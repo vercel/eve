@@ -26,32 +26,12 @@
  */
 
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
-
-type AstNode = {
-  argument?: AstNode | null;
-  arguments?: AstNode[];
-  async?: boolean;
-  body?: AstNode | AstNode[] | { body?: AstNode[]; type?: string; start?: number; end?: number };
-  callee?: AstNode;
-  computed?: boolean;
-  declaration?: AstNode | null;
-  declarations?: AstNode[];
-  end?: number;
-  expression?: AstNode | null;
-  id?: { name?: string; start?: number; end?: number } | null;
-  init?: AstNode | null;
-  key?: AstNode | null;
-  kind?: string;
-  left?: AstNode | null;
-  method?: boolean;
-  name?: string;
-  params?: AstNode[];
-  properties?: AstNode[];
-  right?: AstNode | null;
-  start?: number;
-  type?: string;
-  value?: AstNode | unknown;
-};
+import {
+  collectReferencedIdentifierNames,
+  findProperty,
+  type DynamicToolAstNode as AstNode,
+  walkNode,
+} from "#internal/workflow-bundle/dynamic-tool-ast-references.js";
 
 interface HandlerInfo {
   /** The handler function AST node */
@@ -80,6 +60,8 @@ interface ExecuteInfo {
   params: string;
   /** Body source (block statement including braces) */
   body: string;
+  /** Function body AST used to identify actual identifier references */
+  bodyNode: AstNode;
   /** Scope entries from nested functions between handler and this execute */
   nestedScopes: readonly ScopeEntry[];
 }
@@ -382,18 +364,22 @@ function walkForExecuteProps(
         if (isFn || isMethod) {
           const params = extractFnParams(source, fn);
           const body = extractFnBody(source, fn);
+          const bodyNode = fn.body as AstNode | undefined;
           const isAsync = fn.async === true;
 
-          results.push({
-            propStart: prop.start,
-            propEnd: prop.end,
-            fnSource: source.slice(fn.start, fn.end),
-            isAsync,
-            params,
-            body,
-            hoistedName: `__eve_dynamic_exec_${transformCounter++}`,
-            nestedScopes,
-          });
+          if (bodyNode) {
+            results.push({
+              propStart: prop.start,
+              propEnd: prop.end,
+              fnSource: source.slice(fn.start, fn.end),
+              isAsync,
+              params,
+              body,
+              bodyNode,
+              hoistedName: `__eve_dynamic_exec_${transformCounter++}`,
+              nestedScopes,
+            });
+          }
         }
       }
     }
@@ -494,7 +480,7 @@ function applyTransform(source: string, handlers: HandlerInfo[]): { code: string
       // Only capture vars the execute body actually references. This
       // avoids TDZ errors when the execute is inside a nested function
       // that runs before later handler-level declarations are initialized.
-      const bodyText = exec.body;
+      const referencedNames = collectReferencedIdentifierNames(exec.bodyNode);
 
       // Exclude names that collide with the execute function's own
       // parameters — the hoisted function already has those as formal
@@ -503,8 +489,7 @@ function applyTransform(source: string, handlers: HandlerInfo[]): { code: string
       const execParamNames = extractExecuteParamNames(exec.params);
 
       const allVars = deduped.filter(
-        (name) =>
-          !execParamNames.has(name) && new RegExp(`\\b${escapeForRegex(name)}\\b`).test(bodyText),
+        (name) => !execParamNames.has(name) && referencedNames.has(name),
       );
 
       const varsObj = allVars.length > 0 ? `{ ${allVars.join(", ")} }` : "{}";
@@ -572,51 +557,6 @@ function applyTransform(source: string, handlers: HandlerInfo[]): { code: string
   }
 
   return { code: result };
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function walkNode(node: AstNode, visitor: (node: AstNode) => boolean): void {
-  if (!visitor(node)) return;
-
-  if (Array.isArray(node.body)) {
-    for (const child of node.body) walkNode(child, visitor);
-  } else if (node.body && typeof node.body === "object" && "type" in node.body) {
-    walkNode(node.body as AstNode, visitor);
-  }
-  if (node.declarations) {
-    for (const decl of node.declarations) walkNode(decl, visitor);
-  }
-  if (node.init) walkNode(node.init, visitor);
-  if (node.expression) walkNode(node.expression, visitor);
-  if (node.declaration) walkNode(node.declaration, visitor);
-  if (node.argument) walkNode(node.argument, visitor);
-  if (node.arguments) {
-    for (const arg of node.arguments) walkNode(arg, visitor);
-  }
-  if (node.properties) {
-    for (const prop of node.properties) {
-      walkNode(prop, visitor);
-      if (prop.value && typeof prop.value === "object" && "type" in (prop.value as AstNode)) {
-        walkNode(prop.value as AstNode, visitor);
-      }
-    }
-  }
-  if (node.left) walkNode(node.left, visitor);
-  if (node.right) walkNode(node.right, visitor);
-}
-
-function findProperty(obj: AstNode, name: string): AstNode | undefined {
-  return obj.properties?.find(
-    (p) =>
-      p.type === "Property" && !p.computed && p.key?.type === "Identifier" && p.key.name === name,
-  );
-}
-
-function escapeForRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**

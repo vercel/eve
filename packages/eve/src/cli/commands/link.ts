@@ -24,11 +24,12 @@ const defaultDependencies: LinkCommandDependencies = {
 };
 
 /**
- * `eve link`: pick a Vercel team and project (re-linking when one is already
- * linked), run `vercel link` for the selected project, then pull env so the AI Gateway
- * credential lands in `.env.local`. The flow itself is {@link runLinkFlow}, shared with the dev
- * TUI `/model` menu's provider row. Interactive only: the pickers are the point of the command,
- * so a non-TTY run refuses with guidance instead of guessing a project.
+ * `eve link`: pick a Vercel team, then create or select a project (re-linking
+ * when one is already linked), run `vercel link` for the resolved project,
+ * then pull env so the AI Gateway credential lands in `.env.local`. The flow
+ * itself is {@link runLinkFlow}, shared with the dev TUI `/model` menu's
+ * provider row. Interactive only: the pickers are the point of the command, so
+ * a non-TTY run refuses with guidance instead of guessing a project.
  */
 export async function runLinkCommand(
   logger: LinkCliLogger,
@@ -51,7 +52,12 @@ export async function runLinkCommand(
   const prompter = dependencies.createPrompter?.() ?? createPrompter();
   prompter.intro("Link your eve agent to Vercel");
   try {
-    const result = await runLinkFlow({ appRoot, prompter, deps: dependencies.flowDeps });
+    const result = await runLinkFlow({
+      appRoot,
+      prompter,
+      projectSelection: "create-or-link",
+      deps: dependencies.flowDeps,
+    });
     prompter.outro(result.kind === "cancelled" ? "Cancelled." : "Project linked.");
   } catch (error) {
     logger.error(error instanceof Error ? error.message : String(error));

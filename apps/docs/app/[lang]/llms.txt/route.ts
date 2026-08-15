@@ -1,10 +1,8 @@
-import { createLlmsRoute } from "@vercel/geistdocs/routes/llms";
-import { geistdocsSource } from "@/lib/geistdocs/source";
+import { createLlmsIndex } from "@/lib/geistdocs/llms-index";
 
 export const revalidate = false;
 
-const llmsRoute = createLlmsRoute({
-  sources: [geistdocsSource],
-});
-
-export const GET = llmsRoute.GET;
+export const GET = () =>
+  new Response(createLlmsIndex(), {
+    headers: { "Content-Type": "text/markdown; charset=utf-8" },
+  });

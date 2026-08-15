@@ -1,22 +1,25 @@
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
+import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import type { InputRequest } from "#runtime/input/types.js";
-import type { JsonObject } from "#shared/json.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { EveEvalDerivedFacts, EveEvalSubagentCall, EveEvalToolCall } from "#evals/types.js";
 
 interface MutableToolCall {
   name: string;
   input: JsonObject;
-  output: unknown;
-  isError: boolean;
+  output: JsonValue | undefined;
+  status: EveEvalToolCall["status"];
   turnIndex: number;
   sessionId?: string;
 }
 
 interface MutableSubagentCall {
+  callId: string;
+  childSessionId?: string;
   name: string;
   remoteUrl?: string;
-  output?: unknown;
-  isError: boolean;
+  output?: JsonValue;
+  status: EveEvalSubagentCall["status"];
   turnIndex: number;
   sessionId?: string;
 }
@@ -34,7 +37,7 @@ export interface DeriveRunFactsOptions {
  * before this epilogue is `input.requested`, the run ended parked on
  * unanswered HITL input.
  */
-const TURN_EPILOGUE_EVENT_TYPES: ReadonlySet<HandleMessageStreamEvent["type"]> = new Set([
+const TURN_EPILOGUE_EVENT_TYPES: ReadonlySet<MessageStreamEvent["type"]> = new Set([
   "turn.completed",
   "session.waiting",
   "session.completed",
@@ -49,7 +52,7 @@ const TURN_EPILOGUE_EVENT_TYPES: ReadonlySet<HandleMessageStreamEvent["type"]> =
  * power checks, scorers, and reporters.
  */
 export function deriveRunFacts(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
   options?: DeriveRunFactsOptions,
 ): EveEvalDerivedFacts {
   const sessionId = options?.sessionId;
@@ -63,13 +66,31 @@ export function deriveRunFacts(
   let reasoningBlockCount = 0;
   let failureCode: string | undefined;
 
+  const ensureToolCall = (callId: string, name: string, input: JsonObject): MutableToolCall => {
+    const existing = toolCallsByCallId.get(callId);
+    if (existing !== undefined) return existing;
+
+    const call: MutableToolCall = {
+      name,
+      input,
+      output: undefined,
+      status: "pending",
+      turnIndex: Math.max(turnIndex, 0),
+      sessionId,
+    };
+    toolCalls.push(call);
+    toolCallsByCallId.set(callId, call);
+    return call;
+  };
+
   const ensureSubagentCall = (callId: string, name: string): MutableSubagentCall => {
     const existing = subagentCallsByCallId.get(callId);
     if (existing !== undefined) return existing;
 
     const call: MutableSubagentCall = {
+      callId,
       name,
-      isError: false,
+      status: "pending",
       turnIndex: Math.max(turnIndex, 0),
       sessionId,
     };
@@ -87,43 +108,32 @@ export function deriveRunFacts(
 
       case "actions.requested": {
         for (const action of event.data.actions) {
-          if (action.kind !== "tool-call") continue;
-          const call: MutableToolCall = {
-            name: action.toolName,
-            input: action.input,
-            output: undefined,
-            isError: false,
-            turnIndex: Math.max(turnIndex, 0),
-            sessionId,
-          };
-          toolCalls.push(call);
-          toolCallsByCallId.set(action.callId, call);
+          if (action.kind === "tool-call") {
+            ensureToolCall(action.callId, action.toolName, action.input);
+          } else if (action.kind === "load-skill") {
+            ensureToolCall(action.callId, LOAD_SKILL_TOOL_NAME, action.input);
+          }
         }
         break;
       }
 
       case "action.result": {
         const { result, status } = event.data;
-        const failed = status === "failed" || result.isError === true;
-
         if (result.kind === "tool-result") {
-          const call = toolCallsByCallId.get(result.callId);
-          if (call !== undefined) {
-            call.output = result.output;
-            call.isError = failed;
-          }
+          const call = ensureToolCall(result.callId, result.toolName, {});
+          call.output = result.output;
+          call.status = status;
         } else if (result.kind === "subagent-result") {
-          const call = subagentCallsByCallId.get(result.callId);
-          if (call !== undefined) {
-            call.output = call.output ?? result.output;
-            call.isError = failed;
-          }
+          const call = ensureSubagentCall(result.callId, result.subagentName);
+          call.output = call.output ?? result.output;
+          call.status = status;
         }
         break;
       }
 
       case "subagent.called": {
         const call = ensureSubagentCall(event.data.callId, event.data.name);
+        call.childSessionId = event.data.childSessionId;
         if (event.data.remote !== undefined) {
           call.remoteUrl = event.data.remote.url;
         }
@@ -138,11 +148,15 @@ export function deriveRunFacts(
       case "subagent.completed": {
         const call = ensureSubagentCall(event.data.callId, event.data.subagentName);
         call.output = event.data.output;
+        if (call.status === "pending") call.status = "completed";
         break;
       }
 
       case "input.requested": {
         inputRequests.push(...event.data.requests);
+        for (const request of event.data.requests) {
+          ensureToolCall(request.action.callId, request.action.toolName, request.action.input);
+        }
         break;
       }
 
@@ -200,7 +214,7 @@ export function createEmptyDerivedFacts(): EveEvalDerivedFacts {
  * (`turn.completed` → `session.waiting`) is `input.requested`: the harness
  * surfaced HITL requests and stopped without resolving them.
  */
-function endedParkedOnInput(events: readonly HandleMessageStreamEvent[]): boolean {
+function endedParkedOnInput(events: readonly MessageStreamEvent[]): boolean {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     if (event === undefined || TURN_EPILOGUE_EVENT_TYPES.has(event.type)) continue;

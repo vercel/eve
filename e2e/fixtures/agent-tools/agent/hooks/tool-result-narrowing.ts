@@ -1,6 +1,6 @@
 import { defineHook, type HookDefinition } from "eve/hooks";
 import { toolResultFrom } from "eve/tools";
-import structuredEcho from "../tools/structured-echo.js";
+import structuredEcho from "../tools/structured-echo";
 
 const hook: HookDefinition = defineHook({
   events: {

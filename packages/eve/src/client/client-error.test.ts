@@ -14,6 +14,7 @@ describe("ClientError", () => {
     );
 
     expect(error.message).toBe("Production auth is not configured.");
+    expect(error.code).toBe("eve_production_auth_not_configured");
     expect(error.status).toBe(401);
   });
 
@@ -21,5 +22,15 @@ describe("ClientError", () => {
     const error = new ClientError(500, "Internal Server Error");
 
     expect(error.message).toBe("Internal Server Error");
+  });
+
+  it("preserves normalized response headers", () => {
+    const source = new Headers({ Location: "https://vercel.com/sso-api?url=https://eve.test" });
+    const error = new ClientError(302, "Redirecting...", source);
+    source.set("location", "https://example.com");
+
+    expect(error.headers).toEqual({
+      location: "https://vercel.com/sso-api?url=https://eve.test",
+    });
   });
 });

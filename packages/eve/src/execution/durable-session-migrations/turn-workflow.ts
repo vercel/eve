@@ -10,8 +10,13 @@
  * deployment still runs after a rollout. Future shape changes bump
  * {@link TURN_WORKFLOW_INPUT_VERSION} and append a v{N} → v{N+1} migration.
  */
-import type { HookPayload, SessionCapabilities } from "#channel/types.js";
+import type {
+  HookPayload,
+  RuntimeActionResultHookPayload,
+  SessionCapabilities,
+} from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import type { RuntimeActionResult } from "#runtime/actions/types.js";
 import type { RunMode } from "#shared/run-mode.js";
 
 import { runMigrationChain, type VersionMigration } from "./chain.js";
@@ -19,8 +24,21 @@ import { turnWorkflowInputV0ToV1 } from "./turn-workflow-v0-to-v1.js";
 
 export const TURN_WORKFLOW_INPUT_VERSION = 1;
 
+/** Trusted runtime-action results collected by the parent turn driver. */
+interface RuntimeActionResultStepInput {
+  readonly acceptedAtMsByCallId?: Readonly<Record<string, number>>;
+  readonly kind: "runtime-action-result";
+  readonly results: readonly RuntimeActionResult[];
+}
+
+export type TurnStepPayload =
+  | Exclude<HookPayload, RuntimeActionResultHookPayload>
+  | RuntimeActionResultStepInput;
+
 export interface TurnStepInput {
-  readonly input: HookPayload | undefined;
+  /** Cancellation signal forwarded into the turn step. */
+  readonly abortSignal?: AbortSignal;
+  readonly input: TurnStepPayload | undefined;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -30,6 +48,14 @@ export interface TurnWorkflowInput {
   readonly version: typeof TURN_WORKFLOW_INPUT_VERSION;
   readonly capabilities: SessionCapabilities | undefined;
   readonly completionToken: string;
+  /**
+   * Additive driver feature negotiation. Older pinned drivers omit this,
+   * which keeps runtime-action orchestration on the legacy entry-owned path.
+   */
+  readonly driverCapabilities?: {
+    readonly turnInbox?: true;
+    readonly cancelledTurnSettle?: true;
+  };
   readonly mode: RunMode;
   readonly stepInput: TurnStepInput;
 }
@@ -50,6 +76,7 @@ export function createTurnWorkflowInput(input: TurnWorkflowDispatchInput): TurnW
   return {
     capabilities: input.capabilities,
     completionToken: input.completionToken,
+    driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
     mode: input.mode,
     stepInput: {
       input: input.delivery,

@@ -4,7 +4,7 @@ import { join, posix as pathPosix } from "node:path";
 
 import type {
   CompiledAgentManifest,
-  CompiledAgentNodeManifest,
+  CompiledAgentResources,
   CompiledSkillDefinition,
   CompiledWorkspaceResourceRoot,
 } from "#compiler/manifest.js";
@@ -13,6 +13,8 @@ import { normalizeLogicalPath } from "#discover/filesystem.js";
 import { normalizeSkillPackage, writeSkillPackageDirectory } from "#shared/skill-package.js";
 
 const RESOURCES_DIRECTORY = "workspace-resources";
+const RESOURCE_WORKSPACE_DIRECTORY = "workspace";
+const RESOURCE_SKILLS_DIRECTORY = "skills";
 
 /**
  * Materializes the per-node workspace resource trees under
@@ -36,19 +38,33 @@ export async function materializeWorkspaceResources(input: {
     manifest: input.manifest,
   });
   const subagents = await Promise.all(
-    input.manifest.subagents.map(async (subagent) => ({
-      ...subagent,
-      agent: await materializeNode({
-        nodeId: subagent.nodeId,
-        resourcesRoot,
-        manifest: subagent.agent,
-      }),
-    })),
+    input.manifest.subagents.map(async (subagent) => {
+      if (subagent.configResolver === undefined) {
+        return {
+          ...subagent,
+          agent: await materializeNode({
+            nodeId: subagent.nodeId,
+            resourcesRoot,
+            manifest: subagent.agent,
+          }),
+        };
+      }
+      return {
+        ...subagent,
+        agent: await materializeNode({
+          nodeId: subagent.nodeId,
+          resourcesRoot,
+          manifest: subagent.agent,
+        }),
+        configResolver: subagent.configResolver,
+      };
+    }),
   );
 
   return {
     ...rootAgent,
     kind: input.manifest.kind,
+    extensionMounts: input.manifest.extensionMounts,
     subagentEdges: input.manifest.subagentEdges,
     subagents,
     version: input.manifest.version,
@@ -56,9 +72,9 @@ export async function materializeWorkspaceResources(input: {
 }
 
 function createResourceRoot(
-  manifest: CompiledAgentNodeManifest,
+  manifest: CompiledAgentResources,
   nodeId: string,
-  contentHash: string,
+  contentHash: string | undefined,
 ): CompiledWorkspaceResourceRoot {
   return {
     contentHash,
@@ -70,26 +86,20 @@ function createResourceRoot(
   };
 }
 
-async function materializeNode(input: {
-  readonly manifest: CompiledAgentNodeManifest;
+async function materializeNode<TManifest extends CompiledAgentResources>(input: {
+  readonly manifest: TManifest;
   readonly nodeId: string;
   readonly resourcesRoot: string;
-}): Promise<CompiledAgentNodeManifest> {
-  // Validate up-front so a `skills/`-shadowing workspace doesn't leave
-  // partial output behind from earlier workspaces in the same node.
-  for (const workspace of input.manifest.sandboxWorkspaces) {
-    if (workspace.rootEntries.some((entry) => entry === "skills/" || entry === "skills")) {
-      throw new Error(
-        `Sandbox workspace "${workspace.logicalPath}" cannot define "skills" because eve manages that workspace entry.`,
-      );
-    }
-  }
-
+}): Promise<TManifest> {
   const nodeRoot = join(input.resourcesRoot, input.nodeId);
   await mkdir(nodeRoot, { recursive: true });
 
+  const workspaceRoot = join(nodeRoot, RESOURCE_WORKSPACE_DIRECTORY);
   for (const workspace of input.manifest.sandboxWorkspaces) {
-    await cp(workspace.sourcePath, nodeRoot, { recursive: true });
+    await copyDirectoryContents({
+      sourcePath: workspace.sourcePath,
+      targetPath: workspaceRoot,
+    });
   }
 
   for (const skill of input.manifest.skills) {
@@ -109,7 +119,7 @@ async function materializeSkill(input: {
   readonly nodeRoot: string;
   readonly skill: CompiledSkillDefinition;
 }): Promise<void> {
-  const skillRoot = join(input.nodeRoot, "skills", input.skill.name);
+  const skillRoot = join(input.nodeRoot, RESOURCE_SKILLS_DIRECTORY, input.skill.name);
 
   if (input.skill.sourceKind === "skill-package") {
     await cp(input.skill.rootPath, skillRoot, { recursive: true });
@@ -127,12 +137,36 @@ function stripSkillPackageFiles(skill: CompiledSkillDefinition): CompiledSkillDe
   return manifestSkill;
 }
 
-async function hashWorkspaceResourceRoot(rootPath: string): Promise<string> {
+async function copyDirectoryContents(input: {
+  readonly sourcePath: string;
+  readonly targetPath: string;
+}): Promise<void> {
+  const entries = await readdir(input.sourcePath, {
+    withFileTypes: true,
+  });
+
+  await mkdir(input.targetPath, { recursive: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory() && !entry.isFile()) {
+      continue;
+    }
+
+    await cp(join(input.sourcePath, entry.name), join(input.targetPath, entry.name), {
+      recursive: true,
+    });
+  }
+}
+
+async function hashWorkspaceResourceRoot(rootPath: string): Promise<string | undefined> {
   const files = await listWorkspaceResourceFiles({
     logicalDirectoryPath: ".",
     sourceDirectoryPath: rootPath,
   });
   files.sort((left, right) => left.logicalPath.localeCompare(right.logicalPath));
+
+  if (files.length === 0) {
+    return undefined;
+  }
 
   const hash = createHash("sha256");
   hash.update("eve-workspace-resource-root-v1\0");

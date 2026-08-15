@@ -5,17 +5,15 @@ const DYNAMIC_INSTRUCTIONS_TOKEN = "dynamic-instructions-ok-M3K8";
 /**
  * Skill smoke eval:
  * `defineDynamic` + `defineInstructions` (instructions/dynamic-context.ts)
- * resolves at session start and injects markdown into system context; the
- * reply honors its exact-token directive, proving delivery.
+ * resolves at session start and appends a durable user message; the reply
+ * honors its exact-token directive, proving delivery.
  */
 export default defineEval({
-  description: "Skills smoke: dynamic instructions injection at session start.",
+  description: "Skills smoke: dynamic user instructions append at session start.",
   async test(t) {
-    const turn = await t.send("Acknowledge this message.");
-    turn.expectOk();
+    await t.send("Acknowledge this message.");
 
-    t.didNotFail();
-    t.completed();
+    t.succeeded();
     t.messageIncludes(DYNAMIC_INSTRUCTIONS_TOKEN);
   },
 });

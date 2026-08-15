@@ -67,7 +67,7 @@ describe("sandbox workspace folder convention", () => {
     const roundTrip = await handle.session.readTextFile({ path: "/workspace/authored.txt" });
     expect(roundTrip).toBe("round-trip");
 
-    await handle.dispose();
+    await handle.shutdown();
   });
 
   it("opens an empty prewarmed template when the sandbox has no authored workspace files", async () => {
@@ -95,7 +95,7 @@ describe("sandbox workspace folder convention", () => {
     expect(result.exitCode).toBe(0);
     expect(Number(result.stdout.trim())).toBe(0);
 
-    await handle.dispose();
+    await handle.shutdown();
   });
 
   it("materializes a fixture default workspace folder into a deterministic file list", async () => {

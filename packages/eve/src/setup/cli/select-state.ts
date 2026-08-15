@@ -76,13 +76,16 @@ export function filterOptions(
   const normalizedQuery = query.toLowerCase();
   const matches = options.filter(
     (option) =>
-      option.label.toLowerCase().includes(normalizedQuery) ||
-      option.value.toLowerCase().includes(normalizedQuery) ||
-      (option.hint?.toLowerCase().includes(normalizedQuery) ?? false) ||
-      (option.focusHint?.toLowerCase().includes(normalizedQuery) ?? false),
+      option.trailingAction !== true &&
+      (option.label.toLowerCase().includes(normalizedQuery) ||
+        option.value.toLowerCase().includes(normalizedQuery) ||
+        (option.hint?.toLowerCase().includes(normalizedQuery) ?? false) ||
+        (option.focusHint?.toLowerCase().includes(normalizedQuery) ?? false)),
   );
-  if (searchAction === undefined) return matches;
-  return [...matches, { value: searchActionValue(query), label: searchAction.label(query) }];
+  if (searchAction !== undefined) {
+    matches.push({ value: searchActionValue(query), label: searchAction.label(query) });
+  }
+  return [...matches, ...options.filter((option) => option.trailingAction === true)];
 }
 
 /** A row the cursor can land on: neither disabled nor locked. */

@@ -1,5 +1,8 @@
+import { join } from "node:path";
+
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
+import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "#internal/application/runtime-compiled-artifacts-source.js";
 import type {
   SandboxBackend,
@@ -9,6 +12,7 @@ import type {
 } from "#public/definitions/sandbox-backend.js";
 import {
   createBundledRuntimeCompiledArtifactsSource,
+  createDiskRuntimeCompiledArtifactsSource,
   getRuntimeCompiledArtifactsSandboxAppRoot,
   type RuntimeCompiledArtifactsSource,
   type RuntimeDiskCompiledArtifactsSource,
@@ -51,6 +55,7 @@ export type SandboxBackendPrewarmDispatch = (input: {
 
 interface PrewarmSandboxesInput {
   readonly appRoot: string;
+  readonly compileDirectoryPath: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly graph: ResolvedAgentGraphBundle;
   readonly log?: (message: string) => void;
@@ -113,10 +118,14 @@ export async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<vo
           },
         );
       } catch (error) {
+        const prewarmError = formatPrewarmFailureForEnvironment({
+          backendName: backend.name,
+          error,
+        });
         input.log?.(
-          `eve: failed to initialize sandbox template "${label}" on backend "${backend.name}": ${toErrorMessage(error)}`,
+          `eve: failed to initialize sandbox template "${label}" on backend "${backend.name}": ${toErrorMessage(prewarmError)}`,
         );
-        throw error;
+        throw prewarmError;
       }
       return result;
     }),
@@ -164,6 +173,8 @@ export async function prewarmAppSandboxes(input: {
 
   await prewarmSandboxes({
     appRoot: getRuntimeCompiledArtifactsSandboxAppRoot(compiledArtifactsSource) ?? input.appRoot,
+    compileDirectoryPath: resolveRuntimeCompilerArtifactPaths(compiledArtifactsSource.appRoot)
+      .compileDirectoryPath,
     compiledArtifactsSource,
     dispatch: input.dispatch,
     graph,
@@ -182,16 +193,20 @@ export async function prewarmBuiltAppSandboxes(input: {
   readonly log?: (message: string) => void;
   readonly dispatch?: SandboxBackendPrewarmDispatch;
 }): Promise<void> {
-  const authoredSource = createAuthoredSourceRuntimeCompiledArtifactsSource(input.appRoot);
+  const builtArtifactsRoot = join(input.appRoot, ".output");
+  const builtArtifactsSource = createDiskRuntimeCompiledArtifactsSource(builtArtifactsRoot, {
+    moduleMapLoaderPath: resolvePackageSourceFilePath("src/internal/authored-module-map-loader.ts"),
+    sandboxAppRoot: input.appRoot,
+  });
   const [metadata, manifest, moduleMap] = await Promise.all([
     loadCompileMetadata({
-      compiledArtifactsSource: authoredSource,
+      compiledArtifactsSource: builtArtifactsSource,
     }),
     loadCompiledManifest({
-      compiledArtifactsSource: authoredSource,
+      compiledArtifactsSource: builtArtifactsSource,
     }),
     loadCompiledModuleMapFromAuthoredSource({
-      compiledArtifactsSource: authoredSource,
+      compiledArtifactsSource: builtArtifactsSource,
     }),
   ]);
 
@@ -211,6 +226,8 @@ export async function prewarmBuiltAppSandboxes(input: {
 
       await prewarmSandboxes({
         appRoot: input.appRoot,
+        compileDirectoryPath:
+          resolveRuntimeCompilerArtifactPaths(builtArtifactsRoot).compileDirectoryPath,
         compiledArtifactsSource,
         dispatch: input.dispatch,
         graph,
@@ -222,12 +239,10 @@ export async function prewarmBuiltAppSandboxes(input: {
 
 async function collectPrewarmTargets(input: {
   readonly appRoot: string;
+  readonly compileDirectoryPath: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly graph: ResolvedAgentGraphBundle;
 }): Promise<readonly PrewarmTarget[]> {
-  const compileDirectoryPath = resolveRuntimeCompilerArtifactPaths(
-    input.appRoot,
-  ).compileDirectoryPath;
   const runtimeContext = { appRoot: input.appRoot };
 
   const targets: PrewarmTarget[] = [];
@@ -256,7 +271,7 @@ async function collectPrewarmTargets(input: {
         input: {
           bootstrap: definition.bootstrap,
           seedFiles: await loadResourceRootSeedFiles({
-            compileDirectoryPath,
+            compileDirectoryPath: input.compileDirectoryPath,
             workspaceResourceRoot,
           }),
           runtimeContext,
@@ -284,7 +299,10 @@ async function loadResourceRootSeedFiles(input: {
   readonly compileDirectoryPath: string;
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
 }): Promise<readonly SandboxSeedFile[]> {
-  if (input.workspaceResourceRoot.rootEntries.length === 0) {
+  if (
+    input.workspaceResourceRoot.contentHash === undefined &&
+    input.workspaceResourceRoot.rootEntries.length === 0
+  ) {
     return [];
   }
   const materialized = await materializeWorkspaceDirectory(
@@ -343,4 +361,30 @@ function shouldLogSandboxPrewarmProgress(message: string): boolean {
     message !== "loading microsandbox runtime" &&
     message !== "microsandbox runtime ready"
   );
+}
+
+function formatPrewarmFailureForEnvironment(input: {
+  readonly backendName: string;
+  readonly error: unknown;
+}): unknown {
+  if (!isVercelEnvironment() || !isLocalSandboxBackend(input.backendName)) {
+    return input.error;
+  }
+
+  return new Error(
+    `The ${input.backendName} sandbox backend is not available when deploying on Vercel. ` +
+      "Vercel build containers cannot run local Docker containers or microsandbox VMs. " +
+      "Use defaultBackend() so eve selects Vercel Sandbox on Vercel, or configure a " +
+      "Vercel-compatible backend explicitly, such as vercel(). " +
+      `Original ${input.backendName} error: ${toErrorMessage(input.error)}`,
+    { cause: input.error },
+  );
+}
+
+function isVercelEnvironment(): boolean {
+  return Boolean(process.env.VERCEL?.trim());
+}
+
+function isLocalSandboxBackend(backendName: string): boolean {
+  return backendName === "docker" || backendName === "microsandbox";
 }

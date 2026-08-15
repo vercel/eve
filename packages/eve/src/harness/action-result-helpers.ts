@@ -1,25 +1,24 @@
-import type { ModelMessage, ToolSet, TypedToolResult } from "ai";
+import type { ModelMessage, ToolSet, TypedToolError, TypedToolResult } from "ai";
 
 import type { RuntimeToolResultActionResult } from "#runtime/actions/types.js";
+import { toError } from "#shared/errors.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import {
   authorizationPendingAsJsonObject,
   isAuthorizationSignal,
   isAuthorizationPendingModelOutput,
 } from "#harness/authorization.js";
+import { withToolOutputSerializationError } from "#harness/tool-output-serialization.js";
 
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
+type ToolResultOutputCandidate =
+  | ToolResultPart["output"]
+  | { readonly type: "error-json" | "json"; readonly value: unknown };
 
 /**
- * Coerces an arbitrary value to a JSON-safe {@link JsonValue} without
- * premature stringification.
- *
- * - Strings, numbers, booleans, and `null` pass through as primitives.
- * - `Error` instances surface only their message (no stack leak).
- * - Plain objects and arrays pass through structurally.
- * - Non-JSON-representable values (functions, symbols, BigInts) fall
- *   back to `String(value)`.
+ * Coerces framework-owned sentinel values and validates the result payload as
+ * JSON without attaching tool-specific context.
  */
 function toJsonValue(value: unknown): JsonValue {
   if (isAuthorizationSignal(value)) {
@@ -33,24 +32,7 @@ function toJsonValue(value: unknown): JsonValue {
     return parseJsonValue(authorizationPendingAsJsonObject(value));
   }
 
-  if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-
-  if (value instanceof Error) {
-    return value.message;
-  }
-
-  if (typeof value === "object") {
-    return value as JsonValue;
-  }
-
-  return String(value);
+  return parseJsonValue(value === undefined ? null : value);
 }
 
 /**
@@ -58,11 +40,10 @@ function toJsonValue(value: unknown): JsonValue {
  *
  * This is the single coercion point for `action.result` projection. Both
  * native tool execution (via {@link createRuntimeToolResultFromStepResult} /
- * {@link createRuntimeToolResultFromMessagePart}) and code-mode nested tool
- * calls funnel through here, so the raw-output-vs-`toModelOutput` decision —
- * always raw — is decided once. The output is passed through structurally
- * because it is already JSON-serialized (the AI SDK tool result, or the
- * code-mode worker bridge).
+ * {@link createRuntimeToolResultFromMessagePart}) and Workflow child calls
+ * funnel through here, so the raw-output-vs-`toModelOutput` decision —
+ * always raw — is decided once. The output is validated as JSON here so bad
+ * values never reach protocol events or persisted history.
  */
 export function createRuntimeToolResultFromValue(input: {
   readonly callId: string;
@@ -73,7 +54,17 @@ export function createRuntimeToolResultFromValue(input: {
   const result: RuntimeToolResultActionResult = {
     callId: input.callId,
     kind: "tool-result",
-    output: toJsonValue(input.output),
+    output: toolResultOutputToJsonValue({
+      output: {
+        type: input.isError === true ? "error-json" : "json",
+        value:
+          input.isError === true && input.output instanceof Error
+            ? input.output.message
+            : input.output,
+      },
+      toolCallId: input.callId,
+      toolName: input.toolName,
+    }),
     toolName: input.toolName,
   };
 
@@ -96,6 +87,36 @@ export function createRuntimeToolResultFromStepResult(
 }
 
 /**
+ * Builds a failed `RuntimeToolResultActionResult` from one AI SDK
+ * `tool-error` part.
+ */
+export function createRuntimeToolResultFromToolError(
+  toolError: TypedToolError<ToolSet>,
+): RuntimeToolResultActionResult {
+  return createRuntimeToolResultFromValue({
+    callId: toolError.toolCallId,
+    isError: true,
+    output: toError(toolError.error),
+    toolName: toolError.toolName,
+  });
+}
+
+/**
+ * Builds the inline tool-result message part that repairs model history after a
+ * local tool execution error.
+ */
+export function createToolResultMessagePartFromToolError(
+  toolError: TypedToolError<ToolSet>,
+): ToolResultPart {
+  return {
+    type: "tool-result",
+    toolCallId: toolError.toolCallId,
+    toolName: toolError.toolName,
+    output: { type: "error-text", value: toError(toolError.error).message },
+  };
+}
+
+/**
  * Builds a `RuntimeToolResultActionResult` from one tool-result message
  * part as it appears on `step.response.messages`. Used as a fallback when
  * the result is missing from `step.toolResults` (some providers — notably
@@ -107,28 +128,45 @@ export function createRuntimeToolResultFromMessagePart(
 ): RuntimeToolResultActionResult {
   return createRuntimeToolResultFromValue({
     callId: part.toolCallId,
-    output: toolResultOutputToJsonValue(part.output),
+    output: toolResultOutputToJsonValue({
+      output: part.output,
+      toolCallId: part.toolCallId,
+      toolName: part.toolName,
+    }),
     toolName: part.toolName,
     isError: isToolResultError(part.output),
   });
 }
 
-function toolResultOutputToJsonValue(output: ToolResultPart["output"]): JsonValue {
-  switch (output.type) {
-    case "text":
-    case "error-text":
-      return output.value;
-    case "json":
-    case "error-json":
-      return toJsonValue(output.value);
-    case "execution-denied":
-      return {
-        code: "TOOL_EXECUTION_DENIED",
-        message: output.reason ?? "Tool execution was denied.",
-      };
-    case "content":
-      return toJsonValue(output.value);
-  }
+function toolResultOutputToJsonValue(input: {
+  readonly output: ToolResultOutputCandidate;
+  readonly toolCallId: string;
+  readonly toolName: string;
+}): JsonValue {
+  return withToolOutputSerializationError(
+    {
+      boundary: "action.result",
+      toolCallId: input.toolCallId,
+      toolName: input.toolName,
+    },
+    () => {
+      switch (input.output.type) {
+        case "text":
+        case "error-text":
+          return input.output.value;
+        case "json":
+        case "error-json":
+          return toJsonValue(input.output.value);
+        case "execution-denied":
+          return {
+            code: "TOOL_EXECUTION_DENIED",
+            message: input.output.reason ?? "Tool execution was denied.",
+          };
+        case "content":
+          return toJsonValue(input.output.value);
+      }
+    },
+  );
 }
 
 function isToolResultError(output: ToolResultPart["output"]): boolean {

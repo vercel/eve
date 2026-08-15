@@ -33,7 +33,7 @@ type CodingAgentReplDefinition = (typeof CODING_AGENT_REPLS)[number];
 export type CodingAgentRepl = CodingAgentReplDefinition["command"];
 
 /** The one post-init continuation point for a human terminal session. */
-export type InitHandoff = "eve-dev" | CodingAgentRepl;
+export type InitHandoff = "exit" | "eve-dev" | CodingAgentRepl;
 
 export interface InitReplDependencies {
   createPrompter(): Prompter;
@@ -103,6 +103,11 @@ function handoffOptions(
       label: `Open ${repl.label}`,
       focusHint: `build '${agentName}' using ${repl.label}`,
     })),
+    {
+      value: "exit",
+      label: "Exit",
+      focusHint: "return to your terminal",
+    },
   ];
 }
 

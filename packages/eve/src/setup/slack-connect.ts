@@ -164,7 +164,9 @@ export function slackMessageDeepLink(url: string): string {
 /** A Slack connector plus the project ids it is attached to. */
 export interface RawSlackConnector {
   uid: string;
+  id?: string;
   projectIds: readonly string[];
+  createdAt: number;
 }
 
 /** Parses Slack connectors (uid + attached project ids) from a connect-list response. */
@@ -185,7 +187,13 @@ export function parseSlackConnectors(listJson: unknown): RawSlackConnector[] {
           )
           .filter((id): id is string => typeof id === "string")
       : [];
-    parsed.push({ uid: raw.uid, projectIds });
+    const connector: RawSlackConnector = {
+      uid: raw.uid,
+      projectIds,
+      createdAt: typeof raw.createdAt === "number" ? raw.createdAt : 0,
+    };
+    if (typeof raw.id === "string") connector.id = raw.id;
+    parsed.push(connector);
   }
   return parsed;
 }

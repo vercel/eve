@@ -1,20 +1,26 @@
 /**
  * Inbound Slack event → harness shaping.
  *
- * The channel calls these helpers on every inbound `app_mention` event
- * before handing it to the runtime:
+ * The channel calls these helpers on inbound Slack message events before
+ * handing them to the runtime:
  *
- * 1. {@link parseAppMentionEvent} parses Slack's webhook envelope into
- *    a channel-owned {@link SlackMessage}, with the body's text already
- *    re-rendered as GFM markdown so the agent does not see raw
- *    `<@U…>` / `<https://…|…>` fragments.
- * 2. {@link formatSlackContextBlock} renders a `<slack_context>` block
- *    naming the actor, channel, and thread. The channel delivers it as
- *    a dedicated context entry so the agent always knows who and where
- *    it is talking.
+ * 1. {@link slackMessageFromWebhookPayload} converts the shared Chat SDK
+ *    webhook payload into a channel-owned {@link SlackMessage}. The legacy
+ *    {@link parseAppMentionEvent} and {@link parseDirectMessageEvent}
+ *    helpers keep their raw-envelope behavior for direct unit coverage.
+ * 2. The channel renders the actor, message, channel, and thread as one
+ *    attributed model message so speaker identity cannot drift away from
+ *    the content it describes.
  */
 
+import type {
+  SlackAppMentionPayload,
+  SlackDirectMessagePayload,
+  SlackFile,
+} from "#compiled/@chat-adapter/slack/webhook.js";
+
 import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
+import { isObject } from "#shared/guards.js";
 
 /**
  * Author metadata for an inbound Slack message. Channel-owned shape;
@@ -45,9 +51,9 @@ export interface SlackAttachment {
 /**
  * Channel-owned representation of one inbound Slack message.
  *
- * Returned by {@link parseAppMentionEvent} for the triggering mention.
- * Replaces the chat SDK `Message` type in the public callback surface
- * (e.g. `onAppMention(ctx, message)`).
+ * Returned for the triggering Slack event. Replaces the chat SDK
+ * `Message` type in the public callback surface (e.g.
+ * `onAppMention(ctx, message)`).
  */
 export interface SlackMessage {
   /** The original Slack text (mrkdwn). */
@@ -68,6 +74,16 @@ export interface SlackMessage {
   readonly attachments: readonly SlackAttachment[];
   /** Raw inbound event payload from Slack. */
   readonly raw: Record<string, unknown>;
+}
+
+/**
+ * Open-ended Slack Events API payload handed to `slackChannel({ onEvent })`.
+ * `type` is the Slack event discriminator; all event-specific fields pass
+ * through unchanged from the signed webhook body.
+ */
+export interface SlackEvent {
+  readonly type: string;
+  readonly [key: string]: unknown;
 }
 
 /**
@@ -115,10 +131,38 @@ interface SlackMessageEvent {
 export interface SlackEventCallback {
   readonly type: "event_callback";
   readonly team_id?: string;
+  readonly authorizations?: readonly {
+    readonly is_bot?: boolean;
+    readonly user_id?: string;
+  }[];
   readonly event?: { readonly type?: string } & Record<string, unknown>;
   readonly event_id?: string;
   readonly event_time?: number;
   readonly [key: string]: unknown;
+}
+
+/**
+ * Validated Slack Events API callback envelope handed to `onEvent` through
+ * {@link SlackInboundEventContext}. Unlike the permissive parser input type,
+ * this shape always carries an event with a non-empty `type` discriminator.
+ */
+export interface SlackEventEnvelope extends SlackEventCallback {
+  readonly event: SlackEvent;
+}
+
+/**
+ * Parses a raw JSON webhook body into an open-ended Slack Events API envelope.
+ * Returns `null` for URL verification, interactivity, and malformed callback
+ * payloads. Invalid JSON is allowed to throw so the route can log it once.
+ */
+export function parseSlackEventEnvelope(body: string): SlackEventEnvelope | null {
+  const envelope = JSON.parse(body) as unknown;
+  if (!isObject(envelope) || envelope.type !== "event_callback") return null;
+
+  const event = envelope.event;
+  if (!isObject(event) || typeof event.type !== "string" || event.type.length === 0) return null;
+
+  return envelope as SlackEventEnvelope;
 }
 
 /**
@@ -147,6 +191,22 @@ export function parseAppMentionEvent(envelope: SlackEventCallback): SlackMessage
  * - the message was posted by a bot (`bot_id` set) — this prevents the
  *   bot's own DM replies from re-triggering the handler.
  */
+/** Returns the bot user id attached to a Slack event authorization. */
+export function slackEventBotUserId(envelope: SlackEventCallback): string | undefined {
+  const authorization = envelope.authorizations?.find(
+    (entry) => entry.is_bot === true && typeof entry.user_id === "string",
+  );
+  return authorization?.user_id;
+}
+
+/** Parses a Slack message event without applying bot or subtype policy. */
+export function parseMessageEvent(envelope: SlackEventCallback): SlackMessage | null {
+  if (envelope.type !== "event_callback") return null;
+  const event = envelope.event;
+  if (!event || event.type !== "message") return null;
+  return buildSlackMessage(event as SlackMessageEvent, envelope.team_id);
+}
+
 export function parseDirectMessageEvent(envelope: SlackEventCallback): SlackMessage | null {
   if (envelope.type !== "event_callback") return null;
   const event = envelope.event;
@@ -154,16 +214,48 @@ export function parseDirectMessageEvent(envelope: SlackEventCallback): SlackMess
 
   const message = event as SlackMessageEvent;
   if (message.channel_type !== "im") return null;
+  if (!isHumanMessage(message)) return null;
+
+  return buildSlackMessage(message, envelope.team_id);
+}
+
+function isHumanMessage(message: SlackMessageEvent): boolean {
   if (
     typeof message.subtype === "string" &&
     message.subtype.length > 0 &&
     message.subtype !== "file_share"
   ) {
-    return null;
+    return false;
   }
-  if (typeof message.bot_id === "string" && message.bot_id.length > 0) return null;
+  return !(typeof message.bot_id === "string" && message.bot_id.length > 0);
+}
 
-  return buildSlackMessage(message, envelope.team_id);
+export function slackMessageFromWebhookPayload(
+  payload: SlackAppMentionPayload | SlackDirectMessagePayload,
+): SlackMessage | null {
+  if (payload.kind === "direct_message") {
+    if (
+      typeof payload.subtype === "string" &&
+      payload.subtype.length > 0 &&
+      payload.subtype !== "file_share"
+    ) {
+      return null;
+    }
+    if (typeof payload.botId === "string" && payload.botId.length > 0) return null;
+  }
+
+  if (!payload.channelId || !payload.ts) return null;
+  return {
+    text: payload.text,
+    markdown: slackMrkdwnToGfm(payload.text),
+    ts: payload.ts,
+    threadTs: payload.threadTs,
+    channelId: payload.channelId,
+    teamId: payload.teamId,
+    author: parsePayloadAuthor(payload),
+    attachments: parsePayloadAttachments(payload.files),
+    raw: payload.raw,
+  };
 }
 
 function buildSlackMessage(
@@ -223,6 +315,17 @@ function toAttachment(file: Record<string, unknown>): SlackAttachment {
   };
 }
 
+function toPayloadAttachment(file: SlackFile): SlackAttachment {
+  return {
+    id: file.id,
+    type: file.type,
+    url: file.url,
+    name: file.name,
+    mimeType: file.mimeType,
+    size: file.size,
+  };
+}
+
 function inferAttachmentType(mimeType: string | undefined): "image" | "file" | "video" | "audio" {
   if (mimeType === undefined) return "file";
   if (mimeType.startsWith("image/")) return "image";
@@ -231,8 +334,27 @@ function inferAttachmentType(mimeType: string | undefined): "image" | "file" | "
   return "file";
 }
 
+function parsePayloadAuthor(
+  payload: SlackAppMentionPayload | SlackDirectMessagePayload,
+): SlackAuthor | undefined {
+  if (!payload.userId) return undefined;
+  const raw = payload.raw;
+  return {
+    userId: payload.userId,
+    userName: typeof raw.username === "string" ? raw.username : undefined,
+    fullName: undefined,
+    isBot: typeof raw.bot_id === "string" && raw.bot_id.length > 0,
+    isMe: false,
+  };
+}
+
+function parsePayloadAttachments(files: readonly SlackFile[] | undefined): SlackAttachment[] {
+  if (!Array.isArray(files)) return [];
+  return files.map(toPayloadAttachment);
+}
+
 /**
- * Verified inbound identity used to render a `<slack_context>` block.
+ * Verified inbound identity used to attribute a model-visible Slack message.
  *
  * Channel-owned shape so the helper does not depend on the inbound
  * `SlackMessage` and is therefore trivially testable in isolation.
@@ -244,23 +366,4 @@ export interface SlackInboundContext {
   readonly channelId: string;
   readonly threadTs: string;
   readonly teamId?: string;
-}
-
-/**
- * Renders one {@link SlackInboundContext} as a `<slack_context>` block.
- * Lines are deterministic and tag-delimited so the agent can match the
- * block in its prompt.
- */
-export function formatSlackContextBlock(context: SlackInboundContext): string {
-  const lines = [
-    "<slack_context>",
-    `user_id: ${context.userId}`,
-    ...(context.userName ? [`user_name: ${context.userName}`] : []),
-    ...(context.fullName ? [`full_name: ${context.fullName}`] : []),
-    `channel_id: ${context.channelId}`,
-    `thread_ts: ${context.threadTs}`,
-    ...(context.teamId ? [`team_id: ${context.teamId}`] : []),
-    "</slack_context>",
-  ];
-  return lines.join("\n");
 }

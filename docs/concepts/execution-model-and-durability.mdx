@@ -1,0 +1,100 @@
+---
+title: "Execution Model and Durability"
+description: "How an eve session runs. Durable conversations, turns that checkpoint at steps, and parked work that resumes later."
+---
+
+An eve session is a durable conversation. It can run for days and survives process restarts and redeploys without any work on your part. You write the capabilities (tools, instructions, channels) and eve runs the loop.
+
+## Sessions, turns, and steps
+
+Work nests in three levels:
+
+- **session**: the whole durable conversation or task. It's long-lived and can span many requests over days or weeks without losing context.
+- **turn**: one user message and all the work it triggers (model calls, tool calls, reasoning) until the agent produces its response.
+- **step**: a durable checkpoint inside a turn (one model call and the tool calls it makes).
+
+Every turn runs as a durable workflow, built on the open-source [Workflow SDK](https://workflow-sdk.dev/) (Vercel Workflow when you deploy on Vercel). eve checkpoints progress and serializes durable state at each step boundary. Your code runs inside a managed step, so tools, the sandbox, and subagents feel synchronous even though the session underneath them is durable.
+
+The Workflow SDK is not inherently tied to Vercel. In local development and in a self-deployed `eve start` process, eve uses the SDK's local world by default; that world persists workflow runs on disk under `.eve/.workflow-data` and dispatches through the same Nitro-hosted workflow routes. On Vercel, the same workflow code runs against Vercel Workflow instead, which adds platform features such as latest production deployment routing and dashboard run metadata.
+
+When a Vercel production deployment changes, the next model turn in an existing session uses that deployment's current system-role instructions, model, and tools. Static user-role instructions stay pinned in the durable conversation history and are not seeded again. Identity-based channels such as Telegram private chats and Twilio phone-number conversations therefore adopt agent behavior updates without duplicating or rewriting their existing context.
+
+Nitro hosts the HTTP routes and workflow entrypoints. It does not supply the workflow state store or the sandbox runtime. Those are separate adapters: Workflow uses the active world implementation, and Sandbox uses the backend from `agent/sandbox` or `defaultBackend()`.
+
+For advanced self-hosted deployments, the root `agent.ts` can select the installed Workflow world package to use with `experimental.workflow.world`:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  experimental: {
+    workflow: {
+      world: "@workflow/world-postgres",
+    },
+  },
+});
+```
+
+The world package backs workflow state, queues, hooks, and streams. Keep secrets and deployment-specific options in runtime environment variables read by that package, not in `agent.ts`. Custom worlds must implement the runtime protocol expected by eve's vendored `@workflow/*` packages (currently the `5.0.0-beta` line); the Workflow SDK rejects incompatible protocol versions during initialization. See [Self-host eve](../guides/deployment/self-hosting#persist-workflow-state), [agent.ts](../agent-config#workflow-world), and [Workflow Worlds](https://workflow-sdk.dev/worlds).
+
+## Agent loop and sandbox
+
+An eve agent spans two execution environments with different responsibilities:
+
+<AgentRuntimeDiagram />
+
+The agent loop runs as a durable workflow in the app runtime. Model calls, tool executors, hooks, instrumentation, and connection clients also run there with full Node.js access.
+
+App-side code reaches the sandbox through `ctx.getSandbox()`. The built-in `bash`, `read_file`, `write_file`, `glob`, and `grep` tools use it, and authored tools can use it when they need isolated filesystem or process access.
+
+The [sandbox](../sandbox) owns the per-session filesystem and processes. Authored skills are materialized under `$HOME/.agents/skills`, and `agent/sandbox/workspace/**` seeds `/workspace`. The loop and sandbox have decoupled lifetimes: the durable workflow can park or restart independently, while the app runtime opens or reuses sandbox compute only when code needs it.
+
+This split gives the agent a real filesystem and process environment without putting credentials or trusted integration code in model-controlled compute. The workflow can park without holding sandbox compute, while sandbox capacity and backends can change independently of durable orchestration. Because access flows through app-side tools, sandbox work gets the same approval and instrumentation path as any other tool call.
+
+Provider keys, tool secrets, and MCP, OpenAPI, and connection credentials stay in the app runtime. When a sandbox process needs authenticated network access, [credential brokering](./security-model#credential-brokering) handles the request without exposing the credential to the process.
+
+## Resuming after a crash
+
+Crash the process, hit a timeout, or redeploy mid-turn, and the run picks up from the last completed step rather than replaying the whole turn. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval. Whatever that step already wrote to the session stream stays there, and the re-run emits its events again under new ids, so a stream consumer sees both attempts — see [the event envelope](./sessions-runs-and-streaming#the-event-envelope).
+
+There's nothing to configure. eve owns the workflow lifecycle, and sessions are durable by default.
+
+You don't write workflow code directly. Workflow primitives (`start()`, `resumeHook()`, etc.) are an implementation detail of eve's runtime layer; channels, tools, and hooks never touch them. Two surfaces give your own code session data: tools read the current session's metadata (id, turn, auth, parent lineage) via `ctx.session`, and [`defineState`](./state) reads or writes session-scoped durable state. See [State](./state) for the read/write model.
+
+## Parked work
+
+Some work has to wait, including a human approving a [tool](../tools), an interactive OAuth sign-in for a [connection](../connections), or a long-running [subagent](../subagents). At those points the turn parks durably. The workflow suspends and holds no compute until the input it's waiting on arrives (a click, a callback, a child completing), even if that's much later. When it does, the conversation picks up exactly where it left off.
+
+## Message delivery and steering
+
+eve does not maintain a durable FIFO queue of user messages for a session. An
+ID-addressed HTTP delivery and a channel-address delivery both target the
+session's current command inbox; neither is a general message queue.
+
+Only one active session can own a channel continuation token. A channel-created
+session commits both its stable session-ID alias and its channel alias before
+processing the first turn, and fails creation if another run already owns the
+channel alias. Rekeying replaces only that channel alias. An HTTP-created
+session has the stable ID alias and no channel continuation token. Competing
+channel input is not forwarded to the owner.
+
+When a session is waiting, a delivery through its ID or current channel address wakes it and starts the next turn. Message sends default to `turnPolicy: "steer"`: while a turn is active, the session driver durably buffers the replacement before requesting cooperative cancellation. The interrupted turn emits `turn.cancelled` followed by `session.waiting`, then the replacement starts with a new turn ID. Partial output and completed side effects are not rolled back.
+
+`turnPolicy: "queue"` preserves the message until the active turn settles. If several deliveries are ready when the driver checks, eve may fold adjacent messages into the next turn while preserving their arrival order. Pure `inputResponses` deliveries do not steer; they remain available to the pending request they address.
+
+Every built-in and custom channel accepts a default `turnPolicy`, and imperative message sends can override it. The policy is part of the same durable delivery command as the message, so concurrent senders cannot separate replacement ownership from cancellation intent. Separate sessions still run independently.
+
+## Subagents
+
+A turn can hand work off to a [subagent](../subagents). Each subagent gets its own context and its own durable session; a declared subagent also gets its own sandbox, skills, and state. Nothing crosses the boundary implicitly.
+
+## How eve orders session history
+
+Conversation history within a session is append-only. Static user-role instructions lead fresh-session history. Dynamic user-role instructions land at their session or turn boundary before the current delivery. Turns follow in order, and the tool calls inside a turn (plus their results) keep their order too. Read a session back and you see messages in the order they happened.
+
+## What to read next
+
+- [Sessions and streaming](./sessions-runs-and-streaming): the handles you hold and the event stream you watch.
+- [Security model](./security-model): the trust boundaries the runtime enforces.
+- [State](./state): durable per-session memory that persists across step boundaries.

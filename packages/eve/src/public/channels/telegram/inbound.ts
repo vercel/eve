@@ -192,7 +192,7 @@ function parseMessageReference(value: unknown): TelegramMessageReference | undef
 function parseTelegramChat(value: unknown): TelegramChat | null {
   if (!isObject(value)) return null;
   const id = numberLikeToString(value.id);
-  const type = parseChatType(value.type);
+  const type = parseTelegramChatType(value.type);
   if (!id || !type) return null;
   return {
     id,
@@ -276,7 +276,8 @@ function scorePhoto(photo: {
   return (photo.width ?? 0) * (photo.height ?? 0);
 }
 
-function parseChatType(value: unknown): TelegramChatType | null {
+/** Parses the Telegram chat types eve recognizes from inbound and send responses. */
+export function parseTelegramChatType(value: unknown): TelegramChatType | null {
   if (value === "channel" || value === "group" || value === "private" || value === "supergroup") {
     return value;
   }

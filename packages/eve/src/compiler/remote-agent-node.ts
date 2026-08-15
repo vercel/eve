@@ -5,6 +5,13 @@ import type { JsonObject } from "#shared/json.js";
 import type { Node } from "#shared/node.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 
+export interface CompiledDynamicSubagentDefinition extends Readonly<ModuleSourceRef> {
+  readonly build?: {
+    readonly externalDependencies?: readonly string[];
+  };
+  readonly eventNames: readonly string[];
+}
+
 /**
  * Remote subagent entry owned by one compiled agent node manifest. Like
  * channels, remote subagents are node-local manifest entries rather than a
@@ -19,7 +26,8 @@ export type CompiledRemoteAgentNode = Readonly<
       outputSchema?: JsonObject;
       path: string;
       rootPath: string;
-      url: string;
+      // Absent when the definition's `url` is a function the runtime resolves.
+      url?: string;
     }
 >;
 
@@ -39,6 +47,6 @@ export const compiledRemoteAgentNodeSchema: z.ZodType<CompiledRemoteAgentNode> =
     rootPath: z.string(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
-    url: z.string(),
+    url: z.string().optional(),
   })
   .strict();

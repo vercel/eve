@@ -1,6 +1,9 @@
+import { e2eJudgeModel } from "@eve-e2e/config";
 import { defineEvalConfig } from "eve/evals";
+import { evalLifecycleReporter } from "./reporter.js";
 
 /** Default judge model for any `t.judge.*` assertion in this fixture. */
 export default defineEvalConfig({
-  judge: { model: "openai/gpt-5.5" },
+  judge: { model: e2eJudgeModel() },
+  reporters: [evalLifecycleReporter],
 });

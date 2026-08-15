@@ -3,14 +3,18 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
-import { normalizeJsonSchemaDefinition } from "#shared/json-schema.js";
+import { serializeOutputSchema } from "#shared/tool-schema.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
-import type { PublicAgentModelDefinition } from "#shared/agent-definition.js";
+import {
+  isDynamicModelDefinition,
+  type PublicAgentStaticModelDefinition,
+} from "#shared/agent-definition.js";
+import type { DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
 import type { CompiledAgentDefinition, CompiledRuntimeModelReference } from "#compiler/manifest.js";
 import type { CompiledRuntimeModelLimits } from "#compiler/model-catalog.js";
 import {
@@ -27,32 +31,44 @@ type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 export async function compileAgentConfig(
   manifest: AgentSourceManifest,
   context: ManifestCompileContext,
+  options: {
+    readonly definition?: unknown;
+  } = {},
 ): Promise<CompiledAgentDefinition> {
   const configModule = manifest.configModule;
   const configModulePath =
     configModule === undefined ? undefined : formatAgentConfigModulePath(manifest, configModule);
+  const hasInjectedDefinition = Object.hasOwn(options, "definition");
   const definition = normalizeAgentDefinition(
-    configModule === undefined
-      ? { model: DEFAULT_AGENT_MODEL_ID }
-      : await loadModuleBackedDefinition({
-          agentRoot: manifest.agentRoot,
-          displayPath: configModulePath!,
-          kind: "agent config",
-          source: configModule,
-        }),
+    hasInjectedDefinition
+      ? options.definition
+      : configModule === undefined
+        ? { model: DEFAULT_AGENT_MODEL_ID }
+        : await loadModuleBackedDefinition({
+            agentRoot: manifest.agentRoot,
+            displayPath: configModulePath!,
+            kind: "agent config",
+            source: configModule,
+          }),
     configModule === undefined
       ? `Expected the default agent config to match the public eve shape.`
       : `Expected the agent config export "${configModule.exportName ?? "default"}" from "${configModulePath}" to match the public eve shape.`,
   );
-  const model = await normalizeAuthoredModelReference({
-    modelCatalog: context.modelCatalog,
-    purpose: "the primary compaction trigger model",
-    contextWindowTokens: definition.modelContextWindowTokens,
-    providerOptions: definition.modelOptions?.providerOptions,
-    source: configModule,
-    sourcePath: configModulePath,
-    value: definition.model,
-  });
+  const dynamicModelDefinition = isDynamicModelDefinition(definition.model)
+    ? definition.model
+    : undefined;
+  const model =
+    dynamicModelDefinition === undefined
+      ? await normalizeAuthoredModelReference({
+          modelCatalog: context.modelCatalog,
+          purpose: "the primary compaction trigger model",
+          contextWindowTokens: definition.modelContextWindowTokens,
+          providerOptions: definition.modelOptions?.providerOptions,
+          source: configModule,
+          sourcePath: configModulePath,
+          value: definition.model as PublicAgentStaticModelDefinition,
+        })
+      : undefined;
   const compaction: {
     model?: CompiledRuntimeModelReference;
     thresholdPercent?: number;
@@ -66,18 +82,32 @@ export async function compileAgentConfig(
     };
     description?: string;
     experimental?: CompiledAgentDefinition["experimental"];
-    model: CompiledRuntimeModelReference;
     name: string;
     outputSchema?: JsonObject;
+    reasoning?: CompiledAgentDefinition["reasoning"];
     source?: ModuleSourceRef;
+    limits?: CompiledAgentDefinition["limits"];
   } = {
     compaction,
-    model,
     name: manifest.agentId,
   };
 
   if (definition.description !== undefined) {
     compiledConfig.description = definition.description;
+  }
+
+  let dynamicModel: CompiledAgentDefinition["dynamicModel"] | undefined;
+  if (dynamicModelDefinition !== undefined) {
+    if (configModule === undefined) {
+      throw new Error("Expected dynamic model definitions to be authored in agent.ts.");
+    }
+    dynamicModel = {
+      eventNames: Object.keys(dynamicModelDefinition.events) as DynamicToolEventName[],
+      exportName: configModule.exportName,
+      sourceKind: "module",
+      logicalPath: configModule.logicalPath,
+      sourceId: configModule.sourceId,
+    };
   }
 
   const experimental = normalizeExperimentalDefinition(definition.experimental);
@@ -95,7 +125,19 @@ export async function compileAgentConfig(
   }
 
   if (definition.outputSchema !== undefined) {
-    compiledConfig.outputSchema = normalizeJsonSchemaDefinition(definition.outputSchema, "output");
+    compiledConfig.outputSchema = serializeOutputSchema(definition.outputSchema);
+  }
+
+  if (definition.reasoning !== undefined) {
+    compiledConfig.reasoning = definition.reasoning;
+  }
+
+  if (definition.limits !== undefined) {
+    compiledConfig.limits = {
+      maxInputTokensPerSession: definition.limits.maxInputTokensPerSession,
+      maxOutputTokensPerSession: definition.limits.maxOutputTokensPerSession,
+      sessionTimeoutMs: definition.limits.sessionTimeoutMs,
+    };
   }
 
   if (configModule !== undefined) {
@@ -123,7 +165,15 @@ export async function compileAgentConfig(
     compaction.thresholdPercent = definition.compaction.thresholdPercent;
   }
 
-  return compiledConfig;
+  if (dynamicModel !== undefined) {
+    return { ...compiledConfig, dynamicModel };
+  }
+
+  if (model === undefined) {
+    throw new Error("Expected a static agent model to compile to a concrete model reference.");
+  }
+
+  return { ...compiledConfig, model };
 }
 
 function normalizeExperimentalDefinition(
@@ -135,8 +185,16 @@ function normalizeExperimentalDefinition(
 
   const compiledExperimental: Mutable<NonNullable<CompiledAgentDefinition["experimental"]>> = {};
 
-  if (experimental.codeMode !== undefined) {
-    compiledExperimental.codeMode = experimental.codeMode;
+  if (experimental.instrumentationProviders !== undefined) {
+    compiledExperimental.instrumentationProviders = experimental.instrumentationProviders;
+  }
+
+  if (experimental.subagentPersistentSessions !== undefined) {
+    compiledExperimental.subagentPersistentSessions = experimental.subagentPersistentSessions;
+  }
+
+  if (experimental.tasks !== undefined) {
+    compiledExperimental.tasks = experimental.tasks;
   }
 
   if (experimental.workflow !== undefined) {
@@ -155,7 +213,7 @@ async function normalizeAuthoredModelReference(input: {
   readonly providerOptions?: Record<string, JsonObject>;
   readonly source?: ModuleSourceRef;
   readonly sourcePath?: string;
-  readonly value: PublicAgentModelDefinition;
+  readonly value: PublicAgentStaticModelDefinition;
 }): Promise<CompiledRuntimeModelReference> {
   if (typeof input.value === "string") {
     return await withCompiledRuntimeModelLimits(
@@ -214,17 +272,22 @@ async function normalizeAuthoredModelReference(input: {
   };
 
   if (input.contextWindowTokens === undefined) {
-    const providerResult = await input.modelCatalog.getByProviderModelId(
-      languageModel.provider,
-      languageModel.modelId,
-    );
+    try {
+      const providerResult = await input.modelCatalog.getByProviderModelId(
+        languageModel.provider,
+        languageModel.modelId,
+      );
 
-    if (providerResult) {
-      return {
-        ...sourceBackedModel,
-        id: providerResult.slug,
-        contextWindowTokens: providerResult.limits.contextWindowTokens,
-      };
+      if (providerResult) {
+        return {
+          ...sourceBackedModel,
+          id: providerResult.slug,
+          contextWindowTokens: providerResult.limits.contextWindowTokens,
+          maxOutputTokens: providerResult.limits.maxOutputTokens,
+        };
+      }
+    } catch {
+      // Slug lookup below still resolves built-in limits and otherwise resurfaces the catalog error.
     }
   }
 
@@ -292,6 +355,7 @@ async function withCompiledRuntimeModelLimits(
   return {
     ...model,
     contextWindowTokens: limits.contextWindowTokens,
+    maxOutputTokens: limits.maxOutputTokens,
   };
 }
 

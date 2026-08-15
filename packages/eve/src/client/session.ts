@@ -1,366 +1,317 @@
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/message.js";
-import {
-  EVE_CREATE_SESSION_ROUTE_PATH,
-  createEveContinueSessionRoutePath,
-} from "#protocol/routes.js";
+import { EVE_SESSION_ROUTE_PATH, createEveSessionRoutePath } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
 import { MessageResponse } from "#client/message-response.js";
-import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
-import { openStreamBody, openStreamIterable } from "#client/open-stream.js";
-import { normalizeOutputSchemaForRequest } from "#client/output-schema.js";
-import { advanceSession } from "#client/session-utils.js";
+import { followStreamIterable } from "#client/open-stream.js";
+import {
+  cancelClientSession,
+  clearClientSession,
+  compactClientSession,
+  resetClientSession,
+} from "#client/session-controls.js";
+import { serializeOutputSchema } from "#shared/tool-schema.js";
 import { createClientUrl } from "#client/url.js";
+import type { InputResponse } from "#runtime/input/types.js";
 import type {
+  CancelSessionResult,
+  ClearResult,
+  ClientSessionState,
+  CompactResult,
   ClientRedirectPolicy,
+  RespondTurnOptions,
+  ResetResult,
   SendTurnInput,
+  SendTurnOptions,
   SendTurnPayload,
-  SessionState,
+  SessionSnapshot,
   StreamOptions,
 } from "#client/types.js";
-
-const DELIVER_RETRY_ATTEMPTS = 10;
-const DELIVER_RETRY_DELAY_MS = 200;
 
 /**
  * Internal interface that a {@link ClientSession} uses to access client-level
  * configuration without depending on the full {@link Client} class.
  */
-interface SessionContext {
+export interface ClientSessionContext {
   readonly host: string;
-  readonly maxReconnectAttempts: number;
-  readonly preserveCompletedSessions: boolean;
   readonly redirect?: ClientRedirectPolicy;
   resolveHeaders(perRequest?: Readonly<Record<string, string>>): Promise<Headers>;
 }
 
-/**
- * One conversation with an eve agent.
- *
- * A session tracks conversation state (continuation token, session ID, stream
- * cursor) automatically across {@link send} calls. Read the state from
- * the {@link state} getter and serialize it to persist a session.
- */
+/** One fixed, ID-addressed conversation with an eve agent. */
 export class ClientSession {
-  readonly #context: SessionContext;
-  #state: SessionState;
+  readonly #context: ClientSessionContext;
+  #state: ClientSessionState;
 
   /** @internal */
-  constructor(context: SessionContext, state: SessionState) {
+  constructor(context: ClientSessionContext, state: ClientSessionState) {
     this.#context = context;
     this.#state = state;
   }
 
-  /**
-   * Current session cursor. Always reflects the latest state after each
-   * completed turn. Serialize this to persist and resume later.
-   */
-  get state(): SessionState {
+  /** @internal */
+  static async create<TOutput = unknown>(
+    context: ClientSessionContext,
+    input: SendTurnInput<TOutput>,
+  ): Promise<{ readonly response: MessageResponse<TOutput>; readonly session: ClientSession }> {
+    const response = await postTurn(context, EVE_SESSION_ROUTE_PATH, input, true);
+    const sessionId = await readSessionId(response);
+    const session = new ClientSession(context, { sessionId, streamIndex: 0 });
+
+    return {
+      response: session.#messageResponse<TOutput>(response, input, 0),
+      session,
+    };
+  }
+
+  /** Current fixed session identity and durable stream cursor. */
+  get state(): ClientSessionState {
     return this.#state;
   }
 
-  /**
-   * Sends one turn payload to the agent.
-   *
-   * Pass a string as shorthand for `{ message }`, or pass an object to submit
-   * follow-up text, HITL results, client context, output schema, signal, and
-   * headers in a single request.
-   */
-  async send<TOutput = unknown>(input: SendTurnInput<TOutput>): Promise<MessageResponse<TOutput>> {
-    const payload = normalizeSendTurnInput(input);
-    const state = this.#state;
-    const postResult = await this.#postTurn(payload, state);
-    const { continuationToken, sessionId } = postResult;
+  /** Reads a finite prefix through the durable tail without advancing this handle. */
+  async snapshot(options?: { readonly signal?: AbortSignal }): Promise<SessionSnapshot> {
+    options?.signal?.throwIfAborted();
+    const events: MessageStreamEvent[] = [];
 
-    return new MessageResponse<TOutput>({
-      continuationToken,
-      createStream: () => this.#createEventStream(sessionId, continuationToken, state, payload),
-      sessionId,
-    });
-  }
-
-  /**
-   * Opens this session's event stream for the current session ID.
-   *
-   * Resumes from the session's stored stream cursor unless `options.startIndex`
-   * overrides it. The returned iterable reconnects on transient socket
-   * disconnects, up to the client's `maxReconnectAttempts`.
-   *
-   * @throws {Error} If the session has no session ID (no message has been sent
-   *   yet).
-   */
-  stream(options?: StreamOptions): AsyncIterable<HandleMessageStreamEvent> {
-    const sessionId = this.#state.sessionId;
-
-    if (!sessionId) {
-      throw new Error("Session has no session ID. Send a message first.");
+    for await (const event of this.#readStream({
+      follow: false,
+      signal: options?.signal,
+      startIndex: 0,
+    })) {
+      events.push(event);
     }
 
-    return this.#streamAndAdvance(sessionId, options);
+    options?.signal?.throwIfAborted();
+    return {
+      events,
+      session: { sessionId: this.#state.sessionId, streamIndex: events.length },
+    };
   }
 
-  // ---------------------------------------------------------------------------
-  // Internal: POST to message route
-  // ---------------------------------------------------------------------------
+  /** Sends a message to this exact session ID. */
+  async send<TOutput = unknown>(
+    message: SendTurnInput<TOutput>["message"],
+    options: SendTurnOptions<TOutput> = {},
+  ): Promise<MessageResponse<TOutput>> {
+    return await this.#send({ ...options, message });
+  }
 
-  async #postTurn(
-    input: SendTurnPayload,
-    session: SessionState,
-  ): Promise<{ continuationToken?: string; sessionId: string }> {
-    const routePath = session.sessionId
-      ? createEveContinueSessionRoutePath(session.sessionId)
-      : EVE_CREATE_SESSION_ROUTE_PATH;
-    const url = createClientUrl(this.#context.host, routePath);
-    const headers = await this.#context.resolveHeaders(input.headers);
-    headers.set("content-type", "application/json");
+  /** Answers pending input requests on this exact session ID. */
+  async respond<TOutput = unknown>(
+    inputResponses: readonly InputResponse[],
+    options: RespondTurnOptions<TOutput> = {},
+  ): Promise<MessageResponse<TOutput>> {
+    if (inputResponses.length === 0) {
+      throw new Error("ClientSession.respond() requires at least one input response.");
+    }
+    return await this.#send({ ...options, inputResponses });
+  }
 
-    const body = createHandleMessageBody({
+  async #send<TOutput = unknown>(
+    input: SendTurnPayload<TOutput>,
+  ): Promise<MessageResponse<TOutput>> {
+    const initialStreamIndex = this.#state.streamIndex;
+    const response = await postTurn(
+      this.#context,
+      createEveSessionRoutePath(this.#state.sessionId),
       input,
-      outputSchema: normalizeOutputSchemaForRequest(input.outputSchema),
-      session,
-    });
-
-    if (body === null) {
-      throw new Error("Session.send requires a non-empty message, inputResponses, or both.");
+      false,
+    );
+    const responseSessionId = await readSessionId(response, this.#state.sessionId);
+    if (responseSessionId !== this.#state.sessionId) {
+      throw new Error("Message route returned a different session id.");
     }
-
-    const response = await postTurnWithRetry({
-      body: JSON.stringify(body),
-      headers,
-      mustDeliver: (input.inputResponses?.length ?? 0) > 0,
-      redirect: this.#context.redirect,
-      signal: input.signal,
-      url,
-    });
-
-    const payload = (await response.json()) as Record<string, unknown>;
-
-    const sessionId =
-      (typeof payload.sessionId === "string" ? payload.sessionId : undefined) ??
-      response.headers.get(EVE_SESSION_ID_HEADER)?.trim() ??
-      session.sessionId;
-
-    if (!sessionId) {
-      throw new Error("Message route did not return a session id.");
-    }
-
-    const continuationToken =
-      typeof payload.continuationToken === "string" ? payload.continuationToken : undefined;
-
-    return { continuationToken, sessionId };
+    return this.#messageResponse<TOutput>(response, input, initialStreamIndex);
   }
 
-  // ---------------------------------------------------------------------------
-  // Internal: event stream with reconnection
-  // ---------------------------------------------------------------------------
+  /** Requests cooperative cancellation of this session's active turn. */
+  async cancel(options?: { readonly turnId?: string }): Promise<CancelSessionResult> {
+    return await cancelClientSession({
+      context: this.#context,
+      options,
+      sessionId: this.#state.sessionId,
+    });
+  }
+
+  /** Queues removal of this session's durable model-message history. */
+  async clear(): Promise<ClearResult> {
+    return await clearClientSession({ context: this.#context, sessionId: this.#state.sessionId });
+  }
+
+  /** Queues context compaction without sending model input. */
+  async compact(): Promise<CompactResult> {
+    return await compactClientSession({ context: this.#context, sessionId: this.#state.sessionId });
+  }
+
+  /** Terminally retires this exact session ID. The handle remains pinned to it. */
+  async reset(options?: { readonly reason?: string }): Promise<ResetResult> {
+    return await resetClientSession({
+      context: this.#context,
+      options,
+      sessionId: this.#state.sessionId,
+    });
+  }
+
+  /** Opens this session's durable event stream from its stored cursor. */
+  stream(options?: StreamOptions): AsyncIterable<MessageStreamEvent> {
+    if (options?.follow === false && (options.startIndex ?? this.#state.streamIndex) < 0) {
+      throw new Error(
+        "stream({ follow: false }) requires a nonnegative startIndex; a tail-relative cursor cannot be bounded.",
+      );
+    }
+    return this.#streamAndAdvance(options);
+  }
+
+  #messageResponse<TOutput>(
+    response: Response,
+    input: SendTurnPayload,
+    initialStreamIndex: number,
+  ): MessageResponse<TOutput> {
+    response.body?.cancel().catch(() => {});
+    return new MessageResponse<TOutput>({
+      cancelTurn: async (turnId) => await this.cancel({ turnId }),
+      createStream: () => this.#createEventStream(initialStreamIndex, input),
+      sessionId: this.#state.sessionId,
+    });
+  }
 
   async *#createEventStream(
-    sessionId: string,
-    continuationToken: string | undefined,
-    initialState: SessionState,
+    initialStreamIndex: number,
     input: SendTurnPayload,
-  ): AsyncGenerator<HandleMessageStreamEvent> {
-    const events: HandleMessageStreamEvent[] = [];
-
+  ): AsyncGenerator<MessageStreamEvent> {
+    let eventCount = 0;
     try {
-      let currentStreamIndex = initialState.sessionId === sessionId ? initialState.streamIndex : 0;
-      let remainingReconnectAttempts = this.#context.maxReconnectAttempts;
-
-      while (true) {
-        const body = await this.#openStreamBody(
-          sessionId,
-          currentStreamIndex,
-          input.signal,
-          input.headers,
-        );
-
-        let foundBoundary = false;
-
-        try {
-          for await (const event of readNdjsonStream(body)) {
-            events.push(event);
-            currentStreamIndex += 1;
-            yield event;
-
-            if (isCurrentTurnBoundaryEvent(event)) {
-              foundBoundary = true;
-              break;
-            }
-          }
-        } catch (error) {
-          if (!isStreamDisconnectError(error)) {
-            throw error;
-          }
-        }
-
-        if (foundBoundary) {
-          break;
-        }
-
-        // A caller-initiated abort is a stop signal, not a transient socket
-        // disconnect — do not reconnect.
-        if (input.signal?.aborted) {
-          break;
-        }
-
-        if (remainingReconnectAttempts <= 0) {
-          break;
-        }
-
-        remainingReconnectAttempts -= 1;
+      for await (const event of this.#readStream({
+        headers: input.headers,
+        keepAlive: shouldKeepActiveTurnAlive(input.streamReconnectPolicy),
+        signal: input.signal,
+        startIndex: initialStreamIndex,
+        streamReconnectPolicy: input.streamReconnectPolicy,
+      })) {
+        eventCount += 1;
+        yield event;
+        if (isCurrentTurnBoundaryEvent(event)) break;
       }
     } finally {
-      this.#state = advanceSession({
-        continuationToken,
-        events,
-        preserveCompletedSessions: this.#context.preserveCompletedSessions,
-        sessionId,
-        session: initialState,
-      });
+      this.#state = {
+        sessionId: this.#state.sessionId,
+        streamIndex: initialStreamIndex + eventCount,
+      };
     }
   }
 
-  async #openStreamBody(
-    sessionId: string,
-    startIndex: number,
-    signal?: AbortSignal,
-    headers?: Readonly<Record<string, string>>,
-  ): Promise<ReadableStream<Uint8Array>> {
-    return await openStreamBody({
-      host: this.#context.host,
-      resolveHeaders: () => this.#context.resolveHeaders(headers),
-      redirect: this.#context.redirect,
-      sessionId,
-      signal,
-      startIndex,
-    });
-  }
-
-  async *#streamAndAdvance(
-    sessionId: string,
-    options?: StreamOptions,
-  ): AsyncGenerator<HandleMessageStreamEvent> {
-    const initialState = this.#state;
-    const streamIndex = options?.startIndex ?? initialState.streamIndex;
-    const events: HandleMessageStreamEvent[] = [];
-
+  async *#streamAndAdvance(options?: StreamOptions): AsyncGenerator<MessageStreamEvent> {
+    const startIndex = options?.startIndex ?? this.#state.streamIndex;
+    let eventCount = 0;
     try {
-      for await (const event of openStreamIterable({
-        host: this.#context.host,
-        maxReconnectAttempts: this.#context.maxReconnectAttempts,
-        resolveHeaders: () => this.#context.resolveHeaders(),
-        redirect: this.#context.redirect,
-        sessionId,
+      for await (const event of this.#readStream({
+        follow: options?.follow,
         signal: options?.signal,
-        startIndex: streamIndex,
+        startIndex,
+        streamReconnectPolicy: options?.streamReconnectPolicy,
       })) {
-        events.push(event);
+        eventCount += 1;
         yield event;
       }
     } finally {
-      this.#state = advanceSession({
-        continuationToken: initialState.continuationToken,
-        events,
-        preserveCompletedSessions: this.#context.preserveCompletedSessions,
-        session: { ...initialState, sessionId, streamIndex },
-        sessionId,
-      });
+      if (startIndex >= 0) {
+        this.#state = {
+          sessionId: this.#state.sessionId,
+          streamIndex: startIndex + eventCount,
+        };
+      }
     }
   }
-}
 
-async function postTurnWithRetry(input: {
-  readonly body: string;
-  readonly headers: Headers;
-  readonly mustDeliver: boolean;
-  readonly redirect?: ClientRedirectPolicy;
-  readonly signal?: AbortSignal;
-  readonly url: string;
-}): Promise<Response> {
-  const attempts = input.mustDeliver ? DELIVER_RETRY_ATTEMPTS : 1;
-  let lastStatus: number | undefined;
-  let lastBody: string | undefined;
-
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const response = await fetch(input.url, {
-      body: input.body,
-      headers: input.headers,
-      method: "POST",
-      redirect: input.redirect,
-      signal: input.signal ?? null,
+  #readStream(input: {
+    readonly follow?: boolean;
+    readonly headers?: Readonly<Record<string, string>>;
+    readonly keepAlive?: boolean;
+    readonly signal?: AbortSignal;
+    readonly startIndex: number;
+    readonly streamReconnectPolicy?: StreamOptions["streamReconnectPolicy"];
+  }): AsyncIterable<MessageStreamEvent> {
+    return followStreamIterable({
+      follow: input.follow,
+      host: this.#context.host,
+      keepAlive: input.keepAlive,
+      resolveHeaders: () => this.#context.resolveHeaders(input.headers),
+      redirect: this.#context.redirect,
+      sessionId: this.#state.sessionId,
+      signal: input.signal,
+      startIndex: input.startIndex,
+      streamReconnectPolicy: input.streamReconnectPolicy,
     });
+  }
+}
 
-    if (response.ok) return response;
-
-    lastStatus = response.status;
-    lastBody = await response.text();
-
-    if (!isRetryableDeliveryFailure(response.status, lastBody)) {
-      throw new ClientError(response.status, lastBody);
-    }
-
-    if (attempt < attempts - 1) {
-      await sleep(DELIVER_RETRY_DELAY_MS);
-    }
+function shouldKeepActiveTurnAlive(policy: StreamOptions["streamReconnectPolicy"]): boolean {
+  if (policy && "reconnect" in policy) {
+    return false;
   }
 
-  throw new ClientError(lastStatus ?? 0, lastBody ?? "Failed to deliver session turn.");
+  return policy?.streamIdleReconnectPolicy?.maxAttempts === undefined;
 }
 
-function isRetryableDeliveryFailure(status: number, body: string): boolean {
-  return status === 500 && /target session was not found/i.test(body);
+async function postTurn(
+  context: ClientSessionContext,
+  path: string,
+  input: SendTurnPayload,
+  requireMessage: boolean,
+): Promise<Response> {
+  const body = createMessageBody(input, requireMessage);
+  if (body === null) {
+    throw new Error(
+      requireMessage
+        ? "Creating a session requires a non-empty message."
+        : "A session turn requires a non-empty message or inputResponses.",
+    );
+  }
+
+  const headers = await context.resolveHeaders(input.headers);
+  headers.set("content-type", "application/json");
+  const response = await fetch(createClientUrl(context.host, path), {
+    body: JSON.stringify(body),
+    headers,
+    method: "POST",
+    redirect: context.redirect,
+    signal: input.signal ?? null,
+  });
+  if (!response.ok) {
+    const responseBody = await response.text();
+    throw new ClientError(response.status, responseBody, response.headers);
+  }
+  return response;
 }
 
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
+async function readSessionId(response: Response, expected?: string): Promise<string> {
+  const payload = (await response.json()) as Record<string, unknown>;
+  const sessionId =
+    (typeof payload.sessionId === "string" ? payload.sessionId : undefined) ??
+    response.headers.get(EVE_SESSION_ID_HEADER)?.trim() ??
+    expected;
+  if (!sessionId) throw new Error("Message route did not return a session id.");
+  return sessionId;
 }
 
-function normalizeSendTurnInput<TOutput>(input: SendTurnInput<TOutput>): SendTurnPayload<TOutput> {
-  return typeof input === "string" ? { message: input } : input;
-}
-
-function createHandleMessageBody(input: {
-  readonly input: SendTurnPayload;
-  readonly outputSchema?: Record<string, unknown>;
-  readonly session: SessionState;
-}): Record<string, unknown> | null {
+function createMessageBody(
+  input: SendTurnPayload,
+  requireMessage: boolean,
+): Record<string, unknown> | null {
   const body: Record<string, unknown> = {};
-
-  if (input.input.message !== undefined) {
-    body.message = input.input.message;
+  if (input.message !== undefined) body.message = input.message;
+  if (input.inputResponses !== undefined && input.inputResponses.length > 0) {
+    body.inputResponses = input.inputResponses;
   }
-
-  if (input.input.inputResponses !== undefined && input.input.inputResponses.length > 0) {
-    body.inputResponses = input.input.inputResponses;
+  if (!requireMessage && input.message !== undefined && input.turnPolicy !== undefined) {
+    body.turnPolicy = input.turnPolicy;
   }
+  if (input.clientContext !== undefined) body.clientContext = input.clientContext;
+  const outputSchema = serializeOutputSchema(input.outputSchema);
+  if (outputSchema !== undefined) body.outputSchema = outputSchema;
 
-  if (input.input.clientContext !== undefined) {
-    body.clientContext = input.input.clientContext;
-  }
-
-  if (input.outputSchema !== undefined) {
-    body.outputSchema = input.outputSchema;
-  }
-
-  if (input.session.continuationToken !== undefined) {
-    body.continuationToken = input.session.continuationToken;
-  }
-
-  if (Object.keys(body).length === 0) {
-    return null;
-  }
-
-  if (input.session.continuationToken === undefined && body.message === undefined) {
-    return null;
-  }
-
-  if (
-    input.session.continuationToken !== undefined &&
-    body.message === undefined &&
-    body.inputResponses === undefined
-  ) {
-    return null;
-  }
-
+  if (requireMessage && body.message === undefined) return null;
+  if (body.message === undefined && body.inputResponses === undefined) return null;
   return body;
 }

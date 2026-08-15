@@ -59,6 +59,12 @@ export const defaultEvents: TelegramChannelEvents = {
     await channel.telegram.startTyping();
   },
 
+  async "authorization.completed"(event, channel, _ctx) {
+    if (event.outcome === "authorized") {
+      await channel.telegram.startTyping();
+    }
+  },
+
   async "actions.requested"(_event, channel, _ctx) {
     await channel.telegram.startTyping();
   },

@@ -71,7 +71,8 @@ describe("resolveNitroCompiledArtifactsSource", () => {
       expect(
         resolveNitroCompiledArtifactsSource({
           appRoot: "/tmp/dev-app",
-          dev: true,
+          devRuntimeArtifactsPointerPath: "/tmp/dev-app/.eve/dev-runtime/current.json",
+          kind: "development",
           moduleMapLoaderPath,
         }),
       ).toMatchObject({
@@ -83,29 +84,29 @@ describe("resolveNitroCompiledArtifactsSource", () => {
     });
   });
 
-  it("requires the authored-source loader path in development mode", async () => {
-    await withScopedRuntimeSession(() => {
-      expect(() =>
-        resolveNitroCompiledArtifactsSource({
-          appRoot: "/tmp/dev-app",
-          dev: true,
-        }),
-      ).toThrow('require "moduleMapLoaderPath"');
-    });
-  });
-
   it("uses bundled artifacts outside development mode when they exist", async () => {
     await withScopedRuntimeSession(() => {
       installEmptyBundledArtifacts();
 
       expect(
         resolveNitroCompiledArtifactsSource({
-          appRoot: "/tmp/prod-app",
-          dev: false,
+          kind: "production",
         }),
       ).toEqual({
         kind: "bundled",
       });
+    });
+  });
+
+  it("does not fall back to the authored build path in production", async () => {
+    await withScopedRuntimeSession(() => {
+      const productionConfig = {
+        appRoot: "/tmp/build-machine-app",
+        kind: "production" as const,
+      };
+      expect(() => resolveNitroCompiledArtifactsSource(productionConfig)).toThrow(
+        "requires bundled artifacts",
+      );
     });
   });
 });

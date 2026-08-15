@@ -1,6 +1,5 @@
-import { jsonSchema } from "ai";
-
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { HarnessToolMap } from "#harness/types.js";
 import type { ContextKey } from "#context/key.js";
 import {
   SessionDynamicToolMetadataKey,
@@ -8,8 +7,15 @@ import {
   LiveStepToolsKey,
 } from "#context/keys.js";
 import type { DurableDynamicToolMetadata } from "#context/keys.js";
-import { buildCallbackContext } from "#context/build-callback-context.js";
+import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { createLogger } from "#internal/logging.js";
+import type {
+  ApprovalContext,
+  ApprovalResponseDecision,
+  ApprovalResponseContext,
+  ApprovalStatus,
+} from "#public/definitions/approval.js";
+import { toInputSchema, toOutputSchema } from "#shared/tool-schema.js";
 
 const log = createLogger("dynamic-tools");
 
@@ -49,14 +55,60 @@ function replayTools(metadata: readonly DurableDynamicToolMetadata[]): HarnessTo
 
     tools.push({
       description: m.description,
-      execute: (input: unknown) => stepFn(m.closureVars, input, buildCallbackContext()),
-      inputSchema: jsonSchema(m.inputSchema),
+      execute: createToolExecuteWithAuth({
+        scope: m.name,
+        execute: (input, ctx) => stepFn(m.closureVars, input, ctx),
+      }),
+      inputSchema: toInputSchema(m.inputSchema),
       name: m.name,
-      outputSchema: m.outputSchema === undefined ? undefined : jsonSchema(m.outputSchema),
+      approval: buildReplayedApproval(m),
+      outputSchema: toOutputSchema(m.outputSchema),
     });
   }
 
   return tools;
+}
+
+function buildReplayedApproval(
+  metadata: DurableDynamicToolMetadata,
+): HarnessToolDefinition["approval"] | undefined {
+  if (metadata.approvalStepFnName === undefined) {
+    return undefined;
+  }
+
+  const approvalStepFn = lookupStepFunction(metadata.approvalStepFnName);
+  if (approvalStepFn === null) {
+    log.warn(
+      `Dynamic tool "${metadata.name}" references approval function "${metadata.approvalStepFnName}" ` +
+        "which is not registered — requiring approval by default.",
+    );
+    return () => "user-approval";
+  }
+
+  const policy = async (approvalCtx: ApprovalContext) =>
+    (await approvalStepFn(metadata.closureVars ?? {}, approvalCtx)) as ApprovalStatus;
+  if (metadata.approvalResponseStepFnName === undefined) return policy;
+
+  const responseStepFn = lookupStepFunction(metadata.approvalResponseStepFnName);
+  if (responseStepFn === null) {
+    log.warn(
+      `Dynamic tool "${metadata.name}" references response authorizer ` +
+        `"${metadata.approvalResponseStepFnName}" which is not registered — rejecting responses.`,
+    );
+    return {
+      request: policy,
+      response: async () => ({
+        reason: "Approval response authorization is temporarily unavailable.",
+        status: "rejected" as const,
+      }),
+    };
+  }
+
+  return {
+    request: policy,
+    response: async (responseCtx: ApprovalResponseContext) =>
+      (await responseStepFn(metadata.closureVars ?? {}, responseCtx)) as ApprovalResponseDecision,
+  };
 }
 
 /**
@@ -67,6 +119,20 @@ function replayTools(metadata: readonly DurableDynamicToolMetadata[]): HarnessTo
  * `LiveStepToolsKey`). Session/turn tools are replayed from durable
  * metadata via the bundler's registered step functions.
  */
+export function buildResponseAuthorizationTools(input: {
+  readonly authoredTools: HarnessToolMap;
+  readonly context?: { get<T>(key: ContextKey<T>): T | undefined };
+}): HarnessToolMap {
+  const tools = new Map<string, HarnessToolDefinition>();
+  for (const tool of input.context === undefined ? [] : buildDynamicTools(input.context)) {
+    if (!tools.has(tool.name)) tools.set(tool.name, tool);
+  }
+  for (const [name, tool] of input.authoredTools) {
+    if (!tools.has(name)) tools.set(name, tool);
+  }
+  return tools;
+}
+
 export function buildDynamicTools(ctx: {
   get<T>(key: ContextKey<T>): T | undefined;
 }): readonly HarnessToolDefinition[] {

@@ -14,7 +14,15 @@ A browser UI is a client of the agent's HTTP routes (the [eve channel](../../cha
 
 The per-framework pages below walk through the wiring step by step: [Next.js](./nextjs), [Nuxt](./nuxt), and [SvelteKit](./sveltekit).
 
-For scripts, server-to-server calls, evals, tests, or custom clients that do not need framework UI state, use the [TypeScript SDK](../client/overview) directly.
+For scripts, server-to-server calls, evals, tests, or custom clients that do not need framework UI state, use the [Client SDK](../client/overview) directly.
+
+## Authenticate browser requests
+
+A same-origin framework integration sends your application cookies with every eve request. For bearer tokens or another non-cookie scheme, pass `auth` or `headers` to `useEveAgent`.
+
+The default eve channel fails closed. Without an authored `agent/channels/eve.ts`, production browser traffic receives `401` from the default `[vercelOidc(), localDev(), placeholderAuth()]` policy. Add the channel file with an `AuthFn` that verifies your application session or token.
+
+For a public demo, use `none()` from `eve/channels/auth` to admit anonymous requests explicitly. Do not use `none()` for an agent that handles private or production data. See [Authentication](../auth-and-route-protection) for application-session examples, token verifiers, and the default policy.
 
 ## Basic chat (React)
 
@@ -36,7 +44,7 @@ export function Chat() {
         const form = new FormData(event.currentTarget);
         const message = String(form.get("message") ?? "").trim();
         if (message.length > 0) {
-          void agent.send({ message });
+          void agent.send(message);
         }
       }}
     >
@@ -61,69 +69,134 @@ export function Chat() {
 
 `useEveAgent()` returns the current UI state plus commands:
 
-| Field     | What it is                                                                     |
-| --------- | ------------------------------------------------------------------------------ |
-| `data`    | Projected UI state from the reducer. Defaults to `{ messages }`.               |
-| `status`  | `"ready"`, `"submitted"`, `"streaming"`, or `"error"`. Drives the composer.    |
-| `error`   | The last `Error` thrown, if any.                                               |
-| `events`  | Raw eve stream events for this session.                                        |
-| `session` | Serializable session cursor (`sessionId`, `continuationToken`, `streamIndex`). |
-| `send`    | Send text or the full turn payload (multi-part messages, HITL responses).      |
-| `stop`    | Abort the active request.                                                      |
-| `reset`   | Clear local events, data, errors, and the local session cursor.                |
+| Field     | What it is                                                                  |
+| --------- | --------------------------------------------------------------------------- |
+| `data`    | Projected UI state from the reducer. Defaults to `{ messages }`.            |
+| `status`  | `"ready"`, `"submitted"`, `"streaming"`, or `"error"`. Drives the composer. |
+| `error`   | The last `Error` thrown, if any.                                            |
+| `events`  | Raw eve stream events for this session.                                     |
+| `session` | Serializable fixed session cursor (`sessionId`, `streamIndex`).             |
+| `send`    | Send text or a multi-part message, with per-turn options.                   |
+| `respond` | Answer pending HITL input requests, with per-turn options.                  |
+| `cancel`  | Request durable cancellation of the active turn.                            |
+| `reset`   | Clear local events, data, errors, and the local session cursor.             |
 
-Most chat UIs only need `data.messages` and `status`. Drop down to `events` to render lower-level activity such as tool calls and reasoning deltas that the default reducer doesn't surface.
+Most chat UIs only need `data.messages` and `status`. Drop down to `events` when you need the authoritative wire events directly, for example to persist an audit log or build a custom projection.
 
-`data.messages` are `EveMessage[]` following the AI SDK `UIMessage` convention, so they drop straight into any AI SDK UI primitive that accepts a `UIMessage[]`. Parts include user text, assistant text, reasoning, tool calls, tool results, and input requests.
+`data.messages` are eve-owned `EveMessage[]`. Common text, reasoning, file, and dynamic-tool parts follow the [AI SDK `UIMessage`](https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message) rendering convention, but the types are not interchangeable. eve also exposes authorization and HITL metadata, and a file part's URL can be absent. Adapt those parts before passing messages to an API typed as `UIMessage[]`.
+
+When the root agent delegates, its stream emits `subagent.called` with the child's `childSessionId`, then `subagent.completed` when the child returns. Detailed child progress lives on the child session's stream instead of being flattened into the root `data.messages`. Use the lower-level [TypeScript client](../client/overview#sessions) to attach to that ID when your UI needs live subagent activity. See [What the parent sees](../../subagents#what-the-parent-sees) for the complete contract.
 
 ## Sending and streaming
 
-Pass an object to `send()` for text, multi-part messages, attachments, HITL responses, and per-turn context:
+Pass the message first and optional per-turn settings second. Use `respond()` for HITL answers:
 
 ```tsx
-await agent.send({ message: "Summarize this session." });
+await agent.send("Summarize this session.");
 
-await agent.send({
-  message: [
-    { type: "text", text: "What is in this file?" },
-    {
-      type: "file",
-      data: fileDataUrl, // base64 data URL
-      mediaType: "application/pdf",
-      filename: "report.pdf",
-    },
-  ],
-});
+await agent.send([
+  { type: "text", text: "What is in this file?" },
+  {
+    type: "file",
+    data: fileDataUrl, // base64 data URL
+    mediaType: "application/pdf",
+    filename: "report.pdf",
+  },
+]);
 ```
 
-Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and `status` moves from `ready` to `submitted` to `streaming` and back. Call `stop()` to abort the active request, and `reset()` to clear local state so the next send starts a fresh durable session.
+Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and `status` moves from `ready` to `submitted` to `streaming` and back. Call `cancel()` to stop the durable server-side turn, and `reset()` to clear local state so the next send starts a fresh durable session.
 
-## Human-in-the-loop prompts
-
-Tools opt into approval with `needsApproval`, and the model can also ask a question with `ask_question` — see [Human-in-the-loop](/docs/human-in-the-loop) for the server-side model. Either way the stream emits an `input.requested` event, and the pending request rides on a `dynamic-tool` part of the latest message at `part.toolMetadata?.eve?.inputRequest`. Read it, then answer through the same session with `send()`:
+`cancel()` can be called as soon as `status` is `"submitted"`; the hook waits for the active response to identify its turn when necessary, sends one guarded cancellation request, and keeps the event stream attached. The promise resolves when eve accepts the request or reports that no turn is active, and rejects if the cancellation request fails. The turn then settles on the same stream as `turn.cancelled` followed by `session.waiting`, so the session is safe to continue.
 
 ```tsx
-const request = agent.data.messages
-  .at(-1)
-  ?.parts.find((part) => part.type === "dynamic-tool" && part.toolMetadata?.eve?.inputRequest)
-  ?.toolMetadata?.eve?.inputRequest;
-
-if (request) {
-  await agent.send({
-    inputResponses: [{ requestId: request.requestId, optionId: "approve" }],
-  });
+if (agent.status === "submitted" || agent.status === "streaming") {
+  await agent.cancel();
 }
 ```
 
-`request.prompt` and `request.options` give you what you need to render the approve and deny UI. The default reducer marks the part as responded immediately, then updates it again once eve streams the resumed result.
+Unmounting the component or closing the page disconnects the local stream but does not cancel server execution. Call `cancel()` before detaching when the user intends to stop the durable turn.
+
+After eve confirms an attachment turn with `message.received`, the default reducer projects each
+received attachment as a `file` part on the user message. The part includes `mediaType`, optional
+`filename` and `size`, and a `url` only when the original attachment was browser-resolvable.
+
+## Human-in-the-loop prompts
+
+Tools opt into approval with `approval`, and the model can also ask a question with `ask_question` — see [Human-in-the-loop](/docs/human-in-the-loop) for the server-side model. Either way the stream emits an `input.requested` event, and the pending request rides on a `dynamic-tool` part at `part.toolMetadata?.eve?.inputRequest`. Scan every message because an unrelated turn can add newer messages while an approval stays open, then answer through the same session with `respond()`:
+
+```tsx
+const pendingRequests = agent.data.messages
+  .flatMap((message) => message.parts)
+  .flatMap((part) => {
+    if (part.type !== "dynamic-tool" || part.state !== "approval-requested") return [];
+    const request = part.toolMetadata?.eve?.inputRequest;
+    return request ? [request] : [];
+  });
+
+return pendingRequests.map((request) => (
+  <fieldset key={request.requestId}>
+    <legend>
+      {request.kind === "tool-approval"
+        ? "Approval required"
+        : request.kind === "question"
+          ? "Question"
+          : "Session limit"}
+    </legend>
+    <p>{request.prompt}</p>
+    {request.options?.map((option) => (
+      <button
+        key={option.id}
+        onClick={() => void agent.respond([{ requestId: request.requestId, optionId: option.id }])}
+        type="button"
+      >
+        {option.label}
+      </button>
+    ))}
+  </fieldset>
+));
+```
+
+For a question with `allowFreeform`, render a text input and send `{ requestId, text }`. The default reducer marks each matching part as responded immediately. Approved tools update again when eve streams their result.
+
+## Authorization prompts
+
+Connections and tools that need OAuth or another grant emit `authorization.required`. The default reducer projects that into an `authorization` message part with the display name, instructions, device code, and user-facing sign-in URL. Render that part as a normal chat message, then keep the session cursor; eve resumes the parked turn when the callback completes and updates the part after `authorization.completed`:
+
+```tsx
+import type { EveMessagePart } from "eve/react";
+
+function AuthorizationPrompt({ part }: { part: EveMessagePart }) {
+  if (part.type !== "authorization") return null;
+
+  if (part.state === "completed") {
+    return (
+      <p>
+        {part.outcome === "authorized"
+          ? `${part.displayName} connected.`
+          : `${part.displayName} authorization ${part.outcome}.`}
+      </p>
+    );
+  }
+
+  return (
+    <section>
+      <p>{part.description}</p>
+      {part.authorization?.userCode ? <code>{part.authorization.userCode}</code> : null}
+      {part.authorization?.url ? <a href={part.authorization.url}>Sign in</a> : null}
+    </section>
+  );
+}
+```
+
+For fully custom state machines, `authorization.required` and `authorization.completed` are still available on `events` and `onEvent`.
 
 ## Attach page context per turn
 
-`clientContext` adds ephemeral context for the next model call only. Strings (or an array of strings) become user-role context messages; an object is JSON-serialized into one. It rides along with a message or HITL response, so it never dispatches a turn on its own and never lands in durable session history. Pass it directly to `send()`:
+`clientContext` adds ephemeral context for the next model call only. Strings (or an array of strings) become user-role context messages; an object is JSON-serialized into one. It rides along with a message or HITL response, so it never dispatches a turn on its own and never lands in durable session history. Pass it in the second argument to `send()` or `respond()`:
 
 ```tsx
-await agent.send({
-  message: "What should I do on this screen?",
+await agent.send("What should I do on this screen?", {
   clientContext: { route: "/billing", plan: "pro", seatsUsed: 4 },
 });
 ```
@@ -141,11 +214,12 @@ const agent = useEveAgent({
 
 ## Lifecycle callbacks
 
-On top of `onSessionChange`, the hook takes a few per-turn callbacks:
+The hook accepts these lifecycle callbacks:
 
 - `onEvent(event)`: fires for each eve stream event as it arrives.
 - `onError(error)`: fires with the last `Error` when a turn fails.
 - `onFinish(snapshot)`: fires with the final `{ data, status, session, ... }` snapshot once a turn settles.
+- `onSessionChange(session)`: fires when the session cursor advances. Persist it to resume across reloads.
 
 ```tsx
 const agent = useEveAgent({
@@ -155,10 +229,7 @@ const agent = useEveAgent({
 });
 ```
 
-Two more options tune turn behavior:
-
-- `optimistic` (default `true`): projects submitted user messages into `data` before eve confirms them with a `message.received` event. These are reducer-facing projection events only. `events` stays the authoritative eve stream.
-- `maxReconnectAttempts` (default `3`): stream reconnection budget per turn.
+The `optimistic` option (default `true`) projects submitted user messages into `data` before eve confirms them with a `message.received` event. These are reducer-facing projection events only. `events` stays the authoritative eve stream.
 
 ## Custom reducer
 
@@ -186,23 +257,47 @@ const agent = useEveAgent({ reducer: toolCounter });
 
 ## Resumable sessions
 
-The browser conversation lives durably on the server. Persist the `session` cursor to pick it back up after a reload:
+The browser conversation lives durably on the server. Persist both the rendered event log and the `session` cursor to pick it back up after a reload:
 
 ```tsx
-const [initialSession] = useState(() => {
-  const raw = localStorage.getItem("eve-session");
-  return raw ? JSON.parse(raw) : undefined;
+import type { ClientSessionState, MessageStreamEvent } from "eve/client";
+
+type SavedEveChat = {
+  events?: readonly MessageStreamEvent[];
+  session?: ClientSessionState;
+};
+
+const [saved] = useState<SavedEveChat>(() => {
+  const raw = localStorage.getItem("eve-chat");
+  return raw ? JSON.parse(raw) : {};
 });
 
 const agent = useEveAgent({
-  initialSession,
-  onSessionChange(session) {
-    localStorage.setItem("eve-session", JSON.stringify(session));
+  initialEvents: saved.events ?? [],
+  initialSession: saved.session,
+  onFinish(snapshot) {
+    localStorage.setItem(
+      "eve-chat",
+      JSON.stringify({
+        events: snapshot.events,
+        session: snapshot.session,
+      }),
+    );
   },
 });
 ```
 
-Store the full `session` object (`sessionId`, `continuationToken`, `streamIndex`), not a single field.
+Store the full `session` object (`sessionId`, `streamIndex`). The session cursor
+lets eve continue the exact durable conversation; the event log lets your UI
+render historical messages without replaying the whole stream. A database-backed
+chat app should usually persist stream events as they arrive with `onEvent` and
+then save a final snapshot in `onFinish`.
+
+`initialEvents` must be an ordered prefix of the same session's stream, but its endpoint does not have to line up exactly with where the stream resumes. Every event carries a stable [`meta.id`](/docs/concepts/sessions-runs-and-streaming#the-event-envelope), and the store drops any event whose id it has already applied — so a saved log that overlaps the replayed prefix renders once, and `onEvent` only fires for events your UI has not seen.
+
+For multiple chat threads, keep one saved event log and session cursor per thread. `agent`, `host`, `reducer`, `session`, `initialEvents`, `initialSession`, `auth`, `headers`, and `optimistic` are read when the hook creates its store, so remount the chat component when switching threads, for example with `key={chat.id}`.
+
+If the user can refresh or navigate immediately after pressing send, create your app-level chat row and store the pending user message before calling `send()`. After the request starts, persist the session state as soon as it contains a `sessionId`, then reconnect an interrupted in-flight turn with `session.stream({ startIndex: savedEvents.length })` from the lower-level client.
 
 ## Custom hosts and headers
 
@@ -215,6 +310,12 @@ const agent = useEveAgent({
     bearer: async () => await getAccessToken(),
   },
 });
+```
+
+When a framework integration mounts multiple named agents, pass `agent` instead of `host`:
+
+```tsx
+const support = useEveAgent({ agent: "support" });
 ```
 
 ## Per-framework integration
@@ -230,5 +331,5 @@ const agent = useEveAgent({
 
 - [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming): the event stream and session cursor
 - [Channels](../../channels/overview): the HTTP routes the hook talks to
-- [TypeScript SDK](../client/overview): the lower-level client underneath the frontend hooks
+- [Client SDK](../client/overview): the lower-level client underneath the frontend hooks
 - [Next.js](./nextjs): step-by-step setup for wiring eve into a Next.js app

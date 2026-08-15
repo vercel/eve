@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveModelEndpointStatus } from "./resolve-model-endpoint-status.js";
+import {
+  resolveGatewayCredential,
+  resolveModelEndpointStatus,
+} from "./resolve-model-endpoint-status.js";
 
 describe("resolveModelEndpointStatus", () => {
   it("reports an external endpoint without a connectedness claim", () => {
@@ -37,5 +40,37 @@ describe("resolveModelEndpointStatus", () => {
         { apiKey: false, oidc: false },
       ),
     ).toEqual({ kind: "gateway", connected: false });
+  });
+});
+
+describe("resolveGatewayCredential", () => {
+  it("ranks an env-file key first, attributing its location", () => {
+    expect(
+      resolveGatewayCredential({ apiKeyFile: ".env.local", apiKeyInEnv: true, oidcFile: ".env" }),
+    ).toEqual({
+      credential: "api-key",
+      source: { kind: "env-file", path: ".env.local" },
+      shadowedOidc: { file: ".env" },
+    });
+  });
+
+  it("ranks a shell key over the OIDC token it shadows", () => {
+    expect(resolveGatewayCredential({ apiKeyInEnv: true, oidcAvailable: true })).toEqual({
+      credential: "api-key",
+      source: { kind: "shell" },
+      shadowedOidc: {},
+    });
+  });
+
+  it("falls to oidc only when no key exists anywhere", () => {
+    expect(resolveGatewayCredential({ oidcFile: ".env.local" })).toEqual({
+      credential: "oidc",
+      file: ".env.local",
+    });
+    expect(resolveGatewayCredential({ oidcAvailable: true })).toEqual({ credential: "oidc" });
+  });
+
+  it("resolves nothing when no credential is observable", () => {
+    expect(resolveGatewayCredential({})).toBeUndefined();
   });
 });

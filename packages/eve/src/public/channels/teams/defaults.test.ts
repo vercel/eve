@@ -8,10 +8,11 @@ const sessionCtx = {} as SessionContext;
 
 function buildChannelStub(state: Partial<TeamsChannelState> = {}) {
   const post = vi.fn().mockResolvedValue({ id: "act1" });
+  const startTyping = vi.fn().mockResolvedValue(undefined);
   const update = vi.fn().mockResolvedValue(undefined);
   const channel = {
     adaptiveCardVersion: "1.5",
-    thread: { post, update } as Partial<TeamsEventContext["thread"]>,
+    thread: { post, startTyping, update } as Partial<TeamsEventContext["thread"]>,
     state: {
       bot: null,
       channelId: null,
@@ -25,7 +26,7 @@ function buildChannelStub(state: Partial<TeamsChannelState> = {}) {
       ...state,
     },
   } as TeamsEventContext;
-  return { channel, post, update };
+  return { channel, post, startTyping, update };
 }
 
 function authRequiredEvent(overrides: { displayName?: string } = {}) {
@@ -70,6 +71,18 @@ describe("defaultEvents authorization.required", () => {
 });
 
 describe("defaultEvents authorization.completed", () => {
+  it("restarts the typing indicator after authorization succeeds", async () => {
+    const { channel, startTyping } = buildChannelStub();
+
+    await defaultEvents["authorization.completed"]!(
+      { name: "notion", outcome: "authorized", sequence: 1, stepIndex: 0, turnId: "turn_0" },
+      channel,
+      sessionCtx,
+    );
+
+    expect(startTyping).toHaveBeenCalledTimes(1);
+  });
+
   it("renders the challenge displayName in the completion status", async () => {
     const { channel, update } = buildChannelStub({ pendingAuthActivityId: "act1" });
 

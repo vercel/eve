@@ -1,10 +1,19 @@
 import type { ModelMessage, ToolSet, TypedToolCall } from "ai";
 
-import { createActionResultEvent, type HandleMessageStreamEvent } from "#protocol/message.js";
-import { getRuntimeActionRequestKey, getRuntimeActionResultKey } from "#runtime/actions/keys.js";
+import { createActionResultEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
+import { resolveRuntimeActionResultsForKeys } from "#runtime/actions/results.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
+import { findRunningAgentHandle, isResultBoundToRunningHandle } from "#harness/handles/query.js";
+import { settleAgentTurn } from "#harness/handles/transitions.js";
 import { clearProxyInputRequestsForChild } from "#harness/proxy-input-requests.js";
+import {
+  accumulateSessionUsage,
+  getTurnUsageState,
+  setTurnUsageState,
+} from "#harness/turn-tag-state.js";
 import type {
   HarnessEmitFn,
   HarnessSession,
@@ -16,6 +25,17 @@ import type {
 const PENDING_RUNTIME_ACTION_BATCH_KEY = "eve.runtime.pendingActionBatch";
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
+
+/**
+ * Lifecycle outcome from a subagent result. Only `child`-origin results
+ * carry one; parent-synthesized dispatch failures never do, and their type
+ * omits the field entirely.
+ */
+function readSubagentResultOutcome(
+  result: Extract<RuntimeActionResult, { kind: "subagent-result" }>,
+): AgentTurnOutcome | undefined {
+  return result.origin === "child" ? result.outcome : undefined;
+}
 
 /**
  * Serializable event coordinates for one pending runtime-action batch.
@@ -32,14 +52,12 @@ interface PendingRuntimeActionEventMetadata {
 /**
  * Serializable pending runtime-action batch stored on `session.state`.
  *
- * `childContinuationTokens` maps each `subagent-call` action's
- * `callId` to the deterministic child token minted by dispatch, so
- * the harness can clear proxy-input entries on result resolution
- * without re-deriving the token (keeps `harness/` runtime-agnostic).
+ * Child ownership does not live here: the agent handle store records every
+ * dispatched child (from before its start side effect) and is the sole
+ * authority for continuing, settling, and cancelling children.
  */
-interface PendingRuntimeActionBatch {
+export interface PendingRuntimeActionBatch {
   readonly actions: readonly RuntimeActionRequest[];
-  readonly childContinuationTokens?: Readonly<Record<string, string>>;
   readonly event: PendingRuntimeActionEventMetadata;
   readonly responseMessages: readonly ModelMessage[];
 }
@@ -102,6 +120,7 @@ export function setPendingRuntimeActionBatch(input: {
   readonly responseMessages: readonly ModelMessage[];
   readonly session: HarnessSession;
 }): HarnessSession {
+  assertUniqueRuntimeActionCallIds(input.actions);
   const state = { ...input.session.state };
   state[PENDING_RUNTIME_ACTION_BATCH_KEY] = {
     actions: [...input.actions],
@@ -112,96 +131,14 @@ export function setPendingRuntimeActionBatch(input: {
   return { ...input.session, state };
 }
 
-/**
- * Records the child continuation token for a dispatched subagent-call
- * so {@link resolvePendingRuntimeActions} can clear proxy-input
- * entries when the child finishes.
- */
-export function recordPendingSubagentChildToken(input: {
-  readonly callId: string;
-  readonly childContinuationToken: string;
-  readonly session: HarnessSession;
-}): HarnessSession {
-  const batch = getPendingRuntimeActionBatch(input.session.state);
-
-  if (batch === undefined) {
-    return input.session;
-  }
-
-  const state = { ...input.session.state };
-  state[PENDING_RUNTIME_ACTION_BATCH_KEY] = {
-    ...batch,
-    childContinuationTokens: {
-      ...batch.childContinuationTokens,
-      [input.callId]: input.childContinuationToken,
-    },
-  } satisfies PendingRuntimeActionBatch;
-
-  return { ...input.session, state };
-}
-
-/**
- * Discriminated item consumed by {@link accumulateRuntimeActionResults}
- * so the loop can process interleaved deliveries and results without
- * coupling to a concrete `HookPayload` shape.
- */
-type RuntimeActionAccumulatorItem<TDeliver> =
-  | { readonly kind: "deliver"; readonly value: TDeliver }
-  | { readonly kind: "runtime-action-result"; readonly results: readonly RuntimeActionResult[] };
-
-/**
- * Accumulates runtime-action results until every pending key has a
- * matching result. The caller passes the ordered key list so the
- * workflow runtime can drive the loop without hydrating a session.
- */
-export async function accumulateRuntimeActionResults<TDeliver>(input: {
-  readonly bufferedDeliveries: TDeliver[];
-  readonly getNext: () => Promise<RuntimeActionAccumulatorItem<TDeliver> | null>;
-  readonly initialResults?: readonly RuntimeActionResult[];
-  readonly pendingActionKeys: readonly string[] | undefined;
-}): Promise<RuntimeActionResult[] | null> {
-  const pendingKeys = input.pendingActionKeys;
-  const buffered: RuntimeActionResult[] = [...(input.initialResults ?? [])];
-
-  if (pendingKeys !== undefined && buffered.length > 0) {
-    const ready = resolveRuntimeActionResultsForKeys({
-      pendingKeys,
-      results: buffered,
-    });
-
-    if (ready !== undefined) {
-      return ready;
+/** Rejects an ambiguous action batch before any result or side effect can bind by call id. */
+export function assertUniqueRuntimeActionCallIds(actions: readonly RuntimeActionRequest[]): void {
+  const seen = new Set<string>();
+  for (const action of actions) {
+    if (seen.has(action.callId)) {
+      throw new Error(`Runtime action batch contains duplicate callId "${action.callId}".`);
     }
-  }
-
-  while (true) {
-    const item = await input.getNext();
-
-    if (item === null) {
-      return null;
-    }
-
-    if (item.kind === "deliver") {
-      input.bufferedDeliveries.push(item.value);
-      continue;
-    }
-
-    buffered.push(...item.results);
-
-    if (pendingKeys === undefined) {
-      // No pending batch; nothing to resolve. Keep draining so the
-      // stream state stays consistent.
-      continue;
-    }
-
-    const ready = resolveRuntimeActionResultsForKeys({
-      pendingKeys,
-      results: buffered,
-    });
-
-    if (ready !== undefined) {
-      return ready;
-    }
+    seen.add(action.callId);
   }
 }
 
@@ -220,49 +157,22 @@ function resolveReadyRuntimeActionResults(input: {
     return undefined;
   }
 
-  return resolveRuntimeActionResultsForBatch({ batch, results: input.results });
+  return resolveRuntimeActionResultsForBatch({
+    batch,
+    results: input.results,
+    state: input.session.state,
+  });
 }
 
 function resolveRuntimeActionResultsForBatch(input: {
   readonly batch: PendingRuntimeActionBatch;
   readonly results: readonly RuntimeActionResult[];
+  readonly state: SessionStateMap | undefined;
 }): RuntimeActionResult[] | undefined {
   return resolveRuntimeActionResultsForKeys({
     pendingKeys: input.batch.actions.map((action) => getRuntimeActionRequestKey(action)),
-    results: input.results,
+    results: input.results.filter((result) => isResultBoundToRunningHandle(input.state, result)),
   });
-}
-
-function resolveRuntimeActionResultsForKeys(input: {
-  readonly pendingKeys: readonly string[];
-  readonly results: readonly RuntimeActionResult[];
-}): RuntimeActionResult[] | undefined {
-  const pendingKeySet = new Set(input.pendingKeys);
-  const resultsByKey = new Map<string, RuntimeActionResult>();
-
-  for (const result of input.results) {
-    const key = getRuntimeActionResultKey(result);
-
-    if (!pendingKeySet.has(key)) {
-      continue;
-    }
-
-    resultsByKey.set(key, result);
-  }
-
-  const orderedResults: RuntimeActionResult[] = [];
-
-  for (const key of input.pendingKeys) {
-    const result = resultsByKey.get(key);
-
-    if (result === undefined) {
-      return undefined;
-    }
-
-    orderedResults.push(result);
-  }
-
-  return orderedResults;
 }
 
 /**
@@ -304,15 +214,16 @@ export async function resolvePendingRuntimeActions(input: {
   if (input.emit !== undefined) {
     for (const result of readyResults) {
       if (result.kind === "subagent-result" && result.isError !== true) {
+        const backgroundTask = readBackgroundTaskReceipt(result);
+        const data = {
+          callId: result.callId,
+          output: typeof result.output === "string" ? result.output : JSON.stringify(result.output),
+          subagentName: result.subagentName,
+        };
         await input.emit({
-          data: {
-            callId: result.callId,
-            output:
-              typeof result.output === "string" ? result.output : JSON.stringify(result.output),
-            subagentName: result.subagentName,
-          },
+          data: backgroundTask === undefined ? data : { ...data, backgroundTask },
           type: "subagent.completed",
-        } satisfies Extract<HandleMessageStreamEvent, { type: "subagent.completed" }>);
+        } satisfies Extract<UnstampedMessageStreamEvent, { type: "subagent.completed" }>);
       }
 
       await input.emit(
@@ -326,28 +237,73 @@ export async function resolvePendingRuntimeActions(input: {
     }
   }
 
-  const state = { ...input.session.state };
-  delete state[PENDING_RUNTIME_ACTION_BATCH_KEY];
+  // Settle each bound child result against its running handle from the
+  // outcome the child engine reported: `parked` keeps the handle (the child
+  // is idle and resumable), `terminal` deletes it. Before a terminal
+  // deletion the proxy-input entry keyed by the child's continuation token
+  // is cleared (the handle is the only record of that token) so future
+  // deliveries don't route responses to a dead child.
+  let nextSession: HarnessSession = input.session;
+  for (const result of readyResults) {
+    // Dispatch failures never settle handles: the dispatch step already
+    // rejected (deleted) the handle when it synthesized the failure.
+    if (result.kind !== "subagent-result" || result.origin !== "child") {
+      continue;
+    }
+    // A background receipt confirms task admission, not child-turn settlement.
+    // The task snapshot later carries the actual parked/terminal outcome.
+    if (readBackgroundTaskReceipt(result) !== undefined) {
+      continue;
+    }
+    const handle = findRunningAgentHandle(nextSession.state, { callId: result.callId });
+    if (handle === undefined) {
+      continue;
+    }
+    const outcome = readSubagentResultOutcome(result);
+    if (outcome === undefined) {
+      continue;
+    }
+    if (outcome.kind === "terminal" && "continuationToken" in handle.address) {
+      nextSession = clearProxyInputRequestsForChild(nextSession, handle.address.continuationToken);
+    }
+    const settled = settleAgentTurn(nextSession, {
+      operationId: handle.operation.id,
+      outcome,
+    });
+    if (settled.kind === "settled") {
+      nextSession = settled.session;
+    }
+  }
 
-  let nextSession: HarnessSession = {
-    ...input.session,
+  const state = { ...nextSession.state };
+  delete state[PENDING_RUNTIME_ACTION_BATCH_KEY];
+  nextSession = {
+    ...nextSession,
     state: Object.keys(state).length > 0 ? state : undefined,
   };
 
-  // Clear proxy-input entries for completed children so future
-  // deliveries don't route responses to a dead child.
-  const childTokens = batch.childContinuationTokens;
-  if (childTokens !== undefined) {
-    for (const result of readyResults) {
-      if (result.kind !== "subagent-result") {
-        continue;
-      }
-
-      const childToken = childTokens[result.callId];
-      if (childToken !== undefined) {
-        nextSession = clearProxyInputRequestsForChild(nextSession, childToken);
-      }
+  // Draw settled child spend down against the parent's session totals so
+  // the session token limits and the remaining-quota budget granted to later
+  // delegations account for what the tree has already spent. Every outcome
+  // carries the child turn's `usageDelta`, folded exactly once per settled
+  // result (each batch resolves once), so repeated turns of a persistent
+  // child never double-count earlier turns. Only child-produced results
+  // carry an outcome; parent-side dispatch failures never do.
+  for (const result of readyResults) {
+    if (result.kind !== "subagent-result") {
+      continue;
     }
+    const outcome = readSubagentResultOutcome(result);
+    if (outcome === undefined) {
+      continue;
+    }
+    nextSession = setTurnUsageState(
+      nextSession,
+      accumulateSessionUsage({
+        previous: getTurnUsageState(nextSession.state),
+        usage: outcome.usageDelta,
+      }),
+    );
   }
 
   const toolResults = readyResults.map((result) => {
@@ -386,12 +342,17 @@ export async function resolvePendingRuntimeActions(input: {
       role: "tool",
     });
   }
-
   return {
     messages,
     outcome: "resolved",
     session: nextSession,
   };
+}
+
+function readBackgroundTaskReceipt(
+  result: Extract<RuntimeActionResult, { kind: "subagent-result" }>,
+): { readonly status: "working"; readonly taskId: string } | undefined {
+  return "backgroundTask" in result ? result.backgroundTask : undefined;
 }
 
 /**
@@ -402,6 +363,17 @@ export function createRuntimeActionRequestFromToolCall(input: {
   readonly tools: HarnessToolMap;
 }): RuntimeActionRequest {
   const definition = input.tools.get(input.toolCall.toolName);
+
+  if (definition?.frameworkAction === "load-skill") {
+    return {
+      callId: input.toolCall.toolCallId,
+      input: resolveToolCallInputObject(input.toolCall.input, {
+        callId: input.toolCall.toolCallId,
+        toolName: input.toolCall.toolName,
+      }),
+      kind: "load-skill",
+    };
+  }
 
   if (definition?.runtimeAction?.kind === "subagent-call") {
     return {
@@ -448,6 +420,10 @@ export function createRuntimeActionRequestFromToolCall(input: {
  * Coerces an AI SDK tool-call `input` into the runtime-action `JsonObject`
  * contract, throwing a `TypeError` (with the original as `cause`) that names
  * the offending tool when the payload is not a JSON object.
+ *
+ * String inputs are parsed as JSON first: the model protocol carries tool
+ * arguments as text, and provider-executed tool calls can surface that raw
+ * string — or an empty string when the model sends no arguments.
  */
 export function resolveToolCallInputObject(
   value: unknown,
@@ -457,8 +433,12 @@ export function resolveToolCallInputObject(
     return {};
   }
 
+  if (typeof value === "string" && value.trim() === "") {
+    return {};
+  }
+
   try {
-    return parseJsonObject(value);
+    return parseJsonObject(typeof value === "string" ? parseJsonStringInput(value) : value);
   } catch (error) {
     // This module is bundled into the workflow driver body, which cannot
     // import the logger, so enrich the error (and keep the original as
@@ -469,6 +449,10 @@ export function resolveToolCallInputObject(
       { cause: error },
     );
   }
+}
+
+function parseJsonStringInput(value: string): unknown {
+  return JSON.parse(value);
 }
 
 function toToolResultOutput(result: RuntimeActionResult): ToolResultPart["output"] {

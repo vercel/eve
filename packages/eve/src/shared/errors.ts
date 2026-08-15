@@ -57,6 +57,20 @@ export function toError(raw: unknown): Error {
   return error;
 }
 
+/**
+ * Yields the error itself and every object on its `cause` chain, once
+ * each. Cycles terminate the walk instead of looping.
+ */
+export function* walkCauseChain(error: unknown): Generator<unknown> {
+  const seen = new Set<unknown>();
+  let current = error;
+  while (isObject(current) && !seen.has(current)) {
+    seen.add(current);
+    yield current;
+    current = current.cause;
+  }
+}
+
 function safeJsonStringify(value: unknown): string {
   try {
     const stringified = JSON.stringify(value);

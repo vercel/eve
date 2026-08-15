@@ -1,5 +1,5 @@
 import { normalizeModelPath } from "#runtime/framework-tools/file-state.js";
-import { validateAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
+import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { ripgrepIsAvailable } from "#execution/sandbox/ripgrep-probe.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
@@ -53,9 +53,8 @@ export async function executeGrepOnSandbox(
 ): Promise<GrepResult> {
   const effectivePath = args.path ?? DEFAULT_PATH;
 
-  validateAbsoluteFilePath(effectivePath);
-
-  const normalizedPath = normalizeModelPath(effectivePath);
+  const resolvedPath = await resolveAbsoluteFilePath(sandbox, effectivePath);
+  const normalizedPath = normalizeModelPath(resolvedPath);
   const effectiveLimit = Math.min(Math.max(1, args.limit ?? DEFAULT_GREP_LIMIT), MAX_GREP_LIMIT);
   const contextLines = args.context !== undefined && args.context > 0 ? args.context : 0;
 
@@ -88,7 +87,10 @@ export async function executeGrepOnSandbox(
   // Any other exit code (e.g. 127 from bash when the tool is missing)
   // indicates a real failure. Surface these as structured errors
   // rather than silently pretending the search returned zero matches.
-  if (result.exitCode !== 0 && result.exitCode !== 1) {
+  if (
+    (result.exitCode !== 0 && result.exitCode !== 1) ||
+    (result.exitCode === 1 && result.stderr.trim().length > 0)
+  ) {
     throw buildGrepExecutionError(command, result.exitCode, result.stderr);
   }
 
@@ -163,7 +165,7 @@ function buildRipgrepCommand(input: BuildCommandInput): string {
  * Builds the POSIX fallback form of the grep command using `grep -rn`.
  */
 function buildPosixGrepCommand(input: BuildCommandInput): string {
-  const parts: string[] = ["grep", "-r", "-n", "--color=never", "--exclude-dir=.git"];
+  const parts: string[] = ["grep", "-r", "-n", "--exclude-dir=.git"];
 
   if (input.ignoreCase) {
     parts.push("-i");
@@ -187,8 +189,7 @@ function buildPosixGrepCommand(input: BuildCommandInput): string {
 
   // `-m` limits matches per file, analogous to ripgrep's `--max-count`.
   parts.push(`-m ${input.effectiveLimit}`);
-  parts.push("--");
-  parts.push(shellQuote(input.pattern));
+  parts.push(`-e ${shellQuote(input.pattern)}`);
   parts.push(shellQuote(input.normalizedPath));
 
   return parts.join(" ");

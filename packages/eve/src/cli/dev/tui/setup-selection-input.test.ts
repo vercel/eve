@@ -10,6 +10,8 @@ describe("setupSelectionIntent", () => {
     expect(setupSelectionIntent({ type: "ctrl-c" })).toEqual({ kind: "cancel" });
     expect(setupSelectionIntent({ type: "up" })).toEqual({ kind: "move", direction: "up" });
     expect(setupSelectionIntent({ type: "down" })).toEqual({ kind: "move", direction: "down" });
+    expect(setupSelectionIntent({ type: "ctrl-p" })).toEqual({ kind: "move", direction: "up" });
+    expect(setupSelectionIntent({ type: "ctrl-n" })).toEqual({ kind: "move", direction: "down" });
     expect(setupSelectionIntent({ type: "ctrl-r" })).toEqual({ kind: "repaint" });
     expect(setupSelectionIntent({ type: "enter" })).toEqual({ kind: "submit" });
   });

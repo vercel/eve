@@ -9,6 +9,7 @@ import {
 import type { CompiledModuleMap } from "../src/compiler/module-map.js";
 import { TEST_DEFAULT_MODEL_ID } from "../src/internal/testing/app-harness.js";
 import { ResolveAgentError, resolveAgent } from "../src/runtime/resolve-agent.js";
+import { serializeInputSchema } from "../src/shared/tool-schema.js";
 
 describe("resolveAgent", () => {
   it("hydrates compiled authored metadata and attaches tool execute functions", async () => {
@@ -38,13 +39,16 @@ describe("resolveAgent", () => {
           sourceId: "agent.mjs",
         },
       },
-      instructions: {
-        name: "instructions",
-        logicalPath: "instructions.md",
-        markdown: "You are a weather-focused assistant.",
-        sourceId: "instructions.md",
-        sourceKind: "markdown",
-      },
+      instructions: [
+        {
+          content: "You are a weather-focused assistant.",
+          name: "instructions",
+          logicalPath: "instructions.md",
+          role: "system",
+          sourceId: "instructions.md",
+          sourceKind: "markdown",
+        },
+      ],
       sandbox: {
         logicalPath: "sandbox/sandbox.mjs",
         sourceHash: "sandbox-source-hash",
@@ -166,7 +170,7 @@ describe("resolveAgent", () => {
     });
     const [resolvedChannel] = resolved.channels;
 
-    expect(resolved.config.name).toBe("weather-agent");
+    expect(resolved.config?.name).toBe("weather-agent");
     expect(resolved.config).toEqual({
       compaction: {},
       model: {
@@ -196,13 +200,16 @@ describe("resolveAgent", () => {
         warnings: 0,
       },
     });
-    expect(resolved.instructions).toEqual({
-      name: "instructions",
-      logicalPath: "instructions.md",
-      markdown: "You are a weather-focused assistant.",
-      sourceId: "instructions.md",
-      sourceKind: "markdown",
-    });
+    expect(resolved.instructions).toEqual([
+      {
+        content: "You are a weather-focused assistant.",
+        logicalPath: "instructions.md",
+        name: "instructions",
+        role: "system",
+        sourceId: "instructions.md",
+        sourceKind: "markdown",
+      },
+    ]);
     expect(resolved.sandbox).toEqual({
       backend: expect.objectContaining({
         create: expect.any(Function),
@@ -250,26 +257,28 @@ describe("resolveAgent", () => {
       },
     ]);
     expect(resolved.workspaceSpec).toEqual({
-      rootEntries: ["skills/"],
+      rootEntries: [],
     });
     expect(resolved.tools).toHaveLength(1);
     expect(resolved.tools[0]).toMatchObject({
       description: "Get the current weather for a city.",
-      inputSchema: {
-        properties: {
-          city: {
-            type: "string",
-          },
-        },
-        required: ["city"],
-        type: "object",
-      },
       logicalPath: "tools/get-weather.mjs",
       name: "get_weather",
       sourceId: "tools/get-weather.mjs",
       sourceKind: "module",
     });
-    expect(resolved.tools[0]?.execute?.({ city: "Brooklyn" })).toEqual({
+    expect(serializeInputSchema(resolved.tools[0]!.inputSchema!)).toMatchObject({
+      properties: {
+        city: {
+          type: "string",
+        },
+      },
+      required: ["city"],
+      type: "object",
+    });
+    expect(
+      resolved.tools[0]?.execute?.({ city: "Brooklyn" }, { messages: [], toolCallId: "call_1" }),
+    ).toEqual({
       city: "Brooklyn",
     });
   });
@@ -336,10 +345,10 @@ describe("resolveAgent", () => {
       manifest,
       moduleMap,
     });
-    const inputStandardSchema = resolved.tools[0]?.inputStandardSchema;
-    expect(inputStandardSchema).toBeDefined();
+    const inputSchema = resolved.tools[0]?.inputSchema;
+    expect(inputSchema).toBeDefined();
 
-    const sdkSchema = asSchema(inputStandardSchema);
+    const sdkSchema = asSchema(inputSchema!);
     const result = await sdkSchema.validate!({});
 
     expect(result).toEqual({
@@ -373,7 +382,7 @@ describe("resolveAgent", () => {
       },
     });
 
-    expect(resolved.config.name).toBe("weather-agent");
+    expect(resolved.config?.name).toBe("weather-agent");
     expect(resolved.config).toEqual({
       compaction: {},
       model: {
@@ -381,7 +390,7 @@ describe("resolveAgent", () => {
       },
       name: "weather-agent",
     });
-    expect(resolved.instructions).toBeUndefined();
+    expect(resolved.instructions).toEqual([]);
     expect(resolved.sandbox).toBeNull();
     expect(resolved.skills).toEqual([]);
     expect(resolved.tools).toEqual([]);
@@ -451,7 +460,7 @@ describe("resolveAgent", () => {
       },
     });
 
-    expect(resolved.config.model).toEqual({
+    expect(resolved.config?.model).toEqual({
       id: "test-provider/weather-pro",
       source: {
         sourceKind: "module",
@@ -490,7 +499,7 @@ describe("resolveAgent", () => {
       },
     });
 
-    expect(resolved.config.model).toEqual({
+    expect(resolved.config?.model).toEqual({
       id: "anthropic/claude-opus-4.5-thinking",
       providerOptions: {
         anthropic: {

@@ -35,6 +35,11 @@ const userAuthDef: AuthorizationDefinition = {
   principalType: "user",
 };
 
+const connectUserAuthDef: AuthorizationDefinition = {
+  ...userAuthDef,
+  vercelConnect: { connector: "mcp.notion.com/notion" },
+};
+
 describe("principalKey", () => {
   it("collapses every app principal to the string 'app'", () => {
     expect(principalKey({ type: "app" })).toBe("app");
@@ -49,6 +54,10 @@ describe("principalKey", () => {
     const alice = principalKey({ id: "alice", issuer: "idp", type: "user" });
     const bob = principalKey({ id: "bob", issuer: "idp", type: "user" });
     expect(alice).not.toBe(bob);
+  });
+
+  it("keys an issuerless native Vercel user by its user id", () => {
+    expect(principalKey({ id: "user_123", type: "user" })).toBe("user:user_123");
   });
 });
 
@@ -90,6 +99,50 @@ describe("resolveConnectionPrincipal", () => {
     });
   });
 
+  it("projects a Vercel development user without its reserved OIDC issuer", () => {
+    const ctx = ctxWithAuth(
+      userAuth({
+        attributes: { environment: "development", user_id: "user_123" },
+        authenticator: "oidc",
+        issuer: "https://oidc.vercel.com/team_123",
+        principalId: "https://oidc.vercel.com/team_123:user_123",
+        subject: "user_123",
+      }),
+    );
+
+    const principal = contextStorage.run(ctx, () =>
+      resolveConnectionPrincipal("notion", connectUserAuthDef),
+    );
+
+    expect(principal).toEqual({
+      attributes: { environment: "development", user_id: "user_123" },
+      id: "user_123",
+      type: "user",
+    });
+  });
+
+  it("preserves a Vercel development user's issuer for non-Connect authorization", () => {
+    const ctx = ctxWithAuth(
+      userAuth({
+        attributes: { environment: "development", user_id: "user_123" },
+        authenticator: "oidc",
+        issuer: "https://oidc.vercel.com/team_123",
+        principalId: "https://oidc.vercel.com/team_123:user_123",
+        subject: "user_123",
+      }),
+    );
+
+    const principal = contextStorage.run(ctx, () =>
+      resolveConnectionPrincipal("custom", userAuthDef),
+    );
+
+    expect(principal).toMatchObject({
+      id: "https://oidc.vercel.com/team_123:user_123",
+      issuer: "https://oidc.vercel.com/team_123",
+      type: "user",
+    });
+  });
+
   it("preserves the full SessionAuthContext attributes on the principal", () => {
     const attributes = { email: "a@b.com", roles: ["admin", "viewer"] };
     const ctx = ctxWithAuth(userAuth({ attributes }));
@@ -104,7 +157,7 @@ describe("resolveConnectionPrincipal", () => {
   it("throws principal_required (non-retryable) when AuthKey is null", () => {
     const ctx = ctxWithAuth(null);
 
-    expect.assertions(4);
+    expect.assertions(5);
     try {
       contextStorage.run(ctx, () => resolveConnectionPrincipal("linear", userAuthDef));
     } catch (error) {
@@ -113,6 +166,7 @@ describe("resolveConnectionPrincipal", () => {
       expect(err.reason).toBe("principal_required");
       expect(err.retryable).toBe(false);
       expect(err.connectionName).toBe("linear");
+      expect(err.message).toContain("route auth that resolves an authenticated user");
     }
   });
 
@@ -126,7 +180,20 @@ describe("resolveConnectionPrincipal", () => {
 
     expect(() =>
       contextStorage.run(ctx, () => resolveConnectionPrincipal("linear", userAuthDef)),
-    ).toThrow(/principalType "user"/);
+    ).toThrow(/active session is scoped to "service"/);
+  });
+
+  it("explains when a local Connect request has no Vercel user", () => {
+    const ctx = ctxWithAuth({
+      attributes: {},
+      authenticator: "local-dev",
+      principalId: "local-dev",
+      principalType: "local-dev",
+    });
+
+    expect(() =>
+      contextStorage.run(ctx, () => resolveConnectionPrincipal("notion", connectUserAuthDef)),
+    ).toThrow(/fell back to local development access/);
   });
 
   it("accepts an explicit ctx argument and bypasses AsyncLocalStorage", () => {
@@ -168,7 +235,7 @@ describe("resolveConnectionPrincipal", () => {
   });
 
   it("throws principal_required for user-typed connections when no context is active", () => {
-    expect.assertions(4);
+    expect.assertions(5);
     try {
       resolveConnectionPrincipal("linear", userAuthDef);
     } catch (error) {
@@ -177,6 +244,7 @@ describe("resolveConnectionPrincipal", () => {
       expect(err.reason).toBe("principal_required");
       expect(err.retryable).toBe(false);
       expect(err.message).toMatch(/outside an eve context/);
+      expect(err.message).toContain("credentials shared by the agent");
     }
   });
 });

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMicrosandboxSandboxBackend } from "#execution/sandbox/bindings/microsandbox.js";
 import {
   createMicrosandboxNetworkPlan,
+  createTransformBrokerEnvironment,
   serializeMicrosandboxNetworkPolicyJson,
 } from "#execution/sandbox/bindings/microsandbox-network.js";
 import {
@@ -61,10 +62,12 @@ describe.skipIf(onWindows)("createMicrosandboxSandboxBackend", () => {
       cause,
       message: expect.stringContaining(
         'Failed to prewarm microsandbox template "template-key" [database]: ' +
-          "Migration file of version 'm20260606_000001_named_volume_kinds' is missing. " +
-          "Check that the microsandbox npm package and installed VM runtime use the same version. " +
-          "If versions changed, use a clean MSB_HOME or migrate the existing database.",
+          "Migration file of version 'm20260606_000001_named_volume_kinds' is missing.",
       ),
+      // The per-code remediation travels as a structured hint, not prose.
+      hint:
+        "Check that the microsandbox npm package and installed VM runtime use the same version. " +
+        "If versions changed, use a clean MSB_HOME or migrate the existing database.",
     });
   });
 });
@@ -161,6 +164,26 @@ describe.skipIf(onWindows)("createMicrosandboxNetworkPlan", () => {
         },
       }),
     ]);
+  });
+
+  it("keeps brokered header values out of the guest environment", () => {
+    const plan = createMicrosandboxNetworkPlan({
+      allow: {
+        "github.com": [
+          {
+            transform: [{ headers: { Authorization: "Basic real-secret" } }],
+          },
+        ],
+      },
+    });
+
+    expect(createTransformBrokerEnvironment(plan)).toEqual({
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+      GIT_CONFIG_VALUE_0: expect.stringMatching(
+        /^Authorization: __EVE_MSB_SECRET_[A-Fa-f0-9]{24}__$/u,
+      ),
+    });
   });
 
   it("serializes policy JSON using microsandbox's native snake-case schema", () => {

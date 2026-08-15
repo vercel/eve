@@ -3,8 +3,10 @@ import { basename, join, resolve } from "node:path";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor } from "../../node-engine.js";
+import type { AgentReasoningDefinition } from "../../../shared/agent-definition.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "../update/module-files.js";
 import { pathExists, writeTextFile } from "../files.js";
+import { blockingCreateInPlaceEntries } from "../create-in-place.js";
 import { resolveVersionToken } from "../version-tokens.js";
 import {
   applyPackageManagerWorkspaceConfiguration,
@@ -15,8 +17,6 @@ import {
 import { WEB_APP_TEMPLATE_FILES } from "./web-template.js";
 
 export const CURRENT_DIRECTORY_PROJECT_NAME = ".";
-
-const ALLOWED_CREATE_IN_PLACE_ENTRIES = new Set([".DS_Store", ".git", ".gitkeep", ".hg"]);
 
 export const DEFAULT_AI_PACKAGE_VERSION = "__AI_SDK_VERSION__";
 export const DEFAULT_CONNECT_PACKAGE_VERSION = "__VERCEL_CONNECT_VERSION__";
@@ -37,7 +37,7 @@ export interface EvePackageContract {
 }
 
 export const DEFAULT_EVE_PACKAGE_CONTRACT: EvePackageContract = {
-  version: "__EVE_PACKAGE_VERSION__",
+  version: "__EVE_PACKAGE_DEPENDENCY_VERSION__",
   nodeEngine: "__NODE_ENGINE__",
 };
 
@@ -54,6 +54,7 @@ export function resolveEvePackageContract(
 interface TemplateContext {
   appName: string;
   model: string;
+  reasoning?: AgentReasoningDefinition;
   eveVersion: string;
   aiPackageVersion: string;
   connectPackageVersion: string;
@@ -65,7 +66,7 @@ interface TemplateContext {
 
 /**
  * Provider slug a gateway model id routes through: the segment before the
- * first "/" (e.g. `anthropic/claude-sonnet-4.6` → `anthropic`). The slug is
+ * first "/" (e.g. `anthropic/claude-sonnet-5` → `anthropic`). The slug is
  * injected into generated source, so characters outside the catalog's slug
  * alphabet are dropped; an id without a usable prefix falls back to
  * `anthropic`.
@@ -94,18 +95,31 @@ export function byokProviderEnvVar(modelId: string): string {
  * subset `eve init` writes when adding an agent to an existing project, where
  * everything outside `agent/` belongs to the host app.
  */
-export function agentTemplateFiles(model: string): Record<string, string> {
+export function agentTemplateFiles(
+  model: string,
+  reasoning?: AgentReasoningDefinition,
+): Record<string, string> {
   return {
-    "agent/agent.ts": BASE_AGENT_TEMPLATE.replaceAll("__EVE_INIT_MODEL__", model),
+    "agent/agent.ts": BASE_AGENT_TEMPLATE.replaceAll("__EVE_INIT_MODEL__", model).replaceAll(
+      "__EVE_INIT_REASONING__",
+      reasoningTemplateLine(reasoning),
+    ),
     "agent/channels/eve.ts": WEB_APP_TEMPLATE_FILES["agent/channels/eve.ts"],
     "agent/instructions.md": AGENT_INSTRUCTIONS_TEMPLATE,
   };
+}
+
+function reasoningTemplateLine(reasoning: AgentReasoningDefinition | undefined): string {
+  return reasoning === undefined || reasoning === "provider-default"
+    ? ""
+    : `  reasoning: "${reasoning}",\n`;
 }
 
 function renderTemplate(content: string, ctx: TemplateContext): string {
   return content
     .replaceAll("__EVE_INIT_APP_NAME__", ctx.appName)
     .replaceAll("__EVE_INIT_MODEL__", ctx.model)
+    .replaceAll("__EVE_INIT_REASONING__", reasoningTemplateLine(ctx.reasoning))
     .replaceAll("__EVE_INIT_BYOK_PROVIDER__", modelProviderSlug(ctx.model))
     .replaceAll("__EVE_INIT_BYOK_ENV_VAR__", byokProviderEnvVar(ctx.model))
     .replaceAll("__EVE_INIT_PACKAGE_VERSION__", formatEveDependencySpecifier(ctx.eveVersion))
@@ -127,7 +141,7 @@ const BASE_AGENT_TEMPLATE = `import { defineAgent } from "eve";
 
 export default defineAgent({
   model: "__EVE_INIT_MODEL__",
-});
+__EVE_INIT_REASONING__});
 `;
 
 // The agent reaches the model through a provider key the user supplies via the
@@ -140,7 +154,7 @@ const BYOK_AGENT_TEMPLATE = `import { defineAgent } from "eve";
 
 export default defineAgent({
   model: "__EVE_INIT_MODEL__",
-  modelOptions: {
+__EVE_INIT_REASONING__  modelOptions: {
     providerOptions: {
       gateway: {
         byok: {
@@ -153,11 +167,37 @@ export default defineAgent({
 `;
 
 // `@vercel/connect`'s optional `ai` peer (`^6 || ^7`) excludes prereleases, so
-// npm and yarn refuse to fill it from the prerelease `ai` the eve runtime pins
-// and abort the install (ERESOLVE). Forcing `ai` through `overrides` (npm/bun)
-// and `resolutions` (yarn) keeps the whole tree on that exact version; pnpm
-// already tolerates the unmet optional peer and ignores both fields.
-function packageJsonTemplate(includeRootOnlyFields: boolean): string {
+// npm, Bun, and Yarn need a manager-specific pin for the runtime's prerelease
+// `ai` version. pnpm tolerates the unmet optional peer without either field.
+function packageManagerAiPinTemplateSuffix(packageManager: PackageManagerKind): string {
+  switch (packageManager) {
+    case "bun":
+    case "npm":
+      return `,
+  "overrides": {
+    "ai": "__EVE_INIT_AI_SDK_VERSION__"
+  }`;
+    case "yarn":
+      return `,
+  "resolutions": {
+    "ai": "__EVE_INIT_AI_SDK_VERSION__"
+  }`;
+    case "pnpm":
+      return "";
+    default: {
+      const exhaustive: never = packageManager;
+      return exhaustive;
+    }
+  }
+}
+
+function packageJsonTemplate(input: {
+  includeRootOnlyFields: boolean;
+  packageManager: PackageManagerKind;
+}): string {
+  const rootOnlyFields = input.includeRootOnlyFields
+    ? `${packageManagerAiPinTemplateSuffix(input.packageManager)}${ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX}`
+    : "";
   return `{
   "name": "__EVE_INIT_APP_NAME__",
   "version": "0.0.0",
@@ -181,18 +221,13 @@ function packageJsonTemplate(includeRootOnlyFields: boolean): string {
   "devDependencies": {
     "@types/node": "__EVE_INIT_TYPES_NODE_VERSION__",
     "typescript": "__EVE_INIT_TYPESCRIPT_VERSION__"
-  }${includeRootOnlyFields ? ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX : ""}
+  }${rootOnlyFields}
 }
 `;
 }
 
-const ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX = `,
-  "overrides": {
-    "ai": "__EVE_INIT_AI_SDK_VERSION__"
-  },
-  "resolutions": {
-    "ai": "__EVE_INIT_AI_SDK_VERSION__"
-  },
+/** Trailing fields only written when the scaffold is not a workspace member. */
+export const ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX = `,
   "engines": {
     "node": "__EVE_INIT_NODE_ENGINE__"
   }
@@ -209,22 +244,21 @@ const SHARED_TEMPLATE_FILES: Record<string, string> = {
   "tsconfig.json": `{
   "compilerOptions": {
     "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "esnext",
+    "moduleResolution": "bundler",
     "types": ["node"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["agent/**/*.ts", "evals/**/*.ts", ".eve/**/*.d.ts"]
+  "include": ["agent/**/*.ts", "evals/**/*.ts"]
 }
 `,
   ".gitignore": `node_modules
 .env*
 .eve
 .vercel
-.workflow-data
 .next
 .output
 .nitro
@@ -237,7 +271,6 @@ dist
   ".vercelignore": `node_modules
 .env*
 .eve
-.workflow-data
 .next
 .output
 .nitro
@@ -245,20 +278,73 @@ dist
 `,
   "AGENTS.md": `# eve Agent App
 
-This project uses the eve framework. Before writing code, always read the relevant guide in \`node_modules/eve/docs/\`.
+This project uses the eve framework. Before writing code, read the relevant guide
+from the installed eve package docs. In most installs, those docs are at
+\`node_modules/eve/docs/\`. In workspaces or local package installs, resolve the
+installed \`eve\` package location first and read its \`docs/\` directory. If
+package docs are unavailable, use https://eve.dev/docs as a fallback.
+
+## Adding integrations
+
+Before implementing an integration yourself, discover existing integrations:
+
+\`\`\`sh
+eve registry search <query> --json
+eve registry view <item>
+\`\`\`
+
+Prefer registry items whose \`implementation\` is \`native\`; use Chat SDK adapters when no
+native channel fits. \`registry view\` provides the selected item's documentation link.
+
+Install and configure one without driving interactive terminal prompts:
+
+\`\`\`sh
+eve add <item> --non-interactive
+\`\`\`
+
+Exit code 0 means setup completed, 1 means setup failed, and 2 means setup needs
+input or a prerequisite. On exit 2, parse the final NDJSON event and use its
+\`next.command\` as the continuation.
+
+Every \`--answer\` value is JSON, so strings need JSON quotes. For an editable
+question, you may supply its nested \`editable.key\` with the parent key in one
+invocation:
+
+\`\`\`sh
+eve add channel/photon-imessage --non-interactive \\
+  --answer 'photon-project-source="create"' \\
+  --answer 'photon-project-name="eve · my-agent"'
+\`\`\`
+
+Add \`--yes\` to accept recommended setup values and reduce setup round trips;
+explicit \`--answer\` values take precedence. Use the reported \`--skip-install\`
+continuation after installation.
+A Vercel Connect setup may report \`eve link\` as a prerequisite; run it and
+retry the continuation. Never pass secrets in \`--answer\`; use the documented
+environment variable or secret store.
+
+An \`external_action\` event with \`blocking: true\` means the command is still
+running while it waits for the user. Surface its URL and code, keep the process
+alive, and wait for its matching \`external_action_resolved\` event or a terminal
+event. Do not start a continuation. When a completed event has
+\`deploymentRequired: true\`, recommend its \`next\` command to deploy the changes.
 `,
   "CLAUDE.md": `@AGENTS.md
 `,
 };
 
-function templateFiles(
-  byokProvider: boolean,
-  includeRootOnlyPackageJsonFields: boolean,
-): Record<string, string> {
+function templateFiles(input: {
+  byokProvider: boolean;
+  includeRootOnlyPackageJsonFields: boolean;
+  packageManager: PackageManagerKind;
+}): Record<string, string> {
   return {
-    "agent/agent.ts": byokProvider ? BYOK_AGENT_TEMPLATE : BASE_AGENT_TEMPLATE,
+    "agent/agent.ts": input.byokProvider ? BYOK_AGENT_TEMPLATE : BASE_AGENT_TEMPLATE,
     ...SHARED_TEMPLATE_FILES,
-    "package.json": packageJsonTemplate(includeRootOnlyPackageJsonFields),
+    "package.json": packageJsonTemplate({
+      includeRootOnlyFields: input.includeRootOnlyPackageJsonFields,
+      packageManager: input.packageManager,
+    }),
   };
 }
 
@@ -271,7 +357,7 @@ async function assertCanCreateInPlace(
   }
 
   const entries = await readdir(targetRoot);
-  const blocking = entries.filter((entry) => !ALLOWED_CREATE_IN_PLACE_ENTRIES.has(entry));
+  const blocking = blockingCreateInPlaceEntries(entries);
   if (blocking.length > 0 && !overwriteExisting) {
     const visible = blocking.slice(0, 5).join(", ");
     const suffix = blocking.length > 5 ? `, and ${blocking.length - 5} more` : "";
@@ -284,6 +370,7 @@ async function assertCanCreateInPlace(
 export interface ScaffoldBaseProjectOptions {
   projectName: string;
   model: string;
+  reasoning?: AgentReasoningDefinition;
   /**
    * The manager that owns command execution and manager-specific generated
    * project files for this scaffold.
@@ -333,12 +420,13 @@ export async function scaffoldBaseProject(options: ScaffoldBaseProjectOptions): 
   const ctx: TemplateContext = {
     appName: basename(targetRoot),
     model: options.model,
+    reasoning: options.reasoning,
     eveVersion: evePackage.version,
     aiPackageVersion: resolveVersionToken(
       "aiPackageVersion",
       options.aiPackageVersion ?? DEFAULT_AI_PACKAGE_VERSION,
     ),
-    // Channels and connections scaffolded later (`eve channels add slack`,
+    // Channels and connections scaffolded later (`eve add channel/slack`,
     // possibly while `eve dev` is running) import `@vercel/connect`; shipping
     // it from init means adding them never introduces a missing dependency.
     connectPackageVersion: resolveVersionToken(
@@ -359,7 +447,13 @@ export async function scaffoldBaseProject(options: ScaffoldBaseProjectOptions): 
 
   await mkdir(targetRoot, { recursive: true });
 
-  for (const [relPath, content] of Object.entries(templateFiles(byokProvider, !workspaceMember))) {
+  for (const [relPath, content] of Object.entries(
+    templateFiles({
+      byokProvider,
+      includeRootOnlyPackageJsonFields: !workspaceMember,
+      packageManager,
+    }),
+  )) {
     const filePath = `${targetRoot}/${relPath}`;
     const existed = await pathExists(filePath);
     await writeTextFile(filePath, renderTemplate(content, ctx), {

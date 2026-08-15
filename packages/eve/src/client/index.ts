@@ -4,11 +4,13 @@
 
 export { EveAgentStore } from "#client/eve-agent-store.js";
 export { Client } from "#client/client.js";
+export { AgentInfoResponseError } from "#client/agent-info-error.js";
 export { ClientError } from "#client/client-error.js";
 export { defaultMessageReducer } from "#client/message-reducer.js";
 export { createDataUrlFilePart, createTextWithFileContent } from "#client/file-parts.js";
 export { MessageResponse } from "#client/message-response.js";
 export { ClientSession } from "#client/session.js";
+export { ClientSessions, type CreatedClientSession } from "#client/sessions.js";
 
 // ---------------------------------------------------------------------------
 // Client types
@@ -41,16 +43,25 @@ export type {
   AgentInfoSubagentEntry,
   AgentInfoToolEntry,
   AgentInfoTools,
+  CancelSessionResult,
+  ClearResult,
+  CompactResult,
   ClientAuth,
   ClientOptions,
   ClientRedirectPolicy,
   HeadersValue,
   HealthResult,
   MessageResult,
+  RespondTurnOptions,
+  ResetResult,
+  ResolvedStreamReconnectPolicy,
   SendTurnInput,
-  SendTurnPayload,
-  SessionState,
+  SendTurnOptions,
+  SessionSnapshot,
+  ClientSessionState,
   StreamOptions,
+  StreamReconnectPolicy,
+  StreamReconnectRetryPolicy,
   TokenValue,
 } from "#client/types.js";
 
@@ -63,6 +74,9 @@ export type {
 } from "#client/reducer.js";
 
 export type {
+  EveAuthorizationChallenge,
+  EveAuthorizationOutcome,
+  EveAuthorizationPart,
   EveMessageData,
   EveDynamicToolPart,
   EveMessageInputRequest,
@@ -78,26 +92,32 @@ export type {
 // ---------------------------------------------------------------------------
 
 export type {
+  ActionPartialStreamEvent,
   ActionResultStreamEvent,
   ActionsRequestedStreamEvent,
   AssistantStepFinishReason,
+  AuthorizationOutcome,
   CompactionCompletedStreamEvent,
   CompactionRequestedStreamEvent,
   AuthorizationCompletedStreamEvent,
   ConnectionAuthorizationOutcome,
   AuthorizationRequiredStreamEvent,
   HandleMessageStreamEvent,
+  MessageStreamEventMeta,
   InputRequestedStreamEvent,
   MessageAppendedStreamEvent,
   MessageCompletedStreamEvent,
+  MessageReceivedPart,
   MessageReceivedStreamEvent,
   ReasoningAppendedStreamEvent,
   ReasoningCompletedStreamEvent,
   ResultCompletedStreamEvent,
+  RuntimeTraceContext,
   SessionCompletedStreamEvent,
   SessionFailedStreamEvent,
   SessionStartedStreamEvent,
   SessionWaitingStreamEvent,
+  MessageStreamEvent,
   StepCompletedStreamEvent,
   StepFailedStreamEvent,
   StepStartedStreamEvent,
@@ -105,6 +125,7 @@ export type {
   SubagentChildEventStreamEvent,
   SubagentCompletedStreamEvent,
   SubagentStartedStreamEvent,
+  TurnCancelledStreamEvent,
   TurnCompletedStreamEvent,
   TurnFailedStreamEvent,
   TurnStartedStreamEvent,
@@ -113,9 +134,15 @@ export type {
 
 export { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
 
-export type { InputOption, InputRequest, InputResponse } from "#runtime/input/types.js";
+export type {
+  InputOption,
+  InputRequest,
+  InputRequestKind,
+  InputResponse,
+} from "#runtime/input/types.js";
 export {
   inputOptionSchema,
+  inputRequestKindSchema,
   inputRequestSchema,
   inputResponseSchema,
   isInputRequest,

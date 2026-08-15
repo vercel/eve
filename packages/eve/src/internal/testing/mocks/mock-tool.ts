@@ -2,6 +2,7 @@ import type { SessionContext } from "#public/definitions/callback-context.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
+import { toInputSchema } from "#shared/tool-schema.js";
 
 /**
  * Declarative description of one synthetic authored tool used by the
@@ -48,7 +49,7 @@ export function mockTool(input: MockToolInput): ResolvedToolDefinition {
   const logicalPath = input.logicalPath ?? `tools/${sanitizeLogicalPathSegment(input.name)}.ts`;
   const definition: ResolvedToolDefinition = {
     description: input.description ?? `${input.name} mock tool.`,
-    inputSchema: input.inputSchema ?? null,
+    inputSchema: toInputSchema(input.inputSchema ?? null),
     logicalPath,
     name: input.name,
     sourceId: logicalPath,

@@ -8,15 +8,14 @@ const SUBAGENT_TOKEN = "SUBAGENT_TOKEN=echo-marker-9F2X";
  * message proves the child's output was spliced back into the conversation.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "Local subagent delegation smoke: child output reaches the parent reply verbatim.",
   async test(t) {
-    const turn = await t.send(
+    await t.send(
       "Use the echo-marker subagent with message 'ping'. Once it returns, reply with the subagent's exact output included verbatim.",
     );
-    turn.expectOk();
 
-    t.didNotFail();
-    t.completed();
+    t.succeeded();
     t.calledSubagent("echo-marker", { output: /SUBAGENT_TOKEN=echo-marker-9F2X/ });
     t.messageIncludes(SUBAGENT_TOKEN);
   },

@@ -1,10 +1,8 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
-import {
-  createCrossChannelReceiveFn,
-  toCrossChannelTargets,
-} from "#channel/cross-channel-receive.js";
+import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
+import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-channel-receive.js";
 import { createSession, type Session } from "#channel/session.js";
-import type { Runtime, SessionAuthContext } from "#channel/types.js";
+import type { Runtime } from "#channel/types.js";
 import { expectFunction } from "#internal/authored-module.js";
 import type {
   ScheduleDefinition,
@@ -13,16 +11,7 @@ import type {
 } from "#public/definitions/schedule.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
-/**
- * Pre-built application auth context handed to schedules. Schedules
- * run on behalf of the agent itself, not a downstream user.
- */
-export const SCHEDULE_APP_AUTH: SessionAuthContext = {
-  attributes: {},
-  authenticator: "app",
-  principalId: "eve:app",
-  principalType: "runtime",
-};
+export { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 
 /**
  * Durable adapter kind used when a schedule fires without targeting a
@@ -53,7 +42,7 @@ export interface ScheduleDispatchInput {
  *
  * For handler schedules: builds {@link ScheduleHandlerArgs} against the
  * request-scoped channel bundle and invokes the author's `run`. The
- * author owns control flow — `args.receive(channel, …)` hands work off
+ * author owns control flow — `args.to(channel, target).send(…)` hands work off
  * to a channel; `args.waitUntil(promise)` extends the task lifetime
  * so the dispatcher awaits in-flight work before settling.
  *
@@ -85,14 +74,19 @@ export class ScheduleDispatcher {
   async trigger(input: ScheduleDispatchInput): Promise<ScheduleDispatchResult> {
     const sessions: Session[] = [];
     const waitUntilTasks: Promise<unknown>[] = [];
-    const receive = createCrossChannelReceiveFn(this.runtime, toCrossChannelTargets(this.channels));
+    const toChannel = createCrossChannelToFn(this.runtime, toCrossChannelTargets(this.channels));
 
     const args: ScheduleHandlerArgs = {
       appAuth: SCHEDULE_APP_AUTH,
-      receive: async (channel, options) => {
-        const session = await receive(channel, options);
-        sessions.push(session);
-        return session;
+      to(channel, target) {
+        const destination = toChannel(channel, target);
+        return {
+          async send(message, options) {
+            const session = await destination.send(message, options);
+            sessions.push(session);
+            return session;
+          },
+        };
       },
       waitUntil(task) {
         waitUntilTasks.push(task);
@@ -114,13 +108,13 @@ export class ScheduleDispatcher {
   }
 
   private async runMarkdown(markdown: string): Promise<Session> {
-    const handle = await this.runtime.run({
+    const handle = await this.runtime.createSession({
       adapter: SCHEDULE_ADAPTER,
       auth: SCHEDULE_APP_AUTH,
       input: { message: markdown },
       mode: "task",
     });
-    return createSession(handle.sessionId, handle.continuationToken, this.runtime);
+    return createSession(handle.sessionId, this.runtime);
   }
 }
 

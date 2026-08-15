@@ -10,6 +10,7 @@ export {
   AUTHORED_ARTIFACTS_UPDATED_LOG_LINE,
   EveTUIRunner,
   createPromptCommandHandler,
+  promptCommandsFor,
   type EveTUIRunnerOptions,
   formatChangeDetectedLogLine,
   MockScreen,

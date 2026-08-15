@@ -35,12 +35,15 @@ describe("resolveAgentInfoCompiledArtifactsSource", () => {
     expect(
       resolveAgentInfoCompiledArtifactsSource({
         appRoot: "/tmp/app",
-        dev: true,
         devRuntimeArtifactsPointerPath: "/tmp/app/.eve/dev-runtime/current.json",
+        kind: "development",
+        moduleMapLoaderPath: "/tmp/eve/src/internal/authored-module-map-loader.ts",
       }),
     ).toEqual({
       appRoot: "/tmp/app/.eve/dev-runtime/snapshot/app",
       kind: "disk",
+      moduleMapLoaderPath: "/tmp/eve/src/internal/authored-module-map-loader.ts",
+      sandboxAppRoot: "/tmp/app",
     });
     expect(mocks.readDevelopmentRuntimeArtifactsSnapshotRoot).toHaveBeenCalledWith(
       "/tmp/app/.eve/dev-runtime/current.json",

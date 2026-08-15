@@ -54,6 +54,7 @@ function createDeployProjectDeps() {
       async () => true,
     ),
     detectDeployment: vi.fn<DeployProjectDeps["detectDeployment"]>(async () => DEPLOYED),
+    syncHostFrameworkPreset: vi.fn<DeployProjectDeps["syncHostFrameworkPreset"]>(async () => {}),
   };
 }
 

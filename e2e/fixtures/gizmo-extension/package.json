@@ -1,0 +1,39 @@
+{
+  "name": "gizmo-extension",
+  "version": "0.0.0",
+  "private": true,
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.mjs"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "default": "./dist/tools/index.mjs"
+    }
+  },
+  "scripts": {
+    "build": "eve extension build"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "eve": "workspace:*",
+    "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "eve": "*"
+  },
+  "eve": {
+    "extension": {
+      "source": "./extension",
+      "dist": "./dist/extension"
+    }
+  }
+}

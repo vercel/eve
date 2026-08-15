@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { renderMarkdown } from "./markdown.js";
+import { stripAnsi } from "#cli/ui/terminal-text.js";
 
 describe("renderMarkdown", () => {
   it("preserves underscores inside URLs", () => {
@@ -26,5 +27,28 @@ describe("renderMarkdown", () => {
   it("applies emphasis around a shielded URL", () => {
     const rendered = renderMarkdown("see _https://example.com/a_b_ now");
     expect(rendered).toContain("https://example.com/a_b");
+  });
+
+  it("renders fenced code, task lists, links, and strikethrough semantically", () => {
+    const rendered = renderMarkdown(
+      "- [x] Read [the docs](https://example.com)\n\n~~~ts\nconst ok = true;\n~~~\n\n~~old~~",
+    );
+
+    expect(rendered).toContain("• ☑ Read the docs (\x1b[36mhttps://example.com\x1b[39m)");
+    expect(rendered).toContain("  \x1b[2mts\x1b[22m");
+    expect(rendered).toContain("\x1b[2m│\x1b[22m \x1b[36mconst ok = true;\x1b[39m");
+    expect(rendered).toContain("\x1b[9mold\x1b[29m");
+  });
+
+  it("fits wide tables to the available terminal width", () => {
+    const rendered = renderMarkdown(
+      "| Name | Description |\n| --- | --- |\n| alpha | a very long description |",
+      24,
+    );
+
+    for (const line of rendered.split("\n")) {
+      expect(stripAnsi(line).length).toBeLessThanOrEqual(24);
+    }
+    expect(rendered).toContain("…");
   });
 });

@@ -15,7 +15,7 @@ describe("compileFromMemory", () => {
     expect(manifest.kind).toBe(COMPILED_AGENT_MANIFEST_KIND);
     expect(manifest.version).toBe(COMPILED_AGENT_MANIFEST_VERSION);
     expect(manifest.config.name).toBe("memory-agent");
-    expect(manifest.config.model.id).toBe("openai/gpt-5.4");
+    expect(manifest.config.model?.id).toBe("openai/gpt-5.4");
     expect(manifest.tools).toEqual([]);
     expect(manifest.skills).toEqual([]);
     expect(manifest.subagents).toEqual([]);
@@ -31,7 +31,7 @@ describe("compileFromMemory", () => {
     });
 
     expect(manifest.config.name).toBe("custom-agent");
-    expect(manifest.config.model.id).toBe("mock/custom");
+    expect(manifest.config.model?.id).toBe("mock/custom");
     expect(manifest.appRoot).toBe("/app");
     expect(manifest.agentRoot).toBe("/app/agent");
   });

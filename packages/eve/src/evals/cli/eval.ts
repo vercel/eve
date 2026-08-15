@@ -1,19 +1,30 @@
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
-import { resolveApplicationRoot } from "#internal/application/paths.js";
-import { type DevelopmentServerHandle, startDevelopmentServer } from "#internal/nitro/host.js";
+import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
+import {
+  EVE_EVALUATION_ENV_FLAG,
+  EVE_EVALUATION_RUN_ID_ENV,
+} from "#internal/application/dev-environment.js";
+import { createDevelopmentServer, type DevelopmentServer } from "#internal/nitro/host.js";
 import { createEvalClient } from "#evals/cli/eval-client.js";
-import { discoverAndImportEvals, discoverEvalConfig } from "#evals/runner/discover.js";
+import { filterEvalsByTags } from "#evals/cli/filter.js";
+import {
+  discoverAndImportEvals,
+  discoverEvalConfig,
+  findMisplacedEvalDirs,
+} from "#evals/runner/discover.js";
 import { runEvals } from "#evals/runner/run-evals.js";
-import { ConsoleReporter } from "#evals/runner/reporters/console.js";
+import { Console } from "#evals/runner/reporters/console.js";
 import { JUnit } from "#evals/runner/reporters/junit.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import { resolveEvalTargetHandle } from "#evals/target.js";
 import type { EveEval, EveEvalTargetHandle } from "#evals/types.js";
 
-interface EvalCliOptions {
+/** Parsed Commander options accepted by {@link runEvalCommand}. */
+export interface EvalCliOptions {
   url?: string;
   timeout?: string;
   maxConcurrency?: string;
@@ -23,6 +34,7 @@ interface EvalCliOptions {
   strict?: boolean;
   list?: boolean;
   tag?: string[];
+  excludeTag?: string[];
   verbose?: boolean;
 }
 
@@ -33,22 +45,31 @@ type EvalCliLogger = { log(message: string): void; error(message: string): void 
  *
  * Exit codes: `0` when every executed eval passed its gate assertions (and
  * soft thresholds under `--strict`), `1` when any eval failed, `2` for runner
- * or configuration errors (no evals discovered, no evals matching filters).
+ * or configuration errors (no evals discovered, no evals matching `--tag`).
+ * When `--exclude-tag` removes every matching eval the run succeeds with
+ * nothing executed.
  */
 export async function runEvalCommand(
   evalIds: readonly string[],
   options: EvalCliOptions,
   logger: EvalCliLogger,
+  appRoot: string = process.cwd(),
 ): Promise<void> {
-  const appRoot = resolveApplicationRoot();
-
   loadDevelopmentEnvironmentFiles(appRoot);
 
   const requestedEvalIds = evalIds.length > 0 ? evalIds : undefined;
   const discovered = await discoverAndImportEvals(appRoot, requestedEvalIds);
 
   if (discovered.length === 0) {
-    if (requestedEvalIds) {
+    const misplaced = await findMisplacedEvalDirs(appRoot);
+    if (misplaced.length > 0) {
+      logger.error(
+        "No evals found under evals/, but eval files are present inside agent/:\n" +
+          misplaced.map((dir) => `  - ${dir}`).join("\n") +
+          "\neve eval only scans the top-level evals/ directory (a sibling of agent/). " +
+          "Move these files there.",
+      );
+    } else if (requestedEvalIds) {
       logger.error(`No evals found matching: ${requestedEvalIds.join(", ")}`);
     } else {
       logger.error("No evals found. Create files under evals/ with the *.eval.ts extension.");
@@ -57,10 +78,31 @@ export async function runEvalCommand(
     return;
   }
 
-  const evaluations = filterEvalsByTag(discovered, options.tag ?? []);
-  if (evaluations.length === 0) {
-    logger.error(`No evals matched the provided tags (${(options.tag ?? []).join(", ")}).`);
+  const includeTags = options.tag ?? [];
+  const excludeTags = options.excludeTag ?? [];
+  const included = filterEvalsByTags({ evaluations: discovered, includeTags, excludeTags: [] });
+  if (included.length === 0) {
+    logger.error(`No evals matched the provided tags (${includeTags.join(", ")}).`);
     process.exitCode = 2;
+    return;
+  }
+
+  const evaluations = filterEvalsByTags({ evaluations: included, includeTags: [], excludeTags });
+
+  // List mode reports the post-exclusion set — even when it is empty — so
+  // suite runners can probe "does anything run here?" with `--list --json`.
+  if (options.list === true) {
+    printEvalList(evaluations, options.json === true, logger);
+    return;
+  }
+
+  if (evaluations.length === 0) {
+    // Every matching eval was excluded. Unlike an include filter with no
+    // matches, this is a legitimate "nothing applies to this run" outcome
+    // (e.g. a world suite excluding real-model evals), so it succeeds.
+    logger.log(
+      `All ${included.length} matching evals are excluded by tags (${excludeTags.join(", ")}); nothing to run.`,
+    );
     return;
   }
 
@@ -75,11 +117,6 @@ export async function runEvalCommand(
     return;
   }
 
-  if (options.list === true) {
-    printEvalList(evaluations, options.json === true, logger);
-    return;
-  }
-
   let config;
   try {
     config = await discoverEvalConfig(appRoot);
@@ -90,7 +127,7 @@ export async function runEvalCommand(
   }
 
   // Resolve target
-  let server: DevelopmentServerHandle | undefined;
+  let devServer: DevelopmentServer | undefined;
   let target: EveEvalTargetHandle;
   let client: Awaited<ReturnType<typeof createEvalClient>>;
 
@@ -107,17 +144,22 @@ export async function runEvalCommand(
         url: options.url,
       });
     } else {
-      server = await startDevelopmentServer(appRoot, { host: "127.0.0.1", port: 0 });
-      client = await createEvalClient({ kind: "local", url: server.url });
+      // Set before the server boots, because a provider's `setup` reads it
+      // once at startup and never again.
+      process.env[EVE_EVALUATION_ENV_FLAG] = "1";
+      process.env[EVE_EVALUATION_RUN_ID_ENV] = randomUUID();
+      devServer = createDevelopmentServer(appRoot, { host: "127.0.0.1", port: 0 });
+      const started = await devServer.start();
+      client = await createEvalClient({ kind: "local", url: started.url });
       target = await resolveEvalTargetHandle({
         client,
         expectedAgentName: await readExpectedAgentName(appRoot),
         kind: "local",
-        url: server.url,
+        url: started.url,
       });
     }
 
-    const reporters: EvalReporter[] = options.json === true ? [] : [new ConsoleReporter()];
+    const reporters: EvalReporter[] = options.json === true ? [] : [Console()];
     if (options.junit !== undefined) {
       reporters.push(JUnit({ filePath: options.junit }));
     }
@@ -151,8 +193,11 @@ export async function runEvalCommand(
       process.exitCode = 1;
     }
   } finally {
-    if (server) {
-      await server.close();
+    if (devServer) {
+      await devServer.close();
+      await shutdownActiveSandboxHandles({
+        log: (message) => logger.error(message),
+      });
     }
   }
 
@@ -182,18 +227,6 @@ function parseNonNegativeInteger(value: string | undefined, flag: string): numbe
     throw new Error(`${flag} must be a non-negative integer; got "${value}".`);
   }
   return parsed;
-}
-
-// ---------------------------------------------------------------------------
-// Eval filtering
-// ---------------------------------------------------------------------------
-
-/** Applies `--tag` filtering: an eval runs when it carries any requested tag. */
-function filterEvalsByTag(evaluations: readonly EveEval[], tags: readonly string[]): EveEval[] {
-  if (tags.length === 0) return [...evaluations];
-  return evaluations.filter(
-    (evaluation) => evaluation.tags?.some((tag) => tags.includes(tag)) ?? false,
-  );
 }
 
 // ---------------------------------------------------------------------------

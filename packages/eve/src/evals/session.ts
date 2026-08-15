@@ -4,29 +4,48 @@ import { basename, extname } from "node:path";
 import { createTextWithFileContent } from "#client/file-parts.js";
 import type { Client } from "#client/client.js";
 import type { ClientSession } from "#client/session.js";
-import type { SendTurnInput, SendTurnPayload, SessionState } from "#client/types.js";
-import type { HandleMessageStreamEvent, TurnFailureStreamEvent } from "#protocol/message.js";
+import type {
+  CancelSessionResult,
+  ClientSessionState,
+  SendTurnInput,
+  SendTurnOptions,
+  SendTurnPayload,
+} from "#client/types.js";
+import type {
+  MessageStreamEvent,
+  RuntimeTraceContext,
+  TurnFailureStreamEvent,
+} from "#protocol/message.js";
 import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
-import {
-  deriveResultStatus,
-  extractCompletedMessage,
-  extractInputRequests,
-} from "#client/session-utils.js";
+import { summarizeTurnEvents } from "#client/session-utils.js";
 import { extractCompletedResult } from "#client/output-schema.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
+import { AssertionCollector } from "#evals/assertions/collector.js";
+import { createOutputAssertions, createScopedAssertions } from "#evals/assertions/scoped.js";
+import { EvalRequirementFailed } from "#evals/control-flow.js";
+import { inputRequestMatches, matchesValue, toolCallMatches } from "#evals/match.js";
 import type {
+  EveEvalAssertions,
+  EveEvalDerivedFacts,
+  EveEvalLiveTurn,
+  EveEvalOutputAssertions,
   EveEvalSession,
   EveEvalSessionResult,
+  EveEvalStreamEvent,
   EveEvalToolCall,
   EveEvalTurn,
+  EveEvalWaitForEventOptions,
 } from "#evals/types.js";
+import type { EveEvalInputRequestMatchOptions, EveEvalToolCallMatchOptions } from "#evals/match.js";
+
+/* oxlint-disable typescript/no-unsafe-declaration-merging */
 
 /**
  * Error thrown by {@link EveEvalTurn.expectOk} when a turn failed.
  */
 export class EveEvalTurnFailedError extends Error {
-  readonly event: TurnFailureStreamEvent | undefined;
+  readonly event: (TurnFailureStreamEvent & MessageStreamEvent) | undefined;
   readonly turn: EveEvalTurn;
 
   constructor(turn: EveEvalTurn) {
@@ -42,19 +61,57 @@ export class EveEvalTurnFailedError extends Error {
   }
 }
 
+export interface EvalSessionDriver extends EveEvalAssertions, EveEvalOutputAssertions {}
+
+export interface EvalSessionStartedEvent {
+  readonly primary: boolean;
+  readonly sessionId: string;
+  readonly startedAt: string;
+  readonly traceContext: RuntimeTraceContext;
+}
+
 export class EvalSessionDriver implements EveEvalSession {
-  readonly #session: ClientSession;
+  readonly #client: Client;
+  #session: ClientSession | undefined;
   readonly #signal: AbortSignal | undefined;
-  readonly #events: HandleMessageStreamEvent[] = [];
+  readonly #collector: AssertionCollector;
+  readonly #events: MessageStreamEvent[] = [];
+  readonly #primary: boolean;
+  readonly #onSessionStart: ((event: EvalSessionStartedEvent) => void) | undefined;
+  readonly #traceContexts: RuntimeTraceContext[] = [];
+  readonly #traceKeys = new Set<string>();
   #lastTurn: EvalTurn | undefined;
+  #sessionStartReported = false;
   #pendingInputRequests: readonly InputRequest[] = [];
 
-  constructor(input: { readonly session: ClientSession; readonly signal?: AbortSignal }) {
+  constructor(input: {
+    readonly client: Client;
+    readonly collector: AssertionCollector;
+    readonly onSessionStart?: (event: EvalSessionStartedEvent) => void;
+    readonly primary: boolean;
+    readonly session?: ClientSession;
+    readonly signal?: AbortSignal;
+  }) {
+    this.#client = input.client;
+    this.#collector = input.collector;
+    this.#onSessionStart = input.onSessionStart;
+    this.#primary = input.primary;
     this.#session = input.session;
     this.#signal = input.signal;
+    Object.assign(
+      this,
+      createScopedAssertions(this.#collector, {
+        timing: "snapshot",
+        select: () => this.#assertionSubject(),
+      }),
+      createOutputAssertions(this.#collector, {
+        timing: "snapshot",
+        select: () => this.#assertionSubject(),
+      }),
+    );
   }
 
-  get events(): readonly HandleMessageStreamEvent[] {
+  get events(): readonly MessageStreamEvent[] {
     return this.#events;
   }
 
@@ -67,63 +124,113 @@ export class EvalSessionDriver implements EveEvalSession {
   }
 
   get sessionId(): string | undefined {
-    return this.#session.state.sessionId ?? this.#lastTurn?.sessionId;
+    return this.#session?.state.sessionId ?? this.#lastTurn?.sessionId;
   }
 
-  get state(): SessionState {
-    return this.#session.state;
+  get state(): ClientSessionState | undefined {
+    return this.#session?.state;
   }
 
-  expectInputRequests(filter?: {
-    readonly display?: InputRequest["display"];
-    readonly toolName?: string;
-  }): readonly InputRequest[] {
+  async cancel(): Promise<CancelSessionResult> {
+    if (this.#session === undefined) throw new Error("Eval session has not started.");
+    return await this.#session.cancel();
+  }
+
+  requireInputRequest(filter: EveEvalInputRequestMatchOptions = {}): InputRequest {
     if (this.#pendingInputRequests.length === 0) {
-      throw new Error("Expected pending input requests, but the last turn did not park.");
+      this.#failRequirement(
+        "requireInputRequest",
+        "expected one pending input request, but the last turn did not park",
+      );
     }
 
     const matching = this.#pendingInputRequests.filter((request) =>
       inputRequestMatches(request, filter),
     );
-    if (matching.length === 0) {
-      throw new Error(`No pending input requests matched ${formatInputRequestFilter(filter)}.`);
+    if (this.#pendingInputRequests.length !== 1 || matching.length !== 1) {
+      this.#failRequirement(
+        "requireInputRequest",
+        `expected exactly one pending input request matching ${formatInputRequestFilter(filter)}, found ${matching.length} match(es) across ${this.#pendingInputRequests.length} pending request(s)`,
+      );
     }
 
-    return matching;
+    this.#collector.recordOutcome({ name: "requireInputRequest", outcome: { score: 1 } });
+    return matching[0]!;
   }
 
-  async respond(...responses: InputResponse[]): Promise<EveEvalTurn> {
+  async respond(
+    responses: readonly InputResponse[],
+    options: SendTurnOptions = {},
+  ): Promise<EveEvalTurn> {
     if (responses.length === 0) {
       throw new Error("respond() requires at least one input response.");
     }
 
-    return await this.send({ inputResponses: responses });
+    return await (await this.#start({ ...options, inputResponses: responses })).result();
+  }
+
+  async startRespond(
+    responses: readonly InputResponse[],
+    options: SendTurnOptions = {},
+  ): Promise<EveEvalLiveTurn> {
+    if (responses.length === 0) throw new Error("startRespond() requires input responses.");
+    return await this.#start({ ...options, inputResponses: responses });
   }
 
   async respondAll(optionId: string): Promise<EveEvalTurn> {
-    const requests = this.expectInputRequests();
+    const requests = this.#pendingInputRequests;
+    if (requests.length === 0) {
+      throw new Error("respondAll() requires at least one pending input request.");
+    }
     for (const request of requests) {
       assertRequestHasOption(request, optionId);
     }
 
     return await this.respond(
-      ...requests.map((request) => ({
+      requests.map((request) => ({
         optionId,
         requestId: request.requestId,
       })),
     );
   }
 
-  async send(input: SendTurnInput): Promise<EveEvalTurn> {
-    const response = await this.#session.send(attachSignal(input, this.#signal));
-    const result = await response.result();
-    return this.#recordTurn({
-      data: result.data,
-      events: result.events,
-      inputRequests: result.inputRequests,
-      message: result.message,
-      sessionId: result.sessionId,
-      status: result.status,
+  async send(
+    message: SendTurnInput["message"],
+    options: SendTurnOptions = {},
+  ): Promise<EveEvalTurn> {
+    return await (await this.#start({ turnPolicy: "queue", ...options, message })).result();
+  }
+
+  async start(message: string, options: SendTurnOptions = {}): Promise<EveEvalLiveTurn> {
+    return await this.#start({ turnPolicy: "queue", ...options, message });
+  }
+
+  async #start(input: SendTurnPayload): Promise<EveEvalLiveTurn> {
+    const turnInput = attachSignal(input, this.#signal);
+    let response;
+    if (this.#session === undefined) {
+      if (turnInput.message === undefined) {
+        throw new Error("Eval session has not started.");
+      }
+      const created = await this.#client.sessions.create({
+        ...turnInput,
+        message: turnInput.message,
+      });
+      this.#session = created.session;
+      response = created.response;
+    } else {
+      const { inputResponses, message, ...options } = turnInput;
+      response =
+        inputResponses === undefined
+          ? await this.#session.send(message!, options)
+          : await this.#session.respond(inputResponses, options);
+    }
+    return new EvalLiveTurn({
+      events: response,
+      observe: (event) => this.#observeEvent(response.sessionId, event),
+      record: (events) => this.#recordObservedTurn(response.sessionId, events),
+      session: this,
+      sessionId: response.sessionId,
     });
   }
 
@@ -135,59 +242,69 @@ export class EvalSessionDriver implements EveEvalSession {
       mediaType: mediaType ?? inferMediaType(filePath),
       text,
     });
-    return await this.send({ message });
+    return await this.send(message);
   }
 
   async readTurn(options?: { readonly startIndex?: number }): Promise<EveEvalTurn> {
     const sessionId = this.sessionId;
-    const events: HandleMessageStreamEvent[] = [];
-    let sawBoundary = false;
+    return await this.watchTurn(options, requireSessionId(sessionId)).result();
+  }
 
-    for await (const event of this.#session.stream({
-      signal: this.#signal,
-      startIndex: options?.startIndex,
-    })) {
-      events.push(event);
-
-      if (isCurrentTurnBoundaryEvent(event)) {
-        sawBoundary = true;
-        break;
-      }
-    }
-
-    if (!sawBoundary) {
-      throw new Error(
-        `Stream for session "${this.sessionId ?? "(unknown)"}" closed before a turn boundary.`,
-      );
-    }
-
-    return this.#recordTurn({
-      data: extractCompletedResult(events),
-      events,
-      inputRequests: extractInputRequests(events),
-      message: extractCompletedMessage(events),
+  watchTurn(
+    options?: { readonly startIndex?: number },
+    sessionId = requireSessionId(this.sessionId),
+  ): EveEvalLiveTurn {
+    if (this.#session === undefined) throw new Error("Eval session has not started.");
+    return new EvalLiveTurn({
+      events: this.#session.stream({
+        signal: this.#signal,
+        startIndex: options?.startIndex,
+      }),
+      observe: (event) => this.#observeEvent(sessionId, event),
+      record: (events) => this.#recordObservedTurn(sessionId, events),
+      session: this,
       sessionId,
-      status: deriveResultStatus(events),
     });
   }
 
-  snapshot(primary: boolean): EveEvalSessionResult {
+  snapshot(): EveEvalSessionResult {
     const sessionId = this.sessionId;
     return {
       derived: deriveRunFacts(this.#events, { sessionId }),
       events: [...this.#events],
-      primary,
+      primary: this.#primary,
       sessionId,
-      state: this.#session.state,
+      state: this.#session?.state,
+      traceContexts: [...this.#traceContexts],
     };
+  }
+
+  #observeEvent(sessionId: string, event: MessageStreamEvent): void {
+    if (event.type !== "session.started" && event.type !== "turn.started") return;
+    const traceContext = event.data.trace;
+    if (traceContext === undefined) return;
+
+    const key = `${traceContext.traceId}:${traceContext.spanId}`;
+    if (this.#traceKeys.has(key)) return;
+    this.#traceKeys.add(key);
+    this.#traceContexts.push(traceContext);
+
+    if (this.#sessionStartReported) return;
+    this.#sessionStartReported = true;
+    this.#onSessionStart?.({
+      primary: this.#primary,
+      sessionId,
+      startedAt: event.meta.at,
+      traceContext,
+    });
   }
 
   #recordTurn(input: {
     readonly data: unknown;
-    readonly events: readonly HandleMessageStreamEvent[];
+    readonly events: readonly MessageStreamEvent[];
     readonly inputRequests: readonly InputRequest[];
     readonly message: string | undefined;
-    readonly sessionId: string | undefined;
+    readonly sessionId: string;
     readonly status: "completed" | "failed" | "waiting";
   }): EveEvalTurn {
     this.#events.push(...input.events);
@@ -195,31 +312,187 @@ export class EvalSessionDriver implements EveEvalSession {
 
     const derived = deriveRunFacts(input.events, { sessionId: input.sessionId });
     const turn = new EvalTurn({
+      collector: this.#collector,
       data: input.data,
+      derived,
       events: input.events,
       inputRequests: input.inputRequests,
       message: input.message,
-      sessionId: input.sessionId ?? this.sessionId ?? "",
+      sessionId: input.sessionId,
       status: input.status,
       toolCalls: derived.toolCalls,
     });
     this.#lastTurn = turn;
     return turn;
   }
+
+  #recordObservedTurn(sessionId: string, events: readonly MessageStreamEvent[]): EveEvalTurn {
+    const summary = summarizeTurnEvents(events);
+    return this.#recordTurn({
+      data: extractCompletedResult(events),
+      events,
+      inputRequests: summary.inputRequests,
+      message: summary.message,
+      sessionId,
+      status: summary.status,
+    });
+  }
+
+  #assertionSubject() {
+    const sessionId = this.sessionId;
+    const derived = deriveRunFacts(this.#events, { sessionId });
+    return {
+      derived,
+      events: [...this.#events],
+      output: outputOf(this.#lastTurn),
+      status: this.#lastTurn?.status ?? "completed",
+    } as const;
+  }
+
+  #failRequirement(name: string, message: string): never {
+    this.#collector.recordOutcome({ name, outcome: { score: 0, message } });
+    throw new EvalRequirementFailed();
+  }
 }
+
+interface LiveEventWaiter {
+  readonly matches: (event: MessageStreamEvent) => boolean;
+  readonly reject: (error: Error) => void;
+  readonly resolve: (event: MessageStreamEvent) => void;
+}
+
+class EvalLiveTurn implements EveEvalLiveTurn {
+  readonly session: EveEvalSession;
+  readonly sessionId: string;
+  readonly #completion: Promise<EveEvalTurn>;
+  readonly #events: MessageStreamEvent[] = [];
+  readonly #waiters = new Set<LiveEventWaiter>();
+  #waitError: Error | undefined;
+
+  constructor(input: {
+    readonly events: AsyncIterable<MessageStreamEvent>;
+    readonly observe: (event: MessageStreamEvent) => void;
+    readonly record: (events: readonly MessageStreamEvent[]) => EveEvalTurn;
+    readonly session: EveEvalSession;
+    readonly sessionId: string;
+  }) {
+    this.session = input.session;
+    this.sessionId = input.sessionId;
+    this.#completion = this.#consume(input.events, input.observe, input.record);
+    void this.#completion.catch(() => {});
+  }
+
+  get events(): readonly MessageStreamEvent[] {
+    return this.#events;
+  }
+
+  async cancel(): Promise<CancelSessionResult> {
+    return await this.session.cancel();
+  }
+
+  async result(): Promise<EveEvalTurn> {
+    return await this.#completion;
+  }
+
+  async waitForEvent<TType extends MessageStreamEvent["type"]>(
+    type: TType,
+    options?: EveEvalWaitForEventOptions<TType>,
+  ): Promise<EveEvalStreamEvent<TType>> {
+    const matches = (event: MessageStreamEvent): boolean =>
+      event.type === type &&
+      (options?.data === undefined ||
+        matchesValue(options.data, "data" in event ? event.data : undefined));
+    const observed = this.#events.find(matches);
+    if (observed !== undefined) return observed as EveEvalStreamEvent<TType>;
+    if (this.#waitError !== undefined) throw this.#waitError;
+
+    return await new Promise<EveEvalStreamEvent<TType>>((resolve, reject) => {
+      const waiter: LiveEventWaiter = {
+        matches,
+        reject,
+        resolve: (event) => resolve(event as EveEvalStreamEvent<TType>),
+      };
+      this.#waiters.add(waiter);
+    });
+  }
+
+  async #consume(
+    source: AsyncIterable<MessageStreamEvent>,
+    observe: (event: MessageStreamEvent) => void,
+    record: (events: readonly MessageStreamEvent[]) => EveEvalTurn,
+  ): Promise<EveEvalTurn> {
+    try {
+      let sawBoundary = false;
+      for await (const event of source) {
+        this.#events.push(event);
+        observe(event);
+        this.#resolveWaiters(event);
+
+        if (isTurnFailureEvent(event)) {
+          this.#closeWaiters(
+            new Error(
+              `Session ${this.sessionId} failed before the expected event (${event.type}).`,
+            ),
+          );
+        }
+
+        if (isCurrentTurnBoundaryEvent(event)) {
+          sawBoundary = true;
+          this.#closeWaiters(
+            new Error(`Session ${this.sessionId} reached ${event.type} before the expected event.`),
+          );
+          break;
+        }
+      }
+
+      if (!sawBoundary) {
+        throw new Error(`Stream for session "${this.sessionId}" closed before a turn boundary.`);
+      }
+
+      return record(this.#events);
+    } catch (error) {
+      const normalized = error instanceof Error ? error : new Error(String(error));
+      this.#closeWaiters(normalized);
+      throw error;
+    }
+  }
+
+  #resolveWaiters(event: MessageStreamEvent): void {
+    for (const waiter of this.#waiters) {
+      if (!waiter.matches(event)) continue;
+      this.#waiters.delete(waiter);
+      waiter.resolve(event);
+    }
+  }
+
+  #closeWaiters(error: Error): void {
+    if (this.#waitError !== undefined) return;
+    this.#waitError = error;
+    for (const waiter of this.#waiters) {
+      waiter.reject(error);
+    }
+    this.#waiters.clear();
+  }
+}
+
+interface EvalTurn extends EveEvalAssertions, EveEvalOutputAssertions {}
 
 class EvalTurn implements EveEvalTurn {
   readonly data: unknown;
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly inputRequests: readonly InputRequest[];
   readonly message: string | undefined;
   readonly sessionId: string;
   readonly status: "completed" | "failed" | "waiting";
   readonly toolCalls: readonly EveEvalToolCall[];
+  readonly #collector: AssertionCollector;
+  readonly #derived: EveEvalDerivedFacts;
 
   constructor(input: {
+    readonly collector: AssertionCollector;
     readonly data: unknown;
-    readonly events: readonly HandleMessageStreamEvent[];
+    readonly derived: EveEvalDerivedFacts;
+    readonly events: readonly MessageStreamEvent[];
     readonly inputRequests: readonly InputRequest[];
     readonly message: string | undefined;
     readonly sessionId: string;
@@ -233,49 +506,98 @@ class EvalTurn implements EveEvalTurn {
     this.sessionId = input.sessionId;
     this.status = input.status;
     this.toolCalls = input.toolCalls;
+    this.#collector = input.collector;
+    this.#derived = input.derived;
+    Object.assign(
+      this,
+      createScopedAssertions(input.collector, {
+        timing: "snapshot",
+        select: () => this.#assertionSubject(),
+      }),
+      createOutputAssertions(input.collector, {
+        timing: "snapshot",
+        select: () => this.#assertionSubject(),
+      }),
+    );
   }
 
   expectOk(): this {
     if (this.status !== "failed") return this;
     throw new EveEvalTurnFailedError(this);
   }
+
+  requireToolCall(
+    name: string,
+    options: Omit<EveEvalToolCallMatchOptions, "count"> = {},
+  ): EveEvalToolCall {
+    const matching = this.toolCalls.filter(
+      (call) => call.name === name && toolCallMatches(call, options),
+    );
+    if (matching.length !== 1) {
+      inputRequirementFailed(
+        this.#collector,
+        "requireToolCall",
+        `expected exactly one matching "${name}" tool call in this turn, found ${matching.length}; observed [${this.toolCalls.map((call) => call.name).join(", ")}]`,
+      );
+    }
+    this.#collector.recordOutcome({ name: "requireToolCall", outcome: { score: 1 } });
+    return matching[0]!;
+  }
+
+  #assertionSubject() {
+    return {
+      derived: this.#derived,
+      events: this.events,
+      output: outputOf(this),
+      status: this.status,
+    } as const;
+  }
 }
 
 export class EvalSessionManager {
   readonly #client: Client;
   readonly #signal: AbortSignal | undefined;
+  readonly #collector: AssertionCollector;
+  readonly #onSessionStart: ((event: EvalSessionStartedEvent) => void) | undefined;
   readonly #sessions: EvalSessionDriver[] = [];
   #primary: EvalSessionDriver | undefined;
 
-  constructor(input: { readonly client: Client; readonly signal?: AbortSignal }) {
+  constructor(input: {
+    readonly client: Client;
+    readonly collector?: AssertionCollector;
+    readonly onSessionStart?: (event: EvalSessionStartedEvent) => void;
+    readonly signal?: AbortSignal;
+  }) {
     this.#client = input.client;
+    this.#collector = input.collector ?? new AssertionCollector();
+    this.#onSessionStart = input.onSessionStart;
     this.#signal = input.signal;
   }
 
   get primary(): EvalSessionDriver {
-    this.#primary ??= this.#createSession();
+    this.#primary ??= this.#createSession(true);
     return this.#primary;
   }
 
   newSession(): EvalSessionDriver {
-    return this.#createSession();
+    return this.#createSession(false);
   }
 
   async attachSession(
     sessionId: string,
     options?: { readonly startIndex?: number },
   ): Promise<EvalSessionDriver> {
-    const session = new EvalSessionDriver({
-      session: this.#client.session({ sessionId, streamIndex: options?.startIndex ?? 0 }),
-      signal: this.#signal,
-    });
-    this.#sessions.push(session);
+    const session = this.#createAttachedSession(sessionId, options);
     await session.readTurn(options);
     return session;
   }
 
+  watchTurn(sessionId: string, options?: { readonly startIndex?: number }): EveEvalLiveTurn {
+    return this.#createAttachedSession(sessionId, options).watchTurn(options, sessionId);
+  }
+
   snapshots(): readonly EveEvalSessionResult[] {
-    return this.#sessions.map((session) => session.snapshot(session === this.#primary));
+    return this.#sessions.map((session) => session.snapshot());
   }
 
   lastTurnSession(): EvalSessionDriver | undefined {
@@ -286,9 +608,34 @@ export class EvalSessionManager {
     return this.#sessions.find((session) => session.lastTurn !== undefined);
   }
 
-  #createSession(): EvalSessionDriver {
+  hasActivity(): boolean {
+    return this.#sessions.length > 0;
+  }
+
+  #createSession(primary: boolean): EvalSessionDriver {
     const session = new EvalSessionDriver({
-      session: this.#client.session(),
+      client: this.#client,
+      collector: this.#collector,
+      onSessionStart: this.#onSessionStart,
+      primary,
+      signal: this.#signal,
+    });
+    this.#sessions.push(session);
+    return session;
+  }
+
+  #createAttachedSession(
+    sessionId: string,
+    options?: { readonly startIndex?: number },
+  ): EvalSessionDriver {
+    const session = new EvalSessionDriver({
+      client: this.#client,
+      collector: this.#collector,
+      onSessionStart: this.#onSessionStart,
+      primary: false,
+      session: this.#client.sessions.attach(sessionId, {
+        streamIndex: options?.startIndex ?? 0,
+      }),
       signal: this.#signal,
     });
     this.#sessions.push(session);
@@ -296,34 +643,34 @@ export class EvalSessionManager {
   }
 }
 
-function attachSignal(input: SendTurnInput, signal: AbortSignal | undefined): SendTurnInput {
+function attachSignal(input: SendTurnPayload, signal: AbortSignal | undefined): SendTurnPayload {
   if (signal === undefined) return input;
-
-  if (typeof input === "string") {
-    return { message: input, signal };
-  }
-
-  const payload = input as SendTurnPayload;
-  return payload.signal === undefined ? { ...payload, signal } : payload;
+  return input.signal === undefined ? { ...input, signal } : input;
 }
 
-function inputRequestMatches(
-  request: InputRequest,
-  filter: { readonly display?: InputRequest["display"]; readonly toolName?: string } | undefined,
-): boolean {
-  if (filter === undefined) return true;
-  if (filter.display !== undefined && request.display !== filter.display) return false;
-  if (filter.toolName !== undefined) {
-    return request.action.kind === "tool-call" && request.action.toolName === filter.toolName;
-  }
-  return true;
-}
-
-function formatInputRequestFilter(
-  filter: { readonly display?: InputRequest["display"]; readonly toolName?: string } | undefined,
-): string {
-  if (filter === undefined) return "{}";
+function formatInputRequestFilter(filter: EveEvalInputRequestMatchOptions): string {
   return JSON.stringify(filter);
+}
+
+function inputRequirementFailed(
+  collector: AssertionCollector,
+  name: string,
+  message: string,
+): never {
+  collector.recordOutcome({ name, outcome: { score: 0, message } });
+  throw new EvalRequirementFailed();
+}
+
+function outputOf(turn: EveEvalTurn | undefined): unknown {
+  if (turn === undefined) return null;
+  return turn.data === undefined ? (turn.message ?? null) : turn.data;
+}
+
+function requireSessionId(sessionId: string | undefined): string {
+  if (sessionId === undefined) {
+    throw new Error("Eval session produced a turn without a session id.");
+  }
+  return sessionId;
 }
 
 function assertRequestHasOption(request: InputRequest, optionId: string): void {

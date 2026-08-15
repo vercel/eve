@@ -135,9 +135,32 @@ export function teamsContinuationToken(input: {
   readonly replyToActivityId?: string | null;
   readonly tenantId?: string | null;
 }): string {
-  return [input.tenantId ?? "_", input.conversationId, input.replyToActivityId ?? ""]
+  const address = normalizeTeamsContinuationAddress(input);
+  return [input.tenantId ?? "_", address.conversationId, address.replyToActivityId ?? ""]
     .map((component) => encodeURIComponent(component))
     .join(":");
+}
+
+/** Normalizes the thread suffix that Teams inconsistently includes in channel conversation ids. */
+export function normalizeTeamsContinuationAddress(input: {
+  readonly conversationId: string;
+  readonly replyToActivityId?: string | null;
+}): { readonly conversationId: string; readonly replyToActivityId: string | null } {
+  const marker = ";messageid=";
+  const markerIndex = input.conversationId.lastIndexOf(marker);
+  if (markerIndex < 0) {
+    return {
+      conversationId: input.conversationId,
+      replyToActivityId: input.replyToActivityId ?? null,
+    };
+  }
+
+  const conversationId = input.conversationId.slice(0, markerIndex);
+  const threadRoot = input.conversationId.slice(markerIndex + marker.length);
+  return {
+    conversationId,
+    replyToActivityId: threadRoot || input.replyToActivityId || null,
+  };
 }
 
 /** Resolves a Teams app id, falling back to `MICROSOFT_APP_ID` then `TEAMS_APP_ID`. */

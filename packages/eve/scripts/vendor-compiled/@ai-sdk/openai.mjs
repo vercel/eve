@@ -1,4 +1,4 @@
-import { buildOpaqueTypesStub, createDeclarationCopier } from "../_shared.mjs";
+import { createDeclarationCopier } from "../_shared.mjs";
 
 /**
  * Type declarations are copied verbatim from the installed
@@ -13,9 +13,8 @@ import { buildOpaqueTypesStub, createDeclarationCopier } from "../_shared.mjs";
  * - `@ai-sdk/provider` → already vendored, re-route both the named and
  *   the `import * as _ai_sdk_provider` namespace import at the vendored
  *   copy.
- * - `@ai-sdk/provider-utils` → local opaque-type stub; eve doesn't
- *   surface provider-utils' types to user code. `resolveWebSearchProviderTool`
- *   casts the returned tool to `ToolSet[string]`.
+ * - `@ai-sdk/provider-utils` → type-only vendored upstream declarations.
+ * - `zod/v4` → eve's vendored Zod v4 declarations.
  */
 export default {
   packageName: "@ai-sdk/openai",
@@ -25,10 +24,10 @@ export default {
     rewrites: {
       "@ai-sdk/provider": { kind: "vendored", compiledPath: "@ai-sdk/provider" },
       "@ai-sdk/provider-utils": {
-        kind: "stub",
-        stubBaseName: "_provider-utils",
-        build: buildOpaqueTypesStub,
+        kind: "vendored",
+        compiledPath: "@ai-sdk/provider-utils",
       },
+      "zod/v4": { kind: "vendored", compiledPath: "zod" },
     },
   }),
 };

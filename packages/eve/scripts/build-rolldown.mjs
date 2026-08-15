@@ -127,7 +127,7 @@ const EXCLUDED_DIRECTORIES = new Set([join("internal", "testing")]);
  *
  *   - Peer dependencies (`ai`, `next`, `react`, `@opentelemetry/api`,
  *     `braintrust`) — consumers provide the install.
- *   - Runtime dependencies (`nitro`) — resolved at
+ *   - Runtime dependencies (`nitro`, `undici`) — resolved at
  *     runtime against the eve installation.
  *   - Optional peer dependency (`just-bash`) — the opt-in local sandbox
  *     engine; resolved lazily against the consumer's install and never
@@ -149,6 +149,7 @@ const EXTERNAL_PACKAGES = new Set([
   "nitro",
   "react",
   "svelte",
+  "undici",
   "vite",
   "vue",
 ]);
@@ -237,7 +238,7 @@ await buildWithNitroRolldown({
     // `eve-source` makes `#*.js` resolve to `./src/*.ts` at build time so
     // sibling source files become part of the graph instead of bare
     // imports rolldown would refuse to follow.
-    conditionNames: ["eve-source", "node", "import"],
+    conditionNames: ["eve-source"],
     mainFields: ["module", "main"],
   },
   treeshake: false,
@@ -317,7 +318,7 @@ if (vueSourceFiles.length > 0) {
     external: isVueBuildExternal,
     platform: "node",
     resolve: {
-      conditionNames: ["eve-source", "node", "import"],
+      conditionNames: ["eve-source"],
       mainFields: ["module", "main"],
     },
     treeshake: true,
@@ -374,7 +375,7 @@ if (svelteSourceFiles.length > 0) {
     external: isSvelteBuildExternal,
     platform: "node",
     resolve: {
-      conditionNames: ["eve-source", "node", "import"],
+      conditionNames: ["eve-source"],
       mainFields: ["module", "main"],
     },
     treeshake: true,

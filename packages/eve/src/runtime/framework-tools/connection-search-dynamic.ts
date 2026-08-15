@@ -1,10 +1,12 @@
+import { z } from "#compiled/zod/index.js";
+
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import {
   type AuthorizationChallenge,
   type AuthorizationSignal,
-  getAuthorizationResult,
-  getHookUrl,
+  consumeAuthorizationResult,
+  createAuthorizationAttempt,
   requestAuthorization,
 } from "#harness/authorization.js";
 import {
@@ -12,52 +14,62 @@ import {
   isConnectionAuthorizationFailedError,
   isConnectionAuthorizationRequiredError,
 } from "#public/connections/errors.js";
+import { defineDynamic, defineTool } from "#public/definitions/tool.js";
 import type { JsonValue } from "#public/types/json.js";
 import type { JsonObject } from "#shared/json.js";
 import { writeCachedToken } from "#runtime/connections/authorization-tokens.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
-import { stampChallengeDisplayName } from "#runtime/connections/scoped-authorization.js";
+import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
+import {
+  resolveAuthorizationCallbackUrl,
+  stampChallengeDisplayName,
+} from "#runtime/connections/scoped-authorization.js";
 import {
   type ConnectionRegistry,
   type ConnectionToolMetadata,
   type InteractiveAuthorizationDefinition,
   supportsInteractiveAuthorization,
 } from "#runtime/connections/types.js";
-import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
+import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { createLogger } from "#internal/logging.js";
-import type { DynamicToolEvents, DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
+import { toError } from "#shared/errors.js";
 import type { ModelMessage } from "ai";
 
-import { ConnectionRegistryKey } from "#context/providers/connection.js";
+import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 
 const logger = createLogger("framework.connection-search-dynamic");
 
-const CONNECTION_SEARCH_RESULT_ITEM_SCHEMA: JsonObject = {
-  additionalProperties: false,
-  properties: {
-    connection: { type: "string" },
-    description: { type: "string" },
-    error: { type: "string" },
-    inputSchema: { type: "object" },
-    needsAuthorization: { type: "boolean" },
-    outputSchema: { type: "object" },
-    qualifiedName: { type: "string" },
-    tool: { type: "string" },
-  },
-  required: ["connection", "description"],
-  type: "object",
-};
+const CONNECTION_SEARCH_INPUT_SCHEMA = z.strictObject({
+  connection: z
+    .string()
+    .describe("Optional: limit search to a specific connection name.")
+    .optional(),
+  keywords: z
+    .string()
+    .describe(
+      "Search keywords and expanded aliases. Distill intent into keywords; avoid stop words like 'a', 'the', 'in'.",
+    ),
+  limit: z.number().describe("Max results to return. Default 10.").optional(),
+});
 
-const CONNECTION_SEARCH_OUTPUT_SCHEMA: JsonObject = {
-  items: CONNECTION_SEARCH_RESULT_ITEM_SCHEMA,
-  type: "array",
-};
+const connectionSchema = z.looseObject({});
+const CONNECTION_SEARCH_RESULT_ITEM_SCHEMA = z.strictObject({
+  connection: z.string(),
+  description: z.string(),
+  error: z.string().optional(),
+  inputSchema: connectionSchema.optional(),
+  needsAuthorization: z.boolean().optional(),
+  outputSchema: connectionSchema.optional(),
+  qualifiedName: z.string().optional(),
+  tool: z.string().optional(),
+});
+
+const CONNECTION_SEARCH_OUTPUT_SCHEMA = z.array(CONNECTION_SEARCH_RESULT_ITEM_SCHEMA);
 
 /**
  * Durable context key for connection search results. Written by
- * `executeConnectionSearch` so the resolver can find discovered tools
- * even in code-mode (where tool results are wrapped inside the
- * `code_mode` tool and not directly visible in messages).
+ * `executeConnectionSearch` so the resolver can find discovered tools without
+ * relying on model-facing tool result history.
  */
 const ConnectionSearchResultsKey = new ContextKey<readonly ConnectionSearchResultItem[]>(
   "eve.connectionSearchResults",
@@ -115,14 +127,15 @@ function scoreMatch(queryTokens: string[], tool: ConnectionToolMetadata): number
   return score;
 }
 
-function resolveInteractiveAuth(
+async function resolveInteractiveAuth(
   registry: ConnectionRegistry,
   connectionName: string,
-): InteractiveAuthorizationDefinition | undefined {
+): Promise<InteractiveAuthorizationDefinition | undefined> {
   const conn = registry.getConnections().find((c) => c.connectionName === connectionName);
-  if (!conn?.authorization) return undefined;
-  if (!supportsInteractiveAuthorization(conn.authorization)) return undefined;
-  return conn.authorization as unknown as InteractiveAuthorizationDefinition;
+  if (conn === undefined) return undefined;
+  const authorization = await resolveConnectionAuthorization(conn);
+  if (!supportsInteractiveAuthorization(authorization)) return undefined;
+  return authorization as InteractiveAuthorizationDefinition;
 }
 
 /**
@@ -134,15 +147,18 @@ function resolveInteractiveAuth(
  * following load, the freshly minted token is itself being rejected, so
  * the connection must fail terminally rather than re-challenge forever.
  */
-async function completePendingAuthorizations(registry: ConnectionRegistry): Promise<Set<string>> {
+async function completePendingAuthorizations(
+  registry: ConnectionRegistry,
+  connections: readonly ResolvedConnectionDefinition[],
+): Promise<Set<string>> {
   const ctx = loadContext();
   const completed = new Set<string>();
-  for (const conn of registry.getConnections()) {
-    const result = getAuthorizationResult(conn.connectionName);
+  for (const conn of connections) {
+    const result = consumeAuthorizationResult(conn.connectionName);
     if (!result) continue;
-    const auth = resolveInteractiveAuth(registry, conn.connectionName);
+    const auth = await resolveInteractiveAuth(registry, conn.connectionName);
     if (!auth) continue;
-    const principal = resolveConnectionPrincipal(conn.connectionName, auth);
+    const principal = result.principal ?? resolveConnectionPrincipal(conn.connectionName, auth);
     const token = await (
       auth as InteractiveAuthorizationDefinition<JsonValue>
     ).completeAuthorization({
@@ -167,8 +183,6 @@ async function executeConnectionSearch(
     return [];
   }
 
-  const justAuthorized = await completePendingAuthorizations(registry);
-
   const limit = input.limit ?? 10;
   const queryTokens = tokenize(input.keywords);
   const results: Array<{ item: ConnectionSearchResultItem; score: number }> = [];
@@ -178,6 +192,14 @@ async function executeConnectionSearch(
     input.connection !== undefined && input.connection !== ""
       ? registry.getConnections().filter((c) => c.connectionName === input.connection)
       : registry.getConnections();
+
+  if (input.connection && targetConnections.length === 0) {
+    throw new Error(
+      `Connection "${input.connection}" is not registered. Available connections: ${registry.getConnectionNames().join(", ")}.`,
+    );
+  }
+
+  const justAuthorized = await completePendingAuthorizations(registry, targetConnections);
 
   const authChallenges: AuthorizationChallenge[] = [];
 
@@ -204,28 +226,41 @@ async function executeConnectionSearch(
           continue;
         }
 
-        const auth = resolveInteractiveAuth(registry, conn.connectionName);
+        const auth = await resolveInteractiveAuth(registry, conn.connectionName);
         if (auth) {
-          const hookUrl = getHookUrl(conn.connectionName);
-          if (hookUrl) {
+          const attempt = createAuthorizationAttempt(conn.connectionName);
+          if (attempt) {
             const principal = resolveConnectionPrincipal(conn.connectionName, auth);
+            const callbackUrl = resolveAuthorizationCallbackUrl({
+              authorization: auth,
+              callbackUrl: attempt.hookUrl,
+            });
             try {
               const { challenge, resume } = await auth.startAuthorization({
-                callbackUrl: hookUrl,
+                callbackUrl,
                 connection: { url: conn.url ?? "" },
                 principal,
               });
               authChallenges.push({
+                attemptId: attempt.attemptId,
                 name: conn.connectionName,
                 challenge: stampChallengeDisplayName(challenge, auth),
-                hookUrl,
+                hookUrl: callbackUrl,
+                principal,
                 resume,
               });
             } catch (startErr) {
+              const error = toError(startErr);
               logger.warn("startAuthorization failed", {
                 connection: conn.connectionName,
-                error: startErr instanceof Error ? startErr : new Error(String(startErr)),
+                error,
               });
+              failedConnections.push({
+                connection: conn.connectionName,
+                description: conn.description,
+                error: `Failed to start authorization for "${conn.connectionName}": ${error.message}`,
+              });
+              continue;
             }
           }
         }
@@ -252,15 +287,15 @@ async function executeConnectionSearch(
         continue;
       }
 
-      const message = err instanceof Error ? err.message : "unknown error";
+      const error = toError(err);
       logger.warn("failed to load connection tools", {
         connection: conn.connectionName,
-        error: err instanceof Error ? err : new Error(message),
+        error,
       });
       failedConnections.push({
         connection: conn.connectionName,
         description: conn.description,
-        error: `Failed to load tools for "${conn.connectionName}": ${message}`,
+        error: `Failed to load tools for "${conn.connectionName}": ${error.message}`,
       });
       continue;
     }
@@ -285,6 +320,14 @@ async function executeConnectionSearch(
 
   if (authChallenges.length > 0) {
     return requestAuthorization(authChallenges);
+  }
+
+  const terminalFailures = failedConnections.filter((failure) => failure.error !== undefined);
+  if (targetConnections.length > 0 && terminalFailures.length === targetConnections.length) {
+    // When every targeted connection reaches a terminal error, connection_search itself fails.
+    // AI SDK catches this rejection, emits a tool-error result, and preserves the failed call in
+    // agent-run observability. Partial failures stay in the successful result so usable tools remain discoverable.
+    throw new Error(terminalFailures.map((failure) => failure.error).join("\n"));
   }
 
   results.sort((a, b) => b.score - a.score);
@@ -351,16 +394,10 @@ export function extractDiscoveredTools(
   return [...byQualifiedName.values()];
 }
 
-/**
- * Creates the connection search dynamic tool resolver events.
- *
- * The resolver subscribes to `step.started` so it re-derives the tool
- * set from conversation history on every step. After compaction, old
- * `connection_search` results disappear from messages and discovered
- * tools naturally drop from the toolset.
- */
-export function createConnectionSearchEvents(): DynamicToolEvents {
-  return {
+// The step-scoped definition re-derives its tools from conversation history.
+// After compaction removes old search results, those tools naturally disappear.
+const connectionSearchDynamicDefinition = defineDynamic({
+  events: {
     "step.started": async (_event, ctx) => {
       const registry = loadContext().get(ConnectionRegistryKey);
       if (!registry || registry.getConnections().length === 0) return null;
@@ -378,68 +415,49 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
       }
       const discovered = [...mergedMap.values()];
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const tools: Record<string, DynamicToolEntry<any, any>> = {};
+      const tools: Record<string, object> = {};
 
-      tools["connection_search"] = {
+      tools["connection_search"] = defineTool({
         description:
           "Search for tools across your connections. " +
           "Discovered tools become directly callable by their qualified name " +
           "(e.g. `linear__list_issues`) in your next response. " +
           `Available connections: ${connectionNames.join(", ")}.`,
-        inputSchema: {
-          type: "object" as const,
-          additionalProperties: false,
-          properties: {
-            keywords: {
-              description:
-                "Search keywords and expanded aliases. Distill intent into keywords; avoid stop words like 'a', 'the', 'in'.",
-              type: "string",
-            },
-            connection: {
-              description: "Optional: limit search to a specific connection name.",
-              type: "string",
-            },
-            limit: {
-              description: "Max results to return. Default 10.",
-              type: "number",
-            },
-          },
-          required: ["keywords"],
-        },
+        inputSchema: CONNECTION_SEARCH_INPUT_SCHEMA,
         async execute(input: ConnectionSearchInput) {
           return executeConnectionSearch(input);
         },
         outputSchema: CONNECTION_SEARCH_OUTPUT_SCHEMA,
-      };
+      });
 
       for (const result of discovered) {
         const connectionName = result.connection;
         const toolName = result.tool!;
         const approval = registry.getConnectionApproval(connectionName);
 
-        tools[qualifiedConnectionToolName(connectionName, toolName)] = {
+        tools[qualifiedConnectionToolName(connectionName, toolName)] = defineTool({
           description: result.description,
           inputSchema: (result.inputSchema ?? {
             type: "object",
           }) as JsonObject,
-          needsApproval: approval,
+          approval,
           outputSchema: result.outputSchema as JsonObject | undefined,
-          async execute(input: Record<string, unknown>) {
+          async execute(input: Record<string, unknown>, executeCtx) {
             const reg = loadContext().get(ConnectionRegistryKey)!;
             const conn = reg.getConnections().find((c) => c.connectionName === connectionName);
-            const interactiveAuth: InteractiveAuthorizationDefinition<JsonValue> | undefined =
-              conn?.authorization && supportsInteractiveAuthorization(conn.authorization)
-                ? (conn.authorization as InteractiveAuthorizationDefinition<JsonValue>)
-                : undefined;
+            const interactiveAuth = (await resolveInteractiveAuth(reg, connectionName)) as
+              | InteractiveAuthorizationDefinition<JsonValue>
+              | undefined;
 
             let justCompletedAuth = false;
             if (interactiveAuth) {
-              const authResult = getAuthorizationResult(connectionName);
+              const authResult = consumeAuthorizationResult(connectionName);
               if (authResult) {
                 justCompletedAuth = true;
                 const ctx = loadContext();
-                const principal = resolveConnectionPrincipal(connectionName, interactiveAuth);
+                const principal =
+                  authResult.principal ??
+                  resolveConnectionPrincipal(connectionName, interactiveAuth);
                 const token = await interactiveAuth.completeAuthorization({
                   callbackUrl: authResult.hookUrl,
                   connection: { url: conn?.url ?? "" },
@@ -453,7 +471,9 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
 
             try {
               const client = reg.getClient(connectionName);
-              return await client.executeTool(toolName, input);
+              return await client.executeTool(toolName, input, {
+                abortSignal: executeCtx.abortSignal,
+              });
             } catch (err) {
               if (!isConnectionAuthorizationRequiredError(err) || !interactiveAuth) {
                 throw err;
@@ -470,47 +490,38 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
                 });
               }
 
-              const hookUrl = getHookUrl(connectionName);
-              if (!hookUrl) throw err;
+              const attempt = createAuthorizationAttempt(connectionName);
+              if (!attempt) throw err;
 
               const principal = resolveConnectionPrincipal(connectionName, interactiveAuth);
+              const callbackUrl = resolveAuthorizationCallbackUrl({
+                authorization: interactiveAuth,
+                callbackUrl: attempt.hookUrl,
+              });
               const { challenge, resume } = await interactiveAuth.startAuthorization({
-                callbackUrl: hookUrl,
+                callbackUrl,
                 connection: { url: conn?.url ?? "" },
                 principal,
               });
 
               return requestAuthorization([
                 {
+                  attemptId: attempt.attemptId,
                   name: connectionName,
                   challenge: stampChallengeDisplayName(challenge, interactiveAuth),
-                  hookUrl,
+                  hookUrl: callbackUrl,
+                  principal,
                   resume,
                 },
               ]);
             }
           },
-        };
+        });
       }
 
       return tools;
     },
-  };
-}
+  },
+});
 
-/**
- * Creates a `ResolvedDynamicToolResolver` for the framework connection
- * search tool. Used by graph resolution to register alongside authored
- * dynamic tool resolvers.
- */
-export function createConnectionSearchResolver(): ResolvedDynamicToolResolver {
-  const events = createConnectionSearchEvents();
-  return {
-    slug: "connection",
-    eventNames: Object.keys(events),
-    events: events as ResolvedDynamicToolResolver["events"],
-    sourceId: "eve:connection-search-dynamic",
-    sourceKind: "module",
-    logicalPath: "eve:framework/connection-search-dynamic",
-  };
-}
+export default connectionSearchDynamicDefinition;

@@ -4,12 +4,21 @@ import {
   formatPromptCommandHelp,
   isPromptControlCommand,
   parsePromptCommand,
+  promptCommandsFor,
   PROMPT_COMMANDS,
 } from "./prompt-commands.js";
 
 describe("parsePromptCommand", () => {
-  it("parses /new", () => {
-    expect(parsePromptCommand("/new")).toEqual({ type: "new" });
+  it("parses /reset", () => {
+    expect(parsePromptCommand("/reset")).toEqual({ type: "reset" });
+  });
+
+  it("parses /cancel", () => {
+    expect(parsePromptCommand("/cancel")).toEqual({ type: "cancel" });
+  });
+
+  it("parses /new as a context clear", () => {
+    expect(parsePromptCommand("/new")).toEqual({ type: "clear" });
   });
 
   it("parses /exit and its /quit alias", () => {
@@ -34,24 +43,24 @@ describe("parsePromptCommand", () => {
   });
 
   it("parses the setup commands", () => {
-    expect(parsePromptCommand("/vc")).toEqual({
+    expect(parsePromptCommand("/vc:install")).toEqual({
       type: "extension",
-      name: "vc",
+      name: "vc:install",
       argument: "",
     });
-    expect(parsePromptCommand("/login")).toEqual({
+    expect(parsePromptCommand("/vc:login")).toEqual({
       type: "extension",
-      name: "login",
-      argument: "",
-    });
-    expect(parsePromptCommand("/channels")).toEqual({
-      type: "extension",
-      name: "channels",
+      name: "vc:login",
       argument: "",
     });
     expect(parsePromptCommand("/deploy")).toEqual({
       type: "extension",
       name: "deploy",
+      argument: "",
+    });
+    expect(parsePromptCommand("/add")).toEqual({
+      type: "extension",
+      name: "add",
       argument: "",
     });
   });
@@ -71,13 +80,16 @@ describe("parsePromptCommand", () => {
   });
 
   it("trims surrounding whitespace before matching", () => {
-    expect(parsePromptCommand("  /new  ")).toEqual({ type: "new" });
+    expect(parsePromptCommand("  /reset  ")).toEqual({ type: "reset" });
   });
 
   it("rejects near-misses and ordinary prompts", () => {
     expect(parsePromptCommand("/models")).toBeNull();
     expect(parsePromptCommand("/vercel")).toBeNull();
-    expect(parsePromptCommand("/channels extra")).toBeNull();
+    expect(parsePromptCommand("/vc")).toBeNull();
+    expect(parsePromptCommand("/login")).toBeNull();
+    expect(parsePromptCommand("/vc:auth")).toBeNull();
+    expect(parsePromptCommand("/channels")).toBeNull();
     expect(parsePromptCommand("tell me about /channels")).toBeNull();
     expect(parsePromptCommand("/")).toBeNull();
     expect(parsePromptCommand("")).toBeNull();
@@ -85,8 +97,44 @@ describe("parsePromptCommand", () => {
   });
 });
 
+describe("promptCommandsFor", () => {
+  it("exposes project commands only for local sessions", () => {
+    const names = promptCommandsFor("local").map((command) => command.name);
+    expect(names).toContain("model");
+    expect(names).toContain("add");
+    expect(names).toContain("deploy");
+    expect(names).toContain("vc:install");
+    expect(names).toContain("vc:login");
+    expect(names).not.toContain("vc:auth");
+  });
+
+  it("exposes the Vercel CLI commands for remote sessions", () => {
+    const names = promptCommandsFor("remote").map((command) => command.name);
+    expect(names).toContain("vc:install");
+    expect(names).toContain("vc:login");
+    expect(names).not.toContain("vc:auth");
+    expect(names).not.toContain("model");
+    expect(names).not.toContain("add");
+    expect(names).not.toContain("deploy");
+  });
+
+  it("filters discovery and rejects the obsolete remote auth command", () => {
+    const remote = promptCommandsFor("remote");
+    expect(parsePromptCommand("/vc:auth")).toBeNull();
+    expect(parsePromptCommand("/model")).toEqual({
+      type: "extension",
+      name: "model",
+      argument: "",
+    });
+    expect(formatPromptCommandHelp(remote)).toContain("/vc:login");
+    expect(formatPromptCommandHelp(remote)).not.toContain("/vc:auth");
+    expect(formatPromptCommandHelp(remote)).not.toContain("/model");
+  });
+});
+
 describe("isPromptControlCommand", () => {
   it("is true exactly for recognized commands", () => {
+    expect(isPromptControlCommand("/reset")).toBe(true);
     expect(isPromptControlCommand("/new")).toBe(true);
     expect(isPromptControlCommand("/model gpt-5")).toBe(true);
     expect(isPromptControlCommand("/unknown")).toBe(false);

@@ -24,6 +24,36 @@ const modelEndpoint = z.union([
   z.object({ kind: z.literal("gateway"), connected: z.literal(false) }),
 ]);
 
+const agentModelBaseFields = {
+  contextWindowTokens: z.number().optional(),
+  providerOptions: z.unknown().optional(),
+  // An unrecognized future effort level degrades to absent, not a parse failure.
+  reasoning: z
+    .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
+    .optional()
+    .catch(undefined),
+  source: source.optional(),
+};
+
+const agentModel = z.union([
+  z
+    .object({
+      ...agentModelBaseFields,
+      id: z.string(),
+      routing: modelRouting,
+      endpoint: modelEndpoint.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...agentModelBaseFields,
+      endpoint: z.never().optional(),
+      id: z.never().optional(),
+      routing: z.object({ kind: z.literal("dynamic") }).strict(),
+    })
+    .strict(),
+]);
+
 const tool = entry.extend({
   description: z.string(),
   hasAuth: z.boolean(),
@@ -56,7 +86,10 @@ const skill = entry.extend({
   metadata: z.record(z.string(), z.string()).optional(),
 });
 
-const instructions = entry.extend({ markdown: z.string() });
+const instructions = entry.extend({
+  content: z.string(),
+  role: z.enum(["system", "user"]),
+});
 
 const schedule = entry.extend({
   cron: z.string(),
@@ -65,7 +98,7 @@ const schedule = entry.extend({
 });
 
 const subagent = entry.extend({
-  description: z.string(),
+  description: z.string().optional(),
   entryPath: z.string(),
   nodeId: z.string(),
   rootPath: z.string(),
@@ -125,14 +158,7 @@ export const AgentInfoResultSchema = z.object({
     appRoot: z.string(),
     configSource: source.optional(),
     description: z.string().optional(),
-    model: z.object({
-      contextWindowTokens: z.number().optional(),
-      id: z.string(),
-      providerOptions: z.unknown().optional(),
-      source: source.optional(),
-      routing: modelRouting.optional(),
-      endpoint: modelEndpoint.optional(),
-    }),
+    model: agentModel,
     name: z.string(),
     outputSchema: z.unknown().optional(),
   }),
@@ -151,7 +177,7 @@ export const AgentInfoResultSchema = z.object({
   hooks: z.array(hook),
   instructions: z.object({
     dynamic: z.array(dynamicResolver),
-    static: instructions.nullable(),
+    static: z.array(instructions),
   }),
   kind: z.literal("eve-agent-info"),
   mode: z.enum(["development", "production"]),
@@ -173,7 +199,7 @@ export const AgentInfoResultSchema = z.object({
     framework: z.array(frameworkTool),
     reserved: z.array(z.string()),
   }),
-  version: z.literal(1),
+  version: z.literal(2),
   workflow: z.object({
     enabled: z.boolean(),
     toolName: z.string(),

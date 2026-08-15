@@ -17,7 +17,7 @@ import {
   nextGraphemeBoundary,
   previousGraphemeBoundary,
 } from "#shared/text-boundaries.js";
-import { inputTextWidth, offsetAtVisibleColumn } from "./terminal-text.js";
+import { inputTextWidth, offsetAtVisibleColumn } from "#cli/ui/terminal-text.js";
 
 /**
  * Editor text and a caret at a grapheme boundary, represented as a UTF-16

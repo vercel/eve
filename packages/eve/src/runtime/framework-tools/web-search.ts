@@ -132,39 +132,169 @@ export const WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA: JsonObject = {
 };
 
 /**
- * Output schema for AI Gateway's provider-managed `perplexitySearch` tool.
+ * Output schema for AI Gateway's provider-managed `exaSearch` tool.
  */
-export const WEB_SEARCH_GATEWAY_OUTPUT_SCHEMA: JsonObject = {
+export const WEB_SEARCH_EXA_OUTPUT_SCHEMA: JsonObject = {
   $schema: "http://json-schema.org/draft-07/schema#",
   anyOf: [
     {
-      additionalProperties: false,
       properties: {
-        id: { type: "string" },
+        costDollars: {
+          additionalProperties: false,
+          properties: {
+            search: {
+              additionalProperties: { type: "number" },
+              type: "object",
+            },
+            total: { type: "number" },
+          },
+          type: "object",
+        },
+        requestId: { type: "string" },
+        resolvedSearchType: { type: "string" },
         results: {
           items: {
-            additionalProperties: false,
             properties: {
-              date: { type: "string" },
-              lastUpdated: { type: "string" },
-              snippet: { type: "string" },
-              title: { type: "string" },
+              author: {
+                anyOf: [{ type: "string" }, { type: "null" }],
+              },
+              entities: {
+                items: {
+                  properties: {
+                    id: { type: "string" },
+                    properties: { type: "object" },
+                    type: { type: "string" },
+                    version: { type: "number" },
+                  },
+                  required: ["id", "type", "version", "properties"],
+                  type: "object",
+                },
+                type: "array",
+              },
+              extras: {
+                additionalProperties: false,
+                properties: {
+                  imageLinks: {
+                    items: { type: "string" },
+                    type: "array",
+                  },
+                  links: {
+                    items: { type: "string" },
+                    type: "array",
+                  },
+                },
+                type: "object",
+              },
+              favicon: {
+                anyOf: [{ type: "string" }, { type: "null" }],
+              },
+              highlightScores: {
+                items: { type: "number" },
+                type: "array",
+              },
+              highlights: {
+                items: { type: "string" },
+                type: "array",
+              },
+              id: { type: "string" },
+              image: {
+                anyOf: [{ type: "string" }, { type: "null" }],
+              },
+              publishedDate: {
+                anyOf: [{ type: "string" }, { type: "null" }],
+              },
+              score: {
+                anyOf: [{ type: "number" }, { type: "null" }],
+              },
+              subpages: {
+                items: {},
+                type: "array",
+              },
+              summary: { type: "string" },
+              text: { type: "string" },
+              title: {
+                anyOf: [{ type: "string" }, { type: "null" }],
+              },
               url: { type: "string" },
             },
-            required: ["title", "url", "snippet"],
+            required: ["url", "id"],
             type: "object",
           },
           type: "array",
         },
+        searchTime: { type: "number" },
+        searchType: { type: "string" },
       },
-      required: ["results", "id"],
+      required: ["requestId", "results"],
       type: "object",
     },
     {
       additionalProperties: false,
       properties: {
         error: {
-          enum: ["api_error", "rate_limit", "timeout", "invalid_input", "unknown"],
+          enum: [
+            "api_error",
+            "rate_limit",
+            "timeout",
+            "invalid_input",
+            "configuration_error",
+            "execution_error",
+            "unknown",
+          ],
+          type: "string",
+        },
+        message: { type: "string" },
+        statusCode: { type: "number" },
+      },
+      required: ["error", "message"],
+      type: "object",
+    },
+  ],
+};
+
+/**
+ * Output schema for AI Gateway's provider-managed `parallelSearch` tool.
+ */
+export const WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA: JsonObject = {
+  $schema: "http://json-schema.org/draft-07/schema#",
+  anyOf: [
+    {
+      additionalProperties: false,
+      properties: {
+        results: {
+          items: {
+            additionalProperties: false,
+            properties: {
+              excerpt: { type: "string" },
+              publishDate: {
+                anyOf: [{ type: "string" }, { type: "null" }],
+              },
+              relevanceScore: { type: "number" },
+              title: { type: "string" },
+              url: { type: "string" },
+            },
+            required: ["url", "title", "excerpt"],
+            type: "object",
+          },
+          type: "array",
+        },
+        searchId: { type: "string" },
+      },
+      required: ["searchId", "results"],
+      type: "object",
+    },
+    {
+      additionalProperties: false,
+      properties: {
+        error: {
+          enum: [
+            "api_error",
+            "rate_limit",
+            "timeout",
+            "invalid_input",
+            "configuration_error",
+            "unknown",
+          ],
           type: "string",
         },
         message: { type: "string" },

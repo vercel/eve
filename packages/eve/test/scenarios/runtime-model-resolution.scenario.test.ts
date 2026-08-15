@@ -110,6 +110,7 @@ describe("runtime model resolution", () => {
       },
     });
 
+    if (bundle.turnAgent.model === undefined) throw new Error("expected a static model");
     const resolvedModel = await resolveRuntimeModelReference(bundle.turnAgent.model, {
       moduleMap: bundle.moduleMap,
       nodeId: bundle.nodeId,
@@ -173,6 +174,7 @@ describe("runtime model resolution", () => {
       compiledArtifactsSource,
       nodeId: "subagents/researcher",
     });
+    if (childBundle.turnAgent.model === undefined) throw new Error("expected a static model");
     const resolvedModel = await resolveRuntimeModelReference(childBundle.turnAgent.model, {
       moduleMap: childBundle.moduleMap,
       nodeId: childBundle.nodeId,

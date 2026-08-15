@@ -18,9 +18,6 @@ export type RuntimeSandboxTemplatePlan =
       readonly kind: "bootstrap";
       readonly revalidationKey?: string;
       readonly sourceHash: string;
-    }
-  | {
-      readonly kind: "source-graph";
     };
 
 /**
@@ -45,7 +42,10 @@ export function createRuntimeSandboxTemplatePlan(input: {
     };
   }
 
-  if (input.workspaceResourceRoot.rootEntries.length === 0) {
+  if (
+    input.workspaceResourceRoot.contentHash === undefined &&
+    input.workspaceResourceRoot.rootEntries.length === 0
+  ) {
     return { kind: "none" };
   }
 

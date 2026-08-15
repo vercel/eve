@@ -5,6 +5,7 @@ import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discove
 import {
   getDirectoryEntryType,
   getSupportedModuleBaseName,
+  isTypeScriptDeclarationFileName,
   normalizeLogicalPath,
 } from "#discover/filesystem.js";
 import {
@@ -294,6 +295,10 @@ function emitUnsupportedLeafDiagnostics<TDefinition>(
     }
 
     if (input.unsupportedFileCode === undefined) {
+      continue;
+    }
+
+    if (isTypeScriptDeclarationFileName(entry.name)) {
       continue;
     }
 

@@ -8,8 +8,12 @@
 
   const agent = useEveAgent();
 
+  type EveFilePart = Extract<EveMessagePart, { type: "file" }>;
+
   let isBusy = $derived(agent.status === "submitted" || agent.status === "streaming");
   let isEmpty = $derived(agent.data.messages.length === 0);
+  let cancellationError = $state<string>();
+  let errorMessage = $derived(cancellationError ?? agent.error?.message);
 
   let messagesEl = $state<HTMLDivElement>();
   let isNearBottom = $state(true);
@@ -42,8 +46,19 @@
   function submitMessage() {
     const text = messageText.trim();
     if (!text || isBusy) return;
+    cancellationError = undefined;
     messageText = "";
-    void agent.send({ message: text });
+    void agent.send(text);
+  }
+
+  async function requestCancellation() {
+    cancellationError = undefined;
+    try {
+      await agent.cancel();
+    } catch (cause) {
+      cancellationError =
+        cause instanceof Error ? cause.message : "The cancellation request failed.";
+    }
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -60,12 +75,32 @@
       readonly text?: string;
     }[],
   ) {
-    void agent.send({ inputResponses: responses });
+    cancellationError = undefined;
+    void agent.respond(responses);
   }
 
   function partKey(part: EveMessagePart, index: number): string {
     if (part.type === "dynamic-tool") return part.toolCallId;
     return `${part.type}:${index}`;
+  }
+
+  function fileLabel(part: EveFilePart): string {
+    return part.filename ?? "Attachment";
+  }
+
+  function fileDetail(part: EveFilePart): string {
+    return [part.mediaType, formatBytes(part.size)].filter(Boolean).join(" - ");
+  }
+
+  function isImageFile(part: EveFilePart): boolean {
+    return part.url !== undefined && part.mediaType.startsWith("image/");
+  }
+
+  function formatBytes(size: number | undefined): string | undefined {
+    if (size === undefined) return undefined;
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
   }
 </script>
 
@@ -82,14 +117,14 @@
   </header>
 
   <section class="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-4 sm:px-6">
-    {#if agent.error}
+    {#if errorMessage}
       <div
         class="mt-4 flex items-start gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm"
       >
         <div>
           <p class="font-medium">Request failed</p>
           <p class="mt-0.5 text-muted-foreground">
-            {agent.error.message}
+            {errorMessage}
           </p>
         </div>
       </div>
@@ -126,6 +161,77 @@
                     <div class="whitespace-pre-wrap">{part.text}</div>
                   {:else if part.type === "reasoning"}
                     <ReasoningBlock text={part.text} isStreaming={part.state === "streaming"} />
+                  {:else if part.type === "file"}
+                    {#if part.url}
+                      <a
+                        href={part.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        class="flex max-w-sm items-center gap-3 rounded-md border border-border/80 bg-background/60 p-2"
+                      >
+                        {#if isImageFile(part)}
+                          <img
+                            src={part.url}
+                            alt={fileLabel(part)}
+                            class="size-12 shrink-0 rounded-sm object-cover"
+                          />
+                        {:else}
+                          <span
+                            class="flex size-10 shrink-0 items-center justify-center rounded-sm bg-muted text-muted-foreground"
+                          >
+                            <svg
+                              class="size-4"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"
+                              />
+                              <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+                            </svg>
+                          </span>
+                        {/if}
+                        <span class="min-w-0 flex-1">
+                          <span class="block truncate font-medium">{fileLabel(part)}</span>
+                          {#if fileDetail(part)}
+                            <span class="block truncate text-muted-foreground">
+                              {fileDetail(part)}
+                            </span>
+                          {/if}
+                        </span>
+                      </a>
+                    {:else}
+                      <div
+                        class="flex max-w-sm items-center gap-3 rounded-md border border-border/80 bg-background/60 p-2"
+                      >
+                        <span
+                          class="flex size-10 shrink-0 items-center justify-center rounded-sm bg-muted text-muted-foreground"
+                        >
+                          <svg
+                            class="size-4"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"
+                            />
+                            <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+                          </svg>
+                        </span>
+                        <span class="min-w-0 flex-1">
+                          <span class="block truncate font-medium">{fileLabel(part)}</span>
+                          {#if fileDetail(part)}
+                            <span class="block truncate text-muted-foreground">
+                              {fileDetail(part)}
+                            </span>
+                          {/if}
+                        </span>
+                      </div>
+                    {/if}
                   {:else if part.type === "dynamic-tool"}
                     <ToolBlock
                       {part}
@@ -162,7 +268,7 @@
             type="button"
             aria-label="Stop response"
             class="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
-            onclick={() => agent.stop()}
+            onclick={requestCancellation}
           >
             <svg class="size-3.5" fill="currentColor" viewBox="0 0 24 24">
               <rect x="4" y="4" width="16" height="16" rx="2" />

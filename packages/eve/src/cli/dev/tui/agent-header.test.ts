@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentInfoResult, AgentInfoToolEntry } from "#client/index.js";
+import { stripAnsi } from "#cli/ui/terminal-text.js";
 
 import { AGENT_HEADER_TIPS, buildAgentHeader, pickAgentHeaderTip } from "./agent-header.js";
-import { EVE_BETA_TERMS_URL } from "#cli/banner.js";
 import { createTheme } from "./theme.js";
 
 const FRAMEWORK_TOOL: AgentInfoToolEntry = {
@@ -45,6 +45,7 @@ const INFO: AgentInfoResult = {
     appRoot: "/tmp/weather-agent",
     model: {
       id: "anthropic/claude-opus-4.7",
+      routing: { kind: "gateway", target: "anthropic" },
     },
     name: "Weather Agent",
   },
@@ -65,12 +66,15 @@ const INFO: AgentInfoResult = {
   hooks: [],
   instructions: {
     dynamic: [],
-    static: {
-      logicalPath: "instructions.md",
-      markdown: "You are a weather assistant.",
-      name: "instructions",
-      sourceKind: "markdown",
-    },
+    static: [
+      {
+        content: "You are a weather assistant.",
+        logicalPath: "instructions.md",
+        name: "instructions",
+        role: "system",
+        sourceKind: "markdown",
+      },
+    ],
   },
   kind: "eve-agent-info",
   mode: "development",
@@ -99,7 +103,7 @@ const INFO: AgentInfoResult = {
     ],
     reserved: [],
   },
-  version: 1,
+  version: 2,
   workflow: {
     enabled: false,
     toolName: "Workflow",
@@ -112,45 +116,45 @@ const INFO: AgentInfoResult = {
 
 describe("buildAgentHeader", () => {
   const theme = createTheme({ color: false, unicode: false });
-  const previewLine = ` eve is currently in preview: ${EVE_BETA_TERMS_URL}`;
 
-  it("renders the brand line with the agent name and preview label", () => {
+  it("renders the brand line with the agent name", () => {
     const lines = buildAgentHeader({ name: "agent-subagents", info: INFO, theme, width: 120 });
 
-    expect(lines).toEqual([" eve agent-subagents", previewLine]);
+    expect(lines).toEqual([" eve agent-subagents"]);
   });
 
-  it("renders the same brand and preview lines when info is unavailable", () => {
+  it("renders just the brand line when info is unavailable", () => {
     expect(buildAgentHeader({ name: "weather-agent", theme, width: 120 })).toEqual([
       " eve weather-agent",
-      previewLine,
     ]);
   });
 
   it("renders the tip line for local sessions only", () => {
     const tip = AGENT_HEADER_TIPS[0]!;
     const local = buildAgentHeader({ name: "weather-agent", info: INFO, theme, width: 120, tip });
-    expect(local).toEqual([" eve weather-agent", previewLine, ` ${tip}`]);
+    expect(local).toEqual([" eve weather-agent", ` ${tip}`]);
 
     const remote = buildAgentHeader({ name: "weather-agent", info: INFO, theme, width: 120 });
     expect(remote.join("\n")).not.toContain("/channels");
   });
 
-  it("keeps the preview URL visible and plain on a color terminal (no OSC 8 escape)", () => {
+  it("renders the /add tip with a blue command", () => {
     const colorTheme = createTheme({ color: true, unicode: false });
-    const lines = buildAgentHeader({
+    const tip = AGENT_HEADER_TIPS.find((candidate) => candidate.includes("/add"));
+
+    expect(tip).toBe("Use /add to install integrations from the registry.");
+    if (tip === undefined) return;
+
+    const line = buildAgentHeader({
       name: "weather-agent",
       info: INFO,
       theme: colorTheme,
       width: 120,
-    });
-    const preview = lines.find((line) => line.includes("eve is currently in preview"))!;
+      tip,
+    }).at(-1);
 
-    // The bare URL stays visible so the terminal's own URL matcher makes it
-    // ⌘/ctrl-clickable. OSC 8 explicit hyperlinks are deliberately avoided —
-    // their click handling is unreliable (e.g. Ghostty bug #11907).
-    expect(preview).toContain(EVE_BETA_TERMS_URL);
-    expect(preview).not.toContain("\x1b]8;;");
+    expect(stripAnsi(line ?? "")).toBe(` ${tip}`);
+    expect(line).toContain(colorTheme.colors.blue("/add"));
   });
 
   it("keeps the discovery-diagnostics line when the compiler reported problems", () => {

@@ -9,7 +9,7 @@ import type { DockerSandboxCreateOptions } from "#public/sandbox/docker-sandbox.
 import { justbash } from "#public/sandbox/backends/just-bash.js";
 import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-sandbox.js";
 import { microsandbox } from "#public/sandbox/backends/microsandbox.js";
-import type { MicrosandboxCreateOptions } from "#public/sandbox/microsandbox-sandbox.js";
+import type { MicrosandboxSandboxCreateOptions } from "#public/sandbox/microsandbox-sandbox.js";
 import { vercel } from "#public/sandbox/backends/vercel.js";
 import type { VercelSandboxCreateOptions } from "#public/sandbox/vercel-sandbox.js";
 
@@ -21,7 +21,7 @@ import type { VercelSandboxCreateOptions } from "#public/sandbox/vercel-sandbox.
 export interface DefaultSandboxOptions {
   readonly docker?: DockerSandboxCreateOptions;
   readonly justBash?: JustBashSandboxCreateOptions;
-  readonly microsandbox?: MicrosandboxCreateOptions;
+  readonly microsandbox?: MicrosandboxSandboxCreateOptions;
   readonly vercel?: VercelSandboxCreateOptions;
 }
 

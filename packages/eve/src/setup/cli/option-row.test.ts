@@ -81,14 +81,15 @@ describe("renderOptionRow", () => {
     );
   });
 
-  test("hovering a row takes over the icon column, even when checked", () => {
+  test("hovering a checked row keeps its check inside the highlight", () => {
+    // The highlight says "active", not "press to activate": the check stays.
     expect(
       row({
         label: "Web Chat",
         isCursor: true,
         state: { kind: "available", checked: true },
       }),
-    ).toBe("<inverse><blue> ▶ Web Chat </blue></inverse>");
+    ).toBe("<inverse><blue> ✓ Web Chat </blue></inverse>");
   });
 
   test("a completed row under the cursor reads as inert: a dim pointer and dim label", () => {
@@ -147,7 +148,7 @@ describe("renderOptionRow", () => {
     ).toBe(" <dim>▷</dim> <dim>Waiting</dim>");
   });
 
-  test("warning-toned disabled rows keep the label dim and turn the reason yellow", () => {
+  test("warning-toned disabled rows keep the label dim and show a yellow alert annotation", () => {
     expect(
       row({
         label: "Slack",
@@ -157,7 +158,7 @@ describe("renderOptionRow", () => {
           reasonTone: "warning",
         },
       }),
-    ).toBe("   <dim>Slack</dim><yellow> (Requires Vercel account, see /model)</yellow>");
+    ).toBe("   <dim>Slack</dim><yellow> ⚠ Requires Vercel account, see /model</yellow>");
   });
 
   test("a hint tab-aligns behind a padded label column", () => {

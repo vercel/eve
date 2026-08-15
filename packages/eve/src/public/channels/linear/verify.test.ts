@@ -62,6 +62,17 @@ describe("verifyLinearRequest", () => {
     );
   });
 
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -1])(
+    "rejects invalid maxSkewMs values (%s)",
+    async (maxSkewMs) => {
+      const req = signedRequest();
+
+      await expect(verifyLinearRequest(req, { maxSkewMs, webhookSecret: SECRET })).rejects.toThrow(
+        "maxSkewMs must be a non-negative finite number",
+      );
+    },
+  );
+
   it("uses webhookVerifier instead of HMAC when supplied", async () => {
     const req = signedRequest({ secret: "wrong-secret" });
 

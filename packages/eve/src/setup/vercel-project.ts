@@ -1,19 +1,18 @@
 import { createPromptCommandOutput, whimsyFor } from "#setup/cli/index.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import { captureVercel, runVercel, type VercelCaptureFailure } from "#setup/primitives/index.js";
-import { hasVercelHostFramework } from "#setup/scaffold/index.js";
 import pc from "picocolors";
 import { z } from "zod";
 
 import {
   assertNoLegacyProjectLinkDirectory,
+  readProjectLink,
   type ProjectResolution,
 } from "./project-resolution.js";
 import type { Prompter } from "./prompter.js";
 import type { ResolvedVercelProjectSpec, VercelProjectIdentity } from "./state.js";
 import { withSpinner } from "./with-spinner.js";
 import {
-  isConflictApiFailure,
   isForbiddenApiFailure,
   isNotFoundApiFailure,
   normalizeVercelApiResult,
@@ -22,21 +21,70 @@ import {
   listRecentProjects,
   listTeams,
   parseVercelJson,
+  rankProjectSearchResults,
   requireVercelTeamAccess,
   searchProjects,
   type VercelProjectListEntry,
   type VercelProjectOperationOptions,
+  VERCEL_PROJECT_REQUEST_TIMEOUT_MS,
 } from "./vercel-project-api.js";
+import {
+  ensureCreatedProjectFramework,
+  type CreatedProjectFrameworkOptions,
+} from "./vercel-project-framework.js";
 
 const VercelProjectReferenceSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
 });
 
-const EVE_FRAMEWORK_PRESET = "eve";
 export interface PickProjectOptions extends VercelProjectOperationOptions {
   /** Whether an empty project list may fall back to entering a name to create. */
   allowCreateWhenEmpty?: boolean;
+  /**
+   * Searches the team for a project with this name before the list opens and
+   * suggests the best match: floated to the top, cursor on it, marked
+   * "suggested". Best-effort — a failed lookup falls back to the plain list.
+   */
+  suggestedName?: string;
+}
+
+export interface PickTeamOptions extends VercelProjectOperationOptions {
+  /** Builds the team selector heading from the current team's display name. */
+  selectMessage?: (currentTeam: string) => string;
+}
+
+export interface LinkProjectOperationOptions extends CreatedProjectFrameworkOptions {}
+
+/** Effects used to ensure an interactive Vercel project link. */
+export interface EnsureLinkedVercelProjectDeps {
+  readProjectLink: typeof readProjectLink;
+  runVercel: typeof runVercel;
+}
+
+/**
+ * Returns the existing Vercel project link or creates one through the Vercel
+ * CLI's interactive flow. The CLI owns team and project selection.
+ */
+export async function ensureLinkedVercelProject(input: {
+  projectRoot: string;
+  prompter: Prompter;
+  signal?: AbortSignal;
+  deps?: EnsureLinkedVercelProjectDeps;
+}): Promise<NonNullable<Awaited<ReturnType<typeof readProjectLink>>>> {
+  const deps = input.deps ?? { readProjectLink, runVercel };
+  const existing = await deps.readProjectLink(input.projectRoot);
+  if (existing !== undefined) return existing;
+
+  const link = () => deps.runVercel(["link"], { cwd: input.projectRoot, signal: input.signal });
+  const linked = await (input.prompter.withInheritedStdio?.(link) ?? link());
+  if (!linked) {
+    input.signal?.throwIfAborted();
+    throw new Error("Vercel project linking failed.");
+  }
+  const project = await deps.readProjectLink(input.projectRoot);
+  if (project === undefined) throw new Error("Vercel project linking failed.");
+  return project;
 }
 
 export function unresolvedProject(): ProjectResolution {
@@ -66,7 +114,11 @@ export async function resolveProjectByNameOrId(
   const result = normalizeVercelApiResult(
     await captureVercel(
       ["api", `/v9/projects/${encodeURIComponent(projectNameOrId)}`, "--scope", team, "--raw"],
-      { cwd: projectRoot, signal: options.signal },
+      {
+        cwd: projectRoot,
+        signal: options.signal,
+        timeoutMs: VERCEL_PROJECT_REQUEST_TIMEOUT_MS,
+      },
     ),
   );
   if (result.ok) {
@@ -78,49 +130,6 @@ export async function resolveProjectByNameOrId(
   if (isForbiddenApiFailure(result.failure)) requireVercelTeamAccess(result.failure);
   throw new Error(
     `Could not resolve project "${projectNameOrId}" in ${team}. ${result.failure.message}`,
-  );
-}
-
-async function createProject(
-  projectRoot: string,
-  team: string,
-  projectName: string,
-  onOutput: ReturnType<typeof createPromptCommandOutput>,
-  options: VercelProjectOperationOptions,
-): Promise<VercelProjectIdentity> {
-  const createProjectArgs = [
-    "api",
-    "/v10/projects",
-    "--scope",
-    team,
-    "--method",
-    "POST",
-    "--raw-field",
-    `name=${projectName}`,
-  ];
-  // Host framework integrations (Next.js, Nuxt, SvelteKit) own the top-level
-  // Vercel build. Leaving the preset unset lets Vercel detect that framework
-  // while vercel.json/build-output config owns the internal Eve service.
-  if (!(await hasVercelHostFramework(projectRoot))) {
-    createProjectArgs.push("--raw-field", `framework=${EVE_FRAMEWORK_PRESET}`);
-  }
-  createProjectArgs.push("--raw");
-  const result = normalizeVercelApiResult(
-    await captureVercel(createProjectArgs, {
-      cwd: projectRoot,
-      onOutput,
-      signal: options.signal,
-    }),
-  );
-  if (result.ok) {
-    return parseProjectReference(result.stdout, `created project ${projectName}`);
-  }
-  if (isConflictApiFailure(result.failure)) {
-    throw new Error(projectNameCollisionMessage(projectName, team));
-  }
-  if (isForbiddenApiFailure(result.failure)) requireVercelTeamAccess(result.failure);
-  throw new Error(
-    `Could not create Vercel project "${projectName}" in ${team}. ${result.failure.message}`,
   );
 }
 
@@ -162,9 +171,15 @@ export function requireVercelLogin(failure?: VercelCaptureFailure): never {
  */
 const WHOAMI_TIMEOUT_MS = 10_000;
 
-/** Runs the bounded, read-only `vercel whoami` probe shared by the auth checks. */
-function probeWhoami(projectRoot: string, options: VercelProjectOperationOptions) {
-  return captureVercel(["whoami"], {
+/**
+ * Runs the bounded, read-only `vercel whoami` probe shared by the auth checks.
+ * A linked team project is the user's explicit scope choice, so authenticate
+ * against that owner instead of whichever account scope the CLI last selected.
+ */
+async function probeWhoami(projectRoot: string, options: VercelProjectOperationOptions) {
+  const link = await readProjectLink(projectRoot);
+  const args = ["whoami", ...(link?.orgId.startsWith("team_") ? ["--scope", link.orgId] : [])];
+  return captureVercel(args, {
     cwd: projectRoot,
     signal: options.signal,
     timeoutMs: WHOAMI_TIMEOUT_MS,
@@ -226,9 +241,9 @@ export function vercelAuthBlockerReason(authStatus: VercelAuthStatus): string | 
     case "authenticated":
       return undefined;
     case "cli-missing":
-      return "Vercel CLI not found, see /vc";
+      return "Vercel CLI not found, see /vc:install";
     case "logged-out":
-      return "Log in to Vercel first, see /login";
+      return "Log in to Vercel first, see /vc:login";
     case "unavailable":
       return "Couldn't reach Vercel, check your connection";
     default: {
@@ -348,7 +363,7 @@ export async function pickTeam(
   prompter: Prompter,
   projectRoot: string,
   presetTeam: string | undefined,
-  options: VercelProjectOperationOptions = {},
+  options: PickTeamOptions = {},
 ): Promise<string> {
   if (presetTeam !== undefined) {
     await validateTeam(prompter, projectRoot, presetTeam, options);
@@ -360,25 +375,85 @@ export async function pickTeam(
   if (teams.length <= 1) {
     return teams.find((team) => team.current)?.slug ?? (await whoamiScope(projectRoot, options));
   }
+  const currentTeam = teams.find((team) => team.current);
   return prompter.select({
-    message: "Select your team",
+    message:
+      options.selectMessage?.(currentTeam?.name ?? (await whoamiScope(projectRoot, options))) ??
+      "Select your team",
     search: true,
     placeholder: "type to search teams",
     options: teams.map((team) => ({
       value: team.slug,
       label: team.current ? `${team.name} (current)` : team.name,
     })),
-    initialValue: teams.find((team) => team.current)?.slug,
+    initialValue: currentTeam?.slug,
   });
 }
 
 const SEARCH_PROJECT_PREFIX = "\0search-project:";
+const SEARCH_MORE_PROJECTS_PREFIX = "\0search-more-projects:";
 
-function appendProjects(
+type ProjectSearchResults = Awaited<ReturnType<typeof searchProjects>>;
+
+interface ProjectSearchContinuation {
+  readonly query: string;
+  readonly next: number;
+}
+
+function searchMoreProjectsValue(continuation: ProjectSearchContinuation): string {
+  return `${SEARCH_MORE_PROJECTS_PREFIX}${continuation.next}:${continuation.query}`;
+}
+
+function prioritizeSearchResults(
   existing: readonly VercelProjectListEntry[],
   found: readonly VercelProjectListEntry[],
 ): VercelProjectListEntry[] {
-  return [...new Map([...existing, ...found].map((project) => [project.id, project])).values()];
+  const projects = new Map(found.map((project) => [project.id, project]));
+  for (const project of existing) {
+    if (!projects.has(project.id)) projects.set(project.id, project);
+  }
+  return [...projects.values()];
+}
+
+async function findProjectSearchResults(
+  projectRoot: string,
+  team: string,
+  query: string,
+  options: VercelProjectOperationOptions,
+  next?: number,
+): Promise<ProjectSearchResults> {
+  const search = query.trim();
+  if (search.length === 0) throw new Error("Project search query cannot be empty.");
+
+  if (next === undefined) {
+    const exact = await resolveProjectByNameOrId(projectRoot, team, search, options);
+    if (exact !== null) return { projects: [{ id: exact.projectId, name: exact.projectName }] };
+  }
+
+  return await searchProjects(projectRoot, team, search, { ...options, next });
+}
+
+/**
+ * Finds the project to suggest for `name`: an exact hit in the already-listed
+ * recents, or the team's best name-search match. Best-effort — failures mean
+ * "no suggestion", never an aborted picker.
+ */
+async function findSuggestedProject(
+  projectRoot: string,
+  team: string,
+  name: string,
+  recents: readonly VercelProjectListEntry[],
+  options: VercelProjectOperationOptions,
+): Promise<VercelProjectListEntry | undefined> {
+  const inRecents = recents.find((project) => project.name === name);
+  if (inRecents !== undefined) return inRecents;
+  try {
+    const found = await findProjectSearchResults(projectRoot, team, name, options);
+    return rankProjectSearchResults(found.projects, name)[0];
+  } catch {
+    options.signal?.throwIfAborted();
+    return undefined;
+  }
 }
 
 /** Picks an existing project under a team, or a name to create when none exist. */
@@ -388,9 +463,50 @@ export async function pickProject(
   team: string,
   options: PickProjectOptions = {},
 ): Promise<ResolvedVercelProjectSpec> {
-  let projects = await withSpinner(prompter, whimsyFor("projects", team), () =>
-    listRecentProjects(projectRoot, team, options),
-  );
+  const suggestedName = options.suggestedName?.trim();
+  const listed = await withSpinner(prompter, whimsyFor("projects", team), async () => {
+    const recents = await listRecentProjects(projectRoot, team, options);
+    const suggested =
+      suggestedName === undefined || suggestedName.length === 0
+        ? undefined
+        : await findSuggestedProject(projectRoot, team, suggestedName, recents, options);
+    return { recents, suggested };
+  });
+  const suggestedId = listed.suggested?.id;
+  let projects =
+    listed.suggested === undefined
+      ? listed.recents
+      : prioritizeSearchResults(listed.recents, [listed.suggested]);
+  let searchResults: readonly VercelProjectListEntry[] = [];
+  let searchContinuation: ProjectSearchContinuation | undefined;
+  const projectOptions = () => {
+    const result = projects.map((project) => {
+      const option: { value: string; label: string; hint?: string } = {
+        value: project.id,
+        label: project.name,
+      };
+      if (project.id === suggestedId) option.hint = "suggested";
+      return option;
+    });
+    if (searchContinuation !== undefined) {
+      result.push({
+        value: searchMoreProjectsValue(searchContinuation),
+        label: `Show more matches for '${searchContinuation.query}'`,
+      });
+    }
+    return result;
+  };
+  const applySearchResults = (
+    query: string,
+    found: ProjectSearchResults,
+    append: boolean,
+  ): void => {
+    const existing = append ? searchResults : [];
+    searchResults = rankProjectSearchResults([...existing, ...found.projects], query);
+    projects = prioritizeSearchResults(projects, searchResults);
+    searchContinuation =
+      found.next === undefined ? undefined : { query: query.trim(), next: found.next };
+  };
   if (projects.length === 0) {
     if (options.allowCreateWhenEmpty === false) {
       throw new Error(
@@ -414,14 +530,33 @@ export async function pickProject(
         label: (query) => `Search for '${query}'`,
         value: (query) => `${SEARCH_PROJECT_PREFIX}${query}`,
         load: async (query) => {
-          const found = await searchProjects(projectRoot, team, query, { signal: options.signal });
-          projects = appendProjects(projects, found);
-          return projects.map((project) => ({ value: project.id, label: project.name }));
+          const found = await findProjectSearchResults(projectRoot, team, query, {
+            signal: options.signal,
+          });
+          applySearchResults(query, found, false);
+          return projectOptions();
         },
       },
-      options: projects.map((project) => ({ value: project.id, label: project.name })),
-      initialValue: projects[0]?.id,
+      options: projectOptions(),
+      initialValue: suggestedId ?? projects[0]?.id,
     });
+    const continuation = searchContinuation;
+    if (continuation !== undefined && selected === searchMoreProjectsValue(continuation)) {
+      const found = await withSpinner(
+        prompter,
+        `Searching ${team} for "${continuation.query}"...`,
+        () =>
+          findProjectSearchResults(
+            projectRoot,
+            team,
+            continuation.query,
+            { signal: options.signal },
+            continuation.next,
+          ),
+      );
+      applySearchResults(continuation.query, found, true);
+      continue;
+    }
     const query = selected.startsWith(SEARCH_PROJECT_PREFIX)
       ? selected.slice(SEARCH_PROJECT_PREFIX.length)
       : undefined;
@@ -436,13 +571,13 @@ export async function pickProject(
     }
 
     const found = await withSpinner(prompter, `Searching ${team} for "${query}"...`, () =>
-      searchProjects(projectRoot, team, query, { signal: options.signal }),
+      findProjectSearchResults(projectRoot, team, query, { signal: options.signal }),
     );
-    if (found.length === 0) {
+    applySearchResults(query, found, false);
+    if (found.projects.length === 0 && found.next === undefined) {
       prompter.note(`No projects matched "${query}" in ${team}.`);
       continue;
     }
-    projects = appendProjects(projects, found);
   }
 }
 
@@ -491,31 +626,49 @@ export async function pickNewProjectName(
 /**
  * Ensures the concrete project exists (creating it for a `new` plan) and links
  * this directory to it. Acts on a fully-resolved spec — never prompts for a
- * team or project. Returns the linked project, or undefined if `vercel link`
- * did not complete.
+ * team or project. A newly created project keeps a detected host framework
+ * when the matching eve integration import is present; otherwise missing,
+ * unsupported, or rejected framework detections are switched back to eve.
+ * Returns the linked project, or undefined if `vercel link` did not complete.
  */
 export async function linkProject(
   prompter: Prompter,
   projectRoot: string,
   spec: ResolvedVercelProjectSpec,
   onOutput: ReturnType<typeof createPromptCommandOutput>,
-  options: VercelProjectOperationOptions = {},
+  options: LinkProjectOperationOptions = {},
 ): Promise<VercelProjectIdentity | undefined> {
   await assertNoLegacyProjectLinkDirectory(projectRoot);
   const scope = ["--scope", spec.team];
-  let project: VercelProjectIdentity;
   if (spec.kind === "new") {
-    project = await withSpinner(
+    const linked = await withSpinner(
       prompter,
       `Creating Vercel project "${spec.project}" in ${spec.team}...`,
       async () => {
         await assertNewProjectNameAvailable(projectRoot, spec.team, spec.project, options);
-        return createProject(projectRoot, spec.team, spec.project, onOutput, options);
+        return runVercel(["link", "--project", spec.project, ...scope, "--yes"], {
+          cwd: projectRoot,
+          onOutput,
+          nonInteractive: true,
+          signal: options.signal,
+        });
       },
     );
-  } else {
-    project = spec.project;
+    if (!linked) return undefined;
+    const link = await readProjectLink(projectRoot);
+    if (link === undefined) return undefined;
+    await ensureCreatedProjectFramework(
+      prompter,
+      projectRoot,
+      spec.team,
+      link.projectId,
+      onOutput,
+      options,
+    );
+    return { projectId: link.projectId, projectName: link.projectName ?? spec.project };
   }
+
+  const project = spec.project;
   const linked = await withSpinner(
     prompter,
     `Linking this directory to Vercel project "${project.projectName}"...`,

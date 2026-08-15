@@ -1,5 +1,3 @@
-import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-
 import {
   executeWriteFileOnSandbox,
   type WriteFileInput,
@@ -37,7 +35,7 @@ export function defineWriteFileTool(input: DefineWriteFileToolInput = {}): ToolD
     async execute(args, ctx) {
       return executeWriteFileOnSandbox(await ctx.getSandbox(), args as WriteFileInput);
     },
-    inputSchema: WRITE_FILE_INPUT_SCHEMA as unknown as StandardJSONSchemaV1<unknown>,
+    inputSchema: WRITE_FILE_INPUT_SCHEMA,
     outputSchema: WRITE_FILE_OUTPUT_SCHEMA,
   };
 }

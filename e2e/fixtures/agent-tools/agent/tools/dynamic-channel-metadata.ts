@@ -1,7 +1,7 @@
 import { isChannel } from "eve/channels";
 import { defineDynamic, defineTool } from "eve/tools";
 import { z } from "zod";
-import metadataProvider from "../channels/metadata-provider.js";
+import metadataProvider from "../channels/metadata-provider";
 
 /**
  * Smoke-test fixture: resolves a tool only when the session was started

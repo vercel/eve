@@ -1,18 +1,11 @@
-import { ContextKey } from "#context/key.js";
+import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
 import type { ConnectionRegistry } from "#runtime/connections/types.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getActiveRuntimeNode } from "#context/node.js";
 import type { FrameworkContextProvider } from "#context/provider.js";
 
-/**
- * Context key for the per-session connection registry.
- *
- * Created as a derived key (no codec) because the registry holds live
- * client instances that cannot be serialized across step boundaries.
- * The `connectionProvider` reconstructs it each step.
- */
-export const ConnectionRegistryKey = new ContextKey<ConnectionRegistry>("eve.connectionRegistry");
+export { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 
 export const connectionProvider: FrameworkContextProvider<ConnectionRegistry> = {
   key: ConnectionRegistryKey,

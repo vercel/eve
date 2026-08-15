@@ -9,6 +9,7 @@ import type {
 } from "#setup/prompter.js";
 import { createSelectOptionCodec } from "#setup/cli/select-option-codec.js";
 import { searchActionQuery } from "#setup/cli/select-state.js";
+import type { SetupSpinnerIntent } from "#setup/cli/index.js";
 import { WizardCancelledError } from "#setup/step.js";
 
 import type { SetupFlowPrompterRenderer, SetupSelectRequest } from "./setup-flow.js";
@@ -27,7 +28,14 @@ function setupSelectRequest<T extends PrompterValue>(
   encode: (value: T) => string,
   encodeOptions: (options: readonly SelectOption<T>[]) => SetupSelectRequest["options"],
 ): SetupSelectRequest {
-  const base = { message: opts.message, options };
+  const base: {
+    message: string;
+    options: SetupSelectRequest["options"];
+    description?: string;
+    metadata?: SetupSelectRequest["metadata"];
+  } = { message: opts.message, options };
+  if (opts.description !== undefined) base.description = opts.description;
+  if (opts.metadata !== undefined) base.metadata = opts.metadata;
   const withNotices = <Request extends SetupSelectRequest>(request: Request): Request => {
     if (opts.notices !== undefined) request.notices = opts.notices;
     return request;
@@ -59,13 +67,14 @@ function setupSelectRequest<T extends PrompterValue>(
     return withNotices(request);
   }
 
-  if (opts.search === true && opts.hintLayout !== undefined) {
-    throw new Error("Searchable setup questions do not support a hint layout.");
+  if (opts.search === true && opts.hintLayout === "stacked") {
+    throw new Error("Searchable setup questions do not support a stacked hint layout.");
   }
 
   let request: SetupSelectRequest;
   if (opts.search === true) {
     request = { ...base, kind: "search" };
+    if (opts.hintLayout === "inline") request.layout = "task-list";
     if (opts.placeholder !== undefined) request.placeholder = opts.placeholder;
     if (opts.searchAction !== undefined) {
       request.searchAction = { label: opts.searchAction.label };
@@ -192,6 +201,10 @@ export function createTuiPrompter(renderer: TuiPrompterRenderer): Prompter {
 
     outro() {},
 
+    replaceContent: (content) => renderer.replaceContent?.(content),
+
+    withInheritedStdio: (task) => renderer.withInheritedStdio(task),
+
     log: {
       message: line("info"),
       info: line("info"),
@@ -205,8 +218,12 @@ export function createTuiPrompter(renderer: TuiPrompterRenderer): Prompter {
         renderer.renderLine(title, "info");
         for (const entry of lines) renderer.renderLine(`  ${entry}`, "info");
       },
-      spinner(message) {
-        renderer.setStatus(message);
+      spinner(message, intent?: SetupSpinnerIntent) {
+        renderer.setStatus(
+          intent?.kind === "external-action"
+            ? { kind: "external-action", text: message, emphasis: intent.emphasis }
+            : message,
+        );
         let stopped = false;
         return {
           stop() {

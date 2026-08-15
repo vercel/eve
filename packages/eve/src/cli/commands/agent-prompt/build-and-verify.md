@@ -1,10 +1,17 @@
 ## Build it out, then verify
 
 Work from the project directory. Once eve is installed, the full docs are bundled
-at `node_modules/eve/docs/` and match the installed version exactly. Read
-`README.md` there first, then the guide for what you're adding, such as
-`connections`, `channels/slack`, or `guides/auth-and-route-protection` for the
-Vercel Connect flow.
+with the installed package and match its version exactly. In most installs, they
+are at `node_modules/eve/docs/`. In workspaces or local package installs, resolve
+the installed `eve` package location first and read its `docs/` directory. If
+package docs are unavailable, use https://eve.dev/docs as a fallback. Read
+`README.md` in the package docs first, then the guide for what you're adding,
+such as `connections`, `channels/slack`, or `guides/auth-and-route-protection`
+for the Vercel Connect flow.
+
+Before implementing an integration yourself, use `eve registry search <query>` or
+`eve registry list` to discover available integrations. Inspect one with
+`eve registry view <item>`, then install it with `eve add <item>`.
 
 - Put the purpose in `agent/instructions.md` (the always-on system prompt),
   replacing the scaffold's placeholder with what the user said the agent should
@@ -21,8 +28,7 @@ terminal UI in a controllable background process instead:
 
 Wait for the server URL, then exercise the HTTP API: create a session with
 `POST /eve/v1/session`, attach to `GET /eve/v1/session/:id/stream`, and send a
-follow-up with the returned `continuationToken`. Stop the dev process after
-verification.
+follow-up to `POST /eve/v1/session/:id`. Stop the dev process after verification.
 
 When the user is ready to use their agent's REPL, give them the interactive
 command to run from the project directory:

@@ -15,6 +15,7 @@ function fakeRenderer(overrides: Partial<TuiPrompterRenderer> = {}): TuiPrompter
     setStatus: vi.fn(),
     renderLine: vi.fn(),
     renderOutput: vi.fn(),
+    withInheritedStdio: (task) => task(),
     ...overrides,
   };
 }
@@ -38,6 +39,26 @@ describe("createTuiPrompter", () => {
     expect(renderer.readSelect).toHaveBeenCalledWith(expect.objectContaining({ kind: "single" }));
   });
 
+  it("forwards question-level descriptions and metadata to the panel", async () => {
+    const renderer = fakeRenderer({ readSelect: vi.fn(async () => ["option-0"]) });
+    const prompter = createTuiPrompter(renderer);
+
+    await prompter.select({
+      message: "extension/agent-browser",
+      description: "Add browser automation tools to an eve agent.",
+      metadata: [{ label: "Source", value: "Official eve registry" }],
+      options: [{ value: "add", label: "Add to project" }],
+    });
+
+    expect(renderer.readSelect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "single",
+        description: "Add browser automation tools to an eve agent.",
+        metadata: [{ label: "Source", value: "Official eve registry" }],
+      }),
+    );
+  });
+
   it("maps a searchable action back to its typed value", async () => {
     const renderer = fakeRenderer({
       readSelect: vi.fn(async () => [searchActionValue("older-agent")]),
@@ -48,6 +69,7 @@ describe("createTuiPrompter", () => {
       prompter.select({
         message: "Project to link",
         search: true,
+        hintLayout: "inline",
         searchAction: {
           label: (query) => `Search for '${query}'`,
           value: (query) => `search:${query}`,
@@ -58,6 +80,7 @@ describe("createTuiPrompter", () => {
     expect(renderer.readSelect).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "search",
+        layout: "task-list",
         searchAction: { label: expect.any(Function) },
       }),
     );
@@ -135,7 +158,7 @@ describe("createTuiPrompter", () => {
         editable: {
           value: "new",
           defaultValue: "weather-agent",
-          formatHint: (value) => `Named '${value}'`,
+          formatHint: (value) => `Name: ${value}`,
         },
       }),
     ).resolves.toEqual({ kind: "edited", value: "new", text: "custom-name" });

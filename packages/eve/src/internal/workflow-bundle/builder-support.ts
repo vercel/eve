@@ -1,22 +1,32 @@
 import { builtinModules } from "node:module";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 
-import {
-  buildWithNitroRolldown,
-  getSingleRolldownChunk,
-} from "#internal/bundler/nitro-rolldown.js";
+import { atomicWriteFile } from "#shared/atomic-write-file.js";
+
+import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
+import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import { resolveWorkflowModulePath } from "#internal/application/package.js";
 import {
   applyWorkflowTransform,
   getImportPath,
   type WorkflowManifest,
 } from "#internal/workflow-bundle/workflow-builders.js";
-import { EVE_WORKFLOW_QUEUE_NAMESPACE } from "#internal/workflow/queue-namespace.js";
 import { WORKFLOW_STEP_EXTERNAL_PACKAGES } from "#internal/workflow-bundle/vercel-workflow-output.js";
 
 export const WORKFLOW_VIRTUAL_ENTRY_ID = "\0eve-workflow-entry";
+
+export interface WorkflowBundleBuilderOptions {
+  agentName: string;
+  appRoot: string;
+  compiledArtifactsBootstrapPath: string;
+  outDir: string;
+  rootDir: string;
+  watch: boolean;
+  /** Test-harness-only: also scans `src/internal/testing/`. */
+  includeTestFixtures?: boolean;
+}
 const PSEUDO_PACKAGES = new Set([
   "server-only",
   "client-only",
@@ -44,7 +54,6 @@ const IGNORED_INPUT_DIRECTORIES = new Set([
   ".nuxt",
   ".output",
   ".vercel",
-  ".workflow-data",
   ".workflow-vitest",
   ".well-known",
   ".svelte-kit",
@@ -70,19 +79,21 @@ export interface WorkflowBundleDiscoveredEntries {
 }
 
 export interface WorkflowBundleCreateWorkflowsBundleOptions {
-  readonly bundleFinalOutput?: boolean;
+  readonly additionalOutputs?: readonly WorkflowBundleOutput[];
   readonly discoveredEntries?: WorkflowBundleDiscoveredEntries;
-  readonly format?: "cjs" | "esm";
   readonly inputFiles: readonly string[];
-  readonly keepInterimBundleContext?: boolean;
   readonly outfile: string;
+  readonly stepRegistrationsPath: string;
   readonly tsconfigPath?: string;
 }
 
 export interface WorkflowBundleCreateWorkflowsBundleResult {
-  readonly bundleFinal?: (interimBundleResult: string) => Promise<void>;
-  readonly interimBundleCtx?: undefined;
   readonly manifest: WorkflowManifest;
+}
+
+export interface WorkflowBundleOutput {
+  readonly outfile: string;
+  readonly stepRegistrationsPath: string;
 }
 
 interface WorkflowGraph {
@@ -311,7 +322,7 @@ export async function bundleWorkflowStepRegistrations(input: {
     ...serdeOnlyFiles.map((filePath) => createWorkflowImport(filePath, input.workingDir)),
     "export const __steps_registered = true;",
   ].join("\n");
-  const output = await buildWithNitroRolldown({
+  const chunk = await buildSingleRolldownChunk(`step registrations bundle for "${input.outfile}"`, {
     cwd: input.workingDir,
     input: WORKFLOW_VIRTUAL_ENTRY_ID,
     // Optional runtime packages (the just-bash sandbox engine and its
@@ -334,20 +345,17 @@ export async function bundleWorkflowStepRegistrations(input: {
       }),
     ],
     resolve: {
-      conditionNames: ["eve-source", "node", "import", "default"],
+      conditionNames: ["eve-source"],
       extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
       mainFields: ["module", "main"],
     },
     tsconfig: input.tsconfigPath ?? false,
-    write: false,
     output: {
-      codeSplitting: false,
       comments: false,
       format: "esm",
       sourcemap: "inline",
     },
   });
-  const chunk = getSingleRolldownChunk(output, `step registrations bundle for "${input.outfile}"`);
   await writeWorkflowBundleAtomically(input.outfile, chunk.code);
 }
 
@@ -380,41 +388,50 @@ export function createWorkflowNodeBuiltinGuardPlugin(): WorkflowRolldownPlugin {
 }
 
 export async function bundleFinalWorkflowOutput(input: {
-  bundleFinalOutput: boolean;
   code: string;
-  format: "cjs" | "esm";
   outfile: string;
-  workingDir: string;
+  queueNamespace: string;
+  stepRegistrationsPath?: string;
 }): Promise<void> {
-  const workflowBundleCode = input.code.endsWith("\n") ? input.code : `${input.code}\n`;
-  const workflowFunctionCode = `// biome-ignore-all lint: generated file
-/* eslint-disable */
-import { workflowEntrypoint } from 'workflow/runtime';
-
-const workflowCode = \`${workflowBundleCode.replace(/[\\`$]/g, "\\$&")}\`;
-
-export const POST = workflowEntrypoint(workflowCode, { namespace: ${JSON.stringify(EVE_WORKFLOW_QUEUE_NAMESPACE)} });`;
-
-  if (!input.bundleFinalOutput) {
-    await writeWorkflowBundleAtomically(input.outfile, workflowFunctionCode);
-    return;
-  }
-
-  const output = await buildWithNitroRolldown({
-    cwd: input.workingDir,
-    input: WORKFLOW_VIRTUAL_ENTRY_ID,
-    external: (source: string) => source === "@aws-sdk/credential-provider-web-identity",
-    platform: "node",
-    plugins: [createWorkflowVirtualEntryPlugin(workflowFunctionCode)],
-    write: false,
-    output: {
-      comments: false,
-      format: input.format,
-      sourcemap: false,
-    },
+  const workflowFunctionCode = createWorkflowEntrypointSource({
+    code: input.code,
+    queueNamespace: input.queueNamespace,
+    stepRegistrationsImport:
+      input.stepRegistrationsPath === undefined
+        ? undefined
+        : toRelativeImportSpecifier(dirname(input.outfile), input.stepRegistrationsPath),
   });
-  const chunk = getSingleRolldownChunk(output, `final workflow bundle for "${input.outfile}"`);
-  await writeWorkflowBundleAtomically(input.outfile, chunk.code);
+
+  await writeWorkflowBundleAtomically(input.outfile, workflowFunctionCode);
+}
+
+export function createWorkflowEntrypointSource(input: {
+  readonly code: string;
+  readonly queueNamespace: string;
+  readonly stepRegistrationsImport?: string;
+}): string {
+  const workflowRuntimePath = normalizeEsmImportSpecifier(
+    resolveWorkflowModulePath("workflow/runtime"),
+  );
+  const encodedWorkflowCode = Buffer.from(
+    input.code.endsWith("\n") ? input.code : `${input.code}\n`,
+    "utf8",
+  ).toString("base64");
+  const chunks = encodedWorkflowCode.match(/.{1,16384}/gu) ?? [""];
+
+  const stepRegistrationsImport =
+    input.stepRegistrationsImport === undefined
+      ? ""
+      : `import { __steps_registered as __eveWorkflowStepsRegistered } from ${JSON.stringify(input.stepRegistrationsImport)};\nvoid __eveWorkflowStepsRegistered;`;
+
+  return `// Generated by eve. Do not edit by hand.
+import { workflowEntrypoint } from ${JSON.stringify(workflowRuntimePath)};
+${stepRegistrationsImport}
+
+const workflowCode = Buffer.from(${JSON.stringify(chunks)}.join(""), "base64").toString("utf8");
+
+export const POST = workflowEntrypoint(workflowCode, { namespace: ${JSON.stringify(input.queueNamespace)} });
+`;
 }
 
 export function convertStepsManifest(steps: WorkflowManifest["steps"]): Record<string, unknown> {
@@ -488,9 +505,7 @@ function resolveFirstExistingPath(paths: readonly string[]): { id: string } | un
 
 async function writeWorkflowBundleAtomically(outfile: string, source: string): Promise<void> {
   await mkdir(dirname(outfile), { recursive: true });
-  const tempPath = `${outfile}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tempPath, source);
-  await rename(tempPath, outfile);
+  await atomicWriteFile(outfile, source);
 }
 
 function mergeWorkflowManifest(target: WorkflowManifest, source: WorkflowManifest): void {
@@ -537,22 +552,4 @@ function createManifestRelativeFilepath(workingDir: string, absolutePath: string
 
 function isJavaScriptLikePath(path: string): boolean {
   return /\.(?:[cm]?[jt]sx?)$/.test(path);
-}
-
-/*
- * Some generated workflow artifacts (notably `workflows.mjs`) are read by
- * Nitro's Rolldown bundler concurrently with rebuilds during `eve dev`. A
- * plain `writeFile` truncates the target first and streams bytes, so a
- * reader can observe an empty or partial module mid-write and report
- * spurious "missing export" errors. Writing to a sibling temp file and
- * renaming relies on POSIX `rename` atomicity so readers always see
- * either the old or the new contents.
- */
-export async function atomicWriteFile(
-  targetPath: string,
-  contents: string | Buffer | Uint8Array,
-): Promise<void> {
-  const tmpPath = `${targetPath}.tmp-${process.pid}-${Date.now().toString(36)}`;
-  await writeFile(tmpPath, contents);
-  await rename(tmpPath, targetPath);
 }

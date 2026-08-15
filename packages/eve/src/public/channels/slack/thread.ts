@@ -29,9 +29,10 @@ export interface LoadThreadContextMessagesOptions {
  * Slack thread turn.
  *
  * Returns an empty array when `message` is the thread root. For thread
- * replies, refreshes the bound Slack thread and returns its recent
- * messages before the triggering message, filtered by {@link options}.
- * Formatting and model-message role choice stay with the caller.
+ * replies, reuses already loaded thread messages or refreshes the bound
+ * Slack thread, then returns messages before the triggering message,
+ * filtered by {@link options}. Formatting and model-message role choice
+ * stay with the caller.
  */
 export async function loadThreadContextMessages(
   thread: Pick<SlackThread, "recentMessages" | "refresh">,
@@ -45,7 +46,9 @@ export async function loadThreadContextMessages(
     return [];
   }
 
-  await thread.refresh();
+  if (thread.recentMessages.length === 0) {
+    await thread.refresh();
+  }
   const currentIndex = thread.recentMessages.findIndex((entry) => entry.ts === message.ts);
   const candidateMessages =
     currentIndex === -1 ? thread.recentMessages : thread.recentMessages.slice(0, currentIndex);

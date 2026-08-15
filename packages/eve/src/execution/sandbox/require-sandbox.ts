@@ -1,6 +1,8 @@
 import { loadContext } from "#context/container.js";
 import { SandboxKey } from "#context/keys.js";
 import type { SandboxSession } from "#public/definitions/sandbox.js";
+import { bindSandboxAbortSignal } from "#execution/sandbox/abort-bound-session.js";
+import { resolveSandboxModelPath } from "#shared/skill-paths.js";
 
 /**
  * Resolves the active sandbox session from the runtime context.
@@ -9,8 +11,10 @@ import type { SandboxSession } from "#public/definitions/sandbox.js";
  * `read_file`, `write_file`, `glob`, `grep`). Centralizes the context
  * lookup, null checks, and error messages so each executor does not
  * duplicate them.
+ *
+ * Binds the returned session to `abortSignal` when provided.
  */
-export async function requireSandboxSession(): Promise<SandboxSession> {
+export async function requireSandboxSession(abortSignal?: AbortSignal): Promise<SandboxSession> {
   const sandboxAccess = loadContext().get(SandboxKey);
 
   if (sandboxAccess === undefined) {
@@ -26,18 +30,25 @@ export async function requireSandboxSession(): Promise<SandboxSession> {
     throw new Error("The sandbox is not available in the current runtime context.");
   }
 
-  return sandbox;
+  return abortSignal === undefined ? sandbox : bindSandboxAbortSignal(sandbox, abortSignal);
 }
 
 /**
- * Validates that a model-supplied file path is absolute. Throws a
- * descriptive error when the path does not start with `/`.
+ * Resolves a model-supplied `$HOME` prefix and validates that the resulting
+ * sandbox file path is absolute.
  */
-export function validateAbsoluteFilePath(filePath: string): void {
-  if (!filePath.startsWith("/")) {
+export async function resolveAbsoluteFilePath(
+  sandbox: SandboxSession,
+  filePath: string,
+): Promise<string> {
+  const resolvedPath = await resolveSandboxModelPath({ path: filePath, sandbox });
+
+  if (!resolvedPath.startsWith("/")) {
     throw new Error(
       `filePath must be an absolute path. Received: "${filePath}". ` +
-        "Use an absolute path such as /workspace/foo.ts.",
+        "Use an absolute path such as /workspace/foo.ts or a path beginning with $HOME/.",
     );
   }
+
+  return resolvedPath;
 }

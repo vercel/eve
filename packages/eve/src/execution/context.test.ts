@@ -21,7 +21,6 @@ import type { HarnessSession } from "#harness/types.js";
 vi.mock("./sandbox/ensure.js", () => ({
   ensureSandboxAccess: vi.fn().mockResolvedValue({
     captureState: vi.fn().mockResolvedValue({ initialized: false, session: null }),
-    dispose: vi.fn(),
     get: vi.fn().mockResolvedValue(null),
   }),
 }));

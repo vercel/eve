@@ -2,7 +2,7 @@ import { createMicrosandboxSandboxBackend } from "#execution/sandbox/bindings/lo
 import type { SandboxBackend } from "#public/definitions/sandbox-backend.js";
 import type {
   MicrosandboxBootstrapUseOptions,
-  MicrosandboxCreateOptions,
+  MicrosandboxSandboxCreateOptions,
   MicrosandboxSessionUseOptions,
 } from "#public/sandbox/microsandbox-sandbox.js";
 
@@ -21,7 +21,7 @@ import type {
  * fallback behavior, use `defaultBackend()` instead.
  */
 export function microsandbox(
-  opts?: MicrosandboxCreateOptions,
+  opts?: MicrosandboxSandboxCreateOptions,
 ): SandboxBackend<MicrosandboxBootstrapUseOptions, MicrosandboxSessionUseOptions> {
   return createMicrosandboxSandboxBackend({ createOptions: opts });
 }

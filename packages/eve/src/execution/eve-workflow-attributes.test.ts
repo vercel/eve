@@ -7,10 +7,12 @@ import {
   deriveSessionTitle,
   EVE_SESSION_TITLE_MAX_CHARS,
   readChannelKind,
+  readChannelRequestId,
   readParentLineage,
   readParentSessionId,
   readRootSessionId,
 } from "#execution/eve-workflow-attributes.js";
+import { ChannelRequestIdKey } from "#context/keys.js";
 
 const slackChannelCtx = {
   "eve.channel": { kind: "slack", state: { team: "T1" } },
@@ -84,6 +86,22 @@ describe("readRootSessionId", () => {
   });
 });
 
+describe("readChannelRequestId", () => {
+  it("returns the channel request id when the context slot is well-formed", () => {
+    expect(
+      readChannelRequestId({
+        [ChannelRequestIdKey.name]: "req_123",
+      }),
+    ).toBe("req_123");
+  });
+
+  it("returns undefined when the slot is missing or malformed", () => {
+    expect(readChannelRequestId({})).toBeUndefined();
+    expect(readChannelRequestId({ [ChannelRequestIdKey.name]: "" })).toBeUndefined();
+    expect(readChannelRequestId({ [ChannelRequestIdKey.name]: 42 })).toBeUndefined();
+  });
+});
+
 describe("deriveSessionTitle", () => {
   it("collapses whitespace and trims plain string messages", () => {
     expect(deriveSessionTitle("  hello\n\nworld   ")).toBe("hello world");
@@ -127,6 +145,7 @@ describe("buildSessionAttributes", () => {
     });
 
     expect(attrs).toEqual({
+      "$eve.channel_request_id": undefined,
       "$eve.type": "session",
       "$eve.trigger": "slack",
       "$eve.title": "ship the thing please",
@@ -142,6 +161,18 @@ describe("buildSessionAttributes", () => {
     expect(attrs["$eve.trigger"]).toBeUndefined();
     expect(attrs["$eve.title"]).toBe("hi");
   });
+
+  it("emits the channel request id when present", () => {
+    const attrs = buildSessionAttributes({
+      inputMessage: "hi",
+      serializedContext: {
+        ...slackChannelCtx,
+        [ChannelRequestIdKey.name]: "req_session",
+      },
+    });
+
+    expect(attrs["$eve.channel_request_id"]).toBe("req_session");
+  });
 });
 
 describe("buildSubagentRootAttributes", () => {
@@ -156,6 +187,7 @@ describe("buildSubagentRootAttributes", () => {
     });
 
     expect(attrs).toEqual({
+      "$eve.channel_request_id": undefined,
       "$eve.type": "subagent",
       "$eve.parent": "wrun_parent_subagent",
       "$eve.parent_call": "call_subagent_0",
@@ -164,6 +196,20 @@ describe("buildSubagentRootAttributes", () => {
       "$eve.subagent": "subagents/linear",
       "$eve.trigger": "slack",
     });
+  });
+
+  it("emits the channel request id when present", () => {
+    const attrs = buildSubagentRootAttributes({
+      identity: { nodeId: "subagents/linear" },
+      parentSessionId: "wrun_parent_subagent",
+      rootSessionId: "wrun_top_level_session",
+      serializedContext: {
+        ...subagentChainCtx,
+        [ChannelRequestIdKey.name]: "req_subagent",
+      },
+    });
+
+    expect(attrs["$eve.channel_request_id"]).toBe("req_subagent");
   });
 });
 
@@ -175,9 +221,20 @@ describe("buildTurnAttributes", () => {
     });
 
     expect(attrs).toEqual({
+      "$eve.channel_request_id": undefined,
       "$eve.type": "turn",
       "$eve.parent": "wrun_session_123",
       "$eve.root": "wrun_session_123",
     });
+  });
+
+  it("emits the channel request id when present", () => {
+    const attrs = buildTurnAttributes({
+      parentSessionId: "wrun_session_123",
+      requestId: "req_turn",
+      rootSessionId: "wrun_session_123",
+    });
+
+    expect(attrs["$eve.channel_request_id"]).toBe("req_turn");
   });
 });

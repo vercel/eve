@@ -1,6 +1,7 @@
 import type {
   CompiledAgentManifest,
   CompiledAgentNodeManifest,
+  CompiledAgentResources,
   CompiledRemoteAgentNode,
   CompiledSubagentNode,
 } from "#compiler/manifest.js";
@@ -13,22 +14,24 @@ import {
   getAllFrameworkChannelNames,
   getFrameworkChannelDefinitions,
 } from "#runtime/framework-channels/index.js";
-import { createConnectionSearchResolver } from "#runtime/framework-tools/connection-search-dynamic.js";
 import {
   getAllFrameworkToolNames,
+  getFrameworkDynamicToolResolvers,
   getFrameworkToolDefinitions,
 } from "#runtime/framework-tools/index.js";
 import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
+import { resolveDynamicSubagentDefinition } from "#runtime/resolve-dynamic-subagent.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import { createRuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createRuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
-import { CODE_MODE_TOOL_NAME, WORKFLOW_TOOL_NAME } from "#shared/code-mode.js";
+import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 import type {
   ResolvedChannelDefinition,
+  ResolvedDynamicSubagentDefinition,
   ResolvedRuntimeDelegationNode,
   ResolvedRuntimeRemoteAgentNode,
   ResolvedRuntimeSubagentNode,
@@ -106,7 +109,8 @@ export async function resolveRuntimeAgentGraph(
 
 interface ResolveRuntimeAgentNodeInput {
   readonly childNodeIdsByParentNodeId: ReadonlyMap<string, readonly string[]>;
-  readonly manifest: CompiledAgentNodeManifest;
+  readonly agentId?: string;
+  readonly manifest: CompiledAgentNodeManifest | CompiledAgentResources;
   readonly moduleMap: CompiledModuleMap;
   readonly nodeId: string;
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
@@ -134,8 +138,9 @@ async function resolveRuntimeAgentNode(
     moduleMap: input.moduleMap,
     nodeId: input.nodeId,
   });
-  const hasConnections = agent.connections.length > 0;
-  const frameworkTools = getFrameworkToolDefinitions({ hasConnections });
+  const frameworkTools = getFrameworkToolDefinitions({
+    authoredSkills: agent.skills,
+  });
   const frameworkToolNames = new Set(frameworkTools.map((t) => t.name));
   const allFrameworkToolNames = getAllFrameworkToolNames();
 
@@ -171,7 +176,6 @@ async function resolveRuntimeAgentNode(
     },
     {
       reservedToolNames: [
-        CODE_MODE_TOOL_NAME,
         WORKFLOW_TOOL_NAME,
         ...(frameworkToolNames.has(LOAD_SKILL_TOOL_NAME) ||
         authoredToolNames.has(LOAD_SKILL_TOOL_NAME)
@@ -213,6 +217,9 @@ async function resolveRuntimeAgentNode(
     workspaceResourceRoot: agent.workspaceResourceRoot,
   });
   const subagentRegistry = createRuntimeSubagentRegistry({
+    persistentSessions:
+      agent.config?.experimental?.tasks === true ||
+      agent.config?.experimental?.subagentPersistentSessions === true,
     reservedToolNames: [
       LOAD_SKILL_TOOL_NAME,
       ...toolRegistry.preparedTools.map((tool) => tool.name),
@@ -226,12 +233,10 @@ async function resolveRuntimeAgentNode(
       subagentNodesById: input.subagentNodesById,
     }),
   });
-  const resolvedAgent = hasConnections
-    ? {
-        ...agent,
-        dynamicToolResolvers: [...agent.dynamicToolResolvers, createConnectionSearchResolver()],
-      }
-    : agent;
+  const resolvedAgent = {
+    ...agent,
+    dynamicToolResolvers: [...agent.dynamicToolResolvers, ...getFrameworkDynamicToolResolvers()],
+  };
 
   const node: ResolvedAgentGraphBundle["root"] = {
     agent: resolvedAgent,
@@ -244,6 +249,7 @@ async function resolveRuntimeAgentNode(
     toolRegistry,
     turnAgent: createResolvedRuntimeTurnAgent({
       agent: resolvedAgent,
+      id: input.agentId,
       nodeId,
       tools: [...toolRegistry.preparedTools, ...subagentRegistry.preparedTools],
     }),
@@ -256,7 +262,7 @@ async function resolveRuntimeAgentNode(
 
 async function resolveRuntimeSubagents(input: {
   readonly childNodeIdsByParentNodeId: ReadonlyMap<string, readonly string[]>;
-  readonly manifest: CompiledAgentNodeManifest;
+  readonly manifest: CompiledAgentNodeManifest | CompiledAgentResources;
   readonly moduleMap: CompiledModuleMap;
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
   readonly parentNodeId: string;
@@ -309,8 +315,20 @@ async function resolveRuntimeSubagent(input: {
   readonly sourceRef: CompiledSubagentNode;
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
 }): Promise<ResolvedRuntimeSubagentNode> {
+  const variant:
+    | { readonly description: string; readonly dynamic?: never }
+    | { readonly description?: never; readonly dynamic: ResolvedDynamicSubagentDefinition } =
+    input.sourceRef.configResolver === undefined
+      ? { description: input.sourceRef.description }
+      : {
+          dynamic: await resolveDynamicSubagentDefinition({
+            definition: input.sourceRef.configResolver,
+            moduleMap: input.moduleMap,
+            nodeId: input.sourceRef.nodeId,
+          }),
+        };
   const resolvedSubagent: ResolvedRuntimeSubagentNode = {
-    description: input.sourceRef.description,
+    ...variant,
     kind: "subagent",
     logicalPath: input.sourceRef.logicalPath,
     name: input.sourceRef.name,
@@ -319,6 +337,7 @@ async function resolveRuntimeSubagent(input: {
     sourceKind: "module",
   };
   await resolveRuntimeAgentNode({
+    agentId: input.sourceRef.name,
     childNodeIdsByParentNodeId: input.childNodeIdsByParentNodeId,
     manifest: input.sourceRef.agent,
     moduleMap: input.moduleMap,
@@ -350,6 +369,7 @@ async function resolveRuntimeRemoteAgent(input: {
   const resolvedRemoteAgent: {
     auth?: ResolvedRuntimeRemoteAgentNode["auth"];
     description: string;
+    forwardPrincipal?: boolean;
     headers?: HeadersValue;
     kind: "remote";
     logicalPath: string;
@@ -370,11 +390,19 @@ async function resolveRuntimeRemoteAgent(input: {
     path: input.sourceRef.path,
     sourceId: input.sourceRef.sourceId,
     sourceKind: "module",
-    url: input.sourceRef.url,
+    url: await resolveRemoteAgentUrl({
+      bakedUrl: input.sourceRef.url,
+      logicalPath: input.sourceRef.logicalPath,
+      resolvedUrl: resolvedRecord.url,
+    }),
   };
 
   if (typeof resolvedRecord.auth === "function") {
     resolvedRemoteAgent.auth = resolvedRecord.auth as ResolvedRuntimeRemoteAgentNode["auth"];
+  }
+
+  if (resolvedRecord.forwardPrincipal === true) {
+    resolvedRemoteAgent.forwardPrincipal = true;
   }
 
   const headers = resolveRemoteAgentHeaders(resolvedRecord.headers);
@@ -384,6 +412,28 @@ async function resolveRuntimeRemoteAgent(input: {
   }
 
   return resolvedRemoteAgent;
+}
+
+async function resolveRemoteAgentUrl(input: {
+  readonly bakedUrl: string | undefined;
+  readonly logicalPath: string;
+  readonly resolvedUrl: unknown;
+}): Promise<string> {
+  if (typeof input.resolvedUrl === "function") {
+    const resolved = await (input.resolvedUrl as () => unknown)();
+    if (typeof resolved !== "string" || resolved.length === 0) {
+      throw new Error(
+        `Remote agent "${input.logicalPath}" url function must return a non-empty string.`,
+      );
+    }
+    return resolved;
+  }
+
+  const url = input.bakedUrl ?? (typeof input.resolvedUrl === "string" ? input.resolvedUrl : "");
+  if (url.length === 0) {
+    throw new Error(`Remote agent "${input.logicalPath}" is missing a url.`);
+  }
+  return url;
 }
 
 function resolveRemoteAgentHeaders(value: unknown): HeadersValue | undefined {

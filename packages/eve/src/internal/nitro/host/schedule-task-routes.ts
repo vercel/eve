@@ -5,7 +5,7 @@ import {
   type ScheduleRegistration,
 } from "#runtime/schedules/register.js";
 import { stringifyEsmImportSpecifier } from "#internal/application/import-specifier.js";
-import type { NitroArtifactsConfigInput } from "#internal/nitro/host/artifacts-config.js";
+import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 
 /**
  * Virtual id prefix used for the synthetic Nitro task module emitted for each
@@ -28,7 +28,7 @@ interface ScheduleTaskNitro {
  * along with the baked-in artifacts config.
  */
 export interface RegisterScheduleTaskHandlersInput {
-  readonly artifactsConfig: NitroArtifactsConfigInput;
+  readonly artifactsConfig: NitroArtifactsConfig;
   readonly dispatchModulePath: string;
   readonly registrations: readonly ScheduleRegistration[];
 }
@@ -38,7 +38,7 @@ export interface RegisterScheduleTaskHandlersInput {
  * change in dev mode.
  */
 export interface SyncScheduleTaskHandlersInput {
-  readonly artifactsConfig: NitroArtifactsConfigInput;
+  readonly artifactsConfig: NitroArtifactsConfig;
   readonly dispatchModulePath: string;
   readonly next: readonly ScheduleRegistration[];
   readonly previous: readonly ScheduleRegistration[];
@@ -146,7 +146,7 @@ export function removeScheduleTaskHandlers(nitro: ScheduleTaskNitro): void {
 function addScheduleTaskVirtualHandler(
   nitro: ScheduleTaskNitro,
   input: {
-    artifactsConfig: NitroArtifactsConfigInput;
+    artifactsConfig: NitroArtifactsConfig;
     dispatchModulePath: string;
     registration: ScheduleRegistration;
   },

@@ -1,4 +1,4 @@
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import { isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 
 function isDevelopmentMessageStreamDisconnectError(error: unknown): boolean {
@@ -43,10 +43,10 @@ export interface DevelopmentMessageStream {
    * configured boundary predicate matches or the response closes.
    */
   readEvents(input: {
-    onEvent?(event: HandleMessageStreamEvent): void;
+    onEvent?(event: MessageStreamEvent): void;
     startAfterBoundaryCount?: number;
-    stopWhen?(event: HandleMessageStreamEvent): boolean;
-  }): Promise<HandleMessageStreamEvent[]>;
+    stopWhen?(event: MessageStreamEvent): boolean;
+  }): Promise<MessageStreamEvent[]>;
 }
 
 class BufferedDevelopmentMessageStream implements DevelopmentMessageStream {
@@ -97,10 +97,10 @@ class BufferedDevelopmentMessageStream implements DevelopmentMessageStream {
   }
 
   async readEvents(input: {
-    onEvent?(event: HandleMessageStreamEvent): void;
+    onEvent?(event: MessageStreamEvent): void;
     startAfterBoundaryCount?: number;
-    stopWhen?(event: HandleMessageStreamEvent): boolean;
-  }): Promise<HandleMessageStreamEvent[]> {
+    stopWhen?(event: MessageStreamEvent): boolean;
+  }): Promise<MessageStreamEvent[]> {
     if (this.#closed) {
       return [];
     }
@@ -118,12 +118,12 @@ class BufferedDevelopmentMessageStream implements DevelopmentMessageStream {
     this.#isReading = true;
 
     try {
-      const events: HandleMessageStreamEvent[] = [];
+      const events: MessageStreamEvent[] = [];
       const stopWhen = input.stopWhen ?? isCurrentTurnBoundaryEvent;
       const startAfterBoundaryCount = input.startAfterBoundaryCount ?? 0;
       let shouldCollect = startAfterBoundaryCount <= this.#boundaryCount;
 
-      const handleEvent = (event: HandleMessageStreamEvent): boolean => {
+      const handleEvent = (event: MessageStreamEvent): boolean => {
         const isBoundaryEvent = isCurrentTurnBoundaryEvent(event);
 
         if (shouldCollect) {
@@ -160,7 +160,7 @@ class BufferedDevelopmentMessageStream implements DevelopmentMessageStream {
             continue;
           }
 
-          const event = JSON.parse(line) as HandleMessageStreamEvent;
+          const event = JSON.parse(line) as MessageStreamEvent;
 
           if (handleEvent(event)) {
             return events;
@@ -209,7 +209,7 @@ class BufferedDevelopmentMessageStream implements DevelopmentMessageStream {
       this.#buffer = "";
 
       if (trailingLine.length > 0) {
-        const event = JSON.parse(trailingLine) as HandleMessageStreamEvent;
+        const event = JSON.parse(trailingLine) as MessageStreamEvent;
         handleEvent(event);
       }
 

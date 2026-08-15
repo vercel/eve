@@ -353,6 +353,7 @@ describe("runtime compiled artifact loaders", () => {
       model: {
         contextWindowTokens: expect.any(Number),
         id: "openai/gpt-5.4",
+        maxOutputTokens: 128_000,
         routing: { kind: "gateway", target: "openai" },
       },
       name: "runtime-loader-test-agent",
@@ -362,13 +363,16 @@ describe("runtime compiled artifact loaders", () => {
         sourceId: "agent.mjs",
       },
     });
-    expect(manifest.instructions).toEqual({
-      name: "instructions",
-      logicalPath: "instructions.mjs",
-      markdown: "You are a precise runtime loader test agent.",
-      sourceId: "instructions.mjs",
-      sourceKind: "module",
-    });
+    expect(manifest.instructions).toEqual([
+      {
+        content: "You are a precise runtime loader test agent.",
+        name: "instructions",
+        logicalPath: "instructions.mjs",
+        role: "system",
+        sourceId: "instructions.mjs",
+        sourceKind: "module",
+      },
+    ]);
     if (compiledChannel === undefined) {
       throw new Error("Expected one compiled channel.");
     }
@@ -423,13 +427,18 @@ describe("runtime compiled artifact loaders", () => {
         }
       ).default.description,
     ).toBe("Get the weather.");
-    await expect(resolvedAgent.tools[0]?.execute?.({ city: "Brooklyn" })).resolves.toEqual({
+    await expect(
+      resolvedAgent.tools[0]?.execute?.(
+        { city: "Brooklyn" },
+        { messages: [], toolCallId: "call_1" },
+      ),
+    ).resolves.toEqual({
       city: "Brooklyn",
       source: "lib",
     });
     expect(resolvedAgent.instructions).toEqual(manifest.instructions);
     expect(resolvedAgent.workspaceSpec).toEqual({
-      rootEntries: ["skills/"],
+      rootEntries: [],
     });
     expect(Object.keys(moduleMap.nodes)).toEqual([ROOT_COMPILED_AGENT_NODE_ID]);
   });
@@ -527,13 +536,16 @@ describe("runtime compiled artifact loaders", () => {
       "sandbox/sandbox.mjs",
       "tools/search.mjs",
     ]);
-    expect(researcherNode?.agent.instructions).toEqual({
-      name: "instructions",
-      logicalPath: "instructions.md",
-      markdown: "Investigate research tasks thoroughly.",
-      sourceId: "instructions.md",
-      sourceKind: "markdown",
-    });
+    expect(researcherNode?.agent.instructions).toEqual([
+      {
+        content: "Investigate research tasks thoroughly.",
+        name: "instructions",
+        logicalPath: "instructions.md",
+        role: "system",
+        sourceId: "instructions.md",
+        sourceKind: "markdown",
+      },
+    ]);
     expect(researcherNode?.agent.sandbox).toMatchObject({
       logicalPath: "sandbox/sandbox.mjs",
       sourceId: "sandbox/sandbox.mjs",
@@ -547,7 +559,12 @@ describe("runtime compiled artifact loaders", () => {
           (tool as { name?: string }).name?.endsWith("_sandbox"),
       ),
     ).toBe(false);
-    await expect(researcherNode?.agent.tools[0]?.execute?.({ query: "climate" })).resolves.toEqual({
+    await expect(
+      researcherNode?.agent.tools[0]?.execute?.(
+        { query: "climate" },
+        { messages: [], toolCallId: "call_1" },
+      ),
+    ).resolves.toEqual({
       query: "climate",
       source: "subagent-lib",
     });
@@ -576,7 +593,9 @@ describe("runtime compiled artifact loaders", () => {
       throw new Error("Expected the get_weather tool to be available.");
     }
 
-    await expect(getWeatherTool.execute?.({ city: "Brooklyn" })).resolves.toEqual({
+    await expect(
+      getWeatherTool.execute?.({ city: "Brooklyn" }, { messages: [], toolCallId: "call_1" }),
+    ).resolves.toEqual({
       city: "Brooklyn",
       route: "@/ path alias",
       source: "alias-lib",
@@ -605,7 +624,9 @@ describe("runtime compiled artifact loaders", () => {
       throw new Error("Expected one compiled tool before the source update.");
     }
 
-    await expect(firstTool.execute?.({ city: "Brooklyn" })).resolves.toEqual({
+    await expect(
+      firstTool.execute?.({ city: "Brooklyn" }, { messages: [], toolCallId: "call_1" }),
+    ).resolves.toEqual({
       city: "Brooklyn",
       source: "lib",
     });
@@ -631,7 +652,9 @@ describe("runtime compiled artifact loaders", () => {
       throw new Error("Expected one compiled tool after the source update.");
     }
 
-    await expect(secondTool.execute?.({ city: "Brooklyn" })).resolves.toEqual({
+    await expect(
+      secondTool.execute?.({ city: "Brooklyn" }, { messages: [], toolCallId: "call_1" }),
+    ).resolves.toEqual({
       city: "Brooklyn",
       source: "updated-lib",
     });

@@ -7,10 +7,6 @@ import { summarizeDiscoverDiagnostics } from "#discover/diagnostics.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import {
-  CHANNEL_INSTRUMENTATION_TYPES_FILE_NAME,
-  createChannelInstrumentationTypesSource,
-} from "#compiler/channel-instrumentation-types.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
@@ -41,7 +37,6 @@ export const COMPILE_METADATA_VERSION = 5;
  */
 export interface CompilerArtifactPaths {
   appRoot: string;
-  channelInstrumentationTypesPath: string;
   compiledManifestPath: string;
   compileDirectoryPath: string;
   compileMetadataPath: string;
@@ -91,11 +86,17 @@ export interface CompileMetadata {
   version: typeof COMPILE_METADATA_VERSION;
 }
 
+export interface CompilerArtifactLocations {
+  readonly publishedRoot: string;
+  readonly writeRoot: string;
+}
+
 /**
  * Input for writing compiler-owned discovery artifacts.
  */
 interface WriteCompilerArtifactsInput {
   appRoot: string;
+  artifactLocations: CompilerArtifactLocations;
   diagnostics: readonly DiscoverDiagnostic[];
   manifest: AgentSourceManifest;
 }
@@ -111,20 +112,22 @@ interface WriteCompilerArtifactsResult {
   paths: CompilerArtifactPaths;
 }
 
-/**
- * Resolves the compiler-owned artifact paths for one application root.
- */
+/** Resolves stable compiler-owned artifact paths for one application root. */
 export function resolveCompilerArtifactPaths(appRoot: string): CompilerArtifactPaths {
+  return resolveCompilerArtifactPathsAt(appRoot, join(resolve(appRoot), ".eve"));
+}
+
+function resolveCompilerArtifactPathsAt(
+  appRoot: string,
+  artifactsRoot: string,
+): CompilerArtifactPaths {
   const resolvedAppRoot = resolve(appRoot);
-  const discoveryDirectoryPath = join(resolvedAppRoot, ".eve", "discovery");
-  const compileDirectoryPath = join(resolvedAppRoot, ".eve", "compile");
+  const resolvedArtifactsRoot = resolve(artifactsRoot);
+  const discoveryDirectoryPath = join(resolvedArtifactsRoot, "discovery");
+  const compileDirectoryPath = join(resolvedArtifactsRoot, "compile");
 
   return {
     appRoot: resolvedAppRoot,
-    channelInstrumentationTypesPath: join(
-      compileDirectoryPath,
-      CHANNEL_INSTRUMENTATION_TYPES_FILE_NAME,
-    ),
     compiledManifestPath: join(compileDirectoryPath, "compiled-agent-manifest.json"),
     compileDirectoryPath,
     compileMetadataPath: join(compileDirectoryPath, "compile-metadata.json"),
@@ -195,13 +198,15 @@ export function createCompileMetadata(input: {
   };
 }
 
-/**
- * Writes the compiler-owned discovery artifacts under `.eve/`.
- */
+/** Writes compiler-owned artifacts and records their stable published locations. */
 export async function writeCompilerArtifacts(
   input: WriteCompilerArtifactsInput,
 ): Promise<WriteCompilerArtifactsResult> {
-  const paths = resolveCompilerArtifactPaths(input.appRoot);
+  const paths = resolveCompilerArtifactPathsAt(input.appRoot, input.artifactLocations.writeRoot);
+  const publishedPaths = resolveCompilerArtifactPathsAt(
+    input.appRoot,
+    input.artifactLocations.publishedRoot,
+  );
   const diagnosticsArtifact = createDiscoveryDiagnosticsArtifact(input.diagnostics);
   const compiledManifest = await materializeWorkspaceResources({
     compileDirectoryPath: paths.compileDirectoryPath,
@@ -212,11 +217,7 @@ export async function writeCompilerArtifacts(
   const diagnosticsArtifactJson = serializeArtifactJson(diagnosticsArtifact);
   const moduleMapSource = createCompiledModuleMapSource({
     manifest: compiledManifest,
-    moduleMapPath: paths.moduleMapPath,
-  });
-  const channelInstrumentationTypesSource = createChannelInstrumentationTypesSource({
-    manifest: compiledManifest,
-    typesPath: paths.channelInstrumentationTypesPath,
+    moduleMapPath: publishedPaths.moduleMapPath,
   });
   const metadata = createCompileMetadata({
     appRoot: input.appRoot,
@@ -224,7 +225,7 @@ export async function writeCompilerArtifacts(
     diagnosticsSummary: diagnosticsArtifact.summary,
     discoveryManifestJson,
     moduleMapSource,
-    paths,
+    paths: publishedPaths,
   });
   const metadataJson = serializeArtifactJson(metadata);
 
@@ -238,7 +239,6 @@ export async function writeCompilerArtifacts(
     writeFile(paths.compiledManifestPath, compiledManifestJson),
     writeFile(paths.diagnosticsPath, diagnosticsArtifactJson),
     writeFile(paths.discoveryManifestPath, discoveryManifestJson),
-    writeFile(paths.channelInstrumentationTypesPath, channelInstrumentationTypesSource),
     writeFile(paths.moduleMapPath, moduleMapSource),
     writeFile(paths.compileMetadataPath, metadataJson),
   ]);

@@ -13,12 +13,14 @@
  * execution-layer adapter that wraps one tool's `execute`.
  */
 
-import { buildCallbackContext } from "#context/build-callback-context.js";
+import { buildBaseToolContext } from "#context/build-base-tool-context.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import {
   ConnectionAuthorizationFailedError,
   ConnectionAuthorizationRequiredError,
   isConnectionAuthorizationRequiredError,
 } from "#public/connections/errors.js";
+import type { ApprovalResponseAuth } from "#public/definitions/approval.js";
 import type { ToolAuthOptions, ToolAuthProvider, ToolContext } from "#public/definitions/tool.js";
 import { type AuthorizationChallenge, requestAuthorization } from "#harness/authorization.js";
 import {
@@ -34,6 +36,8 @@ import {
   startScopedAuthorization,
   type ScopedAuthorization,
 } from "#runtime/connections/scoped-authorization.js";
+import type { ToolExecuteOptions } from "#shared/tool-definition.js";
+import { isAsyncIterable } from "#shared/async-iterable.js";
 
 /**
  * Wraps one authored tool's `execute` with a context that supports inline
@@ -53,38 +57,112 @@ import {
 export function createToolExecuteWithAuth(input: {
   readonly scope: string;
   readonly execute: (toolInput: unknown, ctx: unknown) => unknown;
-}): (toolInput: unknown) => Promise<unknown> {
+}): (toolInput: unknown, options: ToolExecuteOptions) => Promise<unknown> | AsyncIterable<unknown> {
   const { scope, execute } = input;
 
-  return async (toolInput: unknown): Promise<unknown> => {
+  // An async wrapper would turn an async generator into Promise<AsyncIterable>,
+  // which the AI SDK treats as one non-serializable terminal output.
+  return (
+    toolInput: unknown,
+    options: ToolExecuteOptions,
+  ): Promise<unknown> | AsyncIterable<unknown> => {
     const justAuthorizedScopes = new Set<string>();
+    const ctx = buildToolContext({
+      inlineAuthState: {},
+      justAuthorizedScopes,
+      options,
+      scope,
+    });
 
     try {
-      return await execute(
-        toolInput,
-        buildToolContext({
-          inlineAuthState: {},
-          justAuthorizedScopes,
-          scope,
-        }),
-      );
-    } catch (err) {
-      if (isToolAuthorizationRequiredError(err)) {
-        return await handleAuthorizationRequests(err.requests);
+      const output = execute(toolInput, ctx);
+      if (isAsyncIterable(output)) {
+        return handleToolIterableErrors(output);
       }
+      return Promise.resolve(output).catch(handleToolError);
+    } catch (err) {
+      return handleToolError(err);
+    }
 
-      throw err;
+    async function handleToolError(error: unknown): Promise<unknown> {
+      if (isToolAuthorizationRequiredError(error)) {
+        return await handleAuthorizationRequests(error.requests);
+      }
+      throw error;
+    }
+
+    async function* handleToolIterableErrors(
+      output: AsyncIterable<unknown>,
+    ): AsyncIterable<unknown> {
+      try {
+        for await (const value of output) {
+          yield value;
+        }
+      } catch (error) {
+        yield await handleToolError(error);
+      }
     }
   };
 }
 
+/** Builds the narrow token capability used by approval response authorizers. */
+export function buildApprovalResponseAuth(input: {
+  readonly responder: SessionAuthContext;
+  readonly scope: string;
+}): ApprovalResponseAuth {
+  const inlineAuthState: InlineAuthState = {};
+  const justAuthorizedScopes = new Set<string>();
+  return {
+    async getToken(provider?: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult> {
+      if (provider === undefined) throw missingProviderError("ctx.getToken");
+      return await resolveInlineToken({
+        boundResponder: input.responder,
+        inlineAuthState,
+        justAuthorizedScopes,
+        options: namespaceApprovalAuthOptions(input.scope, options),
+        provider,
+        toolScope: input.scope,
+      });
+    },
+    requireAuth(provider?: ToolAuthProvider, options?: ToolAuthOptions): never {
+      if (provider === undefined) throw missingProviderError("ctx.requireAuth");
+      const scoped = buildInlineScopedAuthorization({
+        boundResponder: input.responder,
+        inlineAuthState,
+        options: namespaceApprovalAuthOptions(input.scope, options),
+        provider,
+        toolScope: input.scope,
+      });
+      throw new ToolAuthorizationRequiredError([
+        { justAuthorized: justAuthorizedScopes.has(scoped.scope), scoped },
+      ]);
+    },
+  };
+}
+
+function namespaceApprovalAuthOptions(
+  scope: string,
+  options: ToolAuthOptions | undefined,
+): ToolAuthOptions | undefined {
+  return options?.authKey === undefined
+    ? options
+    : { ...options, authKey: `${scope}:${options.authKey}` };
+}
+
+/** Starts authorization requested by an approval response authorizer. */
+export async function handleApprovalResponsePolicyError(error: unknown): Promise<unknown> {
+  if (!isToolAuthorizationRequiredError(error)) throw error;
+  return await handleAuthorizationRequests(error.requests);
+}
+
 function buildToolContext(input: {
+  readonly options: ToolExecuteOptions;
   readonly scope: string;
   readonly justAuthorizedScopes: Set<string>;
   readonly inlineAuthState: InlineAuthState;
 }): ToolContext {
   const { scope, justAuthorizedScopes, inlineAuthState } = input;
-  const base = buildCallbackContext();
+  const base = buildBaseToolContext({ options: input.options, toolName: scope });
   return {
     ...base,
     async getToken(provider?: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult> {
@@ -116,6 +194,7 @@ function buildToolContext(input: {
 }
 
 async function resolveInlineToken(input: {
+  readonly boundResponder?: SessionAuthContext;
   readonly toolScope: string;
   readonly provider: ToolAuthProvider;
   readonly options?: ToolAuthOptions;
@@ -208,6 +287,7 @@ async function handleAuthorizationRequests(
 }
 
 function buildInlineScopedAuthorization(input: {
+  readonly boundResponder?: SessionAuthContext;
   readonly toolScope: string;
   readonly provider: ToolAuthProvider;
   readonly options?: ToolAuthOptions;
@@ -216,6 +296,7 @@ function buildInlineScopedAuthorization(input: {
   const authorization = normalizeInlineProvider(input.provider, input.options);
   return {
     authorization,
+    boundResponder: input.boundResponder,
     connection: input.options?.connection ?? { url: "" },
     scope:
       input.options?.authKey === undefined

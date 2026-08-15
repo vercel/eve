@@ -1,7 +1,16 @@
+import { createRequire } from "node:module";
 import { createMDX } from "fumadocs-mdx/next";
 import type { NextConfig } from "next";
+import {
+  compatibilityRedirects,
+  defaultLanguageRedirects,
+  docsRedirects,
+  rootMarkdownRedirects,
+} from "./lib/geistdocs/redirects";
 
 const withMDX = createMDX();
+const require = createRequire(import.meta.url);
+const wgslLoader = require.resolve("@vgpu/wgsl/loader-webpack");
 
 const localSiteHost = "localhost:3000";
 
@@ -12,16 +21,27 @@ const config: NextConfig = {
   },
 
   // The integrations gallery sources identity from the workspace package
-  // `@vercel/eve-catalog`; transpile it from source so dev and build compile
+  // `@eve/catalog`; transpile it from source so dev and build compile
   // its TypeScript without a separate prebuild step.
-  transpilePackages: ["@vercel/eve-catalog"],
+  transpilePackages: ["@eve/catalog"],
 
   experimental: {
+    globalNotFound: true,
     turbopackFileSystemCacheForDev: true,
+  },
+
+  turbopack: {
+    rules: {
+      "*.wgsl": {
+        loaders: [wgslLoader],
+        as: "*.js",
+      },
+    },
   },
 
   images: {
     formats: ["image/avif", "image/webp"],
+    qualities: [75, 95],
     remotePatterns: [
       {
         protocol: "https",
@@ -34,25 +54,13 @@ const config: NextConfig = {
     return [
       {
         source: "/docs",
-        destination: "/docs/introduction",
+        destination: "/docs/getting-started",
         permanent: true,
       },
-      {
-        source: "/:lang/docs",
-        destination: "/:lang/docs/introduction",
-        permanent: true,
-      },
-      // Evals moved from a single Advanced page to a top-level section.
-      {
-        source: "/docs/advanced/evals",
-        destination: "/docs/evals/overview",
-        permanent: true,
-      },
-      {
-        source: "/:lang/docs/advanced/evals",
-        destination: "/:lang/docs/evals/overview",
-        permanent: true,
-      },
+      ...compatibilityRedirects,
+      ...docsRedirects,
+      ...rootMarkdownRedirects,
+      ...defaultLanguageRedirects,
     ];
   },
 };

@@ -19,6 +19,7 @@ const sessionCallbackSchema = z
   .object({
     callId: z.string().min(1),
     subagentName: z.string().min(1),
+    taskId: z.string().min(1).optional(),
     token: z.string().min(1),
     url: z.string().min(1),
   })
@@ -44,9 +45,9 @@ const sessionCallbackSchema = z
       });
     }
 
-    // SSRF guard: the framework POSTs to this URL on session completion, so a
-    // caller-supplied private/link-local host (e.g. cloud metadata) must be
-    // rejected. The path/token check above does not constrain the host.
+    // SSRF guard: the framework POSTs to this URL when delegated work settles,
+    // so a caller-supplied private/link-local host (e.g. cloud metadata) must
+    // be rejected. The path/token check above does not constrain the host.
     if (isReservedIpAddress(url.hostname)) {
       ctx.addIssue({
         code: "custom",
@@ -70,12 +71,17 @@ export function parseSessionCallback(value: unknown): SessionCallbackParseResult
 }
 
 function readCallbackUrlToken(url: URL): string | null {
+  // The callback route may be mounted behind a public route prefix (e.g.
+  // `/eve/agents/<name>/eve/v1/callback/<token>`), so locate the route
+  // suffix instead of anchoring at the path start. `tokenPrefix` begins
+  // with `/`, so a match is always segment-aligned.
   const tokenPrefix = createEveCallbackRoutePath("");
-  if (!url.pathname.startsWith(tokenPrefix)) {
+  const prefixIndex = url.pathname.lastIndexOf(tokenPrefix);
+  if (prefixIndex === -1) {
     return null;
   }
 
-  const encodedToken = url.pathname.slice(tokenPrefix.length);
+  const encodedToken = url.pathname.slice(prefixIndex + tokenPrefix.length);
   if (encodedToken.length === 0 || encodedToken.includes("/")) {
     return null;
   }

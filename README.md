@@ -1,5 +1,5 @@
 <div align="center">
-  <a href="https://github.com/vercel/eve">
+  <a href="https://eve.dev/">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset=".github/assets/eve.svg">
       <img alt="eve logo" src=".github/assets/eve.svg" height="128">
@@ -14,7 +14,7 @@
 
 </div>
 
-eve is a filesystem-first framework for durable AI agents. Core agent capabilities live in
+[eve](https://eve.dev/) is a filesystem-first framework for durable AI agents. Core agent capabilities live in
 conventional locations, so projects are easier to inspect, extend, and operate.
 
 ## The filesystem is the authoring interface
@@ -46,6 +46,12 @@ npx eve@latest init my-agent
 
 This creates a new `my-agent` directory, installs its dependencies, initializes Git, and starts
 the interactive terminal UI.
+
+To start with another AI Gateway model, pass its model ID:
+
+```bash
+npx eve@latest init my-agent --model openai/gpt-5.6-terra
+```
 
 To add eve to an existing project, pass a path:
 
@@ -87,7 +93,7 @@ Choose the model in `agent/agent.ts`:
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "anthropic/claude-sonnet-4.6",
+  model: "zai/glm-5.2",
 });
 ```
 

@@ -1,4 +1,4 @@
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 
 /**
  * Returns true when an error looks like a stream socket disconnection that
@@ -19,6 +19,7 @@ export function isStreamDisconnectError(error: unknown): boolean {
     error.name === "AbortError" ||
     error.message === "terminated" ||
     errorCode === "UND_ERR_SOCKET" ||
+    (error instanceof TypeError && /^(?:failed to fetch|fetch failed)$/i.test(error.message)) ||
     /abort|cancel|disconnect|premature close|socket|terminated/i.test(error.message)
   );
 }
@@ -26,7 +27,7 @@ export function isStreamDisconnectError(error: unknown): boolean {
 /**
  * Reads newline-delimited JSON events from a `ReadableStream<Uint8Array>`.
  *
- * Yields one parsed {@link HandleMessageStreamEvent} per complete NDJSON line.
+ * Yields one parsed {@link MessageStreamEvent} per complete NDJSON line.
  * Handles partial lines across chunks via an internal buffer.
  *
  * All read errors — including socket disconnections — propagate to the caller.
@@ -34,16 +35,18 @@ export function isStreamDisconnectError(error: unknown): boolean {
  */
 export async function* readNdjsonStream(
   body: ReadableStream<Uint8Array>,
-): AsyncGenerator<HandleMessageStreamEvent> {
+): AsyncGenerator<MessageStreamEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let reachedEof = false;
 
   try {
     while (true) {
       const result = await reader.read();
 
       if (result.done) {
+        reachedEof = true;
         // Flush any remaining bytes in the decoder.
         buffer += decoder.decode();
         break;
@@ -60,7 +63,7 @@ export async function* readNdjsonStream(
         buffer = buffer.slice(newlineIndex + 1);
 
         if (line.length > 0) {
-          yield JSON.parse(line) as HandleMessageStreamEvent;
+          yield JSON.parse(line) as MessageStreamEvent;
         }
 
         newlineIndex = buffer.indexOf("\n");
@@ -70,9 +73,14 @@ export async function* readNdjsonStream(
     // Yield any trailing content without a final newline.
     const trailing = buffer.trim();
     if (trailing.length > 0) {
-      yield JSON.parse(trailing) as HandleMessageStreamEvent;
+      yield JSON.parse(trailing) as MessageStreamEvent;
     }
   } finally {
+    if (!reachedEof) {
+      // Breaking an async iteration must close the response body; releasing
+      // its lock alone leaves the server-side stream open.
+      await reader.cancel().catch(() => {});
+    }
     reader.releaseLock();
   }
 }

@@ -1,23 +1,51 @@
+import { AGENT_TOOL_DEFINITION } from "#runtime/framework-tools/agent.js";
 import { ASK_QUESTION_TOOL_DEFINITION } from "#runtime/framework-tools/ask-question.js";
 import { BASH_TOOL_DEFINITION } from "#runtime/framework-tools/bash.js";
 import { GLOB_TOOL_DEFINITION } from "#runtime/framework-tools/glob.js";
 import { GREP_TOOL_DEFINITION } from "#runtime/framework-tools/grep.js";
 import { READ_FILE_TOOL_DEFINITION } from "#runtime/framework-tools/read-file.js";
-import { SKILL_TOOL_DEFINITION } from "#runtime/framework-tools/skill.js";
+import {
+  createSkillToolDefinition,
+  SKILL_TOOL_DEFINITION,
+} from "#runtime/framework-tools/skill.js";
+import { TASK_TOOL_DEFINITIONS } from "#runtime/framework-tools/tasks.js";
 import { TODO_TOOL_DEFINITION } from "#runtime/framework-tools/todo.js";
 import { WEB_FETCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-fetch.js";
 import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
 import { WRITE_FILE_TOOL_DEFINITION } from "#runtime/framework-tools/write-file.js";
+import connectionSearchDynamicDefinition from "#runtime/framework-tools/connection-search-dynamic.js";
+import { resolveLoadedDynamicToolDefinition } from "#runtime/resolve-dynamic-tool.js";
 
-export { ConnectionRegistryKey } from "#context/providers/connection.js";
+export { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 export type { ReadFileStamp, ReadFileState } from "#runtime/framework-tools/file-state.js";
 export { ReadFileStateKey } from "#runtime/framework-tools/file-state.js";
 export type { TodoItem, TodoState } from "#runtime/framework-tools/todo.js";
 export { TodoStateKey } from "#runtime/framework-tools/todo.js";
 
-import type { ResolvedToolDefinition } from "#runtime/types.js";
+import type {
+  ResolvedDynamicToolResolver,
+  ResolvedSkillDefinition,
+  ResolvedToolDefinition,
+} from "#runtime/types.js";
+import type { DynamicSentinel } from "#shared/dynamic-tool-definition.js";
 
-const ALL_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
+interface FrameworkDynamicToolDefinition {
+  readonly definition: DynamicSentinel;
+  readonly logicalPath: string;
+  readonly slug: string;
+  readonly sourceId: string;
+}
+
+const REGISTERED_FRAMEWORK_DYNAMIC_TOOLS: readonly FrameworkDynamicToolDefinition[] = [
+  {
+    definition: connectionSearchDynamicDefinition,
+    logicalPath: "eve:framework/connection-search-dynamic",
+    slug: "connection",
+    sourceId: "eve:connection-search-dynamic",
+  },
+];
+
+const REGISTERED_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
   ASK_QUESTION_TOOL_DEFINITION,
   BASH_TOOL_DEFINITION,
   GLOB_TOOL_DEFINITION,
@@ -30,16 +58,53 @@ const ALL_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
   SKILL_TOOL_DEFINITION,
 ];
 
+const ALL_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
+  ...REGISTERED_FRAMEWORK_TOOLS,
+  AGENT_TOOL_DEFINITION,
+  ...TASK_TOOL_DEFINITIONS,
+];
+
 /**
  * Returns framework-owned tool definitions registered in the tool registry
  * alongside authored tools during graph resolution.
  *
- * `connection_search` is no longer in this list — it is registered as a
- * framework dynamic tool resolver in the graph resolution path.
+ * `connection_search` is no longer in this list. The graph resolution path
+ * registers it as a framework dynamic tool resolver.
  */
-export function getFrameworkToolDefinitions(_config?: {
-  readonly hasConnections?: boolean;
+export function getFrameworkToolDefinitions(config?: {
+  readonly authoredSkills?: readonly ResolvedSkillDefinition[];
 }): readonly ResolvedToolDefinition[] {
+  const authoredSkills = config?.authoredSkills;
+  if (authoredSkills === undefined) return REGISTERED_FRAMEWORK_TOOLS;
+
+  return REGISTERED_FRAMEWORK_TOOLS.map((definition) =>
+    definition.name === SKILL_TOOL_DEFINITION.name
+      ? createSkillToolDefinition(authoredSkills)
+      : definition,
+  );
+}
+
+/**
+ * Returns framework-owned dynamic tool resolvers.
+ * Framework definitions use the public `defineDynamic()` contract and enter
+ * the same loaded-definition resolver path as authored dynamic tools.
+ */
+export function getFrameworkDynamicToolResolvers(): readonly ResolvedDynamicToolResolver[] {
+  return REGISTERED_FRAMEWORK_DYNAMIC_TOOLS.map((entry) =>
+    resolveLoadedDynamicToolDefinition(entry.definition, {
+      logicalPath: entry.logicalPath,
+      slug: entry.slug,
+      sourceId: entry.sourceId,
+      sourceKind: "module",
+    }),
+  );
+}
+
+/**
+ * Returns every static framework-owned tool definition, including tools such
+ * as `agent` that the runtime does not register in the tool registry.
+ */
+export function getAllFrameworkToolDefinitions(): readonly ResolvedToolDefinition[] {
   return ALL_FRAMEWORK_TOOLS;
 }
 
@@ -53,5 +118,5 @@ export function getFrameworkToolDefinitions(_config?: {
  * as an authoring error rather than silently dropping the request.
  */
 export function getAllFrameworkToolNames(): ReadonlySet<string> {
-  return new Set(ALL_FRAMEWORK_TOOLS.map((def) => def.name));
+  return new Set(ALL_FRAMEWORK_TOOLS.map((definition) => definition.name));
 }

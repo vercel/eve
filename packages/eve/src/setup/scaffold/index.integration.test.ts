@@ -10,7 +10,9 @@ import {
   isNextJsProject,
   listAuthoredChannels,
   normalizeSlackConnectorSlug,
+  resolveVercelHostFrameworkPreset,
   scaffoldBaseProject,
+  scaffoldExtensionProject,
   type WebPackageVersions,
 } from "./index.js";
 import { PNPM_WORKSPACE_CONTENT } from "../primitives/pm/pnpm.js";
@@ -23,10 +25,13 @@ async function createTempDir(): Promise<string> {
 
 const TEST_EVE_PACKAGE = { version: "0.25.0", nodeEngine: ">=24" } as const;
 const LATEST_EVE_PACKAGE = { version: "latest", nodeEngine: ">=24" } as const;
+const RELEASE_AGE_POLICY =
+  'minimumReleaseAgeExclude:\n  - "@ai-sdk/*"\n  - "@rolldown/*"\n  - "@vercel/*"\n  - "@workflow/*"\n  - ai\n  - experimental-ai-sdk-code-mode\n  - eve\n  - nitro\n  - rolldown\n  - workflow\n';
 
 const TEST_WEB_PACKAGE_VERSIONS = {
   evePackage: TEST_EVE_PACKAGE,
   aiPackageVersion: "7.0.0",
+  betterAuthPackageVersion: "1.6.26-test",
   nextPackageVersion: "16.2.6",
   reactPackageVersion: "19.2.6",
   reactDomPackageVersion: "19.2.6",
@@ -82,6 +87,55 @@ describe("ensureChannel", () => {
     );
     await expect(readFile(join(projectRoot, "package.json"), "utf8")).resolves.toContain(
       '"@vercel/connect": "0.0.0-test"',
+    );
+  });
+
+  test("writes a portable Slack channel and merges its environment example", async () => {
+    const projectRoot = await createTempDir();
+    await mkdir(join(projectRoot, "agent"), { recursive: true });
+    await writeFile(join(projectRoot, "package.json"), "{}\n", "utf8");
+    await writeFile(
+      join(projectRoot, ".env.example"),
+      "EXISTING=value\nSLACK_BOT_TOKEN=old\n",
+      "utf8",
+    );
+
+    const result = await ensureChannel({
+      projectRoot,
+      kind: "slack",
+      slackCredentials: "environment",
+    });
+
+    await expect(readFile(join(projectRoot, "agent/channels/slack.ts"), "utf8")).resolves.toBe(
+      'import { slackChannel } from "eve/channels/slack";\n\nexport default slackChannel();\n',
+    );
+    await expect(readFile(join(projectRoot, ".env.example"), "utf8")).resolves.toBe(
+      "EXISTING=value\nSLACK_BOT_TOKEN=old\n\nSLACK_SIGNING_SECRET=\n",
+    );
+    await expect(readFile(join(projectRoot, "package.json"), "utf8")).resolves.toBe("{}\n");
+    expect(result.packageJsonUpdated).toEqual([]);
+    expect(result.filesWritten).toEqual([
+      join(projectRoot, "agent/channels/slack.ts"),
+      join(projectRoot, ".env.example"),
+    ]);
+  });
+
+  test("rolls back the environment example when portable Slack scaffolding fails", async () => {
+    const projectRoot = await createTempDir();
+    await mkdir(join(projectRoot, "agent/channels/slack.ts"), { recursive: true });
+    await writeFile(join(projectRoot, ".env.example"), "EXISTING=value\n", "utf8");
+
+    await expect(
+      ensureChannel({
+        projectRoot,
+        kind: "slack",
+        slackCredentials: "environment",
+        force: true,
+      }),
+    ).rejects.toThrow();
+
+    await expect(readFile(join(projectRoot, ".env.example"), "utf8")).resolves.toBe(
+      "EXISTING=value\n",
     );
   });
 
@@ -156,7 +210,15 @@ describe("ensureChannel", () => {
         path: join(projectRoot, "package.json"),
         dependencies: expect.arrayContaining(["eve", "next", "react", "react-dom"]),
         devDependencies: expect.arrayContaining(["typescript", "@types/react"]),
-        scripts: expect.arrayContaining(["build", "dev", "start", "typecheck"]),
+        scripts: expect.arrayContaining([
+          "build",
+          "build:eve",
+          "dev",
+          "dev:eve",
+          "start",
+          "start:eve",
+          "typecheck",
+        ]),
       }),
     ]);
     await expect(readFile(join(projectRoot, "agent/channels/eve.ts"), "utf8")).resolves.toBe(
@@ -186,34 +248,99 @@ describe("ensureChannel", () => {
       "withEve",
     );
     const packageJson = await readFile(join(projectRoot, "package.json"), "utf8");
+    expect(packageJson).not.toContain('"better-auth"');
     expect(packageJson).toContain('"next": "16.2.6"');
+    expect(packageJson).toContain('"build:eve": "eve build"');
     expect(packageJson).toContain('"dev": "next dev"');
+    expect(packageJson).toContain('"dev:eve": "eve dev"');
+    expect(packageJson).toContain('"start:eve": "eve start"');
     expect(JSON.parse(packageJson)).toMatchObject({ engines: { node: "24.x" } });
+    const tsconfig = JSON.parse(await readFile(join(projectRoot, "tsconfig.json"), "utf8")) as {
+      include?: string[];
+    };
+    expect(tsconfig.include).not.toContain(".eve/**/*.d.ts");
     await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
       PNPM_WORKSPACE_CONTENT,
     );
+    // withEve() generates the eve service + /eve/v1/* routes into
+    // .vercel/output/config.json at build time, so the scaffold only writes a
+    // minimal vercel.json rather than a services block the platform rejects.
     await expect(readFile(join(projectRoot, "vercel.json"), "utf8")).resolves.toBe(
       `${JSON.stringify(
         {
           $schema: "https://openapi.vercel.sh/vercel.json",
-          experimentalServices: {
-            web: {
-              entrypoint: ".",
-              framework: "nextjs",
-              routePrefix: "/",
-            },
-            eve: {
-              buildCommand: "eve build",
-              entrypoint: ".",
-              framework: "eve",
-              routePrefix: "/_eve_internal/eve",
-            },
-          },
         },
         null,
         2,
       )}\n`,
     );
+  });
+
+  test("writes a Sign in with Vercel authenticated Web Chat app", async () => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      `${JSON.stringify({ name: "private-agent", type: "module" }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const result = await ensureChannel({
+      projectRoot,
+      kind: "web",
+      webAuthentication: "sign-in-with-vercel",
+      webPackageVersions: {
+        ...TEST_WEB_PACKAGE_VERSIONS,
+        nextPackageVersion: undefined,
+      },
+    });
+
+    expect(result).toMatchObject({ kind: "web", action: "created" });
+    expect(result.filesWritten).toEqual(
+      expect.arrayContaining([
+        join(projectRoot, "app/_components/web-chat-auth.tsx"),
+        join(projectRoot, "app/api/auth/[...all]/route.ts"),
+        join(projectRoot, "lib/auth-client.ts"),
+        join(projectRoot, "lib/auth.ts"),
+      ]),
+    );
+
+    const packageJson = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+    };
+    expect(packageJson.dependencies["better-auth"]).toBe("1.6.26-test");
+    expect(packageJson.dependencies.next).toBe("16.3.0");
+
+    const pageSource = await readFile(join(projectRoot, "app/page.tsx"), "utf8");
+    expect(pageSource).toContain("auth.api.getSession");
+    expect(pageSource).toContain("<SignIn />");
+    expect(pageSource).toContain("<AccountControl");
+
+    const authSource = await readFile(join(projectRoot, "lib/auth.ts"), "utf8");
+    expect(authSource).toContain('requireEnvironmentVariable("BETTER_AUTH_SECRET")');
+    expect(authSource).toContain("process.env.VERCEL_PROJECT_PRODUCTION_URL");
+    expect(authSource).toContain('clientId: requireEnvironmentVariable("VERCEL_APP_CLIENT_ID")');
+    expect(authSource).toContain('throw new Error("No trusted deployment hosts are configured")');
+    expect(authSource).not.toContain("*.vercel.app");
+
+    const channelSource = await readFile(join(projectRoot, "agent/channels/eve.ts"), "utf8");
+    expect(channelSource).toContain("auth.api.getSession");
+    expect(channelSource).toContain('authenticator: "better-auth:vercel"');
+    expect(channelSource).not.toContain('issuer: "https://vercel.com"');
+    expect(channelSource).toContain("vercelOidc()");
+    expect(channelSource).toContain("localDev()");
+    expect(channelSource).not.toContain("placeholderAuth");
+
+    const accountSource = await readFile(
+      join(projectRoot, "app/_components/web-chat-auth.tsx"),
+      "utf8",
+    );
+    expect(accountSource).toContain('className="size-9 cursor-pointer');
+    expect(accountSource).toContain("Continue with Vercel");
+    expect(accountSource).toContain('viewBox="0 0 24 20"');
+    expect(accountSource).toContain('viewBox="0 0 169 53"');
+    expect(accountSource).toContain("Sign in to start a session");
+    expect(accountSource).toContain("Log out");
+    expect(accountSource).not.toContain("__EVE_INIT_APP_NAME__");
   });
 
   test("overrides an incompatible node engine when adding Web Chat", async () => {
@@ -296,13 +423,40 @@ describe("ensureChannel", () => {
 
     const channelSource = await readFile(join(projectRoot, "agent/channels/eve.ts"), "utf8");
     const sourceChannel = await readFile(
-      new URL("../../../../../apps/templates/web-chat-next/agent/channels/eve.ts", import.meta.url),
+      new URL(
+        "../../../../../apps/docs/registry/channel/web/agent/channels/eve.ts",
+        import.meta.url,
+      ),
       "utf8",
     );
     // The template is LF; a Windows checkout may hand back the source app as
     // CRLF (no repo .gitattributes), so compare line content, not line endings.
     const normalizeEol = (text: string): string => text.replaceAll("\r\n", "\n");
     expect(normalizeEol(channelSource)).toBe(normalizeEol(sourceChannel));
+  });
+
+  test("scaffolds a Web Chat Stop button with the agent cancellation API", async () => {
+    const projectRoot = await createTempDir();
+    await mkdir(join(projectRoot, "agent"), { recursive: true });
+    await writeFile(
+      join(projectRoot, "package.json"),
+      `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await ensureChannel({
+      projectRoot,
+      kind: "web",
+      webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
+    });
+
+    const agentChatSource = await readFile(
+      join(projectRoot, "app/_components/agent-chat.tsx"),
+      "utf8",
+    );
+    expect(agentChatSource).toContain("agent.cancel()");
+    expect(agentChatSource).not.toContain(".attach(sessionId)");
+    expect(agentChatSource).not.toContain('event.type !== "turn.started"');
   });
 
   test("writes npm dist-tags for Web Chat without semver range decoration", async () => {
@@ -327,18 +481,15 @@ describe("ensureChannel", () => {
     );
   });
 
-  test("preserves existing Vercel configuration when adding Web Chat services", async () => {
+  test("preserves existing Vercel configuration when adding Web Chat", async () => {
     const projectRoot = await createTempDir();
     await writeFile(
       join(projectRoot, "package.json"),
       `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
       "utf8",
     );
-    await writeFile(
-      join(projectRoot, "vercel.json"),
-      `${JSON.stringify({ regions: ["iad1"], experimentalServices: { worker: { entrypoint: "worker.ts" } } }, null, 2)}\n`,
-      "utf8",
-    );
+    const existingVercelJson = `${JSON.stringify({ regions: ["iad1"], rewrites: [] }, null, 2)}\n`;
+    await writeFile(join(projectRoot, "vercel.json"), existingVercelJson, "utf8");
 
     await ensureChannel({
       projectRoot,
@@ -346,16 +497,12 @@ describe("ensureChannel", () => {
       webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
     });
 
-    await expect(
-      readFile(join(projectRoot, "vercel.json"), "utf8").then((value) => JSON.parse(value)),
-    ).resolves.toMatchObject({
-      regions: ["iad1"],
-      experimentalServices: {
-        worker: { entrypoint: "worker.ts" },
-        web: { framework: "nextjs" },
-        eve: { framework: "eve" },
-      },
-    });
+    // withEve() owns eve service generation, so the scaffold leaves an existing
+    // vercel.json completely untouched — no injected services block, no $schema
+    // rewrite, no reformatting of a file the user manages.
+    await expect(readFile(join(projectRoot, "vercel.json"), "utf8")).resolves.toBe(
+      existingVercelJson,
+    );
   });
 
   test("scaffolds Web Chat without Vercel Services for preview-only targets", async () => {
@@ -432,7 +579,7 @@ describe("ensureChannel", () => {
     });
 
     await expect(readFile(pnpmWorkspacePath, "utf8")).resolves.toBe(
-      "packages:\n  - packages/*\nallowBuilds:\n  esbuild: true\n  sharp: false\n\nminimumReleaseAgeExclude:\n  - eve\n",
+      `packages:\n  - packages/*\nallowBuilds:\n  esbuild: true\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
     );
     expect(result.filesWritten).toContain(pnpmWorkspacePath);
   });
@@ -455,12 +602,12 @@ describe("ensureChannel", () => {
     });
 
     await expect(readFile(pnpmWorkspacePath, "utf8")).resolves.toBe(
-      `${existingPolicy}\nminimumReleaseAgeExclude:\n  - eve\n`,
+      `${existingPolicy}\n${RELEASE_AGE_POLICY}`,
     );
     expect(result.filesWritten).toContain(pnpmWorkspacePath);
   });
 
-  test("adds the eve release age exclusion to an existing pnpm workspace exclusion list", async () => {
+  test("adds the release age exclusions to an existing pnpm workspace exclusion list", async () => {
     const projectRoot = await createTempDir();
     const pnpmWorkspacePath = join(projectRoot, "pnpm-workspace.yaml");
     await writeFile(
@@ -481,7 +628,7 @@ describe("ensureChannel", () => {
     });
 
     await expect(readFile(pnpmWorkspacePath, "utf8")).resolves.toBe(
-      "minimumReleaseAgeExclude:\n  - react\n  - eve\nallowBuilds:\n  sharp: false\n",
+      'minimumReleaseAgeExclude:\n  - react\n  - "@ai-sdk/*"\n  - "@rolldown/*"\n  - "@vercel/*"\n  - "@workflow/*"\n  - ai\n  - experimental-ai-sdk-code-mode\n  - eve\n  - nitro\n  - rolldown\n  - workflow\nallowBuilds:\n  sharp: false\n',
     );
     expect(result.filesWritten).toContain(pnpmWorkspacePath);
   });
@@ -515,7 +662,7 @@ describe("ensureChannel", () => {
     expect(result.filesWritten).not.toContain(join(projectRoot, "pnpm-workspace.yaml"));
     await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\nminimumReleaseAgeExclude:\n  - eve\n",
+      `packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectRoot, "package.json"), "utf8"),
@@ -681,6 +828,42 @@ describe("hasVercelHostFramework", () => {
   });
 });
 
+describe("resolveVercelHostFrameworkPreset", () => {
+  test("reads as no host framework when package.json is missing", async () => {
+    const projectRoot = await createTempDir();
+
+    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBeUndefined();
+  });
+
+  test.each([
+    ["Next.js", { next: "16.2.6" }, "nextjs"],
+    ["Nuxt", { nuxt: "4.3.3" }, "nuxtjs"],
+    ["Nuxt 3", { nuxt3: "3.19.7" }, "nuxtjs"],
+    ["Nuxt edge", { "nuxt-edge": "3.0.0-rc.13" }, "nuxtjs"],
+    ["SvelteKit", { "@sveltejs/kit": "2.60.0" }, "sveltekit"],
+  ])("maps %s to its Vercel Framework Preset slug", async (_label, dependencies, preset) => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      JSON.stringify({ name: "demo", devDependencies: dependencies }),
+      "utf8",
+    );
+
+    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBe(preset);
+  });
+
+  test("returns undefined for a standalone eve project", async () => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      JSON.stringify({ name: "demo", dependencies: { eve: "0.25.0" } }),
+      "utf8",
+    );
+
+    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBeUndefined();
+  });
+});
+
 describe("listAuthoredChannels", () => {
   test("recognizes flat channel modules and folder connection modules", async () => {
     const projectRoot = await createTempDir();
@@ -692,8 +875,71 @@ describe("listAuthoredChannels", () => {
   });
 });
 
+describe("scaffoldExtensionProject", () => {
+  test("writes a minimal extension package with peer+dev eve and no sample tools", async () => {
+    const targetDirectory = await createTempDir();
+    const projectRoot = await scaffoldExtensionProject({
+      projectName: "demo-extension",
+      targetDirectory,
+      evePackage: TEST_EVE_PACKAGE,
+      zodPackageVersion: "4.4.3",
+    });
+
+    const packageJson = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8")) as {
+      name: string;
+      eve?: { extension?: { source?: string; dist?: string } };
+      files?: string[];
+      peerDependencies?: { eve?: string };
+      peerDependenciesMeta?: Record<string, unknown>;
+      devDependencies?: Record<string, string>;
+      dependencies?: Record<string, string>;
+      scripts?: Record<string, string>;
+      engines?: { node?: string };
+    };
+    expect(packageJson).toMatchObject({
+      name: "demo-extension",
+      eve: { extension: { source: "./extension", dist: "./dist/extension" } },
+      files: ["dist"],
+      peerDependencies: { eve: "*" },
+      dependencies: { zod: "4.4.3" },
+      scripts: {
+        build: "eve extension build",
+        prepare: "eve extension build",
+        typecheck: "tsc",
+      },
+      engines: { node: "24.x" },
+    });
+    expect(packageJson.devDependencies?.eve).toBe("0.25.0");
+    expect(packageJson.peerDependenciesMeta).toBeUndefined();
+    expect(packageJson.devDependencies?.typescript).toBe("7.0.2");
+    expect(packageJson.dependencies?.ai).toBeUndefined();
+    expect(packageJson.scripts?.dev).toBeUndefined();
+
+    const extensionSource = await readFile(join(projectRoot, "extension/extension.ts"), "utf8");
+    expect(extensionSource).toContain('from "eve/extension"');
+    expect(extensionSource).toContain("defineExtension");
+    expect(extensionSource).toContain("apiKey");
+    await expect(pathExists(join(projectRoot, "extension/tools"))).resolves.toBe(false);
+    await expect(pathExists(join(projectRoot, "agent"))).resolves.toBe(false);
+
+    const tsconfig = JSON.parse(await readFile(join(projectRoot, "tsconfig.json"), "utf8")) as {
+      compilerOptions: { moduleResolution?: string; types?: string[] };
+      include?: string[];
+    };
+    expect(tsconfig.compilerOptions.moduleResolution).toBe("bundler");
+    expect(tsconfig.compilerOptions.types).toEqual(["node"]);
+    expect(tsconfig.include).toEqual(["extension/**/*.ts"]);
+
+    const agentsMd = await readFile(join(projectRoot, "AGENTS.md"), "utf8");
+    expect(agentsMd).toContain("eve extension");
+    expect(agentsMd).toContain("extensions.md");
+    expect(agentsMd).toContain("development dependency pinned exactly");
+    expect(agentsMd).toContain("cannot declare");
+  });
+});
+
 describe("scaffoldBaseProject", () => {
-  test("writes a base eve project with explicit versions", async () => {
+  test("writes a base eve project with the catalog TypeScript version", async () => {
     const targetDirectory = await createTempDir();
     const projectRoot = await scaffoldBaseProject({
       projectName: "demo-agent",
@@ -703,7 +949,6 @@ describe("scaffoldBaseProject", () => {
       aiPackageVersion: "7.0.0",
       connectPackageVersion: "0.2.2",
       zodPackageVersion: "4.4.3",
-      typescriptPackageVersion: "7.0.1-rc",
     });
 
     const agentSource = await readFile(join(projectRoot, "agent/agent.ts"), "utf8");
@@ -711,10 +956,16 @@ describe("scaffoldBaseProject", () => {
     expect(agentSource).not.toContain("modelOptions");
     const packageJson = await readFile(join(projectRoot, "package.json"), "utf8");
     expect(packageJson).toContain('"eve": "^0.25.0"');
-    // Channels added later (`eve channels add slack`, possibly next to a
+    // Channels added later (`eve add channel/slack`, possibly next to a
     // running `eve dev`) import @vercel/connect; init ships it so a later
     // channel add never introduces a missing dependency.
     expect(packageJson).toContain('"@vercel/connect": "0.2.2"');
+    // The default path used by `eve init` must carry the stable toolchain
+    // version captured from the workspace catalog into generated projects.
+    expect(JSON.parse(packageJson)).toMatchObject({
+      devDependencies: { typescript: "7.0.2" },
+      engines: { node: "24.x" },
+    });
     // Every scaffold ships @types/node plus tsconfig `types: ["node"]` so agent
     // code touching `process`/`fs` typechecks out of the box, matching the eve
     // agent fixtures (without the `types` entry, NodeNext resolution does not
@@ -722,30 +973,45 @@ describe("scaffoldBaseProject", () => {
     expect(packageJson).toContain('"@types/node": "24.x"');
     const tsconfig = JSON.parse(await readFile(join(projectRoot, "tsconfig.json"), "utf8")) as {
       compilerOptions: { types?: string[] };
+      include?: string[];
     };
     expect(tsconfig.compilerOptions.types).toEqual(["node"]);
-    // Pinned to a single major so Vercel builds on a supported Node regardless
-    // of the project's dashboard Node pin.
-    expect(JSON.parse(packageJson)).toMatchObject({ engines: { node: "24.x" } });
+    expect(tsconfig.include).toEqual(["agent/**/*.ts", "evals/**/*.ts"]);
     await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
       PNPM_WORKSPACE_CONTENT,
     );
-    await expect(readFile(join(projectRoot, "AGENTS.md"), "utf8")).resolves.toContain(
-      "node_modules/eve/docs/",
-    );
+    const agentsMd = await readFile(join(projectRoot, "AGENTS.md"), "utf8");
+    expect(agentsMd).toContain("installed eve package docs");
+    expect(agentsMd).toContain("node_modules/eve/docs/");
+    expect(agentsMd).toContain("resolve the\ninstalled `eve` package location");
+    expect(agentsMd).toContain("eve registry search <query> --json");
+    expect(agentsMd).toContain("eve registry view <item>");
+    expect(agentsMd).toContain("eve add <item> --non-interactive");
+    expect(agentsMd).toContain("`implementation` is `native`");
+    expect(agentsMd).toContain("`deploymentRequired: true`");
+    expect(agentsMd).toContain("Exit code 0 means setup completed");
+    expect(agentsMd).toContain("next.command");
+    expect(agentsMd).toContain("--skip-install");
+    expect(agentsMd).toContain("eve link");
+    expect(agentsMd).toContain("external_action_resolved");
     // `vercel deploy` uploads everything a .vercelignore doesn't exclude, and
     // the platform default-ignores only the .env.local variants — eve's dev
     // artifacts and a bare .env must be excluded here or a source deploy
     // ships them (and `.eve` alone can blow the upload size limit).
     const vercelignore = await readFile(join(projectRoot, ".vercelignore"), "utf8");
-    for (const entry of [".env*", ".eve", ".workflow-data", ".output", ".nitro", "dist"]) {
+    for (const entry of [".env*", ".eve", ".output", ".nitro", "dist"]) {
       expect(vercelignore.split("\n")).toContain(entry);
     }
   });
 
-  test.each(["npm", "yarn", "bun"] as const)(
-    "omits the pnpm workspace policy from a scaffold owned by %s",
-    async (packageManager) => {
+  test.each([
+    ["pnpm", undefined],
+    ["npm", "overrides"],
+    ["yarn", "resolutions"],
+    ["bun", "overrides"],
+  ] as const)(
+    "scaffolds a standalone %s project with its own package-manager metadata",
+    async (packageManager, aiPinField) => {
       const targetDirectory = await createTempDir();
       const projectRoot = await scaffoldBaseProject({
         projectName: "demo-agent",
@@ -755,13 +1021,27 @@ describe("scaffoldBaseProject", () => {
         evePackage: TEST_EVE_PACKAGE,
         aiPackageVersion: "7.0.0",
         zodPackageVersion: "4.4.3",
-        typescriptPackageVersion: "7.0.1-rc",
+        typescriptPackageVersion: "7.0.2",
       });
 
       await expect(readFile(join(projectRoot, "package.json"), "utf8")).resolves.toContain(
         '"eve": "^0.25.0"',
       );
-      await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
+      await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(
+        packageManager === "pnpm",
+      );
+      const packageJson: unknown = JSON.parse(
+        await readFile(join(projectRoot, "package.json"), "utf8"),
+      );
+      if (aiPinField === undefined) {
+        expect(packageJson).not.toHaveProperty("overrides");
+        expect(packageJson).not.toHaveProperty("resolutions");
+      } else {
+        expect(packageJson).toHaveProperty(`${aiPinField}.ai`, "7.0.0");
+        expect(packageJson).not.toHaveProperty(
+          aiPinField === "overrides" ? "resolutions" : "overrides",
+        );
+      }
     },
   );
 
@@ -784,12 +1064,12 @@ describe("scaffoldBaseProject", () => {
       aiPackageVersion: "7.0.0",
       connectPackageVersion: "0.2.2",
       zodPackageVersion: "4.4.3",
-      typescriptPackageVersion: "7.0.1-rc",
+      typescriptPackageVersion: "7.0.2",
     });
 
     await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "packages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n\nminimumReleaseAgeExclude:\n  - eve\n",
+      `packages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectRoot, "package.json"), "utf8"),
@@ -827,12 +1107,12 @@ describe("scaffoldBaseProject", () => {
       aiPackageVersion: "7.0.0",
       connectPackageVersion: "0.2.2",
       zodPackageVersion: "4.4.3",
-      typescriptPackageVersion: "7.0.1-rc",
+      typescriptPackageVersion: "7.0.2",
     });
 
     await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\nminimumReleaseAgeExclude:\n  - eve\n",
+      `packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectRoot, "package.json"), "utf8"),
@@ -882,7 +1162,7 @@ describe("scaffoldBaseProject", () => {
         aiPackageVersion: "7.0.0",
         connectPackageVersion: "0.2.2",
         zodPackageVersion: "4.4.3",
-        typescriptPackageVersion: "7.0.1-rc",
+        typescriptPackageVersion: "7.0.2",
       });
 
       const projectPackageJson = JSON.parse(
@@ -940,7 +1220,7 @@ describe("scaffoldBaseProject", () => {
         aiPackageVersion: "7.0.0",
         connectPackageVersion: "0.2.2",
         zodPackageVersion: "4.4.3",
-        typescriptPackageVersion: "7.0.1-rc",
+        typescriptPackageVersion: "7.0.2",
       });
 
       const projectPackageJson = JSON.parse(
@@ -977,7 +1257,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: TEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
       zodPackageVersion: "4.4.3",
-      typescriptPackageVersion: "7.0.1-rc",
+      typescriptPackageVersion: "7.0.2",
     });
 
     const agentSource = await readFile(join(projectRoot, "agent/agent.ts"), "utf8");
@@ -1000,7 +1280,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: TEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
       zodPackageVersion: "4.4.3",
-      typescriptPackageVersion: "7.0.1-rc",
+      typescriptPackageVersion: "7.0.2",
     });
 
     const agentSource = await readFile(join(projectRoot, "agent/agent.ts"), "utf8");
@@ -1018,7 +1298,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: { version: "0.25.0", nodeEngine: ">=24.5.0" },
       aiPackageVersion: "7.0.0",
       zodPackageVersion: "4.4.3",
-      typescriptPackageVersion: "7.0.1-rc",
+      typescriptPackageVersion: "7.0.2",
     });
 
     const packageJson = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8")) as {
@@ -1038,7 +1318,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: LATEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
       zodPackageVersion: "4.4.3",
-      typescriptPackageVersion: "7.0.1-rc",
+      typescriptPackageVersion: "7.0.2",
     });
 
     await expect(readFile(join(projectRoot, "package.json"), "utf8")).resolves.toContain(
@@ -1055,7 +1335,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: TEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
       zodPackageVersion: "4.4.3",
-      typescriptPackageVersion: "7.0.1-rc",
+      typescriptPackageVersion: "7.0.2",
     });
 
     const channelPath = join(projectRoot, "agent/channels/eve.ts");
@@ -1079,7 +1359,7 @@ describe("scaffoldBaseProject", () => {
         evePackage: TEST_EVE_PACKAGE,
         aiPackageVersion: "7.0.0",
         zodPackageVersion: "4.4.3",
-        typescriptPackageVersion: "7.0.1-rc",
+        typescriptPackageVersion: "7.0.2",
       }),
     ).rejects.toThrow(/Use an empty directory/);
 
@@ -1094,7 +1374,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: TEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
       zodPackageVersion: "4.4.3",
-      typescriptPackageVersion: "7.0.1-rc",
+      typescriptPackageVersion: "7.0.2",
     });
 
     expect(projectRoot).toBe(targetDirectory);

@@ -53,6 +53,11 @@ export interface EnsureConnectionOptions {
   connectPackageVersion?: string;
 }
 
+export interface EnsureConnectionDependenciesOptions {
+  projectRoot: string;
+  connectPackageVersion?: string;
+}
+
 function resolveAuth(entry: ConnectionInput): ConnectionAuthSpec {
   return entry.auth ?? { kind: "none" };
 }
@@ -156,6 +161,17 @@ async function ensureConnectDependency(
       scripts: [],
     },
   ];
+}
+
+/** Adds the package dependency required by a Connect-auth connection. */
+export async function ensureConnectionDependencies(
+  options: EnsureConnectionDependenciesOptions,
+): Promise<PackageJsonMutation[]> {
+  const version = resolveVersionToken(
+    "connectPackageVersion",
+    options.connectPackageVersion ?? DEFAULT_CONNECT_PACKAGE_VERSION,
+  );
+  return ensureConnectDependency(join(options.projectRoot, "package.json"), version);
 }
 
 function envKeyPresent(source: string, key: string): boolean {

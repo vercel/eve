@@ -7,15 +7,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { theme } from "./lib/theme.ts";
 
 /**
- * End-to-end proof that the *packed* eve artifact can auto-open `/model` after
- * a consumer-shaped install.
+ * End-to-end proof that the *packed* eve artifact can open onboarding `/model`
+ * after a consumer-shaped install.
  *
  * Every other smoke test resolves eve's modules inside the workspace, where
  * devDependencies are installed — so a runtime import of an undeclared
  * dependency still resolves and the bug ships. This test packs the built
  * package (`pnpm pack`), installs the tarball into an empty project with npm
  * (which installs only declared dependencies, exactly like a user install),
- * and drives the installed TUI through automatic provider setup.
+ * and drives the installed TUI through the prefilled onboarding provider setup.
  *
  * Regression: eve 0.6.x–0.7.0 imported `oxc-parser` from the `/model` flow
  * while declaring it only as a devDependency. In a scaffolded project the
@@ -37,6 +37,7 @@ interface PackedTuiHarness {
   EveTUIRunner: new (options: Record<string, unknown>) => { run(): Promise<void> };
   MockScreen: new (size: { columns: number; rows: number }) => {
     waitForText(text: string, timeoutMs: number): Promise<unknown>;
+    waitForIdlePrompt(timeoutMs: number): Promise<unknown>;
     snapshot(): string;
   };
   MockUserInput: new () => {
@@ -45,7 +46,9 @@ interface PackedTuiHarness {
     send(sequence: string): void;
     ctrlC(): void;
   };
-  createPromptCommandHandler: (options: { appRoot?: string }) => unknown;
+  createPromptCommandHandler: (options: {
+    target: { kind: "local"; serverUrl: string; workspaceRoot: string };
+  }) => unknown;
 }
 
 void (async () => {
@@ -95,23 +98,26 @@ void (async () => {
     const screen = new MockScreen({ columns: 100, rows: 40 });
     const input = new MockUserInput();
     const runner = new EveTUIRunner({
-      // `/model` never dispatches a turn; a turn in this test is a bug.
-      session: {
-        send: async () => {
-          throw new Error("unexpected turn dispatched during /model smoke test");
-        },
-      },
+      // `/model` runs before the first chat turn, so no client session exists yet.
       screen,
       userInput: input,
       name: "Packed install model command",
       appRoot: consumerRoot,
-      promptCommandHandler: createPromptCommandHandler({ appRoot: consumerRoot }),
+      initialInput: "/model",
+      getVercelAuthStatus: async () => "authenticated",
+      promptCommandHandler: createPromptCommandHandler({
+        target: {
+          kind: "local",
+          serverUrl: "http://127.0.0.1:0",
+          workspaceRoot: consumerRoot,
+        },
+      }),
       bootDetections: [
         {
-          id: "test-unconfigured-provider",
+          id: "test-model-setup-attention",
           detect: () => [
             {
-              kind: "model-provider-unconfigured",
+              kind: "attention",
               label: "model provider not linked",
               command: "/model",
             },
@@ -122,18 +128,27 @@ void (async () => {
     const runPromise = runner.run();
 
     try {
-      // The provider picker paints before the first prompt only when boot
-      // detection launched the installed `/model` flow and its module graph
-      // loaded — the exact surface the oxc-parser regression crashed.
+      // The provider picker paints before the first prompt only when the
+      // prefilled onboarding `/model` flow and its module graph load — the
+      // exact surface the oxc-parser regression crashed.
       await screen.waitForText("Configure the agent model", 15_000);
       await screen.waitForText("Which model provider do you want to use?", 15_000);
-      console.log(theme.muted("[tui-packed-install] /model auto-opened provider setup"));
+      console.log(theme.muted("[tui-packed-install] /model opened provider setup"));
 
       input.send("\x1b");
       await screen.waitForText("Change model", 5_000);
       input.send("\x1b");
-      await screen.waitForText("/model cancelled.", 5_000);
-      await screen.waitForText("❯", 5_000);
+      await screen.waitForText("/model dismissed.", 5_000);
+      // Fresh-model onboarding now follows the picker with the registry hub.
+      // Dismiss it too before asserting that the runner returns to chat.
+      await screen.waitForText("Add to your agent", 5_000);
+      // The title paints before registry loading necessarily yields to the
+      // category picker. Wait for a real option so Escape belongs to the
+      // question rather than the setup flow's between-questions interrupt trap.
+      await screen.waitForText("Channels", 5_000);
+      input.send("\x1b");
+      await screen.waitForText("/add dismissed.", 5_000);
+      await screen.waitForIdlePrompt(5_000);
 
       input.type("/exit");
       input.enter();

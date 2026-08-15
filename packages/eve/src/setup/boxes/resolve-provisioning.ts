@@ -77,6 +77,7 @@ export interface ResolveProvisioningOptions {
    * team selection to the existing-project picker.
    */
   projectSelection?: "create-or-link" | "existing-only";
+  teamSelectMessage?: (currentTeam: string) => string;
   deps?: ResolveProvisioningDeps;
 }
 
@@ -104,13 +105,11 @@ export interface ResolvedProvisioning {
  * flags.
  */
 interface VercelDemands {
-  slack: boolean;
   connectSlugs: string[];
 }
 
 function vercelDemands(state: Readonly<SetupState>): VercelDemands {
   return {
-    slack: state.channelSelection.includes("slack"),
     connectSlugs: state.connectionSelection
       .filter((plan) => plan.entry.auth?.kind === "connect")
       .map((plan) => plan.slug),
@@ -126,9 +125,6 @@ function connectClause(connectSlugs: readonly string[]): string {
 /** The reasons behind a forced Vercel resolution; empty when free to choose. */
 function vercelRequirements(demands: VercelDemands): string[] {
   const reasons: string[] = [];
-  if (demands.slack) {
-    reasons.push("Slack needs a public URL");
-  }
   if (demands.connectSlugs.length > 0) {
     reasons.push(connectClause(demands.connectSlugs));
   }
@@ -292,12 +288,13 @@ export function resolveProvisioning(
 
     if (deployVercel) {
       await deps.requireAuth(parent(), prompter, { signal });
-      const team = await deps.pickTeam(prompter, parent(), undefined, { signal });
+      const teamOptions = { signal, selectMessage: options.teamSelectMessage };
+      const team = await deps.pickTeam(prompter, parent(), undefined, teamOptions);
       const projectOptions = [
         {
           value: "new" as const,
           label: "Create a new project",
-          hint: `Named ${agentName}`,
+          hint: `Name: ${agentName}`,
         },
         { value: "link" as const, label: "Link an existing project" },
       ];
@@ -310,7 +307,7 @@ export function resolveProvisioning(
               editable: {
                 value: "new",
                 defaultValue: agentName,
-                formatHint: (value) => `Named ${value}`,
+                formatHint: (value) => `Name: ${value}`,
                 validate: (value) =>
                   value.trim().length === 0 ? "Project name cannot be empty." : undefined,
               },
@@ -329,7 +326,7 @@ export function resolveProvisioning(
                     id: "new",
                     value: "new",
                     label: "Create a new project",
-                    hint: `Named ${agentName}`,
+                    hint: `Name: ${agentName}`,
                   },
                   { id: "link", value: "link", label: "Link an existing project" },
                 ],
@@ -348,8 +345,11 @@ export function resolveProvisioning(
           modelWiring: "gateway",
         };
       }
+      // Creating would name the project after the agent, so linking suggests
+      // the existing project already carrying that name.
       const pickedProject = await deps.pickProject(prompter, parent(), team, {
         allowCreateWhenEmpty: options.projectSelection !== "existing-only",
+        suggestedName: agentName,
         signal,
       });
       return {
@@ -392,6 +392,7 @@ export function resolveProvisioning(
           key: "gateway-api-key",
           message: "Enter your AI_GATEWAY_API_KEY",
           sensitive: true,
+          environment: "AI_GATEWAY_API_KEY",
           validate: (value) => (value.trim().length === 0 ? "API key cannot be empty." : null),
           required: true,
         }),
@@ -433,9 +434,6 @@ export function resolveProvisioning(
         // resolves to Vercel for those selections.
         if (plans.vercelProject.kind === "none") {
           const demands = vercelDemands(state);
-          if (demands.slack) {
-            throw new Error("Slack requires a Vercel project. Remove --skip-vercel to add Slack.");
-          }
           if (demands.connectSlugs.length > 0) {
             throw new Error(
               `${connectClause(demands.connectSlugs)}, which needs a Vercel project. Remove --skip-vercel to add ${demands.connectSlugs.length === 1 ? "it" : "them"}.`,

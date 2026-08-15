@@ -1,10 +1,12 @@
 import type { SessionHandle } from "#channel/session.js";
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { RouteHandler } from "#channel/routes.js";
+import type { ChannelFrom } from "#channel/channel-operations.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { ChannelSessionOps } from "#public/definitions/defineChannel.js";
+import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger } from "#internal/logging.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   callTwilioApi,
   sendTwilioMessage,
@@ -35,21 +37,19 @@ import {
   sayTwilioResponse,
 } from "#public/channels/twilio/twiml.js";
 import {
-  verifyTwilioRequest,
-  type TwilioAuthToken,
-  type TwilioWebhookUrl,
-} from "#public/channels/twilio/verify.js";
-import {
-  defineChannel,
-  POST,
-  type Channel,
-  type SendFn,
-} from "#public/definitions/defineChannel.js";
+  buildTwilioActionUrl,
+  buildTwilioRoutes,
+  verifyTwilioInbound,
+  type TwilioRoutes,
+} from "#public/channels/twilio/routing.js";
+import { type TwilioAuthToken, type TwilioWebhookUrl } from "#public/channels/twilio/verify.js";
+import { readNonEmptyString } from "#shared/guards.js";
+import { defineChannel, GET, POST, type Channel } from "#public/definitions/channel.js";
 
 const log = createLogger("twilio.channel");
 
-type EventData<T extends HandleMessageStreamEvent["type"]> =
-  Extract<HandleMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Pre-dispatch Twilio context passed to the inbound text, voice, and voice-transcription hooks. */
 export interface TwilioContext {
@@ -61,8 +61,8 @@ export interface TwilioChannelContext extends TwilioContext {
   state: TwilioChannelState;
 }
 
-/** Event-handler Twilio context, including session operations. */
-export interface TwilioEventContext extends TwilioChannelContext, ChannelSessionOps {}
+/** Event-handler Twilio context, including continuation routing. */
+export interface TwilioEventContext extends TwilioChannelContext, ChannelContinuationOps {}
 
 /** JSON-serializable state for the phone-number conversation. */
 export interface TwilioChannelState {
@@ -99,6 +99,8 @@ export interface TwilioReceiveTarget {
 /** Result of an inbound Twilio text or transcription hook. Return `null` (or `undefined`) to drop the webhook without dispatching; otherwise supply the session `auth` context. */
 export type TwilioInboundResult = {
   auth: SessionAuthContext | null;
+  /** Overrides the workflow run title without changing the message sent to the model. */
+  title?: string;
 } | null;
 
 /** Sync or async {@link TwilioInboundResult}. */
@@ -140,7 +142,7 @@ export type TwilioVoiceResultOrPromise =
   | undefined
   | Promise<TwilioVoiceResult | null | undefined>;
 
-type TwilioEventHandler<T extends HandleMessageStreamEvent["type"]> = (
+type TwilioEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
   data: EventData<T>,
   channel: TwilioEventContext,
   ctx: SessionContext,
@@ -155,12 +157,14 @@ type TwilioSessionFailedHandler = (
 export interface TwilioChannelEvents {
   readonly "turn.started"?: TwilioEventHandler<"turn.started">;
   readonly "actions.requested"?: TwilioEventHandler<"actions.requested">;
+  readonly "action.partial"?: TwilioEventHandler<"action.partial">;
   readonly "action.result"?: TwilioEventHandler<"action.result">;
   readonly "message.completed"?: TwilioEventHandler<"message.completed">;
   readonly "message.appended"?: TwilioEventHandler<"message.appended">;
   readonly "input.requested"?: TwilioEventHandler<"input.requested">;
   readonly "turn.failed"?: TwilioEventHandler<"turn.failed">;
   readonly "turn.completed"?: TwilioEventHandler<"turn.completed">;
+  readonly "turn.cancelled"?: TwilioEventHandler<"turn.cancelled">;
   readonly "session.failed"?: TwilioSessionFailedHandler;
   readonly "session.completed"?: TwilioEventHandler<"session.completed">;
   readonly "session.waiting"?: TwilioEventHandler<"session.waiting">;
@@ -208,6 +212,8 @@ export interface TwilioChannelConfig {
    * mounts `/messages`, `/voice`, and `/voice/transcription` below it.
    */
   readonly route?: string;
+  /** Policy for accepted messages that arrive while a turn is active. */
+  readonly turnPolicy?: TurnPolicy;
   /**
    * Public URL Twilio used for signing. Set this when proxies or local
    * tunnels make `request.url` differ from the configured webhook URL.
@@ -278,11 +284,14 @@ export interface TwilioChannel extends Channel<
 /** Twilio channel factory for SMS and speech-transcribed inbound calls. */
 export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
   assertAllowFromConfigured(config);
-  const routes = buildRoutes(config.route ?? "/eve/v1/twilio");
+  const routes = buildTwilioRoutes(config.route ?? "/eve/v1/twilio");
   const onText = config.onText ?? defaultOnText;
   const onVoice = config.onVoice ?? defaultOnVoice;
   const onVoiceTranscription = config.onVoiceTranscription ?? defaultOnVoiceTranscription;
   const mergedEvents: TwilioChannelEvents = { ...defaultEvents, ...config.events };
+  const messages = handleTwilioMessages({ config, onText });
+  const voice = handleTwilioVoice({ config, onVoice, routes });
+  const transcription = handleTwilioTranscription({ config, onVoiceTranscription, routes });
 
   return defineChannel<
     TwilioChannelState,
@@ -291,6 +300,7 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
     TwilioInstrumentationMetadata
   >({
     kindHint: "twilio",
+    turnPolicy: config.turnPolicy,
     state: {
       from: null as string | null,
       to: null as string | null,
@@ -311,99 +321,139 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
     },
 
     routes: [
-      POST<TwilioChannelState>(routes.messages, async (req, { send, waitUntil }) => {
-        const verified = await verifyInbound(req, config);
-        if (verified === null) return new Response("unauthorized", { status: 401 });
-
-        const message = parseTwilioTextMessage(verified.params);
-        if (!message) return emptyTwilioResponse();
-        if (!(await isAllowed(message.from, config.allowFrom)))
-          return new Response("forbidden", { status: 403 });
-
-        waitUntil(dispatchText({ config, message, onText, send }));
-        return emptyTwilioResponse();
-      }),
-
-      POST<TwilioChannelState>(routes.voice, async (req) => {
-        const verified = await verifyInbound(req, config);
-        if (verified === null) return new Response("unauthorized", { status: 401 });
-
-        const call = parseTwilioVoiceCall(verified.params);
-        if (!call) return sayTwilioResponse("Missing caller information.");
-        if (!(await isAllowed(call.from, config.allowFrom)))
-          return new Response("forbidden", { status: 403 });
-
-        const voiceResult = await acceptVoiceCall({
-          call,
-          config,
-          onVoice,
-        });
-        if (voiceResult === null) return new Response("forbidden", { status: 403 });
-        const voiceOptions = voiceResult ?? {};
-
-        return gatherSpeechTwilioResponse({
-          actionUrl: await buildActionUrl(req, config, routes.transcription),
-          hints: voiceOptions.hints ?? config.voice?.hints,
-          language: voiceOptions.language ?? config.voice?.language,
-          profanityFilter: voiceOptions.profanityFilter ?? config.voice?.profanityFilter,
-          prompt:
-            voiceOptions.prompt ??
-            config.voice?.prompt ??
-            "Please say your message after the tone.",
-          speechModel: voiceOptions.speechModel ?? config.voice?.speechModel,
-          speechTimeout: voiceOptions.speechTimeout ?? config.voice?.speechTimeout ?? "auto",
-          timeoutSeconds: voiceOptions.timeoutSeconds ?? config.voice?.timeoutSeconds,
-          voice: voiceOptions.voice ?? config.voice?.voice,
-        });
-      }),
-
-      POST<TwilioChannelState>(routes.transcription, async (req, { send, waitUntil }) => {
-        const verified = await verifyInbound(req, config);
-        if (verified === null) return new Response("unauthorized", { status: 401 });
-
-        const transcription = parseTwilioVoiceTranscription(verified.params);
-        if (!transcription) {
-          return gatherSpeechTwilioResponse({
-            actionUrl: await buildActionUrl(req, config, routes.transcription),
-            language: config.voice?.language,
-            prompt: config.voice?.prompt ?? "Please say your message after the tone.",
-            speechTimeout: config.voice?.speechTimeout ?? "auto",
-            timeoutSeconds: config.voice?.timeoutSeconds,
-          });
-        }
-        if (!(await isAllowed(transcription.from, config.allowFrom))) {
-          return new Response("forbidden", { status: 403 });
-        }
-
-        waitUntil(
-          dispatchVoiceTranscription({ config, onVoiceTranscription, send, transcription }),
-        );
-        return sayTwilioResponse(
-          config.voice?.acknowledgement ?? "Thanks. I'll follow up by text.",
-        );
-      }),
+      GET<TwilioChannelState>(routes.messages, messages),
+      POST<TwilioChannelState>(routes.messages, messages),
+      GET<TwilioChannelState>(routes.voice, voice),
+      POST<TwilioChannelState>(routes.voice, voice),
+      GET<TwilioChannelState>(routes.transcription, transcription),
+      POST<TwilioChannelState>(routes.transcription, transcription),
     ],
 
-    async receive(input, { send }) {
-      const phoneNumber = readString(input.target.phoneNumber);
+    async receive(input, { from }) {
+      const phoneNumber = readNonEmptyString(input.target.phoneNumber);
       if (!phoneNumber) {
         throw new Error("twilioChannel().receive requires target.phoneNumber.");
       }
-      const from = readString(input.target.from) ?? config.messaging?.from ?? null;
-      return send(input.message, {
-        auth: input.auth,
-        continuationToken: twilioContinuationToken(phoneNumber, from ?? undefined),
-        state: {
-          from: phoneNumber,
-          lastCallSid: null,
-          lastMessageSid: null,
-          to: from,
+      const senderNumber = readNonEmptyString(input.target.from) ?? config.messaging?.from ?? null;
+      return from(twilioContinuationToken(phoneNumber, senderNumber ?? undefined)).send(
+        input.message,
+        {
+          auth: input.auth,
+          state: {
+            from: phoneNumber,
+            lastCallSid: null,
+            lastMessageSid: null,
+            to: senderNumber,
+          },
         },
-      });
+      );
     },
 
     events: mergedEvents,
   });
+}
+
+function handleTwilioMessages(input: {
+  readonly config: TwilioChannelConfig;
+  readonly onText: NonNullable<TwilioChannelConfig["onText"]>;
+}): RouteHandler<TwilioChannelState> {
+  return async (req, { from, waitUntil }) => {
+    const verified = await verifyTwilioInbound(req, input.config);
+    if (verified === null) return new Response("unauthorized", { status: 401 });
+
+    const message = parseTwilioTextMessage(verified.params);
+    if (!message) return emptyTwilioResponse();
+    if (!(await isAllowed(message.from, input.config.allowFrom))) {
+      return new Response("forbidden", { status: 403 });
+    }
+
+    waitUntil(
+      dispatchText({
+        config: input.config,
+        message,
+        onText: input.onText,
+        from,
+      }),
+    );
+    return emptyTwilioResponse();
+  };
+}
+
+function handleTwilioVoice(input: {
+  readonly config: TwilioChannelConfig;
+  readonly onVoice: NonNullable<TwilioChannelConfig["onVoice"]>;
+  readonly routes: TwilioRoutes;
+}): RouteHandler<TwilioChannelState> {
+  return async (req) => {
+    const verified = await verifyTwilioInbound(req, input.config);
+    if (verified === null) return new Response("unauthorized", { status: 401 });
+
+    const call = parseTwilioVoiceCall(verified.params);
+    if (!call) return sayTwilioResponse("Missing caller information.");
+    if (!(await isAllowed(call.from, input.config.allowFrom))) {
+      return new Response("forbidden", { status: 403 });
+    }
+
+    const voiceResult = await acceptVoiceCall({
+      call,
+      config: input.config,
+      onVoice: input.onVoice,
+    });
+    if (voiceResult === null) return new Response("forbidden", { status: 403 });
+    const voiceOptions = voiceResult ?? {};
+
+    return gatherSpeechTwilioResponse({
+      actionUrl: await buildTwilioActionUrl(req, input.config, input.routes.transcription),
+      hints: voiceOptions.hints ?? input.config.voice?.hints,
+      language: voiceOptions.language ?? input.config.voice?.language,
+      profanityFilter: voiceOptions.profanityFilter ?? input.config.voice?.profanityFilter,
+      prompt:
+        voiceOptions.prompt ??
+        input.config.voice?.prompt ??
+        "Please say your message after the tone.",
+      speechModel: voiceOptions.speechModel ?? input.config.voice?.speechModel,
+      speechTimeout: voiceOptions.speechTimeout ?? input.config.voice?.speechTimeout ?? "auto",
+      timeoutSeconds: voiceOptions.timeoutSeconds ?? input.config.voice?.timeoutSeconds,
+      voice: voiceOptions.voice ?? input.config.voice?.voice,
+    });
+  };
+}
+
+function handleTwilioTranscription(input: {
+  readonly config: TwilioChannelConfig;
+  readonly onVoiceTranscription: NonNullable<TwilioChannelConfig["onVoiceTranscription"]>;
+  readonly routes: TwilioRoutes;
+}): RouteHandler<TwilioChannelState> {
+  return async (req, { from, waitUntil }) => {
+    const verified = await verifyTwilioInbound(req, input.config);
+    if (verified === null) return new Response("unauthorized", { status: 401 });
+
+    const transcription = parseTwilioVoiceTranscription(verified.params);
+    if (!transcription) {
+      return gatherSpeechTwilioResponse({
+        actionUrl: await buildTwilioActionUrl(req, input.config, input.routes.transcription),
+        language: input.config.voice?.language,
+        prompt: input.config.voice?.prompt ?? "Please say your message after the tone.",
+        speechTimeout: input.config.voice?.speechTimeout ?? "auto",
+        timeoutSeconds: input.config.voice?.timeoutSeconds,
+      });
+    }
+    if (!(await isAllowed(transcription.from, input.config.allowFrom))) {
+      return new Response("forbidden", { status: 403 });
+    }
+
+    waitUntil(
+      dispatchVoiceTranscription({
+        config: input.config,
+        onVoiceTranscription: input.onVoiceTranscription,
+        from,
+        transcription,
+      }),
+    );
+    return sayTwilioResponse(
+      input.config.voice?.acknowledgement ?? "Thanks. I'll follow up by text.",
+    );
+  };
 }
 
 function rebuildTwilioContext(
@@ -471,19 +521,6 @@ function buildTwilioHandle(input: {
   };
 }
 
-function buildRoutes(baseRoute: string): {
-  messages: string;
-  voice: string;
-  transcription: string;
-} {
-  const base = baseRoute.endsWith("/") ? baseRoute.slice(0, -1) : baseRoute;
-  return {
-    messages: `${base}/messages`,
-    transcription: `${base}/voice/transcription`,
-    voice: `${base}/voice`,
-  };
-}
-
 function assertAllowFromConfigured(
   config: TwilioChannelConfig | undefined,
 ): asserts config is TwilioChannelConfig {
@@ -492,26 +529,11 @@ function assertAllowFromConfigured(
   }
 }
 
-async function verifyInbound(
-  req: Request,
-  config: TwilioChannelConfig,
-): Promise<{ body: string; params: URLSearchParams } | null> {
-  try {
-    return await verifyTwilioRequest(req, {
-      authToken: config.credentials?.authToken,
-      webhookUrl: config.webhookUrl,
-    });
-  } catch (error) {
-    log.warn("twilio inbound verification failed", { error });
-    return null;
-  }
-}
-
 async function dispatchText(input: {
   readonly config: TwilioChannelConfig;
   readonly message: TwilioTextMessage;
   readonly onText: NonNullable<TwilioChannelConfig["onText"]>;
-  readonly send: SendFn<TwilioChannelState>;
+  readonly from: ChannelFrom<TwilioChannelState>;
 }): Promise<void> {
   const { message } = input;
   const twilio: TwilioContext = {
@@ -540,22 +562,17 @@ async function dispatchText(input: {
   });
 
   try {
-    await input.send(
-      {
-        message: message.body,
-        context: [contextBlock],
+    await input.from(twilioContinuationToken(message.from, message.to)).send(message.body, {
+      auth: result.auth,
+      context: [contextBlock],
+      state: {
+        from: message.from,
+        lastCallSid: null,
+        lastMessageSid: message.messageSid ?? null,
+        to: message.to ?? null,
       },
-      {
-        auth: result.auth,
-        continuationToken: twilioContinuationToken(message.from, message.to),
-        state: {
-          from: message.from,
-          lastCallSid: null,
-          lastMessageSid: message.messageSid ?? null,
-          to: message.to ?? null,
-        },
-      },
-    );
+      title: result.title,
+    });
   } catch (error) {
     log.error("text delivery failed", { error });
   }
@@ -587,7 +604,7 @@ async function acceptVoiceCall(input: {
 async function dispatchVoiceTranscription(input: {
   readonly config: TwilioChannelConfig;
   readonly onVoiceTranscription: NonNullable<TwilioChannelConfig["onVoiceTranscription"]>;
-  readonly send: SendFn<TwilioChannelState>;
+  readonly from: ChannelFrom<TwilioChannelState>;
   readonly transcription: TwilioVoiceTranscription;
 }): Promise<void> {
   const { transcription } = input;
@@ -617,22 +634,19 @@ async function dispatchVoiceTranscription(input: {
   });
 
   try {
-    await input.send(
-      {
-        message: transcription.text,
-        context: [contextBlock],
-      },
-      {
+    await input
+      .from(twilioContinuationToken(transcription.from, transcription.to))
+      .send(transcription.text, {
         auth: result.auth,
-        continuationToken: twilioContinuationToken(transcription.from, transcription.to),
+        context: [contextBlock],
         state: {
           from: transcription.from,
           lastCallSid: transcription.callSid ?? null,
           lastMessageSid: null,
           to: transcription.to ?? null,
         },
-      },
-    );
+        title: result.title,
+      });
   } catch (error) {
     log.error("voice transcription delivery failed", { error });
   }
@@ -642,29 +656,4 @@ async function isAllowed(from: string, allowFrom: TwilioAllowFrom): Promise<bool
   const resolved = typeof allowFrom === "function" ? await allowFrom() : allowFrom;
   if (resolved === "*") return true;
   return typeof resolved === "string" ? resolved === from : resolved.includes(from);
-}
-
-async function buildActionUrl(
-  request: Request,
-  config: TwilioChannelConfig,
-  route: string,
-): Promise<string> {
-  const base =
-    typeof config.publicBaseUrl === "function"
-      ? await config.publicBaseUrl(request)
-      : config.publicBaseUrl;
-  if (base) return new URL(route, ensureTrailingSlash(base)).toString();
-
-  const url = new URL(request.url);
-  url.pathname = route;
-  url.search = "";
-  return url.toString();
-}
-
-function ensureTrailingSlash(value: string): string {
-  return value.endsWith("/") ? value : `${value}/`;
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }

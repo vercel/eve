@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { ClientSession, MessageResponse, type HandleMessageStreamEvent } from "eve/client";
+import { ClientSession, MessageResponse, type MessageStreamEvent } from "eve/client";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { EveTUIRunner, MockScreen, MockUserInput } from "./lib/tui.ts";
 
 import { theme } from "./lib/theme.ts";
@@ -13,55 +14,82 @@ import { theme } from "./lib/theme.ts";
  * emit `_completed` in this repo (interactive auth
  * requires a `principalType: "user"` session, which apps/fixtures/agent-tui-client
  * doesn't currently provide). This smoke fills that gap with a
- * `FakeSession` that returns a synthetic event stream, so we get
+ * `FakeSession` that separates the parked request stream from the callback
+ * continuation stream, so we get
  * deterministic coverage of:
  *
  *   1. `_required` with a populated challenge (URL, user code,
  *      instructions). That proves the renderer surfaces all three
  *      challenge fields, which the live smoke can't show.
- *   2. `_completed` with `outcome: "authorized"`. That proves the
- *      right-title transitions, the status bar override clears,
- *      and the section becomes terminal.
+ *   2. `_completed` with `outcome: "authorized"` after `session.waiting`.
+ *      That proves the root TUI follows `session.stream()` until the OAuth
+ *      callback resumes the durable workflow, flips the right-title, clears
+ *      the status-bar override, and settles the section.
  *   3. A second turn with `outcome: "failed"` + a reason. That
  *      proves the failure path renders distinctly and the reason
  *      string surfaces in the section content.
  */
 
 class FakeSession extends ClientSession {
-  readonly #turns: ReadonlyArray<readonly HandleMessageStreamEvent[]>;
+  readonly #turns: ReadonlyArray<readonly UnstampedMessageStreamEvent[]>;
+  readonly #continuations: ReadonlyArray<readonly UnstampedMessageStreamEvent[]>;
   #turnIndex = 0;
+  #continuationIndex = 0;
 
-  constructor(turns: ReadonlyArray<readonly HandleMessageStreamEvent[]>) {
+  constructor(input: {
+    turns: ReadonlyArray<readonly UnstampedMessageStreamEvent[]>;
+    continuations: ReadonlyArray<readonly UnstampedMessageStreamEvent[]>;
+  }) {
     super(
       {
         host: "http://fake.invalid",
-        maxReconnectAttempts: 0,
-        preserveCompletedSessions: false,
         resolveHeaders: async () => new Headers(),
       },
-      { streamIndex: 0 },
+      { sessionId: "fake-session", streamIndex: 0 },
     );
-    this.#turns = turns;
+    this.#turns = input.turns;
+    this.#continuations = input.continuations;
   }
 
   override async send<TOutput = unknown>(): Promise<MessageResponse<TOutput>> {
     const events = this.#turns[this.#turnIndex] ?? [];
     this.#turnIndex += 1;
     return new MessageResponse<TOutput>({
+      cancelTurn: async () => ({ status: "no_active_turn" }),
       sessionId: "fake-session",
-      continuationToken: `fake-token-${this.#turnIndex}`,
-      createStream: async function* () {
-        for (const event of events) {
-          yield event;
-          // Pacing so the renderer paints between each event AND the
-          // smoke's `waitForCondition` (50ms poll) has time to observe
-          // intermediate states. Real streams have natural pacing from
-          // the HTTP transport; a synchronous yield burst makes
-          // intermediate states impossible to assert on.
-          await sleep(200);
-        }
-      },
+      createStream: () => pacedEvents(events),
     });
+  }
+
+  override stream(): AsyncIterable<MessageStreamEvent> {
+    // A durable session tail cannot expose a callback continuation before
+    // the turn that parked for that callback has been accepted.
+    if (this.#continuationIndex >= this.#turnIndex) return pacedEvents([]);
+    const events = this.#continuations[this.#continuationIndex] ?? [];
+    this.#continuationIndex += 1;
+    return pacedEvents(events);
+  }
+}
+
+let nextEventIndex = 0;
+
+/** Stamps a fixture event the way an emit seam does before it hits the wire. */
+function stamp(event: UnstampedMessageStreamEvent): MessageStreamEvent {
+  nextEventIndex += 1;
+  return {
+    ...event,
+    meta: { at: new Date().toISOString(), id: `evt_smoke_${nextEventIndex}` },
+  } as MessageStreamEvent;
+}
+
+async function* pacedEvents(
+  events: readonly UnstampedMessageStreamEvent[],
+): AsyncGenerator<MessageStreamEvent> {
+  for (const event of events) {
+    yield stamp(event);
+    // Pacing gives the renderer and smoke assertions a chance to observe
+    // each lifecycle state between events, as the HTTP transport does live.
+    await sleep(200);
   }
 }
 
@@ -71,10 +99,10 @@ const stepIndex = 0;
 let sequence = 0;
 const next = () => ++sequence;
 
-const firstTurn: HandleMessageStreamEvent[] = [
+const firstTurn: UnstampedMessageStreamEvent[] = [
   { type: "session.started", data: {} },
   { type: "turn.started", data: { sequence: next(), turnId } },
-  { type: "step.started", data: { sequence: next(), stepIndex, turnId } },
+  { type: "step.started", data: { modelId: "eve-mock/test", sequence: next(), stepIndex, turnId } },
   {
     type: "authorization.required",
     data: {
@@ -88,13 +116,21 @@ const firstTurn: HandleMessageStreamEvent[] = [
       sequence: next(),
       stepIndex,
       turnId,
-      webhookUrl: "http://localhost:3000/.well-known/eve/v1/connections/stub-mcp/callback/xyz",
+      webhookUrl: "http://localhost:3000/eve/v1/connections/stub-mcp/callback/xyz",
     },
   },
-  // In a real workflow, the next events arrive only after the webhook
-  // callback fires and `completeAuthorization` resolves. The synthetic
-  // stream emits them after a short delay (above, via the per-event
-  // sleep) so the smoke can observe the intermediate state.
+  {
+    type: "step.completed",
+    data: { finishReason: "stop", sequence: next(), stepIndex, turnId },
+  },
+  {
+    type: "session.waiting",
+    data: { continuationToken: "session-id", wait: "next-user-message" },
+  },
+];
+
+const firstCallbackTurn: UnstampedMessageStreamEvent[] = [
+  { type: "turn.started", data: { sequence: next(), turnId: "turn-1" } },
   {
     type: "authorization.completed",
     data: {
@@ -102,20 +138,27 @@ const firstTurn: HandleMessageStreamEvent[] = [
       outcome: "authorized",
       sequence: next(),
       stepIndex,
-      turnId,
+      turnId: "turn-1",
     },
   },
   {
     type: "step.completed",
-    data: { finishReason: "stop", sequence: next(), stepIndex, turnId },
+    data: { finishReason: "stop", sequence: next(), stepIndex, turnId: "turn-1" },
   },
-  { type: "session.waiting", data: { wait: "next-user-message" } },
+  { type: "turn.completed", data: { sequence: next(), turnId: "turn-1" } },
+  {
+    type: "session.waiting",
+    data: { continuationToken: "session-id", wait: "next-user-message" },
+  },
 ];
 
-const secondTurnId = "turn-1";
-const secondTurn: HandleMessageStreamEvent[] = [
+const secondTurnId = "turn-2";
+const secondTurn: UnstampedMessageStreamEvent[] = [
   { type: "turn.started", data: { sequence: next(), turnId: secondTurnId } },
-  { type: "step.started", data: { sequence: next(), stepIndex, turnId: secondTurnId } },
+  {
+    type: "step.started",
+    data: { modelId: "eve-mock/test", sequence: next(), stepIndex, turnId: secondTurnId },
+  },
   {
     type: "authorization.required",
     data: {
@@ -127,8 +170,21 @@ const secondTurn: HandleMessageStreamEvent[] = [
       sequence: next(),
       stepIndex,
       turnId: secondTurnId,
+      webhookUrl: "http://localhost:3000/eve/v1/connections/other-mcp/callback/xyz",
     },
   },
+  {
+    type: "step.completed",
+    data: { finishReason: "stop", sequence: next(), stepIndex, turnId: secondTurnId },
+  },
+  {
+    type: "session.waiting",
+    data: { continuationToken: "session-id", wait: "next-user-message" },
+  },
+];
+
+const secondCallbackTurn: UnstampedMessageStreamEvent[] = [
+  { type: "turn.started", data: { sequence: next(), turnId: "turn-3" } },
   {
     type: "authorization.completed",
     data: {
@@ -137,20 +193,27 @@ const secondTurn: HandleMessageStreamEvent[] = [
       reason: "access_denied",
       sequence: next(),
       stepIndex,
-      turnId: secondTurnId,
+      turnId: "turn-3",
     },
   },
   {
     type: "step.completed",
-    data: { finishReason: "stop", sequence: next(), stepIndex, turnId: secondTurnId },
+    data: { finishReason: "stop", sequence: next(), stepIndex, turnId: "turn-3" },
   },
-  { type: "session.waiting", data: { wait: "next-user-message" } },
+  { type: "turn.completed", data: { sequence: next(), turnId: "turn-3" } },
+  {
+    type: "session.waiting",
+    data: { continuationToken: "session-id", wait: "next-user-message" },
+  },
 ];
 
 process.env.EVE_TUI_UNICODE = "1";
 
 void (async () => {
-  const session = new FakeSession([firstTurn, secondTurn]);
+  const session = new FakeSession({
+    turns: [firstTurn, secondTurn],
+    continuations: [firstCallbackTurn, secondCallbackTurn],
+  });
   const screen = new MockScreen({ columns: 100, rows: 40 });
   const input = new MockUserInput();
   const runner = new EveTUIRunner({
@@ -168,7 +231,7 @@ void (async () => {
   });
 
   try {
-    await screen.waitForText("❯", 5_000);
+    await screen.waitForIdlePrompt(5_000);
 
     // ---- Turn 1: stub-mcp, ends in `authorized` ----
 
@@ -201,6 +264,25 @@ void (async () => {
       onTimeout: () => screen.snapshot(),
     });
     console.log(theme.muted("[states] right-title flipped to authorized"));
+
+    await waitForCondition(
+      () => {
+        const snap = screen.snapshot();
+        return (
+          snap.includes("Authorization complete") &&
+          !snap.includes("Authorization required for stub-mcp") &&
+          !snap.includes("URL: https://example.com/authorize/stub-mcp") &&
+          !snap.includes("Code: STUB-1234") &&
+          !snap.includes("Visit the URL above")
+        );
+      },
+      {
+        timeoutMs: 5_000,
+        label: "completed authorization replaces the stale challenge body",
+        onTimeout: () => screen.snapshot(),
+      },
+    );
+    console.log(theme.muted("[states] completed authorization body replaced the challenge"));
 
     await waitForCondition(
       () => !screen.snapshot().includes("Waiting for connection authorization"),
@@ -252,12 +334,13 @@ void (async () => {
     console.log(theme.muted("[states] failure reason surfaced"));
 
     // The turn is complete; wait until the runner is back at the prompt so
-    // Ctrl+C exits the session. A Ctrl+C mid-stream now only interrupts the
-    // turn and returns to the prompt (Claude Code's two-step exit).
-    await screen.waitForText("❯", 10_000);
+    // Two idle Ctrl+C presses exit; mid-stream Ctrl+C cancels cooperatively.
+    await screen.waitForIdlePrompt(10_000);
+    input.ctrlC();
     input.ctrlC();
     await runPromise;
   } catch (error) {
+    input.ctrlC();
     input.ctrlC();
     await runPromise.catch(() => undefined);
     throw error;

@@ -1,5 +1,3 @@
-import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-
 import { executeGlobOnSandbox, type GlobInput } from "#execution/sandbox/glob-tool.js";
 import { GLOB_INPUT_SCHEMA, GLOB_OUTPUT_SCHEMA } from "#runtime/framework-tools/glob.js";
 import type { ToolDefinition } from "#public/definitions/tool.js";
@@ -31,7 +29,7 @@ export function defineGlobTool(input: DefineGlobToolInput = {}): ToolDefinition 
     async execute(args, ctx) {
       return executeGlobOnSandbox(await ctx.getSandbox(), args as GlobInput);
     },
-    inputSchema: GLOB_INPUT_SCHEMA as unknown as StandardJSONSchemaV1<unknown>,
+    inputSchema: GLOB_INPUT_SCHEMA,
     outputSchema: GLOB_OUTPUT_SCHEMA,
   };
 }

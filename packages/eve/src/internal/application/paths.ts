@@ -3,12 +3,15 @@ import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
-import type { NitroBuildSurface } from "#internal/nitro/host/types.js";
 import {
   resolveInstalledPackageInfo,
   resolvePackageRoot,
   resolvePackageSourceDirectoryPath,
 } from "#internal/application/package.js";
+
+export const EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY_ENV = "EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY";
+export const EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV =
+  "EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY";
 
 export interface ApplicationInfo {
   appRoot: string;
@@ -29,34 +32,24 @@ function getWorkflowBuildCacheKey(appRoot: string): string {
   return createHash("sha256").update(appRoot).digest("hex").slice(0, 12);
 }
 
-function isVercelBuildEnvironment(): boolean {
+/**
+ * Reports whether the current process is running inside a Vercel build or
+ * deployment. Vercel sets `VERCEL` in both build and runtime environments, so
+ * this is the canonical signal for "managed by Vercel" versus self-hosted.
+ */
+export function isVercelBuildEnvironment(): boolean {
   return Boolean(process.env.VERCEL);
 }
 
 /**
  * Resolves the programmatic Nitro build directory for an app.
  */
-export function resolveNitroBuildDirectory(
-  appRoot: string,
-  surface: NitroBuildSurface = "all",
-): string {
-  const rootDirectory = join(appRoot, ".eve", "nitro");
-
-  if (surface === "all") {
-    return rootDirectory;
-  }
-
-  return join(rootDirectory, surface);
+export function resolveNitroBuildDirectory(appRoot: string): string {
+  return join(appRoot, ".eve", "nitro");
 }
 
-/**
- * Resolves the staged Nitro output directory for one isolated build surface.
- */
-export function resolveNitroSurfaceOutputDirectory(
-  appRoot: string,
-  surface: Exclude<NitroBuildSurface, "all">,
-): string {
-  return join(appRoot, ".eve", "nitro-output", surface);
+export function resolveApplicationHostArtifactsDirectory(appRoot: string): string {
+  return join(appRoot, ".eve", "host");
 }
 
 /**

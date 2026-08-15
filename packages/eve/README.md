@@ -27,7 +27,7 @@ Unless you configure stricter controls, eve agents may operate with permissive s
 - Durable message runs and follow-up turns
 - Inspectable compiled artifacts under `.eve/`
 - Per-agent sandbox with optional authored overrides
-- A stable HTTP protocol with explicit `continuationToken` and `sessionId` contracts
+- A stable HTTP protocol built around immutable session IDs
 - A runtime model that keeps channels, harnesses, and workflow execution separate
 
 ## Authored Directory
@@ -75,7 +75,7 @@ Runtime accessors live on the subpath that owns the concern:
 - `getSkill(identifier)` — handle for a named skill visible to the current agent (`eve/skills`)
 - `getContext(key)`, `requireContext(key)`, `hasContext(key)`, `setContext(key)`, `ensureContext(key, factory)` — unified context helpers (`eve/context`)
 
-The complete API reference, including types and lower-level runtime primitives, is in the [TypeScript API documentation](https://eve.dev/docs/reference/typescript-api).
+The complete API reference, including types and lower-level runtime primitives, is in the [TypeScript API Reference](https://eve.dev/docs/reference/typescript-api).
 
 ## Tiny Example
 
@@ -122,23 +122,30 @@ export default defineAgent({
 npx eve@latest init my-agent
 ```
 
-`eve init` writes a new agent with eve's default model. Pass `--channel-web-nextjs` to add the
-Web Chat application. It installs dependencies, initializes Git, and starts the
-development server. Targeting an existing project directory (`eve init .`) adds
-the agent files and missing dependencies instead. It does not create a Vercel
+`eve init` writes a new agent with eve's default model. Pass `--model
+openai/gpt-5.5` to choose another AI Gateway model, `--reasoning high` to set a
+reasoning effort, or `--channel-web-nextjs` to add the Web Chat application. It
+installs dependencies, initializes Git, and starts the development server. When
+it finds a supported coding-agent REPL, the handoff menu can open that REPL
+instead or exit. Targeting an existing project directory (`eve init .`) adds the
+agent files and missing dependencies instead. It does not create a Vercel
 project or deploy the agent.
 
 CLI commands:
 
+- `eve` (including `npx eve`) — initialize the current directory, or start development in an eve project
 - `eve init <name>` — create a new agent
 - `eve info` — discovery results and compiled artifacts
 - `eve build` — compile `.eve/` and build the host output
 - `eve start` — serve the built `.output/` app
 - `eve dev` — start the local runtime and REPL
+- `eve set [--model <model-id>] [--reasoning <effort>]` — change root model settings
+- `eve extension init <name>` — create a new extension package
+- `eve extension build` — build an extension package
 
 ## Deploying
 
-eve is built to be durable. The runtime is Nitro + Workflows. Read the [deployment guide](https://eve.dev/docs/guides/deployment) for the deployment path, environment variables, and configuration.
+eve is built to be durable. The runtime is Nitro + Workflows. Read the [deployment guide](https://eve.dev/docs/guides/deployment/overview) for the deployment path, environment variables, and configuration.
 
 ## Read Next
 
@@ -146,10 +153,10 @@ These files ship inside the installed package at `node_modules/eve/docs/`:
 
 - [Full docs index](https://eve.dev/docs) — recommended entry point
 - [Getting Started](https://eve.dev/docs/getting-started) — install, scaffold, and run locally
-- [Project Layout](https://eve.dev/docs/reference/project-layout) — every authored directory in depth
+- [Project Layout](https://eve.dev/docs/getting-started#project-layout) — every authored directory in depth
 - [`agent.ts`](https://eve.dev/docs/agent-config) — agent config reference
-- [TypeScript API](https://eve.dev/docs/reference/typescript-api) — complete `define*` and runtime helper reference
-- [Vercel Deployment](https://eve.dev/docs/guides/deployment) — deploy to production
+- [TypeScript API Reference](https://eve.dev/docs/reference/typescript-api) — complete `define*` and runtime helper reference
+- [Vercel Deployment](https://eve.dev/docs/guides/deployment/overview) — deploy to production
 
 By authoring concern: [Tools](https://eve.dev/docs/tools) · [Channels](https://eve.dev/docs/channels/overview) · [Hooks](https://eve.dev/docs/guides/hooks) · [Skills](https://eve.dev/docs/skills) · [Sandbox](https://eve.dev/docs/sandbox) · [Connections](https://eve.dev/docs/connections) · [Subagents](https://eve.dev/docs/subagents) · [Schedules](https://eve.dev/docs/schedules) · [Evals](https://eve.dev/docs/evals/overview)
 
@@ -161,14 +168,13 @@ You do not need this section to author an eve agent — it documents the public 
 
 eve's internal split is:
 
-- the **channel** normalizes inbound transport, applies auth and delivery policy, and owns `continuationToken`
+- the **channel** normalizes inbound transport, applies auth and delivery policy, and owns channel-local addresses
 - the **harness** does one unit of AI work and returns `{ session, next }`
 - the **runtime** persists state, follows `next`, streams events, and owns workflow primitives (`start()`, `resumeHook()`, `createHook()`, `getWritable()`)
 
-That split is why the public HTTP protocol separates two distinct identifiers:
-
-- `continuationToken` — channel-owned handle the caller uses to start the next user turn
-- `sessionId` — runtime-owned handle for streaming and inspection
+The public HTTP protocol exposes one immutable identifier: `sessionId`. Create a
+session explicitly, then use that ID for follow-up messages, controls, streaming,
+and inspection. Channel-local addresses remain behind authored channel APIs.
 
 ## Changelog
 

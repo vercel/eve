@@ -18,15 +18,19 @@ export interface LinkProjectDeps {
 }
 
 export interface LinkProjectOptions {
-  /** Streams link progress and command output. The box never prompts through it. */
+  /** Streams link progress and, in interactive runs, may confirm ambiguous framework detection. */
   prompter: Prompter;
+  /** Headless runs must not ask follow-up questions after the plan is fixed. */
+  headless?: boolean;
   deps?: LinkProjectDeps;
 }
 
 /**
  * Executes the resolved Vercel project plan after scaffolding, once the project
- * directory exists. Gather prompts for nothing — every decision was made in the
- * resolve-provisioning box.
+ * directory exists. Gather prompts for nothing: the team/project decision was
+ * made in the resolve-provisioning box. Interactive runs may still confirm
+ * ambiguous host framework detections; headless runs resolve those
+ * deterministically inside `linkProject`.
  *
  * The plan is authoritative: the box always re-links to the planned project so
  * a stale or mismatched `.vercel` link can't silently win. Re-linking the same
@@ -60,9 +64,13 @@ export function linkVercelProject(
       }
       const projectRoot = requireProjectPath(state);
       const onOutput = createPromptCommandOutput(options.prompter.log);
-      const linked = await deps.linkProject(options.prompter, projectRoot, plan, onOutput, {
-        signal,
-      });
+      const linked = await deps.linkProject(
+        options.prompter,
+        projectRoot,
+        plan,
+        onOutput,
+        options.headless ? { signal, headless: true } : { signal },
+      );
       signal?.throwIfAborted();
       if (!linked) {
         throw new Error(

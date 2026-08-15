@@ -66,7 +66,21 @@ function createRuntimeDependencyChecks(packageComparison) {
   }));
 }
 
-function createSizeBudget(appComparison, packageComparison) {
+function createInitInstallSizeBudgetChecks(initInstallComparison) {
+  if (initInstallComparison === null || initInstallComparison.status !== "present") {
+    return [];
+  }
+
+  return [
+    createSizeBudgetCheck(initInstallComparison.installedSizeBytes, {
+      area: "Init",
+      metric: "Installed footprint",
+      summary: "`eve init` install footprint",
+    }),
+  ];
+}
+
+function createSizeBudget(appComparison, packageComparison, initInstallComparison) {
   const checks = [
     createSizeBudgetCheck(appComparison.uniqueFunctionBytes, {
       area: "Runtime",
@@ -85,6 +99,7 @@ function createSizeBudget(appComparison, packageComparison) {
     );
   }
 
+  checks.push(...createInitInstallSizeBudgetChecks(initInstallComparison));
   checks.push(...createRuntimeDependencyChecks(packageComparison));
 
   return {
@@ -96,6 +111,19 @@ function createSizeBudget(appComparison, packageComparison) {
 
 function readMetricValue(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function compareTrackedNumericMetric(currentValue, baselineValue) {
+  if (
+    typeof currentValue !== "number" ||
+    !Number.isFinite(currentValue) ||
+    typeof baselineValue !== "number" ||
+    !Number.isFinite(baselineValue)
+  ) {
+    return null;
+  }
+
+  return compareNumericMetric(currentValue, baselineValue);
 }
 
 function readSortedRoutes(routes) {
@@ -295,20 +323,40 @@ function comparePublishedPackages(currentPackage, baselinePackage) {
     readDependencyEntries(currentPackage?.peerDependencies),
     readDependencyEntries(baselinePackage?.peerDependencies),
   );
+  const installedDependencyEdgeCount = compareTrackedNumericMetric(
+    currentPackage?.installedDependencyEdgeCount,
+    baselinePackage?.installedDependencyEdgeCount,
+  );
+  const installedDistinctPackageNameCount = compareTrackedNumericMetric(
+    currentPackage?.installedDistinctPackageNameCount,
+    baselinePackage?.installedDistinctPackageNameCount,
+  );
+  const installedOptionalPeerEdgeCount = compareTrackedNumericMetric(
+    currentPackage?.installedOptionalPeerEdgeCount,
+    baselinePackage?.installedOptionalPeerEdgeCount,
+  );
+  const installedPackageInstanceCount = compareTrackedNumericMetric(
+    currentPackage?.installedPackageInstanceCount,
+    baselinePackage?.installedPackageInstanceCount,
+  );
 
   return {
     installedDependencyBytes: compareNumericMetric(
       readMetricValue(currentPackage?.installedDependencyBytes),
       readMetricValue(baselinePackage?.installedDependencyBytes),
     ),
+    ...(installedDependencyEdgeCount === null ? {} : { installedDependencyEdgeCount }),
+    ...(installedDistinctPackageNameCount === null ? {} : { installedDistinctPackageNameCount }),
     installedFileCount: compareNumericMetric(
       readMetricValue(currentPackage?.installedFileCount),
       readMetricValue(baselinePackage?.installedFileCount),
     ),
+    ...(installedOptionalPeerEdgeCount === null ? {} : { installedOptionalPeerEdgeCount }),
     installedPackageBytes: compareNumericMetric(
       readMetricValue(currentPackage?.installedPackageBytes),
       readMetricValue(baselinePackage?.installedPackageBytes),
     ),
+    ...(installedPackageInstanceCount === null ? {} : { installedPackageInstanceCount }),
     installedSizeBytes: compareNumericMetric(
       readMetricValue(currentPackage?.installedSizeBytes),
       readMetricValue(baselinePackage?.installedSizeBytes),
@@ -331,6 +379,68 @@ function comparePublishedPackages(currentPackage, baselinePackage) {
     unpackedSizeBytes: compareNumericMetric(
       readMetricValue(currentPackage?.unpackedSizeBytes),
       readMetricValue(baselinePackage?.unpackedSizeBytes),
+    ),
+  };
+}
+
+function compareInitInstallReports(currentInitInstall, baselineInitInstall) {
+  if (currentInitInstall === null && baselineInitInstall === null) {
+    return null;
+  }
+
+  const dependencyDiff = compareDependencyEntries(
+    readDependencyEntries(currentInitInstall?.dependencies),
+    readDependencyEntries(baselineInitInstall?.dependencies),
+  );
+  const devDependencyDiff = compareDependencyEntries(
+    readDependencyEntries(currentInitInstall?.devDependencies),
+    readDependencyEntries(baselineInitInstall?.devDependencies),
+  );
+
+  return {
+    dependenciesAdded: dependencyDiff.added,
+    dependenciesChanged: dependencyDiff.changed,
+    dependenciesRemoved: dependencyDiff.removed,
+    dependencyCount: compareNumericMetric(
+      readMetricValue(currentInitInstall?.dependencyCount),
+      readMetricValue(baselineInitInstall?.dependencyCount),
+    ),
+    dependencyPackageBytes: compareNumericMetric(
+      readMetricValue(currentInitInstall?.dependencyPackageBytes),
+      readMetricValue(baselineInitInstall?.dependencyPackageBytes),
+    ),
+    devDependenciesAdded: devDependencyDiff.added,
+    devDependenciesChanged: devDependencyDiff.changed,
+    devDependenciesRemoved: devDependencyDiff.removed,
+    devDependencyCount: compareNumericMetric(
+      readMetricValue(currentInitInstall?.devDependencyCount),
+      readMetricValue(baselineInitInstall?.devDependencyCount),
+    ),
+    devDependencyPackageBytes: compareNumericMetric(
+      readMetricValue(currentInitInstall?.devDependencyPackageBytes),
+      readMetricValue(baselineInitInstall?.devDependencyPackageBytes),
+    ),
+    installedFileCount: compareNumericMetric(
+      readMetricValue(currentInitInstall?.installedFileCount),
+      readMetricValue(baselineInitInstall?.installedFileCount),
+    ),
+    installedPackageCount: compareNumericMetric(
+      readMetricValue(currentInitInstall?.installedPackageCount),
+      readMetricValue(baselineInitInstall?.installedPackageCount),
+    ),
+    installedSizeBytes: compareNumericMetric(
+      readMetricValue(currentInitInstall?.installedSizeBytes),
+      readMetricValue(baselineInitInstall?.installedSizeBytes),
+    ),
+    status:
+      baselineInitInstall === null ? "added" : currentInitInstall === null ? "removed" : "present",
+    transitivePackageBytes: compareNumericMetric(
+      readMetricValue(currentInitInstall?.transitivePackageBytes),
+      readMetricValue(baselineInitInstall?.transitivePackageBytes),
+    ),
+    unclassifiedInstalledPackageCount: compareNumericMetric(
+      readMetricValue(currentInitInstall?.unclassifiedInstalledPackageCount),
+      readMetricValue(baselineInitInstall?.unclassifiedInstalledPackageCount),
     ),
   };
 }
@@ -379,13 +489,18 @@ export function createNitroBundleReportComparison(report, baselineReport, option
     report?.publishedPackage ?? null,
     baselineReport?.publishedPackage ?? null,
   );
+  const initInstallComparison = compareInitInstallReports(
+    report?.initInstall ?? null,
+    baselineReport?.initInstall ?? null,
+  );
 
   return {
     app: appComparison,
     baselineGeneratedAt:
       typeof baselineReport?.generatedAt === "string" ? baselineReport.generatedAt : null,
     baselineLabel: typeof options.baselineLabel === "string" ? options.baselineLabel : "baseline",
+    initInstall: initInstallComparison,
     package: packageComparison,
-    sizeBudget: createSizeBudget(appComparison, packageComparison),
+    sizeBudget: createSizeBudget(appComparison, packageComparison, initInstallComparison),
   };
 }

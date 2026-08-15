@@ -6,9 +6,9 @@ import {
 import { DiscoveryProjectResolutionError } from "#discover/project.js";
 import { type ApplicationInfo, getApplicationInfo } from "#internal/application/paths.js";
 import {
-  EVE_CREATE_SESSION_ROUTE_PATH,
-  EVE_CONTINUE_SESSION_ROUTE_PATTERN,
-  EVE_MESSAGE_STREAM_ROUTE_PATTERN,
+  EVE_SESSION_ROUTE_PATH,
+  EVE_SESSION_ROUTE_PATTERN,
+  EVE_SESSION_STREAM_ROUTE_PATTERN,
 } from "#protocol/routes.js";
 
 /**
@@ -16,7 +16,7 @@ import {
  */
 export interface ApplicationInspectionMessaging {
   readonly createSessionRoutePath: string;
-  readonly continueSessionRoutePattern: string;
+  readonly sessionMessagesRoutePattern: string;
   readonly streamRoutePattern: string;
 }
 
@@ -41,9 +41,9 @@ export async function inspectApplication(appRoot: string): Promise<ApplicationIn
     application,
     compiledState,
     messaging: {
-      createSessionRoutePath: EVE_CREATE_SESSION_ROUTE_PATH,
-      continueSessionRoutePattern: EVE_CONTINUE_SESSION_ROUTE_PATTERN,
-      streamRoutePattern: EVE_MESSAGE_STREAM_ROUTE_PATTERN,
+      createSessionRoutePath: EVE_SESSION_ROUTE_PATH,
+      sessionMessagesRoutePattern: EVE_SESSION_ROUTE_PATTERN,
+      streamRoutePattern: EVE_SESSION_STREAM_ROUTE_PATTERN,
     },
   };
 }

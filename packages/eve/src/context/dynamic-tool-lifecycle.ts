@@ -1,26 +1,37 @@
-import { jsonSchema, zodSchema, type FlexibleSchema, type ModelMessage } from "ai";
+import type { ModelMessage } from "ai";
 
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import {
+  resolveApprovalPolicy,
+  type ApprovalContext,
+  type ApprovalResponseContext,
+} from "#public/definitions/approval.js";
 import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent, SessionStartedStreamEvent } from "#protocol/message.js";
 import {
   ALLOWED_DYNAMIC_TOOL_EVENTS,
   isBrandedToolEntry,
 } from "#shared/dynamic-tool-definition.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import { createLogger } from "#internal/logging.js";
-import { normalizeJsonSchemaDefinition } from "#internal/json-schema.js";
+import {
+  serializeInputSchema,
+  serializeOutputSchema,
+  toInputSchema,
+  toOutputSchema,
+} from "#shared/tool-schema.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { ContextContainer } from "#context/container.js";
 import type { ContextKey } from "#context/key.js";
 import {
   SessionDynamicToolMetadataKey,
+  SessionDynamicToolRuntimeRevisionKey,
   TurnDynamicToolMetadataKey,
   LiveStepToolsKey,
 } from "#context/keys.js";
 import type { DurableDynamicToolMetadata } from "#context/keys.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
+import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 
 const log = createLogger("dynamic-tools");
 
@@ -31,35 +42,23 @@ const log = createLogger("dynamic-tools");
 function toHarnessToolDefinition(name: string, entry: DynamicToolEntry): HarnessToolDefinition {
   return {
     description: entry.description,
-    execute: (input: unknown) =>
-      entry.execute(input as Record<string, unknown>, buildCallbackContext()),
-    inputSchema: convertInputSchema(entry.inputSchema),
+    execute: createToolExecuteWithAuth({
+      scope: name,
+      execute: (input, ctx) =>
+        entry.execute(input as Record<string, unknown>, ctx as Parameters<typeof entry.execute>[1]),
+    }),
+    inputSchema: toInputSchema(entry.inputSchema),
     name,
-    needsApproval: entry.needsApproval,
-    outputSchema: convertOptionalOutputSchema(entry.outputSchema),
+    approval: entry.approval,
+    outputSchema: toOutputSchema(entry.outputSchema),
     ...(entry.toModelOutput !== undefined
       ? { toModelOutput: entry.toModelOutput as (output: unknown) => unknown }
       : {}),
   };
 }
 
-function convertInputSchema(schema: unknown): FlexibleSchema {
-  if (typeof schema === "object" && schema !== null && "~standard" in schema) {
-    return zodSchema(schema as Parameters<typeof zodSchema>[0]);
-  }
-  return jsonSchema(schema as Parameters<typeof jsonSchema>[0]);
-}
-
-function convertOptionalOutputSchema(schema: unknown): FlexibleSchema | undefined {
-  if (schema === undefined) return undefined;
-  if (typeof schema === "object" && schema !== null && "~standard" in schema) {
-    return zodSchema(schema as Parameters<typeof zodSchema>[0]);
-  }
-  return jsonSchema(schema as Parameters<typeof jsonSchema>[0]);
-}
-
 function qualifyDynamicToolNames(
-  slug: string,
+  resolver: ResolvedDynamicToolResolver,
   isSingle: boolean,
   entries: Readonly<Record<string, DynamicToolEntry>>,
 ): Array<{ name: string; entryKey: string; entry: DynamicToolEntry }> {
@@ -71,12 +70,17 @@ function qualifyDynamicToolNames(
   // A single returned defineTool is named after the file slug; a map names each
   // entry by its bare key (authors namespace keys themselves if needed).
   if (isSingle) {
-    result.push({ name: slug, entryKey: keys[0]!, entry: entries[keys[0]!]! });
+    result.push({ name: resolver.slug, entryKey: keys[0]!, entry: entries[keys[0]!]! });
     return result;
   }
 
+  // Map entries from an extension resolver are prefixed with the mount
+  // namespace so extension-produced tools are namespaced like the extension's
+  // static tools. The single-tool case above already uses the namespaced slug.
+  const prefix =
+    resolver.extensionNamespace !== undefined ? `${resolver.extensionNamespace}__` : "";
   for (const key of keys) {
-    result.push({ name: key, entryKey: key, entry: entries[key]! });
+    result.push({ name: `${prefix}${key}`, entryKey: key, entry: entries[key]! });
   }
   return result;
 }
@@ -117,10 +121,13 @@ export function replayDynamicSessionTools(
 
     tools.push({
       description: m.description,
-      execute: (input: unknown) => stepFn(m.closureVars, input, buildCallbackContext()),
-      inputSchema: jsonSchema(m.inputSchema),
+      execute: createToolExecuteWithAuth({
+        scope: m.name,
+        execute: (input, ctx) => stepFn(m.closureVars, input, ctx),
+      }),
+      inputSchema: toInputSchema(m.inputSchema),
       name: m.name,
-      outputSchema: m.outputSchema === undefined ? undefined : jsonSchema(m.outputSchema),
+      outputSchema: toOutputSchema(m.outputSchema),
     });
   }
 
@@ -199,10 +206,35 @@ interface ResolveResult {
   readonly liveTools: readonly HarnessToolDefinition[];
 }
 
+function readDynamicToolResult(
+  resolver: ResolvedDynamicToolResolver,
+  value: unknown,
+): { readonly entries: Record<string, DynamicToolEntry>; readonly isSingle: boolean } {
+  if (isBrandedToolEntry(value)) {
+    return { entries: { _single: value as DynamicToolEntry }, isSingle: true };
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(
+      `Dynamic tool resolver "${resolver.logicalPath}" must return defineTool(), a map of defineTool() values, or null.`,
+    );
+  }
+
+  const entries: Record<string, DynamicToolEntry> = {};
+  for (const [name, entry] of Object.entries(value)) {
+    if (!isBrandedToolEntry(entry)) {
+      throw new Error(
+        `Dynamic tool resolver "${resolver.logicalPath}" returned "${name}" without defineTool(). Wrap every dynamic tool entry in defineTool().`,
+      );
+    }
+    entries[name] = entry as DynamicToolEntry;
+  }
+  return { entries, isSingle: false };
+}
+
 async function resolveToolsFromEvent(
   ctx: ContextContainer,
   resolvers: readonly ResolvedDynamicToolResolver[],
-  event: HandleMessageStreamEvent,
+  event: UnstampedMessageStreamEvent,
   messages: readonly ModelMessage[],
 ): Promise<ResolveResult> {
   const outcomes = await Promise.allSettled(
@@ -213,17 +245,7 @@ async function resolveToolsFromEvent(
       const resolveCtx = buildResolveContext(ctx, messages);
       const rawResult = await handler(event, resolveCtx);
       if (rawResult === null || rawResult === undefined) return null;
-
-      let entries: Record<string, DynamicToolEntry>;
-      let isSingle: boolean;
-      if (isBrandedToolEntry(rawResult)) {
-        entries = { _single: rawResult as DynamicToolEntry };
-        isSingle = true;
-      } else {
-        entries = rawResult as Record<string, DynamicToolEntry>;
-        isSingle = false;
-      }
-
+      const { entries, isSingle } = readDynamicToolResult(resolver, rawResult);
       return { resolver, entries, isSingle };
     }),
   );
@@ -245,7 +267,7 @@ async function resolveToolsFromEvent(
     if (outcome.value === null) continue;
 
     const { resolver, entries, isSingle } = outcome.value;
-    const named = qualifyDynamicToolNames(resolver.slug, isSingle, entries);
+    const named = qualifyDynamicToolNames(resolver, isSingle, entries);
     for (const { name, entryKey, entry } of named) {
       const previousOwner = dynamicToolOwners.get(name);
       if (previousOwner !== undefined && previousOwner !== resolver.slug) {
@@ -256,6 +278,9 @@ async function resolveToolsFromEvent(
       dynamicToolOwners.set(name, resolver.slug);
 
       liveTools.push(toHarnessToolDefinition(name, entry));
+      if (event.type === "step.started") {
+        continue;
+      }
 
       const stepFn =
         "__executeStepFn" in entry
@@ -287,17 +312,37 @@ async function resolveToolsFromEvent(
         serializedClosureVars = {};
       }
 
+      let approvalStepFnName: string | undefined;
+      let approvalResponseStepFnName: string | undefined;
+      if (entry.approval !== undefined) {
+        approvalStepFnName = `eve:dynamic-tool-approval:${resolver.slug}:${entryKey}`;
+        const originalApproval = resolveApprovalPolicy(entry.approval).bind(entry);
+        registerStepFunction(approvalStepFnName, (_closureVars: unknown, approvalCtx: unknown) =>
+          originalApproval(approvalCtx as ApprovalContext),
+        );
+
+        const responsePolicy =
+          typeof entry.approval === "function" ? undefined : entry.approval.response;
+        if (responsePolicy !== undefined) {
+          approvalResponseStepFnName = `eve:dynamic-tool-approval-response:${resolver.slug}:${entryKey}`;
+          registerStepFunction(
+            approvalResponseStepFnName,
+            (_closureVars: unknown, responseCtx: unknown) =>
+              responsePolicy(responseCtx as ApprovalResponseContext),
+          );
+        }
+      }
+
       metadata.push({
         name,
         description: entry.description,
-        inputSchema: normalizeJsonSchemaDefinition(entry.inputSchema),
-        outputSchema:
-          entry.outputSchema === undefined
-            ? undefined
-            : normalizeJsonSchemaDefinition(entry.outputSchema, "output"),
+        inputSchema: serializeInputSchema(entry.inputSchema),
+        outputSchema: serializeOutputSchema(entry.outputSchema),
         resolverSlug: resolver.slug,
         entryKey,
         executeStepFnName,
+        approvalStepFnName,
+        approvalResponseStepFnName,
         closureVars: serializedClosureVars,
       });
     }
@@ -310,42 +355,115 @@ async function resolveToolsFromEvent(
 // Dispatch: route to the scope-appropriate durable key
 // ---------------------------------------------------------------------------
 
+const resolvedStepTools = new WeakMap<
+  ContextContainer,
+  { readonly coordinate: string; readonly tools: readonly HarnessToolDefinition[] }
+>();
+
 /**
  * Dispatches a stream event to dynamic tool resolvers. Each
  * resolver's metadata replaces its slot (by slug) in the
  * scope-appropriate durable key. The tool-loop calls
  * {@link buildDynamicTools} to assemble the effective toolset.
  */
+/** Resolves step-scoped tools once for one internal policy/model pass. */
+export async function resolveStepDynamicTools(input: {
+  readonly ctx: ContextContainer;
+  readonly resolvers: readonly ResolvedDynamicToolResolver[];
+  readonly event: UnstampedMessageStreamEvent;
+  readonly messages: readonly ModelMessage[];
+}): Promise<void> {
+  const data = ("data" in input.event ? input.event.data : undefined) as
+    | { readonly stepIndex?: unknown; readonly turnId?: unknown }
+    | undefined;
+  const coordinate =
+    typeof data?.turnId === "string" && typeof data.stepIndex === "number"
+      ? `${data.turnId}:${String(data.stepIndex)}`
+      : undefined;
+  const cached = resolvedStepTools.get(input.ctx);
+  if (coordinate !== undefined && cached?.coordinate === coordinate) {
+    input.ctx.setVirtualContext(LiveStepToolsKey, cached.tools);
+    return;
+  }
+
+  const matching = input.resolvers.filter((resolver) =>
+    resolver.eventNames.includes("step.started"),
+  );
+  const { liveTools } =
+    matching.length === 0
+      ? { liveTools: [] }
+      : await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages);
+  input.ctx.setVirtualContext(LiveStepToolsKey, liveTools);
+  if (coordinate !== undefined) {
+    resolvedStepTools.set(input.ctx, { coordinate, tools: liveTools });
+  }
+}
+
 export async function dispatchDynamicToolEvent(input: {
   readonly ctx: ContextContainer;
   readonly resolvers: readonly ResolvedDynamicToolResolver[];
-  readonly event: HandleMessageStreamEvent;
+  readonly event: UnstampedMessageStreamEvent;
   readonly messages: readonly ModelMessage[];
 }): Promise<void> {
   const { ctx, resolvers, event, messages } = input;
 
   if (!ALLOWED_DYNAMIC_TOOL_EVENTS.has(event.type)) return;
 
-  const matching = resolvers.filter((r) => r.eventNames.includes(event.type));
-  if (matching.length === 0) return;
-
-  const { metadata, liveTools } = await resolveToolsFromEvent(ctx, matching, event, messages);
-
-  // Step-scoped tools store live definitions (with original execute
-  // closures) since they re-resolve every step and don't need
-  // cross-step replay from durable metadata.
   if (event.type === "step.started") {
-    ctx.setVirtualContext(LiveStepToolsKey, liveTools);
+    await resolveStepDynamicTools(input);
     return;
   }
+
+  const matching = resolvers.filter((r) => r.eventNames.includes(event.type));
+  if (matching.length === 0) {
+    if (event.type === "session.started") {
+      ctx.set(SessionDynamicToolMetadataKey, []);
+    }
+    return;
+  }
+
+  const { metadata } = await resolveToolsFromEvent(ctx, matching, event, messages);
 
   // Session/turn: store durable metadata for cross-step replay via
   // the bundler's registered step functions.
   const durableKey = durableKeyForEvent(event.type);
   if (durableKey === undefined) return;
 
+  if (event.type === "session.started") {
+    ctx.set(SessionDynamicToolMetadataKey, metadata);
+    return;
+  }
+
   const slugs = new Set(matching.map((r) => r.slug));
   const existing = ctx.get(durableKey) ?? [];
   const kept = existing.filter((m) => !slugs.has(m.resolverSlug));
   ctx.set(durableKey, [...kept, ...metadata]);
+}
+
+/**
+ * Re-resolves session-scoped dynamic tools when a durable session reaches a
+ * different runtime revision. The refresh is internal: lifecycle consumers
+ * still observe exactly one `session.started` event for the session.
+ */
+export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
+  readonly ctx: ContextContainer;
+  readonly resolvers: readonly ResolvedDynamicToolResolver[];
+  readonly event: SessionStartedStreamEvent;
+  readonly messages: readonly ModelMessage[];
+  readonly runtimeRevision: string;
+}): Promise<void> {
+  if (input.ctx.get(SessionDynamicToolRuntimeRevisionKey) === input.runtimeRevision) {
+    return;
+  }
+
+  const matching = input.resolvers.filter((resolver) =>
+    resolver.eventNames.includes("session.started"),
+  );
+  const { metadata } =
+    matching.length === 0
+      ? { metadata: [] }
+      : await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages);
+
+  input.ctx.set(SessionDynamicToolMetadataKey, metadata);
+  input.ctx.set(SessionDynamicToolRuntimeRevisionKey, input.runtimeRevision);
 }

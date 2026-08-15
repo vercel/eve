@@ -2,6 +2,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import type { EveEvalResult, EveEvalRunSummary } from "#evals/types.js";
+import { truncateDiagnostic } from "#evals/diagnostics.js";
+import { formatAssertionFailureHeadline } from "#evals/runner/reporters/assertion-diagnostics.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 
 export interface JUnitReporterConfig {
@@ -45,7 +47,7 @@ function renderJUnit(summary: EveEvalRunSummary, input: { readonly suiteName?: s
 
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    `<testsuite name="${escapeXml(input.suiteName ?? "eve evals")}" tests="${summary.results.length}" failures="${failures}" skipped="0" time="${formatSeconds(durationSeconds(summary))}">`,
+    `<testsuite name="${escapeXml(input.suiteName ?? "eve evals")}" tests="${summary.results.length}" failures="${failures}" skipped="${summary.skipped}" time="${formatSeconds(durationSeconds(summary))}">`,
     ...cases,
     "</testsuite>",
     "",
@@ -57,6 +59,13 @@ function renderTestCase(result: EveEvalResult): string {
 
   if (result.verdict === "passed") {
     return `  <testcase ${attrs}/>`;
+  }
+  if (result.verdict === "skipped") {
+    return [
+      `  <testcase ${attrs}>`,
+      `    <skipped message="${escapeXml(result.skipReason ?? "skipped")}"/>`,
+      "  </testcase>",
+    ].join("\n");
   }
 
   const message = failureMessage(result);
@@ -82,9 +91,9 @@ function buildFailureDetail(result: EveEvalResult): Record<string, unknown> {
 
 function failureMessage(result: EveEvalResult): string {
   if (result.error !== undefined) return result.error;
-  const failed = result.assertions.find((assertion) => !assertion.passed);
-  if (failed !== undefined) {
-    return failed.message === undefined ? failed.name : `${failed.name}: ${failed.message}`;
+  const failed = result.assertions.filter((assertion) => !assertion.passed);
+  if (failed.length > 0) {
+    return truncateDiagnostic(failed.map(formatAssertionFailureHeadline).join("; "), 1_000);
   }
   if (result.verdict === "scored") return "score below threshold";
   return result.verdict;

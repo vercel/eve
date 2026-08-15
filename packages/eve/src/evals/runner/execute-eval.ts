@@ -9,6 +9,7 @@ import type {
 } from "#evals/types.js";
 import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
 import { executeTask } from "#evals/runner/execute-task.js";
+import type { EvalSessionStartedEvent } from "#evals/session.js";
 import { computeEvalVerdict } from "#evals/runner/verdict.js";
 
 /**
@@ -18,9 +19,13 @@ export interface ExecuteEvalOptions {
   readonly evaluation: EveEval;
   /** Receives `t.log` lines as the eval runs (used by `--verbose`). */
   readonly onLog?: (message: string) => void;
+  /** Receives the first trace context observed for each session. */
+  readonly onSessionStart?: (event: EvalSessionStartedEvent) => void;
   readonly target: EveEvalTargetHandle;
   /** Overrides the eval's own `timeoutMs` when set (CLI `--timeout`). */
   readonly timeoutMs?: number;
+  /** Runner-owned start time, shared with reporter lifecycle events. */
+  readonly startedAt?: string;
   /**
    * Pre-configured client for communicating with the eve agent.
    * The CLI constructs this once with the appropriate auth and headers,
@@ -35,23 +40,26 @@ export interface ExecuteEvalOptions {
  */
 export async function executeEval(options: ExecuteEvalOptions): Promise<EveEvalResult> {
   const { evaluation, target, client } = options;
-  const startedAt = new Date().toISOString();
+  const startedAt = options.startedAt ?? new Date().toISOString();
 
   let result: EveEvalTaskResult;
   let assertions: readonly AssertionResult[] = [];
   let error: string | undefined;
+  let skipReason: string | undefined;
 
   try {
     const outcome = await executeTask({
       client,
       evaluation,
       onLog: options.onLog,
+      onSessionStart: options.onSessionStart,
       target,
       timeoutMs: options.timeoutMs ?? evaluation.timeoutMs,
     });
     result = outcome.result;
     assertions = outcome.assertions;
     error = outcome.error;
+    skipReason = outcome.skipReason;
   } catch (err) {
     error = toErrorMessage(err);
     result = {
@@ -60,10 +68,11 @@ export async function executeEval(options: ExecuteEvalOptions): Promise<EveEvalR
       status: "failed",
       events: [],
       derived: createEmptyDerivedFacts(),
+      traceContexts: [],
     };
   }
 
-  const verdict = computeEvalVerdict({ error, assertions });
+  const verdict = computeEvalVerdict({ error, assertions, skipReason });
 
   return {
     id: evaluation.id,
@@ -71,6 +80,7 @@ export async function executeEval(options: ExecuteEvalOptions): Promise<EveEvalR
     assertions,
     verdict,
     error,
+    skipReason,
     startedAt,
     completedAt: new Date().toISOString(),
   };

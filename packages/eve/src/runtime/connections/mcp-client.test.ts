@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { contextStorage, ContextContainer } from "#context/container.js";
-import { AuthKey, type SessionAuthContext } from "#context/keys.js";
+import { AuthKey, SessionKey, type SessionAuthContext } from "#context/keys.js";
 import {
   isConnectionAuthorizationFailedError,
   isConnectionAuthorizationRequiredError,
 } from "#public/connections/errors.js";
+import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { ConnectionAuthorizationTokensKey } from "#runtime/connections/authorization-tokens.js";
 import {
@@ -26,6 +27,11 @@ vi.mock("#compiled/@ai-sdk/mcp/index.js", () => ({
 function ctxWithAuth(current: SessionAuthContext | null): ContextContainer {
   const ctx = new ContextContainer();
   ctx.set(AuthKey, current);
+  ctx.set(SessionKey, {
+    auth: { current, initiator: current },
+    sessionId: "session-1",
+    turn: { id: "turn-1", sequence: 0 },
+  });
   return ctx;
 }
 
@@ -65,6 +71,81 @@ function makeConnection(
 describe("McpConnectionClient", () => {
   beforeEach(() => {
     createMCPClient.mockReset();
+  });
+
+  it("hides provided arguments from schemas and adds resolved values at execution", async () => {
+    const execute = vi.fn().mockResolvedValue({ ok: true });
+    const toolsFromDefinitions = vi.fn().mockReturnValue({ lookup: { execute } });
+    const client = {
+      close: vi.fn(),
+      listTools: vi.fn().mockResolvedValue({
+        tools: [
+          {
+            description: "Look up a product",
+            inputSchema: {
+              additionalProperties: false,
+              properties: {
+                context: { type: "object" },
+                query: { type: "string" },
+              },
+              required: ["query", "context"],
+              type: "object",
+            },
+            name: "lookup",
+          },
+        ],
+      }),
+      toolsFromDefinitions,
+    };
+    createMCPClient.mockResolvedValue(client);
+
+    const resolver = vi.fn(({ session, toolName }) => ({
+      sessionId: session.id,
+      toolName,
+    }));
+    const mcpClient = new McpConnectionClient(
+      makeConnection({ toolCall: { providedArguments: { context: resolver } } }),
+    );
+    const ctx = ctxWithAuth(null);
+
+    await contextStorage.run(ctx, async () => {
+      await expect(mcpClient.getToolMetadata()).resolves.toEqual([
+        expect.objectContaining({
+          inputSchema: {
+            additionalProperties: false,
+            properties: { query: { type: "string" } },
+            required: ["query"],
+            type: "object",
+          },
+          name: "lookup",
+        }),
+      ]);
+      await expect(
+        mcpClient.executeTool("lookup", { context: { from: "model" }, query: "boots" }),
+      ).resolves.toEqual({ ok: true });
+    });
+
+    expect(toolsFromDefinitions).toHaveBeenCalledWith({
+      tools: [
+        expect.objectContaining({
+          inputSchema: expect.objectContaining({
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          }),
+        }),
+      ],
+    });
+    expect(resolver).toHaveBeenCalledWith(expect.objectContaining({ toolName: "lookup" }));
+    expect(execute).toHaveBeenCalledWith(
+      {
+        context: {
+          sessionId: "session-1",
+          toolName: "lookup",
+        },
+        query: "boots",
+      },
+      expect.any(Object),
+    );
   });
 
   it("creates an HTTP MCP client with resolved connection headers", async () => {
@@ -457,22 +538,26 @@ describe("resolveHeaders", () => {
   });
 
   it("resolves function-valued headers", async () => {
-    const headers = await resolveHeaders(
-      makeConnection({
-        authorization: undefined,
-        headers: { "X-Key": () => "from-fn" },
-      }),
+    const headers = await contextStorage.run(ctxWithAuth(userAuth("alice")), () =>
+      resolveHeaders(
+        makeConnection({
+          authorization: undefined,
+          headers: { "X-Key": () => "from-fn" },
+        }),
+      ),
     );
 
     expect(headers).toEqual({ "X-Key": "from-fn" });
   });
 
   it("resolves a function-form headers definition", async () => {
-    const headers = await resolveHeaders(
-      makeConnection({
-        authorization: undefined,
-        headers: () => ({ "X-Dynamic": "all-at-once" }),
-      }),
+    const headers = await contextStorage.run(ctxWithAuth(userAuth("alice")), () =>
+      resolveHeaders(
+        makeConnection({
+          authorization: undefined,
+          headers: () => ({ "X-Dynamic": "all-at-once" }),
+        }),
+      ),
     );
 
     expect(headers).toEqual({ "X-Dynamic": "all-at-once" });
@@ -524,6 +609,63 @@ describe("resolveHeaders", () => {
 });
 
 describe("resolveHeaders with an active context (principal resolution + cache)", () => {
+  it("resolves auth from the current session caller", async () => {
+    const aliceContext = ctxWithAuth(userAuth("alice"));
+    const bobContext = ctxWithAuth(userAuth("bob"));
+    let resolverCalls = 0;
+    let resolvedSessionId: string | undefined;
+
+    const connection = makeConnection({
+      authorization: async (callbackContext) => {
+        resolverCalls += 1;
+        resolvedSessionId = callbackContext.session.id;
+        const callerId = callbackContext.session.auth.current?.principalId;
+        return {
+          getToken: async () => ({ token: `token-for-${callerId}` }),
+          principalType: "user",
+        };
+      },
+      connectionName: "linear",
+    });
+
+    const aliceHeaders = await contextStorage.run(aliceContext, async () => {
+      const first = await resolveHeaders(connection);
+      await resolveHeaders(connection);
+      return first;
+    });
+    const bobHeaders = await contextStorage.run(bobContext, () => resolveHeaders(connection));
+
+    expect(aliceHeaders).toEqual({ Authorization: "Bearer token-for-alice" });
+    expect(bobHeaders).toEqual({ Authorization: "Bearer token-for-bob" });
+    expect(resolverCalls).toBe(2);
+    expect(resolvedSessionId).toBe("session-1");
+  });
+
+  it("passes the current session context to whole-map and per-header callbacks", async () => {
+    const ctx = ctxWithAuth(userAuth("alice"));
+    const wholeMap = makeConnection({
+      authorization: undefined,
+      headers: async (callbackContext: SessionContext) => ({
+        "X-Session": callbackContext.session.id,
+        "X-User": callbackContext.session.auth.current?.principalId ?? "anonymous",
+      }),
+    });
+    const perHeader = makeConnection({
+      authorization: undefined,
+      headers: {
+        "X-Turn": (callbackContext) => callbackContext.session.turn.id,
+      },
+    });
+
+    await expect(contextStorage.run(ctx, () => resolveHeaders(wholeMap))).resolves.toEqual({
+      "X-Session": "session-1",
+      "X-User": "alice",
+    });
+    await expect(contextStorage.run(ctx, () => resolveHeaders(perHeader))).resolves.toEqual({
+      "X-Turn": "turn-1",
+    });
+  });
+
   it("projects the session's user auth into a user principal and passes it to getToken", async () => {
     const ctx = ctxWithAuth(userAuth("alice"));
 

@@ -232,6 +232,21 @@ describe("createSlackFetchFile", () => {
 
     await expect(fetchFile("https://files.slack.com/locked.csv")).rejects.toThrow("HTTP 403");
   });
+
+  it("rejects HTML returned for a private Slack file", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<!DOCTYPE html><html><body>Slack sign in</body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      }),
+    );
+
+    const fetchFile = createSlackFetchFile({ botToken: "xoxb-test-token" });
+
+    await expect(fetchFile("https://files.slack.com/locked.png")).rejects.toThrow(
+      /files:read.*reinstall/is,
+    );
+  });
 });
 
 describe("collectInboundFileParts", () => {
@@ -271,7 +286,7 @@ describe("collectInboundFileParts", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  it("falls back to the latest non-bot thread message when the mention has no attachments", async () => {
+  it("reuses fetched thread messages when the mention has no attachments", async () => {
     const refresh = vi.fn().mockResolvedValue(undefined);
     const thread = makeSlackThread({
       refresh,
@@ -298,7 +313,7 @@ describe("collectInboundFileParts", () => {
       policy: DEFAULT_UPLOAD_POLICY,
     });
 
-    expect(refresh).toHaveBeenCalledOnce();
+    expect(refresh).not.toHaveBeenCalled();
     expect(parts).toHaveLength(1);
     expect((parts[0]!.data as URL).href).toBe("https://files.slack.com/a/b/earlier.csv");
   });

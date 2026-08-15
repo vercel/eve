@@ -31,6 +31,12 @@ export interface ResolvedTokenClaimMatchers {
   readonly subjects?: readonly string[];
 }
 
+/** One Vercel project and environment accepted by a Vercel OIDC strategy. */
+export interface CurrentVercelProject {
+  readonly environment?: string;
+  readonly projectId: string;
+}
+
 /**
  * Resolved HTTP Basic auth strategy.
  */
@@ -70,27 +76,26 @@ export interface ResolvedJwtEcdsaAuthStrategy extends ResolvedTokenClaimMatchers
 export interface ResolvedOidcAuthStrategy extends ResolvedTokenClaimMatchers {
   /**
    * Vercel-platform extension. When `true` and the token's issuer is
-   * a Vercel OIDC issuer, tokens minted for the current
-   * `VERCEL_PROJECT_ID` are accepted unconditionally — in addition to
+   * a Vercel OIDC issuer, tokens minted for the configured current project
+   * are accepted unconditionally — in addition to
    * the author-supplied `subjects`/`claims` matchers — so the
    * deployment's own runtime callers (subagent, internal fetches)
-   * always authenticate. Tokens that additionally match the current
-   * `VERCEL_TARGET_ENV` / `VERCEL_ENV` are tagged
+   * always authenticate. Tokens that additionally match the configured
+   * current environment are tagged
    * `principalType: "runtime"`; other current-project tokens are
    * tagged `"service"`.
    *
-   * Vercel OIDC tokens with an `external_sub` claim are user tokens.
-   * They must satisfy the current project/environment constraints when
-   * those environment variables are configured, and then authenticate as
-   * `principalType: "user"` with `external_sub` as their subject and
-   * `external_iss` / `connector_id` as their issuer when present.
+   * Vercel OIDC tokens with an `external_sub` claim are user tokens. So are
+   * development tokens with a `user_id` claim when the configured environment
+   * is `development`. Both must satisfy the current project/environment bind.
    *
-   * Set exclusively by `verifyVercelOidc`. The generic public
+   * Set exclusively by Vercel-specific verification. The generic public
    * `verifyOidc` always passes `false`.
    */
   readonly acceptCurrentVercelProject: boolean;
   readonly audiences: readonly string[];
   readonly clockSkewSeconds: number;
+  readonly currentVercelProject?: CurrentVercelProject;
   readonly discoveryUrl: string;
   readonly issuer: string;
   readonly kind: "oidc";

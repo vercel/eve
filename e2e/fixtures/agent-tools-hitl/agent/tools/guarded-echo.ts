@@ -13,7 +13,7 @@ export default defineTool({
   inputSchema: z.object({
     note: z.string().optional().describe("Any note string."),
   }),
-  needsApproval: once(),
+  approval: once(),
   async execute(input) {
     return {
       echoed: input.note ?? null,

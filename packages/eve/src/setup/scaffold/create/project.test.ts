@@ -4,7 +4,7 @@ import { byokProviderEnvVar, modelProviderSlug } from "./project.js";
 
 describe("byok provider derivation", () => {
   it("derives the provider slug from the model id prefix", () => {
-    expect(modelProviderSlug("anthropic/claude-sonnet-4.6")).toBe("anthropic");
+    expect(modelProviderSlug("anthropic/claude-sonnet-5")).toBe("anthropic");
     expect(modelProviderSlug("openai/gpt-5.5")).toBe("openai");
   });
 
@@ -14,7 +14,7 @@ describe("byok provider derivation", () => {
   });
 
   it("derives the env var name, uppercased with non-alphanumerics folded", () => {
-    expect(byokProviderEnvVar("anthropic/claude-sonnet-4.6")).toBe("ANTHROPIC_API_KEY");
+    expect(byokProviderEnvVar("anthropic/claude-sonnet-5")).toBe("ANTHROPIC_API_KEY");
     expect(byokProviderEnvVar("some-lab/model")).toBe("SOME_LAB_API_KEY");
     expect(byokProviderEnvVar("meta.llama/model")).toBe("META_LLAMA_API_KEY");
   });

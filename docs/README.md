@@ -12,7 +12,7 @@ Important naming note:
 
 ## Legal and safeguards
 
-eve is currently a preview and subject to the Vercel beta terms; the framework, APIs, documentation, and behavior may change before general availability.
+eve is in preview; the framework, APIs, documentation, and behavior may change before general availability.
 
 As the deployer, it is your responsibility to ensure your agent complies with applicable laws.
 
@@ -33,26 +33,25 @@ Casing convention:
 
 Read in this order:
 
-1. [Introduction](./introduction.md)
-2. [Getting Started](./getting-started.mdx)
-3. [Project Layout](./reference/project-layout.md)
-4. [`agent.ts`](./agent-config.md)
-5. [TypeScript API](./reference/typescript-api.md)
-6. [Context Control](./concepts/context-control.md)
-7. [Skills](./skills.mdx)
-8. [Tools](./tools/overview.mdx)
-9. [Connections](./connections.mdx)
-10. [Sandboxes](./sandbox.mdx)
-11. [Channels](./channels/overview.mdx)
-12. [Session Context](./reference/typescript-api.md)
-13. [Sessions And Streaming](./concepts/sessions-runs-and-streaming.md)
-14. [TypeScript SDK](./clients/typescript-sdk/overview.mdx)
-15. [Subagents](./subagents.mdx)
-16. [Schedules](./schedules.mdx)
-17. [Evals](./evals/overview.mdx)
-18. [Auth And Route Protection](./develop/auth-and-route-protection.md)
-19. [Vercel Deployment](./develop/deployment.md)
-20. [CLI, Build, And Debugging](./reference/cli.md)
+1. [Getting Started](./getting-started.mdx)
+2. [Tutorial](./tutorial/first-agent.mdx)
+3. [Agents](./agent-config.md)
+4. [TypeScript API Reference](./reference/typescript-api.md)
+5. [Context Control](./concepts/context-control.md)
+6. [Skills](./skills.mdx)
+7. [Tools](./tools/overview.mdx)
+8. [Connections](./connections/overview.mdx)
+9. [Sandboxes](./sandbox.mdx)
+10. [Channels](./channels/overview.mdx)
+11. [Session Context](./guides/session-context.md)
+12. [Sessions and Streaming](./concepts/sessions-runs-and-streaming.md)
+13. [Client SDK](./guides/client/overview.mdx)
+14. [Subagents](./subagents/index.mdx)
+15. [Schedules](./schedules.mdx)
+16. [Evals](./evals/overview.mdx)
+17. [Authentication](./guides/auth-and-route-protection.md)
+18. [Deployment](./guides/deployment/overview.md)
+19. [CLI](./reference/cli.md)
 
 ## The public mental model
 
@@ -85,24 +84,24 @@ eve then gives you:
 The public surface stays filesystem-first, but the implementation model underneath is still useful to
 know:
 
-- channels normalize inbound transport input and define the `continuationToken`
+- channels normalize inbound transport input and map platform addresses to sessions
 - the harness does one unit of AI work and decides whether to continue, wait, or finish
 - the runtime persists session state, streams events, and owns workflow orchestration
 
-That is why eve exposes two identifiers:
-
-- `continuationToken` for the next user message
-- `sessionId` for streaming and inspection
+The default HTTP API exposes one durable `sessionId` for messages, controls, and
+streaming. Platform channels additionally own channel-local continuation
+addresses so a Slack thread or custom conversation ID can point at its current
+session without leaking that routing identity into the HTTP client contract.
 
 ## How to use these docs
 
 - Start with the authored filesystem shape and `agent.ts`.
 - Then add runtime surfaces in this order: skills, tools, workspace, sandbox, channels.
 - Then learn the durable runtime model: HITL, session context, sessions, streaming, and
-  continuation-token follow-ups.
+  ID-addressed follow-ups and channel address routing.
 - Then add advanced features: subagents, schedules, route protection, deployment.
 
 ## Good companions in this repo
 
-- Weather-focused smoke/dev fixture: [`../../apps/fixtures/weather-fixture`](../../apps/fixtures/weather-fixture)
-- Public API source of truth: [`../../packages/eve/src/public/index.ts`](../../packages/eve/src/public/index.ts)
+- Weather-focused smoke/dev fixture: [`../apps/fixtures/weather-agent`](../apps/fixtures/weather-agent)
+- Public API source of truth: [`../packages/eve/src/public/index.ts`](../packages/eve/src/public/index.ts)

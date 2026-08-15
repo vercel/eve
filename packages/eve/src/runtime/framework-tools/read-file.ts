@@ -1,7 +1,9 @@
+import { z } from "#compiled/zod/index.js";
+
 import { executeReadFileOnSandbox, type ReadFileInput } from "#execution/sandbox/read-file-tool.js";
 import { requireSandboxSession } from "#execution/sandbox/require-sandbox.js";
-import type { JsonObject } from "#shared/json.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
+import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
 /**
  * Shared input schema used by the framework `read_file` tool and any author
@@ -11,50 +13,44 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
  * `READ_FILE_TOOL_DEFINITION` use the exact same schema object — keeping
  * model input contracts in sync without duplication.
  */
-export const READ_FILE_INPUT_SCHEMA: JsonObject = {
-  additionalProperties: false,
-  properties: {
-    filePath: {
-      description: "The absolute path to the file to read.",
-      type: "string",
-    },
-    limit: {
-      description: "Maximum number of lines to return. Defaults to 2000.",
-      minimum: 1,
-      type: "integer",
-    },
-    offset: {
-      description: "1-based line number to start from. Defaults to 1.",
-      minimum: 1,
-      type: "integer",
-    },
-  },
-  required: ["filePath"],
-  type: "object",
-};
+export const READ_FILE_INPUT_SCHEMA = z.strictObject({
+  filePath: z
+    .string()
+    .describe("The absolute path to the file to read. A leading $HOME is supported."),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .describe("Maximum number of lines to return. Defaults to 2000.")
+    .optional(),
+  offset: z
+    .number()
+    .int()
+    .min(1)
+    .describe("1-based line number to start from. Defaults to 1.")
+    .optional(),
+});
 
 /**
  * Shared output schema used by the framework `read_file` tool and any author
  * tool constructed via {@link defineReadFileTool}.
  */
-export const READ_FILE_OUTPUT_SCHEMA: JsonObject = {
-  additionalProperties: false,
-  properties: {
-    content: { type: "string" },
-    nextOffset: { minimum: 1, type: "integer" },
-    path: { type: "string" },
-    totalLines: { minimum: 0, type: "integer" },
-    truncated: { type: "boolean" },
-  },
-  required: ["content", "path", "totalLines", "truncated"],
-  type: "object",
-};
+export const READ_FILE_OUTPUT_SCHEMA = z.strictObject({
+  content: z.string(),
+  nextOffset: z.number().int().min(1).optional(),
+  path: z.string(),
+  totalLines: z.number().int().min(0),
+  truncated: z.boolean(),
+});
 
 /**
  * Framework-owned executor that delegates to the default sandbox.
  */
-async function executeReadFile(input: unknown): Promise<unknown> {
-  return executeReadFileOnSandbox(await requireSandboxSession(), input as ReadFileInput);
+async function executeReadFile(input: unknown, options?: ToolExecuteOptions): Promise<unknown> {
+  return executeReadFileOnSandbox(
+    await requireSandboxSession(options?.abortSignal),
+    input as ReadFileInput,
+  );
 }
 
 export const READ_FILE_TOOL_DEFINITION: ResolvedToolDefinition = {
@@ -62,7 +58,7 @@ export const READ_FILE_TOOL_DEFINITION: ResolvedToolDefinition = {
     "Read a file from the local filesystem. If the path does not exist, an error is returned.",
     "",
     "Usage:",
-    "- The filePath parameter should be an absolute path.",
+    "- The filePath parameter should be an absolute path or begin with $HOME/.",
     "- By default, this tool returns up to 2000 lines from the start of the file.",
     "- The offset parameter is the line number to start from (1-indexed).",
     "- To read later sections, call this tool again with a larger offset.",

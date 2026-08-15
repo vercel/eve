@@ -126,6 +126,109 @@ async function walkRegularFiles(root) {
   return files;
 }
 
+function readManifestDependencyNames(manifest, field) {
+  const dependencies = manifest[field];
+
+  return dependencies && typeof dependencies === "object" && !Array.isArray(dependencies)
+    ? Object.keys(dependencies)
+    : [];
+}
+
+async function collectInstalledPackageGraph(nodeModulesRoot) {
+  // npm package roots are direct children of a node_modules directory (or one
+  // of its scope directories). Following only those roots keeps embedded
+  // package.json files from becoming false package instances or graph edges.
+  /** @type {{ manifest: Record<string, unknown>; root: string }[]} */
+  const packageInstances = [];
+
+  async function visitPackageRoot(packageRoot) {
+    const manifest = await readJson(join(packageRoot, "package.json"));
+
+    if (typeof manifest.name !== "string" || manifest.name.length === 0) {
+      throw new Error(`Installed package at "${packageRoot}" has no package name.`);
+    }
+
+    packageInstances.push({
+      manifest,
+      root: packageRoot,
+    });
+
+    const nestedNodeModulesRoot = join(packageRoot, "node_modules");
+
+    if (await pathExists(nestedNodeModulesRoot)) {
+      await visitNodeModulesRoot(nestedNodeModulesRoot);
+    }
+  }
+
+  async function visitNodeModulesRoot(currentNodeModulesRoot) {
+    const entries = await readdir(currentNodeModulesRoot, {
+      withFileTypes: true,
+    });
+    entries.sort((left, right) => comparePaths(left.name, right.name));
+
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) {
+        continue;
+      }
+
+      const entryPath = join(currentNodeModulesRoot, entry.name);
+
+      if (!entry.name.startsWith("@")) {
+        await visitPackageRoot(entryPath);
+        continue;
+      }
+
+      const scopedEntries = await readdir(entryPath, {
+        withFileTypes: true,
+      });
+      scopedEntries.sort((left, right) => comparePaths(left.name, right.name));
+
+      for (const scopedEntry of scopedEntries) {
+        if (!scopedEntry.isDirectory() || scopedEntry.name.startsWith(".")) {
+          continue;
+        }
+
+        await visitPackageRoot(join(entryPath, scopedEntry.name));
+      }
+    }
+  }
+
+  if (await pathExists(nodeModulesRoot)) {
+    await visitNodeModulesRoot(nodeModulesRoot);
+  }
+
+  const distinctPackageNames = new Set();
+  let dependencyEdgeCount = 0;
+  let optionalPeerEdgeCount = 0;
+
+  for (const { manifest } of packageInstances) {
+    distinctPackageNames.add(manifest.name);
+
+    dependencyEdgeCount += new Set([
+      ...readManifestDependencyNames(manifest, "dependencies"),
+      ...readManifestDependencyNames(manifest, "optionalDependencies"),
+    ]).size;
+
+    const peerDependencyNames = readManifestDependencyNames(manifest, "peerDependencies");
+    const peerDependenciesMeta = manifest.peerDependenciesMeta;
+
+    optionalPeerEdgeCount += peerDependencyNames.filter(
+      (name) =>
+        peerDependenciesMeta &&
+        typeof peerDependenciesMeta === "object" &&
+        !Array.isArray(peerDependenciesMeta) &&
+        peerDependenciesMeta[name]?.optional === true,
+    ).length;
+  }
+
+  return {
+    installedDependencyEdgeCount: dependencyEdgeCount,
+    installedDistinctPackageNameCount: distinctPackageNames.size,
+    installedOptionalPeerEdgeCount: optionalPeerEdgeCount,
+    installedPackageInstanceCount: packageInstances.length,
+  };
+}
+
 function summarizeInstalledPackages(files, options) {
   /** @type {Map<string, number>} */
   const packageSizes = new Map();
@@ -347,7 +450,7 @@ async function rewriteCatalogReferencesInTarball(tarballPath, packageRoot) {
   }
 }
 
-async function runPack(packageRoot, packDirectory) {
+export async function runPack(packageRoot, packDirectory) {
   const packagePath = resolve(packageRoot);
   const { stderr, stdout } = await execFile(
     "npm",
@@ -418,6 +521,7 @@ async function collectInstalledPackageSnapshot(input) {
   const installedFiles = (await pathExists(nodeModulesRoot))
     ? await walkRegularFiles(nodeModulesRoot)
     : [];
+  const installedPackageGraph = await collectInstalledPackageGraph(nodeModulesRoot);
   const installedSizeBytes = installedFiles.reduce((total, file) => total + file.size, 0);
   const installedPackageBytes = installedFiles.reduce((total, file) => {
     return readInstalledPackageName(file.relativePath) === input.packageName
@@ -427,13 +531,75 @@ async function collectInstalledPackageSnapshot(input) {
 
   return {
     installedDependencyBytes: installedSizeBytes - installedPackageBytes,
+    installedDependencyEdgeCount: installedPackageGraph.installedDependencyEdgeCount,
+    installedDistinctPackageNameCount: installedPackageGraph.installedDistinctPackageNameCount,
     installedFileCount: installedFiles.length,
+    installedOptionalPeerEdgeCount: installedPackageGraph.installedOptionalPeerEdgeCount,
     installedPackageBytes,
+    installedPackageInstanceCount: installedPackageGraph.installedPackageInstanceCount,
     installedSizeBytes,
     topInstalledPackages: summarizeInstalledPackages(installedFiles, {
       maxEntries: INSTALLED_PACKAGE_BREAKDOWN_MAX_ENTRIES,
       minBytes: INSTALLED_PACKAGE_BREAKDOWN_MIN_BYTES,
     }),
+  };
+}
+
+export async function collectPublishedPackageReportFromPack(options) {
+  const packageRoot = resolve(options.packageRoot);
+  const packageJson = await readJson(resolve(packageRoot, "package.json"));
+  const packageName =
+    typeof packageJson.name === "string" ? packageJson.name : basename(packageRoot);
+  const runtimeDependencies = readRuntimeDependencies(packageJson);
+  const peerDependencies = readPeerDependencies(packageJson);
+  const packResult = options.packResult;
+  const tarballFilename = typeof packResult.filename === "string" ? packResult.filename : null;
+
+  if (!tarballFilename) {
+    throw new Error(`npm pack did not report a tarball filename for "${packageRoot}".`);
+  }
+
+  const packedFiles = Array.isArray(packResult.files)
+    ? packResult.files
+        .filter(
+          (file) =>
+            file &&
+            typeof file === "object" &&
+            typeof file.path === "string" &&
+            typeof file.size === "number",
+        )
+        .map((file) => ({
+          path: file.path,
+          size: file.size,
+        }))
+    : [];
+  const installedSnapshot = await collectInstalledPackageSnapshot({
+    installRoot: options.installDirectory,
+    packageName,
+    tarballPath: options.tarballPath,
+  });
+
+  return {
+    installedDependencyBytes: installedSnapshot.installedDependencyBytes,
+    installedDependencyEdgeCount: installedSnapshot.installedDependencyEdgeCount,
+    installedDistinctPackageNameCount: installedSnapshot.installedDistinctPackageNameCount,
+    installedFileCount: installedSnapshot.installedFileCount,
+    installedOptionalPeerEdgeCount: installedSnapshot.installedOptionalPeerEdgeCount,
+    installedPackageBytes: installedSnapshot.installedPackageBytes,
+    installedPackageInstanceCount: installedSnapshot.installedPackageInstanceCount,
+    installedSizeBytes: installedSnapshot.installedSizeBytes,
+    packageLabel: options.packageLabel ?? basename(packageRoot),
+    packageName,
+    packageRoot,
+    packedSizeBytes: typeof packResult.size === "number" ? packResult.size : 0,
+    peerDependencies,
+    publishedFileCount: typeof packResult.entryCount === "number" ? packResult.entryCount : 0,
+    tarballFilename,
+    topInstalledPackages: installedSnapshot.topInstalledPackages,
+    topPublishedFiles: summarizeTopPublishedFiles(packedFiles, 5),
+    unpackedSizeBytes: typeof packResult.unpackedSize === "number" ? packResult.unpackedSize : 0,
+    version: typeof packageJson.version === "string" ? packageJson.version : "0.0.0",
+    runtimeDependencies,
   };
 }
 
@@ -443,11 +609,6 @@ async function collectInstalledPackageSnapshot(input) {
  */
 export async function collectPublishedPackageReport(options) {
   const packageRoot = resolve(options.packageRoot);
-  const packageJson = await readJson(resolve(packageRoot, "package.json"));
-  const packageName =
-    typeof packageJson.name === "string" ? packageJson.name : basename(packageRoot);
-  const runtimeDependencies = readRuntimeDependencies(packageJson);
-  const peerDependencies = readPeerDependencies(packageJson);
   const packDirectory = await mkdtemp(join(tmpdir(), "eve-package-pack-"));
   const installDirectory = await mkdtemp(join(tmpdir(), "eve-package-install-"));
 
@@ -459,44 +620,13 @@ export async function collectPublishedPackageReport(options) {
       throw new Error(`npm pack did not report a tarball filename for "${packageRoot}".`);
     }
 
-    const packedFiles = Array.isArray(packResult.files)
-      ? packResult.files
-          .filter(
-            (file) =>
-              file &&
-              typeof file === "object" &&
-              typeof file.path === "string" &&
-              typeof file.size === "number",
-          )
-          .map((file) => ({
-            path: file.path,
-            size: file.size,
-          }))
-      : [];
-    const installedSnapshot = await collectInstalledPackageSnapshot({
-      installRoot: installDirectory,
-      packageName,
+    return collectPublishedPackageReportFromPack({
+      installDirectory,
+      packageLabel: options.packageLabel,
+      packageRoot,
+      packResult,
       tarballPath: join(packDirectory, tarballFilename),
     });
-
-    return {
-      installedDependencyBytes: installedSnapshot.installedDependencyBytes,
-      installedFileCount: installedSnapshot.installedFileCount,
-      installedPackageBytes: installedSnapshot.installedPackageBytes,
-      installedSizeBytes: installedSnapshot.installedSizeBytes,
-      packageLabel: options.packageLabel ?? basename(packageRoot),
-      packageName,
-      packageRoot,
-      packedSizeBytes: typeof packResult.size === "number" ? packResult.size : 0,
-      peerDependencies,
-      publishedFileCount: typeof packResult.entryCount === "number" ? packResult.entryCount : 0,
-      tarballFilename,
-      topInstalledPackages: installedSnapshot.topInstalledPackages,
-      topPublishedFiles: summarizeTopPublishedFiles(packedFiles, 5),
-      unpackedSizeBytes: typeof packResult.unpackedSize === "number" ? packResult.unpackedSize : 0,
-      version: typeof packageJson.version === "string" ? packageJson.version : "0.0.0",
-      runtimeDependencies,
-    };
   } finally {
     await Promise.all([
       rm(packDirectory, {

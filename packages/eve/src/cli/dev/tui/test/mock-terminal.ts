@@ -62,6 +62,14 @@ export class MockUserInput extends EventEmitter implements TerminalInput {
   ctrlC() {
     this.send("\u0003");
   }
+
+  ctrlN() {
+    this.send("\u000e");
+  }
+
+  ctrlP() {
+    this.send("\u0010");
+  }
 }
 
 export class MockScreen extends EventEmitter implements TerminalOutput {
@@ -72,6 +80,7 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
   #lines: string[] = [];
   #cursorLine = 0;
   #cursorColumn = 0;
+  #mainScreen?: { lines: string[]; cursorLine: number; cursorColumn: number };
   #waiters: Array<{
     text: string;
     resolve: () => void;
@@ -115,6 +124,37 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
 
   rawOutput() {
     return this.#rawOutput;
+  }
+
+  /**
+   * Resolves once the runner parks at an idle prompt: a column-0 `›` row
+   * with no live turn bar on screen. A streaming turn keeps an identical
+   * `›` prompt anchored (Enter inert), so the glyph alone cannot signal
+   * readiness — the bar's absence is the discriminator.
+   */
+  async waitForIdlePrompt(timeoutMs = 1000) {
+    // The live turn bar: `▪ Working for <duration>…` at column 0 (pulse-off
+    // frames blank the mark; the label may be mid-typewriter but is always
+    // an exact prefix of "Working for", and the duration follows it). The
+    // exact-prefix alternation plus the digit keeps it from matching the
+    // `└ Done in …` coda, prompt rows, ordinary prose, and the todo panel.
+    const barLabel = "Working for";
+    const labelPrefixes = Array.from({ length: barLabel.length }, (_, index) =>
+      barLabel.slice(0, index + 1),
+    );
+    const liveTurnBar = new RegExp(`^[▪* ] (?:${labelPrefixes.join("|")}) \\d`, "mu");
+    // Unicode glyphs only: the ASCII prompt mark (`>`) is ambiguous with the
+    // ASCII brand mark, and every TUI smoke script pins EVE_TUI_UNICODE=1.
+    const idle = () => {
+      const snapshot = this.snapshot();
+      return /^[›❯]/mu.test(snapshot) && !liveTurnBar.test(snapshot);
+    };
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (idle()) return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error(`Timed out waiting for an idle prompt.\n\nScreen:\n${this.snapshot()}`);
   }
 
   async waitForText(text: string, timeoutMs = 1000, getDebugOutput = () => this.snapshot()) {
@@ -210,6 +250,25 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
       parameters[0] === undefined || parameters[0] === "" ? fallback : Number(parameters[0]);
 
     if (isPrivate) {
+      // The alternate screen swaps the grid: entering starts the modal view
+      // from a blank screen, leaving restores the transcript snapshot.
+      if (rawParameters === "?1049" && (command === "h" || command === "l")) {
+        if (command === "h") {
+          this.#mainScreen = {
+            lines: this.#lines,
+            cursorLine: this.#cursorLine,
+            cursorColumn: this.#cursorColumn,
+          };
+          this.#lines = [];
+          this.#cursorLine = 0;
+          this.#cursorColumn = 0;
+        } else if (this.#mainScreen !== undefined) {
+          this.#lines = this.#mainScreen.lines;
+          this.#cursorLine = this.#mainScreen.cursorLine;
+          this.#cursorColumn = this.#mainScreen.cursorColumn;
+          this.#mainScreen = undefined;
+        }
+      }
       return startIndex + sequence.length;
     }
 

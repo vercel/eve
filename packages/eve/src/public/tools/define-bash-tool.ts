@@ -1,5 +1,3 @@
-import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-
 import { type BashInput, executeBashOnSandbox } from "#execution/sandbox/bash-tool.js";
 import { BASH_INPUT_SCHEMA, BASH_OUTPUT_SCHEMA } from "#runtime/framework-tools/bash.js";
 import type { ToolDefinition } from "#public/definitions/tool.js";
@@ -30,7 +28,7 @@ export function defineBashTool(input: DefineBashToolInput = {}): ToolDefinition 
     async execute(args, ctx) {
       return executeBashOnSandbox(await ctx.getSandbox(), args as BashInput);
     },
-    inputSchema: BASH_INPUT_SCHEMA as unknown as StandardJSONSchemaV1<unknown>,
+    inputSchema: BASH_INPUT_SCHEMA,
     outputSchema: BASH_OUTPUT_SCHEMA,
   };
 }

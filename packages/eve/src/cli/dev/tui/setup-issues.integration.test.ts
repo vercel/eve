@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Client, type AgentInfoResult } from "#client/index.js";
 
 import { EveTUIRunner, type AgentTUIRenderer } from "./runner.js";
-import { automaticSetupCommand, detectSetupIssues } from "./setup-issues.js";
+import { detectSetupIssues } from "./setup-issues.js";
 import { createFakeSetupFlowRenderer } from "./test/fake-setup-flow-renderer.js";
 
 afterEach(() => {
@@ -30,7 +30,7 @@ const DISCONNECTED_GATEWAY_INFO: AgentInfoResult = {
   connections: [],
   diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
   hooks: [],
-  instructions: { dynamic: [], static: null },
+  instructions: { dynamic: [], static: [] },
   kind: "eve-agent-info",
   mode: "development",
   sandbox: null,
@@ -45,7 +45,7 @@ const DISCONNECTED_GATEWAY_INFO: AgentInfoResult = {
     framework: [],
     reserved: [],
   },
-  version: 1,
+  version: 2,
   workflow: { enabled: false, toolName: "Workflow" },
   workspace: { resourceRoot: null, rootEntries: [] },
 };
@@ -76,7 +76,7 @@ describe("BOOT_DETECTIONS against a real directory", () => {
     ]);
   });
 
-  it("authorizes model setup when the runtime confirms a linked project is disconnected", async () => {
+  it("diagnoses a linked project with disconnected model access", async () => {
     const appRoot = await linkedAppRoot();
     const issues = await detectSetupIssues({
       appRoot,
@@ -86,29 +86,25 @@ describe("BOOT_DETECTIONS against a real directory", () => {
 
     expect(issues).toEqual([
       {
-        kind: "model-provider-unconfigured",
+        kind: "attention",
         label: "AI Gateway credentials missing",
         command: "/model",
       },
     ]);
-    expect(automaticSetupCommand(issues)).toEqual({
-      prompt: "/model",
-      initialModelStep: "provider",
-    });
   });
 
-  it("opens model setup from the default detection before the first prompt", async () => {
+  it("opens model setup from the prefilled onboarding prompt when inspection is unavailable", async () => {
     const appRoot = await linkedAppRoot();
     const client = new Client({ host: "http://localhost:3000" });
-    vi.spyOn(client, "info").mockResolvedValue(DISCONNECTED_GATEWAY_INFO);
+    vi.spyOn(client, "info").mockRejectedValue(new Error("inspection unavailable"));
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => Response.json({ revision: "snapshot-a" })),
     );
     const order: string[] = [];
-    const handle = vi.fn(async () => {
-      order.push("model");
-      return { message: "/model cancelled." };
+    const handle = vi.fn(async (command: { name: string }) => {
+      order.push(command.name);
+      return { message: `/${command.name} dismissed.` };
     });
     const readPrompt = vi.fn(async () => {
       order.push("prompt");
@@ -127,16 +123,23 @@ describe("BOOT_DETECTIONS against a real directory", () => {
       promptCommandHandler: { handle },
       renderer,
       serverUrl: "http://localhost:3000",
-      session: client.session(),
+      session: client.sessions.attach("session_test"),
+      initialInput: "/model",
     });
 
     await runner.run();
 
-    expect(handle).toHaveBeenCalledExactlyOnceWith(
+    expect(handle).toHaveBeenNthCalledWith(
+      1,
       { type: "extension", name: "model", argument: "" },
       { renderer, title: "eve", initialModelStep: "provider" },
     );
+    expect(handle).toHaveBeenNthCalledWith(
+      2,
+      { type: "extension", name: "add", argument: "" },
+      { renderer, title: "eve" },
+    );
     expect(readPrompt).toHaveBeenCalledOnce();
-    expect(order).toEqual(["model", "prompt"]);
+    expect(order).toEqual(["model", "add", "prompt"]);
   });
 });

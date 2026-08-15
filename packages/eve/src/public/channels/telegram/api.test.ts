@@ -80,6 +80,50 @@ describe("sendTelegramMessage", () => {
 
     expect(posted).toMatchObject({ chatId: "-1001", id: "42" });
   });
+
+  it("extracts recognized chat types from Telegram's response", async () => {
+    for (const chatType of ["channel", "group", "private", "supergroup"] as const) {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            result: { message_id: 42, chat: { id: -1001, type: chatType } },
+          }),
+        ),
+      );
+
+      const posted = await sendTelegramMessage({
+        body: { text: "hello" },
+        chatId: -1001,
+        credentials: { botToken: "bot-token" },
+        fetch: fetchMock,
+      });
+
+      expect(posted).toMatchObject({ chatType });
+    }
+  });
+
+  it("ignores missing and unrecognized chat types from Telegram's response", async () => {
+    for (const chat of [{ id: -1001 }, { id: -1001, type: "bot" }]) {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            result: { message_id: 42, chat },
+          }),
+        ),
+      );
+
+      const posted = await sendTelegramMessage({
+        body: { text: "hello" },
+        chatId: -1001,
+        credentials: { botToken: "bot-token" },
+        fetch: fetchMock,
+      });
+
+      expect(posted.chatType).toBeUndefined();
+    }
+  });
 });
 
 describe("sendTelegramChatAction", () => {

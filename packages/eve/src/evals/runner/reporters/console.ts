@@ -7,18 +7,39 @@ import type {
   EveEvalRunSummary,
   EveEvalTarget,
 } from "#evals/types.js";
+import {
+  formatAssertionFailureDetailLines,
+  formatAssertionFailureHeadline,
+} from "#evals/runner/reporters/assertion-diagnostics.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
+
+/**
+ * Configuration for the console reporter. Every field is optional.
+ */
+export interface ConsoleReporterConfig {
+  /** Function to print console log messages. */
+  log?: (message: string) => void;
+  /** Whether to log with colored output. */
+  color?: boolean;
+}
+
+/**
+ * Creates a {@link ConsoleReporter}.
+ */
+export function Console(config: ConsoleReporterConfig = {}): EvalReporter {
+  return new ConsoleReporter(config);
+}
 
 /**
  * Console reporter that prints eval progress and results to stdout.
  */
-export class ConsoleReporter implements EvalReporter {
+class ConsoleReporter implements EvalReporter {
   readonly #log: (message: string) => void;
   readonly #colors: ReturnType<typeof picocolors.createColors>;
 
-  constructor(options?: { log?: (message: string) => void; color?: boolean }) {
-    this.#log = options?.log ?? console.log;
-    this.#colors = picocolors.createColors(options?.color ?? Boolean(process.stdout.isTTY));
+  constructor(config?: ConsoleReporterConfig) {
+    this.#log = config?.log ?? console.log;
+    this.#colors = picocolors.createColors(config?.color ?? Boolean(process.stdout.isTTY));
   }
 
   onRunStart(evaluations: readonly EveEval[], target: EveEvalTarget): void {
@@ -33,7 +54,7 @@ export class ConsoleReporter implements EvalReporter {
   }
 
   onEvalComplete(result: EveEvalResult): void {
-    const { assertions, verdict, error } = result;
+    const { assertions, verdict, error, skipReason } = result;
     const gates = assertions.filter((assertion) => assertion.severity === "gate");
     const softs = assertions.filter((assertion) => assertion.severity === "soft");
 
@@ -53,19 +74,24 @@ export class ConsoleReporter implements EvalReporter {
 
     for (const assertion of assertions) {
       if (assertion.passed) continue;
-      const detail = assertion.message === undefined ? "" : `: ${assertion.message}`;
-      this.#log(`  ${this.#colors.red(`✗ ${assertion.name}${detail}`)}`);
+      this.#log(`  ${this.#colors.red(`✗ ${formatAssertionFailureHeadline(assertion)}`)}`);
+      for (const detailLine of formatAssertionFailureDetailLines(assertion)) {
+        this.#log(`    ${this.#colors.red(detailLine)}`);
+      }
     }
 
     if (error) {
       this.#log(`  ${this.#colors.red(error)}`);
+    }
+    if (skipReason) {
+      this.#log(`  ${this.#colors.dim(skipReason)}`);
     }
   }
 
   onRunComplete(summary: EveEvalRunSummary): void {
     this.#log("");
 
-    const { passed, failed, scored, results } = summary;
+    const { passed, failed, scored, skipped, results } = summary;
     const total = results.length;
     const parts: string[] = [];
 
@@ -77,6 +103,9 @@ export class ConsoleReporter implements EvalReporter {
     }
     if (scored > 0) {
       parts.push(this.#colors.yellow(`${scored} scored`));
+    }
+    if (skipped > 0) {
+      parts.push(this.#colors.dim(`${skipped} skipped`));
     }
     if (parts.length === 0) {
       parts.push(this.#colors.dim("0 evals"));
@@ -117,6 +146,8 @@ export class ConsoleReporter implements EvalReporter {
         return this.#colors.red("✗");
       case "scored":
         return this.#colors.yellow("○");
+      case "skipped":
+        return this.#colors.dim("–");
     }
   }
 

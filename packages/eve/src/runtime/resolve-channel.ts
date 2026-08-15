@@ -74,6 +74,7 @@ export async function resolveChannelDefinition(
       name: definition.name,
       method: definition.method,
       urlPath: definition.urlPath,
+      cors: definition.cors,
       fetch: async (req: Request, ctx: any) => {
         if (httpRoute) return httpRoute.handler(req, ctx);
         return Response.json({ error: "No matching route handler.", ok: false }, { status: 404 });
@@ -83,6 +84,7 @@ export async function resolveChannelDefinition(
       receive: channelDefinition.receive,
       definition: channelDefinition,
       adapter,
+      turnPolicy: channelDefinition.turnPolicy,
       ...sourceRef,
     };
   } catch (error) {

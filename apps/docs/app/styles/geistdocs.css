@@ -8,9 +8,59 @@ html {
   scroll-padding-top: 5rem;
 }
 
-/* Align docs content with navbar on mobile. */
-#nd-page {
-  @apply max-md:px-6;
+/* Tint the root + body so overscroll and any gaps match the page background
+   instead of showing white. */
+html,
+body {
+  background-color: var(--ds-background-200);
+}
+
+:root {
+  --shiki-token-parameter: var(--shiki-color-text);
+}
+
+/* Tint the global footer to match the landing background, but only on the
+   home route (`/`), which renders the [data-home-route] marker. */
+body:has([data-home-route]) footer {
+  @apply bg-background-200;
+}
+
+/* Nights is an intentionally immersive standalone route. */
+body:has([data-nights-route]) {
+  background: #000;
+  color-scheme: dark;
+}
+
+@keyframes eve-nights-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+[data-nights-route][data-shader-state="loading"] [data-nights-animated] {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body:has([data-nights-route]) [data-nights-animated] {
+    animation: none;
+  }
+}
+
+/* On home routes the navbar starts borderless and fades its bottom border in
+   only once the page is scrolled (ScrollState toggles [data-scrolled]). */
+body:has([data-home-route]) header {
+  border-bottom-color: transparent !important;
+  transition: border-color 200ms ease;
+}
+html[data-scrolled] body:has([data-home-route]) header {
+  border-bottom-color: var(--ds-gray-alpha-400) !important;
 }
 
 /*
@@ -19,8 +69,14 @@ html {
  * above it. Hide the breadcrumb on mobile so the bar sits flush under the
  * navbar; it stays visible on desktop, where the bar is hidden.
  */
-#nd-page > .text-fd-muted-foreground:first-child {
-  @apply max-md:hidden;
+@container (max-width: 960px) {
+  #nd-page {
+    @apply px-6;
+  }
+
+  #nd-page > .text-fd-muted-foreground:first-child {
+    @apply hidden;
+  }
 }
 
 /* TOC and footer links use gray-1000. */

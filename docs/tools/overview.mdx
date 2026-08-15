@@ -28,15 +28,42 @@ A tool definition needs:
 - a filename slug under `agent/tools/`, the model-facing name.
 - a `description`: what the tool does, written for the model.
 - an `inputSchema`: a Zod schema (or any Standard Schema, or a plain JSON Schema object). Required. For no input, pass `z.object({})`. Zod and Standard Schema infer the `input` type in `execute`. Plain JSON Schema types it as `Record<string, unknown>`.
-- an `execute(input, ctx)`: the implementation. May be sync or async.
+- an `execute(input, ctx)`: the implementation. May be sync, async, or an async generator.
 
 When a tool returns structured data, add an optional `outputSchema`. With Zod or Standard Schema it also types the `execute` return.
+
+### Stream preliminary tool results
+
+An async generator lets a long-running tool stream complete output snapshots
+before it finishes. Each `yield` replaces the previous snapshot; the final
+yield is the normal tool result the model receives:
+
+```ts title="agent/tools/build_report.ts"
+export default defineTool({
+  description: "Build a project report.",
+  inputSchema: z.object({ project: z.string() }),
+  async *execute({ project }) {
+    yield { phase: "collecting", report: null };
+    const report = await buildReport(project);
+    yield { phase: "complete", report };
+  },
+});
+```
+
+eve publishes every earlier yield as an `action.partial` stream event. The
+snapshot is visible to channels, hooks, and clients but never enters model
+history or `toModelOutput`; only the final yield does. Treat snapshots as
+last-write-wins by tool call id, not append-only progress. The durable runtime
+can retry a step and replay overlapping snapshots.
 
 ### The `ctx` parameter
 
 `execute` gets a `ctx` carrying the runtime accessors:
 
 - `ctx.session`: session metadata, turn, auth, parent lineage.
+- `ctx.callId`: the id of the current tool call, carried by the call's [stream events](/docs/concepts/sessions-runs-and-streaming) and approval context.
+- `ctx.toolName`: the final runtime name the model called, including any namespace qualification.
+- `ctx.abortSignal`: aborts when the active turn is cancelled. Pass it to cancellation-aware work; sandbox sessions from `ctx.getSandbox()` are already bound to it.
 - `ctx.getSandbox()`: the live [sandbox](/docs/sandbox) handle.
 - `ctx.getSkill(id)`: read a packaged [skill](/docs/skills)'s metadata and files.
 
@@ -46,7 +73,7 @@ eve never runs authored tools during discovery. The model sees descriptors first
 
 ## Gate a tool on human approval
 
-A tool can require a person to sign off before it runs. Set `needsApproval` with the helpers from `eve/tools/approval`:
+A tool can require a person to sign off before it runs. Set `approval` with the helpers from `eve/tools/approval`:
 
 ```ts title="agent/tools/refund_charge.ts"
 import { defineTool } from "eve/tools";
@@ -56,14 +83,14 @@ import { z } from "zod";
 export default defineTool({
   description: "Refund a charge.",
   inputSchema: z.object({ chargeId: z.string(), amount: z.number() }),
-  needsApproval: always(), // or once() / never() / a predicate
+  approval: always(), // or once() / never() / a policy
   async execute(input) {
     return refund(input);
   },
 });
 ```
 
-Approval is one half of eve's [human-in-the-loop](./human-in-the-loop) model — the page covers the `always/once/never` helpers, input-dependent predicates, and how a gated call pauses and resumes durably.
+Approval is one half of eve's [human-in-the-loop](./human-in-the-loop) model — the page covers the `always/once/never` helpers, input-dependent policies, and how a gated call pauses and resumes durably.
 
 ## Shape what the model sees with `toModelOutput`
 
@@ -75,7 +102,38 @@ toModelOutput(output) {
 },
 ```
 
-`toModelOutput` receives the full, typed `execute` return and only affects the model. Channel event handlers and hooks still get the full output on `action.result`, so a channel can render rich platform output (Slack Block Kit, say) the model never sees. Return `{ type: "text", value }` for a summary, or `{ type: "json", value }` for a smaller object.
+`toModelOutput` receives the final, typed `execute` return and only affects the model. Channel event handlers and hooks still get the full output on `action.result`, so a channel can render rich platform output (Slack Block Kit, say) the model never sees. Return `{ type: "text", value }` for a summary, or `{ type: "json", value }` for a smaller object.
+
+Tool outputs must be JSON-serializable. Return plain objects, arrays, strings, numbers, booleans, or `null`; convert values like `Date`, `Map`, `Set`, `NaN`, and cyclic objects before returning them from `execute` or from a `{ type: "json" }` `toModelOutput`.
+
+### Send images to the model with content parts
+
+A tool that produces an image — a screenshot, a rendered chart — can hand the pixels to a vision-capable model by returning a `content` output from `toModelOutput`. Build outputs with the `toolOutput` helpers and parts with the `toolOutputPart` helpers, both from `eve/tools`:
+
+```ts
+import { defineTool, toolOutput, toolOutputPart } from "eve/tools";
+
+export default defineTool({
+  description: "Capture a screenshot of the current page",
+  inputSchema: z.object({ url: z.string() }),
+  async execute(input) {
+    const png = await captureScreenshot(input.url);
+    return { path: png.path, screenshotBase64: png.base64 };
+  },
+  toModelOutput(output) {
+    return toolOutput.content([
+      toolOutputPart.text(`Screenshot of ${output.path}:`),
+      toolOutputPart.file(output.screenshotBase64, { mediaType: "image/png" }),
+    ]);
+  },
+});
+```
+
+The `toolOutput.text` and `toolOutput.json` builders construct the other two output shapes; hand-written literals remain valid everywhere.
+
+File payloads must be base64 strings — raw bytes (`Uint8Array`, `Buffer`) are rejected because they do not survive eve's durable JSON boundary. Keep payloads small: a content-part image is persisted in session history and re-sent on every subsequent model call, and eve warns above 3 MiB. Sending image parts to a model without vision support fails with that provider's error, the same as image parts in user messages.
+
+When older turns are compacted, file payloads are dropped from the summary and replaced with a text stub naming the file and media type — the model cannot re-see a compacted image. Content parts are for "look at this now"; if the agent may need an artifact again later, write it to the [sandbox](/docs/sandbox) and return its path.
 
 Do not return secrets, credentials, unnecessary personal data, or unbounded sensitive content from tools. Filter, minimize, and redact tool outputs before returning them.
 
@@ -85,4 +143,4 @@ Do not return secrets, credentials, unnecessary personal data, or unbounded sens
 - [Skills](/docs/skills): on-demand procedures the model loads when relevant
 - [Default harness](/docs/concepts/default-harness): the built-in tools and how to override or disable them
 - [Dynamic capabilities](/docs/guides/dynamic-capabilities): tools whose set is resolved per session with `defineDynamic`
-- [Auth & route protection](/docs/guides/auth-and-route-protection): authenticate a tool to an external service
+- [Authentication](/docs/guides/auth-and-route-protection): authenticate a tool to an external service

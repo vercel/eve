@@ -1,17 +1,19 @@
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import {
+  getAllFrameworkToolDefinitions,
   getAllFrameworkToolNames,
-  getFrameworkToolDefinitions,
+  getFrameworkDynamicToolResolvers,
 } from "#runtime/framework-tools/index.js";
 import {
   getAllFrameworkChannelNames,
   getFrameworkChannelDefinitions,
 } from "#runtime/framework-channels/index.js";
-import { createConnectionSearchResolver } from "#runtime/framework-tools/connection-search-dynamic.js";
 import type {
   AgentInfoData,
+  CompiledAgentManifest,
   CompiledSubagentNode,
   ResolvedSandboxDefinition,
-  ResolvedSchedule,
+  ResolvedScheduleDefinition,
   ResolvedSkillDefinition,
 } from "#internal/nitro/routes/agent-info/load-agent-info-data.js";
 import type {
@@ -19,9 +21,10 @@ import type {
   ResolvedChannelDefinition,
   ResolvedToolDefinition,
 } from "#runtime/types.js";
+import { serializeInputSchema, serializeOutputSchema } from "#shared/tool-schema.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
-import { CODE_MODE_TOOL_NAME, WORKFLOW_TOOL_NAME } from "#shared/code-mode.js";
-import type { ModelRouting } from "#shared/agent-definition.js";
+import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
+import type { AgentReasoningDefinition, ModelRouting } from "#shared/agent-definition.js";
 import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 
 export interface AgentInfoSource {
@@ -75,13 +78,14 @@ export interface AgentInfoSkillEntry extends AgentInfoSource {
 }
 
 export interface AgentInfoInstructionsEntry extends AgentInfoSource {
-  readonly markdown: string;
+  readonly content: string;
   readonly name: string;
+  readonly role: "system" | "user";
 }
 
 export interface AgentInfoInstructions {
   readonly dynamic: readonly AgentInfoDynamicResolverEntry[];
-  readonly static: AgentInfoInstructionsEntry | null;
+  readonly static: readonly AgentInfoInstructionsEntry[];
 }
 
 export interface AgentInfoScheduleEntry extends AgentInfoSource {
@@ -92,7 +96,7 @@ export interface AgentInfoScheduleEntry extends AgentInfoSource {
 }
 
 export interface AgentInfoSubagentEntry extends AgentInfoSource {
-  readonly description: string;
+  readonly description?: string;
   readonly entryPath: string;
   readonly name: string;
   readonly nodeId: string;
@@ -159,20 +163,35 @@ export interface AgentInfoDiagnostics {
   readonly discoveryWarnings: number;
 }
 
+interface AgentInfoModelBase {
+  readonly contextWindowTokens?: number;
+  readonly providerOptions?: unknown;
+  /** The agent's authored reasoning effort, forwarded to the model call. */
+  readonly reasoning?: AgentReasoningDefinition;
+  readonly source?: AgentInfoSource;
+}
+
+export type AgentInfoModel = AgentInfoModelBase &
+  (
+    | {
+        readonly id: string;
+        readonly routing: ModelRouting;
+        readonly endpoint?: ModelEndpointStatus;
+      }
+    | {
+        readonly id?: never;
+        readonly routing: { readonly kind: "dynamic" };
+        readonly endpoint?: never;
+      }
+  );
+
 export interface AgentInfoResponse {
   readonly agent: {
     readonly agentRoot: string;
     readonly appRoot: string;
     readonly configSource?: AgentInfoSource;
     readonly description?: string;
-    readonly model: {
-      readonly contextWindowTokens?: number;
-      readonly id: string;
-      readonly providerOptions?: unknown;
-      readonly source?: AgentInfoSource;
-      readonly routing?: ModelRouting;
-      readonly endpoint?: ModelEndpointStatus;
-    };
+    readonly model: AgentInfoModel;
     readonly name: string;
     readonly outputSchema?: unknown;
   };
@@ -197,7 +216,7 @@ export interface AgentInfoResponse {
     readonly total: number;
   };
   readonly tools: AgentInfoTools;
-  readonly version: 1;
+  readonly version: 2;
   readonly workflow: {
     readonly enabled: boolean;
     readonly toolName: string;
@@ -215,22 +234,34 @@ export function buildAgentInfoResponse(
   },
 ): AgentInfoResponse {
   const agent = data.agent;
-  const tools = buildToolInfo(agent);
+  const config = agent.config;
+  if (config === undefined) {
+    throw new Error("Cannot inspect unresolved dynamic subagent resources as a root agent.");
+  }
+  const tools = buildToolInfo(agent, getRootDelegationToolNames(data.manifest));
 
   return {
     agent: {
       agentRoot: agent.metadata.agentRoot,
       appRoot: agent.metadata.appRoot,
-      configSource: agent.config.source ? toSource(agent.config.source) : undefined,
-      description: agent.config.description,
-      model: {
-        contextWindowTokens: agent.config.model.contextWindowTokens,
-        id: agent.config.model.id,
-        providerOptions: agent.config.model.providerOptions,
-        source: agent.config.model.source ? toSource(agent.config.model.source) : undefined,
-      },
-      name: agent.config.name,
-      outputSchema: agent.config.outputSchema,
+      configSource: config.source ? toSource(config.source) : undefined,
+      description: config.description,
+      model:
+        config.dynamicModel === undefined
+          ? {
+              contextWindowTokens: config.model.contextWindowTokens,
+              id: config.model.id,
+              providerOptions: config.model.providerOptions,
+              reasoning: config.reasoning,
+              source: config.model.source ? toSource(config.model.source) : undefined,
+              routing: resolveStaticAgentModelRouting(data.manifest),
+            }
+          : {
+              reasoning: config.reasoning,
+              routing: { kind: "dynamic" },
+            },
+      name: config.name,
+      outputSchema: config.outputSchema,
     },
     capabilities: {
       devRoutes: input.mode === "development",
@@ -260,13 +291,12 @@ export function buildAgentInfoResponse(
       dynamic: agent.dynamicInstructionsResolvers.map((resolver) =>
         renderDynamicResolver(resolver, { origin: "authored" }),
       ),
-      static: agent.instructions
-        ? {
-            ...toSource(agent.instructions),
-            markdown: agent.instructions.markdown,
-            name: agent.instructions.name,
-          }
-        : null,
+      static: agent.instructions.map((instructions) => ({
+        ...toSource(instructions),
+        content: instructions.content,
+        name: instructions.name,
+        role: instructions.role,
+      })),
     },
     kind: "eve-agent-info",
     mode: input.mode,
@@ -283,9 +313,9 @@ export function buildAgentInfoResponse(
       total: data.manifest.subagents.length,
     },
     tools,
-    version: 1,
+    version: 2,
     workflow: {
-      enabled: agent.workflowEnabled,
+      enabled: agent.workflowTool !== undefined,
       toolName: WORKFLOW_TOOL_NAME,
     },
     workspace: {
@@ -293,6 +323,13 @@ export function buildAgentInfoResponse(
       rootEntries: [...agent.workspaceSpec.rootEntries],
     },
   };
+}
+
+function resolveStaticAgentModelRouting(manifest: CompiledAgentManifest): ModelRouting {
+  if (manifest.config.model === undefined) {
+    throw new Error("Resolved static agent config does not match its compiled manifest.");
+  }
+  return manifest.config.model.routing;
 }
 
 function buildChannelInfo(agent: ResolvedAgent): AgentInfoChannels {
@@ -343,54 +380,28 @@ function buildChannelInfo(agent: ResolvedAgent): AgentInfoChannels {
   };
 }
 
-function buildToolInfo(agent: ResolvedAgent): AgentInfoTools {
+function buildToolInfo(
+  agent: ResolvedAgent,
+  delegationToolNames: ReadonlySet<string>,
+): AgentInfoTools {
   const authoredToolNames = new Set(agent.tools.map((tool) => tool.name));
   const disabledFrameworkTools = new Set(agent.disabledFrameworkTools);
   const allFrameworkToolNames = getAllFrameworkToolNames();
-  const frameworkToolDefinitions = getFrameworkToolDefinitions({
-    hasConnections: agent.connections.length > 0,
-  });
-  const dynamicFrameworkResolvers =
-    agent.connections.length > 0 ? [createConnectionSearchResolver()] : [];
-  const activeFrameworkTools = frameworkToolDefinitions.filter(
-    (tool) => !authoredToolNames.has(tool.name) && !disabledFrameworkTools.has(tool.name),
-  );
+  const dynamicFrameworkResolvers = getFrameworkDynamicToolResolvers();
   const authored = agent.tools.map((tool) =>
     renderTool(tool, {
       origin: "authored",
       replacesFrameworkTool: allFrameworkToolNames.has(tool.name),
     }),
   );
-  const framework = frameworkToolDefinitions.map((tool) => {
-    const replacedByAuthoredTool = authoredToolNames.has(tool.name);
-    const disabledByAuthor = disabledFrameworkTools.has(tool.name);
-    const status: AgentInfoFrameworkToolEntry["status"] = disabledByAuthor
-      ? "disabled"
-      : replacedByAuthoredTool
-        ? "replaced"
-        : "active";
-
-    return {
-      ...renderTool(tool, {
-        origin: "framework",
-        replacesFrameworkTool: false,
-      }),
-      disabledByAuthor,
-      replacedByAuthoredTool,
-      status,
-    };
+  const frameworkInfo = buildFrameworkToolInfo({
+    authoredToolNames,
+    delegationToolNames,
+    disabledFrameworkToolNames: disabledFrameworkTools,
   });
 
   return {
-    available: [
-      ...activeFrameworkTools.map((tool) =>
-        renderTool(tool, {
-          origin: "framework",
-          replacesFrameworkTool: false,
-        }),
-      ),
-      ...authored,
-    ],
+    available: [...frameworkInfo.available, ...authored],
     authored,
     disabledFramework: [...agent.disabledFrameworkTools],
     dynamic: [
@@ -401,9 +412,61 @@ function buildToolInfo(agent: ResolvedAgent): AgentInfoTools {
         renderDynamicResolver(resolver, { origin: "authored" }),
       ),
     ],
-    framework,
-    reserved: [CODE_MODE_TOOL_NAME, WORKFLOW_TOOL_NAME, LOAD_SKILL_TOOL_NAME],
+    framework: frameworkInfo.framework,
+    reserved: [WORKFLOW_TOOL_NAME, LOAD_SKILL_TOOL_NAME],
   };
+}
+
+export function buildFrameworkToolInfo(input: {
+  readonly authoredToolNames: ReadonlySet<string>;
+  readonly delegationToolNames: ReadonlySet<string>;
+  readonly disabledFrameworkToolNames: ReadonlySet<string>;
+}): Pick<AgentInfoTools, "available" | "framework"> {
+  const occupiedToolNames = new Set([...input.authoredToolNames, ...input.delegationToolNames]);
+  const available: AgentInfoToolEntry[] = [];
+  const framework: AgentInfoFrameworkToolEntry[] = [];
+
+  for (const definition of getAllFrameworkToolDefinitions()) {
+    const disabledByAuthor = input.disabledFrameworkToolNames.has(definition.name);
+    const replacedByAuthoredTool = input.authoredToolNames.has(definition.name);
+    const status: AgentInfoFrameworkToolEntry["status"] = disabledByAuthor
+      ? "disabled"
+      : occupiedToolNames.has(definition.name)
+        ? "replaced"
+        : "active";
+    const rendered = renderTool(definition, {
+      origin: "framework",
+      replacesFrameworkTool: false,
+    });
+
+    if (status === "active") {
+      available.push(rendered);
+    }
+
+    framework.push({
+      ...rendered,
+      disabledByAuthor,
+      replacedByAuthoredTool,
+      status,
+    });
+  }
+
+  return { available, framework };
+}
+
+export function getRootDelegationToolNames(manifest: CompiledAgentManifest): ReadonlySet<string> {
+  const rootChildNodeIds = new Set(
+    manifest.subagentEdges
+      .filter((edge) => edge.parentNodeId === ROOT_COMPILED_AGENT_NODE_ID)
+      .map((edge) => edge.childNodeId),
+  );
+
+  return new Set([
+    ...manifest.subagents
+      .filter((subagent) => rootChildNodeIds.has(subagent.nodeId))
+      .map((subagent) => subagent.name),
+    ...manifest.remoteAgents.map((remoteAgent) => remoteAgent.name),
+  ]);
 }
 
 export function renderChannel(
@@ -429,19 +492,22 @@ export function renderTool(
     readonly replacesFrameworkTool: boolean;
   },
 ): AgentInfoToolEntry {
+  const inputSchema = serializeInputSchema(tool.inputSchema);
+  const outputSchema = serializeOutputSchema(tool.outputSchema);
+
   return {
     ...toSource(tool),
     description: tool.description,
     hasAuth: false,
     hasExecute: tool.execute !== undefined,
     hasModelOutputProjection: tool.toModelOutput !== undefined,
-    hasOutputSchema: tool.outputSchema !== undefined && tool.outputSchema !== null,
-    inputSchema: tool.inputSchema,
+    hasOutputSchema: outputSchema !== undefined,
+    inputSchema,
     name: tool.name,
     origin: input.origin,
-    outputSchema: tool.outputSchema,
+    outputSchema,
     replacesFrameworkTool: input.replacesFrameworkTool,
-    requiresApproval: tool.needsApproval !== undefined,
+    requiresApproval: tool.approval !== undefined,
   };
 }
 
@@ -456,7 +522,7 @@ function renderSkill(skill: ResolvedSkillDefinition): AgentInfoSkillEntry {
   };
 }
 
-export function renderSchedule(schedule: ResolvedSchedule): AgentInfoScheduleEntry {
+export function renderSchedule(schedule: ResolvedScheduleDefinition): AgentInfoScheduleEntry {
   return {
     ...toSource(schedule),
     cron: schedule.cron,
@@ -494,7 +560,7 @@ export function renderSubagent(subagent: CompiledSubagentNode): AgentInfoSubagen
       channels: subagent.agent.channels.length,
       connections: subagent.agent.connections.length,
       hooks: subagent.agent.hooks.length,
-      instructions: subagent.agent.instructions !== undefined,
+      instructions: subagent.agent.instructions.length > 0,
       schedules: subagent.agent.schedules.length,
       skills: subagent.agent.skills.length,
       tools: subagent.agent.tools.length,

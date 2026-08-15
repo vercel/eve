@@ -189,7 +189,7 @@ describe("eve init smoke", () => {
         cwd: canonicalProjectDir,
       },
       {
-        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev"],
+        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--input", "/model"],
         cwd: canonicalProjectDir,
       },
     ]);
@@ -232,7 +232,7 @@ describe("eve init smoke", () => {
       "--no-frozen-lockfile",
       "--config.minimum-release-age=0",
     ]);
-    expect(devCall?.args.slice(-3)).toEqual(["exec", "eve", "dev"]);
+    expect(devCall?.args.slice(-5)).toEqual(["exec", "eve", "dev", "--input", "/model"]);
   });
 
   it("adds Web Chat through npm without writing pnpm configuration", async () => {
@@ -257,7 +257,7 @@ describe("eve init smoke", () => {
         cwd: canonicalProjectDir,
       },
       {
-        args: ["exec", "--", "eve", "dev"],
+        args: ["exec", "--", "eve", "dev", "--input", "/model"],
         cwd: canonicalProjectDir,
       },
     ]);
@@ -301,7 +301,7 @@ describe("eve init smoke", () => {
     ]);
   });
 
-  it("hands a coding agent the setup guide when it omits the target", async () => {
+  it("scaffolds the current directory for a coding agent that omits the target", async () => {
     const scratch = await createScratchDirectory("eve-init-agent-bare-");
     const fakePnpmRoot = await createScratchDirectory("eve-init-agent-bare-pnpm-");
     const fakePnpm = await createFakePnpmEnvironment(fakePnpmRoot);
@@ -309,29 +309,41 @@ describe("eve init smoke", () => {
     const result = await runEveBin(scratch, ["init"], { ...fakePnpm.env, AI_AGENT: "claude" });
 
     expect(result.exitCode, result.stderr).toBe(0);
-    // A bare `eve init` from an agent prints the setup guide and scaffolds
-    // nothing — no agent files written. (No install runs, so the fake pnpm is
-    // never invoked and writes no call log.)
-    expect(result.stdout).toContain("Set up an eve agent");
-    expect(result.stdout).toContain("npx eve@latest init <name>");
-    await expect(pathExists(join(scratch, "agent/agent.ts"))).resolves.toBe(false);
+    const canonicalProjectDir = await realpath(scratch);
+    expect(await readFile(join(scratch, "agent/agent.ts"), "utf8")).toContain(
+      DEFAULT_AGENT_MODEL_ID,
+    );
+    await expect(pathExists(join(scratch, ".git"))).resolves.toBe(true);
+    expect(await fakePnpm.readCalls()).toEqual([
+      {
+        args: [
+          "--dir",
+          canonicalProjectDir,
+          "install",
+          "--no-frozen-lockfile",
+          "--config.minimum-release-age=0",
+        ],
+        cwd: canonicalProjectDir,
+      },
+    ]);
+    expect(result.stdout).toContain("Created an eve agent in ");
+    expect(result.stdout).toContain("eve dev --no-ui");
   });
 
-  it("prints the setup guide but still fails when a coding agent passes a bad flag", async () => {
+  it("warns and continues when a coding agent passes the compatibility yes flag", async () => {
     const scratch = await createScratchDirectory("eve-init-agent-fumble-");
     const fakePnpmRoot = await createScratchDirectory("eve-init-agent-fumble-pnpm-");
     const fakePnpm = await createFakePnpmEnvironment(fakePnpmRoot);
 
-    const result = await runEveBin(scratch, ["init", "--unknown-flag"], {
+    const result = await runEveBin(scratch, ["init", "fumble-agent", "--yes"], {
       ...fakePnpm.env,
       AI_AGENT: "claude",
     });
 
-    // The guide is still printed, but a malformed invocation must preserve its
-    // parse failure — exiting 0 would lie to any script or agent checking it.
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stdout).toContain("Set up an eve agent");
-    await expect(pathExists(join(scratch, "agent/agent.ts"))).resolves.toBe(false);
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(result.stderr).toContain("warning: --yes has no effect for eve init.");
+    expect(result.stdout).toContain("eve dev --no-ui");
+    await expect(pathExists(join(scratch, "fumble-agent", "agent/agent.ts"))).resolves.toBe(true);
   });
 
   it("scaffolds the current empty directory when the target is omitted", async () => {
@@ -359,7 +371,7 @@ describe("eve init smoke", () => {
         cwd: canonicalProjectDir,
       },
       {
-        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev"],
+        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--input", "/model"],
         cwd: canonicalProjectDir,
       },
     ]);

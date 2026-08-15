@@ -4,7 +4,7 @@ import { buildCallbackContext } from "#context/build-callback-context.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { mockSkill } from "#internal/testing/mocks/mock-skill.js";
-import type { SandboxSession } from "#public/definitions/sandbox.js";
+import type { RuntimeSandboxSession, SandboxSession } from "#public/definitions/sandbox.js";
 
 /**
  * Integration coverage for {@link buildCallbackContext} — the single
@@ -121,6 +121,23 @@ describe("buildCallbackContext – getSandbox", () => {
     expect(sandbox.writes).toHaveLength(1);
     expect(sandbox.removedPaths).toEqual(["/workspace/note.txt"]);
     expect(sandbox.files.has("/workspace/note.txt")).toBe(false);
+  });
+
+  it("stops the active sandbox through the runtime session", async () => {
+    let stops = 0;
+    const sandbox = mockSandbox({
+      stop: () => {
+        stops += 1;
+      },
+    });
+    const runtime = createTestRuntime();
+
+    await runtime.runAsSession({ sandbox }, async () => {
+      const live: RuntimeSandboxSession = await buildCallbackContext().getSandbox();
+      await live.stop();
+    });
+
+    expect(stops).toBe(1);
   });
 });
 

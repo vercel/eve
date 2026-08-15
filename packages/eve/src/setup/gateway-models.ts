@@ -1,6 +1,6 @@
+import { AI_GATEWAY_MODELS_URL } from "#internal/gateway.js";
+import { buildPackageUserAgent } from "#internal/user-agent.js";
 import { captureVercel } from "#setup/primitives/index.js";
-
-const AI_GATEWAY_MODELS_URL = "https://ai-gateway.vercel.sh/v1/models";
 
 /**
  * Fetches the set of AI Gateway model ids, for validating a `--model` before
@@ -12,7 +12,17 @@ const AI_GATEWAY_MODELS_URL = "https://ai-gateway.vercel.sh/v1/models";
  * a malformed response) — callers must not block creation on it.
  */
 export async function fetchGatewayModelIds(cwd: string): Promise<Set<string> | null> {
-  const result = await captureVercel(["curl", AI_GATEWAY_MODELS_URL, "--", "--silent"], { cwd });
+  const result = await captureVercel(
+    [
+      "curl",
+      AI_GATEWAY_MODELS_URL,
+      "--",
+      "--silent",
+      "--header",
+      `User-Agent: ${buildPackageUserAgent()}`,
+    ],
+    { cwd },
+  );
   if (!result.ok) return null;
   try {
     const json = JSON.parse(result.stdout) as { data?: { id?: unknown }[] };

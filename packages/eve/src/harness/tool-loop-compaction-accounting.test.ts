@@ -1,7 +1,7 @@
 import { generateText, jsonSchema, type LanguageModel, ToolLoopAgent } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { setPendingInputBatch } from "#harness/input-requests.js";
+import { appendPendingInputBatch } from "#harness/input-requests.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, StepFn, StepNext, ToolLoopHarnessConfig } from "#harness/types.js";
 
@@ -61,6 +61,19 @@ type MockAgentConstructor =
     ? (settings: S) => ToolLoopAgent
     : never;
 
+function getMockResponseMessages(result: Record<string, unknown>): unknown[] {
+  const response = result.response;
+  if (
+    typeof response !== "object" ||
+    response === null ||
+    !("messages" in response) ||
+    !Array.isArray(response.messages)
+  ) {
+    throw new Error("Mock ToolLoopAgent result must include response messages.");
+  }
+  return response.messages;
+}
+
 function setupMockAgentSequence(results: readonly Record<string, unknown>[]): void {
   const queue = [...results];
 
@@ -91,7 +104,7 @@ function setupMockAgentSequence(results: readonly Record<string, unknown>[]): vo
         await onStepFinish(result);
       }
 
-      return result;
+      return { ...result, responseMessages: getMockResponseMessages(result) };
     });
 
     this.stream = vi.fn();
@@ -193,7 +206,7 @@ describe("tool-loop structured compaction accounting", () => {
       createTestSession({
         compaction: {
           recentWindowSize: 10,
-          threshold: 101,
+          threshold: 500,
         },
       }),
       { message: "Compute something" },
@@ -236,7 +249,7 @@ describe("tool-loop structured compaction accounting", () => {
     ]);
 
     const runStep = createToolLoopHarness(createTestConfig());
-    const session = setPendingInputBatch({
+    const session = appendPendingInputBatch({
       requests: [
         {
           action: {
@@ -246,6 +259,7 @@ describe("tool-loop structured compaction accounting", () => {
             toolName: "ask_question",
           },
           display: "select",
+          kind: "question",
           prompt: "Pick one.",
           requestId: "question-call",
         },

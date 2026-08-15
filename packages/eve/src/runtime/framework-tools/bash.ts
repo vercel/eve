@@ -1,7 +1,9 @@
+import { z } from "#compiled/zod/index.js";
+
 import { type BashInput, executeBashOnSandbox } from "#execution/sandbox/bash-tool.js";
 import { requireSandboxSession } from "#execution/sandbox/require-sandbox.js";
-import type { JsonObject } from "#shared/json.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
+import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
 /**
  * Shared input schema used by the framework `bash` tool and any author tool
@@ -11,33 +13,20 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
  * `BASH_TOOL_DEFINITION` use the exact same schema object — keeping model
  * input contracts in sync without duplication.
  */
-export const BASH_INPUT_SCHEMA: JsonObject = {
-  additionalProperties: false,
-  properties: {
-    command: {
-      description: "The shell command to execute.",
-      type: "string",
-    },
-  },
-  required: ["command"],
-  type: "object",
-};
+export const BASH_INPUT_SCHEMA = z.strictObject({
+  command: z.string().describe("The shell command to execute."),
+});
 
 /**
  * Shared output schema used by the framework `bash` tool and any author tool
  * constructed via {@link defineBashTool}.
  */
-export const BASH_OUTPUT_SCHEMA: JsonObject = {
-  additionalProperties: false,
-  properties: {
-    exitCode: { type: "number" },
-    stderr: { type: "string" },
-    stdout: { type: "string" },
-    truncated: { type: "boolean" },
-  },
-  required: ["exitCode", "stderr", "stdout", "truncated"],
-  type: "object",
-};
+export const BASH_OUTPUT_SCHEMA = z.strictObject({
+  exitCode: z.number(),
+  stderr: z.string(),
+  stdout: z.string(),
+  truncated: z.boolean(),
+});
 
 /**
  * Framework-owned executors stay statically imported so hosted server bundles
@@ -47,8 +36,11 @@ export const BASH_OUTPUT_SCHEMA: JsonObject = {
  * sandbox dependencies remain lazily loaded inside the execution layer, so the
  * top-level import here does not force those backends to initialize eagerly.
  */
-async function executeBash(input: unknown): Promise<unknown> {
-  return executeBashOnSandbox(await requireSandboxSession(), input as BashInput);
+async function executeBash(input: unknown, options?: ToolExecuteOptions): Promise<unknown> {
+  return executeBashOnSandbox(
+    await requireSandboxSession(options?.abortSignal),
+    input as BashInput,
+  );
 }
 
 export const BASH_TOOL_DEFINITION: ResolvedToolDefinition = {

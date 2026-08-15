@@ -20,6 +20,14 @@ export const SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS = [
 export const PROJECT_MARKER_FILE_NAMES = ["package.json", "vercel.json"] as const;
 
 const PROJECT_MARKER_FILE_NAME_SET = new Set<string>(PROJECT_MARKER_FILE_NAMES);
+const GENERATED_AGENT_DIRECTORY_NAMES = new Set<string>([
+  ".devtools",
+  ".eve",
+  ".next",
+  ".output",
+  ".vercel",
+  "node_modules",
+]);
 
 /**
  * Filesystem entry type used by discovery classifiers.
@@ -33,7 +41,10 @@ export type AgentRootEntryKind =
   | "agent-config-module"
   | "channels-directory"
   | "connections-directory"
+  | "extensions-directory"
   | "hooks-directory"
+  | "ignored-directory"
+  | "instrumentation-directory"
   | "instructions-directory"
   | "instructions-markdown"
   | "instructions-module"
@@ -53,7 +64,9 @@ export type AgentRootEntryKind =
 export type LocalSubagentEntryKind =
   | "agent-config-module"
   | "connections-directory"
+  | "extensions-directory"
   | "hooks-directory"
+  | "ignored-directory"
   | "instructions-directory"
   | "instructions-markdown"
   | "instructions-module"
@@ -83,6 +96,7 @@ export type SkillPackageEntryKind =
 export type SkillsDirectoryEntryKind =
   | "flat-skill-markdown"
   | "flat-skill-module"
+  | "ignored-declaration"
   | "skill-package-directory"
   | "unknown";
 
@@ -142,6 +156,10 @@ export function classifyAgentRootEntry(
   }
 
   if (entryType === "directory") {
+    if (GENERATED_AGENT_DIRECTORY_NAMES.has(name)) {
+      return "ignored-directory";
+    }
+
     if (name === "channels") {
       return "channels-directory";
     }
@@ -150,12 +168,20 @@ export function classifyAgentRootEntry(
       return "connections-directory";
     }
 
+    if (name === "extensions") {
+      return "extensions-directory";
+    }
+
     if (name === "hooks") {
       return "hooks-directory";
     }
 
     if (name === "instructions") {
       return "instructions-directory";
+    }
+
+    if (name === "instrumentation") {
+      return "instrumentation-directory";
     }
 
     if (name === "lib") {
@@ -218,8 +244,16 @@ export function classifyLocalSubagentEntry(
   }
 
   if (entryType === "directory") {
+    if (GENERATED_AGENT_DIRECTORY_NAMES.has(name)) {
+      return "ignored-directory";
+    }
+
     if (name === "connections") {
       return "connections-directory";
+    }
+
+    if (name === "extensions") {
+      return "extensions-directory";
     }
 
     if (name === "hooks") {
@@ -302,6 +336,10 @@ export function classifySkillsDirectoryEntry(
   }
 
   if (entryType === "file") {
+    if (isTypeScriptDeclarationFileName(name)) {
+      return "ignored-declaration";
+    }
+
     if (name.toLowerCase().endsWith(".md")) {
       return "flat-skill-markdown";
     }
@@ -326,6 +364,10 @@ export function normalizeLogicalPath(input: string): string {
  * extension.
  */
 export function getSupportedModuleBaseName(name: string): string | null {
+  if (isTypeScriptDeclarationFileName(name)) {
+    return null;
+  }
+
   for (const extension of SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS) {
     if (name.endsWith(extension) && name.length > extension.length) {
       return name.slice(0, -extension.length);
@@ -333,6 +375,11 @@ export function getSupportedModuleBaseName(name: string): string | null {
   }
 
   return null;
+}
+
+/** Returns whether a filename is a TypeScript declaration module. */
+export function isTypeScriptDeclarationFileName(name: string): boolean {
+  return /\.d\.(?:cts|mts|ts)$/.test(name);
 }
 
 /**

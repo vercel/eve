@@ -106,7 +106,7 @@ export default rows.map((row) =>
     },
     async test(t) {
       await t.send(row.prompt);
-      t.didNotFail();
+      t.succeeded();
     },
   }),
 );
@@ -144,9 +144,9 @@ const WEATHER_TSCONFIG_SOURCE = `${JSON.stringify(
       forceConsistentCasingInFileNames: true,
       isolatedModules: true,
       lib: ["ES2024"],
-      module: "NodeNext",
+      module: "esnext",
       moduleDetection: "force",
-      moduleResolution: "NodeNext",
+      moduleResolution: "bundler",
       noEmit: true,
       noFallthroughCasesInSwitch: true,
       noImplicitOverride: true,

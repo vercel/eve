@@ -5,6 +5,7 @@ import { loadResolvedCompiledScheduleByTaskName } from "#runtime/schedules/resol
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
+import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
 /**
  * Dispatches one eve authored schedule via the execution engine.
@@ -17,7 +18,20 @@ export async function dispatchScheduleTask(
   taskName: string,
   config: NitroArtifactsConfig,
 ): Promise<{ scheduleId: string; sessionIds: readonly string[] }> {
-  const compiledArtifactsSource = resolveNitroCompiledArtifactsSource(config);
+  return await dispatchScheduleTaskFromArtifacts(
+    taskName,
+    resolveNitroCompiledArtifactsSource(config),
+  );
+}
+
+/**
+ * Variant of {@link dispatchScheduleTask} for callers that already resolved
+ * an artifact source and need the dispatch to stay on that generation.
+ */
+export async function dispatchScheduleTaskFromArtifacts(
+  taskName: string,
+  compiledArtifactsSource: RuntimeCompiledArtifactsSource,
+): Promise<{ scheduleId: string; sessionIds: readonly string[] }> {
   const schedule = await loadResolvedCompiledScheduleByTaskName(taskName, {
     compiledArtifactsSource,
   });

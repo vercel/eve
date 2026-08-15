@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "pnpm --filter eve build && pnpm build:next",
+    "build": "pnpm build:next",
     "dev": "next dev",
     "dev:eve": "eve dev",
     "build:eve": "eve build",
@@ -14,7 +14,6 @@
   "dependencies": {
     "@auth/core": "0.41.2",
     "@vercel/connect": "catalog:",
-    "@vercel/oidc": "3.4.1",
     "ai": "catalog:",
     "eve": "workspace:*",
     "next": "catalog:",
@@ -28,7 +27,7 @@
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "eslint": "10.4.0",
-    "eslint-config-next": "16.2.6",
+    "eslint-config-next": "16.3.0-preview.6",
     "tailwindcss": "4.3.0",
     "typescript": "6.0.3"
   }

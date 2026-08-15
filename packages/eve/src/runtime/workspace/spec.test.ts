@@ -5,7 +5,7 @@ import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
 describe("createWorkspacePromptSection", () => {
   it("tells the model not to answer from the overview when bash verification fails", () => {
     const section = createWorkspacePromptSection({
-      rootEntries: ["skills", "weather-codes.md"],
+      rootEntries: ["weather-codes.md"],
     });
 
     expect(section).toContain(

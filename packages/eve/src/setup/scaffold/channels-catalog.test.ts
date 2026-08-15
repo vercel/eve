@@ -1,4 +1,4 @@
-import { channelEntries } from "@vercel/eve-catalog";
+import { channelEntries } from "@eve/catalog";
 import { describe, expect, test } from "vitest";
 import { SCAFFOLDABLE_CHANNELS } from "./channels-catalog.js";
 
@@ -31,5 +31,14 @@ describe("SCAFFOLDABLE_CHANNELS", () => {
   test("maps slack identity straight through", () => {
     const slack = SCAFFOLDABLE_CHANNELS.find((channel) => channel.slug === "slack");
     expect(slack?.kind).toBe("slack");
+  });
+
+  test("associates scaffoldable channels with canonical registry items", () => {
+    expect(SCAFFOLDABLE_CHANNELS.map(({ kind, registryItem }) => ({ kind, registryItem }))).toEqual(
+      [
+        { kind: "web", registryItem: "channel/web" },
+        { kind: "slack", registryItem: "channel/slack" },
+      ],
+    );
   });
 });

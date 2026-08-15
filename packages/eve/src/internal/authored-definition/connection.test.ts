@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { normalizeMcpClientConnectionDefinition } from "#internal/authored-definition/connection.js";
+import type {
+  ConnectionAuthDefinition,
+  ConnectionAuthProvider,
+} from "#runtime/connections/types.js";
 
 const MSG = "Expected the connection export to match the public eve shape.";
 
@@ -16,6 +20,13 @@ function validInput(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function authProvider(auth: ConnectionAuthDefinition | undefined): ConnectionAuthProvider {
+  if (auth === undefined || typeof auth === "function") {
+    throw new Error("Expected a static auth provider.");
+  }
+  return auth;
+}
+
 describe("normalizeMcpClientConnectionDefinition", () => {
   describe("happy path", () => {
     it("accepts a valid definition with a getToken function", () => {
@@ -23,7 +34,7 @@ describe("normalizeMcpClientConnectionDefinition", () => {
 
       expect(result.url).toBe("https://mcp.example.com/sse");
       expect(result.description).toBe("A test connection.");
-      expect(typeof result.auth?.getToken).toBe("function");
+      expect(typeof authProvider(result.auth).getToken).toBe("function");
     });
 
     it("preserves the author's getToken reference", () => {
@@ -33,7 +44,7 @@ describe("normalizeMcpClientConnectionDefinition", () => {
         MSG,
       );
 
-      expect(result.auth?.getToken).toBe(getToken);
+      expect(authProvider(result.auth).getToken).toBe(getToken);
     });
 
     it('defaults getToken-only auth to principalType "app"', () => {
@@ -44,6 +55,18 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       );
 
       expect(result.auth).toMatchObject({ getToken, principalType: "app" });
+    });
+
+    it("preserves a context-aware auth resolver without invoking it at build time", () => {
+      let calls = 0;
+      const auth = () => {
+        calls += 1;
+        return { getToken: async () => ({ token: "x" }) };
+      };
+      const result = normalizeMcpClientConnectionDefinition(validInput({ auth }), MSG);
+
+      expect(result.auth).toBe(auth);
+      expect(calls).toBe(0);
     });
 
     it("accepts the full three-method interactive-OAuth shape", () => {
@@ -65,9 +88,9 @@ describe("normalizeMcpClientConnectionDefinition", () => {
         MSG,
       );
 
-      expect(result.auth?.getToken).toBe(getToken);
-      expect(result.auth?.startAuthorization).toBe(startAuthorization);
-      expect(result.auth?.completeAuthorization).toBe(completeAuthorization);
+      expect(authProvider(result.auth).getToken).toBe(getToken);
+      expect(authProvider(result.auth).startAuthorization).toBe(startAuthorization);
+      expect(authProvider(result.auth).completeAuthorization).toBe(completeAuthorization);
     });
 
     it("accepts an http URL", () => {
@@ -99,6 +122,22 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       expect((result.auth as Record<string, unknown>).vercelConnect).toEqual({
         connector: "oauth/mcp-linear-app",
       });
+    });
+
+    it("preserves the optional auth evict hook", () => {
+      const evict = async () => {};
+      const result = normalizeMcpClientConnectionDefinition(
+        validInput({
+          auth: {
+            evict,
+            getToken: async () => ({ token: "x" }),
+            principalType: "app",
+          },
+        }),
+        MSG,
+      );
+
+      expect((result.auth as Record<string, unknown>).evict).toBe(evict);
     });
 
     it("drops a malformed vercelConnect marker without throwing", () => {
@@ -286,16 +325,25 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       expect(result.approval).toBe(fn);
     });
 
+    it("accepts request and response approval policies", () => {
+      const approval = {
+        request: () => "user-approval" as const,
+        response: () => ({ status: "allowed" as const }),
+      };
+      const result = normalizeMcpClientConnectionDefinition(validInput({ approval }), MSG);
+      expect(result.approval).toEqual(approval);
+    });
+
     it("rejects a non-function approval", () => {
       expect(() =>
         normalizeMcpClientConnectionDefinition(validInput({ approval: "never" }), MSG),
-      ).toThrow(/must be a function/);
+      ).toThrow();
     });
 
     it("rejects a boolean approval", () => {
       expect(() =>
         normalizeMcpClientConnectionDefinition(validInput({ approval: true }), MSG),
-      ).toThrow(/must be a function/);
+      ).toThrow();
     });
   });
 
@@ -404,6 +452,49 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       expect(result.auth).toBeUndefined();
       const headers = result.headers as Record<string, string>;
       expect(headers.Authorization).toBe("Custom scheme");
+    });
+  });
+
+  describe("toolCall.providedArguments validation", () => {
+    it("accepts static, Promise, and function values", () => {
+      const resolver = () => ({ profile: "https://agent.example.com/profile" });
+      const promised = Promise.resolve("request-id");
+      const result = normalizeMcpClientConnectionDefinition(
+        validInput({
+          toolCall: {
+            providedArguments: {
+              meta: resolver,
+              requestId: promised,
+              version: 1,
+            },
+          },
+        }),
+        MSG,
+      );
+
+      expect(result.toolCall?.providedArguments).toEqual({
+        meta: resolver,
+        requestId: promised,
+        version: 1,
+      });
+    });
+
+    it("rejects unknown toolCall fields", () => {
+      expect(() =>
+        normalizeMcpClientConnectionDefinition(
+          validInput({ toolCall: { prepare: () => ({}) } }),
+          MSG,
+        ),
+      ).toThrow(/Unknown key "prepare"/);
+    });
+
+    it("rejects non-JSON static values", () => {
+      expect(() =>
+        normalizeMcpClientConnectionDefinition(
+          validInput({ toolCall: { providedArguments: { meta: new Date() } } }),
+          MSG,
+        ),
+      ).toThrow(/toolCall\.providedArguments\.meta.*JSON-serializable/);
     });
   });
 

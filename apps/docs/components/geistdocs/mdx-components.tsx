@@ -3,6 +3,7 @@ import { File, Files, Folder } from "fumadocs-ui/components/files";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 import type { MDXComponents } from "mdx/types";
 import Link from "next/link";
+import { AgentRuntimeDiagram } from "./agent-runtime-diagram";
 
 const localComponents: MDXComponents = {
   a: ({ href, ...props }) =>
@@ -14,6 +15,7 @@ const localComponents: MDXComponents = {
   File,
   Files,
   Folder,
+  AgentRuntimeDiagram,
   Step,
   Steps,
 };

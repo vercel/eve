@@ -1,15 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { getWorld, resumeHook, start } from "#compiled/@workflow/core/runtime.js";
+import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import { hydrateWorkflowArguments } from "@workflow/core/serialization";
 
+import { createChannelAddress } from "#channel/channel-address.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
+import {
+  buildSessionAttributes,
+  buildSubagentRootAttributes,
+} from "#execution/eve-workflow-attributes.js";
+import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
+import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
+import { isEventId } from "#protocol/event-id.js";
+import type { ToolContext } from "#public/definitions/tool.js";
+import type {
+  AuthorizationDefinition,
+  ConnectionPrincipal,
+  TokenResult,
+} from "#runtime/connections/types.js";
+import type { ResolvedToolDefinition } from "#runtime/types.js";
+import { toInputSchema } from "#shared/tool-schema.js";
 
 function buildSerializedContext(overrides: {
+  auth?: Record<string, unknown>;
   channelKind: string;
-  continuationToken: string;
+  channelState?: Record<string, unknown>;
+  continuationToken?: string;
   mode: string;
   parent?: {
     readonly callId: string;
@@ -22,20 +45,628 @@ function buildSerializedContext(overrides: {
   };
 }): Record<string, unknown> {
   const context: Record<string, unknown> = {
-    "eve.auth": null,
+    "eve.auth": overrides.auth ?? null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
-    "eve.channel": { kind: overrides.channelKind, state: {} },
-    "eve.continuationToken": overrides.continuationToken,
+    "eve.channel": { kind: overrides.channelKind, state: overrides.channelState ?? {} },
     "eve.mode": overrides.mode,
   };
+  if (overrides.continuationToken !== undefined) {
+    context["eve.continuationToken"] = overrides.continuationToken;
+  }
   if (overrides.parent !== undefined) {
     context["eve.parentSession"] = overrides.parent;
   }
   return context;
 }
 
+interface WeatherAuthRuntime {
+  completeCalls(): number;
+  completedPrincipals(): readonly ConnectionPrincipal[];
+  runtime: ReturnType<typeof createTestRuntime>;
+}
+
+/**
+ * A get_weather tool behind an interactive authorization: getToken always
+ * requires sign-in, and completeAuthorization mints `weather-token` from the
+ * `oauth-code` callback. Shared by the callback-resume and
+ * challenge-stays-open driver tests.
+ */
+function createWeatherAuthRuntime(agentName: string): WeatherAuthRuntime {
+  let completeCalls = 0;
+  const completedPrincipals: ConnectionPrincipal[] = [];
+  const weatherAuth: AuthorizationDefinition<{ nonce: string }> = {
+    principalType: "user",
+    async getToken(): Promise<TokenResult> {
+      throw new ConnectionAuthorizationRequiredError("weather");
+    },
+    async startAuthorization({ callbackUrl }) {
+      return {
+        challenge: {
+          displayName: "Weather",
+          instructions: "Sign in to continue.",
+          url: `https://idp.example/authorize?callback=${encodeURIComponent(callbackUrl)}`,
+        },
+        resume: { nonce: "weather-nonce" },
+      };
+    },
+    async completeAuthorization({ callback, principal, resume }): Promise<TokenResult> {
+      completeCalls += 1;
+      completedPrincipals.push(principal);
+      expect(callback.params.code).toBe("oauth-code");
+      expect(resume).toEqual({ nonce: "weather-nonce" });
+      return { token: "weather-token" };
+    },
+  };
+  const getWeatherTool: ResolvedToolDefinition = {
+    description: "Get the current weather for a city.",
+    execute: createToolExecuteWithAuth({
+      scope: "get_weather",
+      async execute(rawInput, rawCtx) {
+        const ctx = rawCtx as ToolContext;
+        const token = await ctx.getToken(weatherAuth, {
+          authKey: "weather",
+          displayName: "Weather",
+        });
+        const city =
+          typeof rawInput === "object" &&
+          rawInput !== null &&
+          typeof (rawInput as { city?: unknown }).city === "string"
+            ? (rawInput as { city: string }).city
+            : "Lisbon";
+        return {
+          city,
+          condition: "Sunny",
+          summary: `authorized with ${token.token}`,
+          temperatureF: 72,
+        };
+      },
+    }),
+    inputSchema: toInputSchema({
+      additionalProperties: false,
+      properties: {
+        city: { type: "string" },
+      },
+      required: ["city"],
+      type: "object",
+    }),
+    logicalPath: "tools/get_weather.ts",
+    name: "get_weather",
+    sourceId: "tools/get_weather.ts",
+    sourceKind: "module",
+  };
+  const runtime = createTestRuntime({
+    agent: { name: agentName },
+    tools: [getWeatherTool],
+  });
+  const manifestTool = runtime.manifest.tools.find((tool) => tool.name === getWeatherTool.name);
+  if (manifestTool === undefined) {
+    throw new Error("Expected get_weather to be present in the test manifest.");
+  }
+  runtime.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[manifestTool.sourceId] = {
+    default: {
+      execute: getWeatherTool.execute,
+    },
+  };
+  return {
+    completeCalls: () => completeCalls,
+    completedPrincipals: () => completedPrincipals,
+    runtime,
+  };
+}
+
+function authorizationAttemptId(events: readonly MessageStreamEvent[]): string {
+  const required = filterEventsByType(events, "authorization.required")[0];
+  const webhookUrl = required?.data.webhookUrl;
+  if (webhookUrl === undefined) throw new Error("Missing authorization callback URL.");
+  const segments = new URL(webhookUrl).pathname.split("/");
+  const callbackIndex = segments.lastIndexOf("callback");
+  const attemptId = segments[callbackIndex + 1];
+  if (callbackIndex === -1 || attemptId === undefined) {
+    throw new Error("Authorization callback URL is missing its attempt ID.");
+  }
+  return decodeURIComponent(attemptId);
+}
+
+function expectSingleTurn(events: readonly MessageStreamEvent[], turnId: string): void {
+  expect(filterEventsByType(events, "turn.started")).toHaveLength(1);
+  const eventTurnIds = events.flatMap((event) => {
+    if (!("data" in event) || typeof event.data !== "object" || event.data === null) return [];
+    if (!("turnId" in event.data) || typeof event.data.turnId !== "string") return [];
+    return [event.data.turnId];
+  });
+  expect(eventTurnIds.length).toBeGreaterThan(0);
+  expect(new Set(eventTurnIds)).toEqual(new Set([turnId]));
+}
+
 describe("workflowEntry integration", () => {
-  it("parks in conversation mode and resumes via the workflow hook", async () => {
+  it("resumes normal follow-ups after an interactive authorization callback", async () => {
+    const { completeCalls, runtime } = createWeatherAuthRuntime("workflow-entry-auth-followup");
+    const continuationToken = "http:workflow-entry-auth-followup";
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "Use the get_weather tool to check the weather in Lisbon." },
+          serializedContext: buildSerializedContext({
+            auth: {
+              attributes: {},
+              authenticator: "test-idp",
+              issuer: "test-idp",
+              principalId: "user-1",
+              principalType: "user",
+            },
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+
+      const stream = captureEvents(run);
+
+      try {
+        const firstTurn = await stream.nextUntil(
+          "initial auth-required event",
+          (event) => event.type === "authorization.required",
+        );
+        const required = filterEventsByType(firstTurn, "authorization.required");
+
+        expect(firstTurn.at(-1)?.type).toBe("authorization.required");
+        expect(required).toHaveLength(1);
+        expect(required[0]?.data).toMatchObject({
+          name: "weather",
+          authorization: { displayName: "Weather" },
+        });
+
+        // The authorization park closes its turn boundary so stream
+        // consumers do not hang on the parked turn.
+        const parkBoundary = await stream.nextUntil(
+          "authorization park boundary",
+          (event) => event.type === "session.waiting",
+        );
+        expect(parkBoundary.at(-1)?.type).toBe("session.waiting");
+
+        await resumeHook(`${run.runId}:auth`, {
+          kind: "deliver",
+          payloads: [
+            {
+              authorizationCallback: {
+                attemptId: authorizationAttemptId(firstTurn),
+                callback: {
+                  method: "GET",
+                  params: { code: "oauth-code" },
+                },
+                connectionName: "weather",
+              },
+            },
+          ],
+        });
+
+        const authorizedTurn = await stream.nextUntil(
+          "authorization callback turn",
+          (event) => event.type === "session.waiting",
+        );
+        const completed = filterEventsByType(authorizedTurn, "authorization.completed");
+
+        expect(completeCalls()).toBe(1);
+        expectSingleTurn(authorizedTurn, "turn_1");
+        expect(authorizedTurn.at(-1)?.type).toBe("session.waiting");
+        expect(completed).toHaveLength(1);
+        expect(completed[0]?.data).toMatchObject({
+          name: "weather",
+          outcome: "authorized",
+        });
+        expect(
+          authorizedTurn.some(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message?.includes("Used local weather tool for Lisbon") === true,
+          ),
+        ).toBe(true);
+
+        await waitForHook(
+          { runId: run.runId },
+          {
+            token: continuationToken,
+          },
+        );
+        await resumeHook(continuationToken, {
+          kind: "send",
+          payload: { message: "follow up after auth" },
+        });
+
+        const followupTurn = await stream.nextUntil(
+          "post-auth follow-up turn",
+          (event) => event.type === "session.waiting",
+        );
+
+        expect(followupTurn.at(-1)?.type).toBe("session.waiting");
+        expect(
+          followupTurn.some(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message?.includes("follow up after auth") === true,
+          ),
+        ).toBe(true);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("runs ordinary deliveries while an authorization challenge stays open", async () => {
+    const { completeCalls, completedPrincipals, runtime } = createWeatherAuthRuntime(
+      "workflow-entry-auth-open",
+    );
+    const continuationToken = "http:workflow-entry-auth-open";
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "Use the get_weather tool to check the weather in Lisbon." },
+          serializedContext: buildSerializedContext({
+            auth: {
+              attributes: {},
+              authenticator: "test-idp",
+              issuer: "test-idp",
+              principalId: "user-1",
+              principalType: "user",
+            },
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+
+      const stream = captureEvents(run);
+
+      try {
+        const firstTurn = await stream.nextUntil(
+          "initial auth-required event",
+          (event) => event.type === "authorization.required",
+        );
+        // Consume the park's own turn boundary so the next wait delimits
+        // the intervening message turn.
+        await stream.nextUntil(
+          "authorization park boundary",
+          (event) => event.type === "session.waiting",
+        );
+
+        // An ordinary message while the challenge is open runs as a normal
+        // turn instead of queueing behind the callback.
+        await waitForHook({ runId: run.runId }, { token: continuationToken });
+        await resumeHook(continuationToken, {
+          auth: {
+            attributes: {},
+            authenticator: "test-idp",
+            issuer: "test-idp",
+            principalId: "user-2",
+            principalType: "user",
+          },
+          kind: "send",
+          payload: { message: "Quick status note while I sign in." },
+        });
+
+        const interveningTurn = await stream.nextUntil(
+          "intervening message turn",
+          (event) => event.type === "session.waiting",
+        );
+        expect(
+          interveningTurn.some(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message?.includes("Quick status note while I sign in.") === true,
+          ),
+        ).toBe(true);
+        expect(filterEventsByType(interveningTurn, "authorization.completed")).toHaveLength(0);
+        expect(completeCalls()).toBe(0);
+
+        // The callback still lands on the retained read and closes the
+        // challenge exactly once.
+        await resumeHook(`${run.runId}:auth`, {
+          kind: "deliver",
+          payloads: [
+            {
+              authorizationCallback: {
+                attemptId: authorizationAttemptId(firstTurn),
+                callback: {
+                  method: "GET",
+                  params: { code: "oauth-code" },
+                },
+                connectionName: "weather",
+              },
+            },
+          ],
+        });
+
+        const callbackTurn = await stream.nextUntil(
+          "authorization callback turn",
+          (event) => event.type === "session.waiting",
+        );
+        const completed = filterEventsByType(callbackTurn, "authorization.completed");
+        expectSingleTurn(callbackTurn, "turn_2");
+        expect(completed).toHaveLength(1);
+        expect(completed[0]?.data).toMatchObject({
+          name: "weather",
+          outcome: "authorized",
+        });
+
+        // The granted authorization serves the next explicit tool request.
+        // (No waitForHook here: it only reports never-received hooks, and
+        // the continuation hook already received the intervening message.)
+        await resumeHook(continuationToken, {
+          auth: {
+            attributes: {},
+            authenticator: "test-idp",
+            issuer: "test-idp",
+            principalId: "user-1",
+            principalType: "user",
+          },
+          kind: "send",
+          payload: { message: "Use the get_weather tool to check the weather in Lisbon." },
+        });
+
+        const toolTurn = await stream.nextUntil(
+          "post-authorization tool turn",
+          (event) => event.type === "session.waiting",
+        );
+        expect(completeCalls()).toBe(1);
+        expect(completedPrincipals()).toEqual([
+          expect.objectContaining({ id: "user-1", type: "user" }),
+        ]);
+        expect(
+          toolTurn.some(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message?.includes("Used local weather tool for Lisbon") === true &&
+              event.data.message.includes("authorized with weather-token"),
+          ),
+        ).toBe(true);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("defers ordinary deliveries while a task waits for authorization", async () => {
+    const { completeCalls, runtime } = createWeatherAuthRuntime("workflow-entry-task-auth-open");
+    const continuationToken = "http:workflow-entry-task-auth-open";
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "Use the get_weather tool to check the weather in Lisbon." },
+          serializedContext: buildSerializedContext({
+            auth: {
+              attributes: {},
+              authenticator: "test-idp",
+              issuer: "test-idp",
+              principalId: "user-1",
+              principalType: "user",
+            },
+            channelKind: "http",
+            continuationToken,
+            mode: "task",
+          }),
+        },
+      ]);
+      const stream = captureEvents(run);
+
+      try {
+        const firstTurn = await stream.nextUntil(
+          "initial task auth-required event",
+          (event) => event.type === "authorization.required",
+        );
+
+        await waitForHook({ runId: run.runId }, { token: continuationToken });
+        await resumeHook(continuationToken, {
+          kind: "send",
+          payload: { message: "This must not become a second task turn." },
+        });
+        await resumeHook(`${run.runId}:auth`, {
+          kind: "deliver",
+          payloads: [
+            {
+              authorizationCallback: {
+                attemptId: authorizationAttemptId(firstTurn),
+                callback: { method: "GET", params: { code: "oauth-code" } },
+                connectionName: "weather",
+              },
+            },
+          ],
+        });
+
+        const completion = await stream.nextUntil(
+          "authorized task completion",
+          (event) => event.type === "session.completed",
+        );
+        const allEvents = [...firstTurn, ...completion];
+        expect(filterEventsByType(allEvents, "turn.started")).toHaveLength(1);
+        expect(filterEventsByType(allEvents, "message.received")).toHaveLength(1);
+        expect(filterEventsByType(allEvents, "authorization.completed")).toHaveLength(1);
+        expect(filterEventsByType(allEvents, "session.waiting")).toHaveLength(0);
+        expect(completeCalls()).toBe(1);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("ignores stale and duplicate callbacks after a challenge is replaced", async () => {
+    const { completeCalls, runtime } = createWeatherAuthRuntime("workflow-entry-auth-replaced");
+    const continuationToken = "http:workflow-entry-auth-replaced";
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "Use the get_weather tool to check the weather in Lisbon." },
+          serializedContext: buildSerializedContext({
+            auth: {
+              attributes: {},
+              authenticator: "test-idp",
+              issuer: "test-idp",
+              principalId: "user-1",
+              principalType: "user",
+            },
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureEvents(run);
+
+      try {
+        const firstAttempt = await stream.nextUntil(
+          "first auth-required event",
+          (event) => event.type === "authorization.required",
+        );
+        await stream.nextUntil(
+          "first authorization park",
+          (event) => event.type === "session.waiting",
+        );
+
+        await waitForHook({ runId: run.runId }, { token: continuationToken });
+        await resumeHook(continuationToken, {
+          kind: "send",
+          payload: { message: "Use the get_weather tool to check the weather in Lisbon." },
+        });
+        const replacementAttempt = await stream.nextUntil(
+          "replacement auth-required event",
+          (event) => event.type === "authorization.required",
+        );
+        expect(filterEventsByType(replacementAttempt, "authorization.completed")).toMatchObject([
+          { data: { name: "weather", outcome: "failed" } },
+        ]);
+        await stream.nextUntil(
+          "replacement authorization park",
+          (event) => event.type === "session.waiting",
+        );
+
+        const stalePayload = {
+          authorizationCallback: {
+            attemptId: authorizationAttemptId(firstAttempt),
+            callback: { method: "GET", params: { code: "stale-oauth-code" } },
+            connectionName: "weather",
+          },
+        };
+        await resumeHook(`${run.runId}:auth`, { kind: "deliver", payloads: [stalePayload] });
+        await resumeHook(`${run.runId}:auth`, { kind: "deliver", payloads: [stalePayload] });
+
+        await resumeHook(`${run.runId}:auth`, {
+          kind: "deliver",
+          payloads: [
+            {
+              authorizationCallback: {
+                attemptId: authorizationAttemptId(replacementAttempt),
+                callback: { method: "GET", params: { code: "oauth-code" } },
+                connectionName: "weather",
+              },
+            },
+          ],
+        });
+
+        const callbackTurn = await stream.nextUntil(
+          "replacement authorization callback turn",
+          (event) => event.type === "session.waiting",
+        );
+        expect(filterEventsByType(callbackTurn, "authorization.completed")).toHaveLength(1);
+        expect(completeCalls()).toBe(1);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("completes the challenge after a no-op cancel consumed the parked wait", async () => {
+    const { completeCalls, runtime } = createWeatherAuthRuntime("workflow-entry-auth-cancel");
+    const continuationToken = "http:workflow-entry-auth-cancel";
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "Use the get_weather tool to check the weather in Lisbon." },
+          serializedContext: buildSerializedContext({
+            auth: {
+              attributes: {},
+              authenticator: "test-idp",
+              issuer: "test-idp",
+              principalId: "user-1",
+              principalType: "user",
+            },
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+
+      const stream = captureEvents(run);
+
+      try {
+        const firstTurn = await stream.nextUntil(
+          "initial auth-required event",
+          (event) => event.type === "authorization.required",
+        );
+        await stream.nextUntil(
+          "authorization park boundary",
+          (event) => event.type === "session.waiting",
+        );
+
+        // A cancel with no active turn is consumed by the parked wait
+        // without producing a parent turn. The callback must still surface
+        // in the continued wait instead of stalling until unrelated
+        // session activity re-parks the driver.
+        await waitForHook({ runId: run.runId }, { token: continuationToken });
+        await resumeHook(continuationToken, { kind: "cancel" });
+        // Let the driver consume the no-op cancel and re-enter the parked
+        // wait before the callback fires; back-to-back resumes could
+        // otherwise surface the callback in the first wait iteration and
+        // mask a wait that ignores callbacks after a consumed cancel.
+        await new Promise((resolve) => setTimeout(resolve, 250));
+
+        await resumeHook(`${run.runId}:auth`, {
+          kind: "deliver",
+          payloads: [
+            {
+              authorizationCallback: {
+                attemptId: authorizationAttemptId(firstTurn),
+                callback: {
+                  method: "GET",
+                  params: { code: "oauth-code" },
+                },
+                connectionName: "weather",
+              },
+            },
+          ],
+        });
+
+        const callbackTurn = await stream.nextUntil(
+          "authorization callback turn",
+          (event) => event.type === "session.waiting",
+        );
+        const completed = filterEventsByType(callbackTurn, "authorization.completed");
+
+        expect(completeCalls()).toBe(1);
+        expect(completed).toHaveLength(1);
+        expect(completed[0]?.data).toMatchObject({
+          name: "weather",
+          outcome: "authorized",
+        });
+        expect(filterEventsByType(callbackTurn, "turn.cancelled")).toHaveLength(0);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("parks in conversation mode and resumes via runtime delivery", async () => {
     const runtime = createTestRuntime({ agent: { name: "workflow-entry-conversation" } });
     const continuationToken = "http:workflow-entry-conversation";
 
@@ -63,7 +694,10 @@ describe("workflowEntry integration", () => {
         const firstTurn = await stream.nextTurn();
 
         expect(hook.token).toBe(continuationToken);
-        expect(firstTurn.at(-1)?.type).toBe("session.waiting");
+        expect(firstTurn.at(-1)).toMatchObject({
+          data: { continuationToken: "workflow-entry-conversation" },
+          type: "session.waiting",
+        });
         expect(firstTurn.every((event) => typeof event.meta?.at === "string")).toBe(true);
         expect(
           firstTurn.some(
@@ -73,10 +707,15 @@ describe("workflowEntry integration", () => {
           ),
         ).toBe(true);
 
-        await resumeHook(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "follow up" }],
+        const workflowRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
         });
+        await expect(
+          workflowRuntime.dispatchContinuation({
+            command: { auth: null, kind: "send", payload: { message: "follow up" } },
+            continuationToken,
+          }),
+        ).resolves.toEqual({ sessionId: run.runId, status: "accepted" });
 
         const secondTurn = await stream.nextTurn();
 
@@ -92,6 +731,293 @@ describe("workflowEntry integration", () => {
       } finally {
         stream.dispose();
         await run.cancel();
+      }
+    });
+  });
+
+  it("publishes the session ID as the waiting address for an ID-only session", async () => {
+    const runtime = createTestRuntime({ agent: { name: "workflow-entry-id-only" } });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "hello there" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        expect((await stream.nextTurn()).at(-1)).toMatchObject({
+          data: { continuationToken: run.runId },
+          type: "session.waiting",
+        });
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("stamps every stream event with an id that survives a rewind", async () => {
+    const runtime = createTestRuntime({ agent: { name: "workflow-entry-event-ids" } });
+    const continuationToken = "http:workflow-entry-event-ids";
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "identify these events" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      let firstTurn: readonly MessageStreamEvent[];
+      try {
+        firstTurn = await stream.nextTurn();
+      } finally {
+        stream.dispose();
+      }
+
+      try {
+        expect(firstTurn.length).toBeGreaterThan(1);
+        // No two events share an id, including appends that share
+        // `(turnId, sequence, stepIndex)`.
+        expect(firstTurn.every((event) => isEventId(event.meta.id))).toBe(true);
+        expect(new Set(firstTurn.map((event) => event.meta.id)).size).toBe(firstTurn.length);
+
+        // No stream-order assertion on the ids: they sort in mint order per
+        // process, but a turn's events are appended by separate steps whose
+        // writes can interleave behind minting (see #protocol/event-id.js),
+        // so append order is not contractually sorted.
+        const ids = firstTurn.map((event) => event.meta.id);
+
+        // Re-reading the durable stream returns the same ids.
+        const workflowRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        });
+        const replayed = await workflowRuntime.getEventStream(run.runId, { startIndex: 0 });
+        const replayedIds: string[] = [];
+        const reader = replayed.getReader();
+        try {
+          while (replayedIds.length < firstTurn.length) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            replayedIds.push(value.meta.id);
+          }
+        } finally {
+          await reader.cancel();
+        }
+
+        // Order is not contractual across separate steps (see comment above):
+        // compare membership and count, not append order.
+        expect(replayedIds).toHaveLength(ids.length);
+        expect(new Set(replayedIds)).toEqual(new Set(ids));
+      } finally {
+        await run.cancel();
+      }
+    });
+  });
+
+  it("completes an expired conversation and lets its channel start a fresh session", async () => {
+    const runtime = createTestRuntime({ agent: { name: "workflow-entry-timeout" } });
+    const continuationToken = "http:workflow-entry-timeout";
+    const workflowRuntime = createWorkflowRuntime({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "hello there" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+          sessionTimeoutMs: 25,
+        },
+      ]);
+      const stream = captureEvents(run);
+      let replacementSessionId: string | undefined;
+
+      try {
+        const events = await stream.nextUntil(
+          "session completion",
+          (event) => event.type === "session.completed",
+        );
+
+        expect(events.some((event) => event.type === "session.waiting")).toBe(true);
+        expect(events.at(-1)?.type).toBe("session.completed");
+        expect(isEventId(events.at(-1)?.meta.id ?? "")).toBe(true);
+        expect(filterEventsByType(events, "session.failed")).toHaveLength(0);
+        await expect(run.returnValue).resolves.toEqual({ output: "" });
+
+        const replacement = await createChannelAddress({
+          adapter: { kind: "http" },
+          channelName: "http",
+          continuationToken: "workflow-entry-timeout",
+          runtime: workflowRuntime,
+        }).send("start fresh", {
+          auth: null,
+        });
+        replacementSessionId = replacement.id;
+
+        expect(replacement.id).not.toBe(run.runId);
+        await waitForHook(
+          { runId: replacement.id },
+          {
+            token: continuationToken,
+          },
+        );
+      } finally {
+        stream.dispose();
+        if (replacementSessionId !== undefined) {
+          await workflowRuntime.dispatchSession({
+            command: { kind: "reset", reason: "Test cleanup" },
+            sessionId: replacementSessionId,
+          });
+        }
+      }
+    });
+  });
+
+  it("notifies each delegated conversation turn and remains available via agentId", async () => {
+    const runtime = createTestRuntime({ agent: { name: "workflow-entry-delegated-conversation" } });
+    const workflowRuntime = createWorkflowRuntime({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    });
+    const childContinuationToken = "subagent:parent-session:call-1";
+
+    await runtime.run(async () => {
+      const child = await start(workflowEntry, [
+        {
+          input: { message: "delegated first turn" },
+          serializedContext: buildSerializedContext({
+            channelKind: "subagent",
+            channelState: {
+              callId: "call-1",
+              parentContinuationToken: childContinuationToken,
+              parentSessionId: "parent-session",
+              subagentName: "researcher",
+            },
+            continuationToken: childContinuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(child);
+
+      try {
+        const firstTurn = await withTimeout(stream.nextTurn(), "delegated first turn");
+        expect(firstTurn.at(-1)?.type).toBe("session.waiting");
+        await expect(waitForRuntimeActionResult(child.runId, "call-1")).resolves.toMatchObject({
+          kind: "runtime-action-result",
+          results: [
+            {
+              callId: "call-1",
+              kind: "subagent-result",
+              output: expect.stringContaining("delegated first turn"),
+              subagentName: "researcher",
+            },
+          ],
+        });
+
+        await expect(
+          workflowRuntime.dispatchSession({
+            command: {
+              caller: {
+                callId: "call-2",
+                replyTo: { kind: "hook", token: childContinuationToken },
+                subagentName: "researcher",
+              },
+              kind: "send",
+              payload: { message: "delegated follow-up turn" },
+            },
+            sessionId: child.runId,
+          }),
+        ).resolves.toEqual({
+          sessionId: child.runId,
+          status: "accepted",
+        });
+
+        const secondTurn = await withTimeout(stream.nextTurn(), "delegated follow-up turn");
+        expect(secondTurn.at(-1)?.type).toBe("session.waiting");
+        await expect(waitForRuntimeActionResult(child.runId, "call-2")).resolves.toMatchObject({
+          kind: "runtime-action-result",
+          results: [
+            {
+              callId: "call-2",
+              kind: "subagent-result",
+              output: expect.stringContaining("delegated follow-up turn"),
+              subagentName: "researcher",
+            },
+          ],
+        });
+      } finally {
+        stream.dispose();
+        await child.cancel();
+      }
+    });
+  });
+
+  it("exits a competing continuation owner before its first turn", async () => {
+    const runtime = createTestRuntime({ agent: { name: "workflow-entry-hook-owner" } });
+    const continuationToken = "http:workflow-entry-hook-owner";
+
+    await runtime.run(async () => {
+      const owner = await start(workflowEntry, [
+        {
+          input: { message: "owner message" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const ownerStream = captureTurnEvents(owner);
+      await waitForHook({ runId: owner.runId }, { token: continuationToken });
+
+      const firstTurn = await ownerStream.nextTurn();
+      expect(firstTurn.at(-1)?.type).toBe("session.waiting");
+
+      const contender = await start(workflowEntry, [
+        {
+          input: { message: "contending message" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      try {
+        await expect(contender.returnValue).resolves.toEqual({ output: "" });
+
+        await resumeHook(continuationToken, {
+          kind: "send",
+          payload: { message: "owner follow up" },
+        });
+        const ownerFollowUp = await ownerStream.nextTurn();
+
+        expect(ownerFollowUp.at(-1)?.type).toBe("session.waiting");
+        expect(
+          ownerFollowUp.some(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message?.includes("owner follow up") === true,
+          ),
+        ).toBe(true);
+      } finally {
+        ownerStream.dispose();
+        await owner.cancel();
       }
     });
   });
@@ -140,8 +1066,8 @@ describe("workflowEntry integration", () => {
         expect(firstTurn.at(-1)?.type).toBe("session.waiting");
 
         await resumeHook(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "follow up without structured output" }],
+          kind: "send",
+          payload: { message: "follow up without structured output" },
         });
 
         const secondTurn = await stream.nextTurn();
@@ -213,22 +1139,32 @@ describe("workflowEntry integration", () => {
     const continuationToken = "http:workflow-entry-tags";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const serializedContext = buildSerializedContext({
+        channelKind: "http",
+        continuationToken,
+        mode: "conversation",
+      });
+      const run = await start(
+        workflowEntry,
+        [
+          {
+            input: { message: "session tag round-trip" },
+            serializedContext,
+          },
+        ],
         {
-          input: { message: "session tag round-trip" },
-          serializedContext: buildSerializedContext({
-            channelKind: "http",
-            continuationToken,
-            mode: "conversation",
-          }),
+          allowReservedAttributes: true,
+          attributes: normalizeEveAttributes(
+            buildSessionAttributes({
+              inputMessage: "session tag round-trip",
+              serializedContext,
+            }),
+          ),
         },
-      ]);
+      );
 
       const stream = captureTurnEvents(run);
       try {
-        // Drain the first turn — by the time it completes `createSessionStep`
-        // has run and emitted the session-level `$eve.*` keys from inside
-        // its own step body.
         await stream.nextTurn();
 
         const world = await getWorld();
@@ -252,22 +1188,39 @@ describe("workflowEntry integration", () => {
     const runtime = createTestRuntime({ agent: { name: "workflow-entry-subagent-tags" } });
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          input: { message: "subagent tag round-trip" },
-          serializedContext: buildSerializedContext({
-            channelKind: "subagent",
-            continuationToken: "subagent:parent-session:call-subagent-1",
-            mode: "task",
-            parent: {
-              callId: "call-subagent-1",
-              rootSessionId: "root-session",
-              sessionId: "parent-session",
-              turn: { id: "turn-parent", sequence: 2 },
-            },
-          }),
+      const serializedContext = buildSerializedContext({
+        channelKind: "subagent",
+        continuationToken: "subagent:parent-session:call-subagent-1",
+        mode: "task",
+        parent: {
+          callId: "call-subagent-1",
+          rootSessionId: "root-session",
+          sessionId: "parent-session",
+          turn: { id: "turn-parent", sequence: 2 },
         },
-      ]);
+      });
+      const run = await start(
+        workflowEntry,
+        [
+          {
+            input: { message: "subagent tag round-trip" },
+            serializedContext,
+          },
+        ],
+        {
+          allowReservedAttributes: true,
+          attributes: normalizeEveAttributes(
+            buildSubagentRootAttributes({
+              identity: { nodeId: "researcher" },
+              parentCallId: "call-subagent-1",
+              parentSessionId: "parent-session",
+              parentTurnId: "turn-parent",
+              rootSessionId: "root-session",
+              serializedContext,
+            }),
+          ),
+        },
+      );
 
       await expect(run.returnValue).resolves.toEqual({
         output: expect.stringContaining("subagent tag round-trip"),
@@ -287,3 +1240,145 @@ describe("workflowEntry integration", () => {
     });
   });
 });
+
+interface CapturedEventStream {
+  dispose(): void;
+  nextUntil(
+    label: string,
+    predicate: (event: MessageStreamEvent) => boolean,
+  ): Promise<MessageStreamEvent[]>;
+}
+
+function captureEvents(run: Parameters<typeof captureTurnEvents>[0]): CapturedEventStream {
+  const reader = run.readable.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let disposed = false;
+
+  return {
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      reader.releaseLock();
+    },
+    nextUntil(label, predicate) {
+      if (disposed) {
+        return Promise.reject(new Error("CapturedEventStream: stream already disposed."));
+      }
+      return withTimeout(readUntil(reader, decoder, buffer, predicate), label).then((result) => {
+        buffer = result.buffer;
+        return result.events;
+      });
+    },
+  };
+}
+
+async function readUntil(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  decoder: InstanceType<typeof TextDecoder>,
+  initialBuffer: string,
+  predicate: (event: MessageStreamEvent) => boolean,
+): Promise<{ buffer: string; events: MessageStreamEvent[] }> {
+  const events: MessageStreamEvent[] = [];
+  let buffer = initialBuffer;
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      throw new Error("Workflow stream closed before reaching the expected event.");
+    }
+
+    buffer += decoder.decode(value);
+
+    for (
+      let newlineIndex = buffer.indexOf("\n");
+      newlineIndex !== -1;
+      newlineIndex = buffer.indexOf("\n")
+    ) {
+      const line = buffer.slice(0, newlineIndex).trim();
+      buffer = buffer.slice(newlineIndex + 1);
+
+      if (line.length === 0) {
+        continue;
+      }
+
+      const event = JSON.parse(line) as MessageStreamEvent;
+      events.push(event);
+
+      if (predicate(event)) {
+        return { buffer, events };
+      }
+    }
+  }
+}
+
+async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error(`Timed out waiting for ${label}.`));
+        }, 30_000);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+async function waitForRuntimeActionResult(runId: string, callId: string): Promise<unknown> {
+  const world = await getWorld();
+  const deadline = Date.now() + 10_000;
+  let receivedPayloads: unknown[] = [];
+
+  while (Date.now() < deadline) {
+    const events = await world.events.list({
+      pagination: { limit: 1000 },
+      resolveData: "all",
+      runId,
+    });
+    receivedPayloads = [];
+
+    for (const event of events.data) {
+      if (event.eventType === "hook_received") {
+        const payload = await hydrateWorkflowArguments(event.eventData.payload, runId, undefined);
+        receivedPayloads.push(payload);
+        if (hasSubagentResult(payload, callId)) {
+          return payload;
+        }
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(
+    `Timed out waiting for delegated result "${callId}". Received: ${JSON.stringify(receivedPayloads)}`,
+  );
+}
+
+function hasSubagentResult(value: unknown, callId: string): boolean {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("kind" in value) ||
+    value.kind !== "runtime-action-result" ||
+    !("results" in value) ||
+    !Array.isArray(value.results)
+  ) {
+    return false;
+  }
+
+  return value.results.some(
+    (result) =>
+      typeof result === "object" &&
+      result !== null &&
+      "callId" in result &&
+      result.callId === callId,
+  );
+}

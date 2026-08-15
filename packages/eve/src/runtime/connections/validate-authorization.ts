@@ -118,12 +118,11 @@ export function normalizeAuthorizationSpec(
  * attached by `@vercel/connect/eve`'s `connect()` helper. Returns the
  * parsed marker when present and well-formed, otherwise `undefined`.
  *
- * The marker is opaque to the runtime — it exists so downstream tooling
- * (eg. the eve compiler / Vercel dashboard) can attribute the auth
- * back to a Vercel Connect connector without inspecting `getToken`'s
- * closure state. Validation is lenient (a malformed marker is dropped,
- * not thrown) so a misbehaving auth provider can't fail an otherwise-
- * valid connection.
+ * The runtime uses the marker for Connect-specific authorization behavior,
+ * while downstream tooling can attribute the auth back to a Vercel Connect
+ * connector without inspecting `getToken`'s closure state. Validation is
+ * lenient (a malformed marker is dropped, not thrown) so a misbehaving auth
+ * provider can't fail an otherwise-valid connection.
  */
 function extractVercelConnectMarker(value: unknown): { readonly connector: string } | undefined {
   if (value === null || typeof value !== "object") {

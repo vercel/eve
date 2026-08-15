@@ -5,7 +5,9 @@ import {
   channelEntries,
   connectionEntries,
   connectionProtocols,
+  extensionEntries,
   getIntegrationEntry,
+  instrumentationEntries,
 } from "./index.js";
 
 describe("integration catalog", () => {
@@ -14,8 +16,19 @@ describe("integration catalog", () => {
     expect(new Set(slugs).size).toBe(slugs.length);
   });
 
-  it("partitions cleanly into channels and connections", () => {
-    expect(channelEntries().length + connectionEntries().length).toBe(INTEGRATIONS.length);
+  it("partitions cleanly into every integration kind", () => {
+    expect(
+      channelEntries().length +
+        connectionEntries().length +
+        extensionEntries().length +
+        instrumentationEntries().length,
+    ).toBe(INTEGRATIONS.length);
+  });
+
+  it("makes every scaffoldable integration available through the registry", () => {
+    for (const entry of INTEGRATIONS.filter((candidate) => candidate.surfaces.scaffoldable)) {
+      expect(entry.surfaces.registry).toBe(true);
+    }
   });
 
   it("gives every connection a transport and description", () => {
@@ -32,6 +45,19 @@ describe("integration catalog", () => {
     }
   });
 
+  it("keeps extensions free of connection identity", () => {
+    for (const entry of extensionEntries()) {
+      expect(entry.connection).toBeUndefined();
+    }
+  });
+
+  it("keeps instrumentation providers free of connection identity", () => {
+    expect(instrumentationEntries().length).toBeGreaterThan(0);
+    for (const entry of instrumentationEntries()) {
+      expect(entry.connection).toBeUndefined();
+    }
+  });
+
   it("looks up entries by slug", () => {
     expect(getIntegrationEntry("linear")?.name).toBe("Linear");
     expect(getIntegrationEntry("nope")).toBeUndefined();
@@ -43,5 +69,68 @@ describe("integration catalog", () => {
       "openapi",
     ]);
     expect(connectionProtocols(getIntegrationEntry("linear")!.connection!)).toEqual(["mcp"]);
+  });
+
+  it("uses Vercel's streamable HTTP MCP endpoint", () => {
+    expect(getIntegrationEntry("vercel")!.connection!.mcp!.url).toBe("https://mcp.vercel.com");
+  });
+
+  it("uses Linear's streamable HTTP MCP endpoint", () => {
+    expect(getIntegrationEntry("linear")!.connection!.mcp!.url).toBe("https://mcp.linear.app/mcp");
+  });
+
+  it("exposes Kernel as an extension", () => {
+    expect(getIntegrationEntry("kernel")?.kind).toBe("extension");
+    expect(getIntegrationEntry("kernel")?.connection).toBeUndefined();
+  });
+
+  it("exposes Browserbase as an extension", () => {
+    expect(getIntegrationEntry("browserbase")?.kind).toBe("extension");
+    expect(getIntegrationEntry("browserbase")?.connection).toBeUndefined();
+  });
+
+  it("exposes Jetty as an extension", () => {
+    expect(getIntegrationEntry("jetty")?.kind).toBe("extension");
+    expect(getIntegrationEntry("jetty")?.connection).toBeUndefined();
+  });
+
+  it("exposes Upstash AgentKit as an extension", () => {
+    expect(getIntegrationEntry("upstash-agentkit")?.kind).toBe("extension");
+    expect(getIntegrationEntry("upstash-agentkit")?.connection).toBeUndefined();
+  });
+
+  it("exposes Kybernesis Arcana as an extension", () => {
+    expect(getIntegrationEntry("arcana")?.kind).toBe("extension");
+    expect(getIntegrationEntry("arcana")?.connection).toBeUndefined();
+  });
+
+  it("exposes Hindsight as an extension", () => {
+    expect(getIntegrationEntry("hindsight")?.kind).toBe("extension");
+    expect(getIntegrationEntry("hindsight")?.connection).toBeUndefined();
+  });
+
+  it("exposes Buzz as a gallery-only channel", () => {
+    expect(getIntegrationEntry("buzz")).toMatchObject({
+      kind: "channel",
+      surfaces: { scaffoldable: false, registry: false, gallery: true },
+    });
+  });
+
+  it("exposes GitHub Tools as an extension distinct from the GitHub channel", () => {
+    expect(getIntegrationEntry("github")?.kind).toBe("channel");
+    expect(getIntegrationEntry("github-tools")?.kind).toBe("extension");
+    expect(getIntegrationEntry("github-tools")?.connection).toBeUndefined();
+  });
+
+  it("uses Browser Use's streamable HTTP MCP endpoint", () => {
+    expect(getIntegrationEntry("browser-use")!.connection!.mcp!.url).toBe(
+      "https://api.browser-use.com/v3/mcp",
+    );
+  });
+
+  it("uses Natural's streamable HTTP MCP endpoint", () => {
+    expect(getIntegrationEntry("natural")!.connection!.mcp!.url).toBe(
+      "https://mcp.natural.com/mcp",
+    );
   });
 });

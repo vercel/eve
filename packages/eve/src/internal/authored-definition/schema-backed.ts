@@ -1,13 +1,27 @@
-import { isDisabledToolSentinel, isEnableWorkflowToolSentinel } from "#public/definitions/tool.js";
+import {
+  isDisabledToolSentinel,
+  isExperimentalWorkflowToolDefinition,
+} from "#public/definitions/tool.js";
+import { isWebSearchToolDefinition } from "#public/tools/web-search.js";
 import {
   expectFunction,
   expectObjectRecord,
   expectOnlyKnownKeys,
+  expectPositiveInteger,
   expectString,
 } from "#internal/authored-module.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
-import { normalizeJsonSchemaDefinition } from "#internal/json-schema.js";
-import { isDynamicSentinel, type DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
+import {
+  serializeInputSchema,
+  serializeOutputSchema,
+  type ToolSchemaSource,
+} from "#shared/tool-schema.js";
+import { normalizeApproval } from "#internal/authored-definition/approval.js";
+import {
+  assertResolverOnlyDynamicSentinel,
+  isDynamicSentinel,
+  type DynamicToolEventName,
+} from "#shared/dynamic-tool-definition.js";
 
 /**
  * Canonical normalized shape of one authored tool default export.
@@ -30,7 +44,8 @@ type MutableNormalizedAuthoredTool = {
 type NormalizedToolEntry =
   | { readonly kind: "tool"; readonly definition: NormalizedAuthoredTool }
   | { readonly kind: "disabled" }
-  | { readonly kind: "enable-workflow" }
+  | { readonly kind: "workflow-tool"; readonly maxSubagents?: number }
+  | { readonly kind: "web-search-tool"; readonly provider: "exa" | "parallel" }
   | {
       readonly kind: "dynamic-tool";
       readonly eventNames: readonly DynamicToolEventName[];
@@ -39,12 +54,13 @@ type NormalizedToolEntry =
 /**
  * Normalizes one authored tool default export. Recognizes real tool
  * definitions (`defineTool(...)`), disable sentinels (`disableTool()`), and the
- * `Workflow` opt-in sentinel.
+ * experimental `Workflow` tool definition.
  *
  * Authored `name` fields are rejected — tool identity is path-derived.
  */
 export function normalizeToolDefinition(value: unknown, message: string): NormalizedToolEntry {
   if (isDynamicSentinel(value)) {
+    assertResolverOnlyDynamicSentinel(value, message);
     return {
       kind: "dynamic-tool",
       eventNames: Object.keys(value.events) as DynamicToolEventName[],
@@ -53,30 +69,38 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   if (isDisabledToolSentinel(value)) {
     return { kind: "disabled" };
   }
-  if (isEnableWorkflowToolSentinel(value)) {
-    return { kind: "enable-workflow" };
+  if (isExperimentalWorkflowToolDefinition(value)) {
+    const record = expectObjectRecord(value, message);
+    expectOnlyKnownKeys(record, ["kind", "maxSubagents"], message);
+    return {
+      kind: "workflow-tool",
+      maxSubagents:
+        record.maxSubagents === undefined
+          ? undefined
+          : expectPositiveInteger(record.maxSubagents, message),
+    };
+  }
+  if (isWebSearchToolDefinition(value)) {
+    const record = expectObjectRecord(value, message);
+    expectOnlyKnownKeys(record, ["kind", "provider"], message);
+    const provider = expectString(record.provider, message);
+    if (provider !== "exa" && provider !== "parallel") {
+      throw new Error(`${message} Expected "provider" to be one of: exa, parallel.`);
+    }
+    return { kind: "web-search-tool", provider };
   }
 
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
     record,
-    [
-      "auth",
-      "description",
-      "execute",
-      "inputSchema",
-      "needsApproval",
-      "outputSchema",
-      "toModelOutput",
-    ],
+    ["auth", "description", "execute", "inputSchema", "approval", "outputSchema", "toModelOutput"],
     message,
   );
   const inputSchema =
-    record.inputSchema === undefined ? null : normalizeJsonSchemaDefinition(record.inputSchema);
-  const outputSchema =
-    record.outputSchema === undefined
-      ? undefined
-      : normalizeJsonSchemaDefinition(record.outputSchema, "output");
+    record.inputSchema === undefined
+      ? null
+      : serializeInputSchema(record.inputSchema as ToolSchemaSource);
+  const outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined);
   const definition: MutableNormalizedAuthoredTool = {
     description: expectString(record.description, message),
     execute: expectFunction(record.execute, message),
@@ -88,12 +112,12 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
 
   /*
    * The compiler runs at build time and only validates that optional hooks
-   * (`needsApproval`), when present, have the expected shape. The live
+   * (`approval`), when present, have the expected shape. The live
    * references are captured later by `resolve-agent.ts` when it materializes
    * the module export and attaches them to the ResolvedToolDefinition.
    */
-  if (record.needsApproval !== undefined) {
-    expectFunction(record.needsApproval, message);
+  if (record.approval !== undefined) {
+    normalizeApproval(record.approval, message);
   }
 
   if (record.toModelOutput !== undefined) {

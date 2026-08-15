@@ -22,7 +22,6 @@ const LONG_SOURCE_FILE_ALLOWLIST = new Set<string>([
   "public/channels/eve.ts",
   "public/channels/auth.ts",
   "public/channels/slack/slackChannel.ts",
-  "public/channels/discord/discordChannel.ts",
   "public/channels/teams/teamsChannel.ts",
 ]);
 

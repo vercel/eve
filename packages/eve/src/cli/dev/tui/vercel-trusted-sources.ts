@@ -1,8 +1,8 @@
 import {
   updateProjectTrustedSourcesFromJSON,
   type UpdateProjectTrustedSources,
-} from "@vercel/sdk/models/updateprojectprojectsaction.js";
-import { trustedSourcesToJSON } from "@vercel/sdk/models/updateprojectprojectsoptionsallowlist.js";
+} from "@vercel/sdk/models/updateprojectblock.js";
+import { trustedSourcesToJSON } from "@vercel/sdk/models/updateprojectprojectsbranchmatcher.js";
 import { captureVercel } from "#setup/primitives/index.js";
 import type { Prompter } from "#setup/prompter.js";
 import { normalizeVercelApiResult } from "#setup/vercel-api-failure.js";

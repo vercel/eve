@@ -5,12 +5,10 @@ import type {
   PublicToolOutputSchema,
   ToolModelOutput,
 } from "#shared/tool-definition.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { NeedsApprovalContext } from "#public/definitions/tool.js";
+import type { Approval } from "#public/definitions/approval.js";
+import type { ToolContext } from "#public/definitions/tool.js";
 import type { SessionAuth } from "#context/keys.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
-
-type ToolContext = SessionContext;
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 /**
  * Stream event types allowed for dynamic tool resolvers. Dispatch
@@ -18,7 +16,7 @@ type ToolContext = SessionContext;
  * more events are validated.
  */
 export type DynamicToolEventName = Extract<
-  HandleMessageStreamEvent["type"],
+  UnstampedMessageStreamEvent["type"],
   "session.started" | "turn.started" | "step.started"
 >;
 
@@ -30,9 +28,8 @@ export const ALLOWED_DYNAMIC_TOOL_EVENTS: ReadonlySet<string> = new Set<DynamicT
 
 /**
  * Instructions and skills are restricted to session/turn boundaries.
- * They feed the system prompt, the most cache-sensitive position in the
- * wire format; keeping them stable across steps within a turn maximizes
- * cache hits.
+ * Keeping their resolved context stable within a turn avoids changing the
+ * model input between tool-loop steps.
  */
 export const ALLOWED_DYNAMIC_INSTRUCTION_EVENTS: ReadonlySet<string> =
   new Set<DynamicToolEventName>(["session.started", "turn.started"]);
@@ -43,7 +40,7 @@ export const ALLOWED_DYNAMIC_SKILL_EVENTS: ReadonlySet<string> = new Set<Dynamic
 ]);
 
 /**
- * Context passed to a dynamic resolver's event handler (tools and skills).
+ * Context passed to a dynamic resolver's event handler.
  *
  * Exposes read-only session identity, auth, and channel metadata. State
  * is not exposed here; resolvers read it through `defineState` handles or
@@ -88,13 +85,13 @@ export interface DynamicToolEntry<TInput = Record<string, unknown>, TOutput = an
   readonly toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
   /**
    * Optional per-call approval gate, mirroring the authored-tool
-   * `needsApproval` contract: return `true` to require user approval
+   * `approval` contract: return `"user-approval"` to require user approval
    * before the call executes. Only honored for step-scoped dynamic
    * tools, whose live `execute` closures survive into the harness;
    * session/turn-scoped tools replay from durable metadata and cannot
    * carry a function across replay.
    */
-  readonly needsApproval?: (ctx: NeedsApprovalContext) => boolean;
+  readonly approval?: Approval;
 }
 
 /**
@@ -137,11 +134,11 @@ export type DynamicToolEvents = {
  * the slot directory (tools/ vs skills/) determines the required return,
  * validated at runtime by the respective resolver.
  */
-export type DynamicEvents = {
+export type DynamicEvents<TResult = unknown> = {
   readonly [K in DynamicToolEventName]?: (
     event: unknown,
     ctx: DynamicResolveContext,
-  ) => unknown | Promise<unknown>;
+  ) => TResult | Promise<TResult>;
 };
 
 /**
@@ -150,13 +147,22 @@ export type DynamicEvents = {
 export const DYNAMIC_SENTINEL_KIND = "eve:dynamic" as const;
 
 /**
- * Return value of `defineDynamic`: the runtime shape of a
- * `defineDynamic({ events })` export, stamped with a sentinel kind the
- * compiler/normalizer detects.
+ * Return value of `defineDynamic`: the runtime shape of a dynamic export,
+ * stamped with a sentinel kind the compiler/normalizer detects.
  */
-export interface DynamicSentinel {
+export type DynamicSentinel<TResult = unknown> = {
   readonly kind: typeof DYNAMIC_SENTINEL_KIND;
-  readonly events: DynamicEvents;
+  readonly events: DynamicEvents<TResult>;
+};
+
+export function assertResolverOnlyDynamicSentinel(
+  sentinel: DynamicSentinel,
+  message: string,
+): void {
+  const unknownKeys = Object.keys(sentinel).filter((key) => key !== "events" && key !== "kind");
+  if (unknownKeys.length > 0) {
+    throw new Error(`${message} Unknown key(s): ${unknownKeys.join(", ")}.`);
+  }
 }
 
 export function isDynamicSentinel(value: unknown): value is DynamicSentinel {

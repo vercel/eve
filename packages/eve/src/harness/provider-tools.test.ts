@@ -3,14 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import {
   WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
-  WEB_SEARCH_GATEWAY_OUTPUT_SCHEMA,
+  WEB_SEARCH_EXA_OUTPUT_SCHEMA,
   WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
   WEB_SEARCH_OPENAI_OUTPUT_SCHEMA,
+  WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA,
 } from "#runtime/framework-tools/web-search.js";
 import {
-  mergeGatewayProviderPin,
   resolveFrameworkToolFromUpstreamType,
-  resolveGatewayPinForWebSearchBackend,
   resolveWebSearchBackend,
   resolveWebSearchOutputSchema,
   resolveWebSearchProviderTool,
@@ -19,7 +18,8 @@ import {
 const {
   anthropicWebSearch_20250305,
   anthropicWebSearch_20260209,
-  gatewayPerplexitySearch,
+  gatewayExaSearch,
+  gatewayParallelSearch,
   googleSearch,
   openaiWebSearch,
 } = vi.hoisted(() => ({
@@ -29,7 +29,8 @@ const {
   anthropicWebSearch_20260209: vi.fn(() => ({
     providerTool: "anthropic.webSearch_20260209",
   })),
-  gatewayPerplexitySearch: vi.fn(() => ({ providerTool: "gateway.perplexitySearch" })),
+  gatewayExaSearch: vi.fn(() => ({ providerTool: "gateway.exaSearch" })),
+  gatewayParallelSearch: vi.fn(() => ({ providerTool: "gateway.parallelSearch" })),
   googleSearch: vi.fn(() => ({ providerTool: "google.googleSearch" })),
   openaiWebSearch: vi.fn(() => ({ providerTool: "openai.webSearch" })),
 }));
@@ -65,7 +66,8 @@ vi.mock("ai", async () => {
     ...actual,
     gateway: {
       tools: {
-        perplexitySearch: gatewayPerplexitySearch,
+        exaSearch: gatewayExaSearch,
+        parallelSearch: gatewayParallelSearch,
       },
     },
   };
@@ -79,14 +81,20 @@ describe("resolveWebSearchBackend", () => {
   beforeEach(() => {
     anthropicWebSearch_20250305.mockClear();
     anthropicWebSearch_20260209.mockClear();
-    gatewayPerplexitySearch.mockClear();
+    gatewayExaSearch.mockClear();
+    gatewayParallelSearch.mockClear();
     googleSearch.mockClear();
     openaiWebSearch.mockClear();
   });
 
-  it("returns 'openai' for an OpenAI gateway model", () => {
+  it("returns 'exa' for an OpenAI gateway model by default", () => {
     const ref: RuntimeModelReference = { id: "openai/gpt-5.4" };
-    expect(resolveWebSearchBackend(ref)).toBe("openai");
+    expect(resolveWebSearchBackend(ref)).toBe("exa");
+  });
+
+  it("returns the configured Parallel provider for a gateway model", () => {
+    const ref: RuntimeModelReference = { id: "openai/gpt-5.4" };
+    expect(resolveWebSearchBackend(ref, "parallel")).toBe("parallel");
   });
 
   it("returns 'openai' for a BYO OpenAI model", () => {
@@ -99,12 +107,12 @@ describe("resolveWebSearchBackend", () => {
         sourceId: "agent.ts",
       },
     };
-    expect(resolveWebSearchBackend(ref)).toBe("openai");
+    expect(resolveWebSearchBackend(ref, "exa")).toBe("openai");
   });
 
-  it("returns 'anthropic' for an Anthropic gateway model", () => {
+  it("returns 'exa' for an Anthropic gateway model", () => {
     const ref: RuntimeModelReference = { id: "anthropic/claude-opus-4.6" };
-    expect(resolveWebSearchBackend(ref)).toBe("anthropic");
+    expect(resolveWebSearchBackend(ref)).toBe("exa");
   });
 
   it("returns 'anthropic' for a BYO Anthropic model", () => {
@@ -133,14 +141,14 @@ describe("resolveWebSearchBackend", () => {
     expect(resolveWebSearchBackend(ref)).toBe("google");
   });
 
-  it("returns 'gateway' for a Google model on AI Gateway", () => {
+  it("returns 'exa' for a Google model on AI Gateway", () => {
     const ref: RuntimeModelReference = { id: "google/gemini-3.1-pro" };
-    expect(resolveWebSearchBackend(ref)).toBe("gateway");
+    expect(resolveWebSearchBackend(ref)).toBe("exa");
   });
 
-  it("returns 'gateway' for a non-OpenAI/Anthropic/Google gateway model", () => {
+  it("returns 'exa' for any other AI Gateway model", () => {
     const ref: RuntimeModelReference = { id: "mistral/mistral-large" };
-    expect(resolveWebSearchBackend(ref)).toBe("gateway");
+    expect(resolveWebSearchBackend(ref)).toBe("exa");
   });
 
   it("returns null for a BYO non-OpenAI/Anthropic/Google model", () => {
@@ -181,19 +189,31 @@ describe("resolveWebSearchBackend", () => {
     expect(getOutputJsonSchema(tool)).toEqual(WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA);
   });
 
-  it("uses gateway perplexitySearch for the gateway fallback backend", async () => {
-    const tool = await resolveWebSearchProviderTool("gateway");
+  it("uses gateway exaSearch for the Exa backend", async () => {
+    const tool = await resolveWebSearchProviderTool("exa");
 
-    expect(gatewayPerplexitySearch).toHaveBeenCalledTimes(1);
-    expect(tool).toMatchObject({ providerTool: "gateway.perplexitySearch" });
-    expect(getOutputJsonSchema(tool)).toEqual(WEB_SEARCH_GATEWAY_OUTPUT_SCHEMA);
+    expect(gatewayExaSearch).toHaveBeenCalledWith({
+      contents: { highlights: { maxCharacters: 1_000 } },
+      numResults: 10,
+    });
+    expect(tool).toMatchObject({ providerTool: "gateway.exaSearch" });
+    expect(getOutputJsonSchema(tool)).toEqual(WEB_SEARCH_EXA_OUTPUT_SCHEMA);
+  });
+
+  it("uses gateway parallelSearch for the Parallel backend", async () => {
+    const tool = await resolveWebSearchProviderTool("parallel");
+
+    expect(gatewayParallelSearch).toHaveBeenCalledTimes(1);
+    expect(tool).toMatchObject({ providerTool: "gateway.parallelSearch" });
+    expect(getOutputJsonSchema(tool)).toEqual(WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA);
   });
 
   it("resolves output schemas per selected backend", () => {
     expect(resolveWebSearchOutputSchema("anthropic")).toBe(WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA);
-    expect(resolveWebSearchOutputSchema("gateway")).toBe(WEB_SEARCH_GATEWAY_OUTPUT_SCHEMA);
+    expect(resolveWebSearchOutputSchema("exa")).toBe(WEB_SEARCH_EXA_OUTPUT_SCHEMA);
     expect(resolveWebSearchOutputSchema("google")).toBe(WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA);
     expect(resolveWebSearchOutputSchema("openai")).toBe(WEB_SEARCH_OPENAI_OUTPUT_SCHEMA);
+    expect(resolveWebSearchOutputSchema("parallel")).toBe(WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA);
   });
 });
 
@@ -205,55 +225,5 @@ describe("resolveFrameworkToolFromUpstreamType", () => {
   it("returns null for unknown upstream tool types", () => {
     expect(resolveFrameworkToolFromUpstreamType("computer_20251022")).toBeNull();
     expect(resolveFrameworkToolFromUpstreamType("some.future.tool")).toBeNull();
-  });
-});
-
-describe("resolveGatewayPinForWebSearchBackend", () => {
-  it("pins to the matching provider for direct provider backends", () => {
-    expect(resolveGatewayPinForWebSearchBackend("anthropic")).toBe("anthropic");
-    expect(resolveGatewayPinForWebSearchBackend("openai")).toBe("openai");
-    expect(resolveGatewayPinForWebSearchBackend("google")).toBe("google");
-  });
-
-  it("returns null for the gateway-native Perplexity backend", () => {
-    expect(resolveGatewayPinForWebSearchBackend("gateway")).toBeNull();
-  });
-});
-
-describe("mergeGatewayProviderPin", () => {
-  it("adds gateway.only when the base has no gateway section", () => {
-    expect(mergeGatewayProviderPin(undefined, "anthropic")).toEqual({
-      gateway: { only: ["anthropic"] },
-    });
-  });
-
-  it("preserves other gateway fields while adding only", () => {
-    expect(mergeGatewayProviderPin({ gateway: { caching: "auto" } }, "anthropic")).toEqual({
-      gateway: { caching: "auto", only: ["anthropic"] },
-    });
-  });
-
-  it("preserves unrelated providerOptions keys", () => {
-    expect(
-      mergeGatewayProviderPin(
-        { anthropic: { thinking: { type: "adaptive" } }, gateway: { caching: "auto" } },
-        "anthropic",
-      ),
-    ).toEqual({
-      anthropic: { thinking: { type: "adaptive" } },
-      gateway: { caching: "auto", only: ["anthropic"] },
-    });
-  });
-
-  it("does not overwrite an author-supplied gateway.only", () => {
-    expect(mergeGatewayProviderPin({ gateway: { only: ["bedrock"] } }, "anthropic")).toEqual({
-      gateway: { only: ["bedrock"] },
-    });
-  });
-
-  it("does not overwrite an author-supplied gateway.order", () => {
-    expect(
-      mergeGatewayProviderPin({ gateway: { order: ["anthropic", "bedrock"] } }, "anthropic"),
-    ).toEqual({ gateway: { order: ["anthropic", "bedrock"] } });
   });
 });

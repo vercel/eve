@@ -34,14 +34,6 @@ const SANDBOX_WORKSPACE_DIRECTORY_NAME = "workspace";
 const SANDBOX_DEFINITION_BASE_NAME = "sandbox";
 
 /**
- * Discovery diagnostic emitted when the `sandbox/` folder contains an
- * authored `workspace/skills/` subtree, which is reserved for the
- * framework's skill discovery.
- */
-export const DISCOVER_SANDBOX_WORKSPACE_SKILLS_RESERVED =
-  "discover/sandbox-workspace-skills-reserved";
-
-/**
  * Discovery diagnostic emitted when the `sandbox/` folder exists but
  * contains neither a `sandbox.<ext>` module nor a `workspace/`
  * subdirectory. The folder is inert and almost certainly a typo.
@@ -158,21 +150,13 @@ export async function discoverSandboxSource(input: {
       join(SANDBOX_DIRECTORY_NAME, SANDBOX_WORKSPACE_DIRECTORY_NAME),
     );
 
-    const reservedSkillsDiagnostic = await checkWorkspaceSkillsReservation(
-      input.source,
-      workspacePath,
-    );
-    if (reservedSkillsDiagnostic !== null) {
-      diagnostics.push(reservedSkillsDiagnostic);
-    } else {
-      const rootEntries = await collectWorkspaceRootEntries(input.source, workspacePath);
-      sandboxWorkspace = {
-        logicalPath: workspaceLogicalPath,
-        rootEntries,
-        sourceId: createPathDerivedSourceId(workspaceLogicalPath),
-        sourcePath: workspacePath,
-      };
-    }
+    const rootEntries = await collectWorkspaceRootEntries(input.source, workspacePath);
+    sandboxWorkspace = {
+      logicalPath: workspaceLogicalPath,
+      rootEntries,
+      sourceId: createPathDerivedSourceId(workspaceLogicalPath),
+      sourcePath: workspacePath,
+    };
   }
 
   return {
@@ -281,29 +265,4 @@ async function collectWorkspaceRootEntries(
   }
 
   return rendered;
-}
-
-/**
- * Returns a diagnostic when the sandbox workspace folder declares a
- * `skills/` subtree, since that path is reserved for the framework's
- * skill discovery.
- */
-async function checkWorkspaceSkillsReservation(
-  source: ProjectSource,
-  workspacePath: string,
-): Promise<DiscoverDiagnostic | null> {
-  const entries = await readSortedDirectoryEntries(source, workspacePath);
-  const skillsEntry = entries.find((entry) => entry.name === "skills");
-
-  if (skillsEntry === undefined) {
-    return null;
-  }
-
-  return createDiscoverErrorDiagnostic({
-    code: DISCOVER_SANDBOX_WORKSPACE_SKILLS_RESERVED,
-    message:
-      `"sandbox/workspace/skills/" is reserved for the framework skill discovery. ` +
-      `Move skill files under "agent/skills/" instead, or rename the subtree.`,
-    sourcePath: join(workspacePath, "skills"),
-  });
 }

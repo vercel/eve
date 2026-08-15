@@ -1,1 +1,1 @@
-export { default, EVE_NUXT_SERVICE_PREFIX, type EveNuxtModuleOptions } from "./module.js";
+export { default, type EveNuxtModuleOptions } from "./module.js";

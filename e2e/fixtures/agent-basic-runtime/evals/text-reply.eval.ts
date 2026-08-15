@@ -14,8 +14,7 @@ export default defineEval({
   // the model would otherwise phrase its reply.
   async test(t) {
     await t.send('Reply with exactly the text "smoke ping" and nothing else.');
-    t.completed();
-    t.didNotFail();
+    t.succeeded();
     t.messageIncludes("smoke ping");
     t.usedNoTools();
   },

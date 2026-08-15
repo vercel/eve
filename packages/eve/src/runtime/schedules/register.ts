@@ -1,4 +1,4 @@
-import type { ResolvedSchedule } from "#runtime/types.js";
+import type { ResolvedScheduleDefinition } from "#runtime/types.js";
 
 /**
  * Stable Nitro task-name prefix for framework-owned authored schedules.
@@ -56,7 +56,7 @@ export class ScheduleRegistrationError extends Error {
  * resolved authored schedules.
  */
 export function createScheduleRegistrations(
-  schedules: readonly ResolvedSchedule[],
+  schedules: readonly ResolvedScheduleDefinition[],
 ): ScheduleRegistration[] {
   const registrations = schedules
     .map((schedule) => ({

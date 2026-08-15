@@ -1,10 +1,27 @@
 import type { DurableSession } from "#execution/durable-session-store.js";
-import type { HarnessSession, SessionToolDefinition } from "#harness/types.js";
+import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
+import type {
+  HarnessSession,
+  SessionAgent,
+  SessionLimits,
+  SessionToolDefinition,
+} from "#harness/types.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 
 const DEFAULT_COMPACTION_RECENT_WINDOW_SIZE = 10;
 const DEFAULT_COMPACTION_THRESHOLD_PERCENT = 0.9;
 const FALLBACK_COMPACTION_THRESHOLD = 100_000;
+export const DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION = 40_000_000;
+
+/**
+ * Authored session token limits before resolution. `false` means the author
+ * explicitly uncapped the axis (skipping the root default). Resolution maps
+ * this shape onto the numeric {@link SessionLimits} the harness checks.
+ */
+export interface AuthoredSessionLimits {
+  readonly maxInputTokensPerSession?: number | false;
+  readonly maxOutputTokensPerSession?: number | false;
+}
 
 /**
  * Creates the durable compaction configuration used by one harness session.
@@ -26,6 +43,7 @@ export function createCompactionConfig(
   const config = {
     recentWindowSize: DEFAULT_COMPACTION_RECENT_WINDOW_SIZE,
     threshold,
+    thresholdPercent,
   };
 
   if (input.lastKnownInputTokens !== undefined) {
@@ -52,7 +70,11 @@ export interface CreateSessionInput {
   readonly rootSessionId?: string;
   readonly sessionId: string;
   readonly turnAgent: RuntimeTurnAgent;
+  readonly limits?: AuthoredSessionLimits;
   readonly outputSchema?: HarnessSession["outputSchema"];
+  readonly subagentDepth?: number;
+  readonly systemPromptAdditions?: readonly string[];
+  readonly workflowMaxSubagents?: number;
 }
 
 /** Creates a fresh {@link HarnessSession} from the current `turnAgent`. */
@@ -63,29 +85,56 @@ export function createSession(input: CreateSessionInput): HarnessSession {
   const session: {
     -readonly [K in keyof HarnessSession]: HarnessSession[K];
   } = {
-    agent: {
-      compactionModelReference: turnAgent.compactionModel,
-      modelReference: turnAgent.model,
-      system: turnAgent.instructions.join("\n\n"),
+    agent: createSessionAgent(
+      turnAgent,
+      createSessionSystemPrompt({ additions: input.systemPromptAdditions, turnAgent }),
       tools,
-    },
+    ),
     compaction: createCompactionConfig({
-      contextWindowTokens: turnAgent.model.contextWindowTokens,
+      contextWindowTokens: turnAgent.model?.contextWindowTokens,
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
     continuationToken: input.continuationToken,
-    history: [],
+    history: [...(turnAgent.initialMessages ?? [])],
     sessionId: input.sessionId,
   };
 
   if (input.rootSessionId !== undefined) {
     session.rootSessionId = input.rootSessionId;
   }
+  session.limits = resolveSessionLimits(input);
   if (input.outputSchema !== undefined) {
     session.outputSchema = input.outputSchema;
   }
+  if (input.subagentDepth !== undefined) {
+    session.subagentDepth = input.subagentDepth;
+  }
+  if (input.workflowMaxSubagents !== undefined) {
+    session.workflowMaxSubagents = input.workflowMaxSubagents;
+  }
 
   return session;
+}
+
+function createSessionAgent(
+  turnAgent: RuntimeTurnAgent,
+  system: string,
+  tools: readonly SessionToolDefinition[],
+): SessionAgent {
+  const base = {
+    compactionModelReference: turnAgent.compactionModel,
+    reasoning: turnAgent.reasoning,
+    system,
+    tools,
+  };
+
+  if (turnAgent.model !== undefined) {
+    return { ...base, modelReference: turnAgent.model };
+  }
+  if (turnAgent.dynamicModel !== undefined) {
+    return { ...base, dynamicModel: true };
+  }
+  throw new Error("Cannot create a session before dynamic subagent config is selected.");
 }
 
 /**
@@ -95,6 +144,7 @@ export function createSession(input: CreateSessionInput): HarnessSession {
  */
 export function refreshSessionFromTurnAgent(input: {
   readonly session: HarnessSession;
+  readonly systemPromptAdditions?: readonly string[];
   readonly turnAgent: RuntimeTurnAgent;
   readonly compactionOverrides?: {
     readonly thresholdPercent?: number;
@@ -102,19 +152,33 @@ export function refreshSessionFromTurnAgent(input: {
 }): HarnessSession {
   return {
     ...input.session,
-    agent: {
-      compactionModelReference: input.turnAgent.compactionModel,
-      modelReference: input.turnAgent.model,
-      system: input.turnAgent.instructions.join("\n\n"),
-      tools: createSessionToolDefinitions(input.turnAgent),
-    },
+    agent: createSessionAgent(
+      input.turnAgent,
+      createSessionSystemPrompt({
+        additions: input.systemPromptAdditions,
+        turnAgent: input.turnAgent,
+      }),
+      createSessionToolDefinitions(input.turnAgent),
+    ),
     compaction: createCompactionConfig({
-      contextWindowTokens: input.turnAgent.model.contextWindowTokens,
+      contextWindowTokens: input.turnAgent.model?.contextWindowTokens,
       lastKnownInputTokens: input.session.compaction.lastKnownInputTokens,
       lastKnownPromptMessageCount: input.session.compaction.lastKnownPromptMessageCount,
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
   };
+}
+
+function createSessionSystemPrompt(input: {
+  readonly additions?: readonly string[];
+  readonly turnAgent: RuntimeTurnAgent;
+}): string {
+  const skillSection = formatAvailableSkillsSection(input.turnAgent.availableSkills ?? []);
+  const blocks =
+    skillSection === null
+      ? input.turnAgent.instructions
+      : [...input.turnAgent.instructions, skillSection];
+  return [...blocks, ...(input.additions ?? [])].join("\n\n");
 }
 
 /**
@@ -142,11 +206,14 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
     };
     continuationToken: string;
     history: HarnessSession["history"];
+    limits?: HarnessSession["limits"];
     outputSchema?: HarnessSession["outputSchema"];
     rootSessionId?: string;
     sandboxState?: HarnessSession["sandboxState"];
     sessionId: string;
     state?: HarnessSession["state"];
+    subagentDepth?: number;
+    workflowMaxSubagents?: number;
   } = {
     agent: { system: session.agent.system },
     continuationToken: session.continuationToken,
@@ -166,6 +233,9 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
   if (session.rootSessionId !== undefined) {
     durable.rootSessionId = session.rootSessionId;
   }
+  if (session.limits !== undefined) {
+    durable.limits = session.limits;
+  }
   if (session.outputSchema !== undefined) {
     durable.outputSchema = session.outputSchema;
   }
@@ -175,7 +245,12 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
   if (session.state !== undefined) {
     durable.state = session.state;
   }
-
+  if (session.subagentDepth !== undefined) {
+    durable.subagentDepth = session.subagentDepth;
+  }
+  if (session.workflowMaxSubagents !== undefined) {
+    durable.workflowMaxSubagents = session.workflowMaxSubagents;
+  }
   return durable;
 }
 
@@ -197,14 +272,9 @@ export function hydrateDurableSession(input: {
   const session: {
     -readonly [K in keyof HarnessSession]: HarnessSession[K];
   } = {
-    agent: {
-      compactionModelReference: turnAgent.compactionModel,
-      modelReference: turnAgent.model,
-      system: durable.agent.system,
-      tools,
-    },
+    agent: createSessionAgent(turnAgent, durable.agent.system, tools),
     compaction: createCompactionConfig({
-      contextWindowTokens: turnAgent.model.contextWindowTokens,
+      contextWindowTokens: turnAgent.model?.contextWindowTokens,
       lastKnownInputTokens: durable.compaction?.lastKnownInputTokens,
       lastKnownPromptMessageCount: durable.compaction?.lastKnownPromptMessageCount,
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
@@ -217,6 +287,12 @@ export function hydrateDurableSession(input: {
   if (durable.rootSessionId !== undefined) {
     session.rootSessionId = durable.rootSessionId;
   }
+  // Persisted limits are already resolved (defaults, `false`, and any
+  // inherited parent budget applied at creation). Rehydrating verbatim keeps
+  // an uncapped session uncapped instead of re-applying the root default.
+  if (durable.limits !== undefined) {
+    session.limits = durable.limits;
+  }
   if (durable.outputSchema !== undefined) {
     session.outputSchema = durable.outputSchema;
   }
@@ -226,7 +302,12 @@ export function hydrateDurableSession(input: {
   if (durable.state !== undefined) {
     session.state = durable.state;
   }
-
+  if (durable.subagentDepth !== undefined) {
+    session.subagentDepth = durable.subagentDepth;
+  }
+  if (durable.workflowMaxSubagents !== undefined) {
+    session.workflowMaxSubagents = durable.workflowMaxSubagents;
+  }
   return session;
 }
 
@@ -237,4 +318,38 @@ function createSessionToolDefinitions(turnAgent: RuntimeTurnAgent): SessionToolD
     name: tool.name,
     outputSchema: tool.outputSchema,
   }));
+}
+
+function resolveSessionLimits(input: {
+  readonly limits?: AuthoredSessionLimits;
+  readonly subagentDepth?: number;
+}): SessionLimits {
+  const isSubagent = input.subagentDepth !== undefined && input.subagentDepth > 0;
+
+  const maxInputTokensPerSession = resolveSessionTokenLimit({
+    authored: input.limits?.maxInputTokensPerSession,
+    // Subagents have no fixed default: uncapped parents delegate uncapped
+    // children, capped parents delegate their remaining quota (inherited).
+    fallback: isSubagent ? undefined : DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
+  });
+  const maxOutputTokensPerSession = resolveSessionTokenLimit({
+    authored: input.limits?.maxOutputTokensPerSession,
+    fallback: undefined,
+  });
+
+  const limits: { maxInputTokensPerSession?: number; maxOutputTokensPerSession?: number } = {};
+  if (maxInputTokensPerSession !== undefined) {
+    limits.maxInputTokensPerSession = maxInputTokensPerSession;
+  }
+  if (maxOutputTokensPerSession !== undefined) {
+    limits.maxOutputTokensPerSession = maxOutputTokensPerSession;
+  }
+  return limits;
+}
+
+function resolveSessionTokenLimit(input: {
+  readonly authored: number | false | undefined;
+  readonly fallback: number | undefined;
+}): number | undefined {
+  return input.authored === false ? undefined : (input.authored ?? input.fallback);
 }

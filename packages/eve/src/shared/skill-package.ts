@@ -4,8 +4,7 @@ import { dirname, join } from "node:path";
 
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
-
-const WORKSPACE_ROOT = "/workspace";
+import { resolveSandboxSkillRoot, resolveSandboxSkillWritePath } from "#shared/skill-paths.js";
 
 export interface NormalizedSkillPackageFile {
   readonly content: Buffer;
@@ -74,7 +73,7 @@ export async function writeSkillPackageDirectory(input: {
 
 /**
  * Writes a normalized package into the live sandbox under
- * `/workspace/skills/<name>/`.
+ * the sandbox skill root.
  */
 export async function writeSkillPackageToSandbox(input: {
   readonly sandbox: SandboxSession;
@@ -83,7 +82,11 @@ export async function writeSkillPackageToSandbox(input: {
   for (const file of input.skill.files) {
     await input.sandbox.writeBinaryFile({
       content: file.content,
-      path: `${WORKSPACE_ROOT}/skills/${input.skill.name}/${file.relativePath}`,
+      path: await resolveSandboxSkillWritePath({
+        name: input.skill.name,
+        relativePath: file.relativePath,
+        sandbox: input.sandbox,
+      }),
     });
   }
 }
@@ -96,16 +99,18 @@ export async function removeSkillPackageFromSandbox(input: {
   readonly name: string;
 }): Promise<void> {
   assertSafeSkillPackageName(input.name);
+  const root = await resolveSandboxSkillRoot({ sandbox: input.sandbox });
+
   await input.sandbox.removePath({
     force: true,
-    path: `${WORKSPACE_ROOT}/skills/${input.name}`,
+    path: `${root}/${input.name}`,
     recursive: true,
   });
 }
 
 /**
  * Validates a runtime-contributed skill name before it becomes one path
- * segment under `/workspace/skills`.
+ * segment under the sandbox skill root.
  */
 export function assertSafeSkillPackageName(name: string): void {
   if (

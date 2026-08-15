@@ -9,6 +9,8 @@ A skill is a model-loadable procedure that follows the `SKILL.md` convention. It
 
 eve scans the files under `agent/skills/` and exposes each one's description to the model alongside a framework-owned `load_skill` tool. When a request matches a skill's description (or you name the skill outright), the model calls `load_skill`, and eve appends that skill's markdown to the active turn's context.
 
+Static skills do not require a sandbox: `load_skill` returns their instructions directly from the compiled agent. Dynamic skills and access to supporting package files require a sandbox. Builds may also prewarm sandbox templates that contain static package files. Supporting files are available under `$HOME/.agents/skills/<skill>/`, with `/workspace/skills/<skill>/` as the fallback when `$HOME` is unavailable. Sibling references inside `SKILL.md`, such as `references/checklist.md`, are relative to the directory containing that specific `SKILL.md`.
+
 The description is a routing hint, not a label. Write it as the task that should trigger activation:
 
 ```md
@@ -38,6 +40,8 @@ When the task is novel or ambiguous, gather evidence first, then answer with the
 key facts and the remaining uncertainty.
 ```
 
+eve reads `description`, optional `license`, and string `metadata`; other `SKILL.md` frontmatter is accepted as a no-op.
+
 When markdown can't express what you need (typed values, generated content, or inline sibling files), author the skill in TypeScript with `defineSkill` from `eve/skills`:
 
 ```ts title="agent/skills/research.ts"
@@ -55,9 +59,20 @@ export default defineSkill({
 
 eve generates `SKILL.md` from `markdown`, and each `files` entry becomes a package-relative sibling. Start with plain markdown and move to `defineSkill` only when you hit its limits.
 
+## Find and install community skills
+
+`eve registry search` includes [skills.sh](https://skills.sh) as the built-in `@skills` source. Search by task, review the source, then install the returned skill into your project:
+
+```bash
+eve registry search react --registry @skills
+eve add @skills/vercel-labs/agent-skills/vercel-react-best-practices
+```
+
+skills.sh skills are community-authored project files. Review their source and the resulting diff before running the agent. See [Install integrations](./install-integrations#add-a-skill) for registry configuration and install behavior.
+
 ## Skills are scoped per agent
 
-Skills are scoped to the agent that declares them. A [subagent](./subagents)'s `skills/` are invisible to the root agent, and the reverse holds too. There's no shared-skill mechanism, so put shared executable helpers in `lib/`.
+Skills are scoped to the agent that declares them. A [subagent](./subagents)'s `skills/` are invisible to the root agent, and the reverse holds too. To share one skill definition across agents, package it in a [workspace extension](./extensions#use-an-extension-in-a-workspace) and mount that extension in each agent. Put shared executable helpers in `lib/`.
 
 ## Read skill files at runtime
 
@@ -68,7 +83,7 @@ const research = ctx.getSkill("research");
 const checklist = await research.file("references/checklist.md").text();
 ```
 
-The handle exposes the skill's `name` and `file(relativePath)`; file content is read lazily from the active sandbox.
+The handle exposes the skill's `name` and `file(relativePath)`; file content is read lazily from the active sandbox, relative to that skill package directory.
 
 ## Dynamic skills
 

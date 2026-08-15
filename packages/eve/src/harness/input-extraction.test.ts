@@ -12,7 +12,7 @@ describe("extractQuestionInputRequests", () => {
       toolCalls: [
         {
           input: {
-            options: [{ id: "yes", label: "Yes" }],
+            options: [{ id: "yes", label: "Approve" }],
             prompt: "Continue?",
           },
           toolCallId: "call-1",
@@ -27,14 +27,15 @@ describe("extractQuestionInputRequests", () => {
         action: {
           callId: "call-1",
           input: {
-            options: [{ id: "yes", label: "Yes" }],
+            options: [{ id: "yes", label: "Approve" }],
             prompt: "Continue?",
           },
           kind: "tool-call",
           toolName: "ask_question",
         },
         display: "select",
-        options: [{ id: "yes", label: "Yes" }],
+        kind: "question",
+        options: [{ id: "yes", label: "Approve" }],
         prompt: "Continue?",
         requestId: "call-1",
       },
@@ -117,9 +118,10 @@ describe("extractToolApprovalInputRequests", () => {
         },
         allowFreeform: false,
         display: "confirmation",
+        kind: "tool-approval",
         options: [
-          { id: "approve", label: "Yes" },
-          { id: "deny", label: "No" },
+          { id: "approve", label: "Approve" },
+          { id: "cancel", label: "Cancel" },
         ],
         prompt: "Approve tool call: bash",
         requestId: "approval-1",
@@ -127,7 +129,7 @@ describe("extractToolApprovalInputRequests", () => {
     ]);
   });
 
-  it("extracts a code-mode approval request from a sibling tool call", () => {
+  it("extracts an approval request from a sibling tool call", () => {
     const result = extractToolApprovalInputRequests({
       content: [
         {
@@ -154,14 +156,35 @@ describe("extractToolApprovalInputRequests", () => {
         },
         allowFreeform: false,
         display: "confirmation",
+        kind: "tool-approval",
         options: [
-          { id: "approve", label: "Yes" },
-          { id: "deny", label: "No" },
+          { id: "approve", label: "Approve" },
+          { id: "cancel", label: "Cancel" },
         ],
         prompt: "Approve tool call: bash",
         requestId: "approval-1",
       },
     ]);
+  });
+
+  it("skips automatic approval decisions", () => {
+    const result = extractToolApprovalInputRequests({
+      content: [
+        {
+          approvalId: "approval-1",
+          isAutomatic: true,
+          toolCall: {
+            input: { command: "rm -rf /tmp" },
+            toolCallId: "call-1",
+            toolName: "bash",
+            type: "tool-call",
+          },
+          type: "tool-approval-request",
+        },
+      ],
+    });
+
+    expect(result).toEqual([]);
   });
 
   it("skips approval requests without matching tool-call data", () => {
@@ -173,6 +196,27 @@ describe("extractToolApprovalInputRequests", () => {
           type: "tool-approval-request",
         } as never,
       ],
+    });
+
+    expect(result).toEqual([]);
+  });
+
+  it("skips approval requests for excluded tool calls before parsing input", () => {
+    const result = extractToolApprovalInputRequests({
+      content: [
+        {
+          input: [],
+          toolCallId: "call-1",
+          toolName: "bash",
+          type: "tool-call",
+        } as never,
+        {
+          approvalId: "approval-1",
+          toolCallId: "call-1",
+          type: "tool-approval-request",
+        } as never,
+      ],
+      excludedCallIds: new Set(["call-1"]),
     });
 
     expect(result).toEqual([]);

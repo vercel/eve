@@ -1,7 +1,12 @@
-import type { LanguageModel } from "ai";
+import type { CallSettings, LanguageModel } from "ai";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
+import {
+  isDynamicSentinel,
+  type DynamicResolveContext,
+  type DynamicSentinel,
+} from "#shared/dynamic-tool-definition.js";
 
 /**
  * Optional overrides that eve forwards to the AI SDK model runtime call for
@@ -10,6 +15,11 @@ import type { ModuleSourceRef } from "#shared/source-ref.js";
 export interface AgentModelOptionsDefinition {
   readonly providerOptions?: Record<string, JsonObject>;
 }
+
+/**
+ * Provider-agnostic reasoning effort forwarded to the AI SDK model call.
+ */
+export type AgentReasoningDefinition = NonNullable<CallSettings["reasoning"]>;
 
 /**
  * How an agent's model is reached at runtime, decided at compile time from the
@@ -36,16 +46,55 @@ export type ModelRouting =
 export type InternalAgentModelDefinition = {
   id: string;
   contextWindowTokens?: number;
+  maxOutputTokens?: number;
   source?: ModuleSourceRef;
   providerOptions?: Record<string, JsonObject>;
 };
 
 /**
- * The model handle you assign to an agent's `model` field. This is the AI SDK
- * `LanguageModel` value (for example, the result of a provider or gateway
- * model call), not an eve-authored definition object.
+ * A concrete model handle: an AI Gateway model id string or an AI SDK
+ * `LanguageModel` instance.
  */
-export type PublicAgentModelDefinition = LanguageModel;
+export type PublicAgentStaticModelDefinition = string | LanguageModel;
+
+/** Context passed to dynamic model event handlers; the shared dynamic resolver context. */
+export type AgentModelResolveContext = DynamicResolveContext;
+
+export interface PublicAgentModelSelectionDefinition {
+  readonly model: PublicAgentStaticModelDefinition;
+  /** Context window of the selected model, in tokens. */
+  readonly modelContextWindowTokens?: number;
+  /** Provider options for the selected model. */
+  readonly modelOptions?: AgentModelOptionsDefinition;
+}
+
+export type PublicAgentDynamicModelResult =
+  | PublicAgentStaticModelDefinition
+  | PublicAgentModelSelectionDefinition;
+
+export type AgentModelResolver = (
+  event: unknown,
+  ctx: AgentModelResolveContext,
+) => PublicAgentDynamicModelResult | Promise<PublicAgentDynamicModelResult>;
+
+export type PublicAgentDynamicModelDefinition = DynamicSentinel<PublicAgentDynamicModelResult>;
+
+export interface PublicAgentDynamicModelDefinitionInput {
+  readonly events: DynamicSentinel<PublicAgentDynamicModelResult>["events"];
+}
+
+export function isDynamicModelDefinition(
+  value: unknown,
+): value is PublicAgentDynamicModelDefinition {
+  return isDynamicSentinel(value);
+}
+
+/**
+ * The model handle you assign to an agent's `model` field.
+ */
+export type PublicAgentModelDefinition =
+  | PublicAgentStaticModelDefinition
+  | PublicAgentDynamicModelDefinition;
 
 export interface InternalAgentCompactionDefinition {
   /**
@@ -82,7 +131,7 @@ export interface PublicAgentCompactionDefinition {
    *
    * When omitted, eve uses the active turn model for the summary call.
    */
-  readonly model?: PublicAgentModelDefinition;
+  readonly model?: PublicAgentStaticModelDefinition;
   /**
    * Fraction of the primary model context window that triggers compaction.
    *
@@ -92,23 +141,79 @@ export interface PublicAgentCompactionDefinition {
 }
 
 /**
+ * Configures framework-owned runtime limits for this agent's runs.
+ */
+export interface AgentLimitsDefinition {
+  /**
+   * Maximum lifetime of one durable session, in milliseconds.
+   *
+   * The deadline starts when the session is created and survives process
+   * restarts and redeployments. If it elapses during an active turn, eve lets
+   * that turn settle before completing the session normally.
+   *
+   * `false` disables the timeout.
+   *
+   * @default 2_592_000_000 (30 days)
+   */
+  readonly sessionTimeoutMs?: number | false;
+  /**
+   * Maximum provider-reported input tokens accumulated by one durable session.
+   *
+   * eve checks this before starting each model call. The model call that crosses
+   * the limit is allowed to finish because providers only report exact usage
+   * after the call completes; later model calls in the same session are blocked.
+   *
+   * `false` disables the limit: the session is uncapped.
+   *
+   * Delegated subagent sessions default to the delegating parent's remaining
+   * quota at dispatch time, and the parent's remaining quota always caps an
+   * authored child limit — a child can never outspend its parent's budget.
+   *
+   * @default 40_000_000 for root sessions; the parent's remaining quota for delegated subagent sessions
+   */
+  readonly maxInputTokensPerSession?: number | false;
+  /**
+   * Maximum provider-reported output tokens accumulated by one durable session.
+   *
+   * eve checks this before starting each model call. The model call that crosses
+   * the limit is allowed to finish because providers only report exact usage
+   * after the call completes; later model calls in the same session are blocked.
+   *
+   * `false` disables the limit. Unset by default; delegated subagent sessions
+   * inherit the parent's remaining output quota when the parent has one.
+   */
+  readonly maxOutputTokensPerSession?: number | false;
+}
+
+/**
  * Experimental, opt-in agent capabilities authored in `agent.ts`.
  *
  * These options are unstable and may change or be removed in any release.
- * Each agent (the root agent and every subagent) carries its own flags, so
- * code mode can be enabled for the whole graph, only a subagent, or only
- * the parent.
  */
 export interface AgentExperimentalDefinition {
   /**
-   * Routes executable tools through a sandboxed code-execution wrapper
-   * instead of exposing them directly to the model. The model writes
-   * JavaScript that calls the tools inside the sandbox.
+   * Reads instrumentation from an `instrumentation/` directory of providers
+   * rather than a single `agent/instrumentation.ts` config object.
    *
-   * When unset, eve falls back to the `EVE_EXPERIMENTAL_CODE_MODE`
-   * environment variable (`"1"` enables it) for backwards compatibility.
+   * The two layouts are mutually exclusive: with this on, an
+   * `agent/instrumentation.ts` is a build error, and with it off, an
+   * `instrumentation/` directory is.
    */
-  readonly codeMode?: boolean;
+  readonly instrumentationProviders?: boolean;
+  /**
+   * Keeps this agent's delegated subagent sessions alive after they answer.
+   * The model can pass `agentId` to a subagent tool to continue a previous
+   * delegation, and the system prompt documents the `<agents>` listing.
+   * When unset, delegated children run as one-shot tasks.
+   */
+  readonly subagentPersistentSessions?: boolean;
+  /**
+   * Runs this agent's delegated subagent calls as durable background tasks.
+   * The originating tool call returns a task receipt immediately and the
+   * model manages the work through the `task_*` framework tools. Implies
+   * persistent-session children for subagent dispatch. Root agents only.
+   */
+  readonly tasks?: boolean;
   /**
    * Durable Workflow runtime configuration. Root agents may use this to select
    * the Workflow world backing sessions and runs.
@@ -167,7 +272,9 @@ export type InternalAgentDefinition = {
   experimental?: AgentExperimentalDefinition;
   model: InternalAgentModelDefinition;
   outputSchema?: JsonObject;
+  reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;
+  limits?: AgentLimitsDefinition;
 };
 
 /**
@@ -177,7 +284,7 @@ export type InternalAgentDefinition = {
  * package name or app-root basename). Authored definitions do not carry
  * a `name` field.
  */
-export type PublicAgentDefinition = {
+type PublicAgentDefinitionBase = {
   /**
    * Human-readable description of the agent's purpose. Required for
    * subagents (authored under `subagents/<id>/agent.ts`): surfaced to
@@ -192,20 +299,14 @@ export type PublicAgentDefinition = {
    */
   readonly experimental?: AgentExperimentalDefinition;
   /**
-   * Language model used for agent turns. Accepts an AI Gateway model ID or any
-   * AI SDK-compatible language model.
+   * Provider-agnostic reasoning effort for the agent's turn model calls.
+   * Support for individual levels depends on the selected model and provider.
    */
-  readonly model: PublicAgentModelDefinition;
+  readonly reasoning?: AgentReasoningDefinition;
   /**
-   * Optional override for the primary model's context window size, in tokens.
-   *
-   * Escape hatch for cases where eve cannot resolve the model's metadata via
-   * the AI Gateway model catalog (e.g. a custom or unlisted model id). When
-   * set, eve uses this value verbatim and skips the AI Gateway lookup. Prefer
-   * leaving this unset so eve can stay in sync with provider metadata.
+   * Framework-owned runtime limits for this agent's runs.
    */
-  readonly modelContextWindowTokens?: number;
-  readonly modelOptions?: AgentModelOptionsDefinition;
+  readonly limits?: AgentLimitsDefinition;
   /**
    * Optional structured return type used when this agent runs in task mode
    * (for example as a subagent, schedule, or remote job). Interactive
@@ -214,3 +315,24 @@ export type PublicAgentDefinition = {
    */
   readonly outputSchema?: StandardJSONSchemaV1<unknown, unknown> | JsonObject;
 };
+
+/**
+ * Shared public definition for an agent. Static models may carry definition-level
+ * metadata; dynamic models must return metadata with each concrete selection.
+ */
+export type PublicAgentDefinition = PublicAgentDefinitionBase &
+  (
+    | {
+        /** Language model used for agent turns. */
+        readonly model: PublicAgentStaticModelDefinition;
+        /** Optional context-window override for the static model. */
+        readonly modelContextWindowTokens?: number;
+        readonly modelOptions?: AgentModelOptionsDefinition;
+      }
+    | {
+        /** Resolver that must select a concrete model before model-dependent work. */
+        readonly model: PublicAgentDynamicModelDefinition;
+        readonly modelContextWindowTokens?: never;
+        readonly modelOptions?: never;
+      }
+  );

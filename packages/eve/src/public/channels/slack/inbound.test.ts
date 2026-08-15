@@ -1,20 +1,59 @@
 import { describe, expect, it } from "vitest";
 
+import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js";
 import {
-  formatSlackContextBlock,
   parseAppMentionEvent,
   parseDirectMessageEvent,
-  type SlackInboundContext,
+  parseMessageEvent,
+  parseSlackEventEnvelope,
+  slackMessageFromWebhookPayload,
 } from "#public/channels/slack/inbound.js";
 
-const FULL_CONTEXT: SlackInboundContext = {
-  channelId: "C01",
-  fullName: "Jane Smith",
-  teamId: "T01",
-  threadTs: "1700000000.000001",
-  userId: "U01",
-  userName: "jane.smith",
-};
+describe("parseSlackEventEnvelope", () => {
+  it("preserves an arbitrary Events API payload and its delivery envelope", () => {
+    const envelope = parseSlackEventEnvelope(
+      JSON.stringify({
+        api_app_id: "A01",
+        event: {
+          item: { channel: "C01", ts: "1700000000.000100", type: "message" },
+          reaction: "eyes",
+          type: "reaction_added",
+          user: "U01",
+        },
+        event_id: "Ev01",
+        event_time: 1_700_000_000,
+        team_id: "T01",
+        type: "event_callback",
+      }),
+    );
+
+    expect(envelope).toMatchObject({
+      api_app_id: "A01",
+      event: {
+        item: { channel: "C01", ts: "1700000000.000100", type: "message" },
+        reaction: "eyes",
+        type: "reaction_added",
+        user: "U01",
+      },
+      event_id: "Ev01",
+      event_time: 1_700_000_000,
+      team_id: "T01",
+    });
+  });
+
+  it("returns null for non-event callbacks and missing event types", () => {
+    expect(
+      parseSlackEventEnvelope(JSON.stringify({ challenge: "abc", type: "url_verification" })),
+    ).toBeNull();
+    expect(
+      parseSlackEventEnvelope(JSON.stringify({ event: { user: "U01" }, type: "event_callback" })),
+    ).toBeNull();
+  });
+
+  it("throws for invalid JSON", () => {
+    expect(() => parseSlackEventEnvelope("not-json")).toThrow();
+  });
+});
 
 describe("parseAppMentionEvent", () => {
   it("returns a SlackMessage with mrkdwn re-rendered as GFM", () => {
@@ -119,6 +158,35 @@ describe("parseAppMentionEvent", () => {
       mimeType: "image/png",
       size: 1024,
     });
+  });
+});
+
+describe("parseMessageEvent", () => {
+  it("preserves bot and subtype message events for onMessage", () => {
+    const bot = parseMessageEvent({
+      type: "event_callback",
+      event: {
+        type: "message",
+        bot_id: "B01",
+        user: "U_BOT",
+        text: "automated",
+        channel: "C01",
+        ts: "2.0",
+      },
+    });
+    const subtype = parseMessageEvent({
+      type: "event_callback",
+      event: {
+        type: "message",
+        subtype: "message_changed",
+        text: "edited",
+        channel: "C01",
+        ts: "3.0",
+      },
+    });
+
+    expect(bot?.author?.isBot).toBe(true);
+    expect(subtype?.raw.subtype).toBe("message_changed");
   });
 });
 
@@ -275,29 +343,47 @@ describe("parseDirectMessageEvent", () => {
     });
     expect(result).toBeNull();
   });
-});
 
-describe("formatSlackContextBlock", () => {
-  it("renders every available field between tag delimiters", () => {
-    const block = formatSlackContextBlock(FULL_CONTEXT);
-    expect(block.startsWith("<slack_context>")).toBe(true);
-    expect(block.endsWith("</slack_context>")).toBe(true);
-    expect(block).toContain("user_id: U01");
-    expect(block).toContain("user_name: jane.smith");
-    expect(block).toContain("full_name: Jane Smith");
-    expect(block).toContain("channel_id: C01");
-    expect(block).toContain("thread_ts: 1700000000.000001");
-    expect(block).toContain("team_id: T01");
-  });
+  it("builds the Eve message from the shared Slack webhook payload", () => {
+    const payload = parseSlackWebhookBody(
+      JSON.stringify({
+        type: "event_callback",
+        team_id: "T01",
+        event: {
+          type: "message",
+          channel_type: "im",
+          subtype: "file_share",
+          user: "U01",
+          text: "here is a file",
+          channel: "D01",
+          ts: "1700000000.000100",
+          files: [
+            {
+              id: "F01",
+              mimetype: "image/png",
+              url_private: "https://files.slack.com/F01/diagram.png",
+              name: "diagram.png",
+              size: 2048,
+            },
+          ],
+        },
+      }),
+    );
+    expect(payload.kind).toBe("direct_message");
+    if (payload.kind !== "direct_message") throw new Error("expected direct_message");
 
-  it("omits optional fields that are not supplied", () => {
-    const block = formatSlackContextBlock({
-      channelId: "C01",
-      threadTs: "1.0",
-      userId: "U01",
-    });
-    expect(block).not.toContain("user_name");
-    expect(block).not.toContain("full_name");
-    expect(block).not.toContain("team_id");
+    const message = slackMessageFromWebhookPayload(payload);
+
+    expect(message?.channelId).toBe("D01");
+    expect(message?.attachments).toEqual([
+      {
+        id: "F01",
+        type: "image",
+        url: "https://files.slack.com/F01/diagram.png",
+        name: "diagram.png",
+        mimeType: "image/png",
+        size: 2048,
+      },
+    ]);
   });
 });

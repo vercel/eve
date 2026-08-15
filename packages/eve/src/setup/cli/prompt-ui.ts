@@ -5,6 +5,7 @@ import { wrapTextWithPrefix } from "@clack/core";
 import {
   renderCursorRow,
   renderOptionRow,
+  renderOptionRowContinuation,
   resolveOptionRowState,
   UNICODE_ROW_GLYPHS,
 } from "./option-row.js";
@@ -34,6 +35,8 @@ export interface PromptColors {
 export interface PromptOption<T extends PromptValue> {
   value: T;
   label: string;
+  /** Completion action kept after searchable results instead of being filtered. */
+  trailingAction?: boolean;
   /** Supporting copy; stacked prompts render newline-separated text on separate rows. */
   hint?: string;
   /** Short inline annotation shown dimmed only while the cursor is on this row. */
@@ -73,6 +76,8 @@ export interface PromptOption<T extends PromptValue> {
    * to the front. Meaningless without `search`.
    */
   featured?: boolean;
+  /** Marks the currently-active value: renders a green check beside the row. */
+  checked?: boolean;
 }
 
 /** Vertical rail glyph used by the onboarding-style terminal UI. */
@@ -351,7 +356,7 @@ function descriptionLine<T extends PromptValue>(
   colors: PromptColors,
 ): string {
   return isCursor && option.description && !option.disabled
-    ? `\n${rail}    ${colors.dim(option.description)}`
+    ? `\n${rail}  ${renderOptionRowContinuation(colors.dim(option.description))}`
     : "";
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { start } from "#compiled/@workflow/core/runtime.js";
+import { start } from "#internal/workflow/runtime.js";
 
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import {

@@ -5,13 +5,16 @@ describe("composeRuntimeBasePrompt", () => {
   it("composes the authored instructions prompt into one runtime instruction block", () => {
     expect(
       composeRuntimeBasePrompt({
-        instructions: {
-          name: "instructions",
-          logicalPath: "instructions.md",
-          markdown: "You are a weather assistant.\n",
-          sourceId: "instructions.md",
-          sourceKind: "markdown",
-        },
+        instructions: [
+          {
+            content: "You are a weather assistant.\n",
+            name: "instructions",
+            logicalPath: "instructions.md",
+            role: "system",
+            sourceId: "instructions.md",
+            sourceKind: "markdown",
+          },
+        ],
       }),
     ).toEqual(["Instructions (instructions)\nYou are a weather assistant."]);
   });
@@ -29,18 +32,81 @@ describe("composeRuntimeBasePrompt", () => {
     ]);
   });
 
-  it("drops the instructions block when the authored markdown normalizes to empty", () => {
+  it("drops the instructions block when the authored content normalizes to empty", () => {
     expect(
       composeRuntimeBasePrompt({
-        instructions: {
-          name: "instructions",
-          logicalPath: "instructions.md",
-          markdown: "   \n",
-          sourceId: "instructions.md",
-          sourceKind: "markdown",
-        },
+        instructions: [
+          {
+            content: "   \n",
+            name: "instructions",
+            logicalPath: "instructions.md",
+            role: "system",
+            sourceId: "instructions.md",
+            sourceKind: "markdown",
+          },
+        ],
       }),
     ).toEqual([]);
+  });
+
+  it("keeps user entries out of the system prompt and preserves multi-file formatting", () => {
+    expect(
+      composeRuntimeBasePrompt({
+        instructions: [
+          {
+            content: "First system block.",
+            logicalPath: "instructions/10-first.md",
+            name: "instructions/10-first",
+            role: "system",
+            sourceId: "instructions/10-first.md",
+            sourceKind: "markdown",
+          },
+          {
+            content: "Durable user context.",
+            logicalPath: "instructions/20-user.ts",
+            name: "instructions/20-user",
+            role: "user",
+            sourceId: "instructions/20-user.ts",
+            sourceKind: "module",
+          },
+          {
+            content: "Second system block.",
+            logicalPath: "instructions/30-second.ts",
+            name: "instructions/30-second",
+            role: "system",
+            sourceId: "instructions/30-second.ts",
+            sourceKind: "module",
+          },
+        ],
+      }),
+    ).toEqual(["Instructions (instructions)\nFirst system block.\n\nSecond system block."]);
+  });
+
+  it("keeps the existing system-only prompt bytes across ordered entries", () => {
+    const prompt = composeRuntimeBasePrompt({
+      instructions: [
+        {
+          content: "  First system block.  ",
+          logicalPath: "instructions/a.ts",
+          name: "instructions/a",
+          role: "system",
+          sourceId: "instructions/a.ts",
+          sourceKind: "module",
+        },
+        {
+          content: "\tSecond system block.\n",
+          logicalPath: "instructions/b.ts",
+          name: "instructions/b",
+          role: "system",
+          sourceId: "instructions/b.ts",
+          sourceKind: "module",
+        },
+      ],
+    });
+
+    expect(prompt[0]).toBe(
+      "Instructions (instructions)\nFirst system block.  \n\n\tSecond system block.",
+    );
   });
 
   it("adds a shallow workspace awareness section when authored project files are mounted", () => {
@@ -64,7 +130,7 @@ describe("composeRuntimeBasePrompt", () => {
     ]);
   });
 
-  it("does not inject sandbox routing guidance — sandboxes are no longer auto-exposed", () => {
+  it("does not inject runtime-owned delivery or sandbox guidance", () => {
     expect(composeRuntimeBasePrompt({})).toEqual([]);
   });
 

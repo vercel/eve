@@ -1,5 +1,5 @@
 ---
-title: "instrumentation.ts"
+title: "Observability"
 description: "Trace an agent with OpenTelemetry in instrumentation.ts, read the workflow run tags eve emits, and debug discovery with eve info and the common-failures table."
 ---
 
@@ -11,11 +11,11 @@ If you intend to export telemetry, review the exporter destination, data categor
 
 eve observes an agent through three distinct surfaces. They do not all live in this file, and they write to different places:
 
-| Surface                          | Configured in `instrumentation.ts`?                         | What it is                                                                                                                                                    |
-| -------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Workflow run tags** (`$eve.*`) | No (automatic)                                              | Framework-owned attributes on each Vercel Workflow run. Let dashboards stitch session, turn, and subagent runs into a tree and surface model and token usage. |
-| **OpenTelemetry export**         | Yes: `setup`, `recordInputs`, `recordOutputs`, `functionId` | Where AI SDK spans are exported and what they record.                                                                                                         |
-| **Runtime context events**       | Yes: `events["step.started"]`                               | Per-model-call values written into the AI SDK's runtime context, which the AI SDK carries onto its spans.                                                     |
+| Surface                          | Configured in `instrumentation.ts`?                      | What it is                                                                                                                                                    |
+| -------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Workflow run tags** (`$eve.*`) | No (automatic)                                           | Framework-owned attributes on each Vercel Workflow run. Let dashboards stitch session, turn, and subagent runs into a tree and surface model and token usage. |
+| **OpenTelemetry export**         | Local: automatic. Authored: `setup` and capture settings | Where agent and AI spans are exported and what they record.                                                                                                   |
+| **Runtime context events**       | Yes: `events["step.started"]`                            | Per-model-call values written into the AI SDK's runtime context, which the AI SDK carries onto its spans.                                                     |
 
 The two configurable surfaces send AI SDK spans to your OpenTelemetry backend. Workflow run tags are a separate system, queryable in the Workflow dashboard rather than on your OTel spans. The sections below cover what you configure here; [Workflow run tags](#workflow-run-tags) documents what eve emits on its own.
 
@@ -44,19 +44,41 @@ Export the result of `defineInstrumentation` as the default export.
 
 Use the `setup` callback to register your OTel provider (for example `registerOTel` from `@vercel/otel`). The framework invokes it at server startup with the resolved agent name. `context.agentName` is resolved at compile time from your project (the package's `name`, falling back to the app directory name), so you never hard-code a service name.
 
-Any OTel-compatible backend works (Braintrust, Raindrop, Arize, Honeycomb, Datadog, Jaeger). Install the exporter package you need and configure it in the callback.
+Any OTel-compatible backend works (Braintrust, PostHog, Raindrop, Arize, Honeycomb, Datadog, Jaeger). Install the exporter package you need and configure it in the callback. The [PostHog AI Observability integration](/integrations/posthog-instrumentation) provides a ready-to-install exporter and optional user identification.
 
 Three more fields control what the AI SDK records inside those spans (see the AI SDK's [telemetry reference](https://ai-sdk.dev/docs/ai-sdk-core/telemetry)):
 
-- `recordInputs` records full message history on each step span (defaults to `true`). Set it to `false` if inputs contain sensitive content or you want to reduce span payload size.
-- `recordOutputs` records model outputs on spans (defaults to `true`). Set it to `false` to disable output recording.
+- `recordInputs` records full message history on each step span. It defaults to `false`; set it to `true` to include input content.
+- `recordOutputs` records model outputs on spans. It defaults to `false`; set it to `true` to include output content.
 - `functionId` overrides the function name on spans (defaults to the agent name).
 
-For sensitive, regulated, or production data, set `recordInputs` and `recordOutputs` to `false` unless you have reviewed the exporter and its data-retention path.
+eve records metadata without model or tool inputs and outputs by default. Enable either content category only after reviewing the exporter and its data-retention path.
 
 You are responsible for ensuring any observability or eval provider is approved for the data exported to it.
 
 The third configurable surface, [runtime context events](#runtime-context), attaches per-model-call values to these spans.
+
+## Channel delivery traces
+
+Instrumentation providers receive `channel.delivery.started` followed by
+`channel.delivery.completed`, `channel.delivery.cancelled`, or
+`channel.delivery.failed` for every inbound channel operation. The lifecycle
+covers durable processing through the terminal state of the resulting turn, not
+messages an adapter sends back to Slack, Telegram, Twilio, or another platform.
+Several deliveries can coalesce into one turn while retaining separate lifecycle
+pairs, and an adapter can consume a delivery without starting a turn.
+
+Each operation has a framework-owned `deliveryId` distinct from its optional
+platform request ID. Metadata-only providers receive identity, channel, session,
+and outcome fields. Content providers additionally receive only eve's known
+message, context, input-response, and output-schema fields; adapter-specific
+payload fields are never projected.
+
+The built-in OpenTelemetry provider maps each pair to an
+`agent.channel.delivery` consumer span under the durable session window. When
+`traceChannelRequests: true` creates an inbound HTTP server span, the delivery
+span links to it with `eve.link.type=channel.request` rather than using the
+short-lived request span as its parent.
 
 ## Runtime context
 
@@ -66,7 +88,7 @@ Use it when the values depend on the current session, turn, step, channel, or mo
 
 ```ts
 import { defineInstrumentation, isChannel } from "eve/instrumentation";
-import supportChannel from "./channels/support.js";
+import supportChannel from "./channels/support";
 
 export default defineInstrumentation({
   events: {
@@ -94,13 +116,13 @@ The callback receives:
 - `channel`: the channel's `kind` and the metadata projected by the active channel
 - `modelInput`: the final instructions and messages passed to the model call
 
-A channel exposes its identity through `kind`, the discriminant you narrow on. For authored channels it is `channel:<name>`, where `<name>` is the channel's filename under `agent/channels/`, so `agent/channels/support.ts` is `channel:support`. Framework channels use `http`, `schedule`, or `subagent`, and an unrecognized or absent kind normalizes to `unknown`. The kind is also emitted as the `eve.channel.kind` span attribute. eve emits compiler-owned typings keyed by the channel filename, so you can narrow either by checking `input.channel.kind === "channel:support"` or by using `isChannel(input.channel, supportChannel)`.
+A channel exposes its identity through `kind`. For authored channels it is `channel:<name>`, where `<name>` is the channel's filename under `agent/channels/`, so `agent/channels/support.ts` is `channel:support`. Framework channels use `http`, `schedule`, or `subagent`, and an unrecognized or absent kind normalizes to `unknown`. The kind is also emitted as the `eve.channel.kind` span attribute. To access an authored channel's metadata with its precise type, import the channel definition and narrow with `isChannel(input.channel, supportChannel)`.
 
 Channel metadata is channel-owned. Built-in channels expose only the fields they choose to make observable; Slack, for example, projects `channelId`, `teamId`, `threadTs`, and `triggeringUserId` from its durable channel state. User-authored channels expose their own projection by returning `metadata(state)` from `defineChannel`. Runtime instrumentation never falls back to raw channel state.
 
-## Trace hierarchy
+## Authored trace hierarchy
 
-When telemetry is enabled, each turn produces a trace like:
+When authored telemetry is enabled, each turn currently produces a trace like:
 
 ```text
 ai.eve.turn  {eve.session.id}
@@ -114,6 +136,17 @@ ai.eve.turn  {eve.session.id}
 ```
 
 eve creates the `ai.eve.turn` parent span per turn and passes enriched telemetry to the AI SDK so model calls and tool executions are traced automatically. Session, turn, step, and channel context is injected as the framework half of the runtime context (`eve.version`, `eve.session.id`, `eve.environment`, `eve.turn.id`, `eve.turn.sequence`, `eve.step.index`, `eve.channel.kind`) and rides onto the spans alongside any values your `events["step.started"]` callback returns under `runtimeContext`.
+
+Set `traceChannelRequests: true` on `defineInstrumentation` to also wrap each inbound channel HTTP request in a single OpenTelemetry `SERVER` span named for the registered route, which parents the turn tree above (and any `hook.resume` and outgoing HTTP spans):
+
+```text
+POST /eve/v1/session/:sessionId
+  └── hook.resume
+        ├── GET hooks/by-token
+        └── POST hook_received
+```
+
+The span stays low-cardinality (route template in `http.route`, method in `http.request.method`, never the concrete URL) and records no session ids, tokens, headers, bodies, or query parameters. It adopts an incoming `traceparent` as its parent when present, so eve requests correlate with upstream traces. It defaults to `false`; enable it only when you want these request spans.
 
 ## Workflow run tags
 
@@ -138,13 +171,22 @@ Per-turn usage tags are written on each step of a turn, accumulating cumulative 
 
 Tag writes are best-effort: a failure is logged once per process and then swallowed, so a broken tag emit never breaks the agent.
 
-These tags power the **Agent Runs** tab in the Vercel dashboard. When you deploy on Vercel, the platform auto-detects `eve` as the framework and surfaces an Agent Runs view under your project's **Observability** tab, where you can browse sessions and drill into each conversation's trace, with no `instrumentation.ts` required. The tab is currently gated per team. See [Deployment](./deployment#view-runs-in-the-dashboard) for enablement. Agent Runs is separate from the OpenTelemetry export above. Use OTel when you want spans in Braintrust, Datadog, or another third-party backend.
+These tags power the **Agent Runs** tab in the Vercel dashboard. When you deploy on Vercel, the platform auto-detects `eve` as the framework and surfaces an Agent Runs view under your project's **Observability** tab, where you can browse sessions and drill into each conversation's trace, with no `instrumentation.ts` required. The tab is currently gated per team. See [Deploy to Vercel](./deployment/vercel#inspect-agent-runs) for enablement. Agent Runs is separate from the OpenTelemetry export above. Use OTel when you want spans in Braintrust, PostHog, Datadog, or another third-party backend.
 
-Note: By default, telemetry records full message history and model outputs You may need to disclose these data flows in your privacy materials if utilized.
+## Local traces
+
+Without an `instrumentation.ts`, `eve dev` records spans to disk — one trace per session, with turns, model steps, and tool calls. Read them two ways:
+
+- [`/traces`](dev-tui#logs-and-traces) in the dev TUI: a live trace viewer that replays captured content as a conversation.
+- [`eve traces`](../reference/cli#eve-traces): a span tree in the terminal, `eve traces ls` to list. Works after `eve dev` exits.
+
+Local traces omit model and tool inputs and outputs by default. Set `EVE_TRACES_CONTENT=on` in `.env.local` to capture that content.
+
+Writing `instrumentation.ts` replaces this: your `setup` takes over and nothing is recorded locally. For span attributes, retention, and the `EVE_TRACES*` variables, see [`eve traces`](../reference/cli#eve-traces).
 
 ## Debugging
 
-`eve info` is the fastest way to see what eve actually picked up: the active tools, skills, subagents, schedules, routes, and discovery diagnostics. eve also writes inspectable artifacts under `.eve/`, kept even when discovery hits errors:
+`eve info` is the fastest way to see what eve actually picked up: ordered static instructions with their roles, plus the active tools, skills, subagents, schedules, routes, and discovery diagnostics. Dynamic instruction results exist only at runtime and are not part of this static inspection. eve also writes inspectable artifacts under `.eve/`, kept even when discovery hits errors:
 
 | Artifact                        | Tells you                                   |
 | ------------------------------- | ------------------------------------------- |
@@ -157,13 +199,13 @@ When `eve build` fails on discovery errors, the CLI prints the full diagnostics 
 
 ### Common failures
 
-| Symptom                                       | Likely cause and fix                                                                                                                                                                                                                                                        |
-| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tool not discovered (the model never sees it) | Run `eve info`. Confirm the file is in the right slot (`agent/tools/<name>.ts`) and default-exports `defineTool(...)`, and check `.eve/diagnostics.json` for shape errors. `schedules/` are root-only.                                                                      |
-| Model won't call a tool it should             | Tighten the tool `description` and `inputSchema`; put procedural guidance in a [skill](../skills), not the description. Confirm it's in the active set with `eve info`.                                                                                                     |
-| Stuck on `session.waiting`                    | The turn is parked on an approval, a question, or a connection sign-in. Answer it, or POST a follow-up with the `continuationToken` (a stale token is rejected).                                                                                                            |
-| 401 on production routes                      | Expected: auth fails closed. Replace `placeholderAuth()` with your route policy. Use `vercelOidc()` only for Vercel-issued tokens; otherwise configure `httpBasic()`, JWT/OIDC helpers, or a custom `AuthFn`. See [Auth and route protection](./auth-and-route-protection). |
-| Build fails with discovery errors             | Read the printed diagnostics and `.eve/diagnostics.json`; confirm the root-vs-subagent boundary is valid and secrets come from env vars.                                                                                                                                    |
+| Symptom                                       | Likely cause and fix                                                                                                                                                                                                                                             |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tool not discovered (the model never sees it) | Run `eve info`. Confirm the file is in the right slot (`agent/tools/<name>.ts`) and default-exports `defineTool(...)`, and check `.eve/diagnostics.json` for shape errors. `schedules/` are root-only.                                                           |
+| Model won't call a tool it should             | Tighten the tool `description` and `inputSchema`; put procedural guidance in a [skill](../skills), not the description. Confirm it's in the active set with `eve info`.                                                                                          |
+| Stuck on `session.waiting`                    | The turn is parked for input. Answer the pending approval or question, or POST a follow-up to `/eve/v1/session/:sessionId`.                                                                                                                                      |
+| 401 on production routes                      | Expected: auth fails closed. Replace `placeholderAuth()` with your route policy. Use `vercelOidc()` only for Vercel-issued tokens; otherwise configure `httpBasic()`, JWT/OIDC helpers, or a custom `AuthFn`. See [Authentication](./auth-and-route-protection). |
+| Build fails with discovery errors             | Read the printed diagnostics and `.eve/diagnostics.json`; confirm the root-vs-subagent boundary is valid and secrets come from env vars.                                                                                                                         |
 
 ## What to read next
 

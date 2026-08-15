@@ -1,0 +1,40 @@
+import { defineEval } from "eve/evals";
+
+import { FANOUT_SIZE, fanoutExecutionsReachBarrier } from "./fanout";
+
+const TOOL_NAME = "fanout-barrier";
+const LABELS = [
+  "fanout-authored-01",
+  "fanout-authored-02",
+  "fanout-authored-03",
+  "fanout-authored-04",
+  "fanout-authored-05",
+  "fanout-authored-06",
+  "fanout-authored-07",
+  "fanout-authored-08",
+  "fanout-authored-09",
+  "fanout-authored-10",
+] as const;
+
+export default defineEval({
+  tags: ["real-model"],
+  description: "Static tools smoke: ten authored tool calls begin concurrently.",
+  async test(t) {
+    const turn = await t.send(
+      [
+        `Call the \`${TOOL_NAME}\` tool exactly ${FANOUT_SIZE} separate times in one tool-use step.`,
+        `Use each label exactly once: ${LABELS.map((label) => `"${label}"`).join(", ")}.`,
+        "Start every call before waiting for any result. Do not use any other tool.",
+        "After every call returns, reply with exactly: authored fanout complete",
+      ].join("\n"),
+    );
+    turn.expectOk();
+
+    t.succeeded();
+    t.calledTool(TOOL_NAME, { count: FANOUT_SIZE });
+    turn.eventsSatisfy(
+      "ten distinctly labeled authored executions reach the concurrency barrier",
+      (events) => fanoutExecutionsReachBarrier({ events, labels: LABELS, toolName: TOOL_NAME }),
+    );
+  },
+});

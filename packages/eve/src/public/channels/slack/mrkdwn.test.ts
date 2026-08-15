@@ -1,28 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  gfmToSlackMrkdwn,
-  rewriteBareMentions,
-  slackMrkdwnToGfm,
-} from "#public/channels/slack/mrkdwn.js";
-
-describe("rewriteBareMentions", () => {
-  it("rewrites bare @USER tokens into Slack mention syntax", () => {
-    expect(rewriteBareMentions("ping @U123 please")).toBe("ping <@U123> please");
-  });
-
-  it("leaves already-wrapped mentions alone", () => {
-    expect(rewriteBareMentions("ping <@U123> please")).toBe("ping <@U123> please");
-  });
-
-  it("does not touch email-shaped runs", () => {
-    expect(rewriteBareMentions("contact foo@bar.com")).toBe("contact foo@bar.com");
-  });
-
-  it("rewrites every occurrence in a single pass", () => {
-    expect(rewriteBareMentions("@A and @B")).toBe("<@A> and <@B>");
-  });
-});
+import { gfmToSlackMrkdwn, slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
 
 describe("gfmToSlackMrkdwn", () => {
   it("converts ** and __ bold to single-star bold", () => {
@@ -35,6 +13,16 @@ describe("gfmToSlackMrkdwn", () => {
 
   it("converts [label](url) to <url|label>", () => {
     expect(gfmToSlackMrkdwn("see [docs](https://x.dev)")).toBe("see <https://x.dev|docs>");
+  });
+
+  it("escapes Slack control characters in link labels", () => {
+    expect(gfmToSlackMrkdwn("see [a < b](https://x.dev?a=1&b=2)")).toBe(
+      "see <https://x.dev?a=1&b=2|a &lt; b>",
+    );
+  });
+
+  it("leaves links with Slack control characters in the URL unchanged", () => {
+    expect(gfmToSlackMrkdwn("see [bad](https://x.dev/a|b)")).toBe("see [bad](https://x.dev/a|b)");
   });
 
   it("leaves fenced code blocks untouched", () => {
@@ -68,6 +56,11 @@ describe("slackMrkdwnToGfm", () => {
 
   it("upgrades paired *bold* and ~strike~ to GFM", () => {
     expect(slackMrkdwnToGfm("a *b* c ~d~")).toBe("a **b** c ~~d~~");
+  });
+
+  it("unescapes Slack control entities outside code", () => {
+    expect(slackMrkdwnToGfm("a &lt; b &amp; c")).toBe("a < b & c");
+    expect(slackMrkdwnToGfm("call `a &lt; b` here")).toBe("call `a &lt; b` here");
   });
 
   it("leaves fenced and inline code untouched", () => {

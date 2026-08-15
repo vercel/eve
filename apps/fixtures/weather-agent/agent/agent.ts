@@ -1,7 +1,7 @@
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "openai/gpt-5.5",
+  model: "zai/glm-5.2",
   modelOptions: {
     providerOptions: {
       openai: {

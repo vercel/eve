@@ -1,39 +1,42 @@
 import type { UserContent } from "ai";
 
-import type { CrossChannelReceiveFn } from "#channel/cross-channel-receive.js";
-import type { SessionAuthContext, SessionCallback } from "#channel/types.js";
+import type { CrossChannelToFn } from "#channel/cross-channel-receive.js";
+import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import type { Session } from "#channel/session.js";
-import type { RunMode } from "#shared/run-mode.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ChannelMethod } from "#public/definitions/channel.js";
 
 type WebSocketHeaders = Headers | readonly (readonly [string, string])[] | Record<string, string>;
 
 /**
- * Second argument passed to every route handler. `send` starts or continues a
- * session on this channel; `getSession` looks one up by id; `receive` hands
- * inbound work to a different channel; `params` contains the matched path
- * parameters; `waitUntil` keeps background work alive past the response;
- * `requestIp` is the client IP, or `null` when the host cannot provide it.
+ * Second argument passed to every route handler. `from` binds local operations,
+ * `resolveSession` snapshots the current owner, `to` selects a proactive target
+ * on another channel, and `attachSession` binds an immutable-ID handle.
  */
 export interface RouteHandlerArgs<TState = undefined> {
-  send: SendFn<TState>;
-  getSession: GetSessionFn;
+  /** Binds a raw channel-local address to its current-owner operations. */
+  readonly from: ChannelFrom<TState>;
+  /** Snapshots the session currently owning a raw channel-local address. */
+  readonly resolveSession: ChannelResolveSession;
+  /** Attaches a fixed operation handle to one exact durable session ID without performing I/O. */
+  attachSession: AttachSessionFn;
   /**
-   * Starts a session on a different channel to hand off inbound work (e.g. an
-   * HTTP webhook routing the conversation onto Slack). The target's authored
-   * `receive` hook owns continuation-token format and initial state; the caller
-   * supplies the payload, channel-specific args, and auth.
+   * Selects a proactive target on another channel. Call `.send(message, options)`
+   * on the returned handle; the target channel owns its address and initial state.
    */
-  receive: CrossChannelReceiveFn;
+  readonly to: CrossChannelToFn;
+  /** Path parameters matched for the current route. */
   params: Readonly<Record<string, string>>;
+  /** Keeps background work alive after the route returns its response. */
   waitUntil: (task: Promise<unknown>) => void;
+  /** Best-effort client IP reported by the host, or `null` when unavailable. */
   requestIp: string | null;
 }
 
 export interface SendPayload {
   readonly message?: string | UserContent;
+  readonly [key: string]: unknown;
   readonly inputResponses?: readonly InputResponse[];
   /**
    * Context strings contributed by the channel. eve appends each entry
@@ -42,48 +45,14 @@ export interface SendPayload {
    */
   readonly context?: readonly string[];
   /**
-   * Run-scoped JSON schema the turn's result must match. Orthogonal to
-   * {@link BaseSendOptions.mode}: eve enforces the schema in either mode; mode
-   * only decides the failure behavior. A conversation run parks recoverably and
-   * waits for more input; a task run (which cannot wait) finishes as an error.
+   * Run-scoped JSON schema the turn's result must match. eve enforces the
+   * schema in conversation and task mode; mode only decides failure behavior.
    */
   readonly outputSchema?: JsonObject;
 }
 
-/**
- * Starts or continues a session on this channel. Accepts a plain string,
- * `UserContent`, or a {@link SendPayload}, plus {@link SendOptions} (auth,
- * continuation token, run mode, and an optional seed `state` for stateful
- * channels). Resolves to the resulting {@link Session}.
- */
-export type SendFn<TState = undefined> = (
-  input: string | UserContent | SendPayload,
-  options: SendOptions<TState>,
-) => Promise<Session>;
-
-type BaseSendOptions = {
-  auth: SessionAuthContext | null;
-  callback?: SessionCallback;
-  continuationToken: string;
-  mode?: RunMode;
-};
-
-/**
- * Options for {@link SendFn}. The channel owns its continuation-token
- * format: pass the channel-local raw token (the framework prepends
- * the channel name). Stateful channels also seed initial adapter
- * state via {@link state}, which becomes the new session's `state`
- * on first `runtime.run()` and is ignored on subsequent `deliver`s.
- */
-export type SendOptions<TState = undefined> = [TState] extends [undefined]
-  ? BaseSendOptions
-  : BaseSendOptions & { state: TState };
-
-/**
- * Resolves an existing {@link Session} by id, for example to read its event
- * stream from within a route handler.
- */
-export type GetSessionFn = (sessionId: string) => Session;
+/** Attaches an I/O-free handle to one exact durable session ID. */
+export type AttachSessionFn = (sessionId: string) => Session;
 
 export type RouteHandler<TState = undefined> = (
   req: Request,
@@ -199,9 +168,9 @@ export interface WebSocketRouteDefinition<TState = undefined> {
 
 /**
  * A single channel route: either an {@link HttpRouteDefinition} or a
- * {@link WebSocketRouteDefinition}. Produced by the {@link GET}, {@link POST},
- * {@link PUT}, {@link PATCH}, {@link DELETE}, and {@link WS} helpers and listed
- * in a channel's `routes` array.
+ * {@link WebSocketRouteDefinition}. Produced by the {@link GET}, {@link HEAD},
+ * {@link POST}, {@link PUT}, {@link PATCH}, {@link DELETE}, {@link OPTIONS},
+ * and {@link WS} helpers and listed in a channel's `routes` array.
  */
 export type RouteDefinition<TState = undefined> =
   | HttpRouteDefinition<TState>
@@ -216,6 +185,17 @@ export function GET<TState = undefined>(
   handler: RouteHandler<TState>,
 ): HttpRouteDefinition<TState> {
   return { transport: "http", method: "GET", path, handler };
+}
+
+/**
+ * Declares an HTTP `HEAD` route at `path`. See {@link GET} for the handler
+ * contract.
+ */
+export function HEAD<TState = undefined>(
+  path: string,
+  handler: RouteHandler<TState>,
+): HttpRouteDefinition<TState> {
+  return { transport: "http", method: "HEAD", path, handler };
 }
 
 /**
@@ -260,6 +240,17 @@ export function DELETE<TState = undefined>(
   handler: RouteHandler<TState>,
 ): HttpRouteDefinition<TState> {
   return { transport: "http", method: "DELETE", path, handler };
+}
+
+/**
+ * Declares an HTTP `OPTIONS` route at `path`. See {@link GET} for the handler
+ * contract.
+ */
+export function OPTIONS<TState = undefined>(
+  path: string,
+  handler: RouteHandler<TState>,
+): HttpRouteDefinition<TState> {
+  return { transport: "http", method: "OPTIONS", path, handler };
 }
 
 /**

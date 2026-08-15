@@ -247,7 +247,7 @@ describe.runIf(runDockerScenarios)("docker sandbox engine against a real daemon"
   );
 
   it(
-    "persists session state across dispose and reattach",
+    "persists session state across shutdown and reattach",
     async () => {
       const appRoot = await createScratchDirectory("eve-docker-scenario-");
       const engine = createEngine();
@@ -264,11 +264,9 @@ describe.runIf(runDockerScenarios)("docker sandbox engine against a real daemon"
       });
       const state = await firstHandle.captureState();
       expect(state.metadata).toEqual({ containerName: sessionKey });
-      await firstHandle.dispose();
-
-      // Simulate the runtime stopping between steps; reattach must
-      // restart the container transparently.
-      await cleanupCli.run(["stop", "-t", "0", sessionKey]);
+      // Server shutdown stops the container; reattach must restart it
+      // transparently.
+      await firstHandle.shutdown();
 
       const reconnected = await engine.create({
         existingMetadata: state.metadata,

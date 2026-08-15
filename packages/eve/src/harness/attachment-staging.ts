@@ -11,6 +11,7 @@ import { SandboxKey } from "#context/keys.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { fileDataToBytes } from "#internal/attachments/data.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
+import { createLogger } from "#internal/logging.js";
 import { deserializeUrlFilePart, isSerializedUrlFilePart } from "#internal/attachments/url-refs.js";
 import {
   decodeSandboxRef,
@@ -27,6 +28,8 @@ import { toErrorMessage } from "#shared/errors.js";
  * translates to the backend-native location.
  */
 export const ATTACHMENTS_ROOT = "/workspace/attachments";
+
+const log = createLogger("harness.attachment-staging");
 
 const UNSAFE_FILENAME_CHARS = /[^\w.-]+/g;
 const SHA_PREFIX_LENGTH = 16;
@@ -229,10 +232,20 @@ async function hydrateMessageContent(content: unknown, sandbox: SandboxSession):
       }
       const bytes = await sandbox.readBinaryFile({ path: ref.path });
       if (bytes === null) {
-        throw new Error(
-          `Sandbox-ref FilePart references missing file: "${ref.path}". ` +
-            "The staging pipeline invariant (every eve-sandbox: ref has bytes on disk) was violated.",
+        // #325: sandbox snapshots can change during a session lifecycle
+        // as they are deployment bounded.
+        log.warn(
+          "sandbox-ref attachment bytes missing on hydration — degrading to text reference",
+          {
+            mediaType: ref.mediaType,
+            path: ref.path,
+            size: ref.size,
+          },
         );
+        return {
+          text: `FileNotFound: Current snapshot may be newer and does not contain ${ref.path}.`,
+          type: "text",
+        } satisfies TextPart;
       }
       return { ...filePart, data: bytes, mediaType: ref.mediaType };
     }),

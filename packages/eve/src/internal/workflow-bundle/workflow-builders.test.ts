@@ -1,9 +1,28 @@
 import { describe, expect, it } from "vitest";
 
+import { resolvePackageRoot, resolvePackageSourceFilePath } from "#internal/application/package.js";
+
 import { applyWorkflowTransform } from "./workflow-builders.js";
 import { transformWorkflowDirectives } from "./workflow-transformer.js";
 
 describe("applyWorkflowTransform", () => {
+  it("keeps eve workflow references stable when eve is the project root", async () => {
+    const filename = "src/execution/turn-workflow.ts";
+    const transformed = await applyWorkflowTransform(
+      filename,
+      ["export async function turnWorkflow(): Promise<void> {", '  "use workflow";', "}", ""].join(
+        "\n",
+      ),
+      "workflow",
+      resolvePackageSourceFilePath(filename),
+      resolvePackageRoot(),
+    );
+
+    expect(transformed.workflowManifest.workflows?.[filename]?.turnWorkflow).toEqual({
+      workflowId: "workflow//eve//turnWorkflow",
+    });
+  });
+
   it("registers step functions in step mode", async () => {
     const transformed = await applyWorkflowTransform(
       "steps/ping.ts",
@@ -80,16 +99,16 @@ describe("applyWorkflowTransform", () => {
       workflows: {
         "src/execution/workflow-entry.ts": {
           workflowEntry: {
-            workflowId: "workflow//./src/execution/workflow-entry//workflowEntry",
+            workflowId: "workflow//eve//workflowEntry",
           },
         },
       },
     });
     expect(transformed.code).toContain(
-      'workflowEntry.workflowId = "workflow//./src/execution/workflow-entry//workflowEntry";',
+      'workflowEntry.workflowId = "workflow//eve//workflowEntry";',
     );
     expect(transformed.code).toContain(
-      'globalThis.__private_workflows.set("workflow//./src/execution/workflow-entry//workflowEntry", workflowEntry);',
+      'globalThis.__private_workflows.set("workflow//eve//workflowEntry", workflowEntry);',
     );
   });
 
@@ -128,7 +147,7 @@ describe("applyWorkflowTransform", () => {
       workflows: {
         "src/execution/workflow-entry.ts": {
           workflowEntry: {
-            workflowId: "workflow//./src/execution/workflow-entry//workflowEntry",
+            workflowId: "workflow//eve//workflowEntry",
           },
         },
       },

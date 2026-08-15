@@ -65,6 +65,7 @@ function createTaskResult(label: string): TaskOutcome {
       status: "completed",
       events: [],
       derived: createEmptyDerivedFacts(),
+      traceContexts: [],
     },
     assertions: [],
   };
@@ -275,6 +276,69 @@ describe("runEvals", () => {
     expect(seen).toEqual(["start:one,two", "eval:one", "eval:two", "complete:2"]);
   });
 
+  it("reports eval and traced-session starts before completion", async () => {
+    const traceContext = {
+      spanId: "0123456789abcdef",
+      traceFlags: 1,
+      traceId: "0123456789abcdef0123456789abcdef",
+    };
+    mockArtifacts();
+    mockedRunnerDependencies.executeTask.mockImplementation(
+      async ({ onSessionStart }: { onSessionStart?: (event: unknown) => void }) => {
+        onSessionStart?.({
+          primary: true,
+          sessionId: "session-1",
+          startedAt: "2026-01-01T00:00:00.100Z",
+          traceContext,
+        });
+        const outcome = createTaskResult("done");
+        return {
+          ...outcome,
+          result: {
+            ...outcome.result,
+            traceContexts: [{ ...traceContext, primary: true, sessionId: "session-1" }],
+          },
+        };
+      },
+    );
+
+    const seen: string[] = [];
+    const reporter: EvalReporter = {
+      onRunStart: () => {
+        seen.push("run:start");
+      },
+      onEvalStart: (event) => {
+        seen.push(`eval:start:${event.evaluation.id}`);
+      },
+      onSessionStart: (event) => {
+        seen.push(`session:start:${event.sessionId}:${event.traceContext.traceId}`);
+      },
+      onEvalComplete: (result, context) => {
+        seen.push(`eval:complete:${result.id}:${context?.traceContexts.length}`);
+      },
+      onRunComplete: () => {
+        seen.push("run:complete");
+      },
+    };
+
+    await run({
+      evaluations: [createEval("traced")],
+      target: localTarget,
+      client: unusedClient,
+      appRoot: "/tmp/app",
+      reporters: [reporter],
+      maxConcurrency: 1,
+    });
+
+    expect(seen).toEqual([
+      "run:start",
+      "eval:start:traced",
+      `session:start:session-1:${traceContext.traceId}`,
+      "eval:complete:traced:1",
+      "run:complete",
+    ]);
+  });
+
   it("scopes eval-defined reporters to the evals referencing them", async () => {
     mockArtifacts();
     mockedRunnerDependencies.executeTask.mockResolvedValue(createTaskResult("done"));
@@ -380,6 +444,56 @@ describe("runEvals", () => {
     });
 
     expect(peak).toBe(2);
+  });
+
+  it("applies config timeouts while preserving eval and CLI overrides", async () => {
+    mockArtifacts();
+    mockedRunnerDependencies.executeTask.mockResolvedValue(createTaskResult("done"));
+
+    await run({
+      evaluations: [createEval("uses-config"), createEval("uses-eval", { timeoutMs: 2_000 })],
+      config: {
+        _tag: "EveEvalConfig",
+        timeoutMs: 1_000,
+      },
+      target: localTarget,
+      client: unusedClient,
+      appRoot: "/tmp/app",
+      reporters: [],
+      maxConcurrency: 1,
+    });
+
+    expect(mockedRunnerDependencies.executeTask.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        evaluation: expect.objectContaining({ id: "uses-config", timeoutMs: 1_000 }),
+        timeoutMs: 1_000,
+      }),
+    );
+    expect(mockedRunnerDependencies.executeTask.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        evaluation: expect.objectContaining({ id: "uses-eval", timeoutMs: 2_000 }),
+        timeoutMs: 2_000,
+      }),
+    );
+
+    mockedRunnerDependencies.executeTask.mockClear();
+
+    await run({
+      evaluations: [createEval("uses-cli", { timeoutMs: 2_000 })],
+      config: {
+        _tag: "EveEvalConfig",
+        timeoutMs: 1_000,
+      },
+      target: localTarget,
+      client: unusedClient,
+      appRoot: "/tmp/app",
+      reporters: [],
+      timeoutMs: 500,
+    });
+
+    expect(mockedRunnerDependencies.executeTask).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: 500 }),
+    );
   });
 
   it("drives config reporters across every eval and dedupes eval references", async () => {

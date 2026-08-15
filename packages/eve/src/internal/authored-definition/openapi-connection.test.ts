@@ -14,6 +14,16 @@ function validInput(overrides: Record<string, unknown> = {}) {
 }
 
 describe("normalizeOpenApiConnectionDefinition", () => {
+  it("preserves application-provided operation arguments", () => {
+    const tenantId = () => "tenant_1";
+    const result = normalizeOpenApiConnectionDefinition(
+      validInput({ toolCall: { providedArguments: { tenantId } } }),
+      MSG,
+    );
+
+    expect(result.toolCall?.providedArguments?.tenantId).toBe(tenantId);
+  });
+
   describe("happy path", () => {
     it("accepts a string spec URL and base URL", () => {
       const result = normalizeOpenApiConnectionDefinition(validInput(), MSG);
@@ -44,6 +54,18 @@ describe("normalizeOpenApiConnectionDefinition", () => {
       const result = normalizeOpenApiConnectionDefinition(validInput({ auth: { getToken } }), MSG);
 
       expect(result.auth).toMatchObject({ principalType: "app" });
+    });
+
+    it("preserves a context-aware auth resolver without invoking it at build time", () => {
+      let calls = 0;
+      const auth = () => {
+        calls += 1;
+        return { getToken: async () => ({ token: "x" }) };
+      };
+      const result = normalizeOpenApiConnectionDefinition(validInput({ auth }), MSG);
+
+      expect(result.auth).toBe(auth);
+      expect(calls).toBe(0);
     });
   });
 

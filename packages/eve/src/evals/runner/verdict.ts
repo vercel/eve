@@ -11,6 +11,7 @@ import type { AssertionResult, EveEvalVerdict } from "#evals/types.js";
 export function computeEvalVerdict(input: {
   readonly error?: string;
   readonly assertions: readonly AssertionResult[];
+  readonly skipReason?: string;
 }): EveEvalVerdict {
   if (input.error !== undefined) return "failed";
 
@@ -21,5 +22,6 @@ export function computeEvalVerdict(input: {
     demoted = true;
   }
 
+  if (input.skipReason !== undefined) return "skipped";
   return demoted ? "scored" : "passed";
 }

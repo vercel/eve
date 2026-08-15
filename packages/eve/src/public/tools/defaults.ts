@@ -10,7 +10,6 @@ import { READ_FILE_TOOL_DEFINITION } from "#runtime/framework-tools/read-file.js
 import { SKILL_TOOL_DEFINITION } from "#runtime/framework-tools/skill.js";
 import { TODO_TOOL_DEFINITION } from "#runtime/framework-tools/todo.js";
 import { WEB_FETCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-fetch.js";
-import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
 import { WRITE_FILE_TOOL_DEFINITION } from "#runtime/framework-tools/write-file.js";
 import type { ToolDefinition } from "#public/definitions/tool.js";
 import { toPublicToolDefinition } from "#public/tools/internal.js";
@@ -61,32 +60,10 @@ export const webFetch: ToolDefinition = toPublicToolDefinition(WEB_FETCH_TOOL_DE
 export const todo: ToolDefinition = toPublicToolDefinition(TODO_TOOL_DEFINITION);
 
 /**
- * Framework-provided skill loading tool (`load_skill`). Reads a named skill's
- * instructions from the sandbox and returns them as the tool result. It is
- * only useful when the agent declares skills: with no skills available the
+ * Framework-provided skill loading tool (`load_skill`). Returns a named
+ * authored skill's instructions directly; dynamic skills remain sandbox-backed.
+ * It is only useful when the agent declares skills: with no skills available the
  * framework does not surface skill descriptions to the model, so the model has
  * nothing to load.
  */
 export const loadSkill: ToolDefinition = toPublicToolDefinition(SKILL_TOOL_DEFINITION);
-
-/**
- * Framework-provided web search tool. The provider manages the real
- * implementation; the harness injects it at step time based on the model
- * provider. The local `execute` here is a throwing stub: calling it directly
- * fails. To run your own search instead, replace this with `defineTool()` in
- * `agent/tools/web_search.ts`.
- *
- * This default has no input schema (`inputSchema` is empty): the
- * provider-managed implementation defines its own contract at step time, so it
- * is shaped differently from the others, which preserve their real schemas.
- */
-export const webSearch: ToolDefinition = {
-  description: WEB_SEARCH_TOOL_DEFINITION.description,
-  inputSchema: {} as never,
-  execute(_input) {
-    throw new Error(
-      "web_search is provider-managed and has no local execute. " +
-        "Override with defineTool() to provide a custom implementation.",
-    );
-  },
-};

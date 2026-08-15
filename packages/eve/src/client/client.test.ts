@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { AgentInfoResponseError } from "#client/agent-info-error.js";
 import { Client } from "#client/client.js";
+import { ClientError } from "#client/client-error.js";
 import type { AgentInfoResult } from "#client/types.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
 import { resolveRemoteDevelopmentClientOptions } from "#services/dev-client/client-options.js";
@@ -10,7 +12,7 @@ const AGENT_INFO: AgentInfoResult = {
   agent: {
     agentRoot: "/tmp/weather-agent/agent",
     appRoot: "/tmp/weather-agent",
-    model: { id: "openai/gpt-5.5" },
+    model: { id: "openai/gpt-5.5", routing: { kind: "gateway", target: "openai" } },
     name: "Weather Agent",
   },
   capabilities: { devRoutes: true },
@@ -18,7 +20,7 @@ const AGENT_INFO: AgentInfoResult = {
   connections: [],
   diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
   hooks: [],
-  instructions: { dynamic: [], static: null },
+  instructions: { dynamic: [], static: [] },
   kind: "eve-agent-info",
   mode: "development",
   sandbox: null,
@@ -33,7 +35,7 @@ const AGENT_INFO: AgentInfoResult = {
     framework: [],
     reserved: [],
   },
-  version: 1,
+  version: 2,
   workflow: { enabled: false, toolName: "Workflow" },
   workspace: { resourceRoot: null, rootEntries: [] },
 };
@@ -44,6 +46,35 @@ afterEach(() => {
 });
 
 describe("Client request policy", () => {
+  it("includes host query parameters on every agent request", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json(AGENT_INFO))
+      .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`),
+      );
+    const client = new Client({
+      host: "https://eve.test?x-vercel-protection-bypass=secret",
+    });
+
+    await client.info();
+    await client.health();
+    await client.fetch("/custom");
+    await (await client.sessions.create({ message: "hello" })).response.result();
+
+    expect(fetchMock.mock.calls).toHaveLength(5);
+    for (const [request] of fetchMock.mock.calls) {
+      expect(new URL(String(request)).searchParams.get("x-vercel-protection-bypass")).toBe(
+        "secret",
+      );
+    }
+  });
+
   it("enforces its redirect policy for info, health, raw fetch, and sessions", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -51,7 +82,7 @@ describe("Client request policy", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
       .mockResolvedValueOnce(
-        Response.json({ continuationToken: "eve:test", sessionId: "session_1" }, { status: 202 }),
+        Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
       )
       .mockResolvedValueOnce(
         new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`),
@@ -61,7 +92,7 @@ describe("Client request policy", () => {
     await client.info();
     await client.health();
     await client.fetch("/custom", { redirect: "follow" });
-    await (await client.session().send("hello")).result();
+    await (await client.sessions.create({ message: "hello" })).response.result();
 
     expect(fetchMock.mock.calls).toHaveLength(5);
     for (const [, init] of fetchMock.mock.calls) {
@@ -83,6 +114,52 @@ describe("Client request policy", () => {
     const sent = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
     expect(sent.get("authorization")).toBe("Bearer oidc-tok");
     expect(sent.get("x-vercel-trusted-oidc-idp-token")).toBe("oidc-tok");
+  });
+
+  it("lets turn authorization override the client bearer while retaining trusted OIDC", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`),
+      );
+    const client = new Client({
+      host: "https://eve.test",
+      auth: { vercelOidc: { token: "oidc-tok" } },
+    });
+
+    await (
+      await client.sessions.create({
+        headers: { authorization: "Bearer application-user" },
+        message: "hello",
+      })
+    ).response.result();
+
+    expect(fetchMock.mock.calls).toHaveLength(2);
+    for (const [, init] of fetchMock.mock.calls) {
+      const sent = new Headers(init?.headers);
+      expect(sent.get("authorization")).toBe("Bearer application-user");
+      expect(sent.get("x-vercel-trusted-oidc-idp-token")).toBe("oidc-tok");
+    }
+  });
+
+  it("includes response headers in info request errors", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("Redirecting...", {
+        status: 302,
+        headers: { location: "https://vercel.com/sso-api?url=https://eve.test" },
+      }),
+    );
+    const client = new Client({ host: "https://eve.test", redirect: "manual" });
+
+    const error = await client.info().catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(ClientError);
+    expect((error as ClientError).headers.location).toBe(
+      "https://vercel.com/sso-api?url=https://eve.test",
+    );
   });
 
   it("keeps an in-flight remote request on one credential snapshot after rollback", async () => {
@@ -161,13 +238,18 @@ describe("Client request policy", () => {
     );
     const client = new Client({ host: "https://eve.test" });
 
-    await expect(client.info()).rejects.toThrow(SyntaxError);
+    await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
 
   it("rejects an incomplete agent info payload", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({
-        agent: { model: { id: "openai/gpt-5.5" } },
+        agent: {
+          model: {
+            id: "openai/gpt-5.5",
+            routing: { kind: "gateway", target: "openai" },
+          },
+        },
         diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
         kind: "eve-agent-info",
         version: 1,
@@ -175,7 +257,39 @@ describe("Client request policy", () => {
     );
     const client = new Client({ host: "https://eve.test" });
 
-    await expect(client.info()).rejects.toThrow(SyntaxError);
+    await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
+  });
+
+  it("names the offending fields when the agent info payload is incomplete", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        agent: {
+          model: {
+            id: "openai/gpt-5.5",
+            routing: { kind: "gateway", target: "openai" },
+          },
+        },
+        diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
+        kind: "eve-agent-info",
+        version: 1,
+      }),
+    );
+    const client = new Client({ host: "https://eve.test" });
+
+    const error = await client.info().catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(AgentInfoResponseError);
+    expect((error as AgentInfoResponseError).issues.length).toBeGreaterThan(0);
+    expect((error as AgentInfoResponseError).message).toContain(":");
+  });
+
+  it("rejects a non-JSON body from the agent info route", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<!doctype html>", { headers: { "content-type": "text/html" } }),
+    );
+    const client = new Client({ host: "https://eve.test" });
+
+    await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
 
   it.each([null, { kind: "gateway", connected: true }, { kind: "external" }])(
@@ -192,7 +306,7 @@ describe("Client request policy", () => {
       );
       const client = new Client({ host: "https://eve.test" });
 
-      await expect(client.info()).rejects.toThrow(SyntaxError);
+      await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
     },
   );
 });

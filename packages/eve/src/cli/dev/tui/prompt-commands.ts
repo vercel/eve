@@ -1,11 +1,17 @@
-export type PromptCommandExtensionName = "model" | "channels" | "deploy" | "login" | "vc";
+export type PromptCommandExtensionName = "model" | "add" | "deploy" | "vc:install" | "vc:login";
+
+type PromptCommandTarget = "local" | "remote";
 
 /** The slash commands the prompt accepts. */
 export type PromptCommand =
-  | { type: "new" }
+  | { type: "reset" }
+  | { type: "cancel" }
+  | { type: "clear" }
+  | { type: "compact" }
   | { type: "exit" }
   | { type: "help" }
   | { type: "loglevel"; argument: string }
+  | { type: "traces"; argument: string }
   | { type: "extension"; name: PromptCommandExtensionName; argument: string };
 
 /**
@@ -27,41 +33,73 @@ export interface PromptCommandSpec {
   readonly build: (argument: string) => PromptCommand;
 }
 
+interface PromptCommandDefinition extends PromptCommandSpec {
+  readonly targets: readonly PromptCommandTarget[];
+}
+
 /**
  * Every slash command the prompt accepts, in typeahead display order. One
  * module owns the command list so the runner's dispatch, the renderer's
  * transcript-echo suppression, and command discovery cannot drift apart.
  */
-export const PROMPT_COMMANDS: readonly PromptCommandSpec[] = [
+const PROMPT_COMMAND_DEFINITIONS = [
   // `help` leads so that the typeahead's default highlight — what a bare `/`
-  // plus Enter submits — is the safest command, not session-resetting `/new`.
+  // plus Enter submits — is the safest command, not session-resetting `/reset`.
   {
     name: "help",
     aliases: [],
     description: "Show available commands",
     takesArgument: false,
     build: () => ({ type: "help" }),
+    targets: ["local", "remote"],
   },
   {
-    name: "new",
+    name: "reset",
     aliases: [],
     description: "Start a fresh session",
     takesArgument: false,
-    build: () => ({ type: "new" }),
+    build: () => ({ type: "reset" }),
+    targets: ["local", "remote"],
   },
   {
-    name: "vc",
+    name: "cancel",
+    aliases: [],
+    description: "Cancel the running turn",
+    takesArgument: false,
+    build: () => ({ type: "cancel" }),
+    targets: ["local", "remote"],
+  },
+  {
+    name: "clear",
+    aliases: ["new"],
+    description: "Clear the current session context",
+    takesArgument: false,
+    build: () => ({ type: "clear" }),
+    targets: ["local", "remote"],
+  },
+  {
+    name: "compact",
+    aliases: [],
+    description: "Compact the current session context",
+    takesArgument: false,
+    build: () => ({ type: "compact" }),
+    targets: ["local", "remote"],
+  },
+  {
+    name: "vc:install",
     aliases: [],
     description: "Install the Vercel CLI",
     takesArgument: false,
-    build: () => ({ type: "extension", name: "vc", argument: "" }),
+    build: () => ({ type: "extension", name: "vc:install", argument: "" }),
+    targets: ["local", "remote"],
   },
   {
-    name: "login",
+    name: "vc:login",
     aliases: [],
-    description: "Log in to Vercel",
+    description: "Authenticate with Vercel",
     takesArgument: false,
-    build: () => ({ type: "extension", name: "login", argument: "" }),
+    build: () => ({ type: "extension", name: "vc:login", argument: "" }),
+    targets: ["local", "remote"],
   },
   {
     name: "model",
@@ -70,6 +108,7 @@ export const PROMPT_COMMANDS: readonly PromptCommandSpec[] = [
     argumentHint: "[provider/model]",
     takesArgument: true,
     build: (argument) => ({ type: "extension", name: "model", argument }),
+    targets: ["local"],
   },
   {
     name: "loglevel",
@@ -78,13 +117,24 @@ export const PROMPT_COMMANDS: readonly PromptCommandSpec[] = [
     argumentHint: "[all|stderr|sandbox|none]",
     takesArgument: true,
     build: (argument) => ({ type: "loglevel", argument }),
+    targets: ["local", "remote"],
   },
   {
-    name: "channels",
+    name: "traces",
     aliases: [],
-    description: "Add chat channels to the agent",
+    description: "Open the local trace viewer",
+    argumentHint: "[trace]",
+    takesArgument: true,
+    build: (argument) => ({ type: "traces", argument }),
+    targets: ["local"],
+  },
+  {
+    name: "add",
+    aliases: [],
+    description: "Add an integration from the registry",
     takesArgument: false,
-    build: () => ({ type: "extension", name: "channels", argument: "" }),
+    build: () => ({ type: "extension", name: "add", argument: "" }),
+    targets: ["local"],
   },
   {
     name: "deploy",
@@ -92,6 +142,7 @@ export const PROMPT_COMMANDS: readonly PromptCommandSpec[] = [
     description: "Deploy the agent to Vercel",
     takesArgument: false,
     build: () => ({ type: "extension", name: "deploy", argument: "" }),
+    targets: ["local"],
   },
   {
     name: "exit",
@@ -99,14 +150,35 @@ export const PROMPT_COMMANDS: readonly PromptCommandSpec[] = [
     description: "Quit the TUI",
     takesArgument: false,
     build: () => ({ type: "exit" }),
+    targets: ["local", "remote"],
   },
-];
+] satisfies readonly PromptCommandDefinition[];
+
+export const PROMPT_COMMANDS: readonly PromptCommandSpec[] = PROMPT_COMMAND_DEFINITIONS;
+
+export function promptCommandsFor(target: PromptCommandTarget): readonly PromptCommandSpec[] {
+  return PROMPT_COMMAND_DEFINITIONS.filter((definition) =>
+    definition.targets.some((supportedTarget) => supportedTarget === target),
+  );
+}
+
+/** Whether a command runs against this target — the one authority dispatch shares with discovery. */
+export function isPromptCommandAvailableFor(
+  name: PromptCommandExtensionName,
+  target: PromptCommandTarget,
+): boolean {
+  const definition = PROMPT_COMMAND_DEFINITIONS.find((entry) => entry.name === name);
+  const targets: readonly PromptCommandTarget[] | undefined = definition?.targets;
+  return targets?.includes(target) ?? false;
+}
 
 /**
- * Recognizes the slash commands the prompt accepts. `/new` clears the
- * session and transcript; `/exit` (and `/quit`) terminate the TUI like
- * Ctrl+C; extension commands are dispatched outside the runner. Anything
- * else — including unknown `/text` — is a normal message.
+ * Recognizes the slash commands the prompt accepts. `/reset` clears the
+ * session and transcript; `/cancel` stops the running turn; `/clear` (and
+ * `/new`) clears context; `/compact` queues context compaction; `/exit` (and
+ * `/quit`) terminate the TUI like Ctrl+C; extension commands are dispatched
+ * outside the runner. Anything else — including unknown `/text` — is a normal
+ * message.
  */
 export function parsePromptCommand(prompt: string): PromptCommand | null {
   const trimmed = prompt.trim();
@@ -132,8 +204,10 @@ export function isPromptControlCommand(prompt: string): boolean {
  * The table `/help` prints: one line per command — slash name, argument
  * hint, and aliases padded into a column, description after.
  */
-export function formatPromptCommandHelp(): string {
-  const entries = PROMPT_COMMANDS.map((spec) => {
+export function formatPromptCommandHelp(
+  commands: readonly PromptCommandSpec[] = PROMPT_COMMANDS,
+): string {
+  const entries = commands.map((spec) => {
     const hint = spec.argumentHint === undefined ? "" : ` ${spec.argumentHint}`;
     const aliases = spec.aliases.map((alias) => ` (/${alias})`).join("");
     return { invocation: `/${spec.name}${hint}${aliases}`, description: spec.description };

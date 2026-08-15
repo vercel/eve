@@ -27,8 +27,15 @@ import {
   type SearchActionOption,
   type SelectState,
 } from "#setup/cli/select-state.js";
-import type { SelectNotice } from "#setup/prompter.js";
+import type { SelectMetadata, SelectNotice } from "#setup/prompter.js";
+import type { ModelSettingsRequest } from "#setup/flows/model.js";
 
+import {
+  modelEditorMenuRows,
+  reasoningPositions,
+  type ModelEditorRowId,
+  type ModelEditorState,
+} from "./model-editor.js";
 import type { ProviderPickerPhase } from "./provider-picker.js";
 import { maskLine, visibleLine, type LineState } from "./line-editor.js";
 import type { Theme } from "./theme.js";
@@ -38,7 +45,7 @@ import {
   renderInputWithBlockCursor,
   visibleLength,
   wrapVisibleLine,
-} from "./terminal-text.js";
+} from "#cli/ui/terminal-text.js";
 
 function clip(line: string, width: number): string {
   return clipVisible(line, width);
@@ -49,6 +56,10 @@ export type SetupPanelOption = PromptOption<string>;
 
 interface SetupQuestionPanelBase {
   message: string;
+  /** Inert context rendered beneath the heading and above the controls. */
+  description?: string;
+  /** Labeled facts rendered beneath the description and above the controls. */
+  metadata?: readonly SelectMetadata[];
   error?: string;
   /** Outcome lines from earlier menu laps, shown beneath the options. */
   notices?: readonly SelectNotice[];
@@ -60,16 +71,17 @@ interface SetupSelectPanelBase extends SetupQuestionPanelBase {
   select: SelectState;
   /** Live frame rendered beside a searchable input while it loads replacement rows. */
   loadingFrame?: string;
+  /** A dim-inverse affordance appended to the cursor row, e.g. ` ↵ change `. */
+  cursorBadge?: string;
 }
 
 /**
  * A menu row that turns into an inline editor while the cursor rests on it.
  * `optionValue` names the row; the `editor` discriminant chooses the widget —
  * an in-place rename field, or a masked provider-key field with its own
- * validation phases. Hovering the row makes it editable directly (typing and
- * backspace edit in place), so the editor's text and a blinking caret render
- * only on that row. Layout and inline editing are orthogonal, so the editor
- * travels as a payload rather than as its own panel `kind`.
+ * validation phases. Rename defaults stay placeholders until typing begins;
+ * provider keys edit in place. Layout and inline editing are orthogonal, so
+ * the editor travels as a payload rather than as its own panel `kind`.
  */
 interface SetupInlineEditRow {
   optionValue: string;
@@ -95,7 +107,11 @@ interface SetupInlineEditRow {
  */
 type SetupOptionSelectPanelState =
   | (SetupSelectPanelBase & { kind: "single" })
-  | (SetupSelectPanelBase & { kind: "search"; placeholder?: string })
+  | (SetupSelectPanelBase & {
+      kind: "search";
+      layout?: "task-list";
+      placeholder?: string;
+    })
   | (SetupSelectPanelBase & { kind: "multi" })
   | (SetupSelectPanelBase & { kind: "searchable-multi"; placeholder?: string })
   | (SetupSelectPanelBase & { kind: "stacked" })
@@ -150,16 +166,26 @@ export interface FlowPanelIndicator {
   color: "green" | "yellow";
 }
 
+/** One live flow status after its animation frame and visual intent are resolved. */
+export type FlowPanelStatus =
+  | { kind: "progress"; text: string; indicator: FlowPanelIndicator }
+  | {
+      kind: "external-action";
+      text: string;
+      emphasis: string;
+      indicator: FlowPanelIndicator;
+    };
+
 export type FlowPanelContent =
   | {
       kind: "question";
       rows: readonly string[];
       /** The install wait keeps its indicator above the concurrent actions. */
-      status?: { text: string; indicator: FlowPanelIndicator };
+      status?: FlowPanelStatus;
     }
   | {
       kind: "status";
-      status: { text: string; indicator: FlowPanelIndicator };
+      status: FlowPanelStatus;
       /** Latest child-process output shown transiently beneath the status. */
       preview?: string;
     }
@@ -177,6 +203,9 @@ export interface FlowPanelState {
 /** How many option rows a searchable panel shows before windowing. */
 const SEARCH_VIEW_SIZE = 8;
 
+/** The railed searchable list's constant viewport. */
+const RAILED_VIEW_SIZE = 5;
+
 /** The flow panel keeps only the freshest progress in view. */
 const FLOW_PANEL_LINE_CAP = 6;
 
@@ -188,6 +217,8 @@ function questionFooter(hints: readonly string[], theme: Theme): string[] {
 const BOLD_OR_DIM_CLOSE = "\x1b[22m";
 const DIM_OPEN = "\x1b[2m";
 const ANSI_FOREGROUND_COLOR = new RegExp(`${String.fromCharCode(27)}\\[(?:3[0-9]|9[0-7])m`, "g");
+const BLUE_OPEN = "\x1b[34m";
+const FOREGROUND_RESET = "\x1b[39m";
 
 /**
  * Dims a line that may carry embedded bold spans (e.g. a flow bolding a
@@ -198,9 +229,29 @@ function dimWithEmphasis(text: string, theme: Theme): string {
   return theme.colors.dim(text.replaceAll(BOLD_OR_DIM_CLOSE, `${BOLD_OR_DIM_CLOSE}${DIM_OPEN}`));
 }
 
+/** Restores normal intensity for a span nested inside an otherwise dim hint. */
+function solidWithinDim(text: string, theme: Theme): string {
+  if (!theme.color) return text;
+  return `${BOLD_OR_DIM_CLOSE}${text}${DIM_OPEN}`;
+}
+
 /** A selected row must not inherit an authored hint color. */
 function foregroundWithEmphasis(text: string): string {
-  return text.replaceAll(DIM_OPEN, "").replace(ANSI_FOREGROUND_COLOR, "");
+  // Blue is the accent the selected row keeps (drafted values, adjust hints);
+  // every other authored color normalizes to the highlight's foreground, and a
+  // reset survives only when it closes a kept blue span.
+  let blueOpen = false;
+  return text.replaceAll(DIM_OPEN, "").replace(ANSI_FOREGROUND_COLOR, (code) => {
+    if (code === BLUE_OPEN) {
+      blueOpen = true;
+      return code;
+    }
+    if (code === FOREGROUND_RESET && blueOpen) {
+      blueOpen = false;
+      return code;
+    }
+    return "";
+  });
 }
 
 function toneGlyph(tone: FlowPanelLine["tone"], theme: Theme): string {
@@ -223,6 +274,21 @@ function renderIndicator(indicator: FlowPanelIndicator, theme: Theme): string {
     : theme.colors.yellow(indicator.glyph);
 }
 
+function renderStatusText(status: FlowPanelStatus, theme: Theme): string {
+  if (status.kind === "progress") return theme.colors.dim(status.text);
+
+  const start = status.text.indexOf(status.emphasis);
+  if (start === -1) return theme.colors.dim(status.text);
+  const end = start + status.emphasis.length;
+  return `${theme.colors.dim(status.text.slice(0, start))}${theme.colors.yellow(
+    status.text.slice(start, end),
+  )}${theme.colors.dim(status.text.slice(end))}`;
+}
+
+function renderFlowPanelStatus(status: FlowPanelStatus, theme: Theme): string {
+  return `${renderIndicator(status.indicator, theme)} ${renderStatusText(status, theme)}`;
+}
+
 /**
  * Paints the bordered flow panel. Everything a running command produces lives
  * here — progress, questions, the status indicator — and the panel vanishes
@@ -231,7 +297,9 @@ function renderIndicator(indicator: FlowPanelIndicator, theme: Theme): string {
  */
 export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: number): string[] {
   const c = theme.colors;
-  const rows: string[] = [c.dim(theme.glyph.hrule.repeat(Math.max(1, width)))];
+  // Avoid the terminal's final column: writing into it can trigger an implicit
+  // wrap that the live-region row counter cannot observe, leaking old frames.
+  const rows: string[] = [c.dim(theme.glyph.hrule.repeat(Math.max(1, width - 1)))];
   if (state.title.length > 0) {
     rows.push(`  ${c.bold(state.title)}`);
   }
@@ -239,8 +307,12 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
 
   const recent = state.lines.slice(-FLOW_PANEL_LINE_CAP);
   for (const line of recent) {
-    const body = line.tone === "info" ? c.dim(line.text) : line.text;
-    rows.push(`  ${toneGlyph(line.tone, theme)} ${body}`);
+    const text = line.text.split("\n");
+    for (const [index, part] of text.entries()) {
+      const body = line.tone === "info" ? c.dim(part) : part;
+      const prefix = index === 0 ? `${toneGlyph(line.tone, theme)} ` : "  ";
+      rows.push(`  ${prefix}${body}`);
+    }
   }
   if (recent.length > 0) {
     rows.push("");
@@ -250,26 +322,24 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
     case "question":
       // The install wait's question rides beneath its live status indicator.
       if (state.content.status !== undefined) {
-        rows.push(
-          `  ${renderIndicator(state.content.status.indicator, theme)} ${c.dim(state.content.status.text)}`,
-          "",
-        );
+        rows.push(`  ${renderFlowPanelStatus(state.content.status, theme)}`, "");
       }
       rows.push(...state.content.rows);
       break;
     case "status":
-      rows.push(
-        `  ${renderIndicator(state.content.status.indicator, theme)} ${c.dim(state.content.status.text)}`,
-      );
+      rows.push(`  ${renderFlowPanelStatus(state.content.status, theme)}`);
       if (state.content.preview !== undefined) {
-        rows.push(`    ${c.dim(state.content.preview)}`);
+        for (const line of state.content.preview.split("\n")) {
+          rows.push(`    ${c.dim(line)}`);
+        }
       }
       break;
-    case "preview":
-      rows.push(
-        `  ${renderIndicator(state.content.indicator, theme)} ${c.dim(state.content.text)}`,
-      );
+    case "preview": {
+      const [first, ...rest] = state.content.text.split("\n");
+      rows.push(`  ${renderIndicator(state.content.indicator, theme)} ${c.dim(first ?? "")}`);
+      for (const line of rest) rows.push(`    ${c.dim(line)}`);
       break;
+    }
     case "idle":
       // A flow between phases must never look dead: boxes run subprocesses
       // without narrating every gap, so the panel keeps a live pulse.
@@ -289,18 +359,22 @@ function optionRow(input: {
   isCursor: boolean;
   isChecked: boolean;
   placeholder: boolean;
+  /** Railed lists lead resting rows with the `▏` rail and drop the hint dot. */
+  railed?: boolean;
   hintPadding?: number;
   theme: Theme;
 }): string {
   const { option, theme } = input;
+  const railed = input.railed === true;
   return renderOptionRow({
     colors: theme.colors,
     glyphs: {
       pointer: theme.glyph.pointer,
       selectedPointer: theme.glyph.selectedPointer,
       success: theme.glyph.success,
-      placeholder: theme.glyph.option,
-      dot: theme.glyph.dot,
+      placeholder: railed ? theme.glyph.caret : theme.glyph.option,
+      dot: railed ? "" : theme.glyph.dot,
+      warning: theme.glyph.warning,
     },
     label: option.label,
     hint: option.hint,
@@ -330,7 +404,7 @@ function selectPresentation(state: SetupOptionSelectPanelState): SelectPresentat
       return {
         selection: "single",
         filter: { placeholder: state.placeholder },
-        layout: "plain",
+        layout: state.layout ?? "plain",
         edit: undefined,
       };
     case "multi":
@@ -367,10 +441,16 @@ function searchFilter(
   placeholder: string | undefined,
   loadingFrame: string | undefined,
   theme: Theme,
+  railed: boolean,
 ): string {
   const caret = theme.colors.dim(theme.glyph.caret);
   let input = caret;
-  if (filter.length > 0) {
+  if (railed) {
+    // The railed list's filter line: `▏ query▏`, or the dim placeholder.
+    input = `${caret} ${
+      filter.length > 0 ? filter + caret : theme.colors.dim(placeholder ?? "type to search")
+    }`;
+  } else if (filter.length > 0) {
     input = filter + caret;
   } else if (placeholder !== undefined) {
     input = theme.colors.dim(`> ${placeholder}`);
@@ -379,13 +459,31 @@ function searchFilter(
   return `${input} ${theme.colors.yellow(loadingFrame)}`;
 }
 
+/**
+ * Whether a select renders as the railed searchable list — the one component
+ * behind the model catalog, team, and project pickers: `▏`-railed rows, an
+ * inverse cursor row trailed by the `↵` badge, and a rail-led filter line.
+ */
+function isRailedSearch(presentation: SelectPresentation): boolean {
+  return (
+    presentation.filter !== undefined &&
+    presentation.layout === "plain" &&
+    presentation.selection === "single" &&
+    presentation.edit === undefined
+  );
+}
+
 function selectViewSize(input: {
   search: boolean;
   filter: string;
   featuredLead: number;
   optionCount: number;
+  railed: boolean;
 }): number {
   if (!input.search) return input.optionCount;
+  // The railed list keeps a constant five-row viewport; other searchable
+  // presentations open on their featured lead when one exists.
+  if (input.railed) return RAILED_VIEW_SIZE;
   if (input.filter === "" && input.featuredLead > 0) {
     return Math.min(input.featuredLead, SEARCH_VIEW_SIZE);
   }
@@ -407,9 +505,17 @@ function renameHint(
   theme: Theme,
 ): SetupPanelOption {
   const value = rename.editor.text || rename.defaultValue;
-  const caretAt = rename.editor.text.length === 0 ? value.length : rename.editor.cursor;
-  const caret = caretVisible ? theme.colors.cyan(theme.glyph.caret) : "";
-  const editableValue = `${value.slice(0, caretAt)}${caret}${value.slice(caretAt)}`;
+  const caretLine = { text: value, cursor: rename.editor.cursor };
+  // The placeholder caret overlays its first character. Entered text uses the
+  // editor's real cursor position, including the stable trailing cell at EOF.
+  let editableValue = renderInputWithBlockCursor({
+    ...visibleLine(caretLine, Number.POSITIVE_INFINITY),
+    visible: caretVisible,
+    inverse: theme.colors.inverse,
+  });
+  if (rename.editor.text.length > 0) {
+    editableValue = solidWithinDim(editableValue, theme);
+  }
   return { ...option, hint: rename.formatHint(editableValue) };
 }
 
@@ -423,19 +529,25 @@ function keyHint(
   const phase = key.phase;
   if (phase.kind === "inactive") return option;
 
+  const c = theme.colors;
   const display = maskLine(phase.editor);
   const cursorEnabled = phase.kind !== "validating" && phase.kind !== "invalid";
-  let prefix = "";
+  // The state badge trails the input: `↵ validate` while editing, a yellow
+  // `▪ validating` while the check runs, a red refusal afterward — all
+  // background-free.
   let suffix = "";
-  if (phase.kind === "validating") {
-    prefix = "Validating… ";
+  if (phase.kind === "editing") {
+    suffix = `  ${enterBadge(theme, "validate")}`;
+  } else if (phase.kind === "validating") {
+    suffix = `  ${c.yellow(theme.glyph.validating)} ${c.dim("validating")}`;
   } else if (phase.kind === "invalid") {
-    suffix = `    ${theme.colors.red(`${theme.glyph.error} ${theme.colors.bold("Invalid key")}`)}`;
+    suffix = `  ${c.red(`${theme.glyph.error} API key is not valid`)}`;
   }
 
+  const rail = `${theme.glyph.elbow} `;
   const placeholder = phase.editor.text.length === 0 ? "type your key" : undefined;
   const cursorLine = placeholder === undefined ? display : { text: placeholder, cursor: 0 };
-  const inputWidth = Math.max(1, maxHintWidth - visibleLength(`>  ${prefix}${suffix}`));
+  const inputWidth = Math.max(1, maxHintWidth - visibleLength(`${rail}${suffix}`));
   const visible = visibleLine(cursorLine, inputWidth, theme.glyph.ellipsis);
   const value = cursorEnabled
     ? renderInputWithBlockCursor({
@@ -444,7 +556,7 @@ function keyHint(
         inverse: theme.colors.inverse,
       })
     : renderInputText(`${visible.before}${visible.under}${visible.after}`);
-  return { ...option, hint: `>  ${prefix}${value}${suffix}` };
+  return { ...option, hint: `${rail}${value}${suffix}` };
 }
 
 /**
@@ -481,13 +593,10 @@ function optionWithoutStackedHint(
 
 function optionUsesPlaceholder(
   presentation: SelectPresentation,
-  index: number,
-  optionCount: number,
+  isTrailingTaskAction: boolean,
 ): boolean {
   // A type-ahead list draws no placeholder dots — the filter row leads instead.
-  const isFiltered = presentation.filter !== undefined;
-  // The task list's trailing action (Done) reads as a button, not an option.
-  const isTrailingTaskAction = presentation.layout === "task-list" && index === optionCount - 1;
+  const isFiltered = presentation.filter !== undefined && presentation.layout !== "task-list";
   // Checklists and the explicit menu layouts (stacked, task-list) present every
   // row as a pickable option, so each carries the placeholder dot.
   const isMultiSelect = presentation.selection === "multiple";
@@ -507,7 +616,7 @@ function appendSelectOptionRows(input: {
   visibleLabelWidth: number;
   width: number;
   theme: Theme;
-}): void {
+}): boolean {
   const {
     rows,
     state,
@@ -521,11 +630,18 @@ function appendSelectOptionRows(input: {
     theme,
   } = input;
   const c = theme.colors;
+  let renderedTrailingTaskAction = false;
 
   for (let index = start; index < end; index += 1) {
     const option = visible[index]!;
     const isCursor = index === cursor;
-    if (presentation.layout === "task-list" && index === end - 1 && index > start) {
+    const isTrailingTaskAction =
+      presentation.layout === "task-list" && option.trailingAction === true;
+    if (isTrailingTaskAction) {
+      appendSelectNotices(rows, state.notices, presentation.layout, theme, width);
+      renderedTrailingTaskAction = true;
+    }
+    if (isTrailingTaskAction && (index > start || (state.notices?.length ?? 0) > 0)) {
       rows.push("");
     }
 
@@ -538,15 +654,25 @@ function appendSelectOptionRows(input: {
       rendered,
       presentation.layout,
     );
+    const railed = isRailedSearch(presentation);
+    // Railed lists carry the Enter affordance on the cursor row by default;
+    // an explicit cursorBadge (the provider picker's `↵ change`) still wins.
+    const rowBadge =
+      state.cursorBadge ?? (railed && !isTrailingTaskAction ? enterBadge(theme) : undefined);
+    const badge = isCursor && rowBadge !== undefined ? ` ${rowBadge}` : "";
     rows.push(
       `  ${optionRow({
         option: rowOption,
         isCursor,
-        isChecked: presentation.selection === "multiple" && state.select.selected.has(option.value),
-        placeholder: optionUsesPlaceholder(presentation, index, visible.length),
+        isChecked:
+          presentation.selection === "multiple"
+            ? state.select.selected.has(option.value)
+            : option.checked === true,
+        placeholder: railed || optionUsesPlaceholder(presentation, isTrailingTaskAction),
+        railed,
         hintPadding: Math.max(0, visibleLabelWidth - rowOption.label.length),
         theme,
-      })}`,
+      })}${badge}`,
     );
 
     if (stackedHint !== undefined) {
@@ -569,15 +695,11 @@ function appendSelectOptionRows(input: {
     // Disabled descriptions explain why an inert row cannot be selected, so
     // keep them visible even though the cursor skips that row.
     if (option.description !== undefined && (option.disabled === true || isCursor)) {
-      const description = c.dim(option.description);
-      rows.push(
-        presentation.layout === "stacked"
-          ? `  ${renderOptionRowContinuation(description)}`
-          : `    ${description}`,
-      );
+      rows.push(`  ${renderOptionRowContinuation(c.dim(option.description))}`);
     }
     if (presentation.layout === "stacked" && index < end - 1) rows.push("");
   }
+  return renderedTrailingTaskAction;
 }
 
 function appendSubmitRow(rows: string[], cursor: number, submitIndex: number, theme: Theme): void {
@@ -686,15 +808,36 @@ export function renderSelectQuestion(
   const submitIndex = presentation.selection === "multiple" ? submitRowIndex(visible) : -1;
   const cursor = state.select.cursor;
 
+  const railed = isRailedSearch(presentation);
   const rows = selectMessageRows(state.message, presentation.layout, theme);
+  if (state.description !== undefined || state.metadata !== undefined) {
+    if (rows.at(-1) === "") rows.pop();
+    if (state.description !== undefined) {
+      for (const line of wrapVisibleLine(state.description, Math.max(1, width - 4))) {
+        rows.push(`  ${c.dim(line)}`);
+      }
+    }
+    for (const { label, value } of state.metadata ?? []) {
+      const prefix = `${label}: `;
+      const wrapped = wrapVisibleLine(value, Math.max(1, width - 4 - prefix.length));
+      rows.push(`  ${c.dim(`${prefix}${wrapped[0] ?? ""}`)}`);
+      for (const line of wrapped.slice(1)) {
+        rows.push(`  ${c.dim(`${" ".repeat(prefix.length)}${line}`)}`);
+      }
+    }
+    rows.push("");
+  }
 
   if (presentation.filter !== undefined) {
+    // The railed filter line indents one extra cell so its rail sits in the
+    // option rows' glyph column.
     rows.push(
-      `  ${searchFilter(
+      `  ${railed ? " " : ""}${searchFilter(
         state.select.filter,
         presentation.filter.placeholder,
         state.loadingFrame,
         theme,
+        railed,
       )}`,
     );
   }
@@ -706,6 +849,7 @@ export function renderSelectQuestion(
     filter: state.select.filter,
     featuredLead,
     optionCount: visible.length,
+    railed,
   });
   const start = Math.max(
     0,
@@ -726,7 +870,7 @@ export function renderSelectQuestion(
     rows.push(`  ${c.dim("(no matches)")}`);
   }
 
-  appendSelectOptionRows({
+  const renderedTrailingTaskAction = appendSelectOptionRows({
     rows,
     state,
     presentation,
@@ -740,18 +884,177 @@ export function renderSelectQuestion(
   });
   appendSubmitRow(rows, cursor, submitIndex, theme);
 
-  if (visible.length > end - start) {
+  // The railed list scrolls silently: no count row, and Esc is the only
+  // footer hint — typing, arrows, and the ↵ badge carry themselves.
+  if (!railed && visible.length > end - start) {
     rows.push(`  ${c.dim(`↑↓ ${visible.length} options, showing ${start + 1}–${end}`)}`);
   }
 
-  appendSelectNotices(rows, state.notices, presentation.layout, theme, width);
+  if (!renderedTrailingTaskAction) {
+    appendSelectNotices(rows, state.notices, presentation.layout, theme, width);
+  }
 
   if (state.error !== undefined) {
     rows.push("", `  ${c.red(state.error)}`);
   }
 
-  rows.push(...questionFooter(selectFooterHints(presentation, visible, cursor), theme));
+  rows.push(
+    ...questionFooter(
+      railed ? ["esc to cancel"] : selectFooterHints(presentation, visible, cursor),
+      theme,
+    ),
+  );
   return rows.map((row) => clip(row, width));
+}
+
+/** The composite Change-model screen's inputs: the resolved request plus live state. */
+export interface ModelEditorPanelInput {
+  request: ModelSettingsRequest;
+  state: ModelEditorState;
+}
+
+const MODEL_EDITOR_MESSAGE = "Select the model";
+
+/**
+ * A dim, background-free selection badge carrying the Enter affordance, e.g.
+ * `↵`, `↵ change`, `↵ validate`.
+ */
+export function enterBadge(theme: Theme, label?: string): string {
+  const c = theme.colors;
+  return c.dim(label === undefined ? theme.glyph.enter : `${theme.glyph.enter} ${label}`);
+}
+
+/**
+ * A discrete reasoning track: `●` below the current notch, `◉` on it, `○`
+ * above, joined by `─` connectors. `accent` paints the covered stretch —
+ * notches and connectors up to the current position — blue. `index` -1 means
+ * unset: an all-`○` track with no fill.
+ */
+export function reasoningTrack(input: {
+  count: number;
+  index: number;
+  connectorWidth: number;
+  accent: boolean;
+  theme: Theme;
+}): string {
+  const { count, index, theme } = input;
+  const glyphs = theme.glyph;
+  const connector = glyphs.trackLine.repeat(input.connectorWidth);
+  const pieces: string[] = [];
+  for (let at = 0; at < count; at += 1) {
+    if (at > 0) pieces.push(connector);
+    pieces.push(
+      at < index ? glyphs.trackFilled : at === index ? glyphs.trackCurrent : glyphs.trackEmpty,
+    );
+  }
+  if (!input.accent || index < 0) return pieces.join("");
+  // Pieces alternate notch/connector; the covered stretch ends at the current
+  // notch, which sits at piece position 2 * index.
+  const covered = pieces.slice(0, 2 * index + 1).join("");
+  return `${theme.colors.blue(covered)}${pieces.slice(2 * index + 1).join("")}`;
+}
+
+/**
+ * Paints the Change-model screen: a value menu whose reasoning and tier rows
+ * adjust inline with left/right, and whose Model row opens the searchable
+ * catalog.
+ */
+export function renderModelEditorQuestion(
+  input: ModelEditorPanelInput,
+  theme: Theme,
+  width: number,
+): string[] {
+  const { request, state } = input;
+  switch (state.screen.kind) {
+    case "menu":
+      return renderModelEditorMenu(input, state.screen.cursor, theme, width);
+    case "model":
+      return renderModelEditorModelScreen(request, state.screen.select, theme, width);
+  }
+}
+
+/**
+ * The value menu rides the ordinary stacked-select painter: each row's hint
+ * line is the drafted value (mini track, `fast ↯`, the slug), dim at rest and
+ * accent-keeping under the cursor.
+ */
+function renderModelEditorMenu(
+  input: ModelEditorPanelInput,
+  cursor: ModelEditorRowId,
+  theme: Theme,
+  width: number,
+): string[] {
+  const { request, state } = input;
+  const { draft } = state;
+  const rows = modelEditorMenuRows(request, draft, state.capabilities);
+
+  const options: SetupPanelOption[] = rows.map((row) => {
+    if (row.disabled === true && row.value === "model") {
+      // The fixed model still shows its id; the description carries the reason.
+      return draft.modelId === null ? { ...row } : { ...row, hint: draft.modelId };
+    }
+    if (row.disabled === true || row.value === "done") return { ...row };
+    switch (row.value) {
+      case "model":
+        return { ...row, hint: draft.modelId ?? undefined };
+      case "reasoning": {
+        const positions = reasoningPositions(state.capabilities, draft.reasoning);
+        const index = draft.reasoning === "default" ? -1 : positions.indexOf(draft.reasoning);
+        const track = reasoningTrack({
+          count: positions.length,
+          index,
+          connectorWidth: 1,
+          accent: row.value === cursor,
+          theme,
+        });
+        const level = draft.reasoning === "default" ? "provider default" : draft.reasoning;
+        // Track first: the notches hold a fixed column while the
+        // variable-width level name trails, so nothing jumps on adjust.
+        return { ...row, hint: `${track} ${level}` };
+      }
+      case "tier":
+        return { ...row, hint: draft.tier === "priority" ? `fast ${theme.glyph.fast}` : "normal" };
+      default:
+        return { ...row };
+    }
+  });
+
+  const index = Math.max(
+    0,
+    options.findIndex((option) => option.value === cursor),
+  );
+  return renderSelectQuestion(
+    {
+      kind: "stacked",
+      message: "",
+      options,
+      select: { filter: "", cursor: index, selected: new Set() },
+    },
+    theme,
+    width,
+  );
+}
+
+/** The catalog sub-screen: `▏`-railed id rows under a `▏` filter line. */
+function renderModelEditorModelScreen(
+  request: ModelSettingsRequest,
+  select: SelectState,
+  theme: Theme,
+  width: number,
+): string[] {
+  // The catalog list IS the shared railed searchable select — the same
+  // component behind the team and project pickers.
+  return renderSelectQuestion(
+    {
+      kind: "search",
+      message: MODEL_EDITOR_MESSAGE,
+      options: request.model.kind === "pick" ? request.model.options : [],
+      placeholder: "type to search",
+      select,
+    },
+    theme,
+    width,
+  );
 }
 
 /** Paints a text question section: message, a block-cursor input line, hints. */

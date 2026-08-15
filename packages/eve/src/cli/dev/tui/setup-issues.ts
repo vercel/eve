@@ -1,24 +1,18 @@
 import { join } from "node:path";
 
 import type { AgentInfoResult } from "#client/index.js";
+import { hasEnvValue, resolveGatewayCredential } from "#internal/resolve-model-endpoint-status.js";
 import { pathExists } from "#setup/path-exists.js";
 
 /** One boot-time setup problem the TUI can point at a fixing command. */
-export type SetupIssue =
-  | {
-      /** Diagnostics never authorize a command by themselves. */
-      kind: "attention";
-      /** Short category label, e.g. "AI Gateway credentials". */
-      label: string;
-      /** The slash command that fixes it, e.g. "/model". */
-      command: string;
-    }
-  | {
-      /** Positive runtime evidence that no model provider is configured. */
-      kind: "model-provider-unconfigured";
-      label: string;
-      command: "/model";
-    };
+export interface SetupIssue {
+  /** Diagnostics never authorize a command by themselves. */
+  kind: "attention";
+  /** Short category label, e.g. "AI Gateway credentials". */
+  label: string;
+  /** The slash command that fixes it, e.g. "/model". */
+  command: string;
+}
 
 /** What a boot detection may inspect. */
 export interface BootDetectionContext {
@@ -51,11 +45,6 @@ type ModelProviderAccess =
         | { status: "unknown" };
     };
 
-function hasEnvValue(env: Record<string, string | undefined>, key: string): boolean {
-  const value = env[key];
-  return value !== undefined && value.trim().length > 0;
-}
-
 /**
  * Resolves the local TUI's current model-provider state into the agent-info
  * snapshot it caches. The local TUI and dev server share `process.env`, so a
@@ -73,18 +62,29 @@ export function resolveModelProviderState(
   const { credential } = access.runtime;
 
   const model = info.agent.model;
+  if (model.id === undefined || model.routing.kind !== "gateway") return info;
   const endpoint = model.endpoint;
   if (endpoint?.kind === "gateway" && endpoint.connected && endpoint.credential === credential) {
     return info;
   }
+  const connectedEndpoint = {
+    connected: true as const,
+    credential,
+    kind: "gateway" as const,
+  };
 
   return {
     ...info,
     agent: {
       ...info.agent,
       model: {
-        ...model,
-        endpoint: { kind: "gateway", connected: true, credential },
+        contextWindowTokens: model.contextWindowTokens,
+        endpoint: connectedEndpoint,
+        id: model.id,
+        providerOptions: model.providerOptions,
+        reasoning: model.reasoning,
+        routing: model.routing,
+        source: model.source,
       },
     },
   };
@@ -98,9 +98,15 @@ function modelProviderAccess(
   if (model?.routing?.kind === "external") return { kind: "external" };
   if (model?.routing?.kind !== "gateway") return { kind: "unknown" };
 
-  // The compiled routing decides whether gateway credentials apply. A freshly
-  // loaded API key outranks a stale OIDC endpoint, matching gateway resolution.
-  if (hasEnvValue(context.env, "AI_GATEWAY_API_KEY")) {
+  // The compiled routing decides whether gateway credentials apply. Local
+  // ranking delegates to the one precedence authority; the server-reported
+  // endpoint snapshot slots between a freshly loaded key (which outranks a
+  // stale snapshot) and a local OIDC token (which the snapshot outranks).
+  const local = resolveGatewayCredential({
+    apiKeyInEnv: hasEnvValue(context.env["AI_GATEWAY_API_KEY"]),
+    oidcAvailable: hasEnvValue(context.env["VERCEL_OIDC_TOKEN"]),
+  });
+  if (local?.credential === "api-key") {
     return { kind: "gateway", runtime: { status: "connected", credential: "api-key" } };
   }
   const endpoint = model.endpoint;
@@ -110,8 +116,8 @@ function modelProviderAccess(
       runtime: { status: "connected", credential: endpoint.credential },
     };
   }
-  if (hasEnvValue(context.env, "VERCEL_OIDC_TOKEN")) {
-    return { kind: "gateway", runtime: { status: "connected", credential: "oidc" } };
+  if (local !== undefined) {
+    return { kind: "gateway", runtime: { status: "connected", credential: local.credential } };
   }
   if (endpoint?.kind === "gateway") return { kind: "gateway", runtime: { status: "disconnected" } };
   return { kind: "gateway", runtime: { status: "unknown" } };
@@ -124,9 +130,8 @@ function modelProviderAccess(
  * gateway model it reports only the most-root cause; an unlinked directory
  * implies missing OIDC, so listing both would double-count what /model's
  * provider step fixes in one pass. The header and detection receive the same
- * local-credential-normalized endpoint snapshot. Their absence remains
- * unknown and cannot launch setup. A hint, not an error: the model call stays
- * the source of truth.
+ * local-credential-normalized endpoint snapshot. A hint, not an error: the
+ * model call stays the source of truth.
  */
 const modelProvider: BootDetection = {
   id: "model-provider",
@@ -140,7 +145,7 @@ const modelProvider: BootDetection = {
         const linked = await pathExists(join(appRoot, ".vercel", "project.json"));
         return [
           {
-            kind: "model-provider-unconfigured",
+            kind: "attention",
             label: linked ? "AI Gateway credentials missing" : "model provider not linked",
             command: "/model",
           },
@@ -169,19 +174,19 @@ export const BOOT_DETECTIONS: readonly BootDetection[] = [modelProvider];
 export const LOGIN_SETUP_ISSUE: SetupIssue = {
   kind: "attention",
   label: "not logged in",
-  command: "/login",
+  command: "/vc:login",
 };
 
 /**
  * The CLI-missing hint, surfaced by the same off-critical-path probe as
  * {@link LOGIN_SETUP_ISSUE}. When the `vercel` binary is absent the probe
  * reports this instead of the login hint, so the diagnostic points at its fix
- * command (`/vc`) rather than a logged-out state the probe can't determine.
+ * command (`/vc:install`) rather than a logged-out state the probe can't determine.
  */
 export const CLI_MISSING_SETUP_ISSUE: SetupIssue = {
   kind: "attention",
   label: "Vercel CLI not found",
-  command: "/vc",
+  command: "/vc:install",
 };
 
 /**
@@ -211,21 +216,6 @@ export function orderedSetupIssues(
   authIssue: SetupIssue | undefined,
 ): SetupIssue[] {
   return authIssue === undefined ? [...bootIssues] : [authIssue, ...bootIssues];
-}
-
-/** The command and entry step authorized by positive setup evidence. */
-export interface AutomaticSetupCommand {
-  prompt: "/model";
-  initialModelStep: "provider";
-}
-
-/** Returns the only command authorized to run from positive setup evidence. */
-export function automaticSetupCommand(
-  issues: readonly SetupIssue[],
-): AutomaticSetupCommand | undefined {
-  return issues.some((issue) => issue.kind === "model-provider-unconfigured")
-    ? { prompt: "/model", initialModelStep: "provider" }
-    : undefined;
 }
 
 /**

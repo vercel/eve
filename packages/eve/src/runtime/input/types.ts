@@ -26,12 +26,17 @@ export const inputOptionSchema = z
   .strict();
 
 /**
- * Unified input request surfaced to the client when the agent needs
- * user input before continuing.
+ * Framework-owned source of an input request.
  *
- * Tool approvals and questions share this shape. Approvals are requests
- * with two options (`"approve"` / `"deny"`) and `display: "confirmation"`.
+ * Consumers use this discriminator for behavior. The action tool name and
+ * request id are presentation and identity fields, not request semantics.
  */
+export type InputRequestKind = z.infer<typeof inputRequestKindSchema>;
+
+/** Zod schema for the framework-owned source of an input request. */
+export const inputRequestKindSchema = z.enum(["question", "session-limit", "tool-approval"]);
+
+/** Unified input request surfaced when the agent needs user input. */
 export type InputRequest = z.infer<typeof inputRequestSchema>;
 
 /**
@@ -50,6 +55,9 @@ export const inputRequestSchema = z
       .enum(["confirmation", "select", "text"])
       .describe("Rendering hint: the channel uses this to pick a UX treatment.")
       .optional(),
+    kind: inputRequestKindSchema.describe(
+      "Framework-owned request source used to resolve, route, and render the response.",
+    ),
     options: z
       .array(inputOptionSchema)
       .describe("Selectable answer options to present to the user.")
