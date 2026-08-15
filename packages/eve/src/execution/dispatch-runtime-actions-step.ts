@@ -585,6 +585,7 @@ async function startLocalSubagent(input: {
     childSessionId = await createLocalSubagentSession({
       compiledArtifactsSource: input.bundle.compiledArtifactsSource,
       dynamicSubagentAgentConfig: input.dynamicSubagentAgentConfig,
+      exactRecovery: input.exactRecovery,
       nodeId: action.nodeId,
       operationId: operation.id,
       runInput,
@@ -642,6 +643,7 @@ async function commitLocalSubagentStart(input: {
 async function createLocalSubagentSession(input: {
   readonly compiledArtifactsSource: CompiledBundle["compiledArtifactsSource"];
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
+  readonly exactRecovery: boolean;
   readonly nodeId: string;
   readonly operationId: string;
   readonly runInput: RunInput;
@@ -653,7 +655,9 @@ async function createLocalSubagentSession(input: {
     nodeId: input.nodeId,
   }).createSession({
     ...input.runInput,
-    idempotencyKey: `eve-child-start/v1/${input.operationId}`,
+    ...(input.exactRecovery
+      ? { idempotencyKey: `eve-child-start/v1/${input.operationId}` }
+      : {}),
   });
   return handle.sessionId;
 }

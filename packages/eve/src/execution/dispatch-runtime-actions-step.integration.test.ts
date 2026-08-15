@@ -178,6 +178,9 @@ describe("dispatchRuntimeActionsStep child starts", () => {
 
     expect(result.results).toEqual([]);
     expect(mocks.createSession).toHaveBeenCalledTimes(1);
+    expect(mocks.createSession).toHaveBeenCalledWith(
+      expect.not.objectContaining({ idempotencyKey: expect.any(String) }),
+    );
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
       handles: [
         {
@@ -203,6 +206,27 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     });
     expect(writes).toHaveLength(0);
     expect(mocks.publishPublicEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the stable child-start receipt only after exact recovery admission", async () => {
+    const session = createStartSession({ kind: "local" });
+    installContext(
+      session,
+      { definition: { description: "Research", kind: "subagent" }, nodeId: "subagents/research" },
+      { exactRecovery: true },
+    );
+
+    await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(mocks.assertExactRecoveryWorkflowCapabilities).toHaveBeenCalledTimes(1);
+    expect(mocks.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: `eve-child-start/v1/${startOperationId}` }),
+    );
   });
 
   it("uses the active session turn when pending batch metadata has an empty turn id", async () => {
@@ -482,7 +506,6 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
           outputSchema: undefined,
         },
       },
-      idempotencyKey: `eve-continuation/v1/${continueOperationId}`,
       sessionId: CHILD_SESSION_ID,
     });
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
@@ -503,6 +526,26 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
     });
     expect(writes).toHaveLength(0);
     expect(mocks.publishPublicEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the stable continuation receipt only after exact recovery admission", async () => {
+    const session = createPendingSession({
+      handle: LOCAL_PARKED_HANDLE,
+      agentId: LOCAL_PARKED_HANDLE.identity.id,
+    });
+    installContext(session, undefined, { exactRecovery: true });
+
+    await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(mocks.assertExactRecoveryWorkflowCapabilities).toHaveBeenCalledTimes(1);
+    expect(mocks.dispatchSession).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: `eve-continuation/v1/${continueOperationId}` }),
+    );
   });
 
   it.each([

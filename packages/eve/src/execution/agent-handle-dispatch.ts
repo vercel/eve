@@ -207,7 +207,9 @@ export async function dispatchToAgentHandle(input: {
     action,
     bundle,
     handle,
-    idempotencyKey: `eve-continuation/v1/${operation.id}`,
+    ...(input.exactRecovery
+      ? { idempotencyKey: `eve-continuation/v1/${operation.id}` }
+      : {}),
     parentToken: input.parentToken,
   });
   if (!delivery.ok) {
@@ -262,7 +264,7 @@ async function deliverToAgentHandle(input: {
   readonly action: RuntimeAgentHandleAction;
   readonly bundle: CompiledBundle;
   readonly handle: Extract<AgentHandle, { phase: "running" }>;
-  readonly idempotencyKey: string;
+  readonly idempotencyKey?: string;
   readonly parentToken: string;
 }): Promise<Result<void, { readonly cause: unknown; readonly permanent: boolean }>> {
   const { action, bundle, handle } = input;
@@ -324,7 +326,7 @@ async function deliverToAgentHandle(input: {
           outputSchema: normalizeRequestedOutputSchema(action.input.outputSchema),
         },
       },
-      idempotencyKey: input.idempotencyKey,
+      ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
       sessionId: address.sessionId,
     });
     if (result.status === "session_not_active") {

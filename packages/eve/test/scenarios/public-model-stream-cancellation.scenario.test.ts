@@ -246,6 +246,7 @@ async function runHeldProviderScenario(input: {
   });
   const events: MessageStreamEvent[] = [];
   let recovery: { readonly crashedAttempt: number; readonly replacementAttempt: number } | undefined;
+  let closeRecoveredStream: (() => Promise<void>) | undefined;
 
   try {
     const client = new Client({ host: server.url });
@@ -349,7 +350,10 @@ async function runHeldProviderScenario(input: {
       }
       cancelResults.push(await recovered.cancel({ turnId: exactTurnId }));
       try {
-        await withinDeadline(recoveredConsume, "recovered public stream did not settle after cancellation");
+        closeRecoveredStream = await withinDeadline(
+          recoveredConsume,
+          "recovered public stream did not settle after cancellation",
+        );
       } catch (error) {
         throw new Error(
           [
@@ -363,7 +367,6 @@ async function runHeldProviderScenario(input: {
           { cause: error },
         );
       }
-      events.push(...recoveredEvents);
     } else if (input.cancel === "pre-delta") {
       cancelResults.push(await session.cancel({ turnId: exactTurnId }));
     } else {
@@ -409,6 +412,18 @@ async function runHeldProviderScenario(input: {
       const snapshot = await recovered.snapshot();
       expect(snapshot.session.sessionId).toBe(session.state.sessionId);
       expectCancelledLifecycle(snapshot.events);
+    }
+    if (input.crashBeforeCancel === true) {
+      // The replacement provider, its listener, and its source reader have
+      // already settled above. Snapshot only after that quiescence barrier,
+      // then close the follower; this rejects a late durable public event
+      // instead of hiding it with an immediate iterator.return().
+      const snapshot = await new Client({ host: server.url })
+        .sessions.attach(session.state.sessionId)
+        .snapshot();
+      expectCancelledLifecycle(snapshot.events);
+      events.splice(0, events.length, ...snapshot.events);
+      await closeRecoveredStream?.();
     }
     if (
       cancelResults.some(
@@ -509,14 +524,15 @@ function createDirectCancellationProbe(): {
 async function readThroughSessionWaiting(
   iterator: AsyncIterator<MessageStreamEvent>,
   events: MessageStreamEvent[],
-): Promise<void> {
+): Promise<() => Promise<void>> {
   while (true) {
     const next = await iterator.next();
     if (next.done) throw new Error("Recovered public stream ended before session.waiting.");
     events.push(next.value);
     if (next.value.type !== "session.waiting") continue;
-    await iterator.return?.();
-    return;
+    return async () => {
+      await iterator.return?.();
+    };
   }
 }
 

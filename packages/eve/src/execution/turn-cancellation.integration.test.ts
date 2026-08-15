@@ -159,6 +159,49 @@ async function waitForHookByToken(token: string, timeout = 15_000): Promise<{ ru
   throw new Error(`Timed out waiting for hook token "${token}".`);
 }
 
+/** Finds the one active child turn's cancellation hook before it is resumed. */
+async function waitForChildCancellationHook(parentRunId: string, timeout = 15_000): Promise<{
+  readonly runId: string;
+  readonly token: string;
+}> {
+  const world = await getWorld();
+  const parentTurnToken = turnCancellationHookToken(`${parentRunId}:turn-control:0`);
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const page = await world.hooks.list({ pagination: { limit: 1_000 } });
+    const hook = page.data.find(
+      (entry: { readonly runId: string; readonly token: string }) =>
+        entry.runId !== parentRunId &&
+        entry.token !== parentTurnToken &&
+        entry.token.startsWith("abrt_") &&
+        entry.token.endsWith("_cancel"),
+    );
+    if (hook !== undefined) return hook;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("Timed out waiting for the active child cancellation hook.");
+}
+
+/** Verifies the exact child abort receipt on the terminal child turn. */
+async function expectOnlyCancellationReceipt(runId: string, token: string): Promise<void> {
+  const world = await getWorld();
+  const page = await world.events.list({
+    pagination: { limit: 1_000 },
+    resolveData: "none",
+    runId,
+  });
+  const events = page.data as readonly {
+    readonly correlationId?: string | null;
+    readonly eventData?: { readonly token?: string };
+    readonly eventType?: string;
+  }[];
+  const receipts = events.filter(
+    (event) => event.eventType === "hook_received" && event.eventData?.token === token,
+  );
+  expect(receipts).toHaveLength(1);
+  expect(receipts[0]?.correlationId).toEqual(expect.any(String));
+}
+
 /**
  * The retry canary: an aborted `turnStep` settles by *returning*, so the
  * turn workflow run must record no `step_failed`/`step_retrying` events
@@ -590,6 +633,7 @@ describe("turn cancellation integration", () => {
         // The child (a fresh copy of the same agent) hangs on the wait
         // tool, holding the parent in `waitForRuntimeActionResults`.
         await fixture.toolStarted;
+        const childCancelHook = await waitForChildCancellationHook(run.runId);
 
         const cancelToken = sessionCommandHookToken(run.runId);
         await waitForHookByToken(cancelToken);
@@ -605,7 +649,13 @@ describe("turn cancellation integration", () => {
         const childSessionId = filterEventsByType(cancelledTurn, "subagent.called")[0]?.data
           .childSessionId;
         expect(childSessionId).toBeDefined();
-        await waitForHookSweep(turnCancellationHookToken(`${childSessionId ?? ""}:turn-control:0`));
+        expect(childCancelHook.token).toBe(
+          turnCancellationHookToken(`${childSessionId ?? ""}:turn-control:0`),
+        );
+        await waitForRunCompletion(childCancelHook.runId);
+        await waitForHookSweep(childCancelHook.token);
+        await expectOnlyCancellationReceipt(childCancelHook.runId, childCancelHook.token);
+        await expectNoStepRetries(childCancelHook.runId);
         expect(fixture.toolAborts()).toBe(1);
 
         // The cleared pending batch must not re-dispatch on the next turn.
