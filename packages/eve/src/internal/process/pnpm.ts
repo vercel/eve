@@ -63,8 +63,15 @@ export function resolvePnpmInvocation(args: readonly string[]): PnpmInvocation {
     };
   }
 
-  return {
-    args,
-    command: "pnpm",
-  };
+  if (process.platform === "win32") {
+    // A PATH-only pnpm installation exposes a .cmd shim. Invoke that shim
+    // through one owned command processor so global setup waits for pnpm
+    // instead of creating a shell-detached child.
+    return {
+      args: ["/d", "/s", "/c", "pnpm.cmd", ...args],
+      command: process.env.ComSpec ?? "cmd.exe",
+    };
+  }
+
+  return { args, command: "pnpm" };
 }

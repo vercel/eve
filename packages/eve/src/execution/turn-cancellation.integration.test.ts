@@ -194,6 +194,7 @@ const SEND_TURN_CONTROL_STEP_NAME =
 
 type DurableStepEvent = {
   readonly correlationId?: string | null;
+  readonly eventId?: string;
   readonly eventData?: {
     readonly attempt?: number;
     readonly result?: Uint8Array | unknown;
@@ -223,7 +224,10 @@ async function listDurableStepEvents(runId: string): Promise<readonly DurableSte
  * Binds the durable child cancellation receipt to its in-flight turnStep and
  * accepts only the ordered cancellation epilogue that settles that attempt.
  */
-async function expectOnlyCancellationReceipt(runId: string, token: string): Promise<void> {
+async function expectOnlyCancellationReceipt(
+  runId: string,
+  token: string,
+): Promise<readonly DurableStepEvent[]> {
   const world = await getWorld();
   const events = await listDurableStepEvents(runId);
   const receiptIndex = events.findIndex(
@@ -312,6 +316,108 @@ async function expectOnlyCancellationReceipt(runId: string, token: string): Prom
         !allowedCorrelations.has(event.correlationId as string),
     ),
   ).toEqual([]);
+  return afterReceipt;
+}
+
+/**
+ * Follows the child event log from the cancellation receipt's exact cursor.
+ * The World API is paged rather than push-based, so this is the durable-log
+ * equivalent of attaching a stream follower: every later pull starts after
+ * the receipt's committed position and `return()` joins the pending poll.
+ */
+async function attachCancellationReceiptFollower(
+  runId: string,
+  token: string,
+  timeout = 15_000,
+): Promise<AsyncIterator<DurableStepEvent>> {
+  const world = await getWorld();
+  const deadline = Date.now() + timeout;
+  let cursor: string | undefined;
+  let stopped = false;
+
+  while (Date.now() < deadline) {
+    const page = await world.events.list({
+      pagination: { cursor, limit: 1, sortOrder: "asc" },
+      resolveData: "all",
+      runId,
+    });
+    const event = (page.data[0] as DurableStepEvent | undefined) ?? undefined;
+    if (event === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      continue;
+    }
+    cursor = page.cursor ?? undefined;
+    if (event.eventType === "hook_received" && event.eventData?.token === token) break;
+  }
+  if (cursor === undefined)
+    throw new Error("Timed out attaching child follower at cancellation receipt.");
+
+  return {
+    async next(): Promise<IteratorResult<DurableStepEvent>> {
+      while (!stopped) {
+        const page = await world.events.list({
+          pagination: { cursor, limit: 1, sortOrder: "asc" },
+          resolveData: "all",
+          runId,
+        });
+        const event = (page.data[0] as DurableStepEvent | undefined) ?? undefined;
+        if (event !== undefined) {
+          cursor = page.cursor ?? undefined;
+          return { done: false, value: event };
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      return { done: true, value: undefined };
+    },
+    async return(): Promise<IteratorResult<DurableStepEvent>> {
+      stopped = true;
+      return { done: true, value: undefined };
+    },
+  };
+}
+
+/** Quiet only counts after the pending receipt-relative pull and return join. */
+async function expectReceiptFollowerQuiescent(
+  follower: AsyncIterator<DurableStepEvent>,
+): Promise<void> {
+  const pending = follower.next();
+  const outcome = await Promise.race([
+    pending.then((result) => ({ kind: "event" as const, result })),
+    new Promise<{ readonly kind: "quiet" }>((resolve) =>
+      setTimeout(() => resolve({ kind: "quiet" }), 250),
+    ),
+  ]);
+  if (outcome.kind === "event") {
+    throw new Error(
+      outcome.result.done
+        ? "Child follower reached EOF before its joined return."
+        : `Child follower observed ${JSON.stringify(outcome.result.value)} after cancellation settlement.`,
+    );
+  }
+  const returned = follower.return?.();
+  if (returned === undefined) throw new Error("Child follower does not support return().");
+  await returned;
+  const settled = await pending;
+  if (!settled.done) {
+    throw new Error(
+      `Child follower observed ${String(settled.value.eventType)} while joining cancellation quiescence.`,
+    );
+  }
+}
+
+/** Reads every committed receipt-relative event before asking the follower to go quiet. */
+async function expectReceiptFollowerTail(
+  follower: AsyncIterator<DurableStepEvent>,
+  expected: readonly DurableStepEvent[],
+): Promise<void> {
+  for (const event of expected) {
+    const observed = await follower.next();
+    if (observed.done)
+      throw new Error("Child follower reached EOF before the durable terminal tail.");
+    expect(observed.value.eventId).toBe(event.eventId);
+    expect(observed.value.eventType).toBe(event.eventType);
+    expect(observed.value.correlationId).toBe(event.correlationId);
+  }
 }
 
 /**
@@ -750,6 +856,10 @@ describe("turn cancellation integration", () => {
         const cancelToken = sessionCommandHookToken(run.runId);
         await waitForHookByToken(cancelToken);
         await resumeHook(cancelToken, { kind: "cancel" });
+        const childFollower = await attachCancellationReceiptFollower(
+          childCancelHook.runId,
+          childCancelHook.token,
+        );
 
         const cancelledTurn = await stream.nextTurn();
 
@@ -766,7 +876,12 @@ describe("turn cancellation integration", () => {
         );
         await waitForRunCompletion(childCancelHook.runId);
         await waitForHookSweep(childCancelHook.token);
-        await expectOnlyCancellationReceipt(childCancelHook.runId, childCancelHook.token);
+        const receiptTail = await expectOnlyCancellationReceipt(
+          childCancelHook.runId,
+          childCancelHook.token,
+        );
+        await expectReceiptFollowerTail(childFollower, receiptTail);
+        await expectReceiptFollowerQuiescent(childFollower);
         await expectNoStepRetries(childCancelHook.runId);
         expect(fixture.toolAborts()).toBe(1);
 

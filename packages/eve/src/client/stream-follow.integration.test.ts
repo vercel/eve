@@ -38,6 +38,43 @@ function follow(host: string, options?: { follow?: boolean }) {
 }
 
 describe("stream following over real sockets", () => {
+  it("joins a pending live pull when its iterator returns", async () => {
+    let activeConnections = 0;
+    let closedConnections = 0;
+    const host = await listen(
+      createServer((_req, res) => {
+        activeConnections += 1;
+        res.once("close", () => {
+          activeConnections -= 1;
+          closedConnections += 1;
+        });
+        res.writeHead(200, { "content-type": "application/x-ndjson" });
+        res.write(`${JSON.stringify({ type: "session.waiting", data: {} })}\n`);
+      }),
+    );
+    const iterator = follow(host)[Symbol.asyncIterator]();
+
+    expect(await iterator.next()).toMatchObject({
+      done: false,
+      value: { type: "session.waiting" },
+    });
+    const pending = iterator.next();
+    const returned = iterator.return?.();
+    if (returned === undefined) throw new Error("Expected stream iterator to support return().");
+
+    await expect(withTimeout(returned, "iterator return")).resolves.toMatchObject({ done: true });
+    await expect(withTimeout(pending, "pending stream pull")).resolves.toMatchObject({
+      done: true,
+    });
+    await expect(
+      withTimeout(
+        waitFor(() => activeConnections === 0),
+        "socket close",
+      ),
+    ).resolves.toBeUndefined();
+    expect(closedConnections).toBe(1);
+  });
+
   it("stays attached across abrupt drops and clean closes until the boundary event", async () => {
     const log = [
       { type: "step.started", data: {} },
@@ -190,7 +227,9 @@ describe("stream following over real sockets", () => {
       }),
     );
 
-    await expect(follow(host, { follow: false }).next()).rejects.toThrow(/x-eve-stream-tail-index/);
+    await expect(follow(host, { follow: false })[Symbol.asyncIterator]().next()).rejects.toThrow(
+      /x-eve-stream-tail-index/,
+    );
   });
 
   it("never abandons a progressing turn: any event resets the idle budget", async () => {
@@ -222,3 +261,21 @@ describe("stream following over real sockets", () => {
     expect(connections).toBe(3 * events.length);
   }, 30_000);
 });
+
+async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`Timed out waiting for ${label}.`)), 250);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+async function waitFor(condition: () => boolean): Promise<void> {
+  while (!condition()) await new Promise((resolve) => setTimeout(resolve, 5));
+}

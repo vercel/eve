@@ -104,9 +104,39 @@ interface OpenStreamInput extends FollowStreamInput {
  * yields events until the cursor passes that tail, reconnecting as needed,
  * then returns instead of following.
  */
-export async function* followStreamIterable(
-  input: FollowStreamInput,
-): AsyncGenerator<MessageStreamEvent> {
+export function followStreamIterable(input: FollowStreamInput): AsyncIterable<MessageStreamEvent> {
+  return {
+    [Symbol.asyncIterator](): AsyncIterator<MessageStreamEvent> {
+      const ownedAbort = new AbortController();
+      const iterator = followStreamEvents({
+        ...input,
+        signal: mergeAbortSignals(input.signal, ownedAbort),
+      });
+      return {
+        next: async () => await iterator.next(),
+        return: async (value?: MessageStreamEvent) => {
+          ownedAbort.abort();
+          return (await iterator.return?.(value)) ?? { done: true, value };
+        },
+        throw: async (error?: unknown) => {
+          ownedAbort.abort();
+          if (iterator.throw === undefined) throw error;
+          return await iterator.throw(error);
+        },
+      };
+    },
+  };
+}
+
+function mergeAbortSignals(external: AbortSignal | undefined, owned: AbortController): AbortSignal {
+  if (external === undefined) return owned.signal;
+  const forward = () => owned.abort(external.reason);
+  external.addEventListener("abort", forward, { once: true });
+  if (external.aborted) forward();
+  return owned.signal;
+}
+
+async function* followStreamEvents(input: FollowStreamInput): AsyncGenerator<MessageStreamEvent> {
   if (input.follow === false && input.startIndex < 0) {
     throw new Error(
       "stream({ follow: false }) requires a nonnegative startIndex; a tail-relative cursor cannot be bounded.",
@@ -120,76 +150,86 @@ export async function* followStreamIterable(
   let idleReconnects = 0;
   let initialConnection = true;
   let tailIndex: number | undefined;
+  const ownedAbort = new AbortController();
+  const forwardAbort = () => ownedAbort.abort(input.signal?.reason);
+  input.signal?.addEventListener("abort", forwardAbort, { once: true });
+  if (input.signal?.aborted) forwardAbort();
 
-  while (true) {
-    let connection: OpenedStream;
-    try {
-      connection = await openStreamBody({
-        ...input,
-        retryPolicy,
-        startIndex,
-        requestTailIndex: input.follow === false && tailIndex === undefined,
-      });
-    } catch (error) {
-      if (input.signal?.aborted) {
-        return;
-      }
-      throw error;
-    }
-
-    if (input.follow === false && tailIndex === undefined) {
-      tailIndex = connection.tailIndex;
-      if (tailIndex === undefined) {
-        await connection.body.cancel().catch(() => {});
-        throw new Error(
-          `stream({ follow: false }) requires the server to report the ${EVE_STREAM_TAIL_INDEX_HEADER} header. ` +
-            "The agent may be running an older eve version.",
-        );
-      }
-    }
-
-    if (tailIndex !== undefined && startIndex > tailIndex) {
-      await connection.body.cancel().catch(() => {});
-      return;
-    }
-
-    let deliveredEvent = false;
-    try {
-      for await (const event of readNdjsonStream(connection.body)) {
-        startIndex += 1;
-        deliveredEvent = true;
-        reconnectDelayMs = idleRetryPolicy.baseDelayMs;
-        idleReconnects = 0;
-        yield event;
-
-        if (tailIndex !== undefined && startIndex > tailIndex) {
+  try {
+    while (true) {
+      let connection: OpenedStream;
+      try {
+        connection = await openStreamBody({
+          ...input,
+          retryPolicy,
+          signal: ownedAbort.signal,
+          startIndex,
+          requestTailIndex: input.follow === false && tailIndex === undefined,
+        });
+      } catch (error) {
+        if (ownedAbort.signal.aborted) {
           return;
         }
-      }
-    } catch (error) {
-      if (!isStreamDisconnectError(error)) {
         throw error;
       }
-    }
 
-    if (input.signal?.aborted || input.startIndex < 0 || idleRetryPolicy.maxAttempts === 0) {
-      return;
-    }
+      if (input.follow === false && tailIndex === undefined) {
+        tailIndex = connection.tailIndex;
+        if (tailIndex === undefined) {
+          await connection.body.cancel().catch(() => {});
+          throw new Error(
+            `stream({ follow: false }) requires the server to report the ${EVE_STREAM_TAIL_INDEX_HEADER} header. ` +
+              "The agent may be running an older eve version.",
+          );
+        }
+      }
 
-    if (
-      !deliveredEvent &&
-      !initialConnection &&
-      (idleReconnects += 1) >= idleRetryPolicy.maxAttempts
-    ) {
-      return;
-    }
+      if (tailIndex !== undefined && startIndex > tailIndex) {
+        await connection.body.cancel().catch(() => {});
+        return;
+      }
 
-    initialConnection = false;
-    await sleep(reconnectDelayMs, input.signal);
-    if (input.signal?.aborted) {
-      return;
+      let deliveredEvent = false;
+      try {
+        for await (const event of readNdjsonStream(connection.body)) {
+          startIndex += 1;
+          deliveredEvent = true;
+          reconnectDelayMs = idleRetryPolicy.baseDelayMs;
+          idleReconnects = 0;
+          yield event;
+
+          if (tailIndex !== undefined && startIndex > tailIndex) {
+            return;
+          }
+        }
+      } catch (error) {
+        if (!isStreamDisconnectError(error)) {
+          throw error;
+        }
+      }
+
+      if (ownedAbort.signal.aborted || input.startIndex < 0 || idleRetryPolicy.maxAttempts === 0) {
+        return;
+      }
+
+      if (
+        !deliveredEvent &&
+        !initialConnection &&
+        (idleReconnects += 1) >= idleRetryPolicy.maxAttempts
+      ) {
+        return;
+      }
+
+      initialConnection = false;
+      await sleep(reconnectDelayMs, ownedAbort.signal);
+      if (ownedAbort.signal.aborted) {
+        return;
+      }
+      reconnectDelayMs = Math.min(reconnectDelayMs * 2, idleRetryPolicy.maxDelayMs);
     }
-    reconnectDelayMs = Math.min(reconnectDelayMs * 2, idleRetryPolicy.maxDelayMs);
+  } finally {
+    input.signal?.removeEventListener("abort", forwardAbort);
+    ownedAbort.abort();
   }
 }
 

@@ -1,6 +1,10 @@
 import { createServer, type Server } from "node:http";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { readFileSync } from "node:fs";
+import { readFile, readdir } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { dirname, join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -10,6 +14,21 @@ import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { startEveDev } from "./dev-server-harness.js";
 
 const scenarioApp = useScenarioApp();
+const require = createRequire(import.meta.url);
+const installedWorldLocalVersion = (
+  JSON.parse(
+    readFileSync(
+      resolve(dirname(require.resolve("@workflow/world-local")), "../package.json"),
+      "utf8",
+    ),
+  ) as {
+    readonly version: string;
+  }
+).version;
+// beta.34 is admitted only for ordinary, unkeyed compatibility. The real
+// crash/redrive proof runs only while the temporary final Workflow checkout is
+// linked; beta.34 must never turn that exact path into a compatibility claim.
+const itWithFinalWorkflow = installedWorldLocalVersion === "5.0.0-beta.35" ? it : it.skip;
 
 type ProviderEvent =
   | "handler-ready"
@@ -153,7 +172,7 @@ describe("public model-stream cancellation", () => {
     expect(preDelta.rendezvous.events).toContain("handler-ready");
     expect(preDelta.rendezvous.events).not.toContain("first-delta");
     expect(preDelta.rendezvous.events).toContain("interrupted");
-    expectCancelledLifecycle(preDelta.events);
+    expectCancelledLifecycle(preDelta.events, { expectMessageAppended: false });
   }, 120_000);
 
   it("settles duplicate exact-id cancellation once without a stale successful terminal", async () => {
@@ -183,58 +202,55 @@ describe("public model-stream cancellation", () => {
     expectCancelledLifecycle(result.events);
   }, 120_000);
 
-  it("crashes an active provider, redrives it after restart, then cancels its exact public turn", async () => {
-    const result = await runHeldProviderScenario({ cancel: "exact", crashBeforeCancel: true });
-    const recovery = result.recovery;
-    if (recovery === undefined) throw new Error("Expected active-provider recovery evidence.");
+  itWithFinalWorkflow(
+    "recovers the cancelled public session after crash redrive",
+    async () => {
+      const result = await runHeldProviderScenario({ cancel: "exact", crashBeforeCancel: true });
+      const recovery = result.recovery;
+      if (recovery === undefined) throw new Error("Expected active-provider recovery evidence.");
 
-    expect(result.rendezvous.reports).toEqual(
-      expect.arrayContaining([
-        { attempt: recovery.crashedAttempt, event: "handler-ready" },
-        { attempt: recovery.crashedAttempt, event: "first-delta" },
-        { attempt: recovery.replacementAttempt, event: "handler-ready" },
-        { attempt: recovery.replacementAttempt, event: "first-delta" },
-        { attempt: recovery.replacementAttempt, event: "interrupted" },
-        { attempt: recovery.replacementAttempt, event: "listener-settled" },
-        { attempt: recovery.replacementAttempt, event: "stream-settled" },
-        { attempt: recovery.replacementAttempt, event: "source-publisher-settled" },
-        { attempt: recovery.replacementAttempt, event: "watchdog-cleared" },
-      ]),
-    );
-    expect(recovery.replacementAttempt).toBeGreaterThan(recovery.crashedAttempt);
-    expect(
-      result.rendezvous.reports.filter(
-        (report) => report.attempt === recovery.crashedAttempt && report.event === "completed",
-      ),
-    ).toHaveLength(0);
-    expect(
-      result.rendezvous.reports.filter(
-        (report) =>
-          report.attempt === recovery.replacementAttempt && report.event === "interrupted",
-      ),
-    ).toHaveLength(1);
-    expect(
-      result.rendezvous.reports.filter(
-        (report) =>
-          report.attempt === recovery.replacementAttempt && report.event === "listener-settled",
-      ),
-    ).toHaveLength(1);
-    expect(
-      result.rendezvous.reports.filter(
-        (report) =>
-          report.attempt === recovery.replacementAttempt && report.event === "stream-settled",
-      ),
-    ).toHaveLength(1);
-    expect(result.rendezvous.reports.filter((report) => report.event === "watchdog")).toEqual([]);
-    try {
-      expectCancelledLifecycle(result.events);
-    } catch (error) {
-      throw new Error(
-        `Recovered durable event log was not a single cancellation lifecycle: ${JSON.stringify(result.events)}`,
-        { cause: error },
+      expect(result.rendezvous.reports).toEqual(
+        expect.arrayContaining([
+          { attempt: recovery.crashedAttempt, event: "handler-ready" },
+          { attempt: recovery.crashedAttempt, event: "first-delta" },
+          { attempt: recovery.replacementAttempt, event: "handler-ready" },
+          { attempt: recovery.replacementAttempt, event: "first-delta" },
+          { attempt: recovery.replacementAttempt, event: "interrupted" },
+          { attempt: recovery.replacementAttempt, event: "listener-settled" },
+          { attempt: recovery.replacementAttempt, event: "stream-settled" },
+          { attempt: recovery.replacementAttempt, event: "source-publisher-settled" },
+          { attempt: recovery.replacementAttempt, event: "watchdog-cleared" },
+        ]),
       );
-    }
-  }, 120_000);
+      expect(recovery.replacementAttempt).toBeGreaterThan(recovery.crashedAttempt);
+      expect(
+        result.rendezvous.reports.filter(
+          (report) => report.attempt === recovery.crashedAttempt && report.event === "completed",
+        ),
+      ).toHaveLength(0);
+      expect(
+        result.rendezvous.reports.filter(
+          (report) =>
+            report.attempt === recovery.replacementAttempt && report.event === "interrupted",
+        ),
+      ).toHaveLength(1);
+      expect(
+        result.rendezvous.reports.filter(
+          (report) =>
+            report.attempt === recovery.replacementAttempt && report.event === "listener-settled",
+        ),
+      ).toHaveLength(1);
+      expect(
+        result.rendezvous.reports.filter(
+          (report) =>
+            report.attempt === recovery.replacementAttempt && report.event === "stream-settled",
+        ),
+      ).toHaveLength(1);
+      expect(result.rendezvous.reports.filter((report) => report.event === "watchdog")).toEqual([]);
+      expectCancelledLifecycle(result.events);
+    },
+    120_000,
+  );
 });
 
 async function runHeldProviderScenario(input: {
@@ -454,7 +470,17 @@ async function runHeldProviderScenario(input: {
       const snapshot = await new Client({ host: server.url }).sessions
         .attach(session.state.sessionId)
         .snapshot();
-      expectCancelledLifecycle(snapshot.events);
+      const diagnostic = JSON.stringify({
+        error: "crash-redrive-exact-lifecycle",
+        events: snapshot.events,
+        recovery,
+        reports: rendezvous.reports,
+        workflow: await captureWorkflowDiagnostic(join(app.appRoot, ".eve", ".workflow-data")),
+      });
+      if (snapshot.events.filter((event) => event.type === "session.started").length !== 1) {
+        throw new Error(diagnostic);
+      }
+      expectCancelledLifecycle(snapshot.events, { diagnostic });
       events.splice(0, events.length, ...snapshot.events);
       await recoveredStream?.expectNoEvent();
       await recoveredStream?.close();
@@ -476,21 +502,60 @@ async function runHeldProviderScenario(input: {
   }
 }
 
-function expectCancelledLifecycle(events: readonly MessageStreamEvent[]): void {
+async function captureWorkflowDiagnostic(dataDir: string): Promise<{
+  readonly childEvents: readonly unknown[];
+  readonly keyedLedgers: readonly unknown[];
+}> {
+  const readJsonFiles = async (directory: string): Promise<unknown[]> => {
+    try {
+      const entries = await readdir(directory, { withFileTypes: true });
+      return (
+        await Promise.all(
+          entries.map(async (entry) => {
+            const path = join(directory, entry.name);
+            if (entry.isDirectory()) return await readJsonFiles(path);
+            if (!entry.name.endsWith(".json")) return [];
+            try {
+              return [JSON.parse(await readFile(path, "utf8"))] as unknown[];
+            } catch {
+              return [];
+            }
+          }),
+        )
+      ).flat();
+    } catch {
+      return [];
+    }
+  };
+
+  return {
+    childEvents: await readJsonFiles(join(dataDir, "events")),
+    keyedLedgers: await readJsonFiles(join(dataDir, "streams", "keyed-v1")),
+  };
+}
+
+function expectCancelledLifecycle(
+  events: readonly MessageStreamEvent[],
+  options: { readonly diagnostic?: string; readonly expectMessageAppended?: boolean } = {},
+): void {
   const types = events.map((event) => event.type);
   const started = types.indexOf("turn.started");
   const cancelled = types.indexOf("turn.cancelled");
   const waiting = types.indexOf("session.waiting");
   // A recovered worker may repeat the work, but it must not append a second
   // externally visible prefix for the same durable turn.
-  for (const sourceEvent of [
+  const prefixEvents = [
     "session.started",
     "turn.started",
     "message.received",
     "step.started",
-    "message.appended",
-  ]) {
-    expect(types.filter((type) => type === sourceEvent)).toHaveLength(1);
+    ...(options.expectMessageAppended === false ? [] : ["message.appended"]),
+  ];
+  for (const sourceEvent of prefixEvents) {
+    expect(
+      types.filter((type) => type === sourceEvent),
+      options.diagnostic ?? JSON.stringify(types),
+    ).toHaveLength(1);
   }
   expect(types.filter((type) => type === "turn.cancelled")).toHaveLength(1);
   expect(types.filter((type) => type === "session.waiting")).toHaveLength(1);
@@ -599,7 +664,7 @@ async function readThroughSessionWaiting(
         // `return()` must settle the pending pull before server shutdown. A
         // timeout is evidence of an unjoined source owner, not permission to
         // abandon that owner and let shutdown make the test pass.
-        await close();
+        await withinDeadline(close(), "recovered public iterator return did not settle", 5_000);
         const settled = await next;
         if (!settled.result.done)
           throw new Error(

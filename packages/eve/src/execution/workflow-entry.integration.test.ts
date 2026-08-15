@@ -1,5 +1,7 @@
+import { readFile } from "node:fs/promises";
+
 import { describe, expect, it } from "vitest";
-import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import { getRun, getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import { hydrateWorkflowArguments } from "@workflow/core/serialization";
 
 import { createChannelAddress } from "#channel/channel-address.js";
@@ -735,6 +737,66 @@ describe("workflowEntry integration", () => {
     });
   });
 
+  it("uses installed world-local beta.34 for one ordinary runtime start and continuation", async () => {
+    const runtime = createTestRuntime({ agent: { name: "workflow-beta34-ordinary-runtime" } });
+    const continuationToken = "http:workflow-beta34-ordinary-runtime";
+
+    await runtime.run(async () => {
+      const installedWorld = JSON.parse(
+        await readFile(
+          new URL("../../node_modules/@workflow/world-local/package.json", import.meta.url),
+          "utf8",
+        ),
+      ) as { version?: unknown };
+      expect(installedWorld.version).toBe("5.0.0-beta.34");
+
+      const workflowRuntime = createWorkflowRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      });
+      const handle = await workflowRuntime.createSession({
+        adapter: { kind: "http" },
+        auth: null,
+        continuationToken,
+        input: { message: "ordinary beta34 start" },
+        mode: "conversation",
+      });
+      const reader = handle.events.getReader();
+
+      try {
+        const firstTurn = await readRuntimeTurn(reader);
+        expect(handle.sessionId).toEqual(expect.any(String));
+        expect(firstTurn.at(-1)).toMatchObject({
+          data: { continuationToken: "workflow-beta34-ordinary-runtime" },
+          type: "session.waiting",
+        });
+
+        await expect(
+          workflowRuntime.dispatchContinuation({
+            command: {
+              auth: null,
+              kind: "send",
+              payload: { message: "ordinary beta34 continuation" },
+            },
+            continuationToken,
+          }),
+        ).resolves.toEqual({ sessionId: handle.sessionId, status: "accepted" });
+
+        const secondTurn = await readRuntimeTurn(reader);
+        expect(secondTurn.at(-1)?.type).toBe("session.waiting");
+        expect(
+          secondTurn.some(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message?.includes("ordinary beta34 continuation") === true,
+          ),
+        ).toBe(true);
+      } finally {
+        reader.releaseLock();
+        await getRun(handle.sessionId).cancel();
+      }
+    });
+  });
+
   it("publishes the session ID as the waiting address for an ID-only session", async () => {
     const runtime = createTestRuntime({ agent: { name: "workflow-entry-id-only" } });
 
@@ -1320,6 +1382,19 @@ async function readUntil(
         return { buffer, events };
       }
     }
+  }
+}
+
+/** Reads one real Runtime event turn; Runtime exposes parsed events, not NDJSON bytes. */
+async function readRuntimeTurn(
+  reader: ReadableStreamDefaultReader<MessageStreamEvent>,
+): Promise<MessageStreamEvent[]> {
+  const events: MessageStreamEvent[] = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) throw new Error("Runtime event stream closed before session.waiting.");
+    events.push(value);
+    if (value.type === "session.waiting") return events;
   }
 }
 

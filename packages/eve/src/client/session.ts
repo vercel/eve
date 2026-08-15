@@ -199,27 +199,58 @@ export class ClientSession {
     }
   }
 
-  async *#streamAndAdvance(options?: StreamOptions): AsyncGenerator<MessageStreamEvent> {
+  #streamAndAdvance(options?: StreamOptions): AsyncIterable<MessageStreamEvent> {
     const startIndex = options?.startIndex ?? this.#state.streamIndex;
     let eventCount = 0;
-    try {
-      for await (const event of this.#readStream({
-        follow: options?.follow,
-        signal: options?.signal,
-        startIndex,
-        streamReconnectPolicy: options?.streamReconnectPolicy,
-      })) {
-        eventCount += 1;
-        yield event;
-      }
-    } finally {
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
       if (startIndex >= 0) {
         this.#state = {
           sessionId: this.#state.sessionId,
           streamIndex: startIndex + eventCount,
         };
       }
-    }
+    };
+    const stream = this.#readStream({
+      follow: options?.follow,
+      signal: options?.signal,
+      startIndex,
+      streamReconnectPolicy: options?.streamReconnectPolicy,
+    })[Symbol.asyncIterator]();
+    return {
+      [Symbol.asyncIterator](): AsyncIterator<MessageStreamEvent> {
+        return {
+          next: async () => {
+            try {
+              const result = await stream.next();
+              if (result.done) finish();
+              else eventCount += 1;
+              return result;
+            } catch (error) {
+              finish();
+              throw error;
+            }
+          },
+          return: async (value?: MessageStreamEvent) => {
+            try {
+              return (await stream.return?.(value)) ?? { done: true, value };
+            } finally {
+              finish();
+            }
+          },
+          throw: async (error?: unknown) => {
+            try {
+              if (stream.throw === undefined) throw error;
+              return await stream.throw(error);
+            } finally {
+              finish();
+            }
+          },
+        };
+      },
+    };
   }
 
   #readStream(input: {
