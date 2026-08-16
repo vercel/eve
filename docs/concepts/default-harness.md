@@ -34,17 +34,15 @@ Its stream boundary is `context.cleared` followed by `session.waiting`.
 
 ## Built-in tools
 
-Built-in tools require no imports. The exact set depends on the agent and session. `agent` is available only in the root session; `load_skill` and `connection_search` appear only when the agent declares the corresponding resources; `ask_question` requires a session that can request user input; and `web_search` requires a supported model provider. The harness advertises only the tools available to the current session.
+Default tools require no imports. The exact set depends on the agent and session. `agent` is available only in the root session; `load_skill` and `connection_search` appear only when the agent declares the corresponding resources; `ask_question` requires a session that can request user input; and `web_search` requires a supported model provider. The harness advertises only the tools available to the current session.
 
-The shell and file tools (`bash`, `read_file`, `write_file`, `glob`, `grep`) run in the app and proxy their work into the agent's [sandbox](../sandbox). The table shows where each tool's effect lands.
+The default shell and file tools (`bash`, `read_file`, and `write_file`) run in the app and proxy their work into the agent's [sandbox](../sandbox). The table shows where each tool's effect lands.
 
 | Tool                | Does                                                                                                                                                                                                                | Where it runs |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
 | `bash`              | Run a shell command.                                                                                                                                                                                                | Sandbox       |
 | `read_file`         | Read a text file with line-numbered output (enables read-before-write).                                                                                                                                             | Sandbox FS    |
 | `write_file`        | Write a complete file; enforces read-before-write and stale-read detection.                                                                                                                                         | Sandbox FS    |
-| `glob`              | Find files by glob pattern.                                                                                                                                                                                         | Sandbox FS    |
-| `grep`              | Search file contents by regex.                                                                                                                                                                                      | Sandbox FS    |
 | `web_fetch`         | Fetch a URL.                                                                                                                                                                                                        | App runtime   |
 | `web_search`        | Search the web (provider-managed; resolved from the model provider).                                                                                                                                                | Provider      |
 | `todo`              | Maintain a durable per-session todo list.                                                                                                                                                                           | App runtime   |
@@ -53,7 +51,7 @@ The shell and file tools (`bash`, `read_file`, `write_file`, `glob`, `grep`) run
 | `load_skill`        | Pull an on-demand [skill](../skills)'s instructions into the current turn. Present only when the agent declares skills.                                                                                             | App runtime   |
 | `connection_search` | Discover tools across declared [connections](../connections); matched tools become directly callable. Present only when the agent declares connections.                                                             | App runtime   |
 
-The model-facing file tools accept absolute paths and paths beginning with `$HOME/`. eve resolves `$HOME` against the sandbox before invoking non-shell file operations, so packaged skill references such as `$HOME/.agents/skills/<skill>/references/...` work consistently across `read_file`, `write_file`, `glob`, and `grep`.
+The model-facing file tools accept absolute paths and paths beginning with `$HOME/`. eve resolves `$HOME` against the sandbox before invoking non-shell file operations, so packaged skill references such as `$HOME/.agents/skills/<skill>/references/...` work consistently across `read_file`, `write_file`, and the opt-in `glob` and `grep` tools.
 
 Notes:
 
@@ -62,7 +60,36 @@ Notes:
 - **`connection_search`** surfaces a connection's tools by their qualified name (e.g. `linear__list_issues`), which the model can then call directly. It's registered only when the agent has connections.
 - **`web_search`** has no local executor; the provider runs it. AI Gateway models use Exa by default. To use Parallel instead, export `webSearch({ provider: "parallel" })` from `agent/tools/web_search.ts`. Direct provider models continue to use their native search implementation. To supply your own implementation, override it with `defineTool()`.
 
-Review these built-in tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
+Review these default tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
+
+## Add framework-provided tools
+
+Some framework-provided tools stay out of the default set. Add the corresponding file when your agent needs one:
+
+| Tool       | Definition to export                       | Purpose                                            |
+| ---------- | ------------------------------------------ | -------------------------------------------------- |
+| `glob`     | `defineGlobTool()` from `eve/tools`        | Find sandbox files by glob pattern.                |
+| `grep`     | `defineGrepTool()` from `eve/tools`        | Search sandbox file contents by regex.             |
+| `Workflow` | `experimental_workflow()` from `eve/tools` | Orchestrate root-agent copies from generated code. |
+| `sleep`    | `sleep()` from `eve/tools/sleep`           | Pause and durably resume the current turn.         |
+
+For example, add file discovery and content search with two files:
+
+```ts title="agent/tools/glob.ts"
+import { defineGlobTool } from "eve/tools";
+
+export default defineGlobTool();
+```
+
+```ts title="agent/tools/grep.ts"
+import { defineGrepTool } from "eve/tools";
+
+export default defineGrepTool();
+```
+
+The filename supplies the model-facing tool name. You can pass a custom `description` to either helper. The tools run against the agent's sandbox and use the same schemas, results, and error behavior as eve's framework implementations.
+
+The sections below cover the `Workflow` and `sleep` tools in more detail.
 
 ## Override a default
 
@@ -81,7 +108,7 @@ export default defineTool({
 });
 ```
 
-The framework defaults are importable from `eve/tools/defaults` (`bash`, `readFile`, `writeFile`, `glob`, `grep`, `webFetch`, `todo`, `loadSkill`), so you can spread, wrap, or patch them. Skip the spread and your replacement owns its own context. A fresh `defineTool` for `todo` won't inherit the framework's durable state key.
+Framework tool definitions are importable from `eve/tools/defaults` (`bash`, `readFile`, `writeFile`, `glob`, `grep`, `webFetch`, `todo`, `loadSkill`), so you can spread, wrap, or patch them. Importing a definition does not add it to an agent; export it from the corresponding `agent/tools/*.ts` file. Skip the spread and your replacement owns its own context. A fresh `defineTool` for `todo` won't inherit the framework's durable state key.
 
 Provider-managed web search has a dedicated configuration helper instead of an executable default:
 

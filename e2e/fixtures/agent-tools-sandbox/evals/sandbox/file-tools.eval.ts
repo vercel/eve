@@ -1,15 +1,15 @@
 import { defineEval } from "eve/evals";
 
-// The framework `write_file`, `read_file`, and `grep` tools all target the
-// sandbox filesystem. Writing a unique token with `write_file`, then locating
-// it with `grep`, proves these built-in tools operate on the same `/workspace`
-// the bash tool does — without any authored tool definitions.
+// The default `write_file` tool and opt-in framework `grep` tool both target
+// the sandbox filesystem. Writing a unique token with `write_file`, then
+// locating it with `grep`, proves they operate on the same `/workspace` as
+// `bash`.
 const FILE_TOOLS_TOKEN = "sandbox-file-tools-ok-Q2H";
 const FILE_TOOLS_PATH = "/workspace/file-tools-note.txt";
 
 export default defineEval({
   tags: ["real-model"],
-  description: "Sandbox: built-in write_file/grep tools operate on the sandbox filesystem.",
+  description: "Sandbox: write_file and opt-in grep operate on the sandbox filesystem.",
   async test(t) {
     await t.send(
       [

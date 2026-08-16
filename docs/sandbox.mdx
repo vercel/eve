@@ -3,7 +3,7 @@ title: "Sandbox"
 description: "The agent's isolated bash environment, including built-in file tools, a seeded /workspace, backends, lifecycle, and network policy."
 ---
 
-The sandbox is the agent's isolated bash environment: a filesystem rooted at `/workspace` where it can run shell commands, execute scripts, and read or write files without ever touching your app runtime. Every eve agent has exactly one. The built-in `bash`, `read_file`, `write_file`, `glob`, and `grep` tools already target it, and your authored code can too.
+The sandbox is the agent's isolated bash environment: a filesystem rooted at `/workspace` where it can run shell commands, execute scripts, and read or write files without ever touching your app runtime. Every eve agent has exactly one. The default `bash`, `read_file`, and `write_file` tools target it; you can also add the framework's `glob` and `grep` tools or access it from authored code.
 
 A working sandbox exists by default, with nothing to author. Override it only to add setup, seed files, pick a backend, or lock down the network.
 
@@ -17,10 +17,10 @@ The model already has shell and file access through the default tools:
 | -------------------------- | ----------------------------------- |
 | `bash`                     | run a shell command in the sandbox  |
 | `read_file` / `write_file` | read/write files under `/workspace` |
-| `glob`                     | find files by pattern               |
-| `grep`                     | search file contents                |
 
-All of them run with `/workspace` as the working directory. The model-facing file tools accept both absolute paths and paths beginning with `$HOME/`; eve resolves the latter inside the sandbox before reading, writing, or searching. Any authored runtime function (a tool, a step, a model callback) can get a live sandbox handle with `ctx.getSandbox()`.
+Opt into `glob` or `grep` when the model needs dedicated file discovery or content search; see [Built-in tools](./concepts/default-harness#add-framework-provided-tools) for the definitions to export.
+
+These tools run with `/workspace` as the working directory. The model-facing file tools accept both absolute paths and paths beginning with `$HOME/`; eve resolves the latter inside the sandbox before reading, writing, or searching. Any authored runtime function (a tool, a step, a model callback) can get a live sandbox handle with `ctx.getSandbox()`.
 
 ```ts title="agent/tools/run_analysis.ts"
 import { defineTool } from "eve/tools";

@@ -39,7 +39,10 @@ describe("framework-tools/index", () => {
     }
 
     expect(names).toContain("agent");
-    expect(getFrameworkToolDefinitions().map((tool) => tool.name)).not.toContain("agent");
+    const defaultNames = getFrameworkToolDefinitions().map((tool) => tool.name);
+    expect(defaultNames).not.toContain("agent");
+    expect(defaultNames).not.toContain("glob");
+    expect(defaultNames).not.toContain("grep");
   });
 
   it("uses one validated runtime schema for every framework-defined input", () => {
