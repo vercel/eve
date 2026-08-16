@@ -8,6 +8,36 @@ import {
 import { resolveAgent } from "#runtime/resolve-agent.js";
 
 describe("buildFrameworkToolInfo", () => {
+  it("reports opt-in tools as inactive and unavailable by default", () => {
+    const info = buildFrameworkToolInfo({
+      authoredToolNames: new Set(),
+      delegationToolNames: new Set(),
+      disabledFrameworkToolNames: new Set(),
+    });
+
+    expect(info.available.map((tool) => tool.name)).not.toContain("glob");
+    expect(info.available.map((tool) => tool.name)).not.toContain("grep");
+    expect(info.framework.find((tool) => tool.name === "glob")).toMatchObject({
+      status: "opt-in",
+    });
+    expect(info.framework.find((tool) => tool.name === "grep")).toMatchObject({
+      status: "opt-in",
+    });
+  });
+
+  it("reports an authored opt-in tool as replacing the framework definition", () => {
+    const info = buildFrameworkToolInfo({
+      authoredToolNames: new Set(["grep"]),
+      delegationToolNames: new Set(),
+      disabledFrameworkToolNames: new Set(),
+    });
+
+    expect(info.framework.find((tool) => tool.name === "grep")).toMatchObject({
+      replacedByAuthoredTool: true,
+      status: "replaced",
+    });
+  });
+
   it("reports the built-in agent action as active and available by default", () => {
     const info = buildFrameworkToolInfo({
       authoredToolNames: new Set(),

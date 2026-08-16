@@ -5,6 +5,7 @@ import {
   getAllFrameworkToolNames,
   getFrameworkDynamicToolResolvers,
   getFrameworkToolDefinitions,
+  getOptInFrameworkToolNames,
 } from "#runtime/framework-tools/index.js";
 import { isToolSchema } from "#shared/tool-schema.js";
 
@@ -43,6 +44,16 @@ describe("framework-tools/index", () => {
     expect(defaultNames).not.toContain("agent");
     expect(defaultNames).not.toContain("glob");
     expect(defaultNames).not.toContain("grep");
+  });
+
+  it("identifies framework tools that require explicit authoring", () => {
+    expect([...getOptInFrameworkToolNames()].sort()).toEqual(["glob", "grep"]);
+  });
+
+  it("does not direct default tools to opt-in tools", () => {
+    const readFile = getFrameworkToolDefinitions().find((tool) => tool.name === "read_file");
+
+    expect(readFile?.description).not.toMatch(/\b(?:glob|grep)\b/u);
   });
 
   it("uses one validated runtime schema for every framework-defined input", () => {

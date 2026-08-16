@@ -5,6 +5,34 @@ import { createCompiledAgentManifest } from "#compiler/manifest.js";
 import { buildAgentInfoResponseFromManifest } from "#internal/nitro/routes/agent-info/build-agent-info-response-from-manifest.js";
 
 describe("buildAgentInfoResponseFromManifest", () => {
+  it("reports opt-in framework tools as unavailable", () => {
+    const manifest = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      config: {
+        model: {
+          id: "openai/gpt-5",
+          routing: { kind: "gateway", target: "openai" },
+        },
+        name: "app",
+      },
+    });
+
+    const result = buildAgentInfoResponseFromManifest(
+      { manifest, schedules: [] },
+      {
+        gatewayCredentials: { apiKey: false, oidc: false },
+        mode: "development",
+      },
+    );
+
+    expect(result.tools.available.map((tool) => tool.name)).not.toContain("glob");
+    expect(result.tools.available.map((tool) => tool.name)).not.toContain("grep");
+    expect(result.tools.framework.find((tool) => tool.name === "glob")?.status).toBe("opt-in");
+    expect(result.tools.framework.find((tool) => tool.name === "grep")?.status).toBe("opt-in");
+    expect(AgentInfoResultSchema.safeParse(result).success).toBe(true);
+  });
+
   it("reports unresolved dynamic models without a model id", () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/app/agent",

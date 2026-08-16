@@ -70,7 +70,7 @@ const tool = entry.extend({
 const frameworkTool = tool.extend({
   disabledByAuthor: z.boolean(),
   replacedByAuthoredTool: z.boolean(),
-  status: z.enum(["active", "disabled", "replaced"]),
+  status: z.enum(["active", "disabled", "opt-in", "replaced"]),
 });
 
 const dynamicResolver = source.extend({

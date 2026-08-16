@@ -112,6 +112,11 @@ export function getAllFrameworkToolDefinitions(): readonly ResolvedToolDefinitio
   return ALL_FRAMEWORK_TOOLS;
 }
 
+/** Returns framework tools that authors must explicitly add to an agent. */
+export function getOptInFrameworkToolNames(): ReadonlySet<string> {
+  return new Set(OPT_IN_FRAMEWORK_TOOLS.map((definition) => definition.name));
+}
+
 /**
  * Returns the names of every framework-provided tool the framework knows
  * about, regardless of whether the current agent gates any of them on

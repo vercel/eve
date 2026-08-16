@@ -3,6 +3,7 @@ import {
   getAllFrameworkToolDefinitions,
   getAllFrameworkToolNames,
   getFrameworkDynamicToolResolvers,
+  getOptInFrameworkToolNames,
 } from "#runtime/framework-tools/index.js";
 import {
   getAllFrameworkChannelNames,
@@ -51,7 +52,7 @@ export interface AgentInfoToolEntry extends AgentInfoSource {
 export interface AgentInfoFrameworkToolEntry extends AgentInfoToolEntry {
   readonly disabledByAuthor: boolean;
   readonly replacedByAuthoredTool: boolean;
-  readonly status: "active" | "disabled" | "replaced";
+  readonly status: "active" | "disabled" | "opt-in" | "replaced";
 }
 
 export interface AgentInfoDynamicResolverEntry extends AgentInfoSource {
@@ -425,6 +426,7 @@ export function buildFrameworkToolInfo(input: {
   const occupiedToolNames = new Set([...input.authoredToolNames, ...input.delegationToolNames]);
   const available: AgentInfoToolEntry[] = [];
   const framework: AgentInfoFrameworkToolEntry[] = [];
+  const optInFrameworkToolNames = getOptInFrameworkToolNames();
 
   for (const definition of getAllFrameworkToolDefinitions()) {
     const disabledByAuthor = input.disabledFrameworkToolNames.has(definition.name);
@@ -433,7 +435,9 @@ export function buildFrameworkToolInfo(input: {
       ? "disabled"
       : occupiedToolNames.has(definition.name)
         ? "replaced"
-        : "active";
+        : optInFrameworkToolNames.has(definition.name)
+          ? "opt-in"
+          : "active";
     const rendered = renderTool(definition, {
       origin: "framework",
       replacesFrameworkTool: false,
