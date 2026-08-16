@@ -3,7 +3,7 @@ title: "Default Harness"
 description: "How eve manages model context and compaction during an agent turn."
 ---
 
-The default harness is eve's built-in agent loop. It manages model calls, compaction, and tool execution. You can extend it with capabilities specific to your agent. To see how turns checkpoint and resume, read [Execution model and durability](./execution-model-and-durability).
+The default harness is eve's built-in agent loop. It manages model calls, compaction, and tool execution. Review the model-facing defaults and available opt-ins in [Built-in tools](./built-in-tools). To see how turns checkpoint and resume, read [Execution model and durability](./execution-model-and-durability).
 
 ## Compaction
 
