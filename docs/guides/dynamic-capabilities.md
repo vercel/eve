@@ -295,6 +295,6 @@ Dynamic system content that changes frequently can reduce provider prompt-cache 
 
 - Conditionally expose a specialist → [Subagents](../subagents)
 - The static tool basics this builds on → [Tools](../tools)
-- The built-in tools and how to override them → [Default harness](../concepts/default-harness)
+- The built-in tools and how to override them → [Built-in tools](../concepts/built-in-tools)
 - Authenticate a tool or connection to an external service → [Auth & route protection](./auth-and-route-protection)
 - Durable per-session memory for resolvers to read → [State](../concepts/state)

@@ -18,7 +18,8 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 
 - [Execution Model and Durability](${EVE_ORIGIN}/docs/concepts/execution-model-and-durability.md): Understand sessions, checkpointed steps, and parked work.
 - [Sessions, Runs, and Streaming](${EVE_ORIGIN}/docs/concepts/sessions-runs-and-streaming.md): Understand session IDs, NDJSON events, controls, and reconnecting.
-- [Default Harness](${EVE_ORIGIN}/docs/concepts/default-harness.md): Understand the built-in loop, tools, workspace, and context assembly.
+- [Default Harness](${EVE_ORIGIN}/docs/concepts/default-harness.md): Understand model context and compaction in the built-in loop.
+- [Built-in Tools](${EVE_ORIGIN}/docs/concepts/built-in-tools.md): Review default tools and add opt-in tools such as Workflow, glob, grep, and sleep.
 - [Context Control](${EVE_ORIGIN}/docs/concepts/context-control.md): Choose what the model sees and when.
 - [Security Model](${EVE_ORIGIN}/docs/concepts/security-model.md): Review trust boundaries, secret handling, credentials, and fail-closed behavior.
 
@@ -39,7 +40,6 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Schedules](${EVE_ORIGIN}/docs/schedules.md): Run prompts or handlers on a cron cadence.
 - [Hooks](${EVE_ORIGIN}/docs/guides/hooks.md): Subscribe to runtime stream events.
 - [Dynamic Capabilities](${EVE_ORIGIN}/docs/guides/dynamic-capabilities.md): Resolve models, tools, skills, subagents, and instructions at runtime.
-- [Workflow Tool](${EVE_ORIGIN}/docs/subagents/workflow-tool.md): Let the model orchestrate subagents through the experimental Workflow tool.
 
 ## Integrate
 

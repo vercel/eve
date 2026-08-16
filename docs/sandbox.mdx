@@ -18,7 +18,7 @@ The model already has shell and file access through the default tools:
 | `bash`                     | run a shell command in the sandbox  |
 | `read_file` / `write_file` | read/write files under `/workspace` |
 
-Opt into `glob` or `grep` when the model needs dedicated file discovery or content search; see [Built-in tools](./concepts/default-harness#add-framework-provided-tools) for the definitions to export.
+Opt into `glob` or `grep` when the model needs dedicated file discovery or content search; see [Built-in tools](./concepts/built-in-tools#add-framework-provided-tools) for the definitions to export.
 
 These tools run with `/workspace` as the working directory. The model-facing file tools accept both absolute paths and paths beginning with `$HOME/`; eve resolves the latter inside the sandbox before reading, writing, or searching. Any authored runtime function (a tool, a step, a model callback) can get a live sandbox handle with `ctx.getSandbox()`.
 

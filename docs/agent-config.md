@@ -259,6 +259,6 @@ During `eve dev`, ordinary dependencies are bundled into each retained runtime g
 
 ## What to read next
 
-- [Default harness](./concepts/default-harness) for the loop and built-in tools this config drives
+- [Default harness](./concepts/default-harness) for compaction and model context, and [Built-in tools](./concepts/built-in-tools) for the framework-provided tool set
 - [TypeScript API Reference](./reference/typescript-api) for every `defineAgent` field and type
 - [Subagents](./subagents) for the `description` requirement and child-agent config
