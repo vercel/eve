@@ -45,6 +45,18 @@ describe("parseSessionCallback callback-URL token extraction", () => {
     ).toMatchObject({ ok: true });
   });
 
+  it("accepts callback metadata with an optional task id", () => {
+    expect(
+      parseSessionCallback({
+        ...createCallback("https://agent.example.com/eve/v1/callback/tok123"),
+        taskId: "task-1",
+      }),
+    ).toMatchObject({
+      callback: { taskId: "task-1" },
+      ok: true,
+    });
+  });
+
   it("rejects a URL without the callback route", () => {
     expect(
       parseSessionCallback(
