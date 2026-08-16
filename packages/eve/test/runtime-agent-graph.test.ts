@@ -383,14 +383,6 @@ describe("resolveRuntimeAgentGraph", () => {
       },
       {
         kind: "authored-tool",
-        name: "glob",
-      },
-      {
-        kind: "authored-tool",
-        name: "grep",
-      },
-      {
-        kind: "authored-tool",
         name: "read_file",
       },
       {
@@ -470,14 +462,6 @@ describe("resolveRuntimeAgentGraph", () => {
         description: "Execute a shell command in the shared workspace environment.",
         kind: "authored-tool",
         name: "bash",
-      },
-      {
-        kind: "authored-tool",
-        name: "glob",
-      },
-      {
-        kind: "authored-tool",
-        name: "grep",
       },
       {
         kind: "authored-tool",
@@ -787,8 +771,6 @@ describe("resolveRuntimeAgentGraph", () => {
     });
     expect(tools.map((tool) => tool.name)).toEqual([
       "ask_question",
-      "glob",
-      "grep",
       "read_file",
       "write_file",
       "todo",
@@ -827,8 +809,6 @@ describe("resolveRuntimeAgentGraph", () => {
     expect(graph.root.turnAgent.tools.map((tool) => tool.name)).toEqual([
       "ask_question",
       "bash",
-      "glob",
-      "grep",
       "read_file",
       "write_file",
       "todo",
@@ -912,8 +892,6 @@ describe("resolveRuntimeAgentGraph", () => {
 
     expect(tools.map((tool) => tool.name)).toEqual([
       "ask_question",
-      "glob",
-      "grep",
       "read_file",
       "write_file",
       "todo",
