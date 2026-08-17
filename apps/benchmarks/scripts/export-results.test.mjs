@@ -64,7 +64,7 @@ test("exports missing cells without publishing private artifacts", () => {
   }
 });
 
-test("exports the mean estimated list cost from run token usage", () => {
+test("exports mean cost, token consumption, and tool invocations", () => {
   const directory = mkdtempSync(join(tmpdir(), "eve-benchmark-export-cost-"));
   const outputPath = join(directory, "results.json");
   const resultsPath = new URL("../results", import.meta.url).pathname;
@@ -84,6 +84,11 @@ test("exports the mean estimated list cost from run token usage", () => {
       `${JSON.stringify({
         type: "assistant",
         message: {
+          content: [
+            { type: "text", text: "Done." },
+            { type: "tool_use", name: "read", input: {} },
+            { type: "tool_use", name: "bash", input: {} },
+          ],
           usage: {
             inputTokens: 1_000_000,
             outputTokens: 100_000,
@@ -118,6 +123,8 @@ test("exports the mean estimated list cost from run token usage", () => {
         entry.caseId === "author-001-weather-tool",
     );
     assert.equal(result.meanEstimatedListCostUsd, 4.5);
+    assert.equal(result.meanTokenConsumption, 1_100_000);
+    assert.equal(result.meanToolInvocationCount, 2);
   } finally {
     rmSync(resultsPath, { recursive: true, force: true });
     if (existsSync(savedResultsPath)) renameSync(savedResultsPath, resultsPath);

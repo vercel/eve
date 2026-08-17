@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { extractRunUsage, priceUsage } from "./cost.mjs";
+import { countToolInvocations, extractRunUsage, priceUsage, tokenConsumption } from "./cost.mjs";
 
 test("extracts usage from authoring harness transcripts", () => {
   const usage = extractRunUsage(
@@ -30,6 +30,38 @@ test("extracts usage from authoring harness transcripts", () => {
     cacheRead: 50,
     cacheWrite: 10,
   });
+});
+
+test("calculates token consumption without double-counting cache details", () => {
+  assert.equal(
+    tokenConsumption({
+      input: 100,
+      output: 20,
+      reasoning: 5,
+      cacheRead: 50,
+      cacheWrite: 10,
+    }),
+    125,
+  );
+});
+
+test("counts tool invocations in authoring harness transcripts", () => {
+  const raw = [
+    JSON.stringify({ type: "user", message: { role: "user", content: "Hi" } }),
+    JSON.stringify({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Checking." },
+          { type: "tool_use", name: "read", input: {} },
+          { type: "tool_use", name: "bash", input: {} },
+        ],
+      },
+    }),
+  ].join("\n");
+
+  assert.equal(countToolInvocations(raw), 2);
 });
 
 test("prices reasoning at the output rate", () => {
