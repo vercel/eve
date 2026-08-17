@@ -7,7 +7,13 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-import { extractRunUsage, modelPricing, priceUsage } from "./cost.mjs";
+import {
+  countToolInvocations,
+  extractRunUsage,
+  modelPricing,
+  priceUsage,
+  tokenConsumption,
+} from "./cost.mjs";
 import {
   authoringTreatments,
   findPublishedBenchmarkModel,
@@ -67,13 +73,12 @@ for (const benchmark of benchmarks) {
         continue;
       }
       const { summaryPath, ...result } = measured;
-      const meanCost = meanEstimatedListCostUsd(summaryPath, benchmark.model);
       results.push({
         experimentId,
         caseId,
         status: status ?? "current",
         ...result,
-        ...(meanCost === undefined ? {} : { meanEstimatedListCostUsd: meanCost }),
+        ...meanRunMetrics(summaryPath, benchmark.model),
       });
     }
   }
@@ -170,19 +175,32 @@ function latestValidResult(experimentId, caseId) {
   return undefined;
 }
 
-function meanEstimatedListCostUsd(summaryPath, model) {
-  const pricing = modelPricing[model];
-  if (pricing === undefined) return undefined;
-  const costs = readdirSync(dirname(summaryPath), { withFileTypes: true })
+function meanRunMetrics(summaryPath, model) {
+  const runs = readdirSync(dirname(summaryPath), { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && /^run-\d+$/u.test(entry.name))
     .flatMap((entry) => {
       const transcriptPath = join(dirname(summaryPath), entry.name, "transcript-raw.jsonl");
       if (!existsSync(transcriptPath)) return [];
-      const usage = extractRunUsage(readFileSync(transcriptPath, "utf8"));
-      return usage === null ? [] : [priceUsage(usage, pricing)];
+      const raw = readFileSync(transcriptPath, "utf8");
+      return [{ usage: extractRunUsage(raw), toolInvocations: countToolInvocations(raw) }];
     });
-  if (costs.length === 0) return undefined;
-  return costs.reduce((total, cost) => total + cost, 0) / costs.length;
+  const usage = runs.flatMap((run) => (run.usage === null ? [] : [run.usage]));
+  const result = {};
+  const pricing = modelPricing[model];
+  if (pricing !== undefined && usage.length > 0) {
+    result.meanEstimatedListCostUsd = mean(usage.map((value) => priceUsage(value, pricing)));
+  }
+  if (usage.length > 0) {
+    result.meanTokenConsumption = mean(usage.map(tokenConsumption));
+  }
+  if (runs.length > 0) {
+    result.meanToolInvocationCount = mean(runs.map((run) => run.toolInvocations));
+  }
+  return result;
+}
+
+function mean(values) {
+  return values.reduce((total, value) => total + value, 0) / values.length;
 }
 
 function findFiles(root, fileName) {

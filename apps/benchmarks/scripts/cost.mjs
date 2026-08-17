@@ -76,6 +76,26 @@ export function extractRunUsage(raw) {
   return found ? usage : null;
 }
 
+export function tokenConsumption(usage) {
+  return usage.input + usage.output + usage.reasoning;
+}
+
+export function countToolInvocations(raw) {
+  let count = 0;
+  for (const line of raw.split("\n")) {
+    try {
+      const event = JSON.parse(line);
+      if (event.type !== "assistant") continue;
+      const content = object(event.message).content;
+      if (!Array.isArray(content)) continue;
+      count += content.filter((part) => object(part).type === "tool_use").length;
+    } catch {
+      // Ignore malformed transcript lines.
+    }
+  }
+  return count;
+}
+
 export function priceUsage(usage, pricing) {
   return (
     (usage.input * pricing.input +
