@@ -54,6 +54,19 @@ describe("deriveHitlResponse", () => {
     expect(response).toEqual({ requestId: "call_xyz", optionId: "weekly" });
   });
 
+  it("preserves tool-approval metadata from a button action id", () => {
+    const response = deriveHitlResponse({
+      actionId: `${HITL_ACTION_PREFIX}tool-approval:approval_abc123:button:0`,
+      value: "approve",
+    });
+
+    expect(response).toEqual({
+      kind: "tool-approval",
+      optionId: "approve",
+      requestId: "approval_abc123",
+    });
+  });
+
   it("returns null when neither value nor selectedOptionValue is set", () => {
     expect(deriveHitlResponse({ actionId: `${HITL_ACTION_PREFIX}call_abc` })).toBeNull();
   });
@@ -159,8 +172,17 @@ describe("renderInputRequestBlocks", () => {
       body: { type: "mrkdwn", text: "*Approve tool call: mongodb-mutate*" },
     });
     expect(card.actions).toMatchObject([
-      { text: { text: "Cancel" }, value: "cancel" },
-      { style: "primary", text: { text: "Approve" }, value: "approve" },
+      {
+        action_id: `${HITL_ACTION_PREFIX}tool-approval:approval_1:button:0`,
+        text: { text: "Cancel" },
+        value: "cancel",
+      },
+      {
+        action_id: `${HITL_ACTION_PREFIX}tool-approval:approval_1:button:1`,
+        style: "primary",
+        text: { text: "Approve" },
+        value: "approve",
+      },
     ]);
 
     const details = blocks[1] as {

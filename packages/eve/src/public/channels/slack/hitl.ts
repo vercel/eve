@@ -60,7 +60,7 @@ export const HITL_FREEFORM_MODAL_ACTION_ID = "eve_freeform_text";
  * groups stay readable up to ~6 items).
  */
 const RADIO_SELECT_OPTION_LIMIT = 6;
-const BUTTON_ACTION_ID_RE = /^(?<requestId>.+):button:\d+$/u;
+const BUTTON_ACTION_ID_RE = /^(?:(?<kind>tool-approval):)?(?<requestId>.+):button:\d+$/u;
 const TOOL_INPUT_PREFIX = "*Tool input*\n```\n";
 const TOOL_INPUT_CODE_PREFIX = "```\n";
 const TOOL_INPUT_SUFFIX = "\n```";
@@ -90,6 +90,7 @@ interface SlackHitlAction {
 interface DerivedHitlResponse {
   readonly requestId: string;
   readonly optionId: string;
+  readonly kind?: "tool-approval";
 }
 
 /**
@@ -100,20 +101,36 @@ interface DerivedHitlResponse {
 export function deriveHitlResponse(action: SlackHitlAction): DerivedHitlResponse | null {
   if (!action.actionId.startsWith(HITL_ACTION_PREFIX)) return null;
 
-  const encodedRequestId = action.actionId.slice(HITL_ACTION_PREFIX.length);
+  const encodedRequest = action.actionId.slice(HITL_ACTION_PREFIX.length);
 
   if (action.selectedOptionValue !== undefined) {
-    return encodedRequestId
-      ? { optionId: action.selectedOptionValue, requestId: encodedRequestId }
-      : null;
+    const { kind, requestId } = splitEncodedRequest(encodedRequest);
+    if (!requestId) return null;
+    return kind === "tool-approval"
+      ? { kind, optionId: action.selectedOptionValue, requestId }
+      : { optionId: action.selectedOptionValue, requestId };
   }
 
   if (action.value !== undefined) {
-    const requestId = BUTTON_ACTION_ID_RE.exec(encodedRequestId)?.groups?.requestId;
-    return requestId ? { optionId: action.value, requestId } : null;
+    const match = BUTTON_ACTION_ID_RE.exec(encodedRequest);
+    const requestId = match?.groups?.requestId;
+    if (!requestId) return null;
+    return match.groups?.kind === "tool-approval"
+      ? { kind: "tool-approval", optionId: action.value, requestId }
+      : { optionId: action.value, requestId };
   }
 
   return null;
+}
+
+function splitEncodedRequest(value: string): {
+  readonly kind?: "tool-approval";
+  readonly requestId: string;
+} {
+  const prefix = "tool-approval:";
+  return value.startsWith(prefix)
+    ? { kind: "tool-approval", requestId: value.slice(prefix.length) }
+    : { requestId: value };
 }
 
 /**
@@ -149,7 +166,9 @@ export function renderInputRequestBlocks(request: InputRequest): unknown[] {
     type: "section",
   };
   const details = renderInputRequestDetailBlocks(request);
-  const actionId = `${HITL_ACTION_PREFIX}${request.requestId}`;
+  const actionId = `${HITL_ACTION_PREFIX}${
+    request.kind === "tool-approval" ? "tool-approval:" : ""
+  }${request.requestId}`;
 
   const options = request.options;
   const acceptsFreeform = request.allowFreeform === true || !options || options.length === 0;

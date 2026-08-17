@@ -18,7 +18,7 @@ export type SlackSendOptions = Omit<ChannelSendOptions<SlackChannelState>, "auth
 };
 
 /** Options for an input response already bound to one Slack thread. */
-export type SlackRespondOptions = Omit<ChannelRespondOptions, "auth"> & {
+export type SlackRespondOptions = Omit<ChannelRespondOptions<SlackChannelState>, "auth"> & {
   readonly auth?: SessionAuthContext | null;
 };
 

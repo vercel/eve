@@ -1,21 +1,7 @@
 /**
- * Slack `block_actions` + `view_submission` wire handling.
- *
- * The route handler reads the form-encoded body, hands it here, and we:
- *
- * 1. Decode `block_actions` payloads into a typed shape the channel can
- *    work with — actions, channel/thread metadata, the clicker, and the
- *    full original block list for answered-card updates.
- * 2. Open the freeform-answer modal inline when the click was a "Type
- *    your answer" button (Slack's `trigger_id` is only valid for ~3s,
- *    so this can't run under `waitUntil`).
- * 3. Authorize decoded fixed-choice and freeform submissions through
- *    `onInputResponse`, then resolve accepted answers against parked HITL
- *    requests.
- *
- * User-owned block actions flow through to the supplied `onInteraction`
- * callback. Always returns `Response("ok")` — followup work runs under
- * `waitUntil` so the webhook ACK is immediate.
+ * Slack `block_actions` + `view_submission` wire handling. It decodes and
+ * authorizes framework HITL responses, opens freeform modals inline before
+ * Slack's trigger expires, and forwards user-owned actions to `onInteraction`.
  */
 
 import {
@@ -47,7 +33,10 @@ import {
   SLACK_CARD_SUBTEXT_MAX_LENGTH,
   truncateCardSubtext,
 } from "#public/channels/slack/limits.js";
-import { authorizeInputResponse } from "#public/channels/slack/input-response.js";
+import {
+  approvalResponderStatePatch,
+  authorizeInputResponse,
+} from "#public/channels/slack/input-response.js";
 import type {
   SlackChannelConfig,
   SlackChannelState,
@@ -461,9 +450,18 @@ async function dispatchBlockInputResponses(input: {
   try {
     await input.ctx
       .from(slackContinuationToken(input.interaction.channelId, input.interaction.threadTs))
-      .respond(input.submission.inputResponses, { auth: result.auth });
+      .respond(input.submission.inputResponses, {
+        auth: result.auth,
+        state: approvalResponderStatePatch(input.submission, result.auth),
+      });
   } catch (error) {
     log.error("HITL interaction delivery failed", { error });
+    return;
+  }
+
+  if (
+    input.submission.actions.some((action) => deriveHitlResponse(action)?.kind === "tool-approval")
+  ) {
     return;
   }
 

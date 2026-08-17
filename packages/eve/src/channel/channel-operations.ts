@@ -38,14 +38,15 @@ export type ChannelSendOptions<TState = undefined> = [TState] extends [undefined
   ? BaseChannelSendOptions
   : BaseChannelSendOptions & { readonly state: TState };
 
-interface BaseChannelRespondOptions {
+interface BaseChannelRespondOptions<TState = undefined> {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
   readonly outputSchema?: JsonObject;
+  readonly state?: Partial<TState>;
 }
 
 /** Options for answering pending input requests at an existing continuation address. */
-export type ChannelRespondOptions = BaseChannelRespondOptions;
+export type ChannelRespondOptions<TState = undefined> = BaseChannelRespondOptions<TState>;
 
 /** Dynamic handle for whichever session currently owns one channel-local address. */
 export interface ChannelSource<TState = undefined> {
@@ -54,7 +55,7 @@ export interface ChannelSource<TState = undefined> {
   /** Answers pending input requests. Never creates a session. */
   respond(
     inputResponses: readonly InputResponse[],
-    options: ChannelRespondOptions,
+    options: ChannelRespondOptions<TState>,
   ): Promise<Session>;
   /** Cooperatively cancels the active turn without creating a session. */
   cancel(options?: { readonly turnId?: string }): Promise<CancelTurnResult>;
@@ -121,6 +122,7 @@ export function createChannelOperations<TState = undefined>(input: {
               context: options.context,
               inputResponses,
               outputSchema: options.outputSchema,
+              state: options.state,
             },
             options,
           );
