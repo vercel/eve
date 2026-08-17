@@ -20,3 +20,41 @@ for (const entry of await readdir(evalsRoot, { withFileTypes: true })) {
     assert.ok(authoringCase.startingPoint);
   });
 }
+
+test("requires an iMessage phone-number request before supplying the number", async () => {
+  const authoringCase = await loadAuthoringCase(resolve(evalsRoot, "author-000-imessage"));
+  const prompts = [];
+  await assert.rejects(
+    authoringCase.interact({
+      send: async (prompt) => {
+        prompts.push(prompt);
+        return {
+          text: "iMessage needs a phone number with a carrier-level bridge.",
+          toolCalls: [],
+        };
+      },
+    }),
+    /Expected the agent to ask for the user's phone number/u,
+  );
+  assert.deepEqual(prompts, [
+    "Set up iMessage for this agent. I can provide a phone number if you need it.",
+  ]);
+});
+
+test("supplies the number after an iMessage phone-number request", async () => {
+  const authoringCase = await loadAuthoringCase(resolve(evalsRoot, "author-000-imessage"));
+  const prompts = [];
+  await authoringCase.interact({
+    send: async (prompt) => {
+      prompts.push(prompt);
+      return {
+        text: "What phone number should be registered for iMessage? (e.g., `+15551234567`)",
+        toolCalls: [],
+      };
+    },
+  });
+  assert.deepEqual(prompts, [
+    "Set up iMessage for this agent. I can provide a phone number if you need it.",
+    "+15551234567",
+  ]);
+});

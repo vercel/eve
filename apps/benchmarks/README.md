@@ -13,6 +13,7 @@ Git does not ignore:
 pnpm benchmark author-000-imessage
 pnpm benchmark
 pnpm benchmark author-000-imessage --runs 3
+pnpm benchmark author-000-imessage --model kimi-k3
 pnpm benchmark author-000-imessage --treatment baseline
 pnpm benchmark author-000-imessage --dry
 pnpm benchmark author-000-imessage --verbose
@@ -48,18 +49,25 @@ required.
 ## Publish canonical results
 
 Canonical publication compares the `baseline` and `guided` treatments with the same eve revision,
-model, harness, cases, and graders. It requires a clean working tree and defaults to `origin/main`:
+model, harness, cases, and graders. The matrix holds the harness constant at OpenCode and varies
+only the model, so rows are comparable. A model ID is selected independently from the coding-agent
+harness; adding Claude Code, Codex, or Gemini CLI belongs to a separate harness comparison. Publication
+requires a clean working tree and defaults to `origin/main`:
 
 ```sh
 pnpm benchmark:publish --dry
 pnpm benchmark:publish
 pnpm benchmark:publish --revision <commit>
+pnpm benchmark:publish --models kimi-k3,gpt-5-6-sol
 ```
 
 Pass `--allow-dirty` only for a local, noncanonical run. It bypasses the clean-tree check, so its
 results cannot be reproduced from committed source and should not be committed as published data.
 
-Each cell runs three times. Completed cells are memoized by `@vercel/agent-eval`; pass `--force` only
+Without `--models`, publication covers the complete configured model matrix. Use `--models` to
+publish or refresh selected model rows. The published suite currently includes the weather-tool and
+new-project cases; the iMessage case remains available for local runs but is excluded from the
+published matrix. Each cell runs three times. Completed cells are memoized by `@vercel/agent-eval`; pass `--force` only
 when every cell should run again. A successful run writes aggregate results to
 `apps/docs/lib/evals/benchmark-results.json`. The public file contains outcomes and timing, not
 transcripts, generated files, command logs, or synthetic world events.

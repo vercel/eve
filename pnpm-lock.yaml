@@ -132,14 +132,14 @@ importers:
   apps/benchmarks:
     dependencies:
       '@ai-sdk/harness':
-        specifier: 1.0.67
-        version: 1.0.67(ws@8.21.3(bufferutil@4.1.0))(zod@4.4.3)
-      '@ai-sdk/harness-codex':
-        specifier: 1.0.69
-        version: 1.0.69(bufferutil@4.1.0)(zod@4.4.3)
+        specifier: 1.0.72
+        version: 1.0.72(ws@8.21.0(bufferutil@4.1.0))(zod@4.4.3)
+      '@ai-sdk/harness-opencode':
+        specifier: 1.0.73
+        version: 1.0.73(bufferutil@4.1.0)(zod@4.4.3)
       '@ai-sdk/sandbox-vercel':
-        specifier: 1.0.67
-        version: 1.0.67(ws@8.21.3(bufferutil@4.1.0))(zod@4.4.3)
+        specifier: 1.0.72
+        version: 1.0.72(ws@8.21.0(bufferutil@4.1.0))(zod@4.4.3)
       '@vercel/agent-eval':
         specifier: 1.5.0
         version: 1.5.0(supports-color@10.2.2)
@@ -1450,8 +1450,8 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/gateway@4.0.49':
-    resolution: {integrity: sha512-qdSUr4FAN7e+MHBdVzkmbGMtpf7XQdQp1AgMI3jV0QPmld/4k4QbR7mXRQgjUsPeIfAwBzMPMPziHAPP1tXRwg==}
+  '@ai-sdk/gateway@4.0.52':
+    resolution: {integrity: sha512-SXUM8jzzuTUJRq+EOgPd5to6DSx0EKslVn+IVZHbUEX6k/3vCPNrvjckbK26HnNxHU/STxm+zTSJteqrO+7Z0w==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -1480,14 +1480,14 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/harness-codex@1.0.69':
-    resolution: {integrity: sha512-Ybt4PiYj1qeM9dxzpdNpl6M02gdBw/SvuRF746GLKpbRS361i/pKAr78/nqVUanpNRmO5mMI3OazhqjcxVpeKQ==}
+  '@ai-sdk/harness-opencode@1.0.73':
+    resolution: {integrity: sha512-OewZBK5NuufxY9Ve9VahtQ2ma3oaiZXO89iXB5rmzyyF4kMCx5nDNirAwY/HaR8rcwhUE4gGGuoBjNUNPHkaYA==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/harness@1.0.67':
-    resolution: {integrity: sha512-sZLmLl0fLfSHlxL292d8+waJzqqY/z+sQ1zEyCtO+EtB5T+GqdJuwLc/xzRjPGRdkKT0RCtVqR+0i4fJuDMDfA==}
+  '@ai-sdk/harness@1.0.72':
+    resolution: {integrity: sha512-p11kq04JlKCy6VCjzhyeGZJhQbdYkGYdkCOLspFVoBYoW7hp2Co6nob8o2l1uRAsGTFqGdWZ6ZFaKov1K+BjKA==}
     engines: {node: '>=22'}
     peerDependencies:
       ws: ^8.21.0
@@ -1588,8 +1588,8 @@ packages:
     peerDependencies:
       react: ^18 || ~19.0.1 || ~19.1.2 || ^19.2.1
 
-  '@ai-sdk/sandbox-vercel@1.0.67':
-    resolution: {integrity: sha512-+NuPjprC9Bo8Z+89LmQLr/xH0eV2C0HcZ5pW/6gymkD6xwVbd0tBqsme4D+PCOM8QTA6dcHTLnhq10A0Iejalg==}
+  '@ai-sdk/sandbox-vercel@1.0.72':
+    resolution: {integrity: sha512-AolOfKEZ5VhsEXRVwDGroabY5Fy2fCNxEFFYpdjqd4J/1IxgpBSgoYNWOS0T1Xg/0J4WCccAM7PQwpmJgwLtVw==}
     engines: {node: '>=22'}
 
   '@ai-sdk/togetherai@1.0.49':
@@ -8041,8 +8041,8 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  ai@7.0.61:
-    resolution: {integrity: sha512-WaLRW+JI990nHdenxAUQw4QIuS+q8s7TqRcEjjjhspTy6m1vuMcDGubgOCGYIDWmK3GUJdMlSpas4I84eWaKAg==}
+  ai@7.0.66:
+    resolution: {integrity: sha512-wBUyoCYF3GVr+62nelBgR8YbpTSsMZrzFyOOjiwijylNSM2TFCW35C+Pml2vc59/WLMpyhS/LWZ55M+B9DAcSg==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -15285,6 +15285,18 @@ packages:
       utf-8-validate:
         optional: true
 
+  ws@8.21.0:
+    resolution: {integrity: sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   ws@8.21.3:
     resolution: {integrity: sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw==}
     engines: {node: '>=10.0.0'}
@@ -15550,7 +15562,7 @@ snapshots:
       '@vercel/oidc': 3.2.0
       zod: 4.4.3
 
-  '@ai-sdk/gateway@4.0.49(zod@4.4.3)':
+  '@ai-sdk/gateway@4.0.52(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 4.0.7
       '@ai-sdk/provider-utils': 5.0.27(zod@4.4.3)
@@ -15590,24 +15602,24 @@ snapshots:
       zod: 4.4.3
     optional: true
 
-  '@ai-sdk/harness-codex@1.0.69(bufferutil@4.1.0)(zod@4.4.3)':
+  '@ai-sdk/harness-opencode@1.0.73(bufferutil@4.1.0)(zod@4.4.3)':
     dependencies:
-      '@ai-sdk/harness': 1.0.67(ws@8.21.3(bufferutil@4.1.0))(zod@4.4.3)
+      '@ai-sdk/harness': 1.0.72(ws@8.21.0(bufferutil@4.1.0))(zod@4.4.3)
       '@ai-sdk/provider-utils': 5.0.27(zod@4.4.3)
-      ws: 8.21.3(bufferutil@4.1.0)
+      ws: 8.21.0(bufferutil@4.1.0)
       zod: 4.4.3
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@ai-sdk/harness@1.0.67(ws@8.21.3(bufferutil@4.1.0))(zod@4.4.3)':
+  '@ai-sdk/harness@1.0.72(ws@8.21.0(bufferutil@4.1.0))(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 4.0.7
       '@ai-sdk/provider-utils': 5.0.27(zod@4.4.3)
-      ai: 7.0.61(zod@4.4.3)
+      ai: 7.0.66(zod@4.4.3)
       zod: 4.4.3
     optionalDependencies:
-      ws: 8.21.3(bufferutil@4.1.0)
+      ws: 8.21.0(bufferutil@4.1.0)
 
   '@ai-sdk/mcp@2.0.29(zod@4.4.3)':
     dependencies:
@@ -15730,9 +15742,9 @@ snapshots:
     transitivePeerDependencies:
       - zod
 
-  '@ai-sdk/sandbox-vercel@1.0.67(ws@8.21.3(bufferutil@4.1.0))(zod@4.4.3)':
+  '@ai-sdk/sandbox-vercel@1.0.72(ws@8.21.0(bufferutil@4.1.0))(zod@4.4.3)':
     dependencies:
-      '@ai-sdk/harness': 1.0.67(ws@8.21.3(bufferutil@4.1.0))(zod@4.4.3)
+      '@ai-sdk/harness': 1.0.72(ws@8.21.0(bufferutil@4.1.0))(zod@4.4.3)
       '@ai-sdk/provider-utils': 5.0.27(zod@4.4.3)
       '@vercel/sandbox': 2.8.0
     transitivePeerDependencies:
@@ -22799,9 +22811,9 @@ snapshots:
       '@ai-sdk/provider-utils': 5.0.25(zod@4.4.3)
       zod: 4.4.3
 
-  ai@7.0.61(zod@4.4.3):
+  ai@7.0.66(zod@4.4.3):
     dependencies:
-      '@ai-sdk/gateway': 4.0.49(zod@4.4.3)
+      '@ai-sdk/gateway': 4.0.52(zod@4.4.3)
       '@ai-sdk/provider': 4.0.7
       '@ai-sdk/provider-utils': 5.0.27(zod@4.4.3)
       zod: 4.4.3
@@ -32313,6 +32325,10 @@ snapshots:
   wrappy@1.0.2: {}
 
   ws@7.5.13(bufferutil@4.1.0):
+    optionalDependencies:
+      bufferutil: 4.1.0
+
+  ws@8.21.0(bufferutil@4.1.0):
     optionalDependencies:
       bufferutil: 4.1.0
 

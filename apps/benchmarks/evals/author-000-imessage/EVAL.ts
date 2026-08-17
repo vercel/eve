@@ -12,9 +12,12 @@ test("installs the discovered iMessage registry item through the headless setup 
   expect(commandLog).toMatch(/--answer(?:=|\s+)["']?phoneNumber=/i);
 });
 
-test("asks for and uses the phone number from the follow-up turn", () => {
-  expect(transcript.some((entry) => /phone number/i.test(entry.content))).toBe(true);
-  expect(transcript.some((entry) => entry.content.includes("+15551234567"))).toBe(true);
+test("records the agent's phone-number request", () => {
+  expect(
+    transcript
+      .filter((entry) => entry.role === "assistant")
+      .some((entry) => /phone number|imessage number/i.test(entry.content)),
+  ).toBe(true);
 });
 
 test("completes the synthetic provider setup decision tree", () => {
