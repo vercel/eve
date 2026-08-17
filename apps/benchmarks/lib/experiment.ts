@@ -1,8 +1,7 @@
 import type { ExperimentConfig } from "@vercel/agent-eval";
 import { registerAgent } from "@vercel/agent-eval";
 
-import type { AuthoringTreatment } from "./benchmark-config.js";
-import { AUTHORING_MODEL } from "./benchmark-config.js";
+import type { AuthoringBenchmarkModel, AuthoringTreatment } from "./benchmark-config.js";
 import { createAuthoringAgent } from "./harness-agent.js";
 
 export function authoringExperiment(options: {
@@ -10,11 +9,13 @@ export function authoringExperiment(options: {
   readonly digest: string;
   readonly dependencyDigest: string;
   readonly runs?: number;
+  readonly evals?: readonly string[];
+  readonly benchmark: AuthoringBenchmarkModel;
   readonly treatment: AuthoringTreatment;
   readonly verbose?: boolean;
 }): ExperimentConfig {
   const agent = createAuthoringAgent({
-    name: `eve-authoring-harness-${options.digest.slice(0, 12)}-${options.treatment}`,
+    model: options.benchmark.model,
     archive: options.archive,
     digest: options.digest,
     dependencyDigest: options.dependencyDigest,
@@ -22,8 +23,8 @@ export function authoringExperiment(options: {
   registerAgent(agent);
   return {
     agent: agent.name,
-    model: AUTHORING_MODEL,
-    evals: process.env.EVE_BENCHMARK_EVAL ?? "*",
+    model: options.benchmark.model,
+    evals: process.env.EVE_BENCHMARK_EVAL ?? (options.evals ? [...options.evals] : "*"),
     scripts: ["typecheck", "build"],
     runs: options.runs ?? 1,
     earlyExit: false,

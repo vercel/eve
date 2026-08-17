@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-import { parseAuthoringTreatment } from "./lib/benchmark-config.ts";
+import { findBenchmarkModel, parseAuthoringTreatment } from "./lib/benchmark-config.ts";
 import { revisionSubject, workingTreeSubject } from "./lib/source.mjs";
 
 const appRoot = dirname(fileURLToPath(import.meta.url));
@@ -21,6 +21,7 @@ const { values, positionals } = parseArgs({
     head: { type: "string" },
     dry: { type: "boolean" },
     runs: { type: "string" },
+    model: { type: "string", default: "claude-sonnet-5" },
     treatment: { type: "string", default: "guided" },
     verbose: { type: "boolean" },
     help: { type: "boolean", short: "h" },
@@ -39,6 +40,7 @@ if (values.head !== undefined && values.base === undefined) {
 const runs = parseRuns(values.runs);
 const selectedEval = positionals[0];
 const treatment = parseAuthoringTreatment(values.treatment);
+const benchmark = findBenchmarkModel(values.model);
 if (values.verbose && (selectedEval === undefined || runs !== 1 || values.base !== undefined)) {
   throw new Error("--verbose requires one eval, one run, and no revision comparison.");
 }
@@ -59,7 +61,7 @@ const subjects =
 
 prepareFixtures();
 mkdirSync(join(appRoot, "results"), { recursive: true });
-writeExperiments(subjects, runs, treatment, values.verbose ?? false);
+writeExperiments(subjects, runs, benchmark, treatment, values.verbose ?? false);
 const executable = join(appRoot, "node_modules/.bin/agent-eval");
 const experimentNames = subjects.map((subject) => subject.label);
 const args = values.dry ? ["status", ...experimentNames] : ["run", ...experimentNames, "--force"];
@@ -91,7 +93,7 @@ function fixtureNames() {
     .map((entry) => entry.name);
 }
 
-function writeExperiments(subjects, runs, treatment, verbose) {
+function writeExperiments(subjects, runs, benchmark, treatment, verbose) {
   rmSync(experimentsRoot, { recursive: true, force: true });
   mkdirSync(experimentsRoot, { recursive: true });
   for (const subject of subjects) {
@@ -106,6 +108,7 @@ function writeExperiments(subjects, runs, treatment, verbose) {
         `  digest: ${JSON.stringify(subject.digest)},\n` +
         `  dependencyDigest: ${JSON.stringify(subject.dependencyDigest)},\n` +
         `  runs: ${runs},\n` +
+        `  benchmark: ${JSON.stringify(benchmark)},\n` +
         `  treatment: ${JSON.stringify(treatment)},\n` +
         `  verbose: ${verbose},\n` +
         `});\n`,
@@ -123,6 +126,6 @@ function parseRuns(value) {
 
 function usage() {
   console.log(`Usage:
-  pnpm benchmark [eval-name] [--runs N] [--treatment baseline|guided] [--dry] [--verbose]
-  pnpm benchmark [eval-name] --base <revision> [--head <revision>] [--runs N] [--treatment baseline|guided] [--dry]`);
+  pnpm benchmark [eval-name] [--model <id>] [--runs N] [--treatment baseline|guided] [--dry] [--verbose]
+  pnpm benchmark [eval-name] --base <revision> [--head <revision>] [--model <id>] [--runs N] [--treatment baseline|guided] [--dry]`);
 }

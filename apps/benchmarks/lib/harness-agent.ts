@@ -1,11 +1,8 @@
 import { readFileSync } from "node:fs";
-import { performance } from "node:perf_hooks";
-import { pathToFileURL } from "node:url";
-
 import type { HarnessV1NetworkSandboxSession } from "@ai-sdk/harness";
 import type { HarnessAgentSession } from "@ai-sdk/harness/agent";
 import { HarnessAgent } from "@ai-sdk/harness/agent";
-import { createCodex } from "@ai-sdk/harness-codex";
+import { createOpenCode } from "@ai-sdk/harness-opencode";
 import type { Agent, AgentRunResult } from "@vercel/agent-eval";
 
 import type {
@@ -15,37 +12,36 @@ import type {
   AuthoringTurn,
 } from "./authoring-case.js";
 import { createDependencyCachedSandbox } from "./dependency-sandbox.js";
+import { loadAuthoringCase } from "./load-authoring-case.js";
 import {
   AGENT_EVAL_DIRECTORY,
   AUTHORING_EVAL_DIRECTORY,
   AUTHORING_EVAL_DIRECTORY_ENV,
-  AUTHORING_MODEL,
   EVE_PACKAGE_PATH,
   SOURCE_ARCHIVE_PATH,
   SOURCE_ROOT,
   WORKSPACE,
-  WORKSPACE_ENV,
 } from "./paths.js";
-import type { AuthoringTranscriptEntry } from "./protocol.js";
+import type { AuthoringTokenUsage, AuthoringTranscriptEntry } from "./protocol.js";
 
 const HARNESS_BRIDGE_PORT = 4172;
-const HARNESS_NAME = "codex";
+const BOOTSTRAP_VERSION = "v5";
 export function createAuthoringAgent(subject: {
-  readonly name: string;
+  readonly model: string;
   readonly archive: Uint8Array;
   readonly digest: string;
   readonly dependencyDigest: string;
 }): Agent {
   return {
-    name: `codex-${subject.name}`,
+    name: "opencode",
     displayName: "eve authoring harness",
     getApiKeyEnvVar: () => "AI_GATEWAY_API_KEY",
-    getDefaultModel: () => AUTHORING_MODEL,
+    getDefaultModel: () => subject.model,
     definition: {
-      name: `codex-${subject.name}`,
+      name: "opencode",
       displayName: "eve authoring harness",
-      defaultModel: AUTHORING_MODEL,
-      o11yAgentName: HARNESS_NAME,
+      defaultModel: subject.model,
+      o11yAgentName: "opencode",
       runnerPath: "",
       getApiKeyEnvVar: () => "AI_GATEWAY_API_KEY",
       install: () => [],
@@ -68,58 +64,49 @@ export function createAuthoringAgent(subject: {
         env: {
           EVE_INIT_PACKAGE_SPEC: EVE_PACKAGE_PATH,
           [AUTHORING_EVAL_DIRECTORY_ENV]: AUTHORING_EVAL_DIRECTORY,
+          ...Object.assign({}, ...setups.map((setup) => setup.environment ?? {})),
         },
         log,
       });
       const startedAt = Date.now();
       const commands: string[] = [];
       const transcript: AuthoringTranscriptEntry[] = [];
-      const turnTimings: AuthoringTurnTiming[] = [];
       let session: HarnessAgentSession | undefined;
       let activeSandbox: HarnessV1NetworkSandboxSession | undefined;
       let workspace: string | undefined;
 
-      const harnessOptions: Parameters<typeof createCodex>[0] = {
-        auth: { gateway: { apiKey: options.apiKey } },
-        reasoningEffort: "high",
-        port: HARNESS_BRIDGE_PORT,
-      };
-      if (options.model !== undefined) Object.assign(harnessOptions, { model: options.model });
-
       const agent = new HarnessAgent({
-        id: "codex-eve-benchmark",
-        harness: createCodex(harnessOptions),
+        id: "eve-authoring-eval",
+        harness: createOpenCode({
+          auth: "ai-gateway",
+          model: openCodeModel(options.model ?? subject.model),
+          port: HARNESS_BRIDGE_PORT,
+        }),
         sandbox,
         sandboxConfig: {
           workDir: WORKSPACE,
           bootstrapHash: bootstrapHash(authoringCase, subject),
           onBootstrap: async ({ session: bootstrap, workDir }) => {
+            const bootstrapSandbox = bootstrap as HarnessV1NetworkSandboxSession;
+            const context = setupContext(bootstrapSandbox, workDir);
+            for (const setup of setups) await setup.onBootstrap?.(context);
             log("[setup] building the selected eve source");
-            const networkSandbox = bootstrap as HarnessV1NetworkSandboxSession;
             await bootstrapSubject(
-              networkSandbox,
+              bootstrapSandbox,
               workDir,
               authoringCase.startingPoint.workspace,
               subject.archive,
             );
-            const context = setupContext(networkSandbox, workDir);
-            for (const setup of setups) await setup.onBootstrap?.(context);
           },
           onSession: async ({ session: current, sessionWorkDir }) => {
-            log("[setup] preparing the benchmark session");
             activeSandbox = current as HarnessV1NetworkSandboxSession;
             workspace = sessionWorkDir;
             const context = setupContext(activeSandbox, workspace);
             for (const setup of setups) await setup.onSession?.(context);
-            if (options.agentOptions?.agentsMd === true) {
-              await assertAgentGuidance(context);
-            } else {
-              await context.run("rm -f AGENTS.md CLAUDE.md");
+            if (options.agentOptions?.agentsMd !== true) {
+              await installBaselineEveWrapper(context);
+              await context.run("rm -f AGENTS.md CLAUDE.md GEMINI.md");
             }
-            await context.write(
-              `${AGENT_EVAL_DIRECTORY}/results.json`,
-              JSON.stringify({ o11y: { shellCommands: [] } }),
-            );
           },
         },
         permissionMode: "allow-all",
@@ -139,32 +126,29 @@ export function createAuthoringAgent(subject: {
           send: async (prompt) => {
             transcript.push({ role: "user", content: prompt });
             if (verbose) console.log(`[user] ${prompt}`);
-            const result = await streamTurn(
-              agent,
-              session!,
-              prompt,
-              options.timeout,
-              options.signal,
-              verbose,
-            );
-            turnTimings.push({
-              elapsedMs: result.elapsedMs,
-              index: turnTimings.length + 1,
-              steps: result.steps,
+            const result = verbose
+              ? await streamTurn(agent, session!, prompt, options.timeout, options.signal)
+              : await agent.generate({
+                  session: session!,
+                  prompt,
+                  timeout: options.timeout,
+                  abortSignal: options.signal,
+                });
+            transcript.push({
+              role: "assistant",
+              content: result.text,
+              toolCalls: authoringToolCalls(result.toolCalls),
+              usage: normalizeUsage(result.usage),
             });
-            transcript.push({ role: "assistant", content: result.text });
             commands.push(...shellCommands(result.toolCalls));
-            return { text: result.text, toolCalls: result.toolCalls };
+            return { text: result.text, toolCalls: authoringToolCalls(result.toolCalls) };
           },
         });
 
         const context = setupContext(activeSandbox, workspace);
         await context.write(
           `${AGENT_EVAL_DIRECTORY}/results.json`,
-          JSON.stringify({
-            o11y: { shellCommands: commands.map((command) => ({ command })) },
-            timing: { agentTurns: turnTimings, totalAgentElapsedMs: sumTurnTimings(turnTimings) },
-          }),
+          JSON.stringify({ o11y: { shellCommands: commands.map((command) => ({ command })) } }),
         );
         await context.write(
           `${AGENT_EVAL_DIRECTORY}/harness-transcript.json`,
@@ -192,7 +176,7 @@ export function createAuthoringAgent(subject: {
         log("[grade] running deterministic assertions");
         const test = await resultOf(
           activeSandbox,
-          `cd ${AGENT_EVAL_DIRECTORY} && ${WORKSPACE_ENV}=${shellQuote(workspace)} vitest run EVAL.test.ts`,
+          `vitest run ${workspace}/${AGENT_EVAL_DIRECTORY}/EVAL.test.ts`,
           workspace,
         );
         const scriptsResults = Object.fromEntries(
@@ -212,22 +196,15 @@ export function createAuthoringAgent(subject: {
           ),
         );
         const scriptsPassed = Object.values(scriptsResults).every((result) => result.success);
-        scriptsResults.timing = {
-          success: true,
-          output: JSON.stringify({
-            agentTurns: turnTimings,
-            totalAgentElapsedMs: sumTurnTimings(turnTimings),
-          }),
-        };
         log(`[result] ${test.exitCode === 0 && scriptsPassed ? "passed" : "failed"}`);
         return {
           success: test.exitCode === 0 && scriptsPassed,
           output: transcript.at(-1)?.content ?? "",
-          transcript: JSON.stringify(transcript),
           error:
             test.exitCode === 0 && scriptsPassed ? undefined : `${test.stdout}\n${test.stderr}`,
           duration: Date.now() - startedAt,
           testResult: { success: test.exitCode === 0, output: `${test.stdout}${test.stderr}` },
+          transcript: harnessTranscript(transcript),
           scriptsResults,
           sandboxId: activeSandbox.id,
         };
@@ -240,14 +217,12 @@ export function createAuthoringAgent(subject: {
         const result: AgentRunResult = {
           success: false,
           output: transcript.at(-1)?.content ?? "",
-          transcript: JSON.stringify(transcript),
           error: error instanceof Error ? error.message : String(error),
           duration: Date.now() - startedAt,
+          transcript: harnessTranscript(transcript),
           scriptsResults: {},
         };
-        if (activeSandbox !== undefined) {
-          Object.assign(result, { sandboxId: activeSandbox.id });
-        }
+        if (activeSandbox !== undefined) result.sandboxId = activeSandbox.id;
         return result;
       } finally {
         await session?.destroy();
@@ -256,63 +231,55 @@ export function createAuthoringAgent(subject: {
   };
 }
 
-interface AuthoringToolTiming {
-  readonly command: string;
-  readonly elapsedMs: number;
-  readonly startedAtMs: number;
-}
-
-interface AuthoringTurnTiming {
-  readonly elapsedMs: number;
-  readonly index: number;
-  readonly steps: readonly AuthoringToolTiming[];
-}
-
 async function streamTurn(
   agent: HarnessAgent,
   session: HarnessAgentSession,
   prompt: string,
   timeout: number,
-  abortSignal: AbortSignal | undefined,
-  verbose: boolean,
-): Promise<AuthoringTurn & { elapsedMs: number; steps: readonly AuthoringToolTiming[] }> {
-  const startedAt = performance.now();
+  abortSignal?: AbortSignal,
+): Promise<AuthoringTurn & { usage: AuthoringTokenUsage }> {
   const result = await agent.stream({ session, prompt, timeout, abortSignal });
-  const toolStarts = new Map<string, { command: string; startedAtMs: number }>();
-  const steps: AuthoringToolTiming[] = [];
   let lineOpen = false;
   for await (const part of result.fullStream) {
     if (part.type === "text-delta") {
-      if (verbose) {
-        if (!lineOpen) {
-          process.stdout.write("[assistant] ");
-          lineOpen = true;
-        }
-        process.stdout.write(part.text);
+      if (!lineOpen) {
+        process.stdout.write("[assistant] ");
+        lineOpen = true;
       }
+      process.stdout.write(part.text);
     } else if (part.type === "tool-call") {
-      if (verbose && lineOpen) process.stdout.write("\n");
+      if (lineOpen) process.stdout.write("\n");
       lineOpen = false;
-      const command = formatToolCall(part.toolName, part.input);
-      toolStarts.set(part.toolCallId, { command, startedAtMs: performance.now() - startedAt });
-      if (verbose) console.log(`[tool] ${command}`);
-    } else if (part.type === "tool-result") {
-      const tool = toolStarts.get(part.toolCallId);
-      if (tool !== undefined) {
-        steps.push({
-          command: tool.command,
-          elapsedMs: performance.now() - startedAt - tool.startedAtMs,
-          startedAtMs: tool.startedAtMs,
-        });
-      }
+      console.log(`[tool] ${formatToolCall(part.toolName, part.input)}`);
     }
   }
-  if (verbose && lineOpen) process.stdout.write("\n");
+  if (lineOpen) process.stdout.write("\n");
   return {
     text: await result.text,
     toolCalls: authoringToolCalls(await result.toolCalls),
-    elapsedMs: performance.now() - startedAt,
-    steps,
+    usage: normalizeUsage(await result.usage),
+  };
+}
+
+function openCodeModel(model: string): string {
+  const gatewayModel = model.includes("/") ? model : `anthropic/${model}`;
+  // OpenCode's Moonshot provider supplies the OpenAI-compatible transport; the
+  // canonical model ID still makes AI Gateway select the requested provider.
+  return `moonshotai/${gatewayModel}`;
+}
+
+function normalizeUsage(value: unknown): AuthoringTokenUsage {
+  const usage = value as Record<string, unknown>;
+  const number = (field: string) => {
+    const value = usage[field];
+    return typeof value === "number" && Number.isFinite(value) ? value : 0;
+  };
+  return {
+    inputTokens: number("inputTokens"),
+    outputTokens: number("outputTokens"),
+    reasoningTokens: number("reasoningTokens"),
+    cachedInputTokens: number("cachedInputTokens"),
+    cacheWriteTokens: number("cacheWriteTokens"),
   };
 }
 
@@ -351,9 +318,11 @@ async function bootstrapSubject(
       `pnpm --dir ${SOURCE_ROOT}/packages/eve pack --pack-destination /tmp/eve-package`,
       `mv $(find /tmp/eve-package -name '*.tgz' -print -quit) ${EVE_PACKAGE_PATH}`,
       `npm install --global --package-lock=false ${EVE_PACKAGE_PATH}`,
+      'ln -sf "$(npm prefix --global)/bin/eve" /usr/local/bin/eve',
+      "command -v eve",
     ].join(" && "),
   );
-  const artifactsRoot = AGENT_EVAL_DIRECTORY;
+  const artifactsRoot = `${workspace}/${AGENT_EVAL_DIRECTORY}`;
   const workspaceCommands: string[] = [];
   if (workspaceKind === "scaffolded") {
     workspaceCommands.push(`cd ${shellQuote(workspace)} && AI_AGENT=benchmark eve init .`);
@@ -389,12 +358,48 @@ function setupContext(
   };
 }
 
-async function assertAgentGuidance(context: AuthoringSetupContext): Promise<void> {
-  await context.run("test -s AGENTS.md && test -s CLAUDE.md && grep -Fq '@AGENTS.md' CLAUDE.md");
+async function installBaselineEveWrapper(context: AuthoringSetupContext): Promise<void> {
+  await context.run(`
+cli_path="$(npm prefix --global)/bin/eve"
+test -x "$cli_path"
+real_cli="$cli_path.guided"
+if [ ! -e "$real_cli" ]; then mv "$cli_path" "$real_cli"; fi
+cat >"$cli_path" <<'EOF'
+#!/bin/sh
+"$0.guided" "$@"
+status=$?
+rm -f AGENTS.md CLAUDE.md GEMINI.md
+exit "$status"
+EOF
+chmod +x "$cli_path"
+`);
 }
 
-function sumTurnTimings(turns: ReadonlyArray<{ elapsedMs: number }>): number {
-  return turns.reduce((total, turn) => total + turn.elapsedMs, 0);
+function harnessTranscript(transcript: ReadonlyArray<AuthoringTranscriptEntry>): string {
+  return transcript
+    .map((entry) => {
+      const message: {
+        role: AuthoringTranscriptEntry["role"];
+        content: unknown;
+        usage?: AuthoringTokenUsage;
+      } = {
+        role: entry.role,
+        content:
+          entry.role === "assistant"
+            ? [
+                ...(entry.content ? [{ type: "text", text: entry.content }] : []),
+                ...(entry.toolCalls ?? []).map((call) => ({
+                  type: "tool_use",
+                  name: call.name,
+                  input: call.input,
+                })),
+              ]
+            : entry.content,
+      };
+      if (entry.usage !== undefined) message.usage = entry.usage;
+      return JSON.stringify({ type: entry.role, message });
+    })
+    .join("\n");
 }
 
 function shellCommands(toolCalls: ReadonlyArray<{ input: unknown }>): string[] {
@@ -410,7 +415,7 @@ function bootstrapHash(authoringCase: AuthoringCase, subject: { readonly digest:
     .filter((setup): setup is AuthoringSetup => setup !== undefined)
     .map((setup) => setup.id)
     .join("-");
-  return `eve-authoring-${subject.digest}-${authoringCase.startingPoint.id}-${setupIds}`;
+  return `eve-authoring-${BOOTSTRAP_VERSION}-${subject.digest}-${authoringCase.startingPoint.id}-${setupIds}`;
 }
 
 const bootstrapCoordination = globalThis as typeof globalThis & {
@@ -435,6 +440,11 @@ async function withBootstrapInitialization<T>(
   locks.set(key, tail);
 
   await previous;
+  if (ready.has(key)) {
+    release();
+    if (locks.get(key) === tail) locks.delete(key);
+    return operation();
+  }
   try {
     const result = await operation();
     ready.add(key);
@@ -445,32 +455,13 @@ async function withBootstrapInitialization<T>(
   }
 }
 
-async function loadAuthoringCase(fixturePath: string): Promise<AuthoringCase> {
-  let loaded: unknown = await import(pathToFileURL(`${fixturePath}/CASE.ts`).href);
-  while (!isAuthoringCase(loaded) && hasDefaultExport(loaded)) loaded = loaded.default;
-  if (!isAuthoringCase(loaded)) {
-    throw new Error(`${fixturePath}/CASE.ts must export an authoring case as default.`);
-  }
-  return loaded;
-}
-
-function isAuthoringCase(value: unknown): value is AuthoringCase {
-  if (typeof value !== "object" || value === null) return false;
-  const candidate = value as Partial<AuthoringCase>;
-  return candidate.startingPoint !== undefined && typeof candidate.interact === "function";
-}
-
-function hasDefaultExport(value: unknown): value is { default: unknown } {
-  return typeof value === "object" && value !== null && "default" in value;
-}
-
 async function resultOf(
   sandbox: HarnessV1NetworkSandboxSession,
   command: string,
   workingDirectory?: string,
 ) {
-  const options: Parameters<typeof sandbox.run>[0] = { command };
-  if (workingDirectory !== undefined) Object.assign(options, { workingDirectory });
+  const options: { command: string; workingDirectory?: string } = { command };
+  if (workingDirectory !== undefined) options.workingDirectory = workingDirectory;
   return sandbox.run(options);
 }
 

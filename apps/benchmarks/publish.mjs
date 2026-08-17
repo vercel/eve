@@ -8,7 +8,9 @@ import { parseArgs } from "node:util";
 
 import {
   authoringTreatments,
+  findPublishedBenchmarkModel,
   publishedBenchmark,
+  publishedBenchmarkModels,
   publishedExperimentId,
 } from "./lib/benchmark-config.ts";
 import { revisionSubject } from "./lib/source.mjs";
@@ -24,6 +26,7 @@ const { values } = parseArgs({
     dry: { type: "boolean" },
     force: { type: "boolean" },
     revision: { type: "string", default: "origin/main" },
+    models: { type: "string" },
     help: { type: "boolean", short: "h" },
   },
   strict: true,
@@ -31,8 +34,8 @@ const { values } = parseArgs({
 
 if (values.help) {
   console.log(`Usage:
-  pnpm benchmark:publish [--revision origin/main] [--dry]
-  pnpm benchmark:publish [--revision <revision>] [--force] [--allow-dirty]`);
+  pnpm benchmark:publish [--revision origin/main] [--models <id,...>] [--dry]
+  pnpm benchmark:publish [--revision <revision>] [--models <id,...>] [--force] [--allow-dirty]`);
   process.exit(0);
 }
 if (values.dry && values.force) throw new Error("--dry and --force cannot be combined.");
@@ -45,14 +48,17 @@ if (values["allow-dirty"]) {
 
 const revision = git(["rev-parse", "--verify", `${values.revision}^{commit}`]).trim();
 const subject = revisionSubject(repositoryRoot, revision, "published");
-const experimentNames = authoringTreatments.map(publishedExperimentId);
+const benchmarks = selectedBenchmarks(values.models);
+const experimentNames = benchmarks.flatMap((benchmark) =>
+  authoringTreatments.map((treatment) => publishedExperimentId(benchmark, treatment)),
+);
 
 prepareFixtures();
-writeExperiments(subject, revision);
+writeExperiments(subject, revision, benchmarks);
 
 console.log(`> eve revision: ${revision}`);
 console.log(
-  `> model: ${publishedBenchmark.modelDisplayName} through ${publishedBenchmark.harness}`,
+  `> models: ${benchmarks.map((benchmark) => `${benchmark.displayName} through ${benchmark.harness}`).join(", ")}`,
 );
 console.log(`> treatments: ${authoringTreatments.join(", ")}`);
 console.log(`> runs per cell: ${publishedBenchmark.runs}`);
@@ -63,17 +69,8 @@ if (values.dry) {
   process.exit(0);
 }
 
-const cells = experimentNames.flatMap((experiment) =>
-  fixtureNames().map((caseId) => ({ experiment, caseId })),
-);
-for (const [index, cell] of cells.entries()) {
-  console.log(`\n> cell ${index + 1}/${cells.length}: ${cell.experiment} / ${cell.caseId}`);
-  runAgentEval(
-    ["run", cell.experiment, ...(values.force ? ["--force"] : [])],
-    { EVE_BENCHMARK_EVAL: cell.caseId },
-    false,
-  );
-}
+console.log(`> running ${experimentNames.length} experiments concurrently`);
+runAgentEval(["run", ...experimentNames, ...(values.force ? ["--force"] : [])], {}, false);
 
 const pending = benchmarkStatus();
 if (pending.totalRun > 0) {
@@ -172,27 +169,36 @@ function fixtureNames() {
     .sort();
 }
 
-function writeExperiments(subject, revision) {
+function writeExperiments(subject, revision, benchmarks) {
   rmSync(experimentsRoot, { recursive: true, force: true });
   mkdirSync(experimentsRoot, { recursive: true });
   const archiveName = `published-${revision.slice(0, 12)}.source.tar.gz`;
   writeFileSync(join(experimentsRoot, archiveName), subject.archive);
 
-  for (const treatment of authoringTreatments) {
-    const experimentName = publishedExperimentId(treatment);
-    writeFileSync(
-      join(experimentsRoot, `${experimentName}.ts`),
-      `import { readFileSync } from "node:fs";\n` +
-        `import { authoringExperiment } from "../lib/experiment.js";\n\n` +
-        `export default authoringExperiment({\n` +
-        `  archive: readFileSync(new URL(${JSON.stringify(`./${archiveName}`)}, import.meta.url)),\n` +
-        `  digest: ${JSON.stringify(subject.digest)},\n` +
-        `  dependencyDigest: ${JSON.stringify(subject.dependencyDigest)},\n` +
-        `  runs: ${publishedBenchmark.runs},\n` +
-        `  treatment: ${JSON.stringify(treatment)},\n` +
-        `});\n`,
-    );
+  for (const benchmark of benchmarks) {
+    for (const treatment of authoringTreatments) {
+      const experimentName = publishedExperimentId(benchmark, treatment);
+      writeFileSync(
+        join(experimentsRoot, `${experimentName}.ts`),
+        `import { readFileSync } from "node:fs";\n` +
+          `import { authoringExperiment } from "../lib/experiment.js";\n\n` +
+          `export default authoringExperiment({\n` +
+          `  archive: readFileSync(new URL(${JSON.stringify(`./${archiveName}`)}, import.meta.url)),\n` +
+          `  digest: ${JSON.stringify(subject.digest)},\n` +
+          `  dependencyDigest: ${JSON.stringify(subject.dependencyDigest)},\n` +
+          `  runs: ${publishedBenchmark.runs},\n` +
+          `  evals: ${JSON.stringify(publishedBenchmark.caseIds)},\n` +
+          `  benchmark: ${JSON.stringify(benchmark)},\n` +
+          `  treatment: ${JSON.stringify(treatment)},\n` +
+          `});\n`,
+      );
+    }
   }
+}
+
+function selectedBenchmarks(value) {
+  if (value === undefined) return publishedBenchmarkModels;
+  return value.split(",").map((model) => findPublishedBenchmarkModel(model));
 }
 
 function git(args) {

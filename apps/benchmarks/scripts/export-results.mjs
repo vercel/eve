@@ -7,9 +7,12 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
+import { extractRunUsage, modelPricing, priceUsage } from "./cost.mjs";
 import {
   authoringTreatments,
+  findPublishedBenchmarkModel,
   publishedBenchmark,
+  publishedBenchmarkModels,
   publishedExperimentId,
 } from "../lib/benchmark-config.ts";
 
@@ -17,45 +20,62 @@ const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = resolve(appRoot, "../..");
 const evalsRoot = join(appRoot, "evals");
 const resultsRoot = join(appRoot, "results");
+const experimentsRoot = join(appRoot, "experiments");
 const outputPath = join(repositoryRoot, "apps/docs/lib/evals/benchmark-results.json");
 const { values } = parseArgs({
   args: process.argv.slice(2),
   options: {
     revision: { type: "string" },
     output: { type: "string" },
+    models: { type: "string" },
     help: { type: "boolean", short: "h" },
   },
   strict: true,
 });
 
 if (values.help) {
-  console.log("Usage: node scripts/export-results.mjs --revision <full-sha> [--output <path>]");
+  console.log(
+    "Usage: node scripts/export-results.mjs --revision <full-sha> [--models <id,...>] [--output <path>]",
+  );
   process.exit(0);
 }
 if (values.revision === undefined || !/^[0-9a-f]{40}$/u.test(values.revision)) {
   throw new Error("--revision must be a full 40-character Git commit SHA.");
 }
 
-const caseIds = canonicalCaseIds();
-const experimentIds = authoringTreatments.map(publishedExperimentId);
+const caseIds = [...publishedBenchmark.caseIds];
+const benchmarks = selectedBenchmarks(values.models);
+const experimentIds = benchmarks.flatMap((benchmark) =>
+  authoringTreatments.map((treatment) => publishedExperimentId(benchmark, treatment)),
+);
 const stale = staleCells(experimentIds);
 const results = [];
 
-for (const treatment of authoringTreatments) {
-  const experimentId = publishedExperimentId(treatment);
-  for (const caseId of caseIds) {
-    const staleStatus = stale.get(experimentId);
-    const status = staleStatus?.changed.has(caseId)
-      ? "stale"
-      : staleStatus?.new.has(caseId)
-        ? "missing"
-        : undefined;
-    const measured = latestValidResult(experimentId, caseId);
-    if (status !== undefined || measured === undefined) {
-      results.push({ experimentId, caseId, status: status ?? "missing" });
-      continue;
+for (const benchmark of benchmarks) {
+  for (const treatment of authoringTreatments) {
+    const experimentId = publishedExperimentId(benchmark, treatment);
+    for (const caseId of caseIds) {
+      const staleStatus = stale.get(experimentId);
+      const status = staleStatus?.changed.has(caseId)
+        ? "stale"
+        : staleStatus?.new.has(caseId)
+          ? "missing"
+          : undefined;
+      const measured = latestValidResult(experimentId, caseId);
+      if (measured === undefined) {
+        results.push({ experimentId, caseId, status: "missing" });
+        continue;
+      }
+      const { summaryPath, ...result } = measured;
+      const meanCost = meanEstimatedListCostUsd(summaryPath, benchmark.model);
+      results.push({
+        experimentId,
+        caseId,
+        status: status ?? "current",
+        ...result,
+        ...(meanCost === undefined ? {} : { meanEstimatedListCostUsd: meanCost }),
+      });
     }
-    results.push({ experimentId, caseId, status: "current", ...measured });
   }
 }
 
@@ -68,14 +88,16 @@ const output = {
     caseCount: caseIds.length,
     runsPerCell: publishedBenchmark.runs,
   },
-  experiments: authoringTreatments.map((treatment) => ({
-    id: publishedExperimentId(treatment),
-    groupId: publishedBenchmark.groupId,
-    model: publishedBenchmark.model,
-    modelDisplayName: publishedBenchmark.modelDisplayName,
-    harness: publishedBenchmark.harness,
-    treatment,
-  })),
+  experiments: benchmarks.flatMap((benchmark) =>
+    authoringTreatments.map((treatment) => ({
+      id: publishedExperimentId(benchmark, treatment),
+      groupId: `${benchmark.id}-opencode`,
+      model: benchmark.model,
+      modelDisplayName: benchmark.displayName,
+      harness: benchmark.harness,
+      treatment,
+    })),
+  ),
   results,
 };
 
@@ -84,6 +106,11 @@ const destination =
 mkdirSync(dirname(destination), { recursive: true });
 writeFileSync(destination, `${JSON.stringify(output, null, 2)}\n`);
 console.log(`Exported ${results.length} benchmark cells to ${destination}`);
+
+function selectedBenchmarks(value) {
+  if (value === undefined) return publishedBenchmarkModels;
+  return value.split(",").map((model) => findPublishedBenchmarkModel(model));
+}
 
 function caseFingerprint(caseIds) {
   const hash = createHash("sha256");
@@ -99,14 +126,8 @@ function caseFingerprint(caseIds) {
   return hash.digest("hex");
 }
 
-function canonicalCaseIds() {
-  return readdirSync(evalsRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && existsSync(join(evalsRoot, entry.name, "CASE.ts")))
-    .map((entry) => entry.name)
-    .sort();
-}
-
 function staleCells(experimentIds) {
+  if (!existsSync(experimentsRoot)) return new Map();
   const executable = join(appRoot, "node_modules/.bin/agent-eval");
   const raw = execFileSync(executable, ["status", ...experimentIds, "--json"], {
     cwd: appRoot,
@@ -143,9 +164,25 @@ function latestValidResult(experimentId, caseId) {
       validRuns: summary.totalRuns,
       meanDurationMs: Math.round(summary.meanDuration * 1000),
       measuredAt: statSync(summaryPath).mtime.toISOString(),
+      summaryPath,
     };
   }
   return undefined;
+}
+
+function meanEstimatedListCostUsd(summaryPath, model) {
+  const pricing = modelPricing[model];
+  if (pricing === undefined) return undefined;
+  const costs = readdirSync(dirname(summaryPath), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && /^run-\d+$/u.test(entry.name))
+    .flatMap((entry) => {
+      const transcriptPath = join(dirname(summaryPath), entry.name, "transcript-raw.jsonl");
+      if (!existsSync(transcriptPath)) return [];
+      const usage = extractRunUsage(readFileSync(transcriptPath, "utf8"));
+      return usage === null ? [] : [priceUsage(usage, pricing)];
+    });
+  if (costs.length === 0) return undefined;
+  return costs.reduce((total, cost) => total + cost, 0) / costs.length;
 }
 
 function findFiles(root, fileName) {
