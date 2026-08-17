@@ -23,6 +23,10 @@ export const nav = [
     label: "Templates",
     href: "/templates",
   },
+  {
+    label: "Evals",
+    href: "/evals",
+  },
 ];
 
 export const suggestions = [

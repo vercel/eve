@@ -1,0 +1,238 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-17T18:02:41.223Z",
+  "suite": {
+    "eveRevision": "e09675f7b700a326599b8fd908a9bd2dd161576d",
+    "caseFingerprint": "22ca2536d7b3d8cab0d87f346f98a00da7472b891142ca720f6766715b63f336",
+    "caseCount": 2,
+    "runsPerCell": 3
+  },
+  "experiments": [
+    {
+      "id": "claude-sonnet-4-6-opencode--baseline",
+      "groupId": "claude-sonnet-4-6-opencode",
+      "model": "claude-sonnet-4-6",
+      "modelDisplayName": "Claude Sonnet 4.6",
+      "harness": "OpenCode",
+      "treatment": "baseline"
+    },
+    {
+      "id": "claude-sonnet-4-6-opencode--guided",
+      "groupId": "claude-sonnet-4-6-opencode",
+      "model": "claude-sonnet-4-6",
+      "modelDisplayName": "Claude Sonnet 4.6",
+      "harness": "OpenCode",
+      "treatment": "guided"
+    },
+    {
+      "id": "kimi-k3-opencode--baseline",
+      "groupId": "kimi-k3-opencode",
+      "model": "moonshotai/kimi-k3",
+      "modelDisplayName": "Kimi K3",
+      "harness": "OpenCode",
+      "treatment": "baseline"
+    },
+    {
+      "id": "kimi-k3-opencode--guided",
+      "groupId": "kimi-k3-opencode",
+      "model": "moonshotai/kimi-k3",
+      "modelDisplayName": "Kimi K3",
+      "harness": "OpenCode",
+      "treatment": "guided"
+    },
+    {
+      "id": "claude-fable-5-opencode--baseline",
+      "groupId": "claude-fable-5-opencode",
+      "model": "anthropic/claude-fable-5",
+      "modelDisplayName": "Claude Fable 5",
+      "harness": "OpenCode",
+      "treatment": "baseline"
+    },
+    {
+      "id": "claude-fable-5-opencode--guided",
+      "groupId": "claude-fable-5-opencode",
+      "model": "anthropic/claude-fable-5",
+      "modelDisplayName": "Claude Fable 5",
+      "harness": "OpenCode",
+      "treatment": "guided"
+    },
+    {
+      "id": "gemini-3-1-pro-preview-opencode--baseline",
+      "groupId": "gemini-3-1-pro-preview-opencode",
+      "model": "google/gemini-3.1-pro-preview",
+      "modelDisplayName": "Gemini 3.1 Pro Preview",
+      "harness": "OpenCode",
+      "treatment": "baseline"
+    },
+    {
+      "id": "gemini-3-1-pro-preview-opencode--guided",
+      "groupId": "gemini-3-1-pro-preview-opencode",
+      "model": "google/gemini-3.1-pro-preview",
+      "modelDisplayName": "Gemini 3.1 Pro Preview",
+      "harness": "OpenCode",
+      "treatment": "guided"
+    }
+  ],
+  "results": [
+    {
+      "experimentId": "claude-sonnet-4-6-opencode--baseline",
+      "caseId": "author-001-weather-tool",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 140029,
+      "measuredAt": "2026-08-17T17:29:47.278Z",
+      "meanEstimatedListCostUsd": 0.078125
+    },
+    {
+      "experimentId": "claude-sonnet-4-6-opencode--baseline",
+      "caseId": "author-002-new-project",
+      "status": "current",
+      "passedRuns": 2,
+      "validRuns": 3,
+      "meanDurationMs": 277326,
+      "measuredAt": "2026-08-17T17:26:07.327Z",
+      "meanEstimatedListCostUsd": 0.230193
+    },
+    {
+      "experimentId": "claude-sonnet-4-6-opencode--guided",
+      "caseId": "author-001-weather-tool",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 158329,
+      "measuredAt": "2026-08-17T17:16:19.415Z",
+      "meanEstimatedListCostUsd": 0.065606
+    },
+    {
+      "experimentId": "claude-sonnet-4-6-opencode--guided",
+      "caseId": "author-002-new-project",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 257323,
+      "measuredAt": "2026-08-17T17:16:19.442Z",
+      "meanEstimatedListCostUsd": 0.20738
+    },
+    {
+      "experimentId": "kimi-k3-opencode--baseline",
+      "caseId": "author-001-weather-tool",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 243355,
+      "measuredAt": "2026-08-17T17:26:09.387Z",
+      "meanEstimatedListCostUsd": 0.189097
+    },
+    {
+      "experimentId": "kimi-k3-opencode--baseline",
+      "caseId": "author-002-new-project",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 633419,
+      "measuredAt": "2026-08-17T17:26:09.393Z",
+      "meanEstimatedListCostUsd": 0.362446
+    },
+    {
+      "experimentId": "kimi-k3-opencode--guided",
+      "caseId": "author-001-weather-tool",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 209249,
+      "measuredAt": "2026-08-17T17:26:11.363Z",
+      "meanEstimatedListCostUsd": 0.122349
+    },
+    {
+      "experimentId": "kimi-k3-opencode--guided",
+      "caseId": "author-002-new-project",
+      "status": "current",
+      "passedRuns": 1,
+      "validRuns": 3,
+      "meanDurationMs": 802889,
+      "measuredAt": "2026-08-17T17:26:11.366Z",
+      "meanEstimatedListCostUsd": 0.227655
+    },
+    {
+      "experimentId": "claude-fable-5-opencode--baseline",
+      "caseId": "author-001-weather-tool",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 202409,
+      "measuredAt": "2026-08-17T17:26:05.307Z",
+      "meanEstimatedListCostUsd": 0.2290833333333333
+    },
+    {
+      "experimentId": "claude-fable-5-opencode--baseline",
+      "caseId": "author-002-new-project",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 250463,
+      "measuredAt": "2026-08-17T17:26:05.314Z",
+      "meanEstimatedListCostUsd": 0.27305666666666667
+    },
+    {
+      "experimentId": "claude-fable-5-opencode--guided",
+      "caseId": "author-001-weather-tool",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 189104,
+      "measuredAt": "2026-08-17T17:26:05.339Z",
+      "meanEstimatedListCostUsd": 0.33015
+    },
+    {
+      "experimentId": "claude-fable-5-opencode--guided",
+      "caseId": "author-002-new-project",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 211985,
+      "measuredAt": "2026-08-17T17:26:05.343Z",
+      "meanEstimatedListCostUsd": 0.1930066666666667
+    },
+    {
+      "experimentId": "gemini-3-1-pro-preview-opencode--baseline",
+      "caseId": "author-001-weather-tool",
+      "status": "current",
+      "passedRuns": 0,
+      "validRuns": 3,
+      "meanDurationMs": 140485,
+      "measuredAt": "2026-08-17T17:26:07.379Z",
+      "meanEstimatedListCostUsd": 0.082772
+    },
+    {
+      "experimentId": "gemini-3-1-pro-preview-opencode--baseline",
+      "caseId": "author-002-new-project",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 211902,
+      "measuredAt": "2026-08-17T17:26:07.384Z",
+      "meanEstimatedListCostUsd": 0.2803813333333333
+    },
+    {
+      "experimentId": "gemini-3-1-pro-preview-opencode--guided",
+      "caseId": "author-001-weather-tool",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 197810,
+      "measuredAt": "2026-08-17T17:16:35.693Z",
+      "meanEstimatedListCostUsd": 0.150682
+    },
+    {
+      "experimentId": "gemini-3-1-pro-preview-opencode--guided",
+      "caseId": "author-002-new-project",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 240740,
+      "measuredAt": "2026-08-17T17:16:35.697Z",
+      "meanEstimatedListCostUsd": 0.26899866666666666
+    }
+  ]
+}

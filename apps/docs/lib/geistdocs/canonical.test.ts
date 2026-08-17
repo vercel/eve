@@ -11,6 +11,7 @@ describe("canonical routes", () => {
   it("uses one path model for hubs and detail pages", () => {
     expect(canonicalRoutes).toEqual({
       home: "/",
+      evals: "/evals",
       integrations: "/integrations",
       templates: "/templates",
     });

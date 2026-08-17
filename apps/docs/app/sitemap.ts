@@ -41,6 +41,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     origin: getSiteOrigin(),
     sources: [
       { pathname: canonicalRoutes.home },
+      { pathname: canonicalRoutes.evals },
       ...docs,
       { pathname: canonicalRoutes.integrations },
       ...integrations.map(({ slug }) => ({ pathname: integrationPath(slug) })),
