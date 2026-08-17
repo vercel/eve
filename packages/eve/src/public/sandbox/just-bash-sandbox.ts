@@ -8,6 +8,8 @@ export interface JustBashFilesystemContext {
   readonly appRoot: string;
   /** eve's durable, session-owned filesystem, including `/workspace`. */
   readonly defaultFilesystem: IFileSystem;
+  /** The just-bash engine resolved by eve after its optional installation check. */
+  readonly justBash: typeof import("just-bash");
 }
 
 /**

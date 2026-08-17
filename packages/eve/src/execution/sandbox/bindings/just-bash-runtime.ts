@@ -79,10 +79,11 @@ export async function createBashSandbox(input: {
   readonly rootPath: string;
   readonly sessionKey: string;
 }): Promise<BashSandbox> {
-  const { ReadWriteFs, Sandbox } = await loadJustBashModule({
+  const justBash = await loadJustBashModule({
     appRoot: input.appRoot,
     autoInstall: input.autoInstall,
   });
+  const { ReadWriteFs, Sandbox } = justBash;
   const filesystemRootPath = resolveLocalSandboxFilesystemRootPath(input.rootPath);
   const metadataPath = resolveLocalSandboxMetadataPath(input.rootPath);
   const metadata = await readLocalMetadata(metadataPath);
@@ -100,6 +101,7 @@ export async function createBashSandbox(input: {
       filesystem = await input.filesystem({
         appRoot: input.appRoot,
         defaultFilesystem,
+        justBash,
       });
     } catch (error) {
       throw new Error("Failed to create the custom just-bash filesystem.", { cause: error });

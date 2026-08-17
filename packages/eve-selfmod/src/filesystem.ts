@@ -1,11 +1,13 @@
 import { resolve } from "node:path";
 
-import { MountableFs, OverlayFs, ReadWriteFs, type IFileSystem } from "just-bash";
+import type { IFileSystem } from "just-bash";
 
 export async function createSelfmodFilesystem(input: {
   readonly appRoot: string;
   readonly defaultFilesystem: IFileSystem;
+  readonly justBash: typeof import("just-bash");
 }): Promise<IFileSystem> {
+  const { MountableFs, OverlayFs, ReadWriteFs } = input.justBash;
   await input.defaultFilesystem.mkdir("/source", { recursive: true });
   return new MountableFs({
     base: input.defaultFilesystem,

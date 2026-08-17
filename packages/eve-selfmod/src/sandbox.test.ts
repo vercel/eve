@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { InMemoryFs } from "just-bash";
+import * as justBash from "just-bash";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createSelfmodFilesystem } from "./filesystem.js";
@@ -31,7 +31,8 @@ describe("selfmod filesystem", () => {
     const appRoot = await createAppRoot();
     const filesystem = await createSelfmodFilesystem({
       appRoot,
-      defaultFilesystem: new InMemoryFs(),
+      defaultFilesystem: new justBash.InMemoryFs(),
+      justBash,
     });
 
     expect(await filesystem.readFile("/eve-docs/README.md")).toBe("installed eve docs\n");

@@ -6,7 +6,7 @@ export const DEFAULT_SELFMOD_MODEL = "anthropic/claude-sonnet-5";
 /** Creates selfmod's development-only dynamic subagent definition. */
 export function createSelfmodAgent(model: AgentStaticModelDefinition = DEFAULT_SELFMOD_MODEL) {
   return defineDynamic({
-    build: { externalDependencies: ["eve-selfmod"] },
+    build: { externalDependencies: ["@eve/selfmod"] },
     events: {
       "session.started": () =>
         process.env.EVE_DEV === "1"

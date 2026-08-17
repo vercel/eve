@@ -1,5 +1,5 @@
 {
-  "name": "eve-selfmod",
+  "name": "@eve/selfmod",
   "version": "0.0.0",
   "description": "Development-only source editing subagent for eve applications.",
   "keywords": [
