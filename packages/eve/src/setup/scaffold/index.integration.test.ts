@@ -996,6 +996,8 @@ describe("scaffoldBaseProject", () => {
     expect(agentsMd).toContain("next.command");
     expect(agentsMd).toContain("--skip-install");
     expect(agentsMd).toContain("eve link");
+    expect(agentsMd).toContain("eve link --non-interactive --project <name-or-id>");
+    expect(agentsMd).toContain("eve deploy --non-interactive --yes");
     expect(agentsMd).toContain("external_action_resolved");
     // `vercel deploy` uploads everything a .vercelignore doesn't exclude, and
     // the platform default-ignores only the .env.local variants — eve's dev

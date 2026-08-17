@@ -335,8 +335,12 @@ Add \`--yes\` to accept recommended setup values and reduce setup round trips;
 explicit \`--answer\` values take precedence. Use the reported \`--skip-install\`
 continuation after installation.
 A Vercel Connect setup may report \`eve link\` as a prerequisite; run it and
-retry the continuation. Never pass secrets in \`--answer\`; use the documented
-environment variable or secret store.
+retry the continuation. For a named Vercel project in CI or an agent run, use
+\`eve link --non-interactive --project <name-or-id> [--team <team-id-or-slug>]\`.
+To deploy non-interactively, use
+\`eve deploy --non-interactive --yes [--project <name-or-id>] [--team <team-id-or-slug>]\`.
+Never pass secrets in \`--answer\`; use the documented environment variable or
+secret store.
 
 An \`external_action\` event with \`blocking: true\` means the command is still
 running while it waits for the user. Surface its URL and code, keep the process
