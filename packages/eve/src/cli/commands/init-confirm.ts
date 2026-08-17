@@ -38,7 +38,7 @@ export async function confirmExistingPackageIntegration(
     details: ["Planned edits", ...summary.map((line) => `• ${line}`)],
     options: [
       { value: true, label: "Apply edits and install dependencies" },
-      { value: false, label: "Cancel", accent: "warning" },
+      { value: false, label: "Cancel" },
     ],
     initialValue: true,
   });
