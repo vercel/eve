@@ -233,7 +233,7 @@ describe("runModelFlow", () => {
     ]);
     expect(menuPaints).toHaveLength(1);
     expect(exclusiveCalls).toEqual(["called"]);
-    expect(ensureChatGptAuth).toHaveBeenCalledWith({ interactive: true });
+    expect(ensureChatGptAuth).toHaveBeenCalledOnce();
     expect(deps.applySettings).toHaveBeenCalledWith({
       appRoot: APP_ROOT,
       patch: {
@@ -310,7 +310,7 @@ describe("runModelFlow", () => {
       modelMessage: "ChatGPT login ready.",
     });
 
-    expect(deps.ensureChatGptAuth).toHaveBeenCalledWith({ interactive: true });
+    expect(deps.ensureChatGptAuth).toHaveBeenCalledOnce();
     expect(deps.runProviderFlow).toHaveBeenCalledWith(
       expect.objectContaining({ selectedProvider: "chatgpt" }),
     );

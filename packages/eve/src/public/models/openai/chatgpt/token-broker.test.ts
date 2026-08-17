@@ -27,7 +27,6 @@ describe("Codex token broker", () => {
     expect(getAuthStatus).toHaveBeenCalledOnce();
     expect(broker.state()).toMatchObject({
       kind: "ready",
-      accountId: "acct-1",
       accountLabel: "person@example.com",
     });
   });

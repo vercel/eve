@@ -1209,8 +1209,11 @@ export class EveTUIRunner {
           onRuntimeArtifactsChanged: () => this.#handleRuntimeArtifactsChanged(),
         });
         const endpoint = this.#agentInfo?.agent.model.endpoint;
+        const shouldRefreshChatGptAuth =
+          endpoint?.kind === "chatgpt" &&
+          (endpoint.state === "signed-out" || endpoint.state === "reauth-required");
         const now = Date.now();
-        if (endpoint?.kind === "chatgpt" && now - lastChatGptAuthRefresh >= idleChatGptAuthPollMs) {
+        if (shouldRefreshChatGptAuth && now - lastChatGptAuthRefresh >= idleChatGptAuthPollMs) {
           lastChatGptAuthRefresh = now;
           const refreshedInfo = await this.#readAgentInfo();
           if (refreshedInfo !== undefined) this.#replaceAgentInfo(refreshedInfo);

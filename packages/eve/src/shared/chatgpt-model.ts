@@ -1,3 +1,5 @@
+import type { ModelRouting } from "./agent-definition.js";
+
 export const DEFAULT_CHATGPT_MODEL_ID = "gpt-5.6-sol";
 export const CHATGPT_MODEL_SELECTION_PREFIX = "chatgpt/";
 export const DEFAULT_CHATGPT_MODEL_SELECTION = `${CHATGPT_MODEL_SELECTION_PREFIX}${DEFAULT_CHATGPT_MODEL_ID}`;
@@ -9,8 +11,8 @@ export function parseChatGptModelSelection(selection: string): string | undefine
   return isBareChatGptModelId(modelId) ? modelId : undefined;
 }
 
-export function isChatGptModelSelection(selection: string): boolean {
-  return parseChatGptModelSelection(selection) !== undefined;
+export function isChatGptModelRouting(routing: ModelRouting | null | undefined): boolean {
+  return routing?.kind === "external" && routing.provider === "codex";
 }
 
 /** Normalizes the model argument accepted by the public `chatgpt()` helper. */

@@ -26,7 +26,6 @@ export type ModelEndpointStatus =
   | {
       kind: "chatgpt";
       state: ChatGptEndpointState;
-      accountId?: string;
       accountLabel?: string;
     }
   | { kind: "gateway"; connected: true; credential: "api-key" | "oidc" }

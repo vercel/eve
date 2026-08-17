@@ -14,9 +14,7 @@ const TOKEN_REFRESH_WINDOW_MS = 5 * 60_000;
 export type ChatGptAuthState =
   | { readonly kind: "checking" }
   | {
-      readonly accountId?: string;
       readonly accountLabel?: string;
-      readonly expiresAt?: number;
       readonly kind: "ready";
     }
   | { readonly kind: "signed-out" }
@@ -154,9 +152,7 @@ function tokenFrom(token: string): ChatGptToken {
 function readyState(token: ChatGptToken): ChatGptAuthState {
   return {
     kind: "ready",
-    ...(token.accountId !== undefined && { accountId: token.accountId }),
     ...(token.accountLabel !== undefined && { accountLabel: token.accountLabel }),
-    ...(token.expiresAt !== undefined && { expiresAt: token.expiresAt }),
   };
 }
 

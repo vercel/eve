@@ -14,8 +14,7 @@ import { createCodexSubscriptionModel } from "./chatgpt/model.js";
  *
  * Credentials are read from the Codex CLI login on the machine the agent
  * runs on, so this model works in local dev and fails in a deployment.
- * Branch on environment for production, and set `modelContextWindowTokens`
- * because Codex models carry no AI Gateway metadata:
+ * Branch on environment for production:
  *
  * ```ts
  * export default defineAgent({
@@ -23,7 +22,6 @@ import { createCodexSubscriptionModel } from "./chatgpt/model.js";
  *     process.env.NODE_ENV === "production"
  *       ? "anthropic/claude-sonnet-4.6"
  *       : chatgpt(),
- *   modelContextWindowTokens: 200_000,
  * });
  * ```
  */

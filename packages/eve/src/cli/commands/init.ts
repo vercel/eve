@@ -9,7 +9,6 @@ import { EVE_WORDMARK } from "#cli/banner.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createLogger, isLogLevelEnabled } from "#internal/logging.js";
-import { isChatGptModelSelection } from "#shared/chatgpt-model.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import { formatNodeEngineOverrideWarning, type NodeEngineOverride } from "#setup/node-engine.js";
@@ -28,7 +27,6 @@ import type { ProcessOutputLine } from "#setup/primitives/process-output.js";
 import { addAgentToProject } from "#setup/scaffold/create/add-to-project.js";
 import { ensureChannel, scaffoldBaseProject } from "#setup/scaffold/index.js";
 import { WizardCancelledError } from "#setup/step.js";
-import { ensureChatGptAuth } from "#setup/flows/chatgpt-auth.js";
 import { validateModelSlug } from "#setup/flows/model-source-change.js";
 import {
   isPackageManagerWorkspaceMember,
@@ -70,7 +68,6 @@ export interface InitCommandDependencies {
   detectInvokingPackageManager: typeof detectInvokingPackageManager;
   detectPackageManager: typeof detectPackageManager;
   ensureChannel: typeof ensureChannel;
-  ensureChatGptAuth: typeof ensureChatGptAuth;
   isCodingAgentLaunch: typeof isCodingAgentLaunch;
   now: () => number;
   runPackageManagerInstall: typeof runPackageManagerInstall;
@@ -88,7 +85,6 @@ const defaultDependencies: InitCommandDependencies = {
   detectInvokingPackageManager,
   detectPackageManager,
   ensureChannel,
-  ensureChatGptAuth,
   isCodingAgentLaunch,
   now: () => performance.now(),
   runPackageManagerInstall,
@@ -342,13 +338,6 @@ async function runInitSteps(input: {
     target,
   });
   const evePackage = resolveInitEvePackageOverride();
-
-  // Codex owns the terminal during login. Start Eve's animated live region only
-  // after the inherited-stdio child exits so neither process traps or repaints
-  // the other's input/output.
-  if (options.model !== undefined && isChatGptModelSelection(options.model)) {
-    await dependencies.ensureChatGptAuth({ interactive: process.stdin.isTTY === true });
-  }
 
   const progress = startCliLiveRow(logger);
   progress.update("Preparing project");

@@ -1,4 +1,5 @@
 import type { ModelRouting } from "#shared/agent-definition.js";
+import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
 import type { ChatGptEndpointState, ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 
 /**
@@ -80,12 +81,11 @@ export function resolveModelEndpointStatus(
   credentials: GatewayCredentialPresence,
   chatgpt?: {
     readonly state: ChatGptEndpointState;
-    readonly accountId?: string;
     readonly accountLabel?: string;
   },
 ): ModelEndpointStatus {
   if (routing.kind === "external") {
-    if (routing.provider === "codex" && chatgpt !== undefined) {
+    if (isChatGptModelRouting(routing) && chatgpt !== undefined) {
       return { kind: "chatgpt", ...chatgpt };
     }
     return { kind: "external", provider: routing.provider };

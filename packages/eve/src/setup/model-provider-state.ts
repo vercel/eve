@@ -3,6 +3,7 @@ import {
   type GatewayCredentialSource,
 } from "#internal/resolve-model-endpoint-status.js";
 import type { ModelRouting } from "#shared/agent-definition.js";
+import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
 import { AI_GATEWAY_API_KEY_ENV_VAR } from "#setup/ai-gateway-api-key.js";
 import { findEnvFileWithKey } from "#setup/boxes/detect-ai-gateway.js";
 import {
@@ -69,7 +70,7 @@ export function resolveSelectedModelProvider(
   state: GatewayProviderState,
   routing: ModelRouting | null,
 ): SelectedModelProvider {
-  if (routing?.kind === "external" && routing.provider === "codex") return "chatgpt";
+  if (isChatGptModelRouting(routing)) return "chatgpt";
   if (state.preferredGatewayCredential === "project") return "gateway-project";
   if (state.preferredGatewayCredential === "api-key") return "gateway-key";
   if (state.available.gatewayKey !== undefined) return "gateway-key";

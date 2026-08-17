@@ -33,7 +33,6 @@ function toChatGptEndpoint(state: ChatGptAuthState | undefined) {
   if (state === undefined) return undefined;
   return {
     state: state.kind,
-    ...(state.kind === "ready" && state.accountId !== undefined && { accountId: state.accountId }),
     ...(state.kind === "ready" &&
       state.accountLabel !== undefined && { accountLabel: state.accountLabel }),
   };

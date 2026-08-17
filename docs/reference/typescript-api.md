@@ -110,7 +110,6 @@ import { chatgpt } from "eve/models/openai";
 
 export default defineAgent({
   model: chatgpt(),
-  modelContextWindowTokens: 200_000,
 });
 ```
 

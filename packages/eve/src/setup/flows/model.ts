@@ -32,6 +32,7 @@ import {
 import type { AgentReasoningDefinition, ModelRouting } from "#shared/agent-definition.js";
 import {
   DEFAULT_CHATGPT_MODEL_SELECTION,
+  isChatGptModelRouting,
   parseChatGptModelSelection,
 } from "#shared/chatgpt-model.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
@@ -244,7 +245,7 @@ function modelMenuRows(
   }
 
   let providerRow: SelectOption<ModelMenuRow>;
-  if (routing?.kind === "external" && routing.provider !== "codex") {
+  if (routing?.kind === "external" && !isChatGptModelRouting(routing)) {
     providerRow = {
       disabled: true,
       value: "provider",
@@ -342,9 +343,10 @@ export async function runModelFlow(input: {
 
   let lastApply: ApplyModelSettingsOutcome | undefined;
   let providerSelection: SelectedGatewayProvider | undefined;
-  let chatGptLoginReady = false;
+  let shouldAuthenticateChatGpt = false;
   let commitDraft = false;
-  const sourceOwnedExternalRouting = routing?.kind === "external" && routing.provider !== "codex";
+  const sourceOwnedExternalRouting =
+    routing?.kind === "external" && !isChatGptModelRouting(routing);
   const externalNotice: SelectNotice | undefined = sourceOwnedExternalRouting
     ? {
         tone: "warning",
@@ -472,10 +474,8 @@ export async function runModelFlow(input: {
       continue;
     }
     if (result.kind === "chatgpt") {
-      if (selectedProvider === "chatgpt") {
-        await authenticateChatGpt(deps, input.withExclusiveTerminal);
-        chatGptLoginReady = true;
-      } else {
+      shouldAuthenticateChatGpt = true;
+      if (selectedProvider !== "chatgpt") {
         patch.model = { kind: "set", value: DEFAULT_CHATGPT_MODEL_SELECTION };
         patch.gatewayServiceTier = { kind: "remove" };
       }
@@ -495,11 +495,17 @@ export async function runModelFlow(input: {
     break;
   }
 
+  const selectsChatGpt =
+    patch.model.kind === "set" && parseChatGptModelSelection(patch.model.value) !== undefined;
+  if (commitDraft && selectsChatGpt) {
+    patch.gatewayServiceTier = { kind: "remove" };
+    shouldAuthenticateChatGpt = true;
+  }
+  if (commitDraft && shouldAuthenticateChatGpt) {
+    await authenticateChatGpt(deps, input.withExclusiveTerminal);
+  }
+
   if (commitDraft && hasModelSettingsChanges(patch)) {
-    if (patch.model.kind === "set" && parseChatGptModelSelection(patch.model.value) !== undefined) {
-      patch.gatewayServiceTier = { kind: "remove" };
-      await authenticateChatGpt(deps, input.withExclusiveTerminal);
-    }
     lastApply = await deps.applySettings({ appRoot, patch });
     if (lastApply.kind !== "rejected" && nextGatewayCredentialPreference !== undefined) {
       await deps.writeGatewayCredentialPreference(appRoot, nextGatewayCredentialPreference);
@@ -509,16 +515,16 @@ export async function runModelFlow(input: {
     await deps.writeGatewayCredentialPreference(appRoot, nextGatewayCredentialPreference);
   }
 
-  if (lastApply === undefined && providerSelection === undefined && !chatGptLoginReady) {
+  if (lastApply === undefined && providerSelection === undefined && !shouldAuthenticateChatGpt) {
     return { kind: "cancelled" };
   }
   const done: Extract<ModelFlowResult, { kind: "done" }> = {
     kind: "done",
     accessChanged:
-      lastApply?.kind === "changed" || providerSelection !== undefined || chatGptLoginReady,
+      lastApply?.kind === "changed" || providerSelection !== undefined || shouldAuthenticateChatGpt,
   };
   if (lastApply !== undefined) done.modelMessage = formatApplyModelSettingsOutcome(lastApply);
-  else if (chatGptLoginReady) done.modelMessage = "ChatGPT login ready.";
+  else if (shouldAuthenticateChatGpt) done.modelMessage = "ChatGPT login ready.";
   if (providerSelection !== undefined) done.providerSelection = providerSelection;
   return done;
 }
@@ -534,7 +540,7 @@ async function authenticateChatGpt(
   deps: ModelFlowDeps,
   withExclusiveTerminal: (<T>(task: () => Promise<T>) => Promise<T>) | undefined,
 ): Promise<void> {
-  const authenticate = (): Promise<void> => deps.ensureChatGptAuth({ interactive: true });
+  const authenticate = (): Promise<void> => deps.ensureChatGptAuth();
   await (withExclusiveTerminal === undefined
     ? authenticate()
     : withExclusiveTerminal(authenticate));
@@ -560,7 +566,7 @@ async function readCurrentAgentModel(appRoot: string): Promise<CurrentAgentModel
     const model = config?.model;
     // A source-backed model (an SDK model call) carries `source`; a string id
     // does not, and only a string is a literal the editor can rewrite.
-    const chatgpt = model?.routing.kind === "external" && model.routing.provider === "codex";
+    const chatgpt = isChatGptModelRouting(model?.routing);
     return {
       id: chatgpt && model !== undefined ? `chatgpt/${model.id}` : (model?.id ?? null),
       routing: model?.routing ?? null,
@@ -591,9 +597,7 @@ export async function modelChangeRefusalForUneditableModel(
   appRoot: string,
 ): Promise<string | null> {
   const { editable, routing } = await readCurrentAgentModel(appRoot);
-  if (editable || (routing?.kind === "external" && routing.provider === "codex")) {
-    return null;
-  }
+  if (editable) return null;
   const detail =
     routing?.kind === "external"
       ? `the external provider \`${routing.provider}\``

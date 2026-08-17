@@ -4,10 +4,7 @@ import { basename, join, resolve } from "node:path";
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor } from "../../node-engine.js";
 import type { AgentReasoningDefinition } from "../../../shared/agent-definition.js";
-import {
-  isChatGptModelSelection,
-  parseChatGptModelSelection,
-} from "../../../shared/chatgpt-model.js";
+import { parseChatGptModelSelection } from "../../../shared/chatgpt-model.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "../update/module-files.js";
 import { pathExists, writeTextFile } from "../files.js";
 import { blockingCreateInPlaceEntries } from "../create-in-place.js";
@@ -131,7 +128,7 @@ function reasoningTemplateLine(reasoning: AgentReasoningDefinition | undefined):
 }
 
 function renderTemplate(content: string, ctx: TemplateContext): string {
-  if (content === BASE_AGENT_TEMPLATE && isChatGptModelSelection(ctx.model)) {
+  if (content === BASE_AGENT_TEMPLATE && parseChatGptModelSelection(ctx.model) !== undefined) {
     return renderAgentTemplate(ctx.model, ctx.reasoning);
   }
   return content

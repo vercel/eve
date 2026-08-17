@@ -1,4 +1,5 @@
 import { inspectApplication } from "#services/inspect-application.js";
+import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
 
 import { interactiveAsker, withAnswers } from "../ask.js";
 import { deployProject, type DeployProjectDeps } from "../boxes/deploy-project.js";
@@ -72,7 +73,7 @@ export async function runDeployFlow(input: {
   try {
     const application = await deps.inspectApplication(appRoot);
     const routing = application.compiledState?.manifest.config.model?.routing;
-    if (routing?.kind === "external" && routing.provider === "codex") {
+    if (isChatGptModelRouting(routing)) {
       return { kind: "local-model" };
     }
   } catch {

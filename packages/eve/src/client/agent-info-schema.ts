@@ -19,7 +19,6 @@ const modelEndpoint = z.union([
   z.object({
     kind: z.literal("chatgpt"),
     state: z.enum(["checking", "ready", "signed-out", "reauth-required", "unavailable"]),
-    accountId: z.string().optional(),
     accountLabel: z.string().optional(),
   }),
   z.object({

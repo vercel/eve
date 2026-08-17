@@ -9,6 +9,7 @@ import type { GatewayCredentialPresence } from "#internal/resolve-model-endpoint
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { getDefaultCodexTokenBroker } from "#public/models/openai/chatgpt/token-broker.js";
 import type { ModelRouting } from "#shared/agent-definition.js";
+import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
 
 async function createAgentInfoPayload(input: NitroArtifactsConfig) {
   const data = await loadAgentInfoManifestData({
@@ -25,7 +26,7 @@ async function createAgentInfoPayload(input: NitroArtifactsConfig) {
       routing === undefined
         ? { apiKey: false, oidc: false }
         : await resolveGatewayCredentialPresence(routing),
-    ...(routing?.kind === "external" && routing.provider === "codex"
+    ...(isChatGptModelRouting(routing)
       ? { chatgptAuth: await getDefaultCodexTokenBroker().refreshState() }
       : {}),
   });
