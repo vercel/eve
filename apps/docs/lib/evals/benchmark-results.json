@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-17T20:15:59.438Z",
+  "generatedAt": "2026-08-17T22:36:52.118Z",
   "suite": {
     "eveRevision": "99eb6323ffa6a02b46a612d6792afa8248f0a70a",
-    "caseFingerprint": "22ca2536d7b3d8cab0d87f346f98a00da7472b891142ca720f6766715b63f336",
-    "caseCount": 2,
+    "caseFingerprint": "8d6c31f03b3db64dc6404b250103e49876871928d256ea1a39f895e57a2a8e33",
+    "caseCount": 6,
     "runsPerCell": 3
   },
   "experiments": [
@@ -131,6 +131,54 @@
       "meanToolInvocationCount": 54.666666666666664
     },
     {
+      "experimentId": "claude-sonnet-4-6-opencode--baseline",
+      "caseId": "author-003-openapi-connection",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 219628,
+      "measuredAt": "2026-08-17T21:16:28.957Z",
+      "meanEstimatedListCostUsd": 0.167512,
+      "meanTokenConsumption": 42152,
+      "meanToolInvocationCount": 35.333333333333336
+    },
+    {
+      "experimentId": "claude-sonnet-4-6-opencode--baseline",
+      "caseId": "author-004-packaged-skill",
+      "status": "current",
+      "passedRuns": 2,
+      "validRuns": 3,
+      "meanDurationMs": 382777,
+      "measuredAt": "2026-08-17T22:03:22.192Z",
+      "meanEstimatedListCostUsd": 0.108879,
+      "meanTokenConsumption": 22653,
+      "meanToolInvocationCount": 16
+    },
+    {
+      "experimentId": "claude-sonnet-4-6-opencode--baseline",
+      "caseId": "author-005-conditional-approval",
+      "status": "current",
+      "passedRuns": 1,
+      "validRuns": 3,
+      "meanDurationMs": 646128,
+      "measuredAt": "2026-08-17T22:19:44.994Z",
+      "meanEstimatedListCostUsd": 0.046356,
+      "meanTokenConsumption": 6772,
+      "meanToolInvocationCount": 17
+    },
+    {
+      "experimentId": "claude-sonnet-4-6-opencode--baseline",
+      "caseId": "author-006-custom-channel",
+      "status": "current",
+      "passedRuns": 1,
+      "validRuns": 3,
+      "meanDurationMs": 714111,
+      "measuredAt": "2026-08-17T22:19:44.996Z",
+      "meanEstimatedListCostUsd": 0.056847,
+      "meanTokenConsumption": 12625,
+      "meanToolInvocationCount": 10
+    },
+    {
       "experimentId": "claude-sonnet-4-6-opencode--guided",
       "caseId": "author-001-weather-tool",
       "status": "current",
@@ -153,6 +201,54 @@
       "meanEstimatedListCostUsd": 0.20738,
       "meanTokenConsumption": 48973.333333333336,
       "meanToolInvocationCount": 47
+    },
+    {
+      "experimentId": "claude-sonnet-4-6-opencode--guided",
+      "caseId": "author-003-openapi-connection",
+      "status": "current",
+      "passedRuns": 2,
+      "validRuns": 3,
+      "meanDurationMs": 404529,
+      "measuredAt": "2026-08-17T21:16:30.925Z",
+      "meanEstimatedListCostUsd": 0.05484,
+      "meanTokenConsumption": 12526,
+      "meanToolInvocationCount": 15
+    },
+    {
+      "experimentId": "claude-sonnet-4-6-opencode--guided",
+      "caseId": "author-004-packaged-skill",
+      "status": "current",
+      "passedRuns": 2,
+      "validRuns": 3,
+      "meanDurationMs": 366252,
+      "measuredAt": "2026-08-17T22:03:22.219Z",
+      "meanEstimatedListCostUsd": 0.1030785,
+      "meanTokenConsumption": 19777.5,
+      "meanToolInvocationCount": 15.5
+    },
+    {
+      "experimentId": "claude-sonnet-4-6-opencode--guided",
+      "caseId": "author-005-conditional-approval",
+      "status": "current",
+      "passedRuns": 0,
+      "validRuns": 3,
+      "meanDurationMs": 641045,
+      "measuredAt": "2026-08-17T22:35:17.400Z",
+      "meanEstimatedListCostUsd": 0.074469,
+      "meanTokenConsumption": 19223,
+      "meanToolInvocationCount": 11
+    },
+    {
+      "experimentId": "claude-sonnet-4-6-opencode--guided",
+      "caseId": "author-006-custom-channel",
+      "status": "current",
+      "passedRuns": 1,
+      "validRuns": 3,
+      "meanDurationMs": 616082,
+      "measuredAt": "2026-08-17T22:03:22.224Z",
+      "meanEstimatedListCostUsd": 0.041352,
+      "meanTokenConsumption": 8920,
+      "meanToolInvocationCount": 14
     },
     {
       "experimentId": "kimi-k3-opencode--baseline",
@@ -179,6 +275,54 @@
       "meanToolInvocationCount": 39.333333333333336
     },
     {
+      "experimentId": "kimi-k3-opencode--baseline",
+      "caseId": "author-003-openapi-connection",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 241932,
+      "measuredAt": "2026-08-17T21:15:14.488Z",
+      "meanEstimatedListCostUsd": 0.191712,
+      "meanTokenConsumption": 41536,
+      "meanToolInvocationCount": 36
+    },
+    {
+      "experimentId": "kimi-k3-opencode--baseline",
+      "caseId": "author-004-packaged-skill",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 98918,
+      "measuredAt": "2026-08-17T21:53:32.675Z",
+      "meanEstimatedListCostUsd": 0.10943000000000001,
+      "meanTokenConsumption": 21842,
+      "meanToolInvocationCount": 20
+    },
+    {
+      "experimentId": "kimi-k3-opencode--baseline",
+      "caseId": "author-005-conditional-approval",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 143003,
+      "measuredAt": "2026-08-17T21:53:32.680Z",
+      "meanEstimatedListCostUsd": 0.11367,
+      "meanTokenConsumption": 26826,
+      "meanToolInvocationCount": 23.333333333333332
+    },
+    {
+      "experimentId": "kimi-k3-opencode--baseline",
+      "caseId": "author-006-custom-channel",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 101690,
+      "measuredAt": "2026-08-17T21:53:32.685Z",
+      "meanEstimatedListCostUsd": 0.19643,
+      "meanTokenConsumption": 51291.333333333336,
+      "meanToolInvocationCount": 26.666666666666668
+    },
+    {
       "experimentId": "kimi-k3-opencode--guided",
       "caseId": "author-001-weather-tool",
       "status": "current",
@@ -201,6 +345,54 @@
       "meanEstimatedListCostUsd": 0.227655,
       "meanTokenConsumption": 44541,
       "meanToolInvocationCount": 33
+    },
+    {
+      "experimentId": "kimi-k3-opencode--guided",
+      "caseId": "author-003-openapi-connection",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 196092,
+      "measuredAt": "2026-08-17T21:06:04.975Z",
+      "meanEstimatedListCostUsd": 0.129362,
+      "meanTokenConsumption": 29516.666666666668,
+      "meanToolInvocationCount": 24
+    },
+    {
+      "experimentId": "kimi-k3-opencode--guided",
+      "caseId": "author-004-packaged-skill",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 83743,
+      "measuredAt": "2026-08-17T21:50:44.393Z",
+      "meanEstimatedListCostUsd": 0.090563,
+      "meanTokenConsumption": 17674.333333333332,
+      "meanToolInvocationCount": 15.666666666666666
+    },
+    {
+      "experimentId": "kimi-k3-opencode--guided",
+      "caseId": "author-005-conditional-approval",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 63663,
+      "measuredAt": "2026-08-17T21:50:44.399Z",
+      "meanEstimatedListCostUsd": 0.08653699999999999,
+      "meanTokenConsumption": 20956.333333333332,
+      "meanToolInvocationCount": 15.333333333333334
+    },
+    {
+      "experimentId": "kimi-k3-opencode--guided",
+      "caseId": "author-006-custom-channel",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 103364,
+      "measuredAt": "2026-08-17T21:50:44.405Z",
+      "meanEstimatedListCostUsd": 0.143259,
+      "meanTokenConsumption": 32125,
+      "meanToolInvocationCount": 24.666666666666668
     },
     {
       "experimentId": "claude-fable-5-opencode--baseline",
@@ -227,6 +419,54 @@
       "meanToolInvocationCount": 13.333333333333334
     },
     {
+      "experimentId": "claude-fable-5-opencode--baseline",
+      "caseId": "author-003-openapi-connection",
+      "status": "current",
+      "passedRuns": 1,
+      "validRuns": 3,
+      "meanDurationMs": 676174,
+      "measuredAt": "2026-08-17T21:16:26.930Z",
+      "meanEstimatedListCostUsd": 0.21663,
+      "meanTokenConsumption": 12111,
+      "meanToolInvocationCount": 17
+    },
+    {
+      "experimentId": "claude-fable-5-opencode--baseline",
+      "caseId": "author-004-packaged-skill",
+      "status": "current",
+      "passedRuns": 2,
+      "validRuns": 3,
+      "meanDurationMs": 371962,
+      "measuredAt": "2026-08-17T22:03:20.199Z",
+      "meanEstimatedListCostUsd": 0.26129,
+      "meanTokenConsumption": 15713,
+      "meanToolInvocationCount": 13.5
+    },
+    {
+      "experimentId": "claude-fable-5-opencode--baseline",
+      "caseId": "author-005-conditional-approval",
+      "status": "current",
+      "passedRuns": 1,
+      "validRuns": 3,
+      "meanDurationMs": 628108,
+      "measuredAt": "2026-08-17T22:03:20.202Z",
+      "meanEstimatedListCostUsd": 0.29477,
+      "meanTokenConsumption": 23109,
+      "meanToolInvocationCount": 12
+    },
+    {
+      "experimentId": "claude-fable-5-opencode--baseline",
+      "caseId": "author-006-custom-channel",
+      "status": "current",
+      "passedRuns": 1,
+      "validRuns": 3,
+      "meanDurationMs": 631151,
+      "measuredAt": "2026-08-17T22:03:20.204Z",
+      "meanEstimatedListCostUsd": 0.30014,
+      "meanTokenConsumption": 23390,
+      "meanToolInvocationCount": 12
+    },
+    {
       "experimentId": "claude-fable-5-opencode--guided",
       "caseId": "author-001-weather-tool",
       "status": "current",
@@ -249,6 +489,54 @@
       "meanEstimatedListCostUsd": 0.1930066666666667,
       "meanTokenConsumption": 10470,
       "meanToolInvocationCount": 13.666666666666666
+    },
+    {
+      "experimentId": "claude-fable-5-opencode--guided",
+      "caseId": "author-003-openapi-connection",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 211004,
+      "measuredAt": "2026-08-17T21:05:51.289Z",
+      "meanEstimatedListCostUsd": 0.20158,
+      "meanTokenConsumption": 10443.333333333334,
+      "meanToolInvocationCount": 14.333333333333334
+    },
+    {
+      "experimentId": "claude-fable-5-opencode--guided",
+      "caseId": "author-004-packaged-skill",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 81068,
+      "measuredAt": "2026-08-17T21:50:05.083Z",
+      "meanEstimatedListCostUsd": 0.29333666666666663,
+      "meanTokenConsumption": 20027,
+      "meanToolInvocationCount": 9.333333333333334
+    },
+    {
+      "experimentId": "claude-fable-5-opencode--guided",
+      "caseId": "author-005-conditional-approval",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 61687,
+      "measuredAt": "2026-08-17T21:50:05.089Z",
+      "meanEstimatedListCostUsd": 0.21983999999999995,
+      "meanTokenConsumption": 17200,
+      "meanToolInvocationCount": 8
+    },
+    {
+      "experimentId": "claude-fable-5-opencode--guided",
+      "caseId": "author-006-custom-channel",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 57173,
+      "measuredAt": "2026-08-17T21:50:05.095Z",
+      "meanEstimatedListCostUsd": 0.27369333333333334,
+      "meanTokenConsumption": 22946.666666666668,
+      "meanToolInvocationCount": 9
     },
     {
       "experimentId": "gpt-5-6-sol-opencode--baseline",
@@ -275,6 +563,54 @@
       "meanToolInvocationCount": 19.333333333333332
     },
     {
+      "experimentId": "gpt-5-6-sol-opencode--baseline",
+      "caseId": "author-003-openapi-connection",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 170007,
+      "measuredAt": "2026-08-17T21:16:34.909Z",
+      "meanEstimatedListCostUsd": 0.11632666666666668,
+      "meanTokenConsumption": 34394,
+      "meanToolInvocationCount": 37
+    },
+    {
+      "experimentId": "gpt-5-6-sol-opencode--baseline",
+      "caseId": "author-004-packaged-skill",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 82922,
+      "measuredAt": "2026-08-17T22:03:26.183Z",
+      "meanEstimatedListCostUsd": 0.0875275,
+      "meanTokenConsumption": 19019.333333333332,
+      "meanToolInvocationCount": 25.333333333333332
+    },
+    {
+      "experimentId": "gpt-5-6-sol-opencode--baseline",
+      "caseId": "author-005-conditional-approval",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 65429,
+      "measuredAt": "2026-08-17T22:03:26.191Z",
+      "meanEstimatedListCostUsd": 0.1605825,
+      "meanTokenConsumption": 53423,
+      "meanToolInvocationCount": 30.666666666666668
+    },
+    {
+      "experimentId": "gpt-5-6-sol-opencode--baseline",
+      "caseId": "author-006-custom-channel",
+      "status": "current",
+      "passedRuns": 2,
+      "validRuns": 3,
+      "meanDurationMs": 377316,
+      "measuredAt": "2026-08-17T22:03:26.196Z",
+      "meanEstimatedListCostUsd": 0.10921125000000001,
+      "meanTokenConsumption": 32624.5,
+      "meanToolInvocationCount": 29
+    },
+    {
       "experimentId": "gpt-5-6-sol-opencode--guided",
       "caseId": "author-001-weather-tool",
       "status": "current",
@@ -297,6 +633,54 @@
       "meanEstimatedListCostUsd": 0.12426,
       "meanTokenConsumption": 35852.333333333336,
       "meanToolInvocationCount": 37
+    },
+    {
+      "experimentId": "gpt-5-6-sol-opencode--guided",
+      "caseId": "author-003-openapi-connection",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 166379,
+      "measuredAt": "2026-08-17T21:04:54.894Z",
+      "meanEstimatedListCostUsd": 0.09471666666666667,
+      "meanTokenConsumption": 27645,
+      "meanToolInvocationCount": 33.333333333333336
+    },
+    {
+      "experimentId": "gpt-5-6-sol-opencode--guided",
+      "caseId": "author-004-packaged-skill",
+      "status": "current",
+      "passedRuns": 2,
+      "validRuns": 3,
+      "meanDurationMs": 65711,
+      "measuredAt": "2026-08-17T21:50:05.657Z",
+      "meanEstimatedListCostUsd": 0.05317666666666667,
+      "meanTokenConsumption": 10700.666666666666,
+      "meanToolInvocationCount": 21.666666666666668
+    },
+    {
+      "experimentId": "gpt-5-6-sol-opencode--guided",
+      "caseId": "author-005-conditional-approval",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 55710,
+      "measuredAt": "2026-08-17T21:50:05.664Z",
+      "meanEstimatedListCostUsd": 0.07163666666666667,
+      "meanTokenConsumption": 19068,
+      "meanToolInvocationCount": 22
+    },
+    {
+      "experimentId": "gpt-5-6-sol-opencode--guided",
+      "caseId": "author-006-custom-channel",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 64012,
+      "measuredAt": "2026-08-17T21:50:05.669Z",
+      "meanEstimatedListCostUsd": 0.17064000000000001,
+      "meanTokenConsumption": 58319.333333333336,
+      "meanToolInvocationCount": 29.333333333333332
     },
     {
       "experimentId": "gpt-5-6-terra-opencode--baseline",
@@ -323,6 +707,54 @@
       "meanToolInvocationCount": 11.666666666666666
     },
     {
+      "experimentId": "gpt-5-6-terra-opencode--baseline",
+      "caseId": "author-003-openapi-connection",
+      "status": "current",
+      "passedRuns": 2,
+      "validRuns": 3,
+      "meanDurationMs": 142709,
+      "measuredAt": "2026-08-17T21:04:22.623Z",
+      "meanEstimatedListCostUsd": 0.086084,
+      "meanTokenConsumption": 35367,
+      "meanToolInvocationCount": 23.666666666666668
+    },
+    {
+      "experimentId": "gpt-5-6-terra-opencode--baseline",
+      "caseId": "author-004-packaged-skill",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 56532,
+      "measuredAt": "2026-08-17T21:49:37.694Z",
+      "meanEstimatedListCostUsd": 0.045538666666666665,
+      "meanTokenConsumption": 10254.333333333334,
+      "meanToolInvocationCount": 17.333333333333332
+    },
+    {
+      "experimentId": "gpt-5-6-terra-opencode--baseline",
+      "caseId": "author-005-conditional-approval",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 49363,
+      "measuredAt": "2026-08-17T21:49:37.700Z",
+      "meanEstimatedListCostUsd": 0.07134466666666667,
+      "meanTokenConsumption": 25729,
+      "meanToolInvocationCount": 28.333333333333332
+    },
+    {
+      "experimentId": "gpt-5-6-terra-opencode--baseline",
+      "caseId": "author-006-custom-channel",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 54236,
+      "measuredAt": "2026-08-17T21:49:37.705Z",
+      "meanEstimatedListCostUsd": 0.105746,
+      "meanTokenConsumption": 41399.666666666664,
+      "meanToolInvocationCount": 35.333333333333336
+    },
+    {
       "experimentId": "gpt-5-6-terra-opencode--guided",
       "caseId": "author-001-weather-tool",
       "status": "current",
@@ -345,6 +777,54 @@
       "meanEstimatedListCostUsd": 0.044968,
       "meanTokenConsumption": 13834,
       "meanToolInvocationCount": 14.5
+    },
+    {
+      "experimentId": "gpt-5-6-terra-opencode--guided",
+      "caseId": "author-003-openapi-connection",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 149814,
+      "measuredAt": "2026-08-17T21:04:24.073Z",
+      "meanEstimatedListCostUsd": 0.052528,
+      "meanTokenConsumption": 16230.666666666666,
+      "meanToolInvocationCount": 29
+    },
+    {
+      "experimentId": "gpt-5-6-terra-opencode--guided",
+      "caseId": "author-004-packaged-skill",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 52305,
+      "measuredAt": "2026-08-17T21:49:38.298Z",
+      "meanEstimatedListCostUsd": 0.07652066666666667,
+      "meanTokenConsumption": 25132,
+      "meanToolInvocationCount": 20.333333333333332
+    },
+    {
+      "experimentId": "gpt-5-6-terra-opencode--guided",
+      "caseId": "author-005-conditional-approval",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 40336,
+      "measuredAt": "2026-08-17T21:49:38.302Z",
+      "meanEstimatedListCostUsd": 0.068348,
+      "meanTokenConsumption": 26159,
+      "meanToolInvocationCount": 23
+    },
+    {
+      "experimentId": "gpt-5-6-terra-opencode--guided",
+      "caseId": "author-006-custom-channel",
+      "status": "current",
+      "passedRuns": 2,
+      "validRuns": 3,
+      "meanDurationMs": 40571,
+      "measuredAt": "2026-08-17T21:49:38.306Z",
+      "meanEstimatedListCostUsd": 0.10993466666666667,
+      "meanTokenConsumption": 46457.333333333336,
+      "meanToolInvocationCount": 24
     },
     {
       "experimentId": "gemini-3-1-pro-preview-opencode--baseline",
@@ -371,6 +851,54 @@
       "meanToolInvocationCount": 25.666666666666668
     },
     {
+      "experimentId": "gemini-3-1-pro-preview-opencode--baseline",
+      "caseId": "author-003-openapi-connection",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 245820,
+      "measuredAt": "2026-08-17T21:07:27.342Z",
+      "meanEstimatedListCostUsd": 0.4483173333333333,
+      "meanTokenConsumption": 213997,
+      "meanToolInvocationCount": 27.333333333333332
+    },
+    {
+      "experimentId": "gemini-3-1-pro-preview-opencode--baseline",
+      "caseId": "author-004-packaged-skill",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 38128,
+      "measuredAt": "2026-08-17T21:50:29.896Z",
+      "meanEstimatedListCostUsd": 0.06686933333333334,
+      "meanTokenConsumption": 23048,
+      "meanToolInvocationCount": 5
+    },
+    {
+      "experimentId": "gemini-3-1-pro-preview-opencode--baseline",
+      "caseId": "author-005-conditional-approval",
+      "status": "current",
+      "passedRuns": 2,
+      "validRuns": 3,
+      "meanDurationMs": 105026,
+      "measuredAt": "2026-08-17T21:50:29.900Z",
+      "meanEstimatedListCostUsd": 0.285742,
+      "meanTokenConsumption": 131227.66666666666,
+      "meanToolInvocationCount": 32.666666666666664
+    },
+    {
+      "experimentId": "gemini-3-1-pro-preview-opencode--baseline",
+      "caseId": "author-006-custom-channel",
+      "status": "current",
+      "passedRuns": 0,
+      "validRuns": 3,
+      "meanDurationMs": 71273,
+      "measuredAt": "2026-08-17T21:50:29.905Z",
+      "meanEstimatedListCostUsd": 0.3402753333333333,
+      "meanTokenConsumption": 162764.33333333334,
+      "meanToolInvocationCount": 15.666666666666666
+    },
+    {
       "experimentId": "gemini-3-1-pro-preview-opencode--guided",
       "caseId": "author-001-weather-tool",
       "status": "current",
@@ -393,6 +921,54 @@
       "meanEstimatedListCostUsd": 0.26899866666666666,
       "meanTokenConsumption": 123212.66666666667,
       "meanToolInvocationCount": 30.333333333333332
+    },
+    {
+      "experimentId": "gemini-3-1-pro-preview-opencode--guided",
+      "caseId": "author-003-openapi-connection",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 203968,
+      "measuredAt": "2026-08-17T21:06:04.545Z",
+      "meanEstimatedListCostUsd": 0.20651866666666666,
+      "meanTokenConsumption": 97069.33333333333,
+      "meanToolInvocationCount": 21
+    },
+    {
+      "experimentId": "gemini-3-1-pro-preview-opencode--guided",
+      "caseId": "author-004-packaged-skill",
+      "status": "current",
+      "passedRuns": 1,
+      "validRuns": 3,
+      "meanDurationMs": 31761,
+      "measuredAt": "2026-08-17T21:49:29.140Z",
+      "meanEstimatedListCostUsd": 0.07475066666666667,
+      "meanTokenConsumption": 29850.333333333332,
+      "meanToolInvocationCount": 6.333333333333333
+    },
+    {
+      "experimentId": "gemini-3-1-pro-preview-opencode--guided",
+      "caseId": "author-005-conditional-approval",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 49772,
+      "measuredAt": "2026-08-17T21:49:29.146Z",
+      "meanEstimatedListCostUsd": 0.16259666666666664,
+      "meanTokenConsumption": 76228.33333333333,
+      "meanToolInvocationCount": 14.333333333333334
+    },
+    {
+      "experimentId": "gemini-3-1-pro-preview-opencode--guided",
+      "caseId": "author-006-custom-channel",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 43965,
+      "measuredAt": "2026-08-17T21:49:29.150Z",
+      "meanEstimatedListCostUsd": 0.09271800000000001,
+      "meanTokenConsumption": 42269,
+      "meanToolInvocationCount": 7.666666666666667
     }
   ]
 }
