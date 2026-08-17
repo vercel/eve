@@ -14,11 +14,11 @@ import {
 } from "../vercel-project.js";
 import { withSpinner } from "../with-spinner.js";
 
-import type { ModelProvider } from "#setup/provider-settings.js";
+import type { ProviderSelection } from "#setup/provider-settings.js";
 
 import { runLinkFlow } from "./link.js";
 
-export type ProviderConnection = ModelProvider | "external";
+export type ProviderConnection = ProviderSelection | "external";
 
 export const PROVIDER_QUESTION = "Which model provider do you want to use?";
 
@@ -38,12 +38,9 @@ export interface ProviderFlowDeps {
   validateGatewayApiKey: typeof validateGatewayApiKey;
 }
 
-export type ProviderFlowResult =
-  | { kind: "cancelled" }
-  | { kind: "ai-gateway-project" }
-  | { kind: "ai-gateway-key" }
-  | { kind: "chatgpt" }
-  | { kind: "external-provider" };
+export type ProviderFlowResult = {
+  kind: ProviderSelection | "cancelled" | "external-provider";
+};
 
 type AcceptedGatewayKeyValidation = Exclude<GatewayKeyValidation, { kind: "invalid" }>;
 
@@ -87,7 +84,7 @@ function projectConnectionOption(
 
 function providerOptions(
   authStatus: VercelAuthStatus | undefined,
-  selectedProvider: ModelProvider,
+  selectedProvider: ProviderSelection,
 ): SelectOption<ProviderConnection>[] {
   let project = projectConnectionOption(authStatus);
   if (selectedProvider === "ai-gateway-project") {
@@ -154,7 +151,7 @@ export async function runProviderFlow(input: {
   signal?: AbortSignal;
   picker?: ProviderPicker;
   /** The current provider selection. */
-  selectedProvider: ModelProvider;
+  selectedProvider: ProviderSelection;
   deps?: Partial<ProviderFlowDeps>;
 }): Promise<ProviderFlowResult> {
   const { appRoot, prompter, signal } = input;

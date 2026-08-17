@@ -3,7 +3,7 @@ import {
   readProviderSelection,
   resolveAvailableProviders,
   writeProviderSelection,
-  type ModelProvider,
+  type ProviderSelection,
 } from "#setup/provider-settings.js";
 import type {
   AgentModelSettingsPatch,
@@ -141,7 +141,7 @@ export type ModelFlowResult =
       /** The last apply line, when the model was changed this session. */
       modelMessage?: string;
       /** The provider selected in a completed provider sub-flow. */
-      providerSelection?: ModelProvider;
+      providerSelection?: ProviderSelection;
     };
 
 // The bordered panel's title ("Configure the agent model") is the menu's header,
@@ -151,7 +151,7 @@ export const MODEL_MENU_MESSAGE = "";
 type ModelMenuRow = "model" | "provider" | "done";
 
 function providerSelectionHint(
-  provider: ModelProvider,
+  provider: ProviderSelection,
   chatGptAccountLabel: string | undefined,
 ): string {
   if (provider === "chatgpt") {
@@ -214,7 +214,7 @@ function modelMenuRows(
   current: string | null,
   reasoning: ReasoningLevel | null,
   serviceTier: GatewayServiceTierState,
-  selectedProvider: ModelProvider,
+  selectedProvider: ProviderSelection,
   providerConfigured: boolean,
   chatGptAccountLabel: string | undefined,
   routing: ModelRouting | null,
@@ -333,7 +333,7 @@ export async function runModelFlow(input: {
     storedProviderSelection ??
     (availableProviders.includes("ai-gateway-key") ? "ai-gateway-key" : "ai-gateway-project");
   const providerConfigured = availableProviders.includes(selectedProvider);
-  let nextProviderSelection: ModelProvider | undefined;
+  let nextProviderSelection: ProviderSelection | undefined;
   const patch: {
     model: FieldPatch<string>;
     reasoning: FieldPatch<AgentReasoningDefinition>;
@@ -345,7 +345,7 @@ export async function runModelFlow(input: {
   };
 
   let lastApply: ApplyModelSettingsOutcome | undefined;
-  let committedProviderSelection: ModelProvider | undefined;
+  let committedProviderSelection: ProviderSelection | undefined;
   let shouldAuthenticateChatGpt = false;
   let commitDraft = false;
   const sourceOwnedExternalRouting =

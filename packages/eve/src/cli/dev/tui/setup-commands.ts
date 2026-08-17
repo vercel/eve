@@ -6,7 +6,7 @@ import {
 } from "#setup/flows/install-vercel-cli.js";
 import { runLoginFlow, type LoginFlowResult } from "#setup/flows/login.js";
 import { runModelFlow } from "#setup/flows/model.js";
-import type { ModelProvider } from "#setup/provider-settings.js";
+import type { ProviderSelection } from "#setup/provider-settings.js";
 import { runProviderFlow, type ProviderPicker } from "#setup/flows/provider.js";
 import { RegistryFlowFailedError, runRegistryFlow } from "#setup/flows/registry.js";
 import type { Prompter } from "#setup/prompter.js";
@@ -509,7 +509,7 @@ function loginResultMessage(result: LoginFlowResult): TuiSetupCommandResult {
   }
 }
 
-function providerSelectionMessage(selection: ModelProvider): string {
+function providerSelectionMessage(selection: ProviderSelection): string {
   if (selection === "chatgpt") return "ChatGPT subscription selected.";
   return selection === "ai-gateway-project"
     ? "AI Gateway via Project selected."

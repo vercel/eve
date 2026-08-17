@@ -8,7 +8,9 @@ import { AI_GATEWAY_API_KEY_ENV_VAR } from "#setup/ai-gateway-api-key.js";
 import { findEnvFileWithKey } from "#setup/boxes/detect-ai-gateway.js";
 import { readProjectLink } from "#setup/project-resolution.js";
 
-export type ModelProvider = "chatgpt" | "ai-gateway-key" | "ai-gateway-project";
+const PROVIDER_SELECTIONS = ["chatgpt", "ai-gateway-key", "ai-gateway-project"] as const;
+
+export type ProviderSelection = (typeof PROVIDER_SELECTIONS)[number];
 
 export function providerSettingsPath(appRoot: string): string {
   return join(appRoot, ".eve", "provider.json");
@@ -20,7 +22,7 @@ export async function resolveAvailableProviders(
     signal?: AbortSignal;
     env?: Record<string, string | undefined>;
   } = {},
-): Promise<readonly ModelProvider[]> {
+): Promise<readonly ProviderSelection[]> {
   const { signal, env = process.env } = options;
   signal?.throwIfAborted();
   const [projectLink, gatewayKeyFile, oidcFile] = await Promise.all([
@@ -29,7 +31,7 @@ export async function resolveAvailableProviders(
     findEnvFileWithKey(appRoot, "VERCEL_OIDC_TOKEN"),
   ]);
   signal?.throwIfAborted();
-  const available: ModelProvider[] = ["chatgpt"];
+  const available: ProviderSelection[] = ["chatgpt"];
 
   if (gatewayKeyFile !== undefined || hasEnvValue(env[AI_GATEWAY_API_KEY_ENV_VAR])) {
     available.push("ai-gateway-key");
@@ -42,7 +44,9 @@ export async function resolveAvailableProviders(
   return available;
 }
 
-export async function readProviderSelection(appRoot: string): Promise<ModelProvider | undefined> {
+export async function readProviderSelection(
+  appRoot: string,
+): Promise<ProviderSelection | undefined> {
   try {
     return parseProviderSelection(
       JSON.parse(await readFile(providerSettingsPath(appRoot), "utf8")),
@@ -53,7 +57,7 @@ export async function readProviderSelection(appRoot: string): Promise<ModelProvi
 }
 
 /** Synchronous counterpart for the synchronous dev-environment loader. */
-export function readProviderSelectionSync(appRoot: string): ModelProvider | undefined {
+export function readProviderSelectionSync(appRoot: string): ProviderSelection | undefined {
   try {
     return parseProviderSelection(JSON.parse(readFileSync(providerSettingsPath(appRoot), "utf8")));
   } catch {
@@ -63,7 +67,7 @@ export function readProviderSelectionSync(appRoot: string): ModelProvider | unde
 
 export async function writeProviderSelection(
   appRoot: string,
-  selected: ModelProvider,
+  selected: ProviderSelection,
 ): Promise<void> {
   await mkdir(join(appRoot, ".eve"), { recursive: true });
   await writeFile(
@@ -73,10 +77,10 @@ export async function writeProviderSelection(
   );
 }
 
-function parseProviderSelection(value: unknown): ModelProvider | undefined {
-  return isObject(value) && isModelProvider(value.selected) ? value.selected : undefined;
+function parseProviderSelection(value: unknown): ProviderSelection | undefined {
+  return isObject(value) && isProviderSelection(value.selected) ? value.selected : undefined;
 }
 
-function isModelProvider(value: unknown): value is ModelProvider {
-  return value === "chatgpt" || value === "ai-gateway-key" || value === "ai-gateway-project";
+function isProviderSelection(value: unknown): value is ProviderSelection {
+  return PROVIDER_SELECTIONS.some((selection) => selection === value);
 }
