@@ -131,6 +131,13 @@ function formatWorkspaceRootMutationWarning(mutation: WorkspaceRootMutation): st
   return `Updated workspace root ${target} at ${mutation.path}${suffix}`;
 }
 
+function initDevArguments(packageManager: PackageManagerKind): string[] {
+  const args = [...eveDevArguments(packageManager)];
+  // The immediately preceding install already accepted the project's dependency
+  // graph with this one-run bypass, so the handoff must use the same policy.
+  return packageManager === "pnpm" ? ["--config.minimum-release-age=0", ...args] : args;
+}
+
 /**
  * Adds the agent to an existing project and returns the
  * detected manager, which drives the install and dev handoff.
@@ -564,9 +571,8 @@ export async function runInitCommand(
     }
   }
 
-  const agentDevCommand = [result.packageManager, ...eveDevArguments(result.packageManager)].join(
-    " ",
-  );
+  const baseDevArguments = initDevArguments(result.packageManager);
+  const agentDevCommand = [result.packageManager, ...baseDevArguments].join(" ");
   const agentHandoff = initAgentDevHandoff({
     projectPath: result.projectPath,
     devCommand: agentDevCommand,
@@ -612,9 +618,10 @@ export async function runInitCommand(
   // the command the way run-scripts do, so the handoff line is printed here.
   const freshScaffold = result.kind === "created";
   const devArguments = freshScaffold
-    ? [...eveDevArguments(result.packageManager), "--input", "/model"]
-    : eveDevArguments(result.packageManager);
+    ? [...baseDevArguments, "--input", "/model"]
+    : baseDevArguments;
   logger.log(pc.dim(freshScaffold ? "$ eve dev --input /model" : "$ eve dev"));
+
   if (
     !(await dependencies.spawnPackageManager(
       result.packageManager,

@@ -176,6 +176,7 @@ describe("runInitCommand", () => {
     );
     expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
+      "--config.minimum-release-age=0",
       "exec",
       "eve",
       "dev",
@@ -263,13 +264,13 @@ describe("runInitCommand", () => {
       expect.objectContaining({
         command: "codex",
         cwd: projectPath,
-        prompt: expect.stringContaining("pnpm exec eve dev --no-ui"),
+        prompt: expect.stringContaining("pnpm --config.minimum-release-age=0 exec eve dev --no-ui"),
       }),
     );
     const prompt = deps.spawnCodingAgentRepl.mock.calls[0]?.[0].prompt;
     expect(prompt).toBe(
       initAgentReplPrompt({
-        devCommand: "pnpm exec eve dev",
+        devCommand: "pnpm --config.minimum-release-age=0 exec eve dev",
       }),
     );
     expect(prompt).toContain("What should the agent do?");
@@ -364,6 +365,7 @@ describe("runInitCommand", () => {
       );
       expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
       expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
+        "--config.minimum-release-age=0",
         "exec",
         "eve",
         "dev",
@@ -467,7 +469,12 @@ describe("runInitCommand", () => {
     ["npm", "package-lock.json", "bun", ["exec", "--", "eve", "dev", "--input", "/model"]],
     ["yarn", "yarn.lock", "npm", ["eve", "dev", "--input", "/model"]],
     ["bun", "bun.lock", "npm", ["x", "eve", "dev", "--input", "/model"]],
-    ["pnpm", "pnpm-lock.yaml", "npm", ["exec", "eve", "dev", "--input", "/model"]],
+    [
+      "pnpm",
+      "pnpm-lock.yaml",
+      "npm",
+      ["--config.minimum-release-age=0", "exec", "eve", "dev", "--input", "/model"],
+    ],
   ] as const)(
     "scaffolds a fresh named project with the ancestor %s lockfile before the launcher",
     async (kind, lockfile, invokingManager, devArguments) => {
@@ -735,6 +742,7 @@ describe("runInitCommand", () => {
       `Git initialization failed during commit: commit refused\nThe Git repository and staged files were preserved at "${projectPath}".\n\nResolve the Git error above, then retry:\n  git -C ${JSON.stringify(projectPath)} commit -m "Initial commit from eve"`,
     );
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
+      "--config.minimum-release-age=0",
       "exec",
       "eve",
       "dev",
@@ -767,6 +775,7 @@ describe("runInitCommand", () => {
       expect.anything(),
     );
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
+      "--config.minimum-release-age=0",
       "exec",
       "eve",
       "dev",
@@ -840,6 +849,7 @@ describe("runInitCommand", () => {
     expect(deps.tryInitializeGit).not.toHaveBeenCalled();
     expect(deps.confirmInitInNonEmptyDirectory).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectRoot, [
+      "--config.minimum-release-age=0",
       "exec",
       "eve",
       "dev",
@@ -1146,6 +1156,9 @@ describe("runInitCommand", () => {
     expect(deps.selectInitHandoff).not.toHaveBeenCalled();
     expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    expect(output.messages.join("\n")).toContain(
+      "pnpm --config.minimum-release-age=0 exec eve dev --no-ui",
+    );
   });
 
   it("derives the agent dev handoff command from the existing project's own manager", async () => {
@@ -1182,6 +1195,22 @@ describe("runInitCommand", () => {
     expect(output.errors).toEqual(["Packages: +12", "ERR_PNPM_FETCH_404 not found"]);
     expect(deps.tryInitializeGit).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+  });
+
+  it("carries the pnpm release-age bypass into the dev handoff", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dev-release-age-"));
+    const output = logger();
+    const deps = dependencies();
+
+    await expect(
+      runInitCommand(output, parentDirectory, "my-agent", {}, deps),
+    ).resolves.toBeUndefined();
+    expect(deps.spawnPackageManager).toHaveBeenCalledTimes(1);
+    expect(deps.spawnPackageManager).toHaveBeenCalledWith(
+      "pnpm",
+      join(parentDirectory, "my-agent"),
+      ["--config.minimum-release-age=0", "exec", "eve", "dev", "--input", "/model"],
+    );
   });
 
   it("preserves an existing host after install failure and prints the retry command", async () => {
