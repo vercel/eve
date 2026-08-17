@@ -1232,7 +1232,7 @@ describe("runInitCommand", () => {
       "Failed to install dependencies",
     );
 
-    expect(output.errors).toEqual(["Could not start pnpm: spawn pnpm ENOENT"]);
+    expect(output.errors).toEqual(["pnpm was not found. Install it before running this step."]);
   });
 
   it("preserves an existing host after install failure and prints the retry command", async () => {

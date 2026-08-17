@@ -129,7 +129,9 @@ export function packageManagerInstallFailureMessage(
   result: PackageManagerInstallResult,
 ): string | undefined {
   if (result.result.termination.kind === "spawn-error") {
-    return `Could not start ${result.result.command.executable}: ${result.result.termination.message}`;
+    return result.result.termination.code === "ENOENT"
+      ? `${result.result.command.executable} was not found. Install it before running this step.`
+      : `Could not start ${result.result.command.executable}: ${result.result.termination.message}`;
   }
   if (result.kind === "workspace-probe-unrecognized") {
     return "Could not determine whether the ancestor pnpm workspace includes this project.";
