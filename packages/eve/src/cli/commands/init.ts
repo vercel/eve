@@ -20,6 +20,7 @@ import {
 import { pathExists } from "#setup/path-exists.js";
 import {
   eveDevArguments,
+  packageManagerInstallFailureMessage,
   packageManagerInstallSucceeded,
   resultSucceeded,
   runPackageManagerInstall,
@@ -462,6 +463,10 @@ async function runInitSteps(input: {
       const failureOutput =
         installFailureOutput.length > 0 ? installFailureOutput : recentInstallOutput;
       for (const line of failureOutput) logger.error(line);
+      if (failureOutput.length === 0) {
+        const message = packageManagerInstallFailureMessage(installResult);
+        if (message !== undefined) logger.error(message);
+      }
 
       if (project.failurePolicy !== "preserve") {
         const cleaned = await cleanupFreshInitTarget(

@@ -1214,6 +1214,27 @@ describe("runInitCommand", () => {
     );
   });
 
+  it("prints a spawn failure when installation produces no child output", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-spawn-fail-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.runPackageManagerInstall.mockResolvedValue({
+      kind: "installed",
+      result: {
+        command: { executable: "pnpm", args: ["install"], cwd: parentDirectory },
+        termination: { kind: "spawn-error", code: "ENOENT", message: "spawn pnpm ENOENT" },
+        output: [],
+        truncatedBytes: 0,
+      },
+    });
+
+    await expect(runInitCommand(output, parentDirectory, "my-agent", {}, deps)).rejects.toThrow(
+      "Failed to install dependencies",
+    );
+
+    expect(output.errors).toEqual(["Could not start pnpm: spawn pnpm ENOENT"]);
+  });
+
   it("preserves an existing host after install failure and prints the retry command", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-host-install-fail-"));
     const projectRoot = await createHostProject(parentDirectory);

@@ -124,6 +124,19 @@ export function packageManagerInstallSucceeded(result: PackageManagerInstallResu
   return result.kind === "installed" && resultSucceeded(result.result);
 }
 
+/** Returns an actionable explanation when a package-manager command produced no output. */
+export function packageManagerInstallFailureMessage(
+  result: PackageManagerInstallResult,
+): string | undefined {
+  if (result.result.termination.kind === "spawn-error") {
+    return `Could not start ${result.result.command.executable}: ${result.result.termination.message}`;
+  }
+  if (result.kind === "workspace-probe-unrecognized") {
+    return "Could not determine whether the ancestor pnpm workspace includes this project.";
+  }
+  return undefined;
+}
+
 function outputText(result: PackageManagerProcessResult, stream: "stdout" | "stderr"): string {
   return result.output
     .filter((chunk) => chunk.stream === stream)

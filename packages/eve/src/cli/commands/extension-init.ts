@@ -18,6 +18,7 @@ import {
 import { pathExists } from "#setup/path-exists.js";
 import { parseProjectName } from "#setup/project-name.js";
 import {
+  packageManagerInstallFailureMessage,
   packageManagerInstallSucceeded,
   runPackageManagerInstall,
 } from "#setup/primitives/index.js";
@@ -308,6 +309,10 @@ export async function runExtensionInitCommand(
       const failureOutput =
         installFailureOutput.length > 0 ? installFailureOutput : recentInstallOutput;
       for (const line of failureOutput) logger.error(line);
+      if (failureOutput.length === 0) {
+        const message = packageManagerInstallFailureMessage(installResult);
+        if (message !== undefined) logger.error(message);
+      }
       throw new Error(`Failed to install dependencies in "${projectPath}".`);
     }
     initLog.debug("dependencies installed", { ms: installElapsedMs });
