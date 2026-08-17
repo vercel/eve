@@ -74,7 +74,7 @@ export function createAuthoringAgent(subject: {
       const startedAt = Date.now();
       const commands: string[] = [];
       const transcript: AuthoringTranscriptEntry[] = [];
-      const turnTimings: Array<{ elapsedMs: number; index: number }> = [];
+      const turnTimings: AuthoringTurnTiming[] = [];
       let session: HarnessAgentSession | undefined;
       let activeSandbox: HarnessV1NetworkSandboxSession | undefined;
       let workspace: string | undefined;
@@ -139,18 +139,18 @@ export function createAuthoringAgent(subject: {
           send: async (prompt) => {
             transcript.push({ role: "user", content: prompt });
             if (verbose) console.log(`[user] ${prompt}`);
-            const turnStartedAt = performance.now();
-            const result = verbose
-              ? await streamTurn(agent, session!, prompt, options.timeout, options.signal)
-              : await agent.generate({
-                  session: session!,
-                  prompt,
-                  timeout: options.timeout,
-                  abortSignal: options.signal,
-                });
+            const result = await streamTurn(
+              agent,
+              session!,
+              prompt,
+              options.timeout,
+              options.signal,
+              verbose,
+            );
             turnTimings.push({
-              elapsedMs: performance.now() - turnStartedAt,
+              elapsedMs: result.elapsedMs,
               index: turnTimings.length + 1,
+              steps: result.steps,
             });
             transcript.push({ role: "assistant", content: result.text });
             commands.push(...shellCommands(result.toolCalls));
@@ -212,6 +212,13 @@ export function createAuthoringAgent(subject: {
           ),
         );
         const scriptsPassed = Object.values(scriptsResults).every((result) => result.success);
+        scriptsResults.timing = {
+          success: true,
+          output: JSON.stringify({
+            agentTurns: turnTimings,
+            totalAgentElapsedMs: sumTurnTimings(turnTimings),
+          }),
+        };
         log(`[result] ${test.exitCode === 0 && scriptsPassed ? "passed" : "failed"}`);
         return {
           success: test.exitCode === 0 && scriptsPassed,
@@ -249,30 +256,64 @@ export function createAuthoringAgent(subject: {
   };
 }
 
+interface AuthoringToolTiming {
+  readonly command: string;
+  readonly elapsedMs: number;
+  readonly startedAtMs: number;
+}
+
+interface AuthoringTurnTiming {
+  readonly elapsedMs: number;
+  readonly index: number;
+  readonly steps: readonly AuthoringToolTiming[];
+}
+
 async function streamTurn(
   agent: HarnessAgent,
   session: HarnessAgentSession,
   prompt: string,
   timeout: number,
-  abortSignal?: AbortSignal,
-): Promise<AuthoringTurn> {
+  abortSignal: AbortSignal | undefined,
+  verbose: boolean,
+): Promise<AuthoringTurn & { elapsedMs: number; steps: readonly AuthoringToolTiming[] }> {
+  const startedAt = performance.now();
   const result = await agent.stream({ session, prompt, timeout, abortSignal });
+  const toolStarts = new Map<string, { command: string; startedAtMs: number }>();
+  const steps: AuthoringToolTiming[] = [];
   let lineOpen = false;
   for await (const part of result.fullStream) {
     if (part.type === "text-delta") {
-      if (!lineOpen) {
-        process.stdout.write("[assistant] ");
-        lineOpen = true;
+      if (verbose) {
+        if (!lineOpen) {
+          process.stdout.write("[assistant] ");
+          lineOpen = true;
+        }
+        process.stdout.write(part.text);
       }
-      process.stdout.write(part.text);
     } else if (part.type === "tool-call") {
-      if (lineOpen) process.stdout.write("\n");
+      if (verbose && lineOpen) process.stdout.write("\n");
       lineOpen = false;
-      console.log(`[tool] ${formatToolCall(part.toolName, part.input)}`);
+      const command = formatToolCall(part.toolName, part.input);
+      toolStarts.set(part.toolCallId, { command, startedAtMs: performance.now() - startedAt });
+      if (verbose) console.log(`[tool] ${command}`);
+    } else if (part.type === "tool-result") {
+      const tool = toolStarts.get(part.toolCallId);
+      if (tool !== undefined) {
+        steps.push({
+          command: tool.command,
+          elapsedMs: performance.now() - startedAt - tool.startedAtMs,
+          startedAtMs: tool.startedAtMs,
+        });
+      }
     }
   }
-  if (lineOpen) process.stdout.write("\n");
-  return { text: await result.text, toolCalls: await result.toolCalls };
+  if (verbose && lineOpen) process.stdout.write("\n");
+  return {
+    text: await result.text,
+    toolCalls: await result.toolCalls,
+    elapsedMs: performance.now() - startedAt,
+    steps,
+  };
 }
 
 function formatToolCall(name: string, input: unknown): string {
