@@ -390,6 +390,7 @@ function compactionCompletedContext(): MemoryCompactionCompletedContext {
 function toolsContext(): MemoryToolsContext {
   return {
     channel: { kind: "http" },
+    model: null,
     memory: operationContext().memory,
     messages: [],
     session: {

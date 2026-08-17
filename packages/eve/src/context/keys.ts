@@ -163,6 +163,11 @@ export const HandleEventKey = new ContextKey<HandleEventFn>("eve.internal.handle
 // Dynamic model keys
 // ---------------------------------------------------------------------------
 
+/** Static model configured for the effective turn agent, or `null` for a dynamic-only agent. */
+export const StaticModelReferenceKey = new ContextKey<RuntimeModelReference | null>(
+  "eve.staticModelReference",
+);
+
 /** Session-scoped dynamic model selection (from `session.started`). */
 export const SessionDynamicModelReferenceKey = new ContextKey<RuntimeModelReference | null>(
   "eve.sessionDynamicModelReference",

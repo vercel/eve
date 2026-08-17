@@ -71,6 +71,7 @@ describe("dynamic runtime model resolution", () => {
     const result = await definition.events["session.started"]?.(
       { type: "session.started" },
       {
+        model: { id: "openai/gpt-5.5" },
         channel: { kind: "slack" },
         messages: [{ content: "Hi", role: "user" }],
         session: { auth: { current: null, initiator: null }, id: "session-1" },

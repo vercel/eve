@@ -46,6 +46,7 @@ async function executeConnectionSearch(
   return contextStorage.run(ctx, async () => {
     const resolve = getConnectionSearchResolver().events["step.started"]!;
     const resolved = (await resolve({}, {
+      model: { id: "openai/gpt-5.5" },
       channel: {},
       messages: [],
       session: { auth: { current: null, initiator: null }, id: "test-session" },
@@ -94,6 +95,7 @@ describe("connection dynamic tools", () => {
       resolve(
         {},
         {
+          model: { id: "openai/gpt-5.5" },
           channel: {},
           messages: [],
           session: { auth: { current: null, initiator: null }, id: "test-session" },
@@ -128,6 +130,7 @@ describe("connection dynamic tools", () => {
         {},
         {
           channel: {},
+          model: null,
           messages: [],
           session: { auth: { current: null, initiator: null }, id: "test-session" },
         },
@@ -136,6 +139,7 @@ describe("connection dynamic tools", () => {
       return (await resolve(
         {},
         {
+          model: { id: "openai/gpt-5.5" },
           channel: {},
           messages: [],
           session: { auth: { current: null, initiator: null }, id: "test-session" },
@@ -181,6 +185,7 @@ describe("connection dynamic tools", () => {
       const resolve = getConnectionSearchResolver().events["step.started"]!;
       const resolveContext = {
         channel: {},
+        model: null,
         messages: [],
         session: { auth: { current: null, initiator: null }, id: "test-session" },
       } satisfies DynamicResolveContext;
@@ -595,6 +600,7 @@ describe("connection_search", () => {
       const resolve = getConnectionSearchResolver().events["step.started"]!;
       const tools = (await resolve({}, {
         channel: {},
+        model: null,
         messages: [],
         session: { auth: { current: null, initiator: null }, id: "session-auth-replay" },
       } satisfies DynamicResolveContext)) as DynamicToolSet;

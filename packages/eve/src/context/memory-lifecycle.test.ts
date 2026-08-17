@@ -11,7 +11,13 @@ import {
   prepareMemoryCompaction,
   prepareMemoryPreamble,
 } from "#context/memory-lifecycle.js";
-import { AuthKey, SessionIdKey, SessionKey, TurnMemoryLocksKey } from "#context/keys.js";
+import {
+  AuthKey,
+  SessionIdKey,
+  SessionKey,
+  StaticModelReferenceKey,
+  TurnMemoryLocksKey,
+} from "#context/keys.js";
 import { type MemoryInstrumentation } from "#instrumentation/memory.js";
 import {
   defineMemory,
@@ -38,6 +44,7 @@ function createContext() {
     principalType: "user",
   };
   const ctx = new ContextContainer();
+  ctx.set(StaticModelReferenceKey, null);
   ctx.set(AuthKey, auth);
   ctx.set(SessionIdKey, "session_1");
   ctx.set(SessionKey, {

@@ -28,6 +28,7 @@ import {
   ModeKey,
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicToolRuntimeRevisionKey,
+  StaticModelReferenceKey,
   TurnTaskDeliveryKey,
   TurnDeliveryIdsKey,
 } from "#context/keys.js";
@@ -346,6 +347,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       : await resolveRuntimeCompiledArtifactsVersionedCacheKey(bundle.compiledArtifactsSource);
     const sessionStarted = initialEmissionState.sessionStarted;
 
+    ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
     if (!sessionStarted) {
       ctx.set(SessionDynamicSubagentRuntimeRevisionKey, dynamicRuntimeRevision);
       ctx.set(SessionDynamicToolRuntimeRevisionKey, dynamicRuntimeRevision);
@@ -504,6 +506,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       runStep: async ({ firstCall, session, stepInput }) => {
         const result = await runBackgroundStep(ctx, session, async (enrichedSession) => {
           ctx.setVirtualContext(HandleEventKey, handleEvent);
+          ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
           let schemaSession = firstCall
             ? resolveEffectiveOutputSchema({
                 agentOutputSchema: effectiveAgent.turnAgent.outputSchema,

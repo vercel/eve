@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
 import {
+  StaticModelReferenceKey,
   AuthKey,
   ChannelInstrumentationKey,
   ContinuationTokenKey,
@@ -13,6 +14,7 @@ import { buildResolveContext } from "#context/dynamic-resolve-context.js";
 
 function createCtx(): ContextContainer {
   const ctx = new ContextContainer();
+  ctx.set(StaticModelReferenceKey, { id: "openai/gpt-5.5" });
   ctx.set(SessionIdKey, "sess-1");
   ctx.set(AuthKey, null);
   ctx.set(InitiatorAuthKey, null);
@@ -21,6 +23,19 @@ function createCtx(): ContextContainer {
 }
 
 describe("buildResolveContext", () => {
+  it("includes the active agent model", () => {
+    const resolveCtx = buildResolveContext(createCtx(), []);
+
+    expect(resolveCtx.model).toEqual({ id: "openai/gpt-5.5" });
+  });
+
+  it("includes null before a model is selected", () => {
+    const ctx = createCtx();
+    ctx.set(StaticModelReferenceKey, null);
+
+    expect(buildResolveContext(ctx, []).model).toBeNull();
+  });
+
   it("includes channel metadata from ChannelInstrumentationKey", () => {
     const ctx = createCtx();
     ctx.set(ChannelKey, { kind: "http" });
@@ -49,6 +64,7 @@ describe("buildResolveContext", () => {
 
   it("omits continuation token for an ID-only session", () => {
     const ctx = new ContextContainer();
+    ctx.set(StaticModelReferenceKey, { id: "openai/gpt-5.5" });
     ctx.set(SessionIdKey, "sess-1");
     ctx.set(AuthKey, null);
     ctx.set(InitiatorAuthKey, null);
