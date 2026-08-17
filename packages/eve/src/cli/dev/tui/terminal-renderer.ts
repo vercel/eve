@@ -2165,7 +2165,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         options: opts.options,
         select: interaction.select,
         edit: {
-          optionValue: "gateway-key",
+          optionValue: "ai-gateway-key",
           caretVisible: this.#caretVisible,
           editor: { kind: "key", phase: interaction.phase },
         },

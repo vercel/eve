@@ -225,7 +225,7 @@ describe("startAuthoredSourceWatcher", () => {
       const paths = getInitialWatchPaths();
       expect(paths).toContain(join(appRoot, "package.json"));
       expect(paths).toContain(join(appRoot, ".env.local"));
-      expect(paths).toContain(join(appRoot, ".eve", "gateway-credential.json"));
+      expect(paths).toContain(join(appRoot, ".eve", "provider.json"));
       expect(paths).toContain(join(workspaceRoot, "pnpm-lock.yaml"));
       expect(paths).toContain(join(workspaceRoot, "tsconfig.base.json"));
     } finally {

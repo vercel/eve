@@ -45,12 +45,12 @@ describe("development environment reload transactions", () => {
     const appRoot = await createEnvironmentApp();
     await writeFile(join(appRoot, ".env.local"), "AI_GATEWAY_API_KEY=from-file\n");
     await mkdir(join(appRoot, ".eve"));
-    await writeFile(join(appRoot, ".eve", "gateway-credential.json"), '{"preferred":"project"}\n');
+    await writeFile(join(appRoot, ".eve", "provider.json"), '{"selected":"ai-gateway-project"}\n');
 
     loadDevelopmentEnvironmentFiles(appRoot);
     expect(process.env.AI_GATEWAY_API_KEY).toBeUndefined();
 
-    await writeFile(join(appRoot, ".eve", "gateway-credential.json"), '{"preferred":"api-key"}\n');
+    await writeFile(join(appRoot, ".eve", "provider.json"), '{"selected":"ai-gateway-key"}\n');
     loadDevelopmentEnvironmentFiles(appRoot);
     expect(process.env.AI_GATEWAY_API_KEY).toBe("from-file");
   });
@@ -63,7 +63,7 @@ describe("development environment reload transactions", () => {
     expect(readDevelopmentEnvironmentHostValues(appRoot).AI_GATEWAY_API_KEY).toBe("from-parent");
 
     await mkdir(join(appRoot, ".eve"));
-    await writeFile(join(appRoot, ".eve", "gateway-credential.json"), '{"preferred":"project"}\n');
+    await writeFile(join(appRoot, ".eve", "provider.json"), '{"selected":"ai-gateway-project"}\n');
     loadDevelopmentEnvironmentFiles(appRoot);
 
     expect(process.env.AI_GATEWAY_API_KEY).toBeUndefined();

@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { parseEnv } from "node:util";
 
 import { isObject } from "#shared/guards.js";
-import { readGatewayCredentialPreferenceSync } from "#setup/gateway-credential-preference.js";
+import { readProviderSelectionSync } from "#setup/provider-settings.js";
 
 /**
  * Development environment files loaded by local CLI commands such as
@@ -97,7 +97,7 @@ function createDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnviron
   const stageReload = (): DevelopmentEnvironmentReload => {
     const previousManagedValues = new Map(managedValues);
     const nextValues = readDevelopmentEnvironmentValues(appRoot);
-    const preferProjectOidc = applyGatewayCredentialPreference(appRoot, nextValues);
+    const preferProjectOidc = applyProviderSelection(appRoot, nextValues);
     const affectedKeys = new Set([...managedValues.keys(), ...nextValues.keys()]);
     if (preferProjectOidc) {
       affectedKeys.add("AI_GATEWAY_API_KEY");
@@ -150,8 +150,8 @@ function createDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnviron
   };
 }
 
-function applyGatewayCredentialPreference(appRoot: string, values: Map<string, string>): boolean {
-  if (readGatewayCredentialPreferenceSync(appRoot) !== "project") return false;
+function applyProviderSelection(appRoot: string, values: Map<string, string>): boolean {
+  if (readProviderSelectionSync(appRoot) !== "ai-gateway-project") return false;
   values.delete("AI_GATEWAY_API_KEY");
   return true;
 }

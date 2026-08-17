@@ -209,7 +209,7 @@ describe("runTuiSetupCommand", () => {
         kind: "done",
         accessChanged: true,
         modelMessage: "Model changed to openai/gpt-5.5. Live on your next prompt.",
-        providerSelection: "gateway-project",
+        providerSelection: "ai-gateway-project",
       })),
     });
     await expect(run({ command: "model", flows })).resolves.toEqual({
@@ -226,7 +226,7 @@ describe("runTuiSetupCommand", () => {
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
         accessChanged: true,
-        providerSelection: "gateway-project",
+        providerSelection: "ai-gateway-project",
       })),
     });
     await expect(run({ command: "model", flows })).resolves.toEqual({
@@ -241,11 +241,26 @@ describe("runTuiSetupCommand", () => {
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
         accessChanged: true,
-        providerSelection: "gateway-key",
+        providerSelection: "ai-gateway-key",
       })),
     });
     await expect(run({ command: "model", flows })).resolves.toEqual({
       message: "AI Gateway via API key selected.",
+      preserveFlowDiagnostics: false,
+      effect: { kind: "model-access-changed" },
+    });
+  });
+
+  it("reports the selected ChatGPT subscription", async () => {
+    const flows = fakeFlows({
+      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
+        kind: "done",
+        accessChanged: true,
+        providerSelection: "chatgpt",
+      })),
+    });
+    await expect(run({ command: "model", flows })).resolves.toEqual({
+      message: "ChatGPT subscription selected.",
       preserveFlowDiagnostics: false,
       effect: { kind: "model-access-changed" },
     });
@@ -479,7 +494,7 @@ describe("runTuiSetupCommand", () => {
                 resolve({
                   kind: "done",
                   accessChanged: true,
-                  providerSelection: "gateway-key",
+                  providerSelection: "ai-gateway-key",
                 }),
               { once: true },
             );

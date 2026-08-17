@@ -3830,12 +3830,12 @@ describe("TerminalRenderer setup panel", () => {
     const answer = renderer.setupFlow.readProviderPicker({
       message: "Provider",
       options: [
-        { value: "gateway-project", label: "AI Gateway via Project" },
-        { value: "gateway-key", label: "AI Gateway via AI_GATEWAY_API_KEY" },
+        { value: "ai-gateway-project", label: "AI Gateway via Project" },
+        { value: "ai-gateway-key", label: "AI Gateway via AI_GATEWAY_API_KEY" },
         { value: "chatgpt", label: "ChatGPT subscription" },
         { value: "external", label: "Other providers" },
       ],
-      initialValue: "gateway-project",
+      initialValue: "ai-gateway-project",
       validateInlineKey: async () => ({ kind: "valid" }),
     });
 
@@ -3861,8 +3861,8 @@ describe("TerminalRenderer setup panel", () => {
 
     const answer = renderer.setupFlow.readProviderPicker({
       message: "Provider",
-      options: [{ value: "gateway-key", label: "AI Gateway via AI_GATEWAY_API_KEY" }],
-      initialValue: "gateway-key",
+      options: [{ value: "ai-gateway-key", label: "AI Gateway via AI_GATEWAY_API_KEY" }],
+      initialValue: "ai-gateway-key",
       validateInlineKey: validate,
     });
 
@@ -3884,7 +3884,7 @@ describe("TerminalRenderer setup panel", () => {
     input.enter();
     resolveValidation?.({ kind: "valid" });
     await expect(answer).resolves.toEqual({
-      kind: "gateway-key",
+      kind: "ai-gateway-key",
       key: "bad-keyx",
       validation: { kind: "valid" },
     });
@@ -3901,8 +3901,8 @@ describe("TerminalRenderer setup panel", () => {
       const { screen, input, renderer } = makeRenderer();
       const answer = renderer.setupFlow.readProviderPicker({
         message: "Provider",
-        options: [{ value: "gateway-key", label: "AI Gateway via AI_GATEWAY_API_KEY" }],
-        initialValue: "gateway-key",
+        options: [{ value: "ai-gateway-key", label: "AI Gateway via AI_GATEWAY_API_KEY" }],
+        initialValue: "ai-gateway-key",
         validateInlineKey: async () => ({ kind: "valid" }),
       });
       let settled = false;
@@ -3932,8 +3932,8 @@ describe("TerminalRenderer setup panel", () => {
     const validations: Array<{ key: string; signal: AbortSignal; finish(): void }> = [];
     const answer = renderer.setupFlow.readProviderPicker({
       message: "Provider",
-      options: [{ value: "gateway-key", label: "AI Gateway key" }],
-      initialValue: "gateway-key",
+      options: [{ value: "ai-gateway-key", label: "AI Gateway key" }],
+      initialValue: "ai-gateway-key",
       validateInlineKey: (key, signal) => {
         return new Promise<{ kind: "valid" }>((resolve) => {
           validations.push({ key, signal, finish: () => resolve({ kind: "valid" }) });
@@ -3955,7 +3955,7 @@ describe("TerminalRenderer setup panel", () => {
     await Promise.resolve();
     validations[1]?.finish();
     await expect(answer).resolves.toEqual({
-      kind: "gateway-key",
+      kind: "ai-gateway-key",
       key: "sk-second",
       validation: { kind: "valid" },
     });

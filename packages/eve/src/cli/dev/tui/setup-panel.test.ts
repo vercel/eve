@@ -569,7 +569,7 @@ describe("renderSelectQuestion", () => {
   it("keeps a long masked key's inline failure visible within a narrow panel", () => {
     const options = [
       {
-        value: "gateway-key",
+        value: "ai-gateway-key",
         label: "AI Gateway via AI_GATEWAY_API_KEY",
         hint: ">  type your key",
       },
@@ -583,7 +583,7 @@ describe("renderSelectQuestion", () => {
         options,
         select: initialSelectState({ options }),
         edit: {
-          optionValue: "gateway-key",
+          optionValue: "ai-gateway-key",
           caretVisible: false,
           editor: {
             kind: "key",
@@ -814,7 +814,7 @@ describe("renderSelectQuestion", () => {
   it("renders each line of a stacked hint beneath its option", () => {
     const options = [
       {
-        value: "gateway-project",
+        value: "ai-gateway-project",
         label: "AI Gateway via Project",
         hint: "Authenticates with AI Gateway automatically\nin a new or existing project. No keys to manage.",
       },

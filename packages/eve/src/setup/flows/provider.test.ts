@@ -1,4 +1,3 @@
-import pc from "picocolors";
 import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
@@ -34,12 +33,11 @@ function createDeps() {
 type ProviderFlowInput = Parameters<typeof runProviderFlow>[0];
 
 function runTestProviderFlow(
-  input: Omit<ProviderFlowInput, "providerState" | "selectedProvider"> &
-    Partial<Pick<ProviderFlowInput, "providerState" | "selectedProvider">>,
+  input: Omit<ProviderFlowInput, "selectedProvider"> &
+    Partial<Pick<ProviderFlowInput, "selectedProvider">>,
 ) {
   return runProviderFlow({
-    providerState: { available: {}, preferredGatewayCredential: undefined },
-    selectedProvider: "gateway-project",
+    selectedProvider: "ai-gateway-project",
     ...input,
   });
 }
@@ -51,8 +49,8 @@ describe("runProviderFlow", () => {
     const picker: ProviderPicker = async (request) => {
       expect(request.message).toBe(PROVIDER_QUESTION);
       expect(request.options.map((option) => option.value)).toEqual([
-        "gateway-project",
-        "gateway-key",
+        "ai-gateway-project",
+        "ai-gateway-key",
         "chatgpt",
         "external",
       ]);
@@ -64,8 +62,8 @@ describe("runProviderFlow", () => {
         value: "external",
         label: "Other providers",
       });
-      expect(request.initialValue).toBe("gateway-project");
-      return { kind: "gateway-project" };
+      expect(request.initialValue).toBe("ai-gateway-project");
+      return { kind: "ai-gateway-project" };
     };
 
     const result = await runTestProviderFlow({
@@ -75,7 +73,7 @@ describe("runProviderFlow", () => {
       deps,
     });
 
-    expect(result).toEqual({ kind: "gateway-project" });
+    expect(result).toEqual({ kind: "ai-gateway-project" });
     expect(deps.runLinkFlow).toHaveBeenCalledExactlyOnceWith({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
@@ -92,8 +90,8 @@ describe("runProviderFlow", () => {
       prompter: fake.prompter,
       picker: async (request) => {
         expect(request.options.map((option) => option.value)).toEqual([
-          "gateway-project",
-          "gateway-key",
+          "ai-gateway-project",
+          "ai-gateway-key",
           "chatgpt",
           "external",
         ]);
@@ -112,11 +110,11 @@ describe("runProviderFlow", () => {
     const fake = createFakePrompter();
     const deps = createDeps();
     const linked: ProviderPicker = async (request) => {
-      expect(request.initialValue).toBe("gateway-project");
+      expect(request.initialValue).toBe("ai-gateway-project");
       expect(request.options[0]).toMatchObject({
-        value: "gateway-project",
+        value: "ai-gateway-project",
         checked: true,
-        hint: `Linked to ${pc.bold("my-agent")} in team ${pc.bold("my-team")}`,
+        hint: "Current",
       });
       expect(request.options[1]?.checked).toBeUndefined();
       return undefined;
@@ -125,20 +123,16 @@ describe("runProviderFlow", () => {
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       picker: linked,
-      providerState: {
-        available: { gatewayProject: { projectName: "my-agent", teamName: "my-team" } },
-        preferredGatewayCredential: "project",
-      },
-      selectedProvider: "gateway-project",
+      selectedProvider: "ai-gateway-project",
       deps,
     });
 
     const keyed: ProviderPicker = async (request) => {
-      expect(request.initialValue).toBe("gateway-key");
+      expect(request.initialValue).toBe("ai-gateway-key");
       expect(request.options[1]).toMatchObject({
-        value: "gateway-key",
+        value: "ai-gateway-key",
         checked: true,
-        hint: "AI_GATEWAY_API_KEY set in .env.local",
+        hint: "Current",
       });
       return undefined;
     };
@@ -146,25 +140,21 @@ describe("runProviderFlow", () => {
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       picker: keyed,
-      providerState: {
-        available: { gatewayKey: { source: { kind: "env-file", path: ".env.local" } } },
-        preferredGatewayCredential: "api-key",
-      },
-      selectedProvider: "gateway-key",
+      selectedProvider: "ai-gateway-key",
       deps,
     });
   });
 
-  it("uses the resolved Gateway selection when credentials compete", async () => {
+  it("uses the stored selection when multiple providers are available", async () => {
     const fake = createFakePrompter();
     const deps = createDeps();
     const picker: ProviderPicker = async (request) => {
-      expect(request.initialValue).toBe("gateway-project");
-      expect(request.options.find((option) => option.value === "gateway-project")?.checked).toBe(
+      expect(request.initialValue).toBe("ai-gateway-project");
+      expect(request.options.find((option) => option.value === "ai-gateway-project")?.checked).toBe(
         true,
       );
       expect(
-        request.options.find((option) => option.value === "gateway-key")?.checked,
+        request.options.find((option) => option.value === "ai-gateway-key")?.checked,
       ).toBeUndefined();
       return undefined;
     };
@@ -173,14 +163,7 @@ describe("runProviderFlow", () => {
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       picker,
-      providerState: {
-        available: {
-          gatewayProject: { projectName: "my-agent" },
-          gatewayKey: { source: { kind: "shell" } },
-        },
-        preferredGatewayCredential: "project",
-      },
-      selectedProvider: "gateway-project",
+      selectedProvider: "ai-gateway-project",
       deps,
     });
   });
@@ -194,7 +177,7 @@ describe("runProviderFlow", () => {
       runTestProviderFlow({
         appRoot: APP_ROOT,
         prompter: fake.prompter,
-        picker: async () => ({ kind: "gateway-project" }),
+        picker: async () => ({ kind: "ai-gateway-project" }),
         deps,
       }),
     ).resolves.toEqual({ kind: "cancelled" });
@@ -216,10 +199,6 @@ describe("runProviderFlow", () => {
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       picker,
-      providerState: {
-        available: { gatewayProject: { projectName: "my-agent" } },
-        preferredGatewayCredential: "project",
-      },
       selectedProvider: "chatgpt",
       deps,
     });
@@ -233,7 +212,7 @@ describe("runProviderFlow", () => {
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       picker: async () => ({
-        kind: "gateway-key",
+        kind: "ai-gateway-key",
         key: "sk-inline",
         validation: { kind: "valid" },
       }),
@@ -250,7 +229,7 @@ describe("runProviderFlow", () => {
       const signal = new AbortController().signal;
       const validation = await request.validateInlineKey("sk-inline", signal);
       if (validation.kind === "invalid") throw new Error(validation.message);
-      return { kind: "gateway-key", key: "sk-inline", validation };
+      return { kind: "ai-gateway-key", key: "sk-inline", validation };
     };
 
     const result = await runTestProviderFlow({
@@ -260,7 +239,7 @@ describe("runProviderFlow", () => {
       deps,
     });
 
-    expect(result).toEqual({ kind: "gateway-key" });
+    expect(result).toEqual({ kind: "ai-gateway-key" });
     expect(deps.validateGatewayApiKey).toHaveBeenCalledExactlyOnceWith(
       "sk-inline",
       expect.any(AbortSignal),
@@ -276,7 +255,7 @@ describe("runProviderFlow", () => {
     const fake = createFakePrompter();
     const deps = createDeps();
     const picker: ProviderPicker = async () => ({
-      kind: "gateway-key",
+      kind: "ai-gateway-key",
       key: "sk-committed",
       validation: { kind: "valid" },
     });
@@ -300,7 +279,7 @@ describe("runProviderFlow", () => {
     controller.abort();
     releaseWrite.resolve();
 
-    await expect(execution).resolves.toEqual({ kind: "gateway-key" });
+    await expect(execution).resolves.toEqual({ kind: "ai-gateway-key" });
   });
 
   it("shows direct-provider instructions without changing credentials", async () => {
