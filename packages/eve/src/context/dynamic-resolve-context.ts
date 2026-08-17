@@ -2,6 +2,7 @@ import type { ModelMessage } from "ai";
 
 import type { DynamicResolveContext } from "#shared/dynamic-tool-definition.js";
 import type { AlsContext } from "#context/container.js";
+import { getEffectiveModelSelection } from "#context/effective-model.js";
 import {
   AuthKey,
   ChannelInstrumentationKey,
@@ -30,8 +31,10 @@ export function buildResolveContext(
   const channelAdapter = ctx.get(ChannelKey);
   const continuationToken = ctx.get(ContinuationTokenKey);
   const channelInstrumentation = ctx.get(ChannelInstrumentationKey);
+  const effectiveModel = getEffectiveModelSelection(ctx);
 
   return {
+    model: effectiveModel === null ? null : { id: effectiveModel.reference.id },
     session: {
       id: sessionId,
       auth: {

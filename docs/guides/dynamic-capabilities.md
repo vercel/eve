@@ -66,21 +66,32 @@ availability depends on the caller, tenant, environment, or a feature flag.
 Return the child definition to configure and expose it. Return `null` to omit
 it from the parent's model-visible tools.
 
+The example below exposes a finance subagent to enterprise callers and gives
+it the model that the parent would use at that point:
+
 ```ts title="agent/subagents/finance/agent.ts"
 import { defineAgent, defineDynamic } from "eve";
 
 export default defineDynamic({
   events: {
-    "session.started": (_event, ctx) =>
-      ctx.session.auth.current?.attributes.plan === "enterprise"
-        ? defineAgent({
-            description: "Analyze financial and accounting data.",
-            model: "openai/gpt-5.5",
-          })
-        : null,
+    "session.started": (_event, ctx) => {
+      if (ctx.session.auth.current?.attributes.plan !== "enterprise") {
+        return null;
+      }
+
+      return defineAgent({
+        description: "Analyze financial and accounting data.",
+        model: ctx.model ? ctx.model.id : "openai/gpt-5.5-mini",
+      });
+    },
   },
 });
 ```
+
+`ctx.model` is the parent's effective model when the resolver runs. This child
+uses that model when available and falls back to `openai/gpt-5.5-mini` when the
+parent has not selected one yet. The returned child config snapshots the model
+ID; a later parent model change does not retarget the child.
 
 eve always compiles the subagent's filesystem resources, including its
 instructions, tools, skills, connections, sandbox, and nested subagents. It

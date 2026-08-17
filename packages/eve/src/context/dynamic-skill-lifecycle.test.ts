@@ -5,7 +5,12 @@ import {
   PendingSkillAnnouncementKey,
   dispatchDynamicSkillEvent,
 } from "#context/dynamic-skill-lifecycle.js";
-import { DynamicSkillManifestKey, SessionIdKey, SandboxKey } from "#context/keys.js";
+import {
+  StaticModelReferenceKey,
+  DynamicSkillManifestKey,
+  SessionIdKey,
+  SandboxKey,
+} from "#context/keys.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { defineSkill } from "#public/definitions/skill.js";
@@ -40,6 +45,7 @@ function createCtx(authoredSkillNames: readonly string[] = []) {
       [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
     },
   });
+  ctx.set(StaticModelReferenceKey, { id: "openai/gpt-5.5" });
   ctx.set(SessionIdKey, "test-session");
   ctx.set(SandboxKey, sandbox.access);
   ctx.set(BundleKey, createMockBundle(authoredSkillNames));

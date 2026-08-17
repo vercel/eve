@@ -7,7 +7,11 @@ import {
   getDynamicSubagentSelection,
   refreshDynamicSessionSubagentsForRuntimeRevision,
 } from "#context/dynamic-subagent-lifecycle.js";
-import { SessionDynamicSubagentRuntimeRevisionKey, SessionIdKey } from "#context/keys.js";
+import {
+  StaticModelReferenceKey,
+  SessionDynamicSubagentRuntimeRevisionKey,
+  SessionIdKey,
+} from "#context/keys.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
 import { createSessionStartedEvent, createTurnStartedEvent } from "#protocol/message.js";
@@ -28,6 +32,29 @@ describe("dynamic subagent lifecycle", () => {
 
     expect(buildDynamicSubagentTools(ctx)).toEqual([]);
     expect(getDynamicSubagentSelection(ctx, resolver.nodeId)).toBeUndefined();
+  });
+
+  it("exposes the active agent model to a resolver", async () => {
+    const ctx = createContext();
+    const created = createResolver();
+    const handler = vi.fn((_model: { readonly id: string }) => created.agentConfig);
+    const resolver: ResolvedDynamicSubagentResolver = {
+      ...created.resolver,
+      events: {
+        "session.started": (_event, resolveCtx) =>
+          handler((resolveCtx as { model: { id: string } }).model),
+      },
+    };
+
+    await dispatchDynamicSubagentEvent({
+      ctx,
+      event: createSessionStartedEvent(),
+      messages: [],
+      persistentSessions: false,
+      resolvers: [resolver],
+    });
+
+    expect(handler).toHaveBeenCalledWith({ id: "openai/gpt-root" });
   });
 
   it("exposes a subagent with the returned agent config", async () => {
@@ -262,6 +289,7 @@ describe("dynamic subagent lifecycle", () => {
 
 function createContext(): ContextContainer {
   const ctx = new ContextContainer();
+  ctx.set(StaticModelReferenceKey, { id: "openai/gpt-root" });
   ctx.set(SessionIdKey, "session-1");
   return ctx;
 }

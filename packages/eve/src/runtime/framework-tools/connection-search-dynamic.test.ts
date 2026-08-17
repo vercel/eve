@@ -47,6 +47,7 @@ async function executeConnectionSearch(
   return contextStorage.run(ctx, async () => {
     const resolve = getConnectionSearchResolver().events["step.started"]!;
     const resolved = (await resolve({}, {
+      model: { id: "openai/gpt-5.5" },
       channel: {},
       messages: [],
       session: { auth: { current: null, initiator: null }, id: "test-session" },
@@ -95,6 +96,7 @@ describe("connection dynamic tools", () => {
       resolve(
         {},
         {
+          model: { id: "openai/gpt-5.5" },
           channel: {},
           messages: [],
           session: { auth: { current: null, initiator: null }, id: "test-session" },
@@ -141,6 +143,7 @@ describe("connection dynamic tools", () => {
       return (await resolve(
         {},
         {
+          model: { id: "openai/gpt-5.5" },
           channel: {},
           messages,
           session: { auth: { current: null, initiator: null }, id: "test-session" },

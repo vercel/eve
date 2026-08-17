@@ -7,7 +7,6 @@ import {
   LiveStepDynamicModelSelectionKey,
   SessionDynamicModelReferenceKey,
   TurnDynamicModelReferenceKey,
-  type LiveDynamicModelSelection,
 } from "#context/keys.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type {
@@ -29,8 +28,6 @@ const ALLOWED_DYNAMIC_MODEL_EVENTS = new Set<DynamicToolEventName>([
   "turn.started",
   "step.started",
 ]);
-
-export type ActiveDynamicModelSelection = LiveDynamicModelSelection;
 
 const DYNAMIC_MODEL_SELECTION_ERROR_CODE = "EVE_DYNAMIC_MODEL_SELECTION_FAILED";
 
@@ -67,27 +64,6 @@ function durableKeyForEvent(
     case "step.started":
       return undefined;
   }
-}
-
-export function getActiveDynamicModelSelection(ctx: {
-  get<T>(key: ContextKey<T>): T | undefined;
-}): ActiveDynamicModelSelection | null {
-  const step = ctx.get(LiveStepDynamicModelSelectionKey);
-  if (step !== undefined && step !== null) {
-    return step;
-  }
-
-  const turn = ctx.get(TurnDynamicModelReferenceKey);
-  if (turn !== undefined && turn !== null) {
-    return { reference: turn };
-  }
-
-  const session = ctx.get(SessionDynamicModelReferenceKey);
-  if (session !== undefined && session !== null) {
-    return { reference: session };
-  }
-
-  return null;
 }
 
 export async function dispatchDynamicModelEvent(input: {

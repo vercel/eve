@@ -26,6 +26,7 @@ import {
   ModeKey,
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicToolRuntimeRevisionKey,
+  StaticModelReferenceKey,
   TurnTaskDeliveryKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -354,6 +355,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       : await resolveRuntimeCompiledArtifactsVersionedCacheKey(bundle.compiledArtifactsSource);
     const sessionStarted = initialEmissionState.sessionStarted;
 
+    ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
     if (!sessionStarted) {
       ctx.set(SessionDynamicSubagentRuntimeRevisionKey, dynamicRuntimeRevision);
       ctx.set(SessionDynamicToolRuntimeRevisionKey, dynamicRuntimeRevision);
@@ -457,6 +459,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     // or the pending batch would re-park and later re-dispatch.
     throwIfTurnAborted(input.abortSignal);
     stepResult = await runStep(ctx, initialSession, async (enrichedSession) => {
+      ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
       let schemaSession = resolveEffectiveOutputSchema({
         agentOutputSchema: effectiveAgent.turnAgent.outputSchema,
         input: resolved,
