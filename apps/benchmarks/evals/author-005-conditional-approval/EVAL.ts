@@ -46,7 +46,7 @@ function requiresApproval(decision: unknown): boolean {
 }
 
 async function loadDefinition() {
-  return (await import(`../${toolPath}`)).default;
+  return (await import(new URL("../agent/tools/refund_payment.ts", import.meta.url).href)).default;
 }
 
 function refundInput(definition: Awaited<ReturnType<typeof loadDefinition>>, amount: number) {

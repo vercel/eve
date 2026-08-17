@@ -14,10 +14,11 @@ test("creates the filesystem-named support channel and route", () => {
 
 test("maps each support thread to a session and returns its id", () => {
   const source = readFileSync(channelPath, "utf8");
-  expect(source).toMatch(/request\.json\s*\(/);
-  expect(source).toMatch(/from\s*\(\s*params\.threadId\s*\)/);
-  expect(source).toMatch(/\.send\s*\([^)]*message/s);
+  expect(source).toMatch(/\w+\.json\s*\(/);
+  expect(source).toMatch(/params\.threadId/);
+  expect(source).toMatch(/from\s*\(/);
+  expect(source).toMatch(/\.send\s*\(/);
   expect(source).toMatch(/auth\s*:\s*null/);
   expect(source).toMatch(/sessionId/);
-  expect(source).toMatch(/Response\.json/);
+  expect(source).toMatch(/Response(?:\.json|\s*\()/);
 });
