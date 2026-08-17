@@ -66,9 +66,10 @@ results cannot be reproduced from committed source and should not be committed a
 
 Without `--models`, publication covers the complete configured model matrix. Use `--models` to
 publish or refresh selected model rows. The published suite currently includes the weather-tool and
-new-project cases; the iMessage case remains available for local runs but is excluded from the
-published matrix. Each cell runs three times. Completed cells are memoized by `@vercel/agent-eval`; pass `--force` only
-when every cell should run again. A successful run writes aggregate results to
+new-project cases. The iMessage, OpenAPI connection, packaged skill, conditional approval, and
+custom channel cases remain available for local runs but are excluded from the published matrix
+until their canonical model runs are ready. Each cell runs three times. Completed cells are memoized
+by `@vercel/agent-eval`; pass `--force` only when every cell should run again. A successful run writes aggregate results to
 `apps/docs/lib/evals/benchmark-results.json`. The public file contains outcomes and timing, not
 transcripts, generated files, command logs, or synthetic world events.
 
