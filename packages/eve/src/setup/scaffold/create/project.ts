@@ -331,17 +331,18 @@ eve add channel/photon-imessage --non-interactive \\
   --answer 'photon-project-name="eve · my-agent"'
 \`\`\`
 
-Add \`--yes\` to accept recommended setup values and reduce setup round trips;
-explicit \`--answer\` values take precedence. Use the reported \`--skip-install\`
-continuation after installation.
+Never pass secrets in \`--answer\`; use the documented environment variable or
+secret store. Add \`--yes\` to accept recommended setup values and reduce setup
+round trips; explicit \`--answer\` values take precedence. Use the reported
+\`--skip-install\` continuation after installation.
+
 A Vercel Connect setup may report \`eve link\` as a prerequisite; run it and
 retry the continuation. For a named Vercel project in CI or an agent run, use
 \`eve link --non-interactive --project <name-or-id> [--team <team-id-or-slug>]\`.
 To deploy non-interactively, use
 \`eve deploy --non-interactive --yes [--project <name-or-id>] [--team <team-id-or-slug>]\`.
 Use these eve commands instead of calling \`vercel\` directly; eve owns the
-link, environment pull, and deploy lifecycle. Never pass secrets in \`--answer\`;
-use the documented environment variable or secret store.
+link, environment pull, and deploy lifecycle.
 
 An \`external_action\` event with \`blocking: true\` means the command is still
 running while it waits for the user. Surface its URL and code, keep the process
