@@ -2,6 +2,11 @@ import { runDeployFlow, type DeployFlowDeps } from "#setup/flows/deploy.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 
 import { hasInteractiveTerminal } from "./preconditions.js";
+import {
+  isNonInteractiveProjectCommand,
+  runNonInteractiveLink,
+  type VercelProjectCliOptions,
+} from "./vercel-non-interactive.js";
 
 export interface DeployCliLogger {
   error(message: string): void;
@@ -21,23 +26,39 @@ const defaultDependencies: DeployCommandDependencies = {
 
 /**
  * `eve deploy`: deploy the agent to Vercel production. An already-linked
- * project deploys straight away (interactively or not); an unlinked one walks
- * the same team/project pickers as onboarding when a terminal is present, and
- * refuses with `eve link` guidance otherwise. The flow itself is
+ * project deploys straight away (interactively or not); an unlinked interactive
+ * run walks the same team/project pickers as onboarding. A non-interactive
+ * caller can name a project to link before deployment. The flow itself is
  * {@link runDeployFlow}, shared with the dev TUI's `/deploy`.
  */
 export async function runDeployCommand(
   logger: DeployCliLogger,
   appRoot: string,
   dependencies: DeployCommandDependencies = defaultDependencies,
+  options: VercelProjectCliOptions & { yes?: boolean } = {},
 ): Promise<void> {
+  if (isNonInteractiveProjectCommand(options)) {
+    if (options.yes !== true) {
+      logger.error(
+        "`eve deploy --non-interactive` requires `--yes` to confirm production deployment.",
+      );
+      process.exitCode = 1;
+      return;
+    }
+    if (options.project !== undefined) {
+      if (!(await runNonInteractiveLink({ logger, appRoot, options }))) return;
+    }
+  }
+
   const prompter = dependencies.createPrompter?.() ?? createPrompter();
   prompter.intro("Deploy your eve agent to Vercel");
   try {
     const result = await runDeployFlow({
       appRoot,
       prompter,
-      interactive: dependencies.hasInteractiveTerminal(),
+      interactive: isNonInteractiveProjectCommand(options)
+        ? false
+        : dependencies.hasInteractiveTerminal(),
       deps: dependencies.flowDeps,
     });
     if (result.kind === "needs-link") {

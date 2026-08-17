@@ -7,6 +7,20 @@ import { SOURCE_ARCHIVE_PATH, SOURCE_ROOT } from "./paths.js";
 const dependencySnapshots = new Map<string, Promise<string>>();
 const subjectSnapshots = new Map<string, Promise<string>>();
 
+type SandboxCredentials = { token: string; teamId: string; projectId: string };
+
+function sandboxCredentials(): SandboxCredentials {
+  const token = process.env.VERCEL_TOKEN;
+  const teamId = process.env.VERCEL_ORG_ID;
+  const projectId = process.env.VERCEL_PROJECT_ID;
+  if (token === undefined || teamId === undefined || projectId === undefined) {
+    throw new Error(
+      "Benchmarks require VERCEL_TOKEN, VERCEL_ORG_ID, and VERCEL_PROJECT_ID to create Vercel Sandboxes.",
+    );
+  }
+  return { token, teamId, projectId };
+}
+
 export function createDependencyCachedSandbox(options: {
   readonly archive: Uint8Array;
   readonly dependencyDigest: string;
@@ -14,9 +28,11 @@ export function createDependencyCachedSandbox(options: {
   readonly env: Readonly<Record<string, string>>;
   readonly log: (message: string) => void;
 }): HarnessV1SandboxProvider {
+  const credentials = sandboxCredentials();
   const sessionProvider = (snapshotId?: string) =>
     snapshotId === undefined
       ? createVercelSandbox({
+          ...credentials,
           runtime: "node24",
           ports: [...options.ports],
           timeout: 15 * 60_000,
@@ -24,6 +40,7 @@ export function createDependencyCachedSandbox(options: {
           networkPolicy: "allow-all",
         })
       : createVercelSandbox({
+          ...credentials,
           source: { type: "snapshot", snapshotId },
           ports: [...options.ports],
           timeout: 15 * 60_000,
@@ -43,6 +60,7 @@ export function createDependencyCachedSandbox(options: {
         options.archive,
         options.dependencyDigest,
         options.log,
+        credentials,
       );
       const subjectSnapshotId = await subjectSnapshot(
         dependencySnapshotId,
@@ -50,6 +68,7 @@ export function createDependencyCachedSandbox(options: {
         options.env,
         request.onFirstCreate,
         request.abortSignal,
+        credentials,
       );
       return sessionProvider(subjectSnapshotId).createSession({
         abortSignal: request.abortSignal,
@@ -69,11 +88,12 @@ function dependencySnapshot(
   archive: Uint8Array,
   digest: string,
   log: (message: string) => void,
+  credentials: SandboxCredentials,
 ): Promise<string> {
   const name = `eve-benchmark-dependencies-${digest.slice(0, 24)}`;
   let snapshot = dependencySnapshots.get(name);
   if (snapshot !== undefined) return snapshot;
-  snapshot = createDependencySnapshot(name, archive, log);
+  snapshot = createDependencySnapshot(name, archive, log, credentials);
   dependencySnapshots.set(name, snapshot);
   return snapshot;
 }
@@ -82,9 +102,11 @@ async function createDependencySnapshot(
   name: string,
   archive: Uint8Array,
   log: (message: string) => void,
+  credentials: SandboxCredentials,
 ): Promise<string> {
   let created = false;
   const sandbox = await Sandbox.getOrCreate({
+    ...credentials,
     name,
     runtime: "node24",
     timeout: 15 * 60_000,
@@ -115,12 +137,20 @@ function subjectSnapshot(
   identity: string,
   env: Readonly<Record<string, string>>,
   bootstrap: NonNullable<Parameters<HarnessV1SandboxProvider["createSession"]>[0]>["onFirstCreate"],
-  abortSignal?: AbortSignal,
+  abortSignal: AbortSignal | undefined,
+  credentials: SandboxCredentials,
 ): Promise<string> {
   const name = `eve-benchmark-subject-${identity}`;
   let snapshot = subjectSnapshots.get(name);
   if (snapshot !== undefined) return snapshot;
-  snapshot = createSubjectSnapshot(name, dependencySnapshotId, env, bootstrap, abortSignal);
+  snapshot = createSubjectSnapshot(
+    name,
+    dependencySnapshotId,
+    env,
+    bootstrap,
+    abortSignal,
+    credentials,
+  );
   subjectSnapshots.set(name, snapshot);
   return snapshot;
 }
@@ -130,10 +160,12 @@ async function createSubjectSnapshot(
   dependencySnapshotId: string,
   env: Readonly<Record<string, string>>,
   bootstrap: NonNullable<Parameters<HarnessV1SandboxProvider["createSession"]>[0]>["onFirstCreate"],
-  abortSignal?: AbortSignal,
+  abortSignal: AbortSignal | undefined,
+  credentials: SandboxCredentials,
 ): Promise<string> {
   let created = false;
   const sandbox = await Sandbox.getOrCreate({
+    ...credentials,
     name,
     source: { type: "snapshot", snapshotId: dependencySnapshotId },
     timeout: 15 * 60_000,

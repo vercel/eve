@@ -2,6 +2,11 @@ import { runLinkFlow, type LinkFlowDeps } from "#setup/flows/link.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 
 import { hasInteractiveTerminal } from "./preconditions.js";
+import {
+  isNonInteractiveProjectCommand,
+  runNonInteractiveLink,
+  type VercelProjectCliOptions,
+} from "./vercel-non-interactive.js";
 
 export interface LinkCliLogger {
   error(message: string): void;
@@ -24,14 +29,19 @@ const defaultDependencies: LinkCommandDependencies = {
  * when one is already linked), run `vercel link` for the resolved project,
  * then pull env so the AI Gateway credential lands in `.env.local`. The flow
  * itself is {@link runLinkFlow}, shared with the dev TUI `/model` menu's
- * provider row. Interactive only: the pickers are the point of the command, so
- * a non-TTY run refuses with guidance instead of guessing a project.
+ * provider row. Non-interactive callers name the Vercel project explicitly;
+ * interactive callers use the eve-owned pickers.
  */
 export async function runLinkCommand(
   logger: LinkCliLogger,
   appRoot: string,
   dependencies: LinkCommandDependencies = defaultDependencies,
+  options: VercelProjectCliOptions = {},
 ): Promise<void> {
+  if (isNonInteractiveProjectCommand(options)) {
+    await runNonInteractiveLink({ logger, appRoot, options });
+    return;
+  }
   if (!dependencies.hasInteractiveTerminal()) {
     logger.error(
       "`eve link` needs an interactive terminal to pick the team and project. In CI, run `vercel link --project <name> --yes --non-interactive` instead.",

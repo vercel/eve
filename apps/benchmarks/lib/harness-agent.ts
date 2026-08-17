@@ -36,12 +36,12 @@ export function createAuthoringAgent(subject: {
   readonly dependencyDigest: string;
 }): Agent {
   return {
-    name: subject.name,
+    name: `codex-${subject.name}`,
     displayName: "eve authoring harness",
     getApiKeyEnvVar: () => "AI_GATEWAY_API_KEY",
     getDefaultModel: () => AUTHORING_MODEL,
     definition: {
-      name: subject.name,
+      name: `codex-${subject.name}`,
       displayName: "eve authoring harness",
       defaultModel: AUTHORING_MODEL,
       o11yAgentName: HARNESS_NAME,
@@ -60,6 +60,7 @@ export function createAuthoringAgent(subject: {
       const setups = [authoringCase.startingPoint.setup, authoringCase.setup].filter(
         (setup): setup is AuthoringSetup => setup !== undefined,
       );
+      const setupEnvironment = Object.assign({}, ...setups.map((setup) => setup.environment ?? {}));
       const sandbox = createDependencyCachedSandbox({
         archive: subject.archive,
         dependencyDigest: subject.dependencyDigest,
@@ -67,7 +68,7 @@ export function createAuthoringAgent(subject: {
         env: {
           EVE_INIT_PACKAGE_SPEC: EVE_PACKAGE_PATH,
           [AUTHORING_EVAL_DIRECTORY_ENV]: AUTHORING_EVAL_DIRECTORY,
-          ...Object.assign({}, ...setups.map((setup) => setup.environment ?? {})),
+          ...setupEnvironment,
         },
         log,
       });
@@ -86,7 +87,7 @@ export function createAuthoringAgent(subject: {
       if (options.model !== undefined) Object.assign(harnessOptions, { model: options.model });
 
       const agent = new HarnessAgent({
-        id: "eve-benchmark",
+        id: "codex-eve-benchmark",
         harness: createCodex(harnessOptions),
         sandbox,
         sandboxConfig: {
@@ -108,7 +109,7 @@ export function createAuthoringAgent(subject: {
             log("[setup] preparing the benchmark session");
             activeSandbox = current as HarnessV1NetworkSandboxSession;
             workspace = sessionWorkDir;
-            const context = setupContext(activeSandbox, workspace);
+            const context = setupContext(activeSandbox, workspace, setupEnvironment);
             for (const setup of setups) await setup.onSession?.(context);
             if (options.agentOptions?.agentsMd === true) {
               await assertAgentGuidance(context);
@@ -152,7 +153,7 @@ export function createAuthoringAgent(subject: {
           },
         });
 
-        const context = setupContext(activeSandbox, workspace);
+        const context = setupContext(activeSandbox, workspace, setupEnvironment);
         await context.write(
           `${AGENT_EVAL_DIRECTORY}/results.json`,
           JSON.stringify({ o11y: { shellCommands: commands.map((command) => ({ command })) } }),
@@ -217,7 +218,7 @@ export function createAuthoringAgent(subject: {
         };
       } catch (error) {
         if (activeSandbox !== undefined && workspace !== undefined) {
-          await setupContext(activeSandbox, workspace)
+          await setupContext(activeSandbox, workspace, setupEnvironment)
             .write(`${AGENT_EVAL_DIRECTORY}/harness-transcript.json`, JSON.stringify(transcript))
             .catch(() => undefined);
         }
@@ -313,13 +314,21 @@ async function bootstrapSubject(
 function setupContext(
   sandbox: HarnessV1NetworkSandboxSession,
   workspace: string,
+  environment: Readonly<Record<string, string>> = {},
 ): AuthoringSetupContext {
   return {
     sandbox,
     workspace,
     artifactsRoot: AUTHORING_EVAL_DIRECTORY,
     run: async (command, workingDirectory = workspace) => {
-      await run(sandbox, command, workingDirectory);
+      const shellEnvironment = Object.entries(environment)
+        .map(([key, value]) => `${key}=${shellQuote(value)}`)
+        .join(" ");
+      await run(
+        sandbox,
+        shellEnvironment.length === 0 ? command : `${shellEnvironment} ${command}`,
+        workingDirectory,
+      );
     },
     write: async (path, content) => {
       await sandbox.writeTextFile({
