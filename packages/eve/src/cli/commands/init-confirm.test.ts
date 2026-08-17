@@ -16,12 +16,13 @@ describe("confirmExistingPackageIntegration", () => {
     ).rejects.toThrow("Planned edits:\n  - Create agent/agent.ts\n  - Add dependencies: ai, eve");
   });
 
-  it("confirms the durable-edit and install checkpoint in a TTY", async () => {
+  it("defaults to applying the visible plan in a TTY", async () => {
     let message = "";
     let details: readonly string[] = [];
     const fake = createFakePrompter({
       single: (options) => {
         message = options.message;
+        expect(options.initialValue).toBe(true);
         details = options.details ?? [];
         return true;
       },

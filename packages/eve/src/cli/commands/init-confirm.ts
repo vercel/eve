@@ -40,7 +40,7 @@ export async function confirmExistingPackageIntegration(
       { value: true, label: "Apply edits and install dependencies" },
       { value: false, label: "Cancel", accent: "warning" },
     ],
-    initialValue: false,
+    initialValue: true,
   });
   if (!confirmed) throw new Error("Existing-project integration cancelled; no files were changed.");
 }
