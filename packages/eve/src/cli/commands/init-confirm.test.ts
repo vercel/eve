@@ -18,9 +18,11 @@ describe("confirmExistingPackageIntegration", () => {
 
   it("confirms the durable-edit and install checkpoint in a TTY", async () => {
     let description = "";
+    let message = "";
     const fake = createFakePrompter({
       single: (options) => {
         description = options.description ?? "";
+        message = options.message;
         return true;
       },
     });
@@ -32,6 +34,7 @@ describe("confirmExistingPackageIntegration", () => {
       }),
     ).resolves.toBeUndefined();
 
+    expect(message).toBe("Apply these edits?");
     expect(description).toContain("remain if installation fails");
   });
 

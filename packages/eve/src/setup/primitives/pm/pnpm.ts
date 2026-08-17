@@ -229,6 +229,24 @@ function withPnpmWorkspacePackagePattern(source: string, pattern: string): strin
   return lines.join("\n");
 }
 
+export function preparePnpmWorkspaceIncludesProject(input: {
+  projectRoot: string;
+  source: string;
+  workspaceRoot: string;
+}): string {
+  const patterns = parsePnpmWorkspacePackagePatterns(input.source);
+  if (
+    patterns === undefined ||
+    workspacePatternsClaimProject(patterns, input.workspaceRoot, input.projectRoot)
+  ) {
+    return input.source;
+  }
+  return withPnpmWorkspacePackagePattern(
+    input.source,
+    workspacePatternForProject(input.workspaceRoot, input.projectRoot),
+  );
+}
+
 export async function ensurePnpmWorkspaceIncludesProject(
   projectRoot: string,
 ): Promise<"skipped" | "written"> {
@@ -236,16 +254,10 @@ export async function ensurePnpmWorkspaceIncludesProject(
   if (workspaceRoot === undefined || resolve(workspaceRoot) === resolve(projectRoot)) {
     return "skipped";
   }
-  if (findClaimingAncestorPnpmWorkspaceRoot(projectRoot) === workspaceRoot) {
-    return "skipped";
-  }
 
   const filePath = join(workspaceRoot, PNPM_WORKSPACE_PATH);
   const current = await readFile(filePath, "utf8");
-  const next = withPnpmWorkspacePackagePattern(
-    current,
-    workspacePatternForProject(workspaceRoot, projectRoot),
-  );
+  const next = preparePnpmWorkspaceIncludesProject({ projectRoot, source: current, workspaceRoot });
   if (next === current) return "skipped";
   await writeFile(filePath, next, "utf8");
   return "written";

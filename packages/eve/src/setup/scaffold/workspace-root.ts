@@ -70,23 +70,8 @@ function findAncestorPackageJsonWorkspaceRoot(projectRoot: string): string | und
   }
 }
 
-function findClaimingPackageJsonWorkspaceRoot(projectRoot: string): string | undefined {
-  const workspaceRoot = findAncestorPackageJsonWorkspaceRoot(projectRoot);
-  if (workspaceRoot === undefined) return undefined;
-  let patterns: string[] | undefined;
-  try {
-    patterns = readPackageJsonWorkspacePatterns(join(workspaceRoot, "package.json"));
-  } catch {
-    return undefined;
-  }
-  return patterns !== undefined &&
-    workspacePatternsClaimProject(patterns, workspaceRoot, projectRoot)
-    ? workspaceRoot
-    : undefined;
-}
-
 /** Ancestor package-manager workspace root that owns root-only package.json fields. */
-function findPackageManagerWorkspaceRoot(
+export function findPackageManagerWorkspaceRoot(
   packageManager: PackageManagerKind,
   projectRoot: string,
 ): string | undefined {
@@ -116,20 +101,20 @@ export function workspaceRootPackageJsonPath(
   return workspaceRoot === undefined ? undefined : join(workspaceRoot, "package.json");
 }
 
-async function ensurePackageJsonWorkspaceIncludesProject(
-  projectRoot: string,
-): Promise<string | undefined> {
-  const workspaceRoot = findAncestorPackageJsonWorkspaceRoot(projectRoot);
-  if (workspaceRoot === undefined || resolve(workspaceRoot) === resolve(projectRoot)) {
-    return undefined;
+export function preparePackageJsonWorkspaceIncludesProject(input: {
+  projectRoot: string;
+  source: string;
+  workspaceRoot: string;
+}): string {
+  const parsed = JSON.parse(input.source) as PackageJsonWorkspaceShape;
+  const patterns = packageJsonWorkspacePatterns(parsed);
+  if (
+    patterns.length === 0 ||
+    workspacePatternsClaimProject(patterns, input.workspaceRoot, input.projectRoot)
+  ) {
+    return input.source;
   }
-  if (findClaimingPackageJsonWorkspaceRoot(projectRoot) === workspaceRoot) {
-    return undefined;
-  }
-
-  const packageJsonPath = join(workspaceRoot, "package.json");
-  const parsed = JSON.parse(await readFile(packageJsonPath, "utf8")) as PackageJsonWorkspaceShape;
-  const pattern = workspacePatternForProject(workspaceRoot, projectRoot);
+  const pattern = workspacePatternForProject(input.workspaceRoot, input.projectRoot);
   if (Array.isArray(parsed.workspaces)) {
     parsed.workspaces = [...parsed.workspaces, pattern];
   } else if (isJsonObject(parsed.workspaces) && Array.isArray(parsed.workspaces.packages)) {
@@ -138,9 +123,28 @@ async function ensurePackageJsonWorkspaceIncludesProject(
       packages: [...parsed.workspaces.packages, pattern],
     };
   } else {
+    return input.source;
+  }
+  return `${JSON.stringify(parsed, null, 2)}\n`;
+}
+
+async function ensurePackageJsonWorkspaceIncludesProject(
+  projectRoot: string,
+): Promise<string | undefined> {
+  const workspaceRoot = findAncestorPackageJsonWorkspaceRoot(projectRoot);
+  if (workspaceRoot === undefined || resolve(workspaceRoot) === resolve(projectRoot)) {
     return undefined;
   }
-  await writeFile(packageJsonPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+
+  const packageJsonPath = join(workspaceRoot, "package.json");
+  const current = await readFile(packageJsonPath, "utf8");
+  const next = preparePackageJsonWorkspaceIncludesProject({
+    projectRoot,
+    source: current,
+    workspaceRoot,
+  });
+  if (next === current) return undefined;
+  await writeFile(packageJsonPath, next);
   return packageJsonPath;
 }
 

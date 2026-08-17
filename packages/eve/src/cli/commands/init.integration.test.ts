@@ -1052,6 +1052,41 @@ describe("runInitCommand", () => {
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("bun", projectRoot, ["x", "eve", "dev"]);
   });
 
+  it("adds an existing package to an unclaimed pnpm workspace before installation", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-init-existing-pnpm-unclaimed-"));
+    const projectRoot = join(workspaceRoot, "agents", "host-app");
+    await mkdir(projectRoot, { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      `${JSON.stringify({ private: true, engines: { node: "22.x" } }, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n", "utf8");
+    await writeFile(join(projectRoot, "package.json"), '{ "name": "host-app" }\n', "utf8");
+    const output = logger();
+    const deps = dependencies();
+    let summary: readonly string[] = [];
+    deps.confirmExistingPackageIntegration.mockImplementation(async (planned) => {
+      summary = planned;
+    });
+
+    await runInitCommand(output, projectRoot, ".", {}, deps);
+
+    expect(summary).toContain(`Add this package to ${join(workspaceRoot, "pnpm-workspace.yaml")}`);
+    expect(summary).toContain(`Update workspace package.json engines.node to 24.x`);
+    await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toContain(
+      "  - agents/*\n",
+    );
+    expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
+      engines: { node: "24.x" },
+    });
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "pnpm",
+      projectRoot,
+      expect.anything(),
+    );
+  });
+
   it("adds an agent to an existing pnpm workspace member without nested root-only policy", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-init-existing-pnpm-workspace-"));
     const appsDirectory = join(workspaceRoot, "apps");

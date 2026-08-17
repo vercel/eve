@@ -34,11 +34,11 @@ export async function confirmExistingPackageIntegration(
   }
   const prompter = dependencies.createPrompter();
   const confirmed = await prompter.select<boolean>({
-    message: "Apply these existing-project edits?",
+    message: "Apply these edits?",
     description: `${summary.join("; ")}. These edits and package-manager side effects remain if installation fails.`,
     options: [
       { value: true, label: "Apply edits and install dependencies" },
-      { value: false, label: "Cancel" },
+      { value: false, label: "Cancel", accent: "warning" },
     ],
     initialValue: false,
   });

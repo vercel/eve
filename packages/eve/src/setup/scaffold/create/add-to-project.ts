@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import type { NodeEngineOverride } from "../../node-engine.js";
@@ -13,10 +13,15 @@ import {
 } from "../bounded-write-plan.js";
 import { preparePackageJsonPatch, type PackageJsonPatch } from "../update/package-json.js";
 import { resolveVersionToken } from "../version-tokens.js";
-import { preparePnpmWorkspacePolicy } from "../../primitives/pm/pnpm.js";
 import {
-  isPackageManagerWorkspaceMember,
+  findAncestorPnpmWorkspaceRoot,
+  preparePnpmWorkspaceIncludesProject,
+  preparePnpmWorkspacePolicy,
+} from "../../primitives/pm/pnpm.js";
+import {
+  findPackageManagerWorkspaceRoot,
   packageManagerRootOnlyPackageJsonPatch,
+  preparePackageJsonWorkspaceIncludesProject,
   workspaceRootPackageJsonPath,
 } from "../workspace-root.js";
 import {
@@ -135,9 +140,8 @@ export async function planAddAgentToProject(
   );
   const patch: PackageJsonPatch = {};
   if (Object.keys(additions).length > 0) patch.dependencies = additions;
-  if (!isPackageManagerWorkspaceMember(packageManager, options.projectRoot)) {
-    patch.nodeEngineRequirement = evePackage.nodeEngine;
-  }
+  const workspaceRoot = findPackageManagerWorkspaceRoot(packageManager, options.projectRoot);
+  if (workspaceRoot === undefined) patch.nodeEngineRequirement = evePackage.nodeEngine;
   const preparedPackageJson = preparePackageJsonPatch(packageJsonRaw, patch);
   const workspacePackageJsonPath = workspaceRootPackageJsonPath(
     packageManager,
@@ -147,30 +151,54 @@ export async function planAddAgentToProject(
     workspacePackageJsonPath === undefined
       ? undefined
       : await readFile(workspacePackageJsonPath, "utf8");
+  const workspacePackageJsonWithProject =
+    workspacePackageJsonBefore === undefined ||
+    workspaceRoot === undefined ||
+    packageManager === "pnpm"
+      ? workspacePackageJsonBefore
+      : preparePackageJsonWorkspaceIncludesProject({
+          projectRoot: options.projectRoot,
+          source: workspacePackageJsonBefore,
+          workspaceRoot,
+        });
   const preparedWorkspacePackageJson =
-    workspacePackageJsonBefore === undefined
+    workspacePackageJsonWithProject === undefined
       ? undefined
       : preparePackageJsonPatch(
-          workspacePackageJsonBefore,
+          workspacePackageJsonWithProject,
           packageManagerRootOnlyPackageJsonPatch(packageManager, {
             aiPackageVersion: aiVersion,
             nodeEngineRequirement: evePackage.nodeEngine,
           }),
         );
-  const pnpmWorkspacePath = join(options.projectRoot, "pnpm-workspace.yaml");
+  const pnpmWorkspacePath =
+    packageManager === "pnpm"
+      ? join(
+          findAncestorPnpmWorkspaceRoot(options.projectRoot) ?? options.projectRoot,
+          "pnpm-workspace.yaml",
+        )
+      : undefined;
   const pnpmWorkspaceBefore =
-    packageManager === "pnpm" &&
-    !isPackageManagerWorkspaceMember(packageManager, options.projectRoot)
-      ? await readFile(pnpmWorkspacePath, "utf8").catch((error: NodeJS.ErrnoException) => {
+    pnpmWorkspacePath === undefined
+      ? undefined
+      : await readFile(pnpmWorkspacePath, "utf8").catch((error: NodeJS.ErrnoException) => {
           if (error.code === "ENOENT") return undefined;
           throw error;
-        })
-      : undefined;
+        });
+  const pnpmWorkspaceWithProject =
+    pnpmWorkspaceBefore === undefined || workspaceRoot === undefined
+      ? pnpmWorkspaceBefore
+      : preparePnpmWorkspaceIncludesProject({
+          projectRoot: options.projectRoot,
+          source: pnpmWorkspaceBefore,
+          workspaceRoot,
+        });
   const pnpmWorkspaceAfter =
-    packageManager === "pnpm" &&
-    !isPackageManagerWorkspaceMember(packageManager, options.projectRoot)
-      ? preparePnpmWorkspacePolicy(pnpmWorkspaceBefore)
-      : undefined;
+    pnpmWorkspaceWithProject === undefined
+      ? workspaceRoot === undefined
+        ? preparePnpmWorkspacePolicy(undefined)
+        : undefined
+      : preparePnpmWorkspacePolicy(pnpmWorkspaceWithProject);
   const writes = await Promise.all([
     ...Object.entries(files).map(([relativePath, content]) =>
       planFileWrite({
@@ -193,16 +221,18 @@ export async function planAddAgentToProject(
           planFileWrite({
             bytes: preparedWorkspacePackageJson.bytes,
             destination: workspacePackageJsonPath,
-            root: join(workspacePackageJsonPath, ".."),
+            root: dirname(workspacePackageJsonPath),
           }),
         ]
       : []),
-    ...(pnpmWorkspaceAfter !== undefined && pnpmWorkspaceAfter !== pnpmWorkspaceBefore
+    ...(pnpmWorkspacePath !== undefined &&
+    pnpmWorkspaceAfter !== undefined &&
+    pnpmWorkspaceAfter !== pnpmWorkspaceBefore
       ? [
           planFileWrite({
             bytes: Buffer.from(pnpmWorkspaceAfter),
             destination: pnpmWorkspacePath,
-            root: options.projectRoot,
+            root: dirname(pnpmWorkspacePath),
           }),
         ]
       : []),
@@ -210,7 +240,8 @@ export async function planAddAgentToProject(
   const dependenciesAdded = Object.keys(additions).sort();
   return {
     dependenciesAdded,
-    nodeEngineOverride: preparedPackageJson.nodeEngineOverride,
+    nodeEngineOverride:
+      preparedWorkspacePackageJson?.nodeEngineOverride ?? preparedPackageJson.nodeEngineOverride,
     projectRoot: options.projectRoot,
     summary: [
       ...Object.keys(files).map((path) => `Create ${path}`),
@@ -220,11 +251,25 @@ export async function planAddAgentToProject(
       ...(preparedPackageJson.nodeEngineOverride === undefined
         ? []
         : [`Update package.json engines.node to ${preparedPackageJson.nodeEngineOverride.next}`]),
-      ...(preparedWorkspacePackageJson?.changed === true
+      ...(preparedWorkspacePackageJson?.nodeEngineOverride === undefined
+        ? []
+        : [
+            `Update workspace package.json engines.node to ${preparedWorkspacePackageJson.nodeEngineOverride.next}`,
+          ]),
+      ...(workspacePackageJsonWithProject !== workspacePackageJsonBefore &&
+      workspacePackageJsonPath !== undefined
+        ? [`Add this package to ${workspacePackageJsonPath}`]
+        : []),
+      ...(preparedWorkspacePackageJson?.changed === true &&
+      preparedWorkspacePackageJson.nodeEngineOverride === undefined &&
+      workspacePackageJsonWithProject === workspacePackageJsonBefore
         ? [`Update workspace package.json at ${workspacePackageJsonPath}`]
         : []),
-      ...(pnpmWorkspaceAfter !== undefined && pnpmWorkspaceAfter !== pnpmWorkspaceBefore
-        ? ["Update pnpm-workspace.yaml package policy"]
+      ...(pnpmWorkspaceBefore !== pnpmWorkspaceWithProject && pnpmWorkspacePath !== undefined
+        ? [`Add this package to ${pnpmWorkspacePath}`]
+        : []),
+      ...(pnpmWorkspaceAfter !== pnpmWorkspaceWithProject
+        ? [`Update ${pnpmWorkspacePath} package policy`]
         : []),
     ],
     writes,
