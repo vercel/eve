@@ -360,13 +360,12 @@ async function runInitSteps(input: {
 }): Promise<InitResult> {
   const { dependencies, logger, options, parentDirectory, target } = input;
   const debug = isLogLevelEnabled("debug");
-  const agentLaunched = await dependencies.isCodingAgentLaunch();
-  const initTarget = await resolveInitTarget({ parentDirectory, target });
-  const evePackage = resolveInitEvePackageOverride();
-
   let progress = startCliLiveRow(logger);
   progress.update("Preparing project");
   try {
+    const agentLaunched = await dependencies.isCodingAgentLaunch();
+    const initTarget = await resolveInitTarget({ parentDirectory, target });
+    const evePackage = resolveInitEvePackageOverride();
     const scaffoldPhase = initTarget.kind === "fresh" ? "creating agent" : "adding agent";
     progress.update(initTarget.kind === "fresh" ? "Creating agent" : "Adding agent");
     initLog.debug(scaffoldPhase);
