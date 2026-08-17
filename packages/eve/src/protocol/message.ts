@@ -1954,17 +1954,9 @@ function normalizeActionResultOutcome(result: RuntimeActionResult): {
   readonly error?: ActionResultError;
   readonly status: ActionResultStatus;
 } {
-  const outputError = readActionResultOutputError(result.output);
   if (result.isError === true) {
     return {
       error: buildActionResultError(result),
-      status: "failed",
-    };
-  }
-
-  if (outputError !== undefined) {
-    return {
-      error: outputError,
       status: "failed",
     };
   }
