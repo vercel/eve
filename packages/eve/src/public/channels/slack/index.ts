@@ -68,6 +68,19 @@ export {
 export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
 
 export {
+  registerCurrentSlackPreviewAgent,
+  registerSlackPreviewAgent,
+  resolveSlackPreviewAgentRoute,
+  slackUserGroupMentions,
+  unregisterCurrentSlackPreviewAgent,
+  unregisterSlackPreviewAgent,
+  withoutSlackUserGroupMention,
+  type SlackPreviewAgentRegistration,
+  type SlackPreviewAgentRoute,
+  type SlackUserGroupMention,
+} from "#public/channels/slack/user-groups.js";
+
+export {
   describeActionRequest,
   describeActionRequests,
 } from "#public/channels/slack/action-status.js";
