@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 
-import type { AgentModelDefinition } from "eve";
+import type { AgentStaticModelDefinition } from "eve";
 import type { NoConfigExtensionHandle } from "eve/extension";
 
 import type { createSelfmodAgent } from "./agent.js";
@@ -15,7 +15,7 @@ export interface SelfmodOptions {
    *
    * @default "anthropic/claude-sonnet-5"
    */
-  readonly model?: AgentModelDefinition;
+  readonly model?: AgentStaticModelDefinition;
 }
 
 /**

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { InMemoryFs } from "just-bash";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createSelfmodFilesystem } from "./sandbox.js";
+import { createSelfmodFilesystem } from "./filesystem.js";
 
 const temporaryDirectories: string[] = [];
 
