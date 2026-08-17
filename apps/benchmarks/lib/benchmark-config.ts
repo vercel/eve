@@ -46,7 +46,14 @@ export const benchmarkModels = [
     model: "openai/gpt-5.6-sol",
     displayName: "GPT-5.6 Sol",
     harness: "OpenCode",
-    support: "candidate",
+    support: "supported",
+  },
+  {
+    id: "gpt-5-6-terra",
+    model: "openai/gpt-5.6-terra",
+    displayName: "GPT-5.6 Terra",
+    harness: "OpenCode",
+    support: "supported",
   },
   {
     id: "claude-sonnet-5",

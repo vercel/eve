@@ -11,7 +11,14 @@ import {
 test("publishes only compatibility-validated models", () => {
   assert.deepEqual(
     publishedBenchmarkModels.map((benchmark) => benchmark.id),
-    ["claude-sonnet-4-6", "kimi-k3", "claude-fable-5", "gemini-3-1-pro-preview"],
+    [
+      "claude-sonnet-4-6",
+      "kimi-k3",
+      "claude-fable-5",
+      "gpt-5-6-sol",
+      "gpt-5-6-terra",
+      "gemini-3-1-pro-preview",
+    ],
   );
   assert.deepEqual(publishedBenchmark.caseIds, [
     "author-001-weather-tool",
@@ -24,7 +31,8 @@ test("publishes only compatibility-validated models", () => {
 });
 
 test("allows candidate probes and rejects unknown models", () => {
-  assert.equal(findBenchmarkModel("gpt-5-6-sol").support, "candidate");
+  assert.equal(findBenchmarkModel("gpt-5-6-sol").support, "supported");
+  assert.equal(findBenchmarkModel("gpt-5-6-terra").support, "supported");
   assert.equal(findBenchmarkModel("grok-4-6").support, "candidate");
   assert.throws(() => findBenchmarkModel("unknown"), /Unknown model/u);
 });
