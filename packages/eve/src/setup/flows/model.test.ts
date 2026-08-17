@@ -225,6 +225,7 @@ describe("runModelFlow", () => {
     });
     expect(deps.runProviderFlow).toHaveBeenCalledWith(
       expect.objectContaining({
+        availableProviders: ["chatgpt", "ai-gateway-project"],
         selectedProvider: "ai-gateway-project",
       }),
     );
@@ -317,6 +318,7 @@ describe("runModelFlow", () => {
     expect(deps.ensureChatGptAuth).toHaveBeenCalledOnce();
     expect(deps.runProviderFlow).toHaveBeenCalledWith(
       expect.objectContaining({
+        availableProviders: ["chatgpt", "ai-gateway-key"],
         selectedProvider: "chatgpt",
       }),
     );
@@ -741,6 +743,7 @@ describe("runModelFlow", () => {
     expect(runProviderFlow).toHaveBeenCalledWith(
       expect.objectContaining({
         appRoot: APP_ROOT,
+        availableProviders: ["chatgpt"],
         selectedProvider: "ai-gateway-project",
       }),
     );

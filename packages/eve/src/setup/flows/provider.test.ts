@@ -33,17 +33,18 @@ function createDeps() {
 type ProviderFlowInput = Parameters<typeof runProviderFlow>[0];
 
 function runTestProviderFlow(
-  input: Omit<ProviderFlowInput, "selectedProvider"> &
-    Partial<Pick<ProviderFlowInput, "selectedProvider">>,
+  input: Omit<ProviderFlowInput, "availableProviders" | "selectedProvider"> &
+    Partial<Pick<ProviderFlowInput, "availableProviders" | "selectedProvider">>,
 ) {
   return runProviderFlow({
+    availableProviders: ["chatgpt", "ai-gateway-project"],
     selectedProvider: "ai-gateway-project",
     ...input,
   });
 }
 
 describe("runProviderFlow", () => {
-  it("hands the Dev TUI one provider menu", async () => {
+  it("hands the Dev TUI one menu and lets the active project be replaced", async () => {
     const fake = createFakePrompter();
     const deps = createDeps();
     const picker: ProviderPicker = async (request) => {
@@ -104,6 +105,23 @@ describe("runProviderFlow", () => {
     expect(deps.getVercelAuthStatus).not.toHaveBeenCalled();
     expect(deps.runLinkFlow).not.toHaveBeenCalled();
     expect(deps.appendEnv).not.toHaveBeenCalled();
+  });
+
+  it("selects an available linked project without opening the link flow", async () => {
+    const fake = createFakePrompter();
+    const deps = createDeps();
+
+    const result = await runTestProviderFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      picker: async () => ({ kind: "ai-gateway-project" }),
+      selectedProvider: "chatgpt",
+      deps,
+    });
+
+    expect(result).toEqual({ kind: "ai-gateway-project" });
+    expect(deps.getVercelAuthStatus).not.toHaveBeenCalled();
+    expect(deps.runLinkFlow).not.toHaveBeenCalled();
   });
 
   it("checks and describes the active provider, opening the cursor on it", async () => {

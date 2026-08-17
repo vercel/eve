@@ -458,6 +458,7 @@ export async function runModelFlow(input: {
       appRoot,
       prompter,
       signal,
+      availableProviders,
       selectedProvider,
     });
     // Backing out of the provider sub-flow changed nothing; the cursor stays on

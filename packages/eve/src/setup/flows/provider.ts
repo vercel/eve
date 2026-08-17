@@ -141,15 +141,18 @@ async function selectProvider(input: {
  * THE PROVIDER FLOW behind the dev TUI `/model` menu's provider row
  * (`eve link` keeps {@link runLinkFlow}'s shape). One question chooses a
  * project-backed AI Gateway connection, an `AI_GATEWAY_API_KEY`, ChatGPT, or a
- * direct provider. The project branch runs the link flow in create-or-link
- * mode, so a project-less agent can create its first project rather than
- * dead-end on an empty list.
+ * direct provider. Selecting an available but inactive project only changes
+ * the selection; selecting the active project opens the link flow so it can
+ * be replaced. A project-less agent can create its first project there rather
+ * than dead-end on an empty list.
  */
 export async function runProviderFlow(input: {
   appRoot: string;
   prompter: Prompter;
   signal?: AbortSignal;
   picker?: ProviderPicker;
+  /** Provider availability resolved before the picker opened. */
+  availableProviders: readonly ProviderSelection[];
   /** The current provider selection. */
   selectedProvider: ProviderSelection;
   deps?: Partial<ProviderFlowDeps>;
@@ -164,7 +167,7 @@ export async function runProviderFlow(input: {
   };
 
   let authStatus: VercelAuthStatus | undefined;
-  const { selectedProvider } = input;
+  const { availableProviders, selectedProvider } = input;
   // The cursor opens on the active provider; a Vercel auth blocker still
   // re-homes it onto the key row below.
   let initialValue: ProviderConnection = selectedProvider;
@@ -203,6 +206,13 @@ export async function runProviderFlow(input: {
       if (choice.kind === "ai-gateway-key") {
         keyChoice = choice;
         break;
+      }
+
+      if (
+        selectedProvider !== "ai-gateway-project" &&
+        availableProviders.includes("ai-gateway-project")
+      ) {
+        return choice;
       }
 
       const auth = await withSpinner(prompter, "Checking your Vercel login…", () =>
