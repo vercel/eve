@@ -1,0 +1,200 @@
+#!/usr/bin/env node
+
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
+
+import {
+  authoringTreatments,
+  publishedBenchmark,
+  publishedExperimentId,
+} from "./lib/benchmark-config.ts";
+import { revisionSubject } from "./lib/source.mjs";
+
+const appRoot = dirname(fileURLToPath(import.meta.url));
+const repositoryRoot = resolve(appRoot, "../..");
+const evalsRoot = join(appRoot, "evals");
+const experimentsRoot = join(appRoot, "experiments");
+const { values } = parseArgs({
+  args: process.argv.slice(2),
+  options: {
+    "allow-dirty": { type: "boolean" },
+    dry: { type: "boolean" },
+    force: { type: "boolean" },
+    revision: { type: "string", default: "origin/main" },
+    help: { type: "boolean", short: "h" },
+  },
+  strict: true,
+});
+
+if (values.help) {
+  console.log(`Usage:
+  pnpm benchmark:publish [--revision origin/main] [--dry]
+  pnpm benchmark:publish [--revision <revision>] [--force] [--allow-dirty]`);
+  process.exit(0);
+}
+if (values.dry && values.force) throw new Error("--dry and --force cannot be combined.");
+if (!values.dry && !values["allow-dirty"] && !checkCleanWorkingTree()) process.exit(1);
+if (values["allow-dirty"]) {
+  console.warn(
+    "Warning: publishing from a dirty working tree is not reproducible from committed source.",
+  );
+}
+
+const revision = git(["rev-parse", "--verify", `${values.revision}^{commit}`]).trim();
+const subject = revisionSubject(repositoryRoot, revision, "published");
+const experimentNames = authoringTreatments.map(publishedExperimentId);
+
+prepareFixtures();
+writeExperiments(subject, revision);
+
+console.log(`> eve revision: ${revision}`);
+console.log(
+  `> model: ${publishedBenchmark.modelDisplayName} through ${publishedBenchmark.harness}`,
+);
+console.log(`> treatments: ${authoringTreatments.join(", ")}`);
+console.log(`> runs per cell: ${publishedBenchmark.runs}`);
+
+const executable = join(appRoot, "node_modules/.bin/agent-eval");
+if (values.dry) {
+  runAgentEval(["status", ...experimentNames]);
+  process.exit(0);
+}
+
+const cells = experimentNames.flatMap((experiment) =>
+  fixtureNames().map((caseId) => ({ experiment, caseId })),
+);
+for (const [index, cell] of cells.entries()) {
+  console.log(`\n> cell ${index + 1}/${cells.length}: ${cell.experiment} / ${cell.caseId}`);
+  runAgentEval(
+    ["run", cell.experiment, ...(values.force ? ["--force"] : [])],
+    { EVE_BENCHMARK_EVAL: cell.caseId },
+    false,
+  );
+}
+
+const pending = benchmarkStatus();
+if (pending.totalRun > 0) {
+  console.error(
+    `\nCannot publish: ${pending.totalRun} benchmark cell(s) still need a valid result.`,
+  );
+  console.error("Fix any infrastructure failures, then run pnpm benchmark:publish again.");
+  process.exit(1);
+}
+
+const exported = spawnSync(
+  process.execPath,
+  [join(appRoot, "scripts/export-results.mjs"), "--revision", revision],
+  { cwd: appRoot, stdio: "inherit", env: process.env },
+);
+if (exported.error) throw exported.error;
+process.exit(exported.status ?? 1);
+
+function runAgentEval(args, extraEnv = {}, exitOnFailure = true) {
+  const result = spawnSync(executable, args, {
+    cwd: appRoot,
+    stdio: "inherit",
+    env: { ...process.env, ...extraEnv },
+  });
+  if (result.error) throw result.error;
+  if (exitOnFailure && result.status !== 0) process.exit(result.status ?? 1);
+  return result.status ?? 1;
+}
+
+function benchmarkStatus() {
+  const result = spawnSync(executable, ["status", ...experimentNames, "--json"], {
+    cwd: appRoot,
+    encoding: "utf8",
+    env: process.env,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    process.stderr.write(result.stderr);
+    process.exit(result.status ?? 1);
+  }
+  return JSON.parse(result.stdout);
+}
+
+function checkCleanWorkingTree() {
+  const entries = git([
+    "status",
+    "--porcelain",
+    "--untracked-files=all",
+    "--",
+    ".",
+    ":!pnpm-lock.yaml",
+  ])
+    .trimEnd()
+    .split("\n")
+    .filter(Boolean);
+  if (entries.length === 0) return true;
+
+  const shown = entries.slice(0, 12);
+  console.error("Cannot publish canonical benchmark results from a dirty working tree.\n");
+  console.error("Blocking changes:");
+  for (const entry of shown) console.error(`  ${entry}`);
+  if (entries.length > shown.length) {
+    console.error(`  … and ${entries.length - shown.length} more`);
+  }
+  console.error(`
+Publishing records results against committed source so another run can reproduce them.
+Commit, stash, or remove these changes, then run:
+
+  pnpm benchmark:publish
+
+To bypass this check for a local run:
+
+  pnpm benchmark:publish --allow-dirty
+
+To inspect pending benchmark cells without publishing:
+
+  pnpm benchmark:publish --dry`);
+  return false;
+}
+
+function prepareFixtures() {
+  for (const name of fixtureNames()) {
+    const fixtureRoot = join(evalsRoot, name);
+    writeFileSync(join(fixtureRoot, "PROMPT.md"), "");
+    writeFileSync(
+      join(fixtureRoot, "package.json"),
+      `${JSON.stringify({ name: `eve-authoring-${name}`, private: true, type: "module" }, null, 2)}\n`,
+    );
+  }
+}
+
+function fixtureNames() {
+  return readdirSync(evalsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && existsSync(join(evalsRoot, entry.name, "CASE.ts")))
+    .map((entry) => entry.name)
+    .sort();
+}
+
+function writeExperiments(subject, revision) {
+  rmSync(experimentsRoot, { recursive: true, force: true });
+  mkdirSync(experimentsRoot, { recursive: true });
+  const archiveName = `published-${revision.slice(0, 12)}.source.tar.gz`;
+  writeFileSync(join(experimentsRoot, archiveName), subject.archive);
+
+  for (const treatment of authoringTreatments) {
+    const experimentName = publishedExperimentId(treatment);
+    writeFileSync(
+      join(experimentsRoot, `${experimentName}.ts`),
+      `import { readFileSync } from "node:fs";\n` +
+        `import { authoringExperiment } from "../lib/experiment.js";\n\n` +
+        `export default authoringExperiment({\n` +
+        `  archive: readFileSync(new URL(${JSON.stringify(`./${archiveName}`)}, import.meta.url)),\n` +
+        `  digest: ${JSON.stringify(subject.digest)},\n` +
+        `  dependencyDigest: ${JSON.stringify(subject.dependencyDigest)},\n` +
+        `  runs: ${publishedBenchmark.runs},\n` +
+        `  treatment: ${JSON.stringify(treatment)},\n` +
+        `});\n`,
+    );
+  }
+}
+
+function git(args) {
+  return execFileSync("git", args, { cwd: repositoryRoot, encoding: "utf8" });
+}

@@ -5,15 +5,18 @@
   "type": "module",
   "scripts": {
     "benchmark": "node run.mjs",
-    "test": "node --test lib/*.test.mjs",
+    "benchmark:publish": "node publish.mjs",
+    "benchmark:export": "node scripts/export-results.mjs",
+    "test": "node --test lib/*.test.mjs scripts/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ai-sdk/harness": "1.0.67",
-    "@ai-sdk/harness-codex": "1.0.69",
-    "@ai-sdk/sandbox-vercel": "1.0.67",
+    "@ai-sdk/harness": "1.0.68",
+    "@ai-sdk/harness-claude-code": "1.0.70",
+    "@ai-sdk/sandbox-vercel": "1.0.68",
     "@vercel/agent-eval": "1.5.0",
-    "@vercel/sandbox": "catalog:"
+    "@vercel/sandbox": "catalog:",
+    "jiti": "2.7.0"
   },
   "devDependencies": {
     "@types/node": "catalog:",

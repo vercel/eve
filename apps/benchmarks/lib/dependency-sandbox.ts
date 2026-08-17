@@ -4,8 +4,7 @@ import { Sandbox } from "@vercel/sandbox";
 
 import { SOURCE_ARCHIVE_PATH, SOURCE_ROOT } from "./paths.js";
 
-const dependencySnapshots = new Map<string, Promise<string>>();
-const subjectSnapshots = new Map<string, Promise<string>>();
+const snapshots = new Map<string, Promise<string>>();
 
 export function createDependencyCachedSandbox(options: {
   readonly archive: Uint8Array;
@@ -14,53 +13,35 @@ export function createDependencyCachedSandbox(options: {
   readonly env: Readonly<Record<string, string>>;
   readonly log: (message: string) => void;
 }): HarnessV1SandboxProvider {
-  const sessionProvider = (snapshotId?: string) =>
-    snapshotId === undefined
-      ? createVercelSandbox({
-          runtime: "node24",
-          ports: [...options.ports],
-          timeout: 15 * 60_000,
-          env: { ...options.env },
-          networkPolicy: "allow-all",
-        })
-      : createVercelSandbox({
-          source: { type: "snapshot", snapshotId },
-          ports: [...options.ports],
-          timeout: 15 * 60_000,
-          env: { ...options.env },
-          networkPolicy: "allow-all",
-        });
-
+  let provider: Promise<HarnessV1SandboxProvider> | undefined;
+  const resolveProvider = () => {
+    options.log("[setup] preparing dependency cache");
+    return (provider ??= dependencySnapshot(
+      options.archive,
+      options.dependencyDigest,
+      options.log,
+    ).then((snapshotId) =>
+      createVercelSandbox({
+        source: { type: "snapshot", snapshotId },
+        ports: [...options.ports],
+        timeout: 15 * 60_000,
+        env: { ...options.env },
+        networkPolicy: "allow-all",
+      }),
+    ));
+  };
   return {
     specificationVersion: "harness-sandbox-v1",
     providerId: "eve-benchmark-vercel",
-    async createSession(request = {}) {
-      if (request.identity === undefined || request.onFirstCreate === undefined) {
-        return sessionProvider().createSession(request);
-      }
-      options.log("[setup] preparing dependency cache");
-      const dependencySnapshotId = await dependencySnapshot(
-        options.archive,
-        options.dependencyDigest,
-        options.log,
-      );
-      const subjectSnapshotId = await subjectSnapshot(
-        dependencySnapshotId,
-        request.identity,
-        options.env,
-        request.onFirstCreate,
-        request.abortSignal,
-      );
-      return sessionProvider(subjectSnapshotId).createSession({
-        abortSignal: request.abortSignal,
-      });
+    async createSession(options) {
+      return (await resolveProvider()).createSession(options);
     },
-    async resumeSession(request) {
-      const provider = sessionProvider();
-      if (provider.resumeSession === undefined) {
+    async resumeSession(options) {
+      const resolved = await resolveProvider();
+      if (resolved.resumeSession === undefined) {
         throw new Error("Vercel Sandbox does not support session resume.");
       }
-      return provider.resumeSession(request);
+      return resolved.resumeSession(options);
     },
   };
 }
@@ -70,11 +51,11 @@ function dependencySnapshot(
   digest: string,
   log: (message: string) => void,
 ): Promise<string> {
-  const name = `eve-benchmark-dependencies-${digest.slice(0, 24)}`;
-  let snapshot = dependencySnapshots.get(name);
+  const name = `eve-benchmark-dependencies-v4-${digest.slice(0, 24)}`;
+  let snapshot = snapshots.get(name);
   if (snapshot !== undefined) return snapshot;
   snapshot = createDependencySnapshot(name, archive, log);
-  dependencySnapshots.set(name, snapshot);
+  snapshots.set(name, snapshot);
   return snapshot;
 }
 
@@ -83,7 +64,6 @@ async function createDependencySnapshot(
   archive: Uint8Array,
   log: (message: string) => void,
 ): Promise<string> {
-  let created = false;
   const sandbox = await Sandbox.getOrCreate({
     name,
     runtime: "node24",
@@ -91,11 +71,10 @@ async function createDependencySnapshot(
     persistent: true,
     snapshotExpiration: 0,
     networkPolicy: "allow-all",
-    async onCreate(current) {
-      created = true;
+    async onCreate(created) {
       log("[setup] fetching workspace dependencies");
-      await current.writeFiles([{ path: SOURCE_ARCHIVE_PATH, content: archive }]);
-      const command = await current.runCommand("bash", [
+      await created.writeFiles([{ path: SOURCE_ARCHIVE_PATH, content: archive }]);
+      const command = await created.runCommand("bash", [
         "-lc",
         `mkdir -p ${SOURCE_ROOT} && tar -xzf ${SOURCE_ARCHIVE_PATH} -C ${SOURCE_ROOT} && npm install --global pnpm@11.15.0 vitest@4.1.10 && cd ${SOURCE_ROOT} && pnpm fetch --frozen-lockfile`,
       ]);
@@ -106,60 +85,8 @@ async function createDependencySnapshot(
       }
     },
   });
-  if (!created && sandbox.currentSnapshotId !== undefined) return sandbox.currentSnapshotId;
-  return stopWithSnapshot(sandbox, "Dependency");
-}
-
-function subjectSnapshot(
-  dependencySnapshotId: string,
-  identity: string,
-  env: Readonly<Record<string, string>>,
-  bootstrap: NonNullable<Parameters<HarnessV1SandboxProvider["createSession"]>[0]>["onFirstCreate"],
-  abortSignal?: AbortSignal,
-): Promise<string> {
-  const name = `eve-benchmark-subject-${identity}`;
-  let snapshot = subjectSnapshots.get(name);
-  if (snapshot !== undefined) return snapshot;
-  snapshot = createSubjectSnapshot(name, dependencySnapshotId, env, bootstrap, abortSignal);
-  subjectSnapshots.set(name, snapshot);
-  return snapshot;
-}
-
-async function createSubjectSnapshot(
-  name: string,
-  dependencySnapshotId: string,
-  env: Readonly<Record<string, string>>,
-  bootstrap: NonNullable<Parameters<HarnessV1SandboxProvider["createSession"]>[0]>["onFirstCreate"],
-  abortSignal?: AbortSignal,
-): Promise<string> {
-  let created = false;
-  const sandbox = await Sandbox.getOrCreate({
-    name,
-    source: { type: "snapshot", snapshotId: dependencySnapshotId },
-    timeout: 15 * 60_000,
-    env: { ...env },
-    persistent: true,
-    snapshotExpiration: 0,
-    networkPolicy: "allow-all",
-    signal: abortSignal,
-    async onCreate(current) {
-      created = true;
-      const provider = createVercelSandbox({ sandbox: current });
-      const session = await provider.createSession({ abortSignal });
-      await bootstrap!(session.restricted(), { abortSignal });
-    },
-  });
-  if (!created && sandbox.currentSnapshotId !== undefined) return sandbox.currentSnapshotId;
-  return stopWithSnapshot(sandbox, "Subject", abortSignal);
-}
-
-async function stopWithSnapshot(
-  sandbox: Sandbox,
-  label: string,
-  signal?: AbortSignal,
-): Promise<string> {
-  const stopped = await sandbox.stop(signal === undefined ? undefined : { signal });
-  const snapshotId = stopped.snapshot?.id ?? sandbox.currentSnapshotId;
-  if (snapshotId === undefined) throw new Error(`${label} snapshot was not published.`);
-  return snapshotId;
+  if (sandbox.currentSnapshotId !== undefined) return sandbox.currentSnapshotId;
+  const stopped = await sandbox.stop();
+  if (stopped.snapshot?.id === undefined) throw new Error("Dependency snapshot was not published.");
+  return stopped.snapshot.id;
 }

@@ -30,7 +30,7 @@ export interface AuthoringSetup {
 
 export interface AuthoringTurn {
   readonly text: string;
-  readonly toolCalls: ReadonlyArray<{ input: unknown }>;
+  readonly toolCalls: ReadonlyArray<{ name: string; input: unknown }>;
 }
 
 export interface AuthoringInteractionContext {
@@ -46,12 +46,12 @@ export interface AuthoringCase {
 }
 
 export const emptyProject: AuthoringStartingPoint = {
-  id: "empty",
+  id: "empty-v2",
   workspace: "empty",
 };
 
 export const simpleProject: AuthoringStartingPoint = {
-  id: "simple",
+  id: "simple-v2",
   workspace: "scaffolded",
 };
 

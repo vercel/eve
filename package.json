@@ -13,6 +13,7 @@
   "type": "module",
   "scripts": {
     "benchmark": "pnpm --filter @eve-internal/benchmarks benchmark",
+    "benchmark:publish": "node apps/benchmarks/publish.mjs",
     "build": "turbo run build --filter='./packages/*'",
     "changeset": "changeset",
     "check:deps": "syncpack lint",

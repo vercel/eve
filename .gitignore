@@ -51,6 +51,7 @@ Thumbs.db
 
 # IDE/editor
 .codex/
+.githooks/
 .vscode/
 .idea/
 
