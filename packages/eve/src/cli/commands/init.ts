@@ -165,6 +165,7 @@ async function addToExistingProject(
   options: InitCommandOptions,
   dependencies: InitCommandDependencies,
   evePackage: EvePackageContract | undefined,
+  beforeConfirmation: () => void,
 ): Promise<{ packageManager: PackageManagerKind; nodeEngineOverride?: NodeEngineOverride }> {
   if (options.channelWebNextjs === true) {
     throw new Error(
@@ -187,6 +188,7 @@ async function addToExistingProject(
     evePackage,
   });
   if (!options.yes) {
+    beforeConfirmation();
     await dependencies.confirmExistingPackageIntegration(plan.summary);
   }
   const result = await dependencies.applyAddAgentToProjectPlan(plan);
@@ -362,7 +364,7 @@ async function runInitSteps(input: {
   const initTarget = await resolveInitTarget({ parentDirectory, target });
   const evePackage = resolveInitEvePackageOverride();
 
-  const progress = startCliLiveRow(logger);
+  let progress = startCliLiveRow(logger);
   progress.update("Preparing project");
   try {
     const scaffoldPhase = initTarget.kind === "fresh" ? "creating agent" : "adding agent";
@@ -426,7 +428,10 @@ async function runInitSteps(input: {
         options,
         dependencies,
         evePackage,
+        () => progress.stop(),
       );
+      progress = startCliLiveRow(logger);
+      progress.update("Adding agent");
       project =
         addition.nodeEngineOverride === undefined
           ? {

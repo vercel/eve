@@ -35,6 +35,7 @@ describe("confirmExistingPackageIntegration", () => {
     ).resolves.toBeUndefined();
 
     expect(message).toBe("Apply these edits?");
+    expect(description).toContain("• Create agent/agent.ts");
     expect(description).toContain("remain if installation fails");
   });
 
