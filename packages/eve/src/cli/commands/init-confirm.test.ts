@@ -17,14 +17,12 @@ describe("confirmExistingPackageIntegration", () => {
   });
 
   it("confirms the durable-edit and install checkpoint in a TTY", async () => {
-    let description = "";
     let message = "";
-    let metadata: readonly { label: string; value: string }[] = [];
+    let details: readonly string[] = [];
     const fake = createFakePrompter({
       single: (options) => {
-        description = options.description ?? "";
         message = options.message;
-        metadata = options.metadata ?? [];
+        details = options.details ?? [];
         return true;
       },
     });
@@ -37,10 +35,13 @@ describe("confirmExistingPackageIntegration", () => {
     ).resolves.toBeUndefined();
 
     expect(message).toBe("Apply these edits?");
-    expect(metadata).toEqual([
-      { label: "Planned edits", value: "• Create agent/agent.ts\n• Add dependencies: ai, eve" },
+    expect(details).toEqual([
+      "Planned edits",
+      "• Create agent/agent.ts",
+      "• Add dependencies: ai, eve",
+      "",
+      "These edits and package-manager side effects remain if installation fails.",
     ]);
-    expect(description).toContain("remain if installation fails");
   });
 
   it("cancels without applying the supplied plan", async () => {

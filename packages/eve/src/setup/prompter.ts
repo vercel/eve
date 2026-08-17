@@ -99,6 +99,8 @@ export interface SelectMetadata {
 /** Options common to every {@link Prompter.select} call. */
 export interface SelectCommonOptions<T extends PrompterValue> {
   message: string;
+  /** Normal-foreground lines rendered above the question and its options. */
+  details?: readonly string[];
   /** Inert context rendered beneath the question heading and above its options. */
   description?: string;
   /** Labeled facts rendered beneath the description and above the options. */
@@ -471,6 +473,9 @@ export function createPrompter(): Prompter {
     ): Promise<T | T[]> {
       log.settle();
       printNotices(opts.notices);
+      for (const line of opts.details ?? []) {
+        process.stdout.write(formatRailLine(line, pc, process.stdout));
+      }
       if (opts.description !== undefined) {
         process.stdout.write(formatRailLine(pc.dim(opts.description), pc, process.stdout));
       }
