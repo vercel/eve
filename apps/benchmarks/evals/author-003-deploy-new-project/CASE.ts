@@ -5,8 +5,6 @@ export default defineAuthoringCase({
   startingPoint: simpleProject,
   setup: vercelSetup,
   async interact({ send }) {
-    await send(
-      "Link this project to the existing Vercel project wayfinder-production and pull its environment so it is ready to deploy.",
-    );
+    await send("Deploy my agent to production using a new Vercel project called field-notes.");
   },
 });

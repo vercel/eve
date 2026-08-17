@@ -23,6 +23,7 @@ if (args[0] === "link") {
   state.linked = true;
   state.project = project;
   writeFileSync(statePath, JSON.stringify(state));
+  record("project.created", { project });
   record("project.linked", { project });
 } else if (args[0] === "env" && args[1] === "pull") {
   if (!state.linked || !nonInteractive) {
