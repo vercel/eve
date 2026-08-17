@@ -1223,8 +1223,7 @@ describe("runInitCommand", () => {
       result: {
         command: { executable: "pnpm", args: ["install"], cwd: parentDirectory },
         termination: { kind: "spawn-error", code: "ENOENT", message: "spawn pnpm ENOENT" },
-        output: [],
-        truncatedBytes: 0,
+        stdout: "",
       },
     });
 

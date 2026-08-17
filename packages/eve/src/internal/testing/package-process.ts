@@ -7,8 +7,7 @@ export function packageProcessResult(code = 0): PackageManagerProcessResult {
   return {
     command: { executable: "pnpm", args: ["install"], cwd: "/app" },
     termination: { kind: "exit", code },
-    output: [],
-    truncatedBytes: 0,
+    stdout: "",
   };
 }
 

@@ -5,7 +5,7 @@ import { armProcessAbort } from "../process-abort.js";
 import { createProcessOutputBuffer, type ProcessOutputHandler } from "../process-output.js";
 import { getPackageManagerStrategy } from "./index.js";
 import {
-  createPackageProcessOutputCollector,
+  createPackageProcessStdoutCollector,
   type PackageManagerProcessResult,
   type PackageManagerProcessTermination,
   resultSucceeded,
@@ -23,6 +23,8 @@ export interface RunPackageManagerOptions {
   onOutput?: ProcessOutputHandler;
   /** Aborts the package-manager subprocess when setup is interrupted. */
   signal?: AbortSignal;
+  /** Retains bounded stdout for a caller that must interpret a command's output. */
+  captureStdout?: boolean;
   /** Closes stdin so the child cannot contend with a parent-owned TUI. */
   nonInteractive?: boolean;
 }
@@ -53,18 +55,18 @@ export function spawnPackageManager(
     cwd: projectRoot,
   };
   if (options.signal?.aborted === true) {
-    const collector = createPackageProcessOutputCollector({ command });
-    collector.end();
-    return Promise.resolve(collector.result(abortedTermination(options.signal)));
+    return Promise.resolve({
+      command,
+      termination: abortedTermination(options.signal),
+      stdout: "",
+    });
   }
 
   return new Promise((resolvePromise) => {
     const captureOutput = options.onOutput !== undefined || options.nonInteractive === true;
     const lineBuffer = options.onOutput && createProcessOutputBuffer(options.onOutput);
-    const collector = createPackageProcessOutputCollector({
-      command,
-      onOutput: (chunk) => lineBuffer?.write(chunk.stream, Buffer.from(chunk.text)),
-    });
+    const stdoutCollector =
+      options.captureStdout === true ? createPackageProcessStdoutCollector({ command }) : undefined;
     let child;
     try {
       child = spawn(invocation.command, [...invocation.args], {
@@ -76,26 +78,30 @@ export function spawnPackageManager(
         signal: options.signal,
       });
     } catch (error) {
-      collector.end();
       lineBuffer?.flush();
       const failure = error as NodeJS.ErrnoException;
-      resolvePromise(
-        collector.result({ kind: "spawn-error", code: failure.code, message: failure.message }),
-      );
+      resolvePromise({
+        command,
+        termination: { kind: "spawn-error", code: failure.code, message: failure.message },
+        stdout: "",
+      });
       return;
     }
     const disarmAbort = armProcessAbort(child, options.signal);
-    child.stdout?.on("data", (chunk: Buffer) => collector.write("stdout", chunk));
-    child.stderr?.on("data", (chunk: Buffer) => collector.write("stderr", chunk));
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdoutCollector?.write(chunk);
+      lineBuffer?.write("stdout", chunk);
+    });
+    child.stderr?.on("data", (chunk: Buffer) => lineBuffer?.write("stderr", chunk));
 
     let settled = false;
     function settle(termination: PackageManagerProcessTermination): void {
       if (settled) return;
       settled = true;
       disarmAbort();
-      collector.end();
+      stdoutCollector?.end();
       lineBuffer?.flush();
-      resolvePromise(collector.result(termination));
+      resolvePromise(stdoutCollector?.result(termination) ?? { command, termination, stdout: "" });
     }
 
     child.on("error", (error: NodeJS.ErrnoException) => {
@@ -139,13 +145,6 @@ export function packageManagerInstallFailureMessage(
   return undefined;
 }
 
-function outputText(result: PackageManagerProcessResult, stream: "stdout" | "stderr"): string {
-  return result.output
-    .filter((chunk) => chunk.stream === stream)
-    .map((chunk) => chunk.text)
-    .join("");
-}
-
 /** Installs project dependencies and keeps workspace-probe evidence distinct. */
 export async function runPackageManagerInstall(
   kind: PackageManagerKind,
@@ -163,10 +162,10 @@ export async function runPackageManagerInstall(
       kind,
       projectRoot,
       PNPM_WORKSPACE_MEMBERSHIP_ARGUMENTS,
-      { ...options, nonInteractive: true },
+      { ...options, captureStdout: true, nonInteractive: true },
     );
     if (!resultSucceeded(probe)) return { kind: "workspace-probe-failed", result: probe };
-    const claimed = pnpmWorkspaceClaimsProject(outputText(probe, "stdout"), projectRoot);
+    const claimed = pnpmWorkspaceClaimsProject(probe.stdout, projectRoot);
     if (claimed === undefined) return { kind: "workspace-probe-unrecognized", result: probe };
     if (!claimed) installOptions = { ...options, ignoreWorkspace: true };
   }

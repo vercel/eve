@@ -136,7 +136,9 @@ describe("runPnpmInstall", () => {
     child.stdout.emit("data", Buffer.from("workspace parse failed\n"));
     child.emit("close", 1);
 
-    expect((await result).kind).toBe("workspace-probe-failed");
+    const install = await result;
+    expect(install.kind).toBe("workspace-probe-failed");
+    expect(install.result.stdout).toBe("workspace parse failed\n");
     expect(onOutput.mock.calls.map(([line]) => line)).toEqual([
       { stream: "stdout", text: "workspace parse failed" },
     ]);

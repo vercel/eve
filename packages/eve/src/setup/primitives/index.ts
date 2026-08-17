@@ -15,7 +15,6 @@ export {
   resultSucceeded,
   type PackageManagerProcessResult,
   type PackageManagerProcessTermination,
-  type ProcessOutputChunk,
 } from "./pm/process-result.js";
 export {
   getPackageManagerStrategy,

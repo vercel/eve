@@ -1,54 +1,31 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import {
-  createPackageProcessOutputCollector,
-  resultSucceeded,
-  type ProcessOutputChunk,
-} from "./process-result.js";
+import { createPackageProcessStdoutCollector, resultSucceeded } from "./process-result.js";
 
 const command = { executable: "npm", args: ["install"], cwd: "/app" };
 
-function collect(
-  options: { maxRetainedBytes?: number; onOutput?: (chunk: ProcessOutputChunk) => void } = {},
-) {
-  return createPackageProcessOutputCollector({ command, ...options });
+function collect(options: { maxCapturedBytes?: number } = {}) {
+  return createPackageProcessStdoutCollector({ command, ...options });
 }
 
 describe("package process results", () => {
-  it("preserves split UTF-8 code points with one decoder per stream", () => {
+  it("preserves split UTF-8 code points", () => {
     const collector = collect();
     const encoded = Buffer.from("ready 🚀\n");
 
-    collector.write("stdout", encoded.subarray(0, 8));
-    collector.write("stdout", encoded.subarray(8));
+    collector.write(encoded.subarray(0, 8));
+    collector.write(encoded.subarray(8));
     collector.end();
 
-    expect(collector.result({ kind: "exit", code: 0 }).output).toEqual([
-      { emittedSequence: 0, stream: "stdout", text: "ready " },
-      { emittedSequence: 1, stream: "stdout", text: "🚀\n" },
-    ]);
+    expect(collector.result({ kind: "exit", code: 0 }).stdout).toBe("ready 🚀\n");
   });
 
-  it("streams raw output while retaining only the byte bound", () => {
-    const onOutput = vi.fn();
-    const collector = collect({ maxRetainedBytes: 5, onOutput });
-    collector.write("stdout", Buffer.from("123456789"));
+  it("bounds captured stdout without splitting a UTF-8 code point", () => {
+    const collector = collect({ maxCapturedBytes: 7 });
+    collector.write(Buffer.from("ready 🚀"));
     collector.end();
 
-    const result = collector.result({ kind: "exit", code: 0 });
-    expect(result.output.map((chunk) => chunk.text).join("")).toBe("12345");
-    expect(result.truncatedBytes).toBe(4);
-    expect(onOutput.mock.calls.map(([chunk]) => chunk.text).join("")).toBe("123456789");
-  });
-
-  it("does not split a retained UTF-8 code point at the byte bound", () => {
-    const collector = collect({ maxRetainedBytes: 7 });
-    collector.write("stdout", Buffer.from("ready 🚀"));
-    collector.end();
-
-    const result = collector.result({ kind: "exit", code: 0 });
-    expect(result.output.map((chunk) => chunk.text).join("")).toBe("ready ");
-    expect(result.truncatedBytes).toBe(4);
+    expect(collector.result({ kind: "exit", code: 0 }).stdout).toBe("ready ");
   });
 
   it("distinguishes every termination kind from success", () => {
