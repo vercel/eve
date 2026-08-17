@@ -310,10 +310,19 @@ async function streamTurn(
   if (verbose && lineOpen) process.stdout.write("\n");
   return {
     text: await result.text,
-    toolCalls: await result.toolCalls,
+    toolCalls: authoringToolCalls(await result.toolCalls),
     elapsedMs: performance.now() - startedAt,
     steps,
   };
+}
+
+function authoringToolCalls(
+  toolCalls: ReadonlyArray<{ name?: string; toolName?: string; input: unknown }>,
+): ReadonlyArray<{ name: string; input: unknown }> {
+  return toolCalls.flatMap((call) => {
+    const name = call.toolName ?? call.name;
+    return name === undefined ? [] : [{ name, input: call.input }];
+  });
 }
 
 function formatToolCall(name: string, input: unknown): string {
