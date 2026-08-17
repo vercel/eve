@@ -1,5 +1,5 @@
 import { mkdtemp, readdir, rename, rm } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 
 import pc from "picocolors";
@@ -150,7 +150,13 @@ async function addToExistingProject(
   options: InitCommandOptions,
   dependencies: InitCommandDependencies,
   evePackage: EvePackageContract | undefined,
-): Promise<{ packageManager: PackageManagerKind; nodeEngineOverride?: NodeEngineOverride }> {
+): Promise<{
+  configurationFilesChanged: string[];
+  dependenciesAdded: string[];
+  filesWritten: string[];
+  packageManager: PackageManagerKind;
+  nodeEngineOverride?: NodeEngineOverride;
+}> {
   if (options.channelWebNextjs === true) {
     throw new Error(
       "`--channel-web-nextjs` is not supported when adding an agent to an existing project. " +
@@ -172,6 +178,9 @@ async function addToExistingProject(
     evePackage,
   });
   return {
+    configurationFilesChanged: result.configurationFilesChanged,
+    dependenciesAdded: result.dependenciesAdded,
+    filesWritten: result.filesWritten,
     packageManager: manager.kind,
     nodeEngineOverride: result.nodeEngineOverride,
   };
@@ -273,7 +282,10 @@ async function scaffoldProject(
 
 type PreparedInitProject =
   | {
+      configurationFilesChanged: string[];
+      dependenciesAdded: string[];
       failurePolicy: "preserve";
+      filesWritten: string[];
       kind: "added";
       nodeEngineOverride?: NodeEngineOverride;
       packageManager: PackageManagerKind;
@@ -298,6 +310,9 @@ type InitResult = {
   projectPath: string;
 } & (
   | {
+      configurationFilesChanged: string[];
+      dependenciesAdded: string[];
+      filesWritten: string[];
       kind: "added";
       nodeEngineOverride?: NodeEngineOverride;
     }
@@ -330,6 +345,25 @@ function installProgressDetail(
 const NPM_NOISE_LINE = /^\s*npm (?:silly|verbose|http|timing)\b/u;
 const INSTALL_OUTPUT_FALLBACK_LINES = 20;
 
+function reportExistingProjectChanges(
+  logger: InitCliLogger,
+  project: Extract<PreparedInitProject, { kind: "added" }>,
+): void {
+  logger.log("Updated existing project:");
+  for (const path of project.filesWritten) {
+    logger.log(`  Created ${relative(project.projectPath, path)}`);
+  }
+  if (project.dependenciesAdded.length > 0) {
+    logger.log(`  Added dependencies: ${project.dependenciesAdded.join(", ")}`);
+  }
+  for (const path of project.configurationFilesChanged) {
+    logger.log(`  Updated ${path}`);
+  }
+  if (project.nodeEngineOverride !== undefined) {
+    logger.log(pc.yellow(`  ⚠ ${formatNodeEngineOverrideWarning(project.nodeEngineOverride)}`));
+  }
+}
+
 async function runInitSteps(input: {
   dependencies: InitCommandDependencies;
   logger: InitCliLogger;
@@ -343,7 +377,7 @@ async function runInitSteps(input: {
   const initTarget = await resolveInitTarget({ parentDirectory, target });
   const evePackage = resolveInitEvePackageOverride();
 
-  const progress = startCliLiveRow(logger);
+  let progress = startCliLiveRow(logger);
   progress.update("Preparing project");
   try {
     const scaffoldPhase = initTarget.kind === "fresh" ? "creating agent" : "adding agent";
@@ -411,13 +445,19 @@ async function runInitSteps(input: {
       project =
         addition.nodeEngineOverride === undefined
           ? {
+              configurationFilesChanged: addition.configurationFilesChanged,
+              dependenciesAdded: addition.dependenciesAdded,
               failurePolicy: "preserve",
+              filesWritten: addition.filesWritten,
               kind: "added",
               packageManager: addition.packageManager,
               projectPath: initTarget.projectPath,
             }
           : {
+              configurationFilesChanged: addition.configurationFilesChanged,
+              dependenciesAdded: addition.dependenciesAdded,
               failurePolicy: "preserve",
+              filesWritten: addition.filesWritten,
               kind: "added",
               nodeEngineOverride: addition.nodeEngineOverride,
               packageManager: addition.packageManager,
@@ -426,6 +466,11 @@ async function runInitSteps(input: {
     }
     const agentElapsedMs = dependencies.now() - agentStartedAt;
     initLog.debug(`${scaffoldPhase} done`, { ms: agentElapsedMs });
+    if (project.kind === "added") {
+      progress.stop();
+      reportExistingProjectChanges(logger, project);
+      progress = startCliLiveRow(logger);
+    }
 
     progress.update("Installing dependencies", `${project.packageManager} install`);
     initLog.debug(`installing dependencies with ${project.packageManager}`);
@@ -555,9 +600,6 @@ export async function runInitCommand(
     logger.log(
       `${pc.green("✓")} Added an ${EVE_WORDMARK} agent to ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.agentElapsedMs)}`)}`,
     );
-    if (result.nodeEngineOverride !== undefined) {
-      logger.log(pc.yellow(`⚠ ${formatNodeEngineOverrideWarning(result.nodeEngineOverride)}`));
-    }
   }
   logger.log(
     `${pc.green("✓")} Installed dependencies ${pc.dim(`in ${formatElapsed(result.installElapsedMs)}`)}`,

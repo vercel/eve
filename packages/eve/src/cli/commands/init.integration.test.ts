@@ -855,8 +855,15 @@ describe("runInitCommand", () => {
       "eve",
       "dev",
     ]);
-    expect(output.messages.join("\n")).toContain("Added an eve agent to ");
-    expect(output.messages.join("\n")).not.toContain("Overrode package.json engines.node");
+    const printed = output.messages.join("\n");
+    expect(printed).toContain("Added an eve agent to ");
+    expect(printed).toContain("Updated existing project:");
+    expect(printed).toContain("Created agent/agent.ts");
+    expect(printed).toContain("Created agent/instructions.md");
+    expect(printed).toContain("Added dependencies: @vercel/connect, ai, eve");
+    expect(printed).toContain(`Updated ${join(projectRoot, "package.json")}`);
+    expect(printed).toContain(`Updated ${join(projectRoot, "pnpm-workspace.yaml")}`);
+    expect(printed).not.toContain("Overrode package.json engines.node");
   });
 
   it("adds an agent to an existing project with model settings selected by init options", async () => {
@@ -1249,6 +1256,11 @@ describe("runInitCommand", () => {
     expect(JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"))).toMatchObject({
       dependencies: { eve: "^0.6.0" },
     });
+    expect(output.messages.join("\n")).toContain("Updated existing project:");
+    expect(output.messages.join("\n")).toContain("Created agent/agent.ts");
+    expect(output.messages.join("\n")).toContain(
+      "Added dependencies: @vercel/connect, ai, eve, zod",
+    );
   });
 
   it("replays only the actionable npm error, dropping silly/verbose/http/timing noise", async () => {

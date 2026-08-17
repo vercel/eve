@@ -39,6 +39,7 @@ export interface AddAgentToProjectOptions {
 
 export interface AddAgentToProjectResult {
   filesWritten: string[];
+  configurationFilesChanged: string[];
   /** Dependencies added to package.json; ones the project already declares anywhere are left untouched. */
   dependenciesAdded: string[];
   /** Present when an incompatible package.json engines.node value was replaced. */
@@ -171,7 +172,7 @@ export async function addAgentToProject(
   const nodeEngineOverride =
     workspacePatchResult.nodeEngineOverride ?? patchResult.nodeEngineOverride;
 
-  await applyPackageManagerWorkspaceConfiguration({
+  const workspaceConfiguration = await applyPackageManagerWorkspaceConfiguration({
     packageManager,
     projectRoot: options.projectRoot,
   });
@@ -180,5 +181,12 @@ export async function addAgentToProject(
     filesWritten,
     dependenciesAdded: Object.keys(additions).sort(),
     nodeEngineOverride,
+    configurationFilesChanged: [
+      ...(patchResult.changed ? [packageJsonPath] : []),
+      ...(workspacePatchResult.changed && workspacePatchResult.path !== undefined
+        ? [workspacePatchResult.path]
+        : []),
+      ...workspaceConfiguration.filesWritten,
+    ],
   };
 }
