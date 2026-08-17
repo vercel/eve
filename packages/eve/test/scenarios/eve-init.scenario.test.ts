@@ -189,7 +189,16 @@ describe("eve init smoke", () => {
         cwd: canonicalProjectDir,
       },
       {
-        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--input", "/model"],
+        args: [
+          "--dir",
+          canonicalProjectDir,
+          "--config.minimum-release-age=0",
+          "exec",
+          "eve",
+          "dev",
+          "--input",
+          "/model",
+        ],
         cwd: canonicalProjectDir,
       },
     ]);
@@ -371,7 +380,16 @@ describe("eve init smoke", () => {
         cwd: canonicalProjectDir,
       },
       {
-        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--input", "/model"],
+        args: [
+          "--dir",
+          canonicalProjectDir,
+          "--config.minimum-release-age=0",
+          "exec",
+          "eve",
+          "dev",
+          "--input",
+          "/model",
+        ],
         cwd: canonicalProjectDir,
       },
     ]);
