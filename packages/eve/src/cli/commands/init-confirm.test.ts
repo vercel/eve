@@ -39,8 +39,6 @@ describe("confirmExistingPackageIntegration", () => {
       "Planned edits",
       "• Create agent/agent.ts",
       "• Add dependencies: ai, eve",
-      "",
-      "These edits and package-manager side effects remain if installation fails.",
     ]);
   });
 
