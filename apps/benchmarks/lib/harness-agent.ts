@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { performance } from "node:perf_hooks";
 import { pathToFileURL } from "node:url";
 
 import type { HarnessV1NetworkSandboxSession } from "@ai-sdk/harness";
@@ -73,6 +74,7 @@ export function createAuthoringAgent(subject: {
       const startedAt = Date.now();
       const commands: string[] = [];
       const transcript: AuthoringTranscriptEntry[] = [];
+      const turnTimings: Array<{ elapsedMs: number; index: number }> = [];
       let session: HarnessAgentSession | undefined;
       let activeSandbox: HarnessV1NetworkSandboxSession | undefined;
       let workspace: string | undefined;
@@ -137,6 +139,7 @@ export function createAuthoringAgent(subject: {
           send: async (prompt) => {
             transcript.push({ role: "user", content: prompt });
             if (verbose) console.log(`[user] ${prompt}`);
+            const turnStartedAt = performance.now();
             const result = verbose
               ? await streamTurn(agent, session!, prompt, options.timeout, options.signal)
               : await agent.generate({
@@ -145,6 +148,10 @@ export function createAuthoringAgent(subject: {
                   timeout: options.timeout,
                   abortSignal: options.signal,
                 });
+            turnTimings.push({
+              elapsedMs: performance.now() - turnStartedAt,
+              index: turnTimings.length + 1,
+            });
             transcript.push({ role: "assistant", content: result.text });
             commands.push(...shellCommands(result.toolCalls));
             return { text: result.text, toolCalls: result.toolCalls };
@@ -154,7 +161,10 @@ export function createAuthoringAgent(subject: {
         const context = setupContext(activeSandbox, workspace);
         await context.write(
           `${AGENT_EVAL_DIRECTORY}/results.json`,
-          JSON.stringify({ o11y: { shellCommands: commands.map((command) => ({ command })) } }),
+          JSON.stringify({
+            o11y: { shellCommands: commands.map((command) => ({ command })) },
+            timing: { agentTurns: turnTimings, totalAgentElapsedMs: sumTurnTimings(turnTimings) },
+          }),
         );
         await context.write(
           `${AGENT_EVAL_DIRECTORY}/harness-transcript.json`,
@@ -331,6 +341,10 @@ function setupContext(
 
 async function assertAgentGuidance(context: AuthoringSetupContext): Promise<void> {
   await context.run("test -s AGENTS.md && test -s CLAUDE.md && grep -Fq '@AGENTS.md' CLAUDE.md");
+}
+
+function sumTurnTimings(turns: ReadonlyArray<{ elapsedMs: number }>): number {
+  return turns.reduce((total, turn) => total + turn.elapsedMs, 0);
 }
 
 function shellCommands(toolCalls: ReadonlyArray<{ input: unknown }>): string[] {
