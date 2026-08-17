@@ -1,5 +1,21 @@
 # eve
 
+## 0.39.0
+
+### Minor Changes
+
+- 00c0a26: Promote ChatGPT subscription models to the stable `chatgpt()` API with Codex-owned authentication, automatic token refresh, `eve dev` recovery through `codex login` or `/model`, setup/source-authoring support, and local-only deployment safeguards. The deprecated `experimental_chatgpt()` alias remains available.
+
+### Patch Changes
+
+- 267a59a: Align the Sign in with Vercel Web Chat screen with eve's default status page while keeping the generated app name primary and Vercel branding confined to the authentication button.
+- 7a140d4: Carry the one-run pnpm minimum-release-age bypass from dependency installation into the `eve init` development handoff so onboarding starts without a redundant policy failure.
+- e8da571: Allow a child to return `parent.sandbox` from a `defineSandbox` callback, reusing the dispatching parent's live sandbox across agent sessions. Parent and child see the same files, processes, workspace, and sandbox home. A child that selects `parent.sandbox` cannot also declare managed workspace or skill resources; eve rejects that configuration before execution and requires either removing those resources or giving the child its own sandbox.
+- 24f6c06: Eve now emits `workflow.stream.follow.read` spans while following newly created runs, measuring each event from its durable write timestamp to the reader without counting replayed events.
+- 7a8f43b: Treat `eve init` targets as filesystem paths and classify non-empty targets before writing. When the generated initial Git commit fails, retain the repository and staged files and print the command to retry it.
+- 4c1bd80: Remove `glob` and `grep` from the default agent tool set. Agents can opt into either sandbox search tool by exporting `defineGlobTool()` or `defineGrepTool()` from the corresponding tool file.
+- 4af3b1e: Use canonical project discovery for project-scoped CLI commands, including instructions-only agents and commands invoked from descendant directories.
+
 ## 0.38.3
 
 ### Patch Changes
