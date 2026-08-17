@@ -25,6 +25,22 @@ export const modelPricing = {
     cacheRead: 1,
     cacheWrite: 12.5,
   },
+  "openai/gpt-5.6-sol": {
+    effectiveDate: "2026-08-17",
+    source: "https://openai.com/api/pricing/",
+    input: 2.5,
+    output: 15,
+    cacheRead: 0.25,
+    cacheWrite: 3.125,
+  },
+  "openai/gpt-5.6-terra": {
+    effectiveDate: "2026-08-17",
+    source: "https://openai.com/api/pricing/",
+    input: 2,
+    output: 12,
+    cacheRead: 0.2,
+    cacheWrite: 2.5,
+  },
   "google/gemini-3.1-pro-preview": {
     effectiveDate: "2026-08-17",
     source: "https://ai.google.dev/gemini-api/docs/pricing",
