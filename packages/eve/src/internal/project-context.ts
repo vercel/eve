@@ -1,4 +1,4 @@
-import { basename, dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import { createDiskProjectSource, type ProjectSource } from "#discover/project-source.js";
 import {
@@ -29,27 +29,31 @@ function standalone(appRoot: string): Extract<EveProjectContext, { kind: "standa
   return { appRoot, environmentRoot: appRoot, kind: "standalone" };
 }
 
-/** Classify a direct `agents/<name>` root using the canonical ownership rules. */
+/** Classify an app root included by the nearest declared agent workspace. */
 export async function resolveNamedAgentProjectContext(
   appRoot: string,
   options: { readonly source?: ProjectSource } = {},
 ): Promise<Extract<EveProjectContext, { kind: "workspace-member" | "standalone" }> | undefined> {
   const resolvedAppRoot = resolve(appRoot);
-  const agentsRoot = dirname(resolvedAppRoot);
-  if (basename(agentsRoot) !== "agents") return undefined;
-
   const source = options.source ?? createDiskProjectSource();
-  const workspaceRoot = dirname(agentsRoot);
-  const workspace = await resolveAgentWorkspace(workspaceRoot, { source });
-  const member = workspace?.members.find((candidate) => candidate.appRoot === resolvedAppRoot);
-  return workspace === undefined || member === undefined
-    ? undefined
-    : {
+  let workspaceRoot = resolvedAppRoot;
+
+  while (true) {
+    const workspace = await resolveAgentWorkspace(workspaceRoot, { source });
+    const member = workspace?.members.find((candidate) => candidate.appRoot === resolvedAppRoot);
+    if (workspace !== undefined && member !== undefined) {
+      return {
         workspace,
         environmentRoot: workspace.root,
         kind: "workspace-member",
         member,
       };
+    }
+
+    const parent = resolve(workspaceRoot, "..");
+    if (parent === workspaceRoot) return undefined;
+    workspaceRoot = parent;
+  }
 }
 
 /** Classify the current filesystem scope before command-specific policy runs. */
