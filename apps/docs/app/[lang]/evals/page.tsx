@@ -84,6 +84,11 @@ const EvalsPage = () => {
           at the provider&apos;s public list price. It is a relative comparison, not a Gateway bill:
           routing, cache discounts, and provider pricing can differ.
         </p>
+        <p>
+          Expanded rows show mean token consumption and tool calls per evaluation across both
+          treatments. Token consumption includes input, output, and reasoning tokens; cached input
+          details are not counted twice.
+        </p>
       </div>
     </main>
   );

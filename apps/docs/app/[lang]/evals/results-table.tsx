@@ -26,7 +26,9 @@ export const ResultsTable = ({ rows }: { rows: BenchmarkRow[] }) => {
             <HeaderCell>Harness</HeaderCell>
             <HeaderCell align="right">Avg Duration</HeaderCell>
             <HeaderCell align="right">Avg List Cost</HeaderCell>
-            <HeaderCell align="right">Success Rate</HeaderCell>
+            <HeaderCell align="right" sortDirection="descending">
+              Success Rate
+            </HeaderCell>
             <HeaderCell align="right">Success Rate with AGENTS.md *</HeaderCell>
           </tr>
         </thead>
@@ -67,6 +69,8 @@ export const ResultsTable = ({ rows }: { rows: BenchmarkRow[] }) => {
                             <tr>
                               <HeaderCell>Evaluation</HeaderCell>
                               <HeaderCell align="right">Avg Duration</HeaderCell>
+                              <HeaderCell align="right">Avg Tokens</HeaderCell>
+                              <HeaderCell align="right">Avg Tool Calls</HeaderCell>
                               <HeaderCell align="right">Success Rate</HeaderCell>
                               <HeaderCell align="right">Success Rate with AGENTS.md</HeaderCell>
                             </tr>
@@ -77,6 +81,12 @@ export const ResultsTable = ({ rows }: { rows: BenchmarkRow[] }) => {
                                 <Cell>{benchmarkCase.caseId}</Cell>
                                 <Cell align="right">
                                   {formatDuration(benchmarkCase.averageDurationMs)}
+                                </Cell>
+                                <Cell align="right">
+                                  {formatWholeNumber(benchmarkCase.averageTokenConsumption)}
+                                </Cell>
+                                <Cell align="right">
+                                  {formatWholeNumber(benchmarkCase.averageToolInvocationCount)}
                                 </Cell>
                                 <Cell align="right">
                                   {formatRate(benchmarkCase.baselineSuccessRate)}
@@ -104,11 +114,14 @@ export const ResultsTable = ({ rows }: { rows: BenchmarkRow[] }) => {
 const HeaderCell = ({
   align = "left",
   children,
+  sortDirection,
 }: {
   align?: "left" | "right";
   children: React.ReactNode;
+  sortDirection?: "ascending" | "descending";
 }) => (
   <th
+    aria-sort={sortDirection}
     className={`whitespace-nowrap px-4 py-3 font-medium ${align === "right" ? "text-right" : "text-left"}`}
     scope="col"
   >
@@ -147,4 +160,9 @@ function formatCost(value: number | null): React.ReactNode {
 function formatRate(value: number | null): React.ReactNode {
   if (value === null) return <NotAvailable />;
   return `${Math.round(value)}%`;
+}
+
+function formatWholeNumber(value: number | null): React.ReactNode {
+  if (value === null) return <NotAvailable />;
+  return Math.round(value).toLocaleString("en-US");
 }

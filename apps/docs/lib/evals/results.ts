@@ -20,6 +20,8 @@ export interface BenchmarkResult {
   validRuns?: number;
   meanDurationMs?: number;
   meanEstimatedListCostUsd?: number;
+  meanTokenConsumption?: number;
+  meanToolInvocationCount?: number;
   measuredAt?: string;
 }
 
@@ -39,6 +41,8 @@ export interface PublishedBenchmarkResults {
 export interface BenchmarkCaseRow {
   caseId: string;
   averageDurationMs: number | null;
+  averageTokenConsumption: number | null;
+  averageToolInvocationCount: number | null;
   baselineSuccessRate: number | null;
   guidedSuccessRate: number | null;
 }
@@ -51,6 +55,7 @@ export interface BenchmarkRow {
   averageEstimatedListCostUsd: number | null;
   baselineSuccessRate: number | null;
   guidedSuccessRate: number | null;
+  latestMeasuredAt: string | null;
   cases: BenchmarkCaseRow[];
 }
 
@@ -58,7 +63,7 @@ export const benchmarkResults = rawResults as PublishedBenchmarkResults;
 
 export function benchmarkRows(data: PublishedBenchmarkResults): BenchmarkRow[] {
   const groups = Map.groupBy(data.experiments, (experiment) => experiment.groupId);
-  return [...groups.entries()].map(([groupId, experiments]) => {
+  const rows = [...groups.entries()].map(([groupId, experiments]) => {
     const baseline = experiments.find((experiment) => experiment.treatment === "baseline");
     const guided = experiments.find((experiment) => experiment.treatment === "guided");
     const groupResults = data.results.filter(
@@ -84,6 +89,11 @@ export function benchmarkRows(data: PublishedBenchmarkResults): BenchmarkRow[] {
       averageEstimatedListCostUsd,
       baselineSuccessRate,
       guidedSuccessRate,
+      latestMeasuredAt:
+        measuredResults
+          .flatMap((result) => (result.measuredAt === undefined ? [] : [result.measuredAt]))
+          .sort()
+          .at(-1) ?? null,
       cases: caseIds.map((caseId) => {
         const caseResults = measuredResults.filter((result) => result.caseId === caseId);
         const baselineCaseResults = baseline
@@ -95,6 +105,8 @@ export function benchmarkRows(data: PublishedBenchmarkResults): BenchmarkRow[] {
         return {
           caseId,
           averageDurationMs: weightedAverageDuration(caseResults),
+          averageTokenConsumption: weightedAverageMetric(caseResults, "meanTokenConsumption"),
+          averageToolInvocationCount: weightedAverageMetric(caseResults, "meanToolInvocationCount"),
           baselineSuccessRate:
             baselineCaseResults.length === 0
               ? null
@@ -107,6 +119,12 @@ export function benchmarkRows(data: PublishedBenchmarkResults): BenchmarkRow[] {
       }),
     };
   });
+  return rows.sort(
+    (left, right) =>
+      descending(right.baselineSuccessRate, left.baselineSuccessRate) ||
+      descending(right.guidedSuccessRate, left.guidedSuccessRate) ||
+      timestamp(right.latestMeasuredAt) - timestamp(left.latestMeasuredAt),
+  );
 }
 
 function isMeasuredResult(result: BenchmarkResult): result is BenchmarkResult & {
@@ -141,11 +159,28 @@ function averageEstimatedListCost(results: BenchmarkResult[]): number | null {
 }
 
 function weightedAverageDuration(results: BenchmarkResult[]): number | null {
-  const validRuns = results.reduce((total, result) => total + (result.validRuns ?? 0), 0);
-  if (validRuns === 0) return null;
-  const duration = results.reduce(
-    (total, result) => total + (result.meanDurationMs ?? 0) * (result.validRuns ?? 0),
-    0,
+  return weightedAverageMetric(results, "meanDurationMs");
+}
+
+function weightedAverageMetric(
+  results: BenchmarkResult[],
+  field: "meanDurationMs" | "meanTokenConsumption" | "meanToolInvocationCount",
+): number | null {
+  const measured = results.filter(
+    (result): result is BenchmarkResult & { validRuns: number } & Record<typeof field, number> =>
+      result.validRuns !== undefined && result[field] !== undefined,
   );
-  return duration / validRuns;
+  const validRuns = measured.reduce((total, result) => total + result.validRuns, 0);
+  if (validRuns === 0) return null;
+  return (
+    measured.reduce((total, result) => total + result[field] * result.validRuns, 0) / validRuns
+  );
+}
+
+function descending(higher: number | null, lower: number | null): number {
+  return (higher ?? Number.NEGATIVE_INFINITY) - (lower ?? Number.NEGATIVE_INFINITY);
+}
+
+function timestamp(value: string | null): number {
+  return value === null ? Number.NEGATIVE_INFINITY : Date.parse(value);
 }
