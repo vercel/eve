@@ -68,6 +68,9 @@ function logger(): InitCliLogger & { messages: string[]; errors: string[] } {
 function dependencies(
   gitResult: GitInitResult = { kind: "initialized" },
 ): InitCommandDependencies & {
+  confirmExistingPackageIntegration: ReturnType<
+    typeof vi.fn<InitCommandDependencies["confirmExistingPackageIntegration"]>
+  >;
   confirmInitInNonEmptyDirectory: ReturnType<
     typeof vi.fn<InitCommandDependencies["confirmInitInNonEmptyDirectory"]>
   >;
