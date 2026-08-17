@@ -23,6 +23,11 @@ if (args[0] === "link") {
   state.linked = true;
   state.project = project;
   writeFileSync(statePath, JSON.stringify(state));
+  mkdirSync(resolve(process.cwd(), ".vercel"), { recursive: true });
+  writeFileSync(
+    resolve(process.cwd(), ".vercel", "project.json"),
+    `${JSON.stringify({ orgId: "org_benchmark", projectId: `prj_${project}`, projectName: project })}\n`,
+  );
   record("project.created", { project });
   record("project.linked", { project });
 } else if (args[0] === "env" && args[1] === "pull") {

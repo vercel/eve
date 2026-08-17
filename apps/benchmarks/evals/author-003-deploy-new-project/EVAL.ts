@@ -9,6 +9,9 @@ test("uses eve deploy to create and link the named Vercel project without prompt
   expect(commandLog).toMatch(/eve\s+deploy[^\n]*--project(?:=|\s+)field-notes/i);
   expect(commandLog).toMatch(/eve\s+deploy[^\n]*--non-interactive/i);
   expect(commandLog).toMatch(/eve\s+deploy[^\n]*--yes/i);
+  expect(commands).not.toContainEqual(
+    expect.stringMatching(/(?:^|\s)(?:pnpm\s+exec\s+)?vercel\s+(?:link|env|deploy)\b/i),
+  );
   expect(worldEvents).toContainEqual({
     type: "project.created",
     data: { project: "field-notes" },
