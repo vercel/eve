@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-17T18:02:41.223Z",
+  "generatedAt": "2026-08-17T19:25:16.802Z",
   "suite": {
-    "eveRevision": "e09675f7b700a326599b8fd908a9bd2dd161576d",
+    "eveRevision": "99eb6323ffa6a02b46a612d6792afa8248f0a70a",
     "caseFingerprint": "22ca2536d7b3d8cab0d87f346f98a00da7472b891142ca720f6766715b63f336",
     "caseCount": 2,
     "runsPerCell": 3
@@ -53,6 +53,38 @@
       "groupId": "claude-fable-5-opencode",
       "model": "anthropic/claude-fable-5",
       "modelDisplayName": "Claude Fable 5",
+      "harness": "OpenCode",
+      "treatment": "guided"
+    },
+    {
+      "id": "gpt-5-6-sol-opencode--baseline",
+      "groupId": "gpt-5-6-sol-opencode",
+      "model": "openai/gpt-5.6-sol",
+      "modelDisplayName": "GPT-5.6 Sol",
+      "harness": "OpenCode",
+      "treatment": "baseline"
+    },
+    {
+      "id": "gpt-5-6-sol-opencode--guided",
+      "groupId": "gpt-5-6-sol-opencode",
+      "model": "openai/gpt-5.6-sol",
+      "modelDisplayName": "GPT-5.6 Sol",
+      "harness": "OpenCode",
+      "treatment": "guided"
+    },
+    {
+      "id": "gpt-5-6-terra-opencode--baseline",
+      "groupId": "gpt-5-6-terra-opencode",
+      "model": "openai/gpt-5.6-terra",
+      "modelDisplayName": "GPT-5.6 Terra",
+      "harness": "OpenCode",
+      "treatment": "baseline"
+    },
+    {
+      "id": "gpt-5-6-terra-opencode--guided",
+      "groupId": "gpt-5-6-terra-opencode",
+      "model": "openai/gpt-5.6-terra",
+      "modelDisplayName": "GPT-5.6 Terra",
       "harness": "OpenCode",
       "treatment": "guided"
     },
@@ -193,6 +225,86 @@
       "meanDurationMs": 211985,
       "measuredAt": "2026-08-17T17:26:05.343Z",
       "meanEstimatedListCostUsd": 0.1930066666666667
+    },
+    {
+      "experimentId": "gpt-5-6-sol-opencode--baseline",
+      "caseId": "author-001-weather-tool",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 238597,
+      "measuredAt": "2026-08-17T19:14:06.741Z",
+      "meanEstimatedListCostUsd": 0.15293416666666668
+    },
+    {
+      "experimentId": "gpt-5-6-sol-opencode--baseline",
+      "caseId": "author-002-new-project",
+      "status": "current",
+      "passedRuns": 2,
+      "validRuns": 3,
+      "meanDurationMs": 250791,
+      "measuredAt": "2026-08-17T19:14:06.745Z",
+      "meanEstimatedListCostUsd": 0.04845166666666667
+    },
+    {
+      "experimentId": "gpt-5-6-sol-opencode--guided",
+      "caseId": "author-001-weather-tool",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 238385,
+      "measuredAt": "2026-08-17T19:14:31.642Z",
+      "meanEstimatedListCostUsd": 0.09391583333333335
+    },
+    {
+      "experimentId": "gpt-5-6-sol-opencode--guided",
+      "caseId": "author-002-new-project",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 288409,
+      "measuredAt": "2026-08-17T19:14:31.647Z",
+      "meanEstimatedListCostUsd": 0.12426
+    },
+    {
+      "experimentId": "gpt-5-6-terra-opencode--baseline",
+      "caseId": "author-001-weather-tool",
+      "status": "current",
+      "passedRuns": 2,
+      "validRuns": 3,
+      "meanDurationMs": 212536,
+      "measuredAt": "2026-08-17T19:14:00.277Z",
+      "meanEstimatedListCostUsd": 0.064524
+    },
+    {
+      "experimentId": "gpt-5-6-terra-opencode--baseline",
+      "caseId": "author-002-new-project",
+      "status": "current",
+      "passedRuns": 1,
+      "validRuns": 3,
+      "meanDurationMs": 228445,
+      "measuredAt": "2026-08-17T19:14:00.283Z",
+      "meanEstimatedListCostUsd": 0.039312
+    },
+    {
+      "experimentId": "gpt-5-6-terra-opencode--guided",
+      "caseId": "author-001-weather-tool",
+      "status": "current",
+      "passedRuns": 3,
+      "validRuns": 3,
+      "meanDurationMs": 225968,
+      "measuredAt": "2026-08-17T19:24:32.641Z",
+      "meanEstimatedListCostUsd": 0.07843
+    },
+    {
+      "experimentId": "gpt-5-6-terra-opencode--guided",
+      "caseId": "author-002-new-project",
+      "status": "current",
+      "passedRuns": 0,
+      "validRuns": 3,
+      "meanDurationMs": 453515,
+      "measuredAt": "2026-08-17T19:24:32.645Z",
+      "meanEstimatedListCostUsd": 0.044968
     },
     {
       "experimentId": "gemini-3-1-pro-preview-opencode--baseline",
