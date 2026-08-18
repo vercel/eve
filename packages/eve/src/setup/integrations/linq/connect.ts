@@ -1,5 +1,6 @@
 import type { ChannelSetupLog } from "#setup/cli/index.js";
 import { createPromptCommandOutput, withPhase } from "#setup/cli/index.js";
+import type { ProcessOutputHandler } from "#setup/primitives/process-output.js";
 import { replaceConnectTrigger } from "#setup/connect-provisioning.js";
 import type { VercelProjectReference } from "#setup/project-resolution.js";
 import {
@@ -59,10 +60,17 @@ export async function provisionLinqConnector(input: {
   projectRoot: string;
   slug: string;
   signal?: AbortSignal;
+  /** Receives the managed-connector URL printed by the Vercel CLI. */
+  onBrowserUrl?: (url: string) => void;
   deps?: ProvisionLinqConnectorDeps;
 }): Promise<LinqConnectorRef> {
   const deps = input.deps ?? { runVercel, runVercelCaptureStdout };
-  const onOutput = createPromptCommandOutput(input.log);
+  const commandOutput = createPromptCommandOutput(input.log);
+  const onOutput: ProcessOutputHandler = (line) => {
+    commandOutput(line);
+    const url = URL.parse(line.text)?.href;
+    if (url !== undefined) input.onBrowserUrl?.(url);
+  };
   const result = await withPhase(input.log, "Creating Linq connector...", () =>
     deps.runVercelCaptureStdout(
       [

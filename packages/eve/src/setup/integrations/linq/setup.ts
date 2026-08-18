@@ -106,13 +106,23 @@ export async function prepareLinqSetup(context: SetupPrepareContext): Promise<Li
 export async function applyLinqSetup(plan: LinqSetupPlan, context: SetupApplyContext) {
   const path = join(context.appRoot, "agent/channels/linq.ts");
   if (plan.credentials === "connect") {
+    let browserAction:
+      | ReturnType<SetupApplyContext["presenter"]["beginExternalAction"]>
+      | undefined;
     const connector = await provisionLinqConnector({
       log: context.presenter.log,
       project: plan.project!,
       projectRoot: context.appRoot,
       slug: plan.connectorSlug!,
       signal: context.signal,
+      onBrowserUrl(url) {
+        browserAction ??= context.presenter.beginExternalAction({
+          message: "Complete Linq setup",
+          url,
+        });
+      },
     });
+    browserAction?.complete();
     await writeTextFile(path, connectTemplate(connector.uid), { force: context.force });
     context.presenter.nextSteps([
       "Complete the managed Linq line activation and recipient contact verification in Vercel Connect, then deploy the agent.",
