@@ -119,9 +119,6 @@ export async function applyLinqSetup(plan: LinqSetupPlan, context: SetupApplyCon
     if (phoneNumber !== undefined) {
       context.presenter.note(phoneNumber, "Text your agent", { tone: "success" });
     }
-    context.presenter.nextSteps([
-      "Complete the managed Linq line activation and recipient contact verification in Vercel Connect, then deploy the agent.",
-    ]);
   } else {
     await appendEnv(join(context.appRoot, ".env.local"), {
       LINQ_API_KEY: plan.apiKey!,
