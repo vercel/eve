@@ -32,12 +32,14 @@ const BOOTSTRAP_VERSION = "v8";
 // remaining turns still run and the graders still see what the agent did.
 const TURN_TIMEOUT_SECONDS = Number(process.env.EVE_BENCHMARK_TURN_TIMEOUT ?? 480);
 // A turn that has produced no chunk for this long is waiting on the runtime, not
-// working: the longest legitimate gap is a single slow tool call.
-const TURN_STALL_SECONDS = Number(process.env.EVE_BENCHMARK_TURN_STALL ?? 120);
-// A finished step with nothing after it is the ordinary end of a turn, and the
-// gap before a model starts another step is seconds. Waiting the full stall
-// budget there only burns wall clock on a turn that is already over.
-const STEP_IDLE_MILLIS = 30_000;
+// working. The bound is one slow tool call: the bridge reports a call and its
+// result together once the call returns, so an install that takes minutes looks
+// from here like silence rather than work in flight.
+const TURN_STALL_SECONDS = Number(process.env.EVE_BENCHMARK_TURN_STALL ?? 240);
+// The runtime frequently never closes a turn whose last act was the model
+// talking, so silence after a closing message has to end the turn on its own.
+// Long enough that a pause before the next tool call is not mistaken for one.
+const CLOSING_IDLE_MILLIS = 45_000;
 // How long to let an aborted turn settle before starting the next one.
 const TURN_SETTLE_MILLIS = 15_000;
 
@@ -359,12 +361,11 @@ async function runTurn(input: {
   const turnTimeout = Math.min(timeout, TURN_TIMEOUT_SECONDS);
   let stall: string | undefined;
 
-  // The runtime routinely leaves a turn open after the model's last step and
+  // The runtime routinely leaves a turn open after the model's last message and
   // honors neither the total nor the per-chunk budget the SDK passes down, so
-  // the harness has to decide when a turn is over. How long silence is allowed
-  // to run depends on what the stream was doing when it went quiet: a slow
-  // install legitimately produces nothing for minutes, while a step that has
-  // already finished is almost certainly the end of the turn.
+  // the harness has to decide when a turn is over. Text the model never follows
+  // with a tool call is its closing message, so silence after it ends the turn;
+  // silence anywhere else can still be work in flight.
   const controller = new AbortController();
   const abort = () => controller.abort();
   input.abortSignal?.addEventListener("abort", abort, { once: true });
@@ -378,23 +379,34 @@ async function runTurn(input: {
       abortSignal: controller.signal,
     });
     const stream = result.fullStream[Symbol.asyncIterator]();
+    const tracing = process.env.EVE_BENCHMARK_TRACE_PARTS === "1";
+    let lastPartAt = Date.now();
     let pendingTools = 0;
-    let stepFinished = false;
+    let stepCalledTool = false;
+    let turnLooksDone = false;
     for (;;) {
-      const idle = pendingTools > 0 ? Number.POSITIVE_INFINITY : idleBudget(stepFinished);
+      const idle = pendingTools > 0 ? Number.POSITIVE_INFINITY : idleBudget(turnLooksDone);
       const budget = Math.min(idle, deadline - Date.now());
       const next = await withDeadline(stream.next(), budget);
       if (next === "expired") {
         if (Date.now() >= deadline) stall = `turn exceeded its ${turnTimeout}s budget`;
-        else if (!stepFinished) stall = `turn produced no output for ${TURN_STALL_SECONDS}s`;
-        await settleStalledTurn(stream, controller, stall ?? "turn finished its last step");
+        else if (!turnLooksDone) stall = `turn produced no output for ${TURN_STALL_SECONDS}s`;
+        await settleStalledTurn(stream, controller, stall ?? "turn ended on its closing message");
         break;
       }
       if (next.done === true) break;
       const part = next.value;
-      stepFinished = part.type === "finish-step" || part.type === "finish";
+      if (tracing) {
+        const now = Date.now();
+        console.log(`[part] +${((now - lastPartAt) / 1000).toFixed(1)}s ${part.type}`);
+        lastPartAt = now;
+      }
       if (part.type === "text-delta") {
         current += part.text;
+        // Text the model is not following with a tool call is it signing off.
+        // The runtime often emits nothing after that closing message, not even
+        // the step boundary, so the text itself has to be the signal.
+        turnLooksDone = true;
         if (verbose) {
           if (!lineOpen) process.stdout.write("[assistant] ");
           lineOpen = true;
@@ -405,7 +417,12 @@ async function runTurn(input: {
       if (verbose && lineOpen) process.stdout.write("\n");
       lineOpen = false;
       if (part.type === "tool-call") {
+        // Only a tool call reopens the turn. The parts that bracket a message
+        // (`text-start`, `text-end`) are not work, and treating them as work is
+        // what used to hide a closing message behind the full stall budget.
+        turnLooksDone = false;
         pendingTools += 1;
+        stepCalledTool = true;
         toolCalls.push({ name: part.toolName, input: part.input });
         if (verbose) console.log(`[tool] ${formatToolCall(part.toolName, part.input)}`);
       } else if (part.type === "tool-result" || part.type === "tool-error") {
@@ -414,6 +431,10 @@ async function runTurn(input: {
         if (current.trim().length > 0) steps.push(current.trim());
         current = "";
         addUsage(usage, (part as { usage?: unknown }).usage);
+        turnLooksDone = !stepCalledTool;
+        stepCalledTool = false;
+      } else if (part.type === "finish") {
+        turnLooksDone = true;
       }
     }
   } catch (error) {
@@ -428,8 +449,8 @@ async function runTurn(input: {
   return stall === undefined ? turn : { ...turn, stall };
 }
 
-function idleBudget(stepFinished: boolean): number {
-  return stepFinished ? STEP_IDLE_MILLIS : TURN_STALL_SECONDS * 1000;
+function idleBudget(turnLooksDone: boolean): number {
+  return turnLooksDone ? CLOSING_IDLE_MILLIS : TURN_STALL_SECONDS * 1000;
 }
 
 // Aborting is what marks the turn finished. Walking away from the stream is not
