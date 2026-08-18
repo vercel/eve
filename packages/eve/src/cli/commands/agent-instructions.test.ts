@@ -2,6 +2,8 @@ import { readdirSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import { stripAnsi } from "#cli/ui/terminal-text.js";
+
 import {
   HANDOFF_SECTIONS,
   initAgentDevHandoff,
@@ -56,10 +58,12 @@ describe("initAgentInstructions", () => {
 
 describe("initAgentReadySummary", () => {
   it("reports the model and generated instructions path", () => {
-    expect(initAgentReadySummary(undefined, "/app")).toBe(
+    expect(stripAnsi(initAgentReadySummary(undefined, "/app"))).toBe(
       "✓ Model zai/glm-5.2 (eve default)\n✓ Instructions /app/agent/instructions.md",
     );
-    expect(initAgentReadySummary("openai/gpt-5.5", "/app")).toContain("✓ Model openai/gpt-5.5\n");
+    expect(stripAnsi(initAgentReadySummary("openai/gpt-5.5", "/app"))).toContain(
+      "✓ Model openai/gpt-5.5\n",
+    );
   });
 });
 
