@@ -58,6 +58,12 @@ export default defineChannel({
 });
 ```
 
+Route paths mount verbatim on the app. The channel id is not a prefix, so the
+route above answers at `POST /threads/:threadId/messages`, not
+`/support/threads/:threadId/messages`. Give each channel its own path segment:
+two channels that claim the same method and path collide, and only one of them
+will see the request. `/eve/v1` is reserved for framework transport routes.
+
 Each route receives these operation surfaces:
 
 - `from(address)` binds `send`, `respond`, `cancel`, `compact`, `clear`, and `reset` to a channel-local continuation address.
