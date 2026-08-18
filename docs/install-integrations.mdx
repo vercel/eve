@@ -36,6 +36,8 @@ When an official item declares an interactive setup flow or flows, eve asks whet
 | `1`       | Setup failed.                                   |
 | `2`       | Setup needs an answer or an unmet prerequisite. |
 
+Every non-interactive run ends on exactly one terminal event — `completed`, `blocked`, `failed`, or `cancelled` — including a `--skip-install` continuation. That event, not a repeat of the command, is how you confirm the outcome.
+
 On exit code `2`, read the final event and run its `next.command`, adding the answer it asked for. The continuation already carries `--skip-install` once the registry files are installed, so the retry only resumes setup. Resupply any answers you provided earlier — each invocation starts from the recorded state, not from a live session.
 
 Every `--answer` value is JSON, so strings need JSON quotes. When a question has a nested `editable.key`, you may answer both keys in one invocation:

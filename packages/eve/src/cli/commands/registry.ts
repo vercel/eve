@@ -530,7 +530,7 @@ export async function runAddCommand(
           setupReminder: (packageItem) => setupReminder(packageItem, "skipped"),
         },
       });
-      return completion === false ? undefined : completion;
+      return reportCompletion(logger, item, completion, options.nonInteractive);
     }
 
     if (options.skipInstall === true) {
@@ -547,7 +547,7 @@ export async function runAddCommand(
         cancelledReminder: setupReminder(item, "cancelled"),
         resumeCommand: setupResumeCommand(item),
       });
-      return completion === false ? undefined : completion;
+      return reportCompletion(logger, item, completion, options.nonInteractive);
     }
 
     await addRegistryItems([address], {
@@ -613,24 +613,35 @@ export async function runAddCommand(
       cancelledReminder: setupReminder(item, "cancelled"),
       resumeCommand: setupResumeCommand(item),
     });
-    if (completion !== false && options.nonInteractive) {
-      logger.log(
-        serializeHeadlessSetupEvent({
-          version: 1,
-          type: "completed",
-          item,
-          completedItems: [item],
-          ...(completion.deploymentRequired === true
-            ? {
-                deploymentRequired: true as const,
-                next: { command: "eve", args: ["deploy"] },
-              }
-            : {}),
-        }),
-      );
-    }
-    return completion === false ? undefined : completion;
+    return reportCompletion(logger, item, completion, options.nonInteractive);
   });
+}
+
+// Every non-interactive `eve add` has to end on exactly one terminal event, on
+// whichever path it took. `--skip-install` is the continuation a blocked setup
+// hands back, so a caller resuming there is the one that most needs to be told
+// the item is done and whether a deploy still has to follow.
+function reportCompletion(
+  logger: RegistryCommandLogger,
+  item: string,
+  completion: RegistrySetupCompletion | false,
+  nonInteractive: boolean | undefined,
+): RegistrySetupCompletion | undefined {
+  if (completion === false) return undefined;
+  if (nonInteractive === true) {
+    logger.log(
+      serializeHeadlessSetupEvent({
+        version: 1,
+        type: "completed",
+        item,
+        completedItems: [item],
+        ...(completion.deploymentRequired === true
+          ? { deploymentRequired: true as const, next: { command: "eve", args: ["deploy"] } }
+          : {}),
+      }),
+    );
+  }
+  return completion;
 }
 
 /** Adds registry namespace mappings to the project's package.json. */

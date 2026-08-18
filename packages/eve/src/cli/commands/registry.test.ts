@@ -301,6 +301,36 @@ describe("registry commands", () => {
     });
   });
 
+  it("completes the resumed setup that a blocked item hands back", async () => {
+    const logger = createLogger();
+    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: {
+          eve: {
+            setup: [{ package: "eve", bin: "eve", args: ["integration", "setup", "web"] }],
+          },
+        },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "channel/web",
+      { nonInteractive: true, skipInstall: true, answers: { phoneNumber: "+15551234567" } },
+      { loadSetupCommandRunner: async () => runSetupCommand },
+    );
+
+    expect(addRegistryItems).not.toHaveBeenCalled();
+    expect(JSON.parse(logger.logs.at(-1)!)).toEqual({
+      version: 1,
+      type: "completed",
+      item: "channel/web",
+      completedItems: ["channel/web"],
+    });
+  });
+
   it("uses an answered component selection headlessly", async () => {
     const logger = createLogger();
     getRegistryItems
