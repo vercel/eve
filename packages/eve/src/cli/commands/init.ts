@@ -41,6 +41,7 @@ import {
 } from "#setup/scaffold/create/project.js";
 
 import { initAgentDevHandoff, initAgentReplPrompt } from "./agent-instructions.js";
+import { initAgentReadySummary } from "./agent-instructions.js";
 import { confirmInitInNonEmptyDirectory } from "./init-confirm.js";
 import {
   cleanupFreshInitTarget,
@@ -628,13 +629,7 @@ export async function runInitCommand(
   });
 
   if (result.agentLaunched) {
-    const selectedModel = options.model ?? DEFAULT_AGENT_MODEL_ID;
-    logger.log(
-      `${pc.green("✓")} Model ${pc.bold(selectedModel)}${options.model === undefined ? pc.dim(" (eve default)") : ""}`,
-    );
-    logger.log(
-      `${pc.green("✓")} Instructions ${pc.bold(join(result.projectPath, "agent/instructions.md"))}`,
-    );
+    logger.log(initAgentReadySummary(options.model, result.projectPath));
     logger.log(agentHandoff);
     return;
   }

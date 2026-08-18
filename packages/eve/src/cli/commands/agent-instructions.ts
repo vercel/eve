@@ -1,4 +1,9 @@
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+import pc from "picocolors";
+
+import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 
 // The two coding-agent prompts are one onboarding flow in two phases, composed
 // from the section files in `agent-prompt/`. The setup guide runs before
@@ -53,6 +58,16 @@ function compose(
  */
 export function initAgentInstructions(): string {
   return compose(SETUP_SECTIONS, { devCommand: "npx eve dev" });
+}
+
+/** Concise scaffold facts printed only when a coding agent launched `eve init`. */
+export function initAgentReadySummary(model: string | undefined, projectPath: string): string {
+  const selectedModel = model ?? DEFAULT_AGENT_MODEL_ID;
+  const defaultLabel = model === undefined ? pc.dim(" (eve default)") : "";
+  return [
+    `${pc.green("✓")} Model ${pc.bold(selectedModel)}${defaultLabel}`,
+    `${pc.green("✓")} Instructions ${pc.bold(join(projectPath, "agent/instructions.md"))}`,
+  ].join("\n");
 }
 
 /** The post-scaffold handoff printed after a coding agent runs `eve init`. */
