@@ -8,15 +8,25 @@ import { buildEmbeddedApplication, createEmbeddedLocalExecutor } from "eve/embed
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const entrypoint = "embedded-agent.mjs";
+const help = `Usage: embedded-triage <command>
+
+Commands:
+  run <ticket.json>  Triage the support ticket in a JSON file
+  build              Build the production application
+
+Options:
+  -h, --help         Show this help message`;
 const [command, argument, ...extraArguments] = process.argv.slice(2);
 
 try {
-  if (command === "run" && argument !== undefined && extraArguments.length === 0) {
+  if ((command === "-h" || command === "--help") && argument === undefined) {
+    console.log(help);
+  } else if (command === "run" && argument !== undefined && extraArguments.length === 0) {
     await runTicket(argument);
   } else if (command === "build" && argument === undefined) {
     await buildApplication();
   } else {
-    throw new Error("Usage: embedded-triage run <ticket.json>\n       embedded-triage build");
+    throw new Error(`${help}\n\nRun "embedded-triage --help" for usage information.`);
   }
 } catch (error) {
   console.error(`Ticket triage failed: ${error instanceof Error ? error.message : String(error)}`);
