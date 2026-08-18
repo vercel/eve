@@ -17,7 +17,16 @@ pnpm benchmark author-000-imessage --model kimi-k3
 pnpm benchmark author-000-imessage --treatment baseline
 pnpm benchmark author-000-imessage --dry
 pnpm benchmark author-000-imessage --verbose
+pnpm benchmark author-000-imessage --keep-failures
 ```
+
+`--keep-failures` keeps a run the runner judged an infrastructure failure — a stalled turn, a
+sandbox error — as the final result instead of discarding it. Use it while iterating on the
+harness, when the failure itself is what you want to read.
+
+Set `EVE_BENCHMARK_TRACE_PARTS=1` to print every stream part the harness receives with the gap
+since the previous one. The harness decides a turn is over by reading those parts, so this is what
+to reach for when a turn ends too early or hangs past its closing message.
 
 Use `--base` to compare a local Git revision with the working tree:
 
@@ -56,6 +65,17 @@ pnpm benchmark:timings results/current/<timestamp>/<case>/run-1
 
 Pass `--json` to print the original timing artifact. Vercel Sandbox and AI Gateway credentials are
 required.
+
+To read a whole results directory at once — pass/fail, agent time against setup time, turn and tool
+counts, tokens, and any stalled turns:
+
+```sh
+node scripts/analyze.mjs results/current/<timestamp>
+```
+
+Pass `--docs` to also list, per run, which docs page the agent entered at and every page it went on
+to read. That is the fastest way to see whether a documentation change moved agents toward the page
+that answers the task or sent them spidering.
 
 ## Publish canonical results
 
