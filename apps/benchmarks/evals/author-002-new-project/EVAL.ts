@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 
 import { subjectDefaultAgentModel } from "./grader.js";
 
-test("creates a complete eve project in place", () => {
+test("creates a complete eve project", () => {
   expect(existsSync("agent/agent.ts")).toBe(true);
   expect(existsSync("agent/channels/eve.ts")).toBe(true);
   expect(existsSync("agent/instructions.md")).toBe(true);

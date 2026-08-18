@@ -145,6 +145,10 @@ export function createAuthoringAgent(subject: {
           },
         });
 
+        const projectWorkspace =
+          authoringCase.projectDirectory === undefined
+            ? workspace
+            : `${workspace}/${authoringCase.projectDirectory}`;
         const context = setupContext(activeSandbox, workspace);
         await context.write(
           `${AGENT_EVAL_DIRECTORY}/results.json`,
@@ -176,8 +180,8 @@ export function createAuthoringAgent(subject: {
         log("[grade] running deterministic assertions");
         const test = await resultOf(
           activeSandbox,
-          `vitest run ${workspace}/${AGENT_EVAL_DIRECTORY}/EVAL.test.ts`,
-          workspace,
+          `ln -s ${workspace}/${AGENT_EVAL_DIRECTORY} .eve-grader && trap 'rm -f .eve-grader' EXIT && vitest run .eve-grader/EVAL.test.ts`,
+          projectWorkspace,
         );
         const scriptsResults = Object.fromEntries(
           await Promise.all(
@@ -186,7 +190,7 @@ export function createAuthoringAgent(subject: {
               const result = await resultOf(
                 activeSandbox!,
                 `npm run ${shellQuote(script)}`,
-                workspace,
+                projectWorkspace,
               );
               return [
                 script,

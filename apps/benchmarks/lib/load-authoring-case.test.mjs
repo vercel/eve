@@ -21,6 +21,11 @@ for (const entry of await readdir(evalsRoot, { withFileTypes: true })) {
   });
 }
 
+test("loads the named project output directory", async () => {
+  const authoringCase = await loadAuthoringCase(resolve(evalsRoot, "author-002-new-project"));
+  assert.equal(authoringCase.projectDirectory, "wayfinder");
+});
+
 test("requires an iMessage phone-number request before supplying the number", async () => {
   const authoringCase = await loadAuthoringCase(resolve(evalsRoot, "author-000-imessage"));
   const prompts = [];
