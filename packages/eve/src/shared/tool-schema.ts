@@ -231,9 +231,15 @@ function toJsonObject(source: ToolSchemaSource, direction: SchemaDirection): Jso
 }
 
 function getStandardSchemaProperties(value: unknown): Record<string, unknown> | undefined {
-  if (typeof value !== "object" || value === null || !("~standard" in value)) return undefined;
+  if (
+    value === null ||
+    (typeof value !== "object" && typeof value !== "function") ||
+    !("~standard" in value)
+  ) {
+    return undefined;
+  }
 
-  const standard = (value as Record<string, unknown>)["~standard"];
+  const standard = value["~standard"];
   return typeof standard === "object" && standard !== null
     ? (standard as Record<string, unknown>)
     : undefined;
