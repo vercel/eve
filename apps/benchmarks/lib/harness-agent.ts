@@ -256,7 +256,7 @@ export function createAuthoringAgent(subject: {
         const test = await timings.measure("validation.grader", () =>
           resultOf(
             activeSandbox!,
-            `ln -s ${workspace}/${AGENT_EVAL_DIRECTORY} .eve-grader && trap 'rm -f .eve-grader' EXIT && vitest run .eve-grader/EVAL.test.ts`,
+            `ln -s ${AGENT_EVAL_DIRECTORY} .eve-grader && trap 'rm -f .eve-grader' EXIT && vitest run .eve-grader/EVAL.test.ts`,
             projectWorkspace,
           ),
         );
@@ -544,7 +544,12 @@ async function bootstrapSubject(
   if (workspaceKind === "scaffolded") {
     workspaceCommands.push(`cd ${shellQuote(workspace)} && AI_AGENT=benchmark eve init .`);
   }
-  workspaceCommands.push("command -v vitest >/dev/null");
+  // Grader files must not change what subject commands observe in the project directory.
+  workspaceCommands.push(
+    `rm -rf ${AGENT_EVAL_DIRECTORY} && mkdir -p ${AGENT_EVAL_DIRECTORY}`,
+    `printf '{"private":true,"type":"module"}\\n' >${AGENT_EVAL_DIRECTORY}/package.json`,
+    "command -v vitest >/dev/null",
+  );
   if (workspaceKind === "scaffolded") {
     workspaceCommands.push(`test -f ${workspace}/package.json`);
   }
