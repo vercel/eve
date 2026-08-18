@@ -510,6 +510,40 @@ describe("loadAuthoredModuleNamespace", () => {
     }
   });
 
+  it("loads a linked package tsconfig from its real workspace location", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-linked-package-tsconfig-"));
+
+    try {
+      const workspaceRoot = join(root, "workspace");
+      const packageRoot = join(workspaceRoot, "packages", "extension");
+      const linkedPackageRoot = join(root, "app", "node_modules", "@repo", "extension");
+      await mkdir(join(packageRoot, "dist"), { recursive: true });
+      await mkdir(join(linkedPackageRoot, ".."), { recursive: true });
+      await writeFile(
+        join(workspaceRoot, "tsconfig.json"),
+        JSON.stringify({ compilerOptions: { target: "ES2024" } }),
+      );
+      await writeFile(
+        join(packageRoot, "tsconfig.json"),
+        JSON.stringify({ extends: "../../tsconfig.json" }),
+      );
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify({ name: "@repo/extension", type: "module" }),
+      );
+      await writeFile(join(packageRoot, "dist", "entry.mjs"), 'export const result = "linked";\n');
+      await symlink(packageRoot, linkedPackageRoot, "junction");
+
+      const moduleNamespace = await loadAuthoredModuleNamespace(
+        join(linkedPackageRoot, "dist", "entry.mjs"),
+      );
+
+      expect(moduleNamespace.result).toBe("linked");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   it("keeps configured dependencies external when they are imported from workspace packages", async () => {
     const app = await scenarioApp({
       files: {
