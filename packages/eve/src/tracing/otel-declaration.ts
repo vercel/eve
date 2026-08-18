@@ -51,7 +51,7 @@ export interface OtelOptions {
    * processor.
    */
   readonly sampler?: SamplerOrName;
-  /** Composed into one propagator. All inject; the first to extract wins. */
+  /** Composed into one propagator. All inject; the first to extract wins. Defaults to `auto`. */
   readonly propagators?: readonly PropagatorOrName[];
   /**
    * OpenTelemetry `Instrumentation` instances passed through to
