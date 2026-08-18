@@ -138,26 +138,50 @@ value.
 
 ## Scope
 
-Scope identifies the trusted audience or container within a namespace. It may
-be a string, `null`, a promise, or a zero-argument resolver:
+Scope identifies the trusted audience or container within a namespace. A scope
+resolver receives a read-only snapshot of the authenticated session and active
+channel. It may return a string, an array of string components, or `null`:
 
 ```ts
+type MemoryScopeResolverResult = string | readonly string[] | null;
+
+interface MemoryScopeContext {
+  readonly abortSignal: AbortSignal;
+  readonly session: {
+    readonly id: string;
+    readonly auth: SessionAuth;
+  };
+  readonly channel: {
+    readonly kind?: string;
+    readonly continuationToken?: string;
+    readonly metadata?: Readonly<Record<string, unknown>>;
+  };
+}
+
 type MemoryScopeDefinition =
-  string | null | Promise<string | null> | (() => string | null | Promise<string | null>);
+  | string
+  | null
+  | Promise<string | null>
+  | ((
+      context: MemoryScopeContext,
+    ) => MemoryScopeResolverResult | Promise<MemoryScopeResolverResult>);
 ```
 
 `eve/memory/scope` exports the built-in principal resolver:
 
 ```ts
-function byPrincipal(): string | null;
+function byPrincipal(context: MemoryScopeContext): string | null;
 ```
 
 Scope must come from authenticated session context, application data, or trusted
-channel state. It never comes from model input. eve resolves scope before
-namespace. A `null` scope disables the slot without invoking its namespace
-resolver. Otherwise eve resolves the namespace. A `null` namespace also
-disables the slot. A disabled slot does not call the provider, expose its tools,
-or include any of its projections in model context.
+channel state. Scope context deliberately excludes messages and current turn
+input. A resolver that returns an array receives the convenience semantics of
+`value.join(":")`; the array is not a collision-resistant tuple encoding. Each
+component must be a non-empty string. eve resolves scope before namespace. A
+`null` scope disables the slot without invoking its namespace resolver.
+Otherwise eve resolves the namespace. A `null` namespace also disables the
+slot. A disabled slot does not call the provider, expose its tools, or include
+any of its projections in model context.
 
 For an active slot, eve validates both values and derives the provider scope key
 from exactly the resolved namespace and scope:
@@ -189,9 +213,42 @@ that operation. Every projection remains attributed to the slot and scope key
 under which it was recalled.
 
 Passing `byPrincipal` as the scope resolver identifies the authenticated caller
-from principal type, authenticator, optional issuer, and principal ID. The
-function returns `null` for an unauthenticated caller. Anonymous callers never
-share a memory scope.
+from principal type, authenticator, optional issuer, and principal ID. It is a
+pure consumer of the supplied `MemoryScopeContext`; it does not read ambient or
+private runtime state. The function returns `null` for an unauthenticated
+caller. Anonymous callers never share a memory scope.
+
+Principal scope follows the same authenticated caller across channels. Memory
+that is safe only within one channel or conversation must include the trusted
+channel coordinates explicitly. Use `isChannel` to narrow authored channel
+metadata before reading it:
+
+```ts title="agent/memory/channel.ts"
+import { isChannel } from "eve/channels";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+import slack from "../channels/slack";
+import { customMemory } from "../lib/custom-memory";
+
+export default defineMemory({
+  provider: customMemory,
+  scope: (ctx) => {
+    if (!isChannel(ctx.channel, slack)) return null;
+
+    const principal = byPrincipal(ctx);
+    const { channelId, teamId } = ctx.channel.metadata;
+    return principal === null || channelId === null || teamId === null
+      ? null
+      : [principal, teamId, channelId];
+  },
+});
+```
+
+The returned array resolves to `<principal>:<teamId>:<channelId>`. Include a
+thread or conversation identifier as another component when the provider's
+data must not cross that boundary. Resolver output is evaluated once when eve
+locks the operation's memory scopes, and every provider call and tool in that
+operation uses the locked value.
 
 ## Projection visibility across scope changes
 
@@ -655,3 +712,62 @@ Mounted extensions cannot contribute memory slots.
 - [eve dynamic capabilities](../docs/guides/dynamic-capabilities.md)
 - [eve agent configuration](../docs/agent-config.md)
 - [eve turn execution](../packages/eve/src/execution/workflow-steps.ts)
+
+## Review checklist
+
+- [x] **Make channel-aware scope authorable.** Custom scope resolvers receive a
+      read-only `MemoryScopeContext` with the abort signal, authenticated
+      session, and channel metadata, but no messages or turn input.
+      `byPrincipal` consumes that public context without private runtime access.
+      Resolver arrays join non-empty components with `:`, while `null` preserves
+      slot disablement. The authoring guidance states that principal scope
+      crosses channels and shows how to add team, channel, and conversation
+      coordinates for private memory. This resolves the [scope and Slack privacy
+      thread](https://github.com/vercel/eve/pull/1581#discussion_r3807248748).
+
+- [ ] **Decide what settled-turn metadata memory receives.** Determine whether
+      `save` with `phase: "turn.completed"` receives aggregate input, output,
+      cache, and cost usage, and document how `session.id` plus `turnId` link a
+      memory operation to instrumentation. Explicitly keep failed, cancelled,
+      and deferred turns in instrumentation, or add separate typed phases if
+      memory providers are expected to learn from those outcomes. Close the
+      [usage and trace
+      thread](https://github.com/vercel/eve/pull/1581#discussion_r3807526107)
+      and [terminal outcome
+      thread](https://github.com/vercel/eve/pull/1581#discussion_r3807561187)
+      once that boundary is unambiguous.
+
+- [ ] **Give the model a safe memory-slot purpose.** Decide whether the
+      consuming definition or provider configuration supplies a model-facing
+      description that distinguishes destinations such as personal preferences
+      and channel conventions. Keep raw namespace and scope values out of model
+      input, and state that descriptions guide tool choice rather than enforce
+      authorization. Verify that multiple `fileMemory()` slots expose enough
+      information for the model to choose the intended qualified tool. Then
+      close the [model-facing attribution
+      thread](https://github.com/vercel/eve/pull/1581#discussion_r3807269437).
+
+- [ ] **Explain projection placement and tool invocation semantics.** Keep or
+      revise the current replaceable, scope-attributed projection model only
+      after documenting its prompt-cache, chronology, stale-context, and suffix
+      placement tradeoffs. State directly that eve invokes `recall` at fixed
+      lifecycle boundaries and resolves the tool set once per turn, while the
+      model decides whether to call an exposed tool. Close the [replacement and
+      cache thread](https://github.com/vercel/eve/pull/1581#discussion_r3807382863),
+      [suffix placement
+      thread](https://github.com/vercel/eve/pull/1581#discussion_r3807481674),
+      and [recall versus tool
+      thread](https://github.com/vercel/eve/pull/1581#discussion_r3807408005)
+      after the proposal records the chosen rationale.
+
+- [ ] **Reconcile the remaining review threads with the final contract.**
+      Correct the earlier additive-recall reply: the current contract keeps one
+      replaceable projection per slot and scope. Correct the cross-provider
+      reply: provider `ctx.messages` excludes other memory projections, and
+      cross-provider reconciliation remains a non-goal. Reply to or resolve the
+      remaining no-change questions about `phase`, `null` and `undefined`,
+      visibility, and the namespace/scope split, then resolve the outdated and
+      approval-only threads. Start with the [cross-provider
+      thread](https://github.com/vercel/eve/pull/1581#discussion_r3807280622)
+      and the [outdated turn-input
+      thread](https://github.com/vercel/eve/pull/1581#discussion_r3772094622).
