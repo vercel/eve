@@ -50,6 +50,7 @@ import {
   formatSlackInboundMessage,
   formatSlackThreadContext,
 } from "#public/channels/slack/model-context.js";
+import { isPrivateSlackConversation } from "#public/channels/slack/privacy.js";
 import {
   loadThreadContextMessages,
   type LoadThreadContextMessagesOptions,
@@ -370,6 +371,11 @@ export interface SlackInboundEventContext {
  * `onDirectMessage`.
  */
 export interface SlackInboundMessageContext extends SlackContext, SlackSessionOperations {
+  /**
+   * Returns whether the inbound message belongs to a DM, group DM, or private channel.
+   * Unknown conversation types fail closed and return `true`.
+   */
+  isDMOrPrivateChannel(): Promise<boolean>;
   /** Returns whether this message belongs to a thread with an active eve session. */
   isSubscribed(): Promise<boolean>;
   /** Returns whether the inbound event explicitly mentions this bot. */
@@ -1130,6 +1136,12 @@ async function dispatchSlackMessage(input: {
     isBotMentioned: () =>
       input.kind === "app_mention" ||
       (input.botUserId !== undefined && input.message.text.includes(`<@${input.botUserId}`)),
+    isDMOrPrivateChannel: () =>
+      isPrivateSlackConversation({
+        channelId: input.message.channelId,
+        raw: input.message.raw,
+        request: slack.request,
+      }),
     isSubscribed: async () => (await sessionOperations.resolveSession()) !== undefined,
     slack,
     thread,

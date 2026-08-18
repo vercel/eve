@@ -198,15 +198,14 @@ export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
   async onMessage(ctx, message) {
     if (message.author?.isBot) return null;
-    const isDirectMessage = message.raw.channel_type === "im";
-    return isDirectMessage || ctx.isBotMentioned() || (await ctx.isSubscribed())
+    return (await ctx.isDMOrPrivateChannel()) || ctx.isBotMentioned() || (await ctx.isSubscribed())
       ? { auth: null }
       : null;
   },
 });
 ```
 
-`isBotMentioned()` identifies an explicit mention. `isSubscribed()` checks whether the message belongs to a thread with an active eve session. For Vercel Connect, open **Advanced** when creating the connector and add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. Private channels additionally need `message.groups` and `groups:history`.
+`isDMOrPrivateChannel()` returns `true` for DMs, group DMs, and private channels. It uses the inbound event's conversation type when available and otherwise calls Slack's `conversations.info` API. Missing scopes, API errors, and ambiguous responses return `true` so privacy-sensitive behavior fails closed. `isBotMentioned()` identifies an explicit mention. `isSubscribed()` checks whether the message belongs to a thread with an active eve session. For Vercel Connect, open **Advanced** when creating the connector and add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. Private channels additionally need `message.groups` and `groups:history`.
 
 Use `ctx.thread.listParticipants()` when routing depends on who has joined the thread. It fetches the current thread and returns unique human Slack user ids in first-appearance order, so the first id is the starting author for a human-started thread. Bot and system messages are excluded:
 

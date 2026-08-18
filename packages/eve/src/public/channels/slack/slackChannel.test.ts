@@ -1236,6 +1236,32 @@ describe("slackChannel() inbound mention pipeline", () => {
     });
   });
 
+  it("exposes private conversation detection to message handlers", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, channel: { is_private: false } }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    let isPrivate: boolean | undefined;
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onAppMention(ctx) {
+        isPrivate = await ctx.isDMOrPrivateChannel();
+        return null;
+      },
+    });
+
+    const { body } = buildMentionBody({ channel: "C_PUBLIC" });
+    await firePost(channel, buildSignedRequest({ body }));
+
+    expect(isPrivate).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("conversations.info");
+    expect(parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit)).toEqual({
+      channel: "C_PUBLIC",
+    });
+  });
+
   it("binds onAppMention to flat session operations", async () => {
     const clear = vi.fn().mockResolvedValue({ sessionId: "s1", status: "accepted" });
     const channel = slackChannel({
