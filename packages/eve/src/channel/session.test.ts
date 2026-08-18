@@ -58,6 +58,28 @@ describe("createSession#cancel", () => {
 });
 
 describe("fixed session operations", () => {
+  it("keeps the session turn policy out of channel delivery metadata", async () => {
+    const runtime = createRuntime();
+    const session = createSession("sess_1", runtime, {
+      channelKind: "channel:slack",
+      channelName: "slack",
+      requestId: "req_1",
+      turnPolicy: "queue",
+    });
+
+    await session.send("hello", { auth: null });
+
+    const command = vi.mocked(runtime.dispatchSession).mock.calls[0]?.[0].command;
+    expect(command?.kind === "send" ? command.delivery : undefined).toMatchObject({
+      channelKind: "channel:slack",
+      channelName: "slack",
+      requestId: "req_1",
+    });
+    expect(command?.kind === "send" ? command.delivery : undefined).not.toHaveProperty(
+      "turnPolicy",
+    );
+  });
+
   it("dispatches every operation through the stable session id", async () => {
     const runtime = createRuntime();
     const session = createAttachSessionFn(runtime, { requestId: "req_1" })("sess_1");
