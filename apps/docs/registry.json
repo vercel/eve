@@ -29,31 +29,31 @@
       }
     },
     {
-      "name": "experimental/selfmod",
+      "name": "experimental/self-modification",
       "type": "registry:item",
-      "title": "selfmod (Experimental)",
+      "title": "Self-modification (Experimental)",
       "description": "Add an experimental, development-only source editing subagent to an eve project.",
-      "dependencies": ["@eve/selfmod"],
+      "dependencies": ["@eve/self-modification"],
       "files": [
         {
-          "path": "registry/experimental/selfmod/config.ts",
+          "path": "registry/experimental/self-modification/config.ts",
           "type": "registry:file",
-          "target": "agent/subagents/selfmod/config.ts"
+          "target": "agent/subagents/self-modification/config.ts"
         },
         {
-          "path": "registry/experimental/selfmod/agent.ts",
+          "path": "registry/experimental/self-modification/agent.ts",
           "type": "registry:file",
-          "target": "agent/subagents/selfmod/agent.ts"
+          "target": "agent/subagents/self-modification/agent.ts"
         },
         {
-          "path": "registry/experimental/selfmod/sandbox.ts",
+          "path": "registry/experimental/self-modification/sandbox.ts",
           "type": "registry:file",
-          "target": "agent/subagents/selfmod/sandbox.ts"
+          "target": "agent/subagents/self-modification/sandbox.ts"
         },
         {
-          "path": "registry/experimental/selfmod/extension.ts",
+          "path": "registry/experimental/self-modification/extension.ts",
           "type": "registry:file",
-          "target": "agent/subagents/selfmod/extensions/selfmod.ts"
+          "target": "agent/subagents/self-modification/extensions/selfmod.ts"
         }
       ]
     },
