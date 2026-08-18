@@ -30,7 +30,9 @@ export function authoringExperiment(options: {
     scripts: ["typecheck", "build"],
     runs: options.runs ?? 1,
     earlyExit: false,
-    timeout: 900,
+    // Lower this when iterating on a case that stalls, so a hung turn surfaces
+    // in minutes instead of consuming the full budget.
+    timeout: Number(process.env.EVE_BENCHMARK_TIMEOUT ?? 900),
     sandbox: "vercel",
     copyFiles: "changed",
     agentOptions: {

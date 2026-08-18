@@ -17,7 +17,8 @@
     "@ai-sdk/sandbox-vercel": "1.0.72",
     "@vercel/agent-eval": "1.5.0",
     "@vercel/sandbox": "catalog:",
-    "jiti": "2.7.0"
+    "jiti": "2.7.0",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",

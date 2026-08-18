@@ -19,7 +19,11 @@ export const imessageSetup: AuthoringSetup = {
         ),
       ),
     );
-    await run(`pnpm add ./${setupRoot}`);
+    // `setupRoot` is absolute, so this must not be prefixed with `./`: pnpm
+    // would normalize the result to a relative path, link a directory that does
+    // not exist, and name the dependency after the basename instead of the
+    // package, leaving `eve add` unable to find the setup command.
+    await run(`pnpm add ${setupRoot}`);
     await run(`mkdir -p ${artifactsRoot}/registry/channel`);
 
     const channel = {
@@ -68,13 +72,9 @@ export const imessageSetup: AuthoringSetup = {
       write(`${artifactsRoot}/registry/channel/photon-imessage.json`, JSON.stringify(channel)),
     ]);
   },
-  async onSession({ run, artifactsRoot, write }) {
+  async onSession({ run, artifactsRoot }) {
     await run(
       `nohup python3 -m http.server ${REGISTRY_PORT} --directory ${artifactsRoot}/registry >${artifactsRoot}/registry.log 2>&1 </dev/null &`,
-    );
-    await write(
-      ".claude/settings.json",
-      JSON.stringify({ env: { EVE_DEV_OFFICIAL_REGISTRY_URL: REGISTRY_URL } }),
     );
   },
 };
