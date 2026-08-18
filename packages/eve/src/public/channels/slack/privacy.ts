@@ -10,6 +10,8 @@ export function readSlackConversationPrivacy(
     case "mpim":
     case "group":
       return "private";
+    case "channel":
+      return "public";
     default:
       return "unknown";
   }
@@ -21,7 +23,7 @@ export async function isPrivateSlackConversation(input: {
   readonly request: (operation: string, body: unknown) => Promise<SlackApiResponse>;
 }): Promise<boolean> {
   const eventPrivacy = readSlackConversationPrivacy(input.raw);
-  if (eventPrivacy === "private") return true;
+  if (eventPrivacy !== "unknown") return eventPrivacy === "private";
 
   try {
     const privacy = readConversationInfoPrivacy(

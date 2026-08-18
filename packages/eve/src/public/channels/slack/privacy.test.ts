@@ -6,14 +6,21 @@ import {
 } from "#public/channels/slack/privacy.js";
 
 describe("Slack conversation privacy", () => {
-  it("reads explicit private conversation types without an API lookup", async () => {
+  it("reads explicit conversation types without an API lookup", async () => {
     const request = vi.fn();
 
-    expect(readSlackConversationPrivacy({ channel_type: "channel" })).toBe("unknown");
+    expect(readSlackConversationPrivacy({ channel_type: "channel" })).toBe("public");
     expect(readSlackConversationPrivacy({ channel_type: "im" })).toBe("private");
     expect(readSlackConversationPrivacy({ channel_type: "mpim" })).toBe("private");
     expect(readSlackConversationPrivacy({ channel_type: "group" })).toBe("private");
     expect(readSlackConversationPrivacy({})).toBe("unknown");
+    await expect(
+      isPrivateSlackConversation({
+        channelId: "C01",
+        raw: { channel_type: "channel" },
+        request,
+      }),
+    ).resolves.toBe(false);
     await expect(
       isPrivateSlackConversation({ channelId: "D01", raw: { channel_type: "im" }, request }),
     ).resolves.toBe(true);
@@ -24,7 +31,7 @@ describe("Slack conversation privacy", () => {
     { isPrivate: false, expected: false },
     { isPrivate: true, expected: true },
   ])(
-    "resolves channel visibility through conversations.info when is_private is $isPrivate",
+    "resolves events without channel_type through conversations.info when is_private is $isPrivate",
     async ({ isPrivate, expected }) => {
       const request = vi.fn().mockResolvedValue({
         ok: true,
@@ -32,11 +39,7 @@ describe("Slack conversation privacy", () => {
       });
 
       await expect(
-        isPrivateSlackConversation({
-          channelId: "C01",
-          raw: { channel_type: "channel" },
-          request,
-        }),
+        isPrivateSlackConversation({ channelId: "C01", raw: {}, request }),
       ).resolves.toBe(expected);
       expect(request).toHaveBeenCalledWith("conversations.info", { channel: "C01" });
     },
