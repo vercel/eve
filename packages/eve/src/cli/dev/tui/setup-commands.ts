@@ -5,9 +5,10 @@ import {
   type InstallVercelCliResult,
 } from "#setup/flows/install-vercel-cli.js";
 import { runLoginFlow, type LoginFlowResult } from "#setup/flows/login.js";
-import { runModelFlow, type ModelProviderOutcome } from "#setup/flows/model.js";
+import { runModelFlow } from "#setup/flows/model.js";
+import type { ProviderSelection } from "#setup/provider-settings.js";
 import { runProviderFlow, type ProviderPicker } from "#setup/flows/provider.js";
-import { runRegistryFlow } from "#setup/flows/registry.js";
+import { RegistryFlowFailedError, runRegistryFlow } from "#setup/flows/registry.js";
 import type { Prompter } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 
@@ -46,6 +47,8 @@ export interface TuiSetupCommandInput {
   renderer: TuiSetupCommandRenderer;
   /** Initial model-flow step authorized by the runner's boot evidence. */
   initialModelStep?: "provider";
+  /** Live ChatGPT identity shown only inside model configuration UI. */
+  chatGptAccountLabel?: string;
   /** Suspends development runtime artifacts while registry installation and setup mutate them. */
   withExclusiveTerminal?<T>(task: () => Promise<T>): Promise<T>;
   /** Test seam; defaults to the real TUI-native prompter over `renderer`. */
@@ -61,6 +64,27 @@ export interface TuiSetupFlows {
   runModelFlow: typeof runModelFlow;
   runRegistryFlow: typeof runRegistryFlow;
   runDeployFlow: typeof runDeployFlow;
+}
+
+function joinedTitles(titles: readonly string[]): string {
+  if (titles.length === 0) return "";
+  if (titles.length === 1) return titles[0]!;
+  if (titles.length === 2) return `${titles[0]} and ${titles[1]}`;
+  return `${titles.slice(0, -1).join(", ")}, and ${titles.at(-1)}`;
+}
+
+function registryResultMessage(
+  result: Extract<Awaited<ReturnType<typeof runRegistryFlow>>, { kind: "done" }>,
+): string {
+  const lines = [`Added ${joinedTitles(result.items.map((item) => item.title))}`];
+  for (const item of result.items) {
+    if (item.facts.length === 0 && item.output.length === 0) continue;
+    lines.push("", item.title);
+    const width = Math.max(0, ...item.facts.map((fact) => fact.label.length));
+    for (const fact of item.facts) lines.push(`  ${fact.label.padEnd(width)}  ${fact.value}`);
+    for (const output of item.output) lines.push(`  ${output}`);
+  }
+  return lines.join("\n");
 }
 
 export interface TuiSetupCommandResult {
@@ -107,6 +131,9 @@ function muteableRenderer(
         renderer.renderLine(text, tone);
       }
     },
+    replaceContent: (content) => {
+      if (!isMuted()) renderer.replaceContent?.(content);
+    },
     renderOutput: (text) => {
       if (!isMuted()) renderer.renderOutput(text);
     },
@@ -146,6 +173,7 @@ export async function runTuiSetupCommand(
     return {
       ...settled,
       message: `/${command} interrupted.`,
+      tone: "error",
       preserveFlowDiagnostics: true,
     };
   } finally {
@@ -188,6 +216,7 @@ async function executeSetupCommand(
           appRoot,
           prompter,
           signal,
+          chatGptAccountLabel: input.chatGptAccountLabel,
           deps: {
             pickModelSettings: (request) => renderer.readModelEditor(request),
             runProviderFlow: (providerInput) =>
@@ -197,6 +226,8 @@ async function executeSetupCommand(
         if (input.initialModelStep !== undefined) {
           modelInput.initialStep = input.initialModelStep;
         }
+        modelInput.withExclusiveTerminal = (task) =>
+          renderer.withInheritedStdio(() => input.withExclusiveTerminal?.(task) ?? task());
         const result = await flows.runModelFlow(modelInput);
         if (result.kind === "cancelled") {
           return {
@@ -209,19 +240,19 @@ async function executeSetupCommand(
         }
         // One line per completed menu action: the apply line (it already
         // distinguishes success from a rejected slug), then the provider
-        // outcome when that sub-flow also ran.
+        // selection when that sub-flow also ran.
         const lines: string[] = [];
         if (result.modelMessage !== undefined) lines.push(result.modelMessage);
-        if (result.providerOutcome !== undefined) {
-          lines.push(providerOutcomeMessage(result.providerOutcome));
+        if (result.providerSelection !== undefined) {
+          lines.push(providerSelectionMessage(result.providerSelection));
         }
         const outcome: TuiSetupCommandResult = {
           message: lines.join("\n"),
           preserveFlowDiagnostics: false,
         };
-        // Provider setup can change both the local env and Vercel identity.
-        // The runner refreshes the complete model-access view after the flow.
-        if (result.providerOutcome !== undefined) {
+        // A model edit can also move routing between AI Gateway and ChatGPT.
+        // The runner rebuilds authored artifacts before refreshing model access.
+        if (result.accessChanged) {
           outcome.effect = { kind: "model-access-changed" };
         }
         return outcome;
@@ -231,17 +262,16 @@ async function executeSetupCommand(
         if (result.kind === "cancelled") {
           return { message: "/add dismissed.", preserveFlowDiagnostics: true };
         }
-        if (result.addedItems.length > 0) {
-          return {
-            message: [
-              `Registry items added: ${result.addedItems.join(", ")}.`,
-              ...(result.output ?? []),
-            ].join("\n"),
-            tone: "success",
-            preserveFlowDiagnostics: true,
-          };
-        }
-        return { message: "No registry items added.", preserveFlowDiagnostics: true };
+        const outcome: TuiSetupCommandResult = {
+          message:
+            result.addedItems.length > 0
+              ? registryResultMessage(result)
+              : "No registry items added.",
+          preserveFlowDiagnostics: true,
+        };
+        if (result.addedItems.length > 0) outcome.tone = "success";
+        if (result.deployed === "production") outcome.effect = { kind: "deployed" };
+        return outcome;
       }
       case "deploy": {
         const result = await flows.runDeployFlow({ appRoot, prompter, interactive: true, signal });
@@ -254,6 +284,13 @@ async function executeSetupCommand(
             preserveFlowDiagnostics: true,
           };
         }
+        if (result.kind === "local-model") {
+          return {
+            message:
+              "ChatGPT subscription models are local-only. Switch to an AI Gateway or server-authenticated model before deploying.",
+            preserveFlowDiagnostics: true,
+          };
+        }
         return {
           message:
             result.productionUrl === undefined ? "Deployed." : `Deployed: ${result.productionUrl}`,
@@ -263,6 +300,14 @@ async function executeSetupCommand(
       }
     }
   } catch (error) {
+    if (error instanceof RegistryFlowFailedError) {
+      const completed = error.completed;
+      return {
+        message: `${registryResultMessage(completed)}\n\n${error.message}`,
+        tone: "error",
+        preserveFlowDiagnostics: true,
+      };
+    }
     if (error instanceof WizardCancelledError) {
       return {
         message: `/${command} dismissed.`,
@@ -464,42 +509,9 @@ function loginResultMessage(result: LoginFlowResult): TuiSetupCommandResult {
   }
 }
 
-/**
- * The persistent outcome line for /model's completed provider sub-flow. The
- * panel's success lines vanish with it, so the outcome carries the substance:
- * what the directory now reads (the same detection the menu shows) and which
- * credential is ready, or what to do next. "Project linked" is only claimed
- * when a link is actually detected — the own-key branch pastes a credential
- * without linking anything.
- */
-function providerOutcomeMessage(outcome: ModelProviderOutcome): string {
-  const { resolution, status } = outcome;
-  if (status.kind === "gateway-project") {
-    if (resolution === undefined) {
-      return "Project linked. No model credential found; set AI_GATEWAY_API_KEY in .env.local.";
-    }
-    if (resolution.credential === "oidc") {
-      return "Project linked. Connected to AI Gateway via VERCEL_OIDC_TOKEN.";
-    }
-    // A gateway key outranks the project's OIDC token at runtime — claiming
-    // the OIDC connection while the key authenticates every call would split
-    // this message from the status bar and the actual resolution.
-    if (resolution.shadowedOidc !== undefined) {
-      const from = resolution.source.kind === "shell" ? "shell" : resolution.source.path;
-      const remove =
-        resolution.source.kind === "shell"
-          ? "unset it in your shell"
-          : `remove it from ${resolution.source.path}`;
-      return (
-        `Project linked. AI_GATEWAY_API_KEY (${from}) outranks the project's ` +
-        `VERCEL_OIDC_TOKEN and stays the active credential — ${remove} to run on the project.`
-      );
-    }
-    return "Project linked. Connected to AI Gateway via AI_GATEWAY_API_KEY.";
-  }
-  if (status.kind === "gateway-key") {
-    const where = status.source.kind === "shell" ? "your shell" : status.source.path;
-    return `Connected to AI Gateway via ${status.envKey} in ${where}.`;
-  }
-  return "Provider updated — no gateway credential detected; set AI_GATEWAY_API_KEY in .env.local.";
+function providerSelectionMessage(selection: ProviderSelection): string {
+  if (selection === "chatgpt") return "ChatGPT subscription selected.";
+  return selection === "ai-gateway-project"
+    ? "AI Gateway via Project selected."
+    : "AI Gateway via API key selected.";
 }

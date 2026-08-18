@@ -409,6 +409,19 @@ describe("ClientSession", () => {
     });
   });
 
+  it("serializes turnPolicy with a fixed-session message", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createAcceptedResponse());
+    const session = createSession();
+
+    await session.send("Wait your turn", { turnPolicy: "queue" });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({
+      message: "Wait your turn",
+      turnPolicy: "queue",
+    });
+  });
+
   it("serializes clientContext when continuing a session", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createAcceptedResponse());
     const session = createSession({
@@ -787,6 +800,71 @@ describe("ClientSession", () => {
     ]);
   });
 
+  it("keeps following an active turn while authorization is pending", async () => {
+    let streamRequest = 0;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return createAcceptedResponse();
+      }
+
+      streamRequest += 1;
+      if (streamRequest === 1) {
+        return createStreamResponse([{ type: "authorization.required", data: {} }]);
+      }
+      if (streamRequest <= 7) {
+        return createStreamResponse([]);
+      }
+      return createStreamResponse([
+        { type: "authorization.completed", data: {} },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
+      ]);
+    });
+    const session = createSession();
+
+    vi.useFakeTimers();
+    try {
+      const eventTypes = await collectEventTypes(await session.send("first"));
+      expect(eventTypes).toEqual([
+        "authorization.required",
+        "authorization.completed",
+        "session.waiting",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(9);
+    expect(session.state.streamIndex).toBe(3);
+  });
+
+  it("honors an explicit idle reconnect limit for an active turn", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      return (init?.method ?? "GET") === "POST"
+        ? createAcceptedResponse()
+        : createStreamResponse([]);
+    });
+    const session = createSession();
+
+    vi.useFakeTimers();
+    try {
+      const eventTypes = await collectEventTypes(
+        await session.send("first", {
+          streamReconnectPolicy: {
+            streamIdleReconnectPolicy: { baseDelayMs: 10, maxAttempts: 2 },
+          },
+        }),
+      );
+      expect(eventTypes).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
   it("preserves the session cursor when a turn stream is aborted mid-flight", async () => {
     const encoder = new TextEncoder();
     const abortController = new AbortController();
@@ -871,5 +949,43 @@ describe("ClientSession", () => {
       sessionId: "session_1",
       streamIndex: 2,
     });
+  });
+
+  it("hands the cursor from an aborted idle follow to the next send", async () => {
+    const streamStartIndices: Array<string | null> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      if ((init?.method ?? "GET") === "POST") return createAcceptedResponse();
+      const url =
+        typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
+      streamStartIndices.push(new URL(url).searchParams.get("startIndex"));
+      return createStreamResponse([
+        { type: "turn.started", data: {} },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "eve:test", wait: "next-user-message" },
+        },
+      ]);
+    });
+    const session = createSession({
+      sessionId: "session_1",
+      streamIndex: 0,
+    });
+    const idleAbort = new AbortController();
+
+    vi.useFakeTimers();
+    try {
+      for await (const event of session.stream({ signal: idleAbort.signal })) {
+        if (event.type === "session.waiting") idleAbort.abort();
+      }
+
+      expect(session.state.streamIndex).toBe(2);
+      expect(await collectEventTypes(await session.send("follow up"))).toEqual([
+        "turn.started",
+        "session.waiting",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(streamStartIndices).toEqual([null, "2"]);
   });
 });

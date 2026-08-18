@@ -100,13 +100,14 @@ function collectHostedTraceDependencies(
   preparedHost: PreparedApplicationHost,
   configuredOptionalEnginePackages: readonly string[],
 ): string[] {
-  const agentNodes = [
-    preparedHost.compileResult.manifest,
-    ...preparedHost.compileResult.manifest.subagents.map((subagent) => subagent.agent),
+  const configuredExternalDependencies = [
+    ...(preparedHost.compileResult.manifest.config.build?.externalDependencies ?? []),
+    ...preparedHost.compileResult.manifest.subagents.flatMap((subagent) =>
+      subagent.configResolver === undefined
+        ? (subagent.agent.config.build?.externalDependencies ?? [])
+        : (subagent.configResolver.build?.externalDependencies ?? []),
+    ),
   ];
-  const configuredExternalDependencies = agentNodes.flatMap(
-    (node) => node.config.build?.externalDependencies ?? [],
-  );
   // Nitro already classifies known native and non-bundleable packages through
   // its nf3 database. traceDeps is only for eve-owned or author-configured
   // additions to that upstream policy.
@@ -519,9 +520,11 @@ function addDynamicCapabilityTransformPlugin(nitro: Nitro): void {
  */
 function addInstrumentationModuleSideEffectsPlugin(
   nitro: Nitro,
-  instrumentationModulePath: string,
+  instrumentationModulePaths: readonly string[],
 ): void {
-  const normalizedInstrumentationModulePath = normalizePath(instrumentationModulePath);
+  const normalizedInstrumentationModulePaths = new Set(
+    instrumentationModulePaths.map(normalizePath),
+  );
 
   nitro.hooks.hook("rollup:before", (_nitro, config) => {
     if (!Array.isArray(config.plugins)) {
@@ -531,7 +534,7 @@ function addInstrumentationModuleSideEffectsPlugin(
     config.plugins.unshift({
       name: "eve:instrumentation-module-side-effects",
       resolveId(source: string) {
-        if (normalizePath(source) !== normalizedInstrumentationModulePath) {
+        if (!normalizedInstrumentationModulePaths.has(normalizePath(source))) {
           return null;
         }
 
@@ -681,10 +684,10 @@ function configureSharedApplicationNitro(
 
   addDynamicCapabilityTransformPlugin(nitro);
 
-  if (preparedHost.compiledArtifacts.instrumentationSourcePath !== undefined) {
+  if (preparedHost.compiledArtifacts.instrumentationSourcePaths !== undefined) {
     addInstrumentationModuleSideEffectsPlugin(
       nitro,
-      preparedHost.compiledArtifacts.instrumentationSourcePath,
+      preparedHost.compiledArtifacts.instrumentationSourcePaths,
     );
   }
 }

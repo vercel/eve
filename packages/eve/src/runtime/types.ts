@@ -49,13 +49,14 @@ export type ResolvedModuleSourceRef = Readonly<ModuleSourceRef>;
  * `instructions.{ts,...}`.
  *
  * Module-backed instructions sources are executed once at build time —
- * the resulting markdown is captured here. Runtime never re-evaluates
+ * the resulting content is captured here. Runtime never re-evaluates
  * the module.
  */
 export type ResolvedInstructionsDefinition = Readonly<
   SourceRef & {
+    content: string;
     name: string;
-    markdown: string;
+    role: "system" | "user";
   } & (Omit<MarkdownSourceRef<undefined>, "definition"> | ModuleSourceRef)
 >;
 
@@ -144,6 +145,7 @@ export type ResolvedSandboxDefinition = ResolvedModuleSourceRef & {
    */
   readonly backend: SandboxBackend;
   readonly description?: string;
+  readonly inheritsParent?: boolean;
   readonly onSession?: (input: SandboxSessionContext) => Promise<void> | void;
 };
 
@@ -228,6 +230,7 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
   readonly name: string;
   readonly method: ChannelRouteMethod;
   readonly adapter?: ChannelAdapter;
+  readonly turnPolicy?: CompiledChannel["turnPolicy"];
   readonly cors?: NormalizedChannelCorsOptions;
   readonly urlPath: string;
   readonly fetch: (req: Request, ctx: RouteContext) => Promise<Response>;
@@ -321,11 +324,22 @@ export interface ResolvedDynamicSubagentDefinition extends Readonly<ModuleSource
 /**
  * Runtime-owned additive agent configuration resolved from `agent.ts`.
  */
+type ResolvedAgentDefinitionBase = Omit<InternalAgentDefinition, "build" | "model" | "source"> & {
+  source?: Readonly<NonNullable<InternalAgentDefinition["source"]>>;
+};
+
 export type ResolvedAgentDefinition = Readonly<
-  Omit<InternalAgentDefinition, "build" | "source"> & {
-    dynamicModel?: RuntimeDynamicModelReference;
-    source?: Readonly<NonNullable<InternalAgentDefinition["source"]>>;
-  }
+  ResolvedAgentDefinitionBase &
+    (
+      | {
+          dynamicModel?: never;
+          model: InternalAgentDefinition["model"];
+        }
+      | {
+          dynamicModel: RuntimeDynamicModelReference;
+          model?: never;
+        }
+    )
 >;
 
 /**
@@ -390,7 +404,7 @@ export interface ResolvedDynamicInstructionsResolver extends Readonly<ModuleSour
  */
 export interface ResolvedAgent {
   readonly channels: readonly ResolvedChannelDefinition[];
-  readonly config: ResolvedAgentDefinition;
+  readonly config?: ResolvedAgentDefinition;
   readonly connections: readonly ResolvedConnectionDefinition[];
   /**
    * Logical names of framework-provided channels the author opted out of by
@@ -425,7 +439,7 @@ export interface ResolvedAgent {
    * `instructions.{ts,...}`, or `undefined` when the agent does not
    * declare one.
    */
-  readonly instructions?: ResolvedInstructionsDefinition;
+  readonly instructions: readonly ResolvedInstructionsDefinition[];
   /**
    * Authored sandbox override for this agent, when one exists. `null`
    * means the agent uses the framework default sandbox unchanged.

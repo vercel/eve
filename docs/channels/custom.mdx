@@ -7,7 +7,7 @@ When eve doesn't ship a channel for your surface, you build one. Custom channels
 
 ## File location and identity
 
-Custom channels live in `agent/channels/` at the root agent. Local subagents do not declare channels today.
+Custom channels live in `agent/channels/` at the root agent or in an [extension](../extensions) mounted there. Local subagents do not declare channels today.
 
 The channel file stem becomes the channel id, so `agent/channels/internal-webhook.ts` is addressed as `internal-webhook`. Export the channel definition as the module's default export.
 
@@ -108,6 +108,26 @@ await session.clear();
 await session.reset({ reason: "Retire this session" });
 await session.getEventStream({ startIndex: 12 });
 ```
+
+Message sends use the channel's `turnPolicy`, which defaults to `"steer"`. An accepted message arriving during an active turn is durably buffered before eve cancels that turn and starts the message as a replacement turn. Configure `turnPolicy: "queue"` on `defineChannel(...)` when active turns should finish in order, or override one send:
+
+```ts
+export default defineChannel({
+  turnPolicy: "queue",
+  routes: [
+    POST("/messages", async (request, { from }) => {
+      const body = await request.json();
+      await from(body.threadId).send(body.message, {
+        auth: null,
+        turnPolicy: "steer",
+      });
+      return new Response(null, { status: 202 });
+    }),
+  ],
+});
+```
+
+The same override is available on fixed `Session.send(...)` and cross-channel `to(...).send(...)`. `respond(...)` never steers: it delivers only addressed input responses. Use `cancel()` when you need to stop work without a replacement message.
 
 Attaching does no lookup. The first operation reports whether the ID is active.
 Call `resolveSession(address)` only when you explicitly need to snapshot an
@@ -368,10 +388,11 @@ defineChannel({
 
 The `URL` object survives the queue boundary as a string and is reconstituted inside the workflow step. The staging pipeline calls `fetchFile` with the URL serialized as a string (the URL's `href`), which is why the example matches on `url.startsWith(...)`. Return bytes to stage the file to the sandbox, or `null` to let the URL pass through to the model provider.
 
-The framework handles staging bytes to the sandbox, enforcing upload policy, hydrating files for the model call, and reconstituting `URL` objects after queue serialization.
+The framework handles staging bytes to the sandbox, enforcing upload policy, hydrating files for the model call, and reconstituting `URL` objects after queue serialization. See [Inbound attachments](../sandbox#inbound-attachments) for the shared storage, size, and provider-input behavior.
 
 ## What to read next
 
 - [Channels overview](./overview)
 - [Dynamic capabilities](../guides/dynamic-capabilities)
 - [Auth & route protection](../guides/auth-and-route-protection)
+- [Universal Commerce Protocol (UCP)](../protocols/ucp): serve a UCP profile from a custom channel

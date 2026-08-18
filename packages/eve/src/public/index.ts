@@ -10,6 +10,7 @@ export {
   type AgentModelDefinition,
   type AgentModelOptionsDefinition,
   type AgentReasoningDefinition,
+  type AgentStaticModelDefinition,
   type AgentWorkflowDefinition,
   type AgentWorkflowWorldDefinition,
   type DefinedAgent,

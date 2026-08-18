@@ -2,7 +2,7 @@ import type { TelegramInstrumentationMetadata } from "#public/channels/telegram/
 import { defaultDeliverResult, type ChannelAdapterContext } from "#channel/adapter.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
-import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
+import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
@@ -109,6 +109,8 @@ export interface TelegramReceiveTarget {
 export type TelegramInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Overrides the workflow run title without changing the message sent to the model. */
+  readonly title?: string;
 } | null;
 
 /** Sync or async {@link TelegramInboundResult}. */
@@ -166,6 +168,8 @@ export interface TelegramChannelConfig {
   ) => TelegramInboundResultOrPromise;
   /** Override the default webhook route path (`/eve/v1/telegram`). */
   readonly route?: string;
+  /** Policy for accepted messages that arrive while a turn is active. */
+  readonly turnPolicy?: TurnPolicy;
   /** Inbound upload policy for Telegram photos and documents. */
   readonly uploadPolicy?: UploadPolicyInput;
 }
@@ -213,6 +217,7 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
     TelegramInstrumentationMetadata
   >({
     kindHint: "telegram",
+    turnPolicy: config.turnPolicy,
     state: initialTelegramState(config.botUsername),
     metadata: (state) => ({
       chatId: state.chatId,
@@ -526,6 +531,7 @@ async function dispatchMessage(input: {
         auth: result.auth,
         context: [contextBlock, ...channelContext],
         state,
+        title: result.title,
       });
     } else {
       await source.respond(replyInputResponses, {

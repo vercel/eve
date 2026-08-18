@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
+import {
+  fireSessionCallbackStep,
+  fireTaskUpdateCallbackStep,
+} from "#execution/session-callback-step.js";
 
 const USAGE = { cacheReadTokens: 10, cacheWriteTokens: 5, inputTokens: 100, outputTokens: 50 };
 
@@ -138,7 +141,7 @@ describe("fireSessionCallbackStep", () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
-  it("never includes usage on failed callbacks", async () => {
+  it("includes usage on failed callbacks", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -149,7 +152,7 @@ describe("fireSessionCallbackStep", () => {
       usage: USAGE,
     });
 
-    expect(parsePostedBody(fetchMock).usage).toBeUndefined();
+    expect(parsePostedBody(fetchMock).usage).toEqual(USAGE);
   });
 
   it("posts the failed callback with the normalized error message", async () => {
@@ -298,12 +301,43 @@ describe("fireSessionCallbackStep", () => {
   });
 });
 
-function parsePostedBody(fetchMock: ReturnType<typeof vi.fn>): { usage?: unknown } {
+describe("fireTaskUpdateCallbackStep", () => {
+  it("posts a progress update over a task-owned callback", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const taskId = await fireTaskUpdateCallbackStep({
+      callback: {
+        callId: "parent-call",
+        subagentName: "research",
+        taskId: "task_abc",
+        token: "task-token",
+        url: "https://caller.example.com/eve/v1/callback/task-token",
+      },
+      callId: "update-call",
+      childStepIndex: 2,
+      childTurnId: "turn-child",
+      message: "Found three matching records.",
+    });
+
+    expect(taskId).toBe("task_abc");
+    expect(parsePostedBody(fetchMock)).toEqual({
+      callId: "update-call",
+      childStepIndex: 2,
+      childTurnId: "turn-child",
+      kind: "task.update",
+      message: "Found three matching records.",
+      taskId: "task_abc",
+    });
+  });
+});
+
+function parsePostedBody(fetchMock: ReturnType<typeof vi.fn>): Record<string, unknown> {
   const call = fetchMock.mock.calls[0];
   if (call === undefined) {
     throw new Error("expected fetch to have been called");
   }
-  return JSON.parse((call[1] as { body: string }).body) as { usage?: unknown };
+  return JSON.parse((call[1] as { body: string }).body) as Record<string, unknown>;
 }
 
 function createSerializedContext(): Record<string, unknown> {

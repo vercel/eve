@@ -4,10 +4,11 @@ import type { Runtime, SessionCapabilities } from "#channel/types.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import { createHarnessDelegationToolDefinition } from "#execution/delegation-tool.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation-runtime.js";
+import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
 import { UNSPECIFIED_INPUT_SCHEMA } from "#shared/tool-schema.js";
@@ -22,6 +23,10 @@ import {
   AGENT_TOOL_NAME,
   isImplicitAgentToolAvailable,
 } from "#runtime/framework-tools/agent.js";
+import {
+  createTaskToolHarnessDefinitions,
+  isTaskToolAvailable,
+} from "#runtime/framework-tools/tasks.js";
 import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
@@ -108,6 +113,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     mode: input.mode,
     onCompaction: preserveFrameworkStateOnCompaction,
     persistentSubagentSessions:
+      input.node.agent.config?.experimental?.tasks === true ||
       input.node.agent.config?.experimental?.subagentPersistentSessions === true,
     dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
@@ -135,10 +141,6 @@ export function buildRuntimeIdentity(node: ResolvedRuntimeAgentNode): RuntimeIde
     agentId: node.turnAgent.id,
     agentName: node.agent.config?.name,
     eveVersion: packageInfo.version,
-    modelId:
-      node.turnAgent.dynamicModel === undefined
-        ? node.turnAgent.model.id
-        : `dynamic:${node.turnAgent.model.id}`,
   };
 
   const gitSha = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
@@ -174,7 +176,6 @@ function createRuntimeDynamicModelEventDispatcher(
       ctx: input.ctx,
       dynamicModel,
       event: input.event,
-      fallback: input.fallback,
       messages: input.messages,
       scope,
     });
@@ -214,6 +215,7 @@ export function createNodeHarnessTools(input: {
     tools.set(AGENT_TOOL_NAME, {
       description: AGENT_TOOL_DESCRIPTION,
       inputSchema:
+        input.node.agent.config?.experimental?.tasks === true ||
         input.node.agent.config?.experimental?.subagentPersistentSessions === true
           ? PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA
           : SUBAGENT_TOOL_INPUT_SCHEMA,
@@ -224,6 +226,20 @@ export function createNodeHarnessTools(input: {
         subagentName: AGENT_TOOL_NAME,
       },
     });
+  }
+
+  const tasksEnabled = input.node.agent.config?.experimental?.tasks === true;
+  for (const definition of createTaskToolHarnessDefinitions()) {
+    if (
+      isTaskToolAvailable({
+        disabledFrameworkTools: input.node.agent.disabledFrameworkTools,
+        hasAuthoredTool: tools.has(definition.name),
+        tasksEnabled,
+        toolName: definition.name,
+      })
+    ) {
+      tools.set(definition.name, definition);
+    }
   }
 
   return tools;
@@ -260,6 +276,8 @@ function resolveHarnessToolDefinition(input: {
       rawExecute,
       scope: def.name,
     }),
+    frameworkAction:
+      isFrameworkTool && def.name === LOAD_SKILL_TOOL_NAME ? "load-skill" : undefined,
     inputSchema: def.inputSchema ?? UNSPECIFIED_INPUT_SCHEMA,
     name: def.name,
     approval: def.approval,

@@ -18,6 +18,8 @@ function createFakeAccess(files: Record<string, string>): SandboxAccess {
       return { initialized: false, session: null };
     },
 
+    async stop() {},
+
     async get() {
       return {
         id: "test-write-file-sandbox",
@@ -109,6 +111,8 @@ describe("defineWriteFileTool", () => {
       async captureState() {
         return { initialized: false, session: null };
       },
+
+      async stop() {},
 
       async get() {
         return null;

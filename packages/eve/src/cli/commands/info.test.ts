@@ -6,6 +6,7 @@ import {
   createCompiledAgentManifest,
   createCompiledAgentNodeManifest,
   type CompiledChannelEntry,
+  type CompiledInstructionsDefinition,
   type CompiledScheduleDefinition,
   type CompiledSubagentNode,
   ROOT_COMPILED_AGENT_NODE_ID,
@@ -63,7 +64,11 @@ function makeSubagent(name: string): CompiledSubagentNode {
 }
 
 function makeCompiledState(
-  options: { subagents?: CompiledSubagentNode[]; schedules?: CompiledScheduleDefinition[] } = {},
+  options: {
+    instructions?: CompiledInstructionsDefinition[];
+    subagents?: CompiledSubagentNode[];
+    schedules?: CompiledScheduleDefinition[];
+  } = {},
 ): CompileAgentResult {
   const channels: CompiledChannelEntry[] = [
     {
@@ -98,6 +103,7 @@ function makeCompiledState(
       name: "triage-bot",
     },
     channels,
+    instructions: options.instructions ?? [],
     tools: [
       {
         description: "Create a triage ticket.",
@@ -181,6 +187,37 @@ describe("buildApplicationInfoJson", () => {
 
     expect(json.subagents).toEqual(["research"]);
     expect(json.schedules).toEqual(["morning-digest", "weekly-report"]);
+  });
+
+  test("projects ordered instruction paths with their roles", () => {
+    const json = buildApplicationInfoJson({
+      application: getApplicationInfo(APP_ROOT),
+      compiledState: makeCompiledState({
+        instructions: [
+          {
+            content: "Standing rules.",
+            logicalPath: "instructions/10-rules.ts",
+            name: "instructions/10-rules",
+            role: "system",
+            sourceId: "instructions/10-rules.ts",
+            sourceKind: "module",
+          },
+          {
+            content: "Imported brief.",
+            logicalPath: "instructions/20-brief.ts",
+            name: "instructions/20-brief",
+            role: "user",
+            sourceId: "instructions/20-brief.ts",
+            sourceKind: "module",
+          },
+        ],
+      }),
+      messaging: MESSAGING,
+    });
+
+    expect(json.instructions).toBe(
+      "instructions/10-rules.ts (system), instructions/20-brief.ts (user)",
+    );
   });
 
   test("reports an unavailable contract when the project is not compiled", () => {

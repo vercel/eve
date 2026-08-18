@@ -52,6 +52,33 @@ describe("coalesceDeliveries", () => {
       ]),
     ).toThrow("Cannot coalesce deliveries from different turns.");
   });
+
+  it("reindexes all delivery metadata while coalescing", () => {
+    const metadata = (deliveryId: string) => ({
+      channelKind: "channel:slack",
+      channelName: "slack",
+      deliveryId,
+      payloadIndex: 0,
+    });
+
+    const result = coalesceDeliveries([
+      {
+        deliveryMetadata: [metadata("delivery-1")],
+        kind: "deliver" as const,
+        payloads: [{ message: "first" }],
+      },
+      {
+        deliveryMetadata: [metadata("delivery-2")],
+        kind: "deliver" as const,
+        payloads: [{ message: "second" }],
+      },
+    ]);
+
+    expect(result.deliveryMetadata).toEqual([
+      metadata("delivery-1"),
+      { ...metadata("delivery-2"), payloadIndex: 1 },
+    ]);
+  });
 });
 
 describe("coalesceTurnInputs", () => {

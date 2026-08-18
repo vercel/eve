@@ -6,8 +6,13 @@ import type {
   SelectOption,
   SingleSelectOptions,
 } from "#setup/prompter.js";
+import { runDeployFlow } from "#setup/flows/deploy.js";
+import { detectDeployment } from "#setup/project-resolution.js";
+import type { RegistrySetupFact } from "#setup/registry-setup-protocol.js";
 import { WizardCancelledError } from "#setup/step.js";
 import { withSpinner } from "#setup/with-spinner.js";
+
+import { createRegistrySession } from "./registry-session.js";
 
 const ADDRESS_PREFIX = "address:";
 const BACK = "action:back";
@@ -56,13 +61,32 @@ const REGISTRY_CATEGORIES: ReadonlyArray<{
 
 export interface RegistryFlowDeps {
   browseRegistryCatalog: (typeof import("#cli/commands/registry.js"))["browseRegistryCatalog"];
+  detectDeployment: typeof detectDeployment;
   getRegistryItemManifest: (typeof import("#cli/commands/registry.js"))["getRegistryItemManifest"];
   installRegistryItem: (typeof import("#cli/commands/registry.js"))["installRegistryItem"];
+  runDeployFlow: typeof runDeployFlow;
 }
 
 export type RegistryFlowResult =
-  | { kind: "done"; addedItems: readonly string[]; output?: readonly string[] }
+  | {
+      kind: "done";
+      addedItems: readonly string[];
+      items: readonly import("./registry-session.js").RegistrySessionItemResult[];
+      facts: readonly RegistrySetupFact[];
+      output?: readonly string[];
+      deployed?: "production";
+    }
   | { kind: "cancelled" };
+
+export class RegistryFlowFailedError extends Error {
+  readonly completed: Extract<RegistryFlowResult, { kind: "done" }>;
+
+  constructor(error: unknown, completed: Extract<RegistryFlowResult, { kind: "done" }>) {
+    super(error instanceof Error ? error.message : String(error), { cause: error });
+    this.name = "RegistryFlowFailedError";
+    this.completed = completed;
+  }
+}
 
 function itemLabel(item: RegistryCatalogItem): string {
   if (item.title !== undefined) return item.title;
@@ -178,7 +202,14 @@ async function inspectItem(
   item: RegistryCatalogItem,
   resolvedManifest?: Record<string, unknown>,
   signal?: AbortSignal,
-): Promise<{ kind: "added"; output: readonly string[] } | { kind: "back" }> {
+): Promise<
+  | {
+      kind: "added";
+      output: readonly string[];
+      setup?: Awaited<ReturnType<RegistryFlowDeps["installRegistryItem"]>>["setup"];
+    }
+  | { kind: "back" }
+> {
   const manifest =
     resolvedManifest ??
     manifestRecord(
@@ -209,8 +240,8 @@ async function inspectItem(
           prompter,
           signal,
         });
-      const output = await (prompter.withExclusiveTerminal?.(install) ?? install());
-      return { kind: "added", output };
+      const result = await (prompter.withExclusiveTerminal?.(install) ?? install());
+      return { kind: "added", ...result };
     } finally {
       spinner?.stop();
     }
@@ -254,10 +285,13 @@ export async function runRegistryFlow(input: {
   }
   const deps: RegistryFlowDeps = {
     browseRegistryCatalog: input.deps?.browseRegistryCatalog ?? loaded!.browseRegistryCatalog,
+    detectDeployment: input.deps?.detectDeployment ?? detectDeployment,
     getRegistryItemManifest: input.deps?.getRegistryItemManifest ?? loaded!.getRegistryItemManifest,
     installRegistryItem: input.deps?.installRegistryItem ?? loaded!.installRegistryItem,
+    runDeployFlow: input.deps?.runDeployFlow ?? runDeployFlow,
   };
   let notices: SelectNotice[] = [];
+  const session = createRegistrySession(deps);
 
   try {
     while (true) {
@@ -279,7 +313,7 @@ export async function runRegistryFlow(input: {
         notices,
       });
       notices = [];
-      if (selectedCategory === DONE) return { kind: "done", addedItems: [] };
+      if (selectedCategory === DONE) return session.result();
 
       const categoryItems = itemsForCategory(catalog.items, selectedCategory);
       const rows = itemRows(categoryItems);
@@ -315,18 +349,26 @@ export async function runRegistryFlow(input: {
         "manifest" in resolved ? resolved.manifest : undefined,
         input.signal,
       );
-      if (inspected.kind === "added") {
-        return inspected.output.length === 0
-          ? { kind: "done", addedItems: [resolved.item.address] }
-          : {
-              kind: "done",
-              addedItems: [resolved.item.address],
-              output: inspected.output,
-            };
-      }
+      if (inspected.kind !== "added") continue;
+
+      session.add(
+        resolved.item.address,
+        itemLabel(resolved.item),
+        inspected.output,
+        inspected.setup,
+      );
+      const next = await session.continueAfterInstall({
+        appRoot: input.appRoot,
+        prompter: input.prompter,
+        signal: input.signal,
+      });
+      if (next === "add-more") continue;
+      return next;
     }
   } catch (error) {
     if (error instanceof WizardCancelledError) return { kind: "cancelled" };
+    const completed = session.result();
+    if (completed.addedItems.length > 0) throw new RegistryFlowFailedError(error, completed);
     throw error;
   }
 }

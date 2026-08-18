@@ -47,6 +47,23 @@ export interface SubagentRunInputBuild {
 }
 
 /**
+ * Runtime graph shape needed to answer sandbox-inheritance questions for
+ * one declared child node. Partial test bundles may omit the graph.
+ */
+export interface SubagentSandboxGraph {
+  readonly nodesByNodeId: ReadonlyMap<
+    string,
+    {
+      readonly sandboxRegistry: {
+        readonly sandbox: {
+          readonly definition: { readonly inheritsParent?: boolean };
+        } | null;
+      };
+    }
+  >;
+}
+
+/**
  * Builds the {@link RunInput} for one delegated subagent child run.
  */
 export function buildSubagentRunInput(input: {
@@ -68,6 +85,13 @@ export function buildSubagentRunInput(input: {
    */
   readonly fanoutSize?: number;
   readonly initiatorAuth: SessionAuthContext | null;
+  /**
+   * Runtime graph used to detect whether this declared child selected the
+   * dispatching parent's sandbox. Absence means no inheritance.
+   */
+  readonly graph?: SubagentSandboxGraph;
+  /** Durable session identity of the sandbox currently used by the parent. */
+  readonly sandboxSessionId?: string;
   /** Hook token owned by the workflow currently waiting for this child. */
   readonly parentContinuationToken?: string;
   readonly parentTraceContext?: SessionTraceContext;
@@ -109,21 +133,28 @@ export function buildSubagentRunInput(input: {
     -readonly [K in keyof RunSessionLimits]: RunSessionLimits[K];
   } = resolveRemainingSessionTokenLimits(session, input.fanoutSize);
   const requestedOutputSchema = normalizeRequestedOutputSchema(action.input.outputSchema);
+  const adapterState: Record<string, unknown> = {
+    callId: action.callId,
+    parentContinuationToken: input.parentContinuationToken ?? session.continuationToken,
+    parentSessionId: session.sessionId,
+    subagentName: action.subagentName,
+  };
+  const sharesSandbox =
+    input.graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox?.definition
+      .inheritsParent === true || action.subagentName === "agent";
+  if (sharesSandbox) {
+    if (session.sandboxState !== undefined) {
+      adapterState.parentSandboxState = session.sandboxState;
+    }
+    adapterState.sandboxSessionId = input.sandboxSessionId ?? session.sessionId;
+  }
 
   const runInput: {
     -readonly [K in keyof RunInput]: RunInput[K];
   } = {
     adapter: {
       kind: SUBAGENT_ADAPTER_KIND,
-      state: {
-        callId: action.callId,
-        parentContinuationToken: input.parentContinuationToken ?? session.continuationToken,
-        parentSessionId: session.sessionId,
-        subagentName: action.subagentName,
-        ...(action.subagentName === "agent" && session.sandboxState
-          ? { parentSandboxState: session.sandboxState, sandboxSessionId: session.sessionId }
-          : {}),
-      },
+      state: adapterState,
     },
     auth,
     capabilities,

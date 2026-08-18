@@ -32,6 +32,7 @@ export type {
   GetEventStreamOptions,
   ResetSessionResult,
   SessionCallback,
+  TurnPolicy,
 } from "#channel/types.js";
 export type { Session, SessionHandle } from "#channel/session.js";
 export type { SessionRespondOptions, SessionSendOptions } from "#channel/session.js";
@@ -44,7 +45,7 @@ export type {
   ChannelSource,
 };
 export type { ChannelCors, ChannelCorsOptions } from "#channel/cors.js";
-export { GET, POST, PUT, PATCH, DELETE, WS } from "#channel/routes.js";
+export { DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT, WS } from "#channel/routes.js";
 export type {
   AttachSessionFn,
   HttpRouteDefinition,
@@ -64,7 +65,7 @@ export type {
  * is a webhook. Override only when authoring a non-webhook route such as a
  * long-poll endpoint or an event-stream reader.
  */
-export type ChannelMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+export type ChannelMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
 
 /**
  * Method-like discriminator used by compiled channel route entries.
@@ -181,6 +182,8 @@ type ChannelSessionFailedHandler<TCtx> = (
  * and the channel context, with no `ctx`; its data includes `sessionId`.
  */
 export interface ChannelEvents<TCtx = void> {
+  readonly "approval.candidate"?: ChannelEventHandler<"approval.candidate", TCtx>;
+  readonly "approval.settled"?: ChannelEventHandler<"approval.settled", TCtx>;
   readonly "context.cleared"?: ChannelEventHandler<"context.cleared", TCtx>;
   readonly "compaction.requested"?: ChannelEventHandler<"compaction.requested", TCtx>;
   readonly "compaction.completed"?: ChannelEventHandler<"compaction.completed", TCtx>;
@@ -287,6 +290,8 @@ export function defineChannel<
 // The Record type fails to compile if this map drifts from the ChannelEvents
 // keys in either direction.
 const channelEventTypes: Record<keyof ChannelEvents, null> = {
+  "approval.candidate": null,
+  "approval.settled": null,
   "context.cleared": null,
   "compaction.requested": null,
   "compaction.completed": null,
@@ -387,8 +392,9 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
       };
     },
 
-    deliver(payload: DeliverPayload) {
-      return defaultDeliverResult(payload);
+    deliver(payload: DeliverPayload, adapterCtx) {
+      if (definition.deliver === undefined) return defaultDeliverResult(payload);
+      return definition.deliver(payload, adapterCtx as TCtx);
     },
 
     ...eventHandlers,

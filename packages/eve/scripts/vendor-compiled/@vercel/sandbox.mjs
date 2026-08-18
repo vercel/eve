@@ -23,7 +23,8 @@ async function discoverDeclarationFiles({ distDir }) {
  * or local stubs, while Node built-ins remain external.
  */
 export default {
-  packageName: "@vercel/sandbox",
+  packageName: "@vercel/sandbox-drives",
+  packageJsonName: "@vercel/sandbox",
   compiledPath: "@vercel/sandbox",
   plugins: [createOptionalNativeStubPlugin(["fsevents"])],
   copyDeclarations: createDeclarationCopier({

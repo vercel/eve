@@ -52,7 +52,10 @@ describe("eve ID-addressed session routes", () => {
     const response = await route("POST", "/eve/v1/session")(
       new Request("https://eve.test/eve/v1/session", {
         body: JSON.stringify({ message: "hello" }),
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
+        },
         method: "POST",
       }),
       args,
@@ -64,6 +67,16 @@ describe("eve ID-addressed session routes", () => {
       sessionId: "wrun_A",
       status: "accepted",
     });
+    expect(createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentTraceContext: {
+          isRemote: true,
+          spanId: "2".repeat(16),
+          traceFlags: 1,
+          traceId: "1".repeat(32),
+        },
+      }),
+    );
     expect(createSession).toHaveBeenCalledWith(
       expect.not.objectContaining({ continuationToken: expect.anything() }),
     );

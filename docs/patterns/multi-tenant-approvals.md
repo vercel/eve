@@ -1,5 +1,5 @@
 ---
-title: "Multi-tenant approvals"
+title: "Multi-Tenant Approvals"
 description: "Resolve tenant policy asynchronously for authored tools, OpenAPI operations, and MCP tools."
 ---
 

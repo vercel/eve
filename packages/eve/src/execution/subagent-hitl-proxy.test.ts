@@ -35,7 +35,7 @@ describe("routeDeliverPayload", () => {
       payload: {
         inputResponses: [
           { optionId: "approve", requestId: "req-a" },
-          { optionId: "deny", requestId: "req-b" },
+          { optionId: "cancel", requestId: "req-b" },
           { optionId: "ignore", requestId: "req-parent" },
         ],
       },
@@ -46,7 +46,7 @@ describe("routeDeliverPayload", () => {
     const childA = routed.forChildren.find((c) => c.childContinuationToken === "child-a");
     const childB = routed.forChildren.find((c) => c.childContinuationToken === "child-b");
     expect(childA?.payload.inputResponses).toEqual([{ optionId: "approve", requestId: "req-a" }]);
-    expect(childB?.payload.inputResponses).toEqual([{ optionId: "deny", requestId: "req-b" }]);
+    expect(childB?.payload.inputResponses).toEqual([{ optionId: "cancel", requestId: "req-b" }]);
 
     expect(routed.forSelf?.inputResponses).toEqual([
       { optionId: "ignore", requestId: "req-parent" },
@@ -85,6 +85,106 @@ describe("routeDeliverPayload", () => {
     expect(routed.forSelf).toBeUndefined();
   });
 
+  it("keeps one task response batch atomic and marks it for its task run", () => {
+    const session = upsertProxyInputRequests({
+      entries: [
+        [
+          "task-1:req-a",
+          {
+            childContinuationToken: "child-a",
+            childRequestId: "req-a",
+            kind: "tool-approval",
+            taskId: "task-1",
+          },
+        ],
+        [
+          "task-1:req-b",
+          {
+            childContinuationToken: "child-a",
+            childRequestId: "req-b",
+            kind: "question",
+            taskId: "task-1",
+          },
+        ],
+      ],
+      forChildContinuationToken: "child-a",
+      session: createSession(),
+    });
+
+    const routed = routeDeliverPayload({
+      payload: {
+        inputResponses: [
+          { optionId: "approve", requestId: "task-1:req-a" },
+          { text: "west", requestId: "task-1:req-b" },
+        ],
+      },
+      state: session.state,
+    });
+
+    expect(routed.forChildren).toEqual([
+      {
+        childContinuationToken: "child-a",
+        payload: {
+          inputResponses: [
+            { optionId: "approve", requestId: "req-a" },
+            { text: "west", requestId: "req-b" },
+          ],
+        },
+        retireRequestIds: ["task-1:req-a", "task-1:req-b"],
+        taskId: "task-1",
+      },
+    ]);
+  });
+
+  it("keeps identical child-local ids isolated across tasks", () => {
+    let session = upsertProxyInputRequests({
+      entries: [
+        [
+          "task-1:req-shared",
+          {
+            childContinuationToken: "child-a",
+            childRequestId: "req-shared",
+            kind: "tool-approval",
+            taskId: "task-1",
+          },
+        ],
+      ],
+      forChildContinuationToken: "child-a",
+      session: createSession(),
+    });
+    session = upsertProxyInputRequests({
+      entries: [
+        [
+          "task-2:req-shared",
+          {
+            childContinuationToken: "child-b",
+            childRequestId: "req-shared",
+            kind: "tool-approval",
+            taskId: "task-2",
+          },
+        ],
+      ],
+      forChildContinuationToken: "child-b",
+      session,
+    });
+
+    const routed = routeDeliverPayload({
+      payload: {
+        inputResponses: [{ optionId: "approve", requestId: "task-1:req-shared" }],
+      },
+      state: session.state,
+    });
+
+    expect(routed.forChildren).toEqual([
+      {
+        childContinuationToken: "child-a",
+        payload: { inputResponses: [{ optionId: "approve", requestId: "req-shared" }] },
+        retireRequestIds: ["task-1:req-shared"],
+        taskId: "task-1",
+      },
+    ]);
+  });
+
   it("asks the parent to cancel after routing Stop to a descendant session-limit request", () => {
     const session = upsertProxyInputRequests({
       entries: [["req-limit", { childContinuationToken: "child-a", kind: "session-limit" }]],
@@ -103,6 +203,7 @@ describe("routeDeliverPayload", () => {
       {
         childContinuationToken: "child-a",
         payload: { inputResponses: [{ optionId: "stop", requestId: "req-limit" }] },
+        retireRequestIds: ["req-limit"],
       },
     ]);
     expect(routed.parentAction).toEqual({ kind: "cancel-turn" });

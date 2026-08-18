@@ -3,8 +3,8 @@
 import { createCodePlugin } from "@streamdown/code";
 import { geistShikiTheme } from "@vercel/geistdocs/shiki-theme";
 import { useMemo } from "react";
-import { type Components, Streamdown } from "streamdown";
-import { resolveReadmeHref } from "@/lib/templates/readme-links";
+import { type Components, defaultRemarkPlugins, Streamdown } from "streamdown";
+import { createResolveReadmeLinksPlugin, resolveReadmeHref } from "@/lib/templates/readme-links";
 
 interface TemplateReadmeProps {
   readme: string;
@@ -15,6 +15,13 @@ export const TemplateReadme = ({ readme, sourceRevisionHref }: TemplateReadmePro
   const codePlugin = useMemo(
     () => createCodePlugin({ themes: [geistShikiTheme, geistShikiTheme] }),
     [],
+  );
+  const remarkPlugins = useMemo(
+    () => [
+      ...Object.values(defaultRemarkPlugins),
+      createResolveReadmeLinksPlugin(sourceRevisionHref),
+    ],
+    [sourceRevisionHref],
   );
   const components = useMemo<Partial<Components>>(
     () => ({
@@ -63,6 +70,7 @@ export const TemplateReadme = ({ readme, sourceRevisionHref }: TemplateReadmePro
       disallowedElements={["img"]}
       mode="static"
       plugins={{ code: codePlugin }}
+      remarkPlugins={remarkPlugins}
       shikiTheme={[geistShikiTheme, geistShikiTheme]}
     >
       {readme}

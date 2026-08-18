@@ -27,8 +27,7 @@ describe("SKILL_TOOL_DEFINITION", () => {
       "Loading adds the skill instructions to the current turn.",
     );
     expect(SKILL_TOOL_DEFINITION.description).toContain("Available skills block");
-    expect(SKILL_TOOL_DEFINITION.description).toContain("not for MCP connections");
-    expect(SKILL_TOOL_DEFINITION.description).toContain("connection_search");
+    expect(SKILL_TOOL_DEFINITION.description).not.toContain("connection_search");
   });
 });
 
@@ -71,6 +70,7 @@ describe("load_skill executor", () => {
     const access = {
       captureState: vi.fn(async () => ({ initialized: false, session: null })),
       get,
+      stop: vi.fn(async () => {}),
     };
     const ctx = new ContextContainer();
     ctx.set(SandboxKey, access);

@@ -1,12 +1,23 @@
 import { resumeHook } from "#internal/workflow/runtime.js";
+import { z } from "#compiled/zod/index.js";
 import { REMOTE_AGENT_FAILED } from "#harness/agent-handle-errors.js";
 import { EVE_CALLBACK_ROUTE_PATTERN } from "#protocol/routes.js";
 import type { ChannelMethod, RouteContext } from "#public/definitions/channel.js";
+import type { SubagentAuthorizationEvent } from "#channel/types.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
-import { agentTurnOutcomeSchema, type AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
+import { agentTurnOutcomeSchema } from "#shared/agent-turn-outcome.js";
+import { jsonValueSchema } from "#shared/json-schemas.js";
 import type { JsonValue } from "#shared/json.js";
+import { isInputRequest } from "#runtime/input/types.js";
 import { tokenUsageSchema, type TokenUsage } from "#shared/token-usage.js";
+import type {
+  TaskInboundAuthorizationEvent,
+  TaskInboundInputRequest,
+  TaskInboundTurnStarted,
+  TaskInboundUpdate,
+} from "#tasks/types.js";
+import { readTaskIdFromInboxToken } from "#tasks/task-id.js";
 
 export const HTTP_SESSION_CALLBACK_CHANNEL_NAME_PREFIX = "eve/v1/callback";
 
@@ -19,46 +30,142 @@ const ZERO_TOKEN_USAGE: TokenUsage = {
   outputTokens: 0,
 };
 
+// Wire schemas of the child→parent callback route. Possession of the
+// callback token is the authorization to settle; results bind to the
+// pending call by callId. `sessionId` is informational (tracing and
+// diagnostics) and never verified — new senders emit it, older eve
+// deployments may omit it.
+
+const eventCoordinateSchema = z.number().int().nonnegative();
+
+const authorizationChallengeSchema = z.looseObject({
+  displayName: z.string().optional(),
+  expiresAt: z.string().optional(),
+  instructions: z.string().optional(),
+  url: z.string().optional(),
+  userCode: z.string().optional(),
+});
+
 /**
- * Wire payload of the child→parent callback route. Possession of the
- * callback token is the authorization to settle; results bind to the
- * pending call by callId. `sessionId` is informational (tracing and
- * diagnostics) and never verified — new senders emit it, older eve
- * deployments may omit it.
+ * Event payloads validate the fields the parent consumes and pass any
+ * remaining keys through unchanged (loose objects): the parent re-emits
+ * the event, so a newer child extending an event is never rejected here.
  */
-type SessionCallbackPayload =
-  | {
-      readonly callId: string;
-      readonly kind: "session.completed";
-      readonly output: JsonValue;
-      readonly sessionId?: string;
-      readonly subagentName: string;
-      readonly usage?: TokenUsage;
-    }
-  | {
-      readonly callId: string;
-      /** Absent on callbacks from older eve deployments. */
-      readonly error?: JsonValue;
-      readonly kind: "session.failed";
-      readonly sessionId?: string;
-      readonly subagentName: string;
-    }
-  | {
-      readonly callId: string;
-      readonly kind: "turn.completed";
-      readonly outcome: AgentTurnOutcome;
-      readonly output: JsonValue;
-      readonly sessionId?: string;
-      readonly subagentName: string;
-    }
-  | {
-      readonly callId: string;
-      readonly error: JsonValue;
-      readonly kind: "turn.failed";
-      readonly outcome: AgentTurnOutcome;
-      readonly sessionId?: string;
-      readonly subagentName: string;
-    };
+const taskInputEventSchema: z.ZodType<TaskInboundInputRequest["event"]> = z.looseObject({
+  requests: z.array(jsonValueSchema.refine(isInputRequest)).min(1),
+  sequence: eventCoordinateSchema,
+  stepIndex: eventCoordinateSchema,
+  turnId: z.string(),
+});
+
+const taskAuthorizationEventSchema: z.ZodType<SubagentAuthorizationEvent> = z.discriminatedUnion(
+  "type",
+  [
+    z.looseObject({
+      data: z.looseObject({
+        attemptId: z.string().optional(),
+        authorization: authorizationChallengeSchema.optional(),
+        description: z.string(),
+        name: z.string(),
+        sequence: eventCoordinateSchema,
+        stepIndex: eventCoordinateSchema,
+        turnId: z.string(),
+        webhookUrl: z.string().optional(),
+      }),
+      type: z.literal("authorization.required"),
+    }),
+    z.looseObject({
+      data: z.looseObject({
+        attemptId: z.string().optional(),
+        authorization: authorizationChallengeSchema.optional(),
+        name: z.string(),
+        outcome: z.enum(["authorized", "declined", "failed", "timed-out"]),
+        reason: z.string().optional(),
+        sequence: eventCoordinateSchema,
+        stepIndex: eventCoordinateSchema,
+        turnId: z.string(),
+      }),
+      type: z.literal("authorization.completed"),
+    }),
+  ],
+);
+
+const taskEventCallbackSchema = z.discriminatedUnion("kind", [
+  z.object({
+    callId: z.string(),
+    childContinuationToken: z.string(),
+    childSessionId: z.string(),
+    event: taskInputEventSchema,
+    kind: z.literal("task.input-requested"),
+    subagentName: z.string(),
+    taskId: z.string(),
+  }),
+  z.object({
+    callId: z.string(),
+    childContinuationToken: z.string(),
+    childSessionId: z.string(),
+    event: taskAuthorizationEventSchema,
+    kind: z.literal("task.authorization"),
+    subagentName: z.string(),
+    taskId: z.string(),
+  }),
+]);
+
+const taskTurnStartedCallbackSchema = z.object({
+  kind: z.literal("turn.started"),
+  sessionId: z.string().min(1),
+  taskId: z.string().min(1),
+  turnId: z.string().min(1),
+});
+
+const taskUpdateCallbackSchema = z.object({
+  callId: z.string().min(1),
+  childStepIndex: eventCoordinateSchema,
+  childTurnId: z.string().min(1),
+  kind: z.literal("task.update"),
+  message: z.string().min(1),
+  taskId: z.string().min(1),
+});
+
+/**
+ * Turn callbacks must carry the explicit `AgentTurnOutcome` envelope:
+ * the receiving parent settles the child's handle from `outcome.kind`, so
+ * a turn callback that cannot state its lifecycle is rejected rather than
+ * guessed at (pre-1.0: no wire compatibility shims). `usage` stays
+ * unvalidated here — {@link parseCallbackUsage} drops it, never rejects
+ * it, when malformed.
+ */
+const sessionResultCallbackSchema = z.discriminatedUnion("kind", [
+  z.object({
+    callId: z.string().min(1),
+    kind: z.literal("session.completed"),
+    output: jsonValueSchema.optional(),
+    subagentName: z.string().min(1),
+    usage: z.unknown().optional(),
+  }),
+  z.object({
+    callId: z.string().min(1),
+    /** Absent on callbacks from older eve deployments. */
+    error: jsonValueSchema.optional(),
+    kind: z.literal("session.failed"),
+    subagentName: z.string().min(1),
+    usage: z.unknown().optional(),
+  }),
+  z.object({
+    callId: z.string().min(1),
+    kind: z.literal("turn.completed"),
+    outcome: agentTurnOutcomeSchema,
+    output: jsonValueSchema.optional(),
+    subagentName: z.string().min(1),
+  }),
+  z.object({
+    callId: z.string().min(1),
+    error: jsonValueSchema,
+    kind: z.literal("turn.failed"),
+    outcome: agentTurnOutcomeSchema,
+    subagentName: z.string().min(1),
+  }),
+]);
 
 export function getSessionCallbackChannelDefinitions(): readonly ResolvedChannelDefinition[] {
   return HANDLED_METHODS.map((method) => buildCallbackChannelDefinition(method));
@@ -101,6 +208,39 @@ export async function handleSessionCallbackRequest(
     return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
   }
 
+  const taskEvent = projectTaskEvent(body, token);
+  if (taskEvent instanceof Response) return taskEvent;
+  if (taskEvent !== undefined) {
+    try {
+      await resumeHook(token, taskEvent);
+    } catch {
+      return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
+    }
+    return Response.json({ ok: true }, { status: 202 });
+  }
+
+  const update = projectTaskUpdate(body, token);
+  if (update instanceof Response) return update;
+  if (update !== undefined) {
+    try {
+      await resumeHook(token, update);
+    } catch {
+      return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
+    }
+    return Response.json({ ok: true }, { status: 202 });
+  }
+
+  const started = projectTaskTurnStarted(body, token);
+  if (started instanceof Response) return started;
+  if (started !== undefined) {
+    try {
+      await resumeHook(token, started);
+    } catch {
+      return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
+    }
+    return Response.json({ ok: true }, { status: 202 });
+  }
+
   const result = projectSessionCallbackResult(body);
   if (result instanceof Response) {
     return result;
@@ -118,24 +258,118 @@ export async function handleSessionCallbackRequest(
   return Response.json({ ok: true }, { status: 202 });
 }
 
+function callbackKind(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return undefined;
+  return Reflect.get(value, "kind");
+}
+
+function projectTaskEvent(
+  value: unknown,
+  token: string,
+): TaskInboundInputRequest | TaskInboundAuthorizationEvent | Response | undefined {
+  const kind = callbackKind(value);
+  if (kind !== "task.input-requested" && kind !== "task.authorization") return undefined;
+  const parsed = taskEventCallbackSchema.safeParse(value);
+  if (!parsed.success) {
+    return Response.json({ error: "Invalid task event callback.", ok: false }, { status: 400 });
+  }
+  const payload = parsed.data;
+  const tokenRejection = rejectMismatchedTaskToken(token, payload.taskId);
+  if (tokenRejection !== undefined) return tokenRejection;
+  if (payload.kind === "task.input-requested") {
+    return {
+      callId: payload.callId,
+      childContinuationToken: payload.childContinuationToken,
+      childSessionId: payload.childSessionId,
+      event: payload.event,
+      kind: "subagent-input-request",
+      subagentName: payload.subagentName,
+    };
+  }
+  return {
+    callId: payload.callId,
+    childSessionId: payload.childSessionId,
+    event: payload.event,
+    kind: "authorization-event",
+    subagentName: payload.subagentName,
+  };
+}
+
+function projectTaskTurnStarted(
+  value: unknown,
+  token: string,
+): TaskInboundTurnStarted | Response | undefined {
+  if (callbackKind(value) !== "turn.started") return undefined;
+  const parsed = taskTurnStartedCallbackSchema.safeParse(value);
+  if (!parsed.success) {
+    return Response.json(
+      { error: "Invalid task turn-start callback.", ok: false },
+      { status: 400 },
+    );
+  }
+  const tokenRejection = rejectMismatchedTaskToken(token, parsed.data.taskId);
+  if (tokenRejection !== undefined) return tokenRejection;
+  return {
+    childSessionId: parsed.data.sessionId,
+    childTurnId: parsed.data.turnId,
+    kind: "turn-started",
+    taskId: parsed.data.taskId,
+  };
+}
+
+function projectTaskUpdate(
+  value: unknown,
+  token: string,
+): TaskInboundUpdate | Response | undefined {
+  if (callbackKind(value) !== "task.update") return undefined;
+  const parsed = taskUpdateCallbackSchema.safeParse(value);
+  if (!parsed.success) {
+    return Response.json({ error: "Invalid task update callback.", ok: false }, { status: 400 });
+  }
+  const tokenRejection = rejectMismatchedTaskToken(token, parsed.data.taskId);
+  if (tokenRejection !== undefined) return tokenRejection;
+  return {
+    callId: parsed.data.callId,
+    childStepIndex: parsed.data.childStepIndex,
+    childTurnId: parsed.data.childTurnId,
+    kind: "task-update",
+    message: parsed.data.message,
+  };
+}
+
+function rejectMismatchedTaskToken(token: string, taskId: string): Response | undefined {
+  return readTaskIdFromInboxToken(token) === taskId
+    ? undefined
+    : Response.json({ error: "Task callback token mismatch.", ok: false }, { status: 403 });
+}
+
 function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResult | Response {
   if (value === null || typeof value !== "object") {
     return Response.json({ error: "Expected a JSON object.", ok: false }, { status: 400 });
   }
 
-  const payload = value as Partial<SessionCallbackPayload>;
-  if (typeof payload.callId !== "string" || payload.callId.length === 0) {
-    return Response.json({ error: "Missing callback callId.", ok: false }, { status: 400 });
+  const kind = callbackKind(value);
+  if (
+    kind !== "session.completed" &&
+    kind !== "session.failed" &&
+    kind !== "turn.completed" &&
+    kind !== "turn.failed"
+  ) {
+    return Response.json({ error: "Unsupported callback kind.", ok: false }, { status: 400 });
   }
-  if (typeof payload.subagentName !== "string" || payload.subagentName.length === 0) {
-    return Response.json({ error: "Missing callback subagentName.", ok: false }, { status: 400 });
+
+  const parsed = sessionResultCallbackSchema.safeParse(value);
+  if (!parsed.success) {
+    return Response.json({ error: "Invalid session result callback.", ok: false }, { status: 400 });
   }
+  const payload = parsed.data;
+
   // Task-session terminal callbacks carry no outcome envelope on the wire;
   // this boundary synthesizes the terminal verdict (a task session always
   // ends with its result) so the parent settles from an explicit outcome.
   if (payload.kind === "session.completed") {
     const output = payload.output ?? "";
-    const usage = parseCallbackUsage((payload as { usage?: unknown }).usage);
+    const usage = parseCallbackUsage(payload.usage);
     const base: RuntimeSubagentChildResult = {
       callId: payload.callId,
       kind: "subagent-result",
@@ -159,7 +393,7 @@ function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResul
             message: "Remote agent failed.",
           }
         : payload.error;
-    const usage = parseCallbackUsage((payload as { usage?: unknown }).usage);
+    const usage = parseCallbackUsage(payload.usage);
     return {
       callId: payload.callId,
       isError: true,
@@ -176,61 +410,28 @@ function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResul
   }
 
   if (payload.kind === "turn.completed") {
-    const outcome = parseCallbackOutcome((payload as { outcome?: unknown }).outcome);
-    if (outcome instanceof Response) {
-      return outcome;
-    }
-    const result: RuntimeSubagentChildResult = {
+    return {
       callId: payload.callId,
       kind: "subagent-result",
       origin: "child",
-      outcome,
+      outcome: payload.outcome,
       output: payload.output ?? "",
       subagentName: payload.subagentName,
       // Per-result usage projection (usage spans); the parent folds
       // `outcome.usageDelta`, never this field, when an outcome is present.
-      usage: outcome.usageDelta,
-    };
-    return result;
-  }
-
-  if (payload.kind === "turn.failed") {
-    if (payload.error === undefined) {
-      return Response.json({ error: "Missing callback error.", ok: false }, { status: 400 });
-    }
-    const outcome = parseCallbackOutcome((payload as { outcome?: unknown }).outcome);
-    if (outcome instanceof Response) {
-      return outcome;
-    }
-    return {
-      callId: payload.callId,
-      isError: true,
-      kind: "subagent-result",
-      origin: "child",
-      outcome,
-      output: payload.error,
-      subagentName: payload.subagentName,
+      usage: payload.outcome.usageDelta,
     };
   }
 
-  return Response.json({ error: "Unsupported callback kind.", ok: false }, { status: 400 });
-}
-
-/**
- * Turn callbacks must carry the explicit {@link AgentTurnOutcome} envelope:
- * the receiving parent settles the child's handle from `outcome.kind`, so
- * a turn callback that cannot state its lifecycle is rejected rather than
- * guessed at (pre-1.0: no wire compatibility shims).
- */
-function parseCallbackOutcome(value: unknown): AgentTurnOutcome | Response {
-  const parsed = agentTurnOutcomeSchema.safeParse(value);
-  if (!parsed.success) {
-    return Response.json(
-      { error: "Missing or invalid callback outcome.", ok: false },
-      { status: 400 },
-    );
-  }
-  return parsed.data;
+  return {
+    callId: payload.callId,
+    isError: true,
+    kind: "subagent-result",
+    origin: "child",
+    outcome: payload.outcome,
+    output: payload.error,
+    subagentName: payload.subagentName,
+  };
 }
 
 /**

@@ -8,6 +8,7 @@ import {
   createSkillToolDefinition,
   SKILL_TOOL_DEFINITION,
 } from "#runtime/framework-tools/skill.js";
+import { TASK_TOOL_DEFINITIONS } from "#runtime/framework-tools/tasks.js";
 import { TODO_TOOL_DEFINITION } from "#runtime/framework-tools/todo.js";
 import { WEB_FETCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-fetch.js";
 import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
@@ -47,8 +48,6 @@ const REGISTERED_FRAMEWORK_DYNAMIC_TOOLS: readonly FrameworkDynamicToolDefinitio
 const REGISTERED_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
   ASK_QUESTION_TOOL_DEFINITION,
   BASH_TOOL_DEFINITION,
-  GLOB_TOOL_DEFINITION,
-  GREP_TOOL_DEFINITION,
   READ_FILE_TOOL_DEFINITION,
   WRITE_FILE_TOOL_DEFINITION,
   TODO_TOOL_DEFINITION,
@@ -57,9 +56,16 @@ const REGISTERED_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
   SKILL_TOOL_DEFINITION,
 ];
 
+const OPT_IN_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
+  GLOB_TOOL_DEFINITION,
+  GREP_TOOL_DEFINITION,
+];
+
 const ALL_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
   ...REGISTERED_FRAMEWORK_TOOLS,
+  ...OPT_IN_FRAMEWORK_TOOLS,
   AGENT_TOOL_DEFINITION,
+  ...TASK_TOOL_DEFINITIONS,
 ];
 
 /**
@@ -104,6 +110,11 @@ export function getFrameworkDynamicToolResolvers(): readonly ResolvedDynamicTool
  */
 export function getAllFrameworkToolDefinitions(): readonly ResolvedToolDefinition[] {
   return ALL_FRAMEWORK_TOOLS;
+}
+
+/** Returns framework tools that authors must explicitly add to an agent. */
+export function getOptInFrameworkToolNames(): ReadonlySet<string> {
+  return new Set(OPT_IN_FRAMEWORK_TOOLS.map((definition) => definition.name));
 }
 
 /**

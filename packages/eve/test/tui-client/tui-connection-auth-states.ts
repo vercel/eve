@@ -55,12 +55,16 @@ class FakeSession extends ClientSession {
     const events = this.#turns[this.#turnIndex] ?? [];
     this.#turnIndex += 1;
     return new MessageResponse<TOutput>({
+      cancelTurn: async () => ({ status: "no_active_turn" }),
       sessionId: "fake-session",
       createStream: () => pacedEvents(events),
     });
   }
 
   override stream(): AsyncIterable<MessageStreamEvent> {
+    // A durable session tail cannot expose a callback continuation before
+    // the turn that parked for that callback has been accepted.
+    if (this.#continuationIndex >= this.#turnIndex) return pacedEvents([]);
     const events = this.#continuations[this.#continuationIndex] ?? [];
     this.#continuationIndex += 1;
     return pacedEvents(events);
@@ -98,7 +102,7 @@ const next = () => ++sequence;
 const firstTurn: UnstampedMessageStreamEvent[] = [
   { type: "session.started", data: {} },
   { type: "turn.started", data: { sequence: next(), turnId } },
-  { type: "step.started", data: { sequence: next(), stepIndex, turnId } },
+  { type: "step.started", data: { modelId: "eve-mock/test", sequence: next(), stepIndex, turnId } },
   {
     type: "authorization.required",
     data: {
@@ -126,6 +130,7 @@ const firstTurn: UnstampedMessageStreamEvent[] = [
 ];
 
 const firstCallbackTurn: UnstampedMessageStreamEvent[] = [
+  { type: "turn.started", data: { sequence: next(), turnId: "turn-1" } },
   {
     type: "authorization.completed",
     data: {
@@ -133,23 +138,27 @@ const firstCallbackTurn: UnstampedMessageStreamEvent[] = [
       outcome: "authorized",
       sequence: next(),
       stepIndex,
-      turnId,
+      turnId: "turn-1",
     },
   },
   {
     type: "step.completed",
-    data: { finishReason: "stop", sequence: next(), stepIndex, turnId },
+    data: { finishReason: "stop", sequence: next(), stepIndex, turnId: "turn-1" },
   },
+  { type: "turn.completed", data: { sequence: next(), turnId: "turn-1" } },
   {
     type: "session.waiting",
     data: { continuationToken: "session-id", wait: "next-user-message" },
   },
 ];
 
-const secondTurnId = "turn-1";
+const secondTurnId = "turn-2";
 const secondTurn: UnstampedMessageStreamEvent[] = [
   { type: "turn.started", data: { sequence: next(), turnId: secondTurnId } },
-  { type: "step.started", data: { sequence: next(), stepIndex, turnId: secondTurnId } },
+  {
+    type: "step.started",
+    data: { modelId: "eve-mock/test", sequence: next(), stepIndex, turnId: secondTurnId },
+  },
   {
     type: "authorization.required",
     data: {
@@ -175,6 +184,7 @@ const secondTurn: UnstampedMessageStreamEvent[] = [
 ];
 
 const secondCallbackTurn: UnstampedMessageStreamEvent[] = [
+  { type: "turn.started", data: { sequence: next(), turnId: "turn-3" } },
   {
     type: "authorization.completed",
     data: {
@@ -183,13 +193,14 @@ const secondCallbackTurn: UnstampedMessageStreamEvent[] = [
       reason: "access_denied",
       sequence: next(),
       stepIndex,
-      turnId: secondTurnId,
+      turnId: "turn-3",
     },
   },
   {
     type: "step.completed",
-    data: { finishReason: "stop", sequence: next(), stepIndex, turnId: secondTurnId },
+    data: { finishReason: "stop", sequence: next(), stepIndex, turnId: "turn-3" },
   },
+  { type: "turn.completed", data: { sequence: next(), turnId: "turn-3" } },
   {
     type: "session.waiting",
     data: { continuationToken: "session-id", wait: "next-user-message" },

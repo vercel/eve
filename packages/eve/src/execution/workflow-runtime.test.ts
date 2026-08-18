@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { SpanKind } from "#compiled/@opentelemetry/api/index.js";
+
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { ChannelRequestIdKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -20,6 +22,27 @@ const getWorldMock = vi.fn();
 const resumeHookMock = vi.fn();
 const cancelRunMock = vi.fn();
 const startMock = vi.fn();
+const startSpanMock = vi.fn();
+const endSpanMock = vi.fn();
+
+vi.mock("#compiled/@opentelemetry/api/index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("#compiled/@opentelemetry/api/index.js")>();
+  return {
+    ...actual,
+    trace: {
+      ...actual.trace,
+      getTracer: (name: string) => {
+        expect(name).toBe("workflow");
+        return {
+          startSpan: (...args: unknown[]) => {
+            startSpanMock(...args);
+            return { end: endSpanMock };
+          },
+        };
+      },
+    },
+  };
+});
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   cancelRun: (...args: unknown[]) => cancelRunMock(...args),
@@ -41,6 +64,8 @@ afterEach(() => {
   resumeHookMock.mockReset();
   cancelRunMock.mockReset();
   startMock.mockReset();
+  startSpanMock.mockReset();
+  endSpanMock.mockReset();
   vi.mocked(getCompiledRuntimeAgentBundle).mockReset();
   vi.unstubAllEnvs();
 });
@@ -275,6 +300,16 @@ describe("createWorkflowRuntime#resolveContinuation", () => {
 describe("createWorkflowRuntime#createSession", () => {
   const adapter: ChannelAdapter = { kind: "http" };
 
+  function createTestTurnAgent() {
+    return {
+      id: "test-agent",
+      instructions: [],
+      model: { id: "openai/gpt-5.5" },
+      tools: [],
+      workspaceSpec: { rootEntries: [] },
+    } as const;
+  }
+
   function buildRuntime(compiledArtifactsSource: RuntimeCompiledArtifactsSource) {
     return createWorkflowRuntime({ compiledArtifactsSource });
   }
@@ -290,6 +325,7 @@ describe("createWorkflowRuntime#createSession", () => {
           limits: sessionTimeoutMs === undefined ? undefined : { sessionTimeoutMs },
         },
       },
+      turnAgent: createTestTurnAgent(),
     } as never);
     getHookByTokenMock.mockResolvedValue({ runId: "driver-run" });
     getRunMock.mockReturnValue({
@@ -453,6 +489,7 @@ describe("createWorkflowRuntime#createSession", () => {
       compiledArtifactsSource,
       nodeId: "researcher",
       resolvedAgent: { config: {} },
+      turnAgent: createTestTurnAgent(),
     } as never);
     startMock.mockResolvedValue({ runId: "subagent-run" });
     getHookByTokenMock.mockResolvedValue({ runId: "subagent-run" });
@@ -562,6 +599,7 @@ describe("createWorkflowRuntime#createSession", () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       compiledArtifactsSource,
       resolvedAgent: { config: {} },
+      turnAgent: createTestTurnAgent(),
     } as never);
     const bytes = new TextEncoder().encode('{"type":"test.event"}\n');
     const getReadable = vi.fn(
@@ -595,4 +633,71 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(getRunMock).toHaveBeenCalledWith("driver-run");
     expect(getReadable).toHaveBeenCalledTimes(1);
   });
+
+  it("records live-follow read spans and preserves events", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      compiledArtifactsSource,
+      resolvedAgent: { config: {} },
+      turnAgent: createTestTurnAgent(),
+    } as never);
+    const events = [
+      { meta: { at: "invalid", id: "invalid" }, type: "test.event" },
+      { meta: { at: "2026-01-01T00:00:00.000Z", id: "valid" }, type: "test.event" },
+    ];
+    getRunMock.mockReturnValue({ getReadable: vi.fn(() => ndjsonReadable(...events)) });
+    startMock.mockResolvedValue({ runId: "driver-run" });
+    getHookByTokenMock.mockResolvedValue({ runId: "driver-run" });
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-01-01T00:00:00.123Z"));
+
+    const handle = await buildRuntime(compiledArtifactsSource).createSession({
+      adapter,
+      auth: null,
+      input: { message: "hello" },
+      mode: "task",
+    });
+
+    await expect(readAll(handle.events)).resolves.toEqual(events);
+    expect(startSpanMock).toHaveBeenCalledExactlyOnceWith("workflow.stream.follow.read", {
+      attributes: {
+        "workflow.run.id": "driver-run",
+        "workflow.stream.sequence": 1,
+      },
+      kind: SpanKind.CLIENT,
+      startTime: Date.parse("2026-01-01T00:00:00.000Z"),
+    });
+    expect(endSpanMock).toHaveBeenCalledExactlyOnceWith(Date.parse("2026-01-01T00:00:00.123Z"));
+  });
+
+  it("does not record replayable event streams", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    const event = {
+      meta: { at: "2026-01-01T00:00:00.000Z", id: "event-1" },
+      type: "test.event",
+    };
+    getRunMock.mockReturnValue({ getReadable: vi.fn(() => ndjsonReadable(event)) });
+
+    await expect(
+      readAll(await buildRuntime(compiledArtifactsSource).getEventStream("driver-run")),
+    ).resolves.toEqual([event]);
+    expect(startSpanMock).not.toHaveBeenCalled();
+  });
 });
+
+function ndjsonReadable(...events: unknown[]): ReadableStream<Uint8Array> {
+  const bytes = new TextEncoder().encode(
+    events.map((event) => `${JSON.stringify(event)}\n`).join(""),
+  );
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+}
+
+async function readAll<T>(stream: ReadableStream<T>): Promise<T[]> {
+  const values: T[] = [];
+  for await (const value of stream) values.push(value);
+  return values;
+}

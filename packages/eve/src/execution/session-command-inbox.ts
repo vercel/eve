@@ -2,6 +2,7 @@ import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type {
   DeliverHookPayload,
+  RuntimeActionResultHookPayload,
   SessionCommand,
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
@@ -16,7 +17,11 @@ import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
  * sessions are bounded by the 30-day default timeout, so the decode can be
  * dropped once runs created on those versions have aged out.
  */
-export type SessionInboxPayload = DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload;
+export type SessionInboxPayload =
+  | DeliverHookPayload
+  | RuntimeActionResultHookPayload
+  | SessionCommand
+  | SessionTimeoutHookPayload;
 
 interface HookRead {
   readonly order: number;
@@ -34,12 +39,38 @@ interface SessionCommandHookState {
   resolved?: HookRead;
 }
 
-/** Multiplexes one stable session hook and one rekeyable channel alias. */
+/** Which hook family produced an inbox read. */
+export type SessionInboxSource = "authorization" | "session";
+
+/**
+ * Multiplexes one stable session hook, one rekeyable channel alias, and one
+ * window-gated authorization-callback hook.
+ */
 export interface SessionCommandInbox {
+  /**
+   * Claims the session's authorization-callback hook as an inbox source.
+   * Its reads stay stashed until {@link setAuthorizationWindow} opens, so
+   * callbacks never surface as ordinary session activity.
+   */
+  claimAuthorization(token: string): Promise<void>;
   claimStable(token: string): Promise<void>;
   consumeNext(): void;
+  /** Whether an authorization read is already eligible to be consumed. */
+  hasReadyAuthorization(): boolean;
   next(): Promise<IteratorResult<SessionInboxPayload>>;
+  /**
+   * Like {@link next} but reports which hook family produced the read.
+   * Reads surface in one arrival order across every source, which keeps
+   * waits that interleave authorization callbacks with ordinary session
+   * activity deterministic under workflow replay.
+   */
+  nextWithSource(): Promise<{
+    result: IteratorResult<SessionInboxPayload>;
+    source: SessionInboxSource;
+  }>;
   rekeyContinuation(token: string): Promise<void>;
+  /** Opens or closes the surfacing window for authorization-callback reads. */
+  setAuthorizationWindow(open: boolean): void;
 }
 
 /** Adds workflow-entry lifecycle ownership to a session command inbox. */
@@ -57,13 +88,13 @@ export interface SessionCommandInboxHandle extends SessionCommandInbox {
 export function createSessionCommandInbox(): SessionCommandInboxHandle {
   let stable: SessionCommandHookState | undefined;
   let continuation: SessionCommandHookState | undefined;
+  let authorization: SessionCommandHookState | undefined;
   const retired: SessionCommandHookState[] = [];
   const ready: HookRead[] = [];
   let nextOrder = 0;
   let offered: Promise<IteratorResult<SessionInboxPayload>> | null = null;
   let offeredRead: HookRead | undefined;
   let wake: (() => void) | undefined;
-
   const enqueue = (read: HookRead): void => {
     ready.push(read);
     ready.sort((left, right) => left.order - right.order);
@@ -77,9 +108,10 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
     state.pending = true;
     state.resolved = undefined;
     const next = state.retired
-      ? Promise.resolve(state.hook).then(
-          (value): IteratorResult<SessionInboxPayload> => ({ done: false, value }),
-        )
+      ? Promise.resolve(state.hook).then((value): IteratorResult<SessionInboxPayload> => ({
+          done: false,
+          value,
+        }))
       : state.iterator.next();
     void next.then(
       (result) => {
@@ -111,11 +143,58 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
   };
 
   const states = (): readonly SessionCommandHookState[] =>
-    [stable, continuation, ...retired].filter(
+    [stable, continuation, authorization, ...retired].filter(
       (state): state is SessionCommandHookState => state !== undefined,
     );
 
+  const nextRead = (): Promise<IteratorResult<SessionInboxPayload>> => {
+    if (stable === undefined) {
+      throw new Error("Cannot wait for session commands before claiming the stable inbox.");
+    }
+
+    if (offered !== null) return offered;
+
+    const current = states();
+    for (const state of current) arm(state);
+
+    if (current.every((state) => state.closed)) {
+      offeredRead = {
+        order: nextOrder++,
+        result: { done: true, value: undefined },
+        state: stable,
+      };
+      offered = Promise.resolve(offeredRead.result);
+      return offered;
+    }
+
+    offered = (async () => {
+      while (ready.length === 0) {
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
+      }
+
+      const read = ready.shift()!;
+      offeredRead = read;
+      return read.result;
+    })();
+    return offered;
+  };
+
   return {
+    async claimAuthorization(token: string): Promise<void> {
+      if (authorization !== undefined) {
+        if (authorization.hook.token === token) return;
+        throw new Error("A session command inbox cannot change its authorization token.");
+      }
+
+      const candidate = createState(token);
+      await claimHookOwnership(candidate.hook);
+      // Stays disabled until the driver opens the authorization window;
+      // resolved reads stash on the state and enqueue when it opens.
+      authorization = candidate;
+    },
+
     async claimStable(token: string): Promise<void> {
       if (stable !== undefined) {
         if (stable.hook.token === token) return;
@@ -141,46 +220,68 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
     },
 
     async dispose(): Promise<void> {
-      const active = [continuation, stable].filter(
+      // Disposed without closing iterators: a session cancelled while a
+      // durable read is in flight only honors `return()` after that read
+      // settles, so hooks are swept instead.
+      const active = [continuation, stable, authorization].filter(
         (state): state is SessionCommandHookState => state !== undefined,
       );
       continuation = undefined;
       stable = undefined;
+      authorization = undefined;
       await Promise.all(active.map(async (state) => await disposeHook(state.hook)));
     },
 
-    next(): Promise<IteratorResult<SessionInboxPayload>> {
-      if (stable === undefined) {
-        throw new Error("Cannot wait for session commands before claiming the stable inbox.");
-      }
+    hasReadyAuthorization(): boolean {
+      if (authorization?.enabled !== true || authorization.resolved === undefined) return false;
+      if (offeredRead !== undefined) return offeredRead.state === authorization;
+      return ready[0]?.state === authorization;
+    },
 
-      if (offered !== null) return offered;
+    next: nextRead,
 
-      const current = states();
-      for (const state of current) arm(state);
+    async nextWithSource(): Promise<{
+      result: IteratorResult<SessionInboxPayload>;
+      source: SessionInboxSource;
+    }> {
+      const result = await nextRead();
+      return {
+        result,
+        source:
+          offeredRead !== undefined && offeredRead.state === authorization
+            ? "authorization"
+            : "session",
+      };
+    },
 
-      if (current.every((state) => state.closed)) {
-        offeredRead = {
-          order: nextOrder++,
-          result: { done: true, value: undefined },
-          state: stable,
-        };
-        offered = Promise.resolve(offeredRead.result);
-        return offered;
-      }
-
-      offered = (async () => {
-        while (ready.length === 0) {
-          await new Promise<void>((resolve) => {
-            wake = resolve;
-          });
+    setAuthorizationWindow(open: boolean): void {
+      if (authorization === undefined) {
+        if (open) {
+          throw new Error("Cannot open the authorization window before claiming its hook.");
         }
-
-        const read = ready.shift()!;
-        offeredRead = read;
-        return read.result;
-      })();
-      return offered;
+        return;
+      }
+      if (open) {
+        if (!authorization.enabled) enable(authorization);
+        if (
+          offeredRead !== undefined &&
+          offeredRead.state !== authorization &&
+          authorization.resolved !== undefined &&
+          authorization.resolved.order < offeredRead.order
+        ) {
+          enqueue(offeredRead);
+          offeredRead = undefined;
+          offered = null;
+        }
+        if (offered !== null) arm(authorization);
+        return;
+      }
+      authorization.enabled = false;
+      // Un-surface a stashed read that was enqueued but not consumed so it
+      // re-enqueues when the window reopens. Callers close the window only
+      // after consuming any authorization read they were offered.
+      const enqueued = ready.findIndex((read) => read.state === authorization);
+      if (enqueued !== -1) ready.splice(enqueued, 1);
     },
 
     async rekeyContinuation(token: string): Promise<void> {

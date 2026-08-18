@@ -87,14 +87,14 @@ describe("resolveWebSearchBackend", () => {
     openaiWebSearch.mockClear();
   });
 
-  it("returns 'parallel' for an OpenAI gateway model by default", () => {
+  it("returns 'exa' for an OpenAI gateway model by default", () => {
     const ref: RuntimeModelReference = { id: "openai/gpt-5.4" };
-    expect(resolveWebSearchBackend(ref)).toBe("parallel");
+    expect(resolveWebSearchBackend(ref)).toBe("exa");
   });
 
-  it("returns the configured Exa provider for a gateway model", () => {
+  it("returns the configured Parallel provider for a gateway model", () => {
     const ref: RuntimeModelReference = { id: "openai/gpt-5.4" };
-    expect(resolveWebSearchBackend(ref, "exa")).toBe("exa");
+    expect(resolveWebSearchBackend(ref, "parallel")).toBe("parallel");
   });
 
   it("returns 'openai' for a BYO OpenAI model", () => {
@@ -110,9 +110,9 @@ describe("resolveWebSearchBackend", () => {
     expect(resolveWebSearchBackend(ref, "exa")).toBe("openai");
   });
 
-  it("returns 'parallel' for an Anthropic gateway model", () => {
+  it("returns 'exa' for an Anthropic gateway model", () => {
     const ref: RuntimeModelReference = { id: "anthropic/claude-opus-4.6" };
-    expect(resolveWebSearchBackend(ref)).toBe("parallel");
+    expect(resolveWebSearchBackend(ref)).toBe("exa");
   });
 
   it("returns 'anthropic' for a BYO Anthropic model", () => {
@@ -141,14 +141,14 @@ describe("resolveWebSearchBackend", () => {
     expect(resolveWebSearchBackend(ref)).toBe("google");
   });
 
-  it("returns 'parallel' for a Google model on AI Gateway", () => {
+  it("returns 'exa' for a Google model on AI Gateway", () => {
     const ref: RuntimeModelReference = { id: "google/gemini-3.1-pro" };
-    expect(resolveWebSearchBackend(ref)).toBe("parallel");
+    expect(resolveWebSearchBackend(ref)).toBe("exa");
   });
 
-  it("returns 'parallel' for any other AI Gateway model", () => {
+  it("returns 'exa' for any other AI Gateway model", () => {
     const ref: RuntimeModelReference = { id: "mistral/mistral-large" };
-    expect(resolveWebSearchBackend(ref)).toBe("parallel");
+    expect(resolveWebSearchBackend(ref)).toBe("exa");
   });
 
   it("returns null for a BYO non-OpenAI/Anthropic/Google model", () => {

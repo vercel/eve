@@ -45,7 +45,7 @@ function buildHookContext(ctx: ContextContainer): HookContext {
   return {
     ...callbackCtx,
     agent: {
-      name: bundle.resolvedAgent.config.name ?? "agent",
+      name: bundle.turnAgent.id,
       nodeId: bundle.nodeId,
     },
     channel: {

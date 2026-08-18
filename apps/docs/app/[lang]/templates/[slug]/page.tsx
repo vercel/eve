@@ -146,7 +146,7 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
                 <dd className="mt-2 text-copy-14">
                   <a
                     className="break-words rounded-sm font-medium text-gray-900 underline decoration-gray-400 underline-offset-4 outline-none transition-colors hover:text-gray-1000 hover:decoration-gray-1000 focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100 motion-reduce:transition-none"
-                    href={`https://github.com/${entry.githubOwner}/${entry.githubRepo}`}
+                    href={entry.sourceRevisionHref}
                     rel="noopener noreferrer"
                     target="_blank"
                   >

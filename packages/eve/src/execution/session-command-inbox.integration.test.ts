@@ -22,7 +22,15 @@ describe("session command inbox integration", () => {
 
       await expect(
         runtime.dispatchContinuation({
-          command: { kind: "send", payload: { message: "legacy-compatible" } },
+          command: {
+            delivery: {
+              channelKind: "channel:http",
+              channelName: "http",
+              deliveryId: "legacy-delivery",
+            },
+            kind: "send",
+            payload: { message: "legacy-compatible" },
+          },
           continuationToken: token,
         }),
       ).resolves.toEqual({ sessionId: run.runId, status: "accepted" });
@@ -45,7 +53,15 @@ describe("session command inbox integration", () => {
 
       await expect(
         runtime.dispatchContinuation({
-          command: { kind: "send", payload: { message: "mid-cohort-compatible" } },
+          command: {
+            delivery: {
+              channelKind: "channel:http",
+              channelName: "http",
+              deliveryId: "mid-cohort-delivery",
+            },
+            kind: "send",
+            payload: { message: "mid-cohort-compatible" },
+          },
           continuationToken: token,
         }),
       ).resolves.toEqual({ sessionId: run.runId, status: "accepted" });

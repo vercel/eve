@@ -29,7 +29,10 @@ describe("TurnControlReceiver", () => {
   });
 
   it("forwards a buffered delivery and consumes it once the turn accepts", async () => {
-    const delivery: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "hello" }] };
+    const delivery: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ inputResponses: [{ optionId: "yes", requestId: "input-1" }] }],
+    };
     installControlHook([
       deliveryRequest("req-1"),
       { kind: "turn-delivery-accepted", requestId: "req-1" },
@@ -48,7 +51,10 @@ describe("TurnControlReceiver", () => {
   });
 
   it("re-buffers the outstanding delivery when the turn cancels its request", async () => {
-    const delivery: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "hello" }] };
+    const delivery: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ inputResponses: [{ optionId: "yes", requestId: "input-1" }] }],
+    };
     installControlHook([
       deliveryRequest("req-1"),
       { kind: "turn-delivery-cancelled", requestId: "req-1" },
@@ -66,7 +72,7 @@ describe("TurnControlReceiver", () => {
   it("keeps earlier remainders ahead of an unresolved delivery when the turn terminates", async () => {
     const outstanding: DeliverHookPayload = {
       kind: "deliver",
-      payloads: [{ message: "outstanding" }],
+      payloads: [{ inputResponses: [{ optionId: "yes", requestId: "input-1" }] }],
     };
     const earlierRemainder: DeliverHookPayload = {
       kind: "deliver",
@@ -133,10 +139,85 @@ describe("TurnControlReceiver", () => {
         payload: { message: "follow up" },
         payloads: [{ message: "follow up" }],
         requestId: undefined,
+        turnPolicy: undefined,
       },
       { kind: "deliver", payloads: [{ message: "legacy follow up" }] },
     ]);
     expect(bufferedSessionControls).toEqual(["clear", "compact", "expired"]);
+  });
+
+  it("consumes a replayed task delivery only once", async () => {
+    installControlHook([parkResult()], true);
+    const bufferedDeliveries: DeliverHookPayload[] = [];
+    const caller = {
+      callId: "call-task",
+      replyTo: { kind: "hook" as const, token: "task-token" },
+      subagentName: "research",
+      taskId: "task-1",
+    };
+
+    await runReceiver(bufferedDeliveries, {
+      commandInbox: createCommandInbox([
+        { caller, kind: "send", payload: { message: "once" } },
+        { caller, kind: "send", payload: { message: "duplicate" } },
+      ]),
+      seenTaskDeliveries: new Set(),
+    });
+
+    expect(bufferedDeliveries.map((delivery) => delivery.payloads[0]?.message)).toEqual(["once"]);
+  });
+
+  it("deduplicates a replayed task response without dropping a different partial response", async () => {
+    installControlHook([parkResult()], true);
+    const bufferedDeliveries: DeliverHookPayload[] = [];
+
+    await runReceiver(bufferedDeliveries, {
+      commandInbox: createCommandInbox([
+        {
+          kind: "send",
+          payload: { inputResponses: [{ requestId: "q1" }] },
+          taskDeliveryId: "task-1:q1",
+        },
+        {
+          kind: "send",
+          payload: { inputResponses: [{ requestId: "q1" }] },
+          taskDeliveryId: "task-1:q1",
+        },
+        {
+          kind: "send",
+          payload: { inputResponses: [{ requestId: "q2" }] },
+          taskDeliveryId: "task-1:q2",
+        },
+      ]),
+      seenTaskDeliveries: new Set(),
+    });
+
+    expect(
+      bufferedDeliveries.map((delivery) => delivery.payloads[0]?.inputResponses?.[0]?.requestId),
+    ).toEqual(["q1", "q2"]);
+  });
+
+  it("discards queued deliveries when their task is cancelled", async () => {
+    installControlHook([parkResult()], true);
+    const bufferedDeliveries: DeliverHookPayload[] = [];
+
+    await runReceiver(bufferedDeliveries, {
+      commandInbox: createCommandInbox([
+        {
+          kind: "send",
+          payload: { inputResponses: [{ requestId: "q1" }] },
+          taskDeliveryId: "task-1:q1",
+        },
+        { kind: "cancel", taskId: "task-1", turnId: "turn_3" },
+      ]),
+      seenTaskDeliveries: new Set(),
+    });
+
+    expect(bufferedDeliveries).toEqual([]);
+    expect(forwardTurnCancellationStep).toHaveBeenCalledWith({
+      payload: {},
+      token: "turn-control:cancel",
+    });
   });
 
   it("forwards cancel and reset through the active turn's private hook", async () => {
@@ -169,12 +250,15 @@ function runReceiver(
   options: {
     readonly bufferedSessionControls?: Array<"clear" | "compact" | "expired" | "reset">;
     readonly commandInbox?: SessionCommandInbox;
+    readonly seenTaskDeliveries?: Set<string>;
   } = {},
 ): ReturnType<TurnControlReceiver["waitForAction"]> {
   const receiver = new TurnControlReceiver({
     bufferedDeliveries,
     bufferedSessionControls: options.bufferedSessionControls ?? [],
     commandInbox: options.commandInbox ?? createCommandInbox(),
+    expectedTurnId: "turn_0",
+    seenTaskDeliveries: options.seenTaskDeliveries,
     token: "turn-control",
   });
   return receiver.waitForAction().finally(() => receiver.dispose());
@@ -202,15 +286,21 @@ function createCommandInbox(
 ): SessionCommandInbox {
   const queue = [...values];
   return {
+    claimAuthorization: vi.fn(),
     claimStable: vi.fn(),
     consumeNext: vi.fn(),
+    hasReadyAuthorization: vi.fn(() => false),
     next: vi.fn(() => {
       const value = queue.shift();
       return value === undefined
         ? new Promise<IteratorResult<SessionInboxPayload>>(() => {})
         : Promise.resolve({ done: false, value });
     }),
+    nextWithSource: vi.fn(() =>
+      Promise.reject(new Error("nextWithSource is not modeled by this test inbox.")),
+    ),
     rekeyContinuation: vi.fn(),
+    setAuthorizationWindow: vi.fn(),
     ...overrides,
   };
 }

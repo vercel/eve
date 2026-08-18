@@ -148,9 +148,10 @@ describe("runInstallVercelCliFlow", () => {
     await run(
       {
         getVercelAuthStatus: statusProbe("cli-missing", "authenticated"),
-        detectPackageManager: vi.fn(
-          async (): Promise<DetectedPackageManager> => ({ kind: "npm", source: "lockfile" }),
-        ),
+        detectPackageManager: vi.fn(async (): Promise<DetectedPackageManager> => ({
+          kind: "npm",
+          source: "lockfile",
+        })),
       },
       spawnPackageManager,
     );

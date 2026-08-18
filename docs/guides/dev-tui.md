@@ -1,5 +1,5 @@
 ---
-title: "Dev TUI"
+title: "Terminal UI"
 description: "Use eve locally or connect to a deployed agent from an interactive terminal UI."
 ---
 
@@ -57,23 +57,13 @@ Use `/traces` to inspect traces recorded during local development. See [Instrume
 
 ## Display options
 
-Use `eve dev` flags to control how much detail the UI renders:
+Use `eve dev` flags to control tool calls, reasoning, subagents, connection authorization, response statistics, context usage, and logs:
 
 ```bash
 eve dev --tools full --reasoning collapsed --logs all
 ```
 
-| Flag                         | Values                                          | Description                                        |
-| ---------------------------- | ----------------------------------------------- | -------------------------------------------------- |
-| `--tools`                    | `full`, `collapsed`, `auto-collapsed`, `hidden` | Tool-call display.                                 |
-| `--reasoning`                | `full`, `collapsed`, `auto-collapsed`, `hidden` | Reasoning display.                                 |
-| `--subagents`                | `full`, `collapsed`, `auto-collapsed`, `hidden` | Subagent display.                                  |
-| `--connection-auth`          | `full`, `collapsed`, `auto-collapsed`, `hidden` | Connection-authorization display.                  |
-| `--assistant-response-stats` | `tokens`, `tokensPerSecond`                     | Assistant response statistic.                      |
-| `--context-size`             | Token count                                     | Model context-window size for the usage indicator. |
-| `--logs`                     | `all`, `stderr`, `sandbox`, `none`              | Initial log display mode.                          |
-
-Use `--host` and `--port` to bind the local server, or `--no-ui` to run without the terminal UI. See the [CLI reference](../reference/cli#eve-dev) for all options.
+Use `--host` and `--port` to bind the local server, or `--no-ui` to run without the terminal UI. See the [`eve dev` CLI reference](../reference/cli#eve-dev) for the complete option list, accepted values, and defaults.
 
 ## Connect to a deployment
 
@@ -96,3 +86,4 @@ For a Vercel deployment that needs authentication, run `/vc:login` and follow th
 
 - [Instrumentation](./instrumentation): traces, OpenTelemetry, and diagnostics.
 - [CLI](../reference/cli): commands and flags.
+- [Agent Client Protocol (ACP)](../protocols/acp): drive the same agent from ACP clients such as Zed instead of the TUI.

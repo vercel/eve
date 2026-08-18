@@ -39,7 +39,7 @@ In a private chat, text, captions, photos, and documents all go through. Groups 
 
 Forum topics carry `message_thread_id` in the continuation token, so each topic stays on its own thread.
 
-To customize auth or filtering, override `onMessage`. Group privacy mode itself lives in BotFather, not here.
+To customize auth or filtering, override `onMessage`. Return `title` alongside `auth` to set the title when the dispatch starts a run. Group privacy mode itself lives in BotFather, not here.
 
 ### Delivery
 

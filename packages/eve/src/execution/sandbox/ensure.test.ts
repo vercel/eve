@@ -70,6 +70,7 @@ function createBackend(): SandboxBackend {
         metadata: {},
         sessionKey: input.sessionKey,
       }),
+      stop: vi.fn(async () => {}),
       useSessionFn: async () => sandbox.session,
       shutdown: async () => {},
       session: sandbox.session,
@@ -345,6 +346,39 @@ describe("ensureSandboxAccess", () => {
     );
   });
 
+  it("derives an inherited sandbox from the parent owner identity", async () => {
+    const parentBackend = createBackend();
+    const childBackend = createBackend();
+    const registry = createTestRegistry({ inheritsParent: true }, childBackend);
+    const parentDefinition: ResolvedSandboxDefinition = {
+      backend: parentBackend,
+      logicalPath: "agent/sandbox.ts",
+      sourceHash: "parent-source-hash",
+      sourceId: "agent/sandbox",
+      sourceKind: "module",
+    };
+    const inheritedRegistry: RuntimeSandboxRegistry = {
+      sandbox: {
+        ...registry.sandbox,
+        inheritance: {
+          definition: parentDefinition,
+          nodeId: "__root__",
+          workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
+        },
+      },
+    };
+
+    const access = await ensure({ registry: inheritedRegistry });
+    await access.get();
+
+    expect(childBackend.create).not.toHaveBeenCalled();
+    expect(parentBackend.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionKey: expect.stringContaining("session_1-__root__"),
+      }),
+    );
+  });
+
   it("passes runtime tags to the sandbox backend", async () => {
     const backend = createBackend();
     const registry = createTestRegistry({}, backend);
@@ -381,6 +415,17 @@ describe("ensureSandboxAccess", () => {
     expect(countActiveSandboxHandles()).toBe(1);
     await shutdownActiveSandboxHandles();
     expect(countActiveSandboxHandles()).toBe(0);
+  });
+
+  it("delegates authored stops to the backend handle", async () => {
+    const backend = createBackend();
+    const registry = createTestRegistry({}, backend);
+
+    const access = await ensure({ registry });
+    await access.stop();
+
+    const handle = await vi.mocked(backend.create).mock.results[0]?.value;
+    expect(handle?.stop).toHaveBeenCalledTimes(1);
   });
 });
 

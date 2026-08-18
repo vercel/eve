@@ -1,15 +1,19 @@
 import type { H3Event } from "nitro";
+import type { Span } from "#compiled/@opentelemetry/api/index.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
 import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-channel-receive.js";
 import type { RouteHandlerArgs, WebSocketRouteHooks } from "#channel/routes.js";
 import { createChannelOperations } from "#channel/channel-operations.js";
+import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { createAttachSessionFn } from "#channel/session.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
 import {
   attachAgentInfoRouteResponse,
+  attachRouteChannelName,
+  attachRemoteAgentStreamHeadersResolver,
   attachRouteSessionCreator,
 } from "#internal/nitro/routes/channel-route-context.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
@@ -71,7 +75,14 @@ export async function dispatchChannelRequest(
       span?.setAttribute("eve.channel.kind", channelKind);
     }
 
-    const routeArgs = buildRouteArgs(event, bundle, matchedChannel.name, config);
+    const routeArgs = buildRouteArgs(
+      event,
+      bundle,
+      matchedChannel.name,
+      channelKind ?? "channel",
+      config,
+      span,
+    );
 
     let response: Response;
 
@@ -132,7 +143,18 @@ export async function dispatchChannelWebSocketRequest(
   }
 
   const websocket = matchedChannel.websocket;
-  const routeArgs = buildRouteArgs(event, bundle, matchedChannel.name, config);
+  const channelKind =
+    getChannelInstrumentationKind(matchedChannel.definition) ??
+    matchedChannel.adapter?.kind ??
+    "channel";
+  const routeArgs = buildRouteArgs(
+    event,
+    bundle,
+    matchedChannel.name,
+    channelKind,
+    config,
+    undefined,
+  );
 
   try {
     const hooks = await withDevelopmentVercelOidcContext(
@@ -182,7 +204,9 @@ function buildRouteArgs(
   event: H3Event,
   bundle: Awaited<ReturnType<typeof resolveNitroChannelRuntimeBundle>>,
   channelName: string,
+  channelKind: string,
   config: NitroArtifactsConfig,
+  requestSpan: Span | undefined,
 ): BuiltRouteArgs {
   const requestId = readVercelRequestId(event.req.headers);
   const requestIp = extractRequestIp(event, config);
@@ -198,38 +222,67 @@ function buildRouteArgs(
   };
   const channel = bundle.channels.find((candidate) => candidate.name === channelName);
   const adapter = channel?.adapter ?? { kind: "channel" };
+  const requestSpanContext = requestSpan?.spanContext();
+  const deliverySource = {
+    channelKind,
+    channelName,
+    requestId,
+    requestTraceContext:
+      requestSpanContext === undefined
+        ? undefined
+        : {
+            spanId: requestSpanContext.spanId,
+            traceFlags: requestSpanContext.traceFlags,
+            traceId: requestSpanContext.traceId,
+          },
+  };
   const channelOperations = createChannelOperations({
     adapter,
     channelName,
-    metadata: { requestId },
+    metadata: deliverySource,
     runtime: bundle.runtime,
+    turnPolicy: channel?.turnPolicy,
   });
-  const attachSession = createAttachSessionFn(bundle.runtime, { requestId });
+  const attachSession = createAttachSessionFn(bundle.runtime, {
+    ...deliverySource,
+    turnPolicy: channel?.turnPolicy,
+  });
   const to = createCrossChannelToFn(bundle.runtime, toCrossChannelTargets(bundle.channels));
 
   const args = attachRouteSessionCreator(
-    attachAgentInfoRouteResponse(
-      {
-        attachSession,
-        ...channelOperations,
-        params,
-        requestIp,
-        to,
-        waitUntil,
-      },
-      async () => {
-        const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
-        return await handleAgentInfoRequest(config);
-      },
+    attachRouteChannelName(
+      attachAgentInfoRouteResponse(
+        {
+          attachSession,
+          ...channelOperations,
+          params,
+          requestIp,
+          to,
+          waitUntil,
+        },
+        async () => {
+          const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
+          return await handleAgentInfoRequest(config);
+        },
+      ),
+      channelName,
     ),
     async (input) =>
       await bundle.runtime.createSession({
         ...input,
         adapter,
         channelName,
+        continuationToken:
+          input.continuationToken === undefined
+            ? undefined
+            : `${channelName}:${input.continuationToken}`,
+        delivery: createChannelDeliveryMetadata(deliverySource),
         requestId,
       }),
   );
+  if (bundle.resolveRemoteAgentStreamHeaders !== undefined) {
+    attachRemoteAgentStreamHeadersResolver(args, bundle.resolveRemoteAgentStreamHeaders);
+  }
 
   return {
     args,

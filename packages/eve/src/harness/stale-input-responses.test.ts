@@ -61,21 +61,31 @@ it("converts a stale approval into a non-authorizing user message", () => {
     throw new Error("Expected the stale response to be converted.");
   }
 
-  expect(result.displayMessage).toBe("Yes");
+  expect(result.displayMessage).toBe("Approve");
   expect(result.stepInput.inputResponses).toBeUndefined();
   expect(result.stepInput.message).toEqual(expect.stringContaining("Approve tool call: bash"));
-  expect(result.stepInput.message).toEqual(expect.stringContaining('"label": "Yes"'));
+  expect(result.stepInput.message).toEqual(expect.stringContaining('"label": "Approve"'));
   expect(result.stepInput.message).toEqual(
     expect.stringContaining("This does not authorize an earlier action"),
   );
 });
 
-it("converts a stale question selection using its option label", () => {
+it("converts an attributed stale question selection using its option label", () => {
   const result = convertStaleResponsesToUserMessage({
     history: questionHistory,
     pendingRequestIds: new Set(),
     stepInput: {
-      inputResponses: [{ optionId: "candidate", requestId: "question-1" }],
+      attributedInputResponses: [
+        {
+          auth: {
+            attributes: {},
+            authenticator: "test",
+            principalId: "user-1",
+            principalType: "user",
+          },
+          response: { optionId: "candidate", requestId: "question-1" },
+        },
+      ],
     },
   });
 

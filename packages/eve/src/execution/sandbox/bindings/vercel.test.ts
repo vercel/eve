@@ -748,6 +748,63 @@ describe("createVercelSandbox", () => {
     expect(templateSandbox.update).toHaveBeenCalledWith({ networkPolicy: "deny-all" });
   });
 
+  it("resolves mounts only for a fresh live session sandbox", async () => {
+    const templateSandbox = createMockSandbox({ name: "template" });
+    const sessionSandbox = createMockSandbox({ name: "session" });
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(templateSandbox)
+      .mockResolvedValueOnce(sessionSandbox);
+    const resolveSessionCreateOptions = vi.fn(({ session }) => ({
+      mounts: { "/workspace/repos": { drive: `e0-${session.id}` } },
+    }));
+    const backend = createTestVercelSandbox({
+      loadSandboxModule: async () =>
+        ({ Sandbox: { create, get: vi.fn().mockResolvedValue(null) } }) as never,
+      resolveSessionCreateOptions,
+    });
+
+    await backend.prewarm({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      seedFiles: [],
+      templateKey: "template-key",
+    });
+    await backend.create({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      sessionKey: "session-key",
+      tags: { sessionId: "parent-session" },
+      templateKey: "template-key",
+    });
+
+    expect(resolveSessionCreateOptions).toHaveBeenCalledWith({
+      session: { id: "parent-session" },
+    });
+    expect(create.mock.calls[0]?.[0]).not.toHaveProperty("mounts");
+    expect(create.mock.calls[1]?.[0]).toMatchObject({
+      mounts: { "/workspace/repos": { drive: "e0-parent-session" } },
+    });
+  });
+
+  it("does not resolve session create options when resuming a sandbox", async () => {
+    const existing = createMockSandbox({ name: "session-key" });
+    const create = vi.fn();
+    const resolveSessionCreateOptions = vi.fn();
+    const backend = createTestVercelSandbox({
+      loadSandboxModule: async () =>
+        ({ Sandbox: { create, get: vi.fn().mockResolvedValue(existing) } }) as never,
+      resolveSessionCreateOptions,
+    });
+
+    await backend.create({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      sessionKey: "session-key",
+      templateKey: null,
+    });
+
+    expect(resolveSessionCreateOptions).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("forwards author source to template create as the base layer", async () => {
     /*
      * The real Vercel SDK pre-populates `currentSnapshotId` on a
@@ -1026,6 +1083,20 @@ describe("createVercelSandbox", () => {
     expect(sessionSandbox.stop).toHaveBeenCalledTimes(1);
   });
 
+  it("stops authored compute and keeps the Vercel session handle usable", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+    vi.mocked(sessionSandbox.runCommand).mockResolvedValue(createMockDetachedCommand() as never);
+    vi.mocked(sessionSandbox.runCommand).mockClear();
+
+    await handle.stop();
+    await handle.session.run({ command: "printf resumed" });
+
+    expect(sessionSandbox.stop).toHaveBeenCalledTimes(1);
+    expect(sessionSandbox.runCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ args: ["-lc", "printf resumed"], cmd: "bash" }),
+    );
+  });
+
   it("skips the stop call on shutdown when the sandbox is not running", async () => {
     const templateSandbox = createMockSandbox({ name: "template" });
     const sessionSandbox = createMockSandbox({ name: "session", status: "stopped" });
@@ -1055,6 +1126,13 @@ describe("createVercelSandbox", () => {
     await handle.shutdown();
 
     expect(sessionSandbox.stop).not.toHaveBeenCalled();
+  });
+
+  it("surfaces an authored session stop failure", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+    sessionSandbox.stop.mockRejectedValueOnce(new Error("provider unreachable"));
+
+    await expect(handle.stop()).rejects.toThrow("provider unreachable");
   });
 
   it("falls back to creating a new session when the persisted sandbox no longer exists", async () => {

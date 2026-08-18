@@ -33,6 +33,8 @@ import {
   constrainAuthorizationRequired,
   slackChannel,
   type SlackAuthorizationEventContext,
+  type SlackInputResponseContext,
+  type SlackInputResponseSubmission,
   type SlackChannelState,
   type SlackEventContext,
 } from "#public/channels/slack/slackChannel.js";
@@ -459,7 +461,7 @@ describe("slackChannel() default event handlers", () => {
     expect(parseSlackRequestBody(init as RequestInit)).toMatchObject({ status: "" });
   });
 
-  it("input.requested posts an approval card with Slack-unique button action ids", async () => {
+  it("input.requested keeps tool input out of the interactive approval message", async () => {
     const adapter = withState(
       getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
       THREAD_STATE,
@@ -481,7 +483,7 @@ describe("slackChannel() default event handlers", () => {
             kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes" },
-              { id: "deny", label: "No" },
+              { id: "cancel", label: "Cancel" },
             ],
             prompt: "Approve tool call: mongodb-mutate",
             requestId: "approval_abc123",
@@ -494,18 +496,12 @@ describe("slackChannel() default event handlers", () => {
       ctx,
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0]!;
-    expect(String(url)).toBe("https://slack.com/api/chat.postMessage");
-    const body = parseSlackRequestBody(init as RequestInit) as {
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [detailsCall, controlsCall] = fetchMock.mock.calls;
+    expect(String(detailsCall?.[0])).toBe("https://slack.com/api/chat.postMessage");
+    expect(String(controlsCall?.[0])).toBe("https://slack.com/api/chat.postMessage");
+    const detailsBody = parseSlackRequestBody(detailsCall?.[1] as RequestInit) as {
       blocks: Array<{
-        actions?: Array<{
-          action_id: string;
-          style?: string;
-          text: { emoji?: boolean; text: string; type: string };
-          value: string;
-        }>;
-        body?: { text: string; type: string; verbatim?: boolean };
         child_blocks?: Array<{ text?: { text?: string; type?: string }; type: string }>;
         title?: { text: string; type: string };
         type: string;
@@ -514,14 +510,52 @@ describe("slackChannel() default event handlers", () => {
       text: string;
       thread_ts: string;
     };
-    expect(body).toMatchObject({
+    expect(detailsBody).toMatchObject({
       channel: "C01",
       text: 'Approve tool call: mongodb-mutate\n*Tool input*\n```\n{\n  "operation": "deleteMany"\n}\n```',
       thread_ts: "1700000000.000001",
     });
+    expect(detailsBody.blocks).toEqual([
+      expect.objectContaining({
+        type: "container",
+        title: { type: "plain_text", text: "Tool input" },
+        is_collapsible: true,
+        default_collapsed: false,
+        child_blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: '```\n{\n  "operation": "deleteMany"\n}\n```',
+            },
+          },
+        ],
+      }),
+    ]);
 
-    expect(body.blocks).toHaveLength(2);
-    const [card, details] = body.blocks;
+    const controlsBody = parseSlackRequestBody(controlsCall?.[1] as RequestInit) as {
+      blocks: Array<{
+        actions?: Array<{
+          action_id: string;
+          style?: string;
+          text: { emoji?: boolean; text: string; type: string };
+          value: string;
+        }>;
+        body?: { text: string; type: string; verbatim?: boolean };
+        type: string;
+      }>;
+      channel: string;
+      text: string;
+      thread_ts: string;
+    };
+    expect(controlsBody).toMatchObject({
+      channel: "C01",
+      text: "Approve tool call: mongodb-mutate",
+      thread_ts: "1700000000.000001",
+    });
+
+    expect(controlsBody.blocks).toHaveLength(1);
+    const [card] = controlsBody.blocks;
     expect(card).toMatchObject({
       type: "card",
       body: {
@@ -531,21 +565,7 @@ describe("slackChannel() default event handlers", () => {
       },
     });
     expect(card?.body?.text.length).toBeLessThanOrEqual(SLACK_CARD_BODY_TEXT_MAX_LENGTH);
-    expect(details).toMatchObject({
-      type: "container",
-      title: { type: "plain_text", text: "Tool input" },
-      is_collapsible: true,
-      default_collapsed: false,
-      child_blocks: [
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: '```\n{\n  "operation": "deleteMany"\n}\n```',
-          },
-        },
-      ],
-    });
+    expect(JSON.stringify(controlsBody)).not.toContain("deleteMany");
 
     const actions = card?.actions ?? [];
     const actionIds = actions.map((element) => element.action_id);
@@ -556,15 +576,103 @@ describe("slackChannel() default event handlers", () => {
     expect(new Set(actionIds).size).toBe(actionIds.length);
     expect(actions).toMatchObject([
       {
-        text: { type: "plain_text", text: "Deny", emoji: false },
-        value: "deny",
+        text: { type: "plain_text", text: "Cancel", emoji: false },
+        value: "cancel",
       },
       {
         style: "primary",
-        text: { type: "plain_text", text: "Allow", emoji: false },
+        text: { type: "plain_text", text: "Approve", emoji: false },
         value: "approve",
       },
     ]);
+    expect(ctx.state.pendingApprovalCards).toEqual({
+      approval_abc123: {
+        messageBlocks: controlsBody.blocks,
+        messageTs: "1700000001.000001",
+      },
+    });
+  });
+
+  it("keeps a large tool input out of the Slack button callback", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+    });
+    const adapter = withState(getAdapter(channel), THREAD_STATE);
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const longPrompt = "cursor cloud task ".repeat(700);
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", {
+        requests: [
+          {
+            action: {
+              callId: "call_cursor",
+              input: { prompt: longPrompt },
+              kind: "tool-call",
+              toolName: "spawn_cursor_agent",
+            },
+            display: "confirmation",
+            kind: "tool-approval",
+            options: [
+              { id: "approve", label: "Yes" },
+              { id: "cancel", label: "Cancel" },
+            ],
+            prompt: "Approve tool call: spawn_cursor_agent",
+            requestId: "approval_cursor",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    const postCalls = fetchMock.mock.calls.filter(
+      ([url]) => String(url) === "https://slack.com/api/chat.postMessage",
+    );
+    expect(postCalls).toHaveLength(2);
+    const details = parseSlackRequestBody(postCalls[0]?.[1] as RequestInit);
+    expect(JSON.stringify(details)).toContain("cursor cloud task");
+
+    const controls = parseSlackRequestBody(postCalls[1]?.[1] as RequestInit) as {
+      blocks: Array<{
+        actions?: Array<{
+          action_id: string;
+          text: { type: string; text: string };
+          value: string;
+        }>;
+      }>;
+      text: string;
+    };
+    expect(JSON.stringify(controls)).not.toContain("cursor cloud task");
+    const approve = controls.blocks[0]?.actions?.find((action) => action.value === "approve");
+    expect(approve).toBeDefined();
+
+    const interactionRequest = buildSignedInteractionRequest({
+      type: "block_actions",
+      team: { id: "T01" },
+      user: { id: "U_APPROVER", username: "ada", team_id: "T01" },
+      channel: { id: "C01" },
+      message: {
+        ts: "1700000000.000010",
+        thread_ts: "1700000000.000001",
+        text: controls.text,
+        blocks: controls.blocks,
+      },
+      actions: [approve],
+    });
+    const callbackBody = await interactionRequest.clone().text();
+    expect(callbackBody).not.toContain("cursor+cloud+task");
+    expect(callbackBody.length).toBeLessThan(3_000);
+
+    const { send } = await firePost(channel, interactionRequest);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[0]).toBe("C01:1700000000.000001");
+    expect(send.mock.calls[0]?.[1]).toMatchObject({
+      inputResponses: [{ optionId: "approve", requestId: "approval_cursor" }],
+    });
   });
 
   it("input.requested caps section and fallback text so Slack does not reject the post", async () => {
@@ -618,9 +726,8 @@ describe("slackChannel() default event handlers", () => {
     );
     const ctx = buildAdapterContext(adapter, stubAccessor());
 
-    // Approval requests with tool input render as a card plus a tool-input
-    // container. 60 requests must split across three posts to stay below
-    // Slack's 50-block message cap.
+    // Tool-input containers and approval cards are grouped into separate
+    // posts. 60 of each must split into two posts per kind.
     const requests = Array.from({ length: 60 }, (_, index) => ({
       action: {
         callId: `call_${index}`,
@@ -632,7 +739,7 @@ describe("slackChannel() default event handlers", () => {
       kind: "tool-approval" as const,
       options: [
         { id: "approve", label: "Yes" },
-        { id: "deny", label: "No" },
+        { id: "cancel", label: "Cancel" },
       ],
       prompt: `Approve tool call ${index}`,
       requestId: `approval_${index}`,
@@ -644,9 +751,9 @@ describe("slackChannel() default event handlers", () => {
       ctx,
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     const allRequestIds: string[] = [];
-    for (const [url, init] of fetchMock.mock.calls) {
+    for (const [callIndex, [url, init]] of fetchMock.mock.calls.entries()) {
       expect(String(url)).toBe("https://slack.com/api/chat.postMessage");
       const body = parseSlackRequestBody(init as RequestInit) as {
         blocks: Array<{
@@ -656,6 +763,9 @@ describe("slackChannel() default event handlers", () => {
         }>;
       };
       expect(body.blocks.length).toBeLessThanOrEqual(SLACK_MAX_BLOCKS_PER_MESSAGE);
+      expect(new Set(body.blocks.map((block) => block.type))).toEqual(
+        new Set([callIndex < 2 ? "container" : "card"]),
+      );
       for (const block of body.blocks) {
         for (const element of block.actions ?? block.elements ?? []) {
           const requestId = element.action_id.replace(/^.*:(approval_\d+):button:\d+$/u, "$1");
@@ -1349,6 +1459,21 @@ describe("slackChannel() inbound mention pipeline", () => {
     expect(input.title).toBe("hello");
   });
 
+  it("uses the run title returned by onAppMention without changing the message", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onAppMention: () => ({ auth: null, title: "Run" }),
+    });
+
+    const { body } = buildMentionBody({ text: "private message text" });
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [, input] = send.mock.calls[0]!;
+    expect(input.title).toBe("Run");
+    expect(input.message).toContain("<content>\nprivate message text\n</content>");
+  });
+
   it("uses only this app's reply as the incremental thread context boundary", async () => {
     const threadTs = "1700000000.000001";
     const currentTs = "1700000000.000006";
@@ -1784,7 +1909,7 @@ describe("slackChannel() generic Events API pipeline", () => {
     expect(compact).toHaveBeenCalledWith("C01:1700000000.000001");
   });
 
-  it("binds Slack session state when a generic event send creates", async () => {
+  it("binds Slack session state and title when a generic event send creates", async () => {
     const send = vi.fn().mockResolvedValue({ id: "s1" });
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
@@ -1792,6 +1917,7 @@ describe("slackChannel() generic Events API pipeline", () => {
         await ctx.send("follow up", {
           auth: null,
           target: { channelId: "C01", threadTs: "1700000000.000001" },
+          title: "Reaction follow-up",
         });
       },
     });
@@ -1808,6 +1934,7 @@ describe("slackChannel() generic Events API pipeline", () => {
         threadTs: "1700000000.000001",
         triggeringUserId: "U01",
       },
+      title: "Reaction follow-up",
     });
   });
 
@@ -2063,6 +2190,22 @@ describe("slackChannel() inbound direct message pipeline", () => {
     const opts = options as { auth: unknown; state: { channelId: string } };
     expect(opts.auth).toMatchObject({ principalId: "U01", authenticator: "test" });
     expect(opts.state.channelId).toBe(channelId);
+    expect(options.title).toBe("hello");
+  });
+
+  it("uses the run title returned by onDirectMessage", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onDirectMessage: () => ({ auth: null, title: "Private support case" }),
+    });
+
+    const { body } = buildDirectMessageBody({ text: "sensitive message" });
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [, options] = send.mock.calls[0]!;
+    expect(options.title).toBe("Private support case");
+    expect(options.message).toContain("<content>\nsensitive message\n</content>");
   });
 
   it("does not dispatch when onDirectMessage resolves to null", async () => {
@@ -2186,6 +2329,27 @@ describe("slackChannel() HITL interaction pipeline", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
   });
+
+  function buildHitlButtonRequest(userId = "U_APPROVER"): Request {
+    return buildSignedInteractionRequest({
+      type: "block_actions",
+      team: { id: "T01" },
+      user: { id: userId, username: "ada", name: "ada", team_id: "T01" },
+      channel: { id: "C01" },
+      message: {
+        ts: "1700000000.000010",
+        thread_ts: "1700000000.000001",
+        blocks: [{ type: "section", text: { type: "mrkdwn", text: "Approve?" } }],
+      },
+      actions: [
+        {
+          action_id: `${HITL_ACTION_PREFIX}approval_abc123:button:0`,
+          text: { type: "plain_text", text: "Approve" },
+          value: "approve",
+        },
+      ],
+    });
+  }
 
   afterAll(() => {
     if (ORIGINAL_SIGNING_SECRET === undefined) {
@@ -2321,12 +2485,94 @@ describe("slackChannel() HITL interaction pipeline", () => {
     });
   });
 
+  it("authorizes HITL button answers before resuming with the returned auth", async () => {
+    const customAuth = {
+      attributes: { role: "deployer" },
+      authenticator: "secure-slack",
+      principalId: "employee:ada",
+      principalType: "user" as const,
+    };
+    const onInputResponse = vi.fn(
+      (ctx: SlackInputResponseContext, submission: SlackInputResponseSubmission) => {
+        expect(ctx.defaultAuth.principalId).toBe("slack:T01:U_APPROVER");
+        expect(submission).toMatchObject({
+          type: "block_actions",
+          inputResponses: [{ optionId: "approve", requestId: "approval_abc123" }],
+          messageTs: "1700000000.000010",
+          user: { id: "U_APPROVER", username: "ada" },
+        });
+        return { auth: customAuth };
+      },
+    );
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onInputResponse,
+    });
+
+    const { send } = await firePost(channel, buildHitlButtonRequest());
+
+    expect(onInputResponse).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[1]).toMatchObject({ auth: customAuth });
+  });
+
+  it("keeps HITL pending when the input-response hook rejects or throws", async () => {
+    const handlers = [
+      vi.fn(() => null),
+      vi.fn(() => {
+        throw new Error("policy unavailable");
+      }),
+    ];
+
+    for (const onInputResponse of handlers) {
+      fetchMock.mockClear();
+      const channel = slackChannel({
+        credentials: { botToken: "xoxb-test" },
+        onInputResponse,
+      });
+
+      const { send } = await firePost(channel, buildHitlButtonRequest());
+
+      expect(onInputResponse).toHaveBeenCalledTimes(1);
+      expect(send).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalledWith(
+        "https://slack.com/api/chat.update",
+        expect.anything(),
+      );
+    }
+  });
+
+  it("uses default HITL auth when onAppMention is authored", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onAppMention: () => ({ auth: null }),
+    });
+
+    const { send } = await firePost(channel, buildHitlButtonRequest());
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[1].auth?.principalId).toBe("slack:T01:U_APPROVER");
+  });
+
+  it("does not mark a HITL card answered when response delivery fails", async () => {
+    const send = vi.fn().mockRejectedValue(new Error("target session not found"));
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+
+    await firePost(channel, buildHitlButtonRequest(), { send });
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "https://slack.com/api/chat.update",
+      expect.anything(),
+    );
+  });
+
   it("updates one answered HITL card without removing sibling batched buttons", async () => {
     const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
 
-    const firstDenyActionId = `${HITL_ACTION_PREFIX}approval_451:button:0`;
+    const firstCancelActionId = `${HITL_ACTION_PREFIX}approval_451:button:0`;
     const firstApproveActionId = `${HITL_ACTION_PREFIX}approval_451:button:1`;
-    const secondDenyActionId = `${HITL_ACTION_PREFIX}approval_508:button:0`;
+    const secondCancelActionId = `${HITL_ACTION_PREFIX}approval_508:button:0`;
     const secondApproveActionId = `${HITL_ACTION_PREFIX}approval_508:button:1`;
 
     const { send } = await firePost(
@@ -2355,9 +2601,9 @@ describe("slackChannel() HITL interaction pipeline", () => {
               actions: [
                 {
                   type: "button",
-                  action_id: firstDenyActionId,
-                  text: { type: "plain_text", text: "Deny" },
-                  value: "deny",
+                  action_id: firstCancelActionId,
+                  text: { type: "plain_text", text: "Cancel" },
+                  value: "cancel",
                 },
                 {
                   type: "button",
@@ -2386,9 +2632,9 @@ describe("slackChannel() HITL interaction pipeline", () => {
               actions: [
                 {
                   type: "button",
-                  action_id: secondDenyActionId,
-                  text: { type: "plain_text", text: "Deny" },
-                  value: "deny",
+                  action_id: secondCancelActionId,
+                  text: { type: "plain_text", text: "Cancel" },
+                  value: "cancel",
                 },
                 {
                   type: "button",
@@ -2461,7 +2707,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
           ?.map((element) => element.action_id)
           .filter((actionId): actionId is string => typeof actionId === "string") ?? [],
     );
-    expect(remainingActionIds).toEqual([secondDenyActionId, secondApproveActionId]);
+    expect(remainingActionIds).toEqual([secondCancelActionId, secondApproveActionId]);
   });
 
   it("covers the observed e0 batched escalation approval run", async () => {
@@ -2484,7 +2730,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
             kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes" },
-              { id: "deny", label: "No" },
+              { id: "cancel", label: "Cancel" },
             ],
             prompt: "Approve tool call: escalate_issue",
             requestId: "approval_451",
@@ -2500,7 +2746,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
             kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes" },
-              { id: "deny", label: "No" },
+              { id: "cancel", label: "Cancel" },
             ],
             prompt: "Approve tool call: escalate_issue",
             requestId: "approval_508",
@@ -2513,30 +2759,40 @@ describe("slackChannel() HITL interaction pipeline", () => {
       ctx,
     );
 
-    const postCall = fetchMock.mock.calls.find(
+    const postCalls = fetchMock.mock.calls.filter(
       ([url]) => String(url) === "https://slack.com/api/chat.postMessage",
     );
-    expect(postCall).toBeDefined();
-    const posted = parseSlackRequestBody(postCall?.[1] as RequestInit) as {
+    expect(postCalls).toHaveLength(2);
+    const postedDetails = parseSlackRequestBody(postCalls[0]?.[1] as RequestInit) as {
       blocks: Array<{
-        actions?: Array<{ action_id?: string; text?: { text?: string }; value?: string }>;
         child_blocks?: Array<{ text?: { text?: string } }>;
         title?: { text?: string };
         type?: string;
       }>;
     };
-    expect(posted.blocks).toHaveLength(4);
-    expect(posted.blocks[1]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 451');
-    expect(posted.blocks[1]?.child_blocks?.[0]?.text?.text).toContain(
+    expect(postedDetails.blocks).toHaveLength(2);
+    expect(postedDetails.blocks[0]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 451');
+    expect(postedDetails.blocks[0]?.child_blocks?.[0]?.text?.text).toContain(
       '"ownerSlackUserId": "U0AT7H56S90"',
     );
-    expect(posted.blocks[3]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 508');
+    expect(postedDetails.blocks[1]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 508');
 
-    const firstDenyAction = posted.blocks[0]?.actions?.find((action) => action.value === "deny");
-    expect(firstDenyAction).toMatchObject({
+    const postedControls = parseSlackRequestBody(postCalls[1]?.[1] as RequestInit) as {
+      blocks: Array<{
+        actions?: Array<{ action_id?: string; text?: { text?: string }; value?: string }>;
+        type?: string;
+      }>;
+    };
+    expect(postedControls.blocks).toHaveLength(2);
+    expect(JSON.stringify(postedControls)).not.toContain("issueNumber");
+
+    const firstCancelAction = postedControls.blocks[0]?.actions?.find(
+      (action) => action.value === "cancel",
+    );
+    expect(firstCancelAction).toMatchObject({
       action_id: `${HITL_ACTION_PREFIX}approval_451:button:0`,
-      text: { text: "Deny" },
-      value: "deny",
+      text: { text: "Cancel" },
+      value: "cancel",
     });
 
     const { send } = await firePost(
@@ -2554,13 +2810,13 @@ describe("slackChannel() HITL interaction pipeline", () => {
         message: {
           ts: "1700000000.000010",
           thread_ts: "1700000000.000001",
-          blocks: posted.blocks,
+          blocks: postedControls.blocks,
         },
         actions: [
           {
-            action_id: firstDenyAction?.action_id,
-            text: { type: "plain_text", text: "Deny" },
-            value: "deny",
+            action_id: firstCancelAction?.action_id,
+            text: { type: "plain_text", text: "Cancel" },
+            value: "cancel",
           },
         ],
       }),
@@ -2569,7 +2825,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0]?.[0]).toBe("C01:1700000000.000001");
     expect(send.mock.calls[0]?.[1]).toMatchObject({
-      inputResponses: [{ optionId: "deny", requestId: "approval_451" }],
+      inputResponses: [{ optionId: "cancel", requestId: "approval_451" }],
     });
 
     const updateCall = fetchMock.mock.calls.find(
@@ -2585,9 +2841,8 @@ describe("slackChannel() HITL interaction pipeline", () => {
       }>;
     };
 
-    expect(body.blocks[0]?.subtext?.text).toBe(":white_check_mark: *Deny* by <@U0AT7H56S90>");
-    expect(body.blocks[1]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 451');
-    expect(body.blocks[3]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 508');
+    expect(body.blocks[0]?.subtext?.text).toBe(":white_check_mark: *Cancel* by <@U0AT7H56S90>");
+    expect(JSON.stringify(body.blocks)).not.toContain("issueNumber");
     const remainingActionIds = body.blocks.flatMap(
       (block) =>
         (block.actions ?? block.elements)
@@ -2654,6 +2909,56 @@ describe("slackChannel() HITL interaction pipeline", () => {
       },
       inputResponses: [{ requestId: "call_abc123", text: "approved with context" }],
     });
+  });
+
+  it("authorizes freeform modal answers before resuming", async () => {
+    const onInputResponse = vi.fn(() => null);
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onInputResponse,
+    });
+
+    const { send } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "view_submission",
+        team: { id: "T01" },
+        user: { id: "U_SUBMITTER", username: "grace", team_id: "T01" },
+        view: {
+          callback_id: HITL_FREEFORM_MODAL_CALLBACK_ID,
+          private_metadata: JSON.stringify({
+            channelId: "C01",
+            continuationToken: "C01:1700000000.000001",
+            messageTs: "1700000000.000010",
+            requestId: "call_abc123",
+            threadTs: "1700000000.000001",
+          }),
+          state: {
+            values: {
+              [HITL_FREEFORM_MODAL_BLOCK_ID]: {
+                [HITL_FREEFORM_MODAL_ACTION_ID]: { value: "approved with context" },
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    expect(onInputResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultAuth: expect.objectContaining({ principalId: "slack:T01:U_SUBMITTER" }),
+      }),
+      expect.objectContaining({
+        type: "view_submission",
+        inputResponses: [{ requestId: "call_abc123", text: "approved with context" }],
+        user: expect.objectContaining({ id: "U_SUBMITTER" }),
+      }),
+    );
+    expect(send).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "https://slack.com/api/chat.update",
+      expect.anything(),
+    );
   });
 });
 

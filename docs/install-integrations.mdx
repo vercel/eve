@@ -1,5 +1,5 @@
 ---
-title: "Install Integrations"
+title: "Add Integrations"
 description: "Discover and install extensions and other integrations from eve and third-party sources."
 contentType: "How-to"
 ---
@@ -16,11 +16,17 @@ eve add linear
 eve add instrumentation/braintrust
 ```
 
+If an item is not found, `eve add` searches the available catalogs and prints close matches without installing anything.
+
+If you do not know an item name yet, run `eve add` without an argument. Its help output shows how to search the registry with `eve registry search <query>`.
+
 Extensions may create a mount under `agent/extensions/`. Connections write their initial definition under `agent/connections/` and install `@vercel/connect` when required. Instrumentation providers write `agent/instrumentation.ts`; because an agent has one instrumentation file, compose multiple exporters there by hand. Configure generated files and required environment variables before running your agent.
 
 Some integrations package several independently installable components. For example, `eve add linear` lets you choose the Linear Channel, Linear MCP, or both; both are selected by default. The specific `eve add channel/linear-agent` and `eve add connection/linear` commands remain available.
 
 When an official item declares an interactive setup flow or flows, eve asks whether to run them after installation and runs multiple flows in declaration order. Run the printed `eve add <item> --skip-install` command to resume a skipped or cancelled setup later; it reruns the selected components' declared flows from the beginning.
+
+For non-interactive automation, run `eve add <item> --non-interactive`. Add `--yes` to accept recommended setup values and reduce setup round trips; explicit `--answer` values take precedence. Eve returns structured component, setup-input, or prerequisite instructions instead of prompting. Use the continuation command in the response and add the requested answer; it adds `--skip-install` once registry installation has completed; resupply any prior answers from the calling agent's state. Pass non-secret answers with repeatable `--answer 'key=<JSON value>'` options. Supply secrets through the integration's documented environment variable or secret store rather than command-line arguments.
 
 ## Find an integration
 

@@ -265,6 +265,70 @@ async function expectCancelResponse(
 }
 
 describe("turn cancellation integration", () => {
+  it("buffers a default steering message before replacing the active turn", async () => {
+    const fixture = createWaitToolRuntime("turn-steer-message");
+    const rawToken = "turn-steer-message";
+    const continuationToken = `http:${rawToken}`;
+    const workflowRuntime = createWorkflowRuntime({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    });
+    const address = createChannelAddress({
+      adapter: { kind: "http" },
+      channelName: "http",
+      continuationToken: rawToken,
+      runtime: workflowRuntime,
+    });
+
+    await fixture.runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: `Use the ${WAIT_TOOL_NAME} tool.` },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        await waitForHookByToken(continuationToken);
+        await fixture.toolStarted;
+
+        await expect(
+          address.send("replacement after steer", { auth: null }),
+        ).resolves.toMatchObject({ id: run.runId });
+
+        const cancelledTurn = await stream.nextTurn();
+        expect(
+          containsEventSequence(cancelledTurn, [
+            "turn.started",
+            "turn.cancelled",
+            "session.waiting",
+          ]),
+        ).toBe(true);
+        expect(fixture.toolAborts()).toBe(1);
+
+        const replacementTurn = await stream.nextTurn();
+        expect(filterEventsByType(replacementTurn, "turn.started")).toHaveLength(1);
+        expect(filterEventsByType(replacementTurn, "turn.cancelled")).toHaveLength(0);
+        expectNoFailureEvents(replacementTurn);
+        expect(
+          replacementTurn.some(
+            (event) =>
+              event.type === "message.received" &&
+              typeof event.data.message === "string" &&
+              event.data.message.includes("replacement after steer"),
+          ),
+        ).toBe(true);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
   it("cancels a turn mid-tool and accepts the next message normally", async () => {
     const fixture = createWaitToolRuntime("turn-cancel-tool");
     const continuationToken = "http:turn-cancel-tool";
@@ -385,9 +449,12 @@ describe("turn cancellation integration", () => {
         expectNoFailureEvents(cancelledTurn);
         expect(fixture.toolAborts()).toBe(1);
 
+        const started = filterEventsByType(cancelledTurn, "turn.started")[0];
+        if (started === undefined) throw new Error("Expected the cancelled turn to have started.");
+
         // The stable inbox remains owned while the session is parked, so a
-        // duplicate cancellation is durably accepted and consumed as a no-op.
-        const duplicate = await cancelViaRoute(run.runId);
+        // guarded duplicate is harmless even if another alias resolves first.
+        const duplicate = await cancelViaRoute(run.runId, { turnId: started.data.turnId });
         await expectCancelResponse(duplicate, { sessionId: run.runId, status: "accepted" });
 
         await waitForHook({ runId: run.runId }, { token: continuationToken });
@@ -595,7 +662,9 @@ describe("turn cancellation integration", () => {
         // The child asks a question; the proxy epilogue emits this turn's
         // waiting boundary while the parent keeps waiting on the child.
         const hitlTurn = await stream.nextTurn();
-        expect(hitlTurn.at(-1)?.type).toBe("session.waiting");
+        expect(hitlTurn.at(-1)?.type, JSON.stringify(hitlTurn.at(-1), null, 2)).toBe(
+          "session.waiting",
+        );
         const requested = filterEventsByType(hitlTurn, "input.requested");
         expect(requested).toHaveLength(1);
         const requestId = requested[0]?.data.requests[0]?.requestId;

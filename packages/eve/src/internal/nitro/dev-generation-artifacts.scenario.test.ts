@@ -13,6 +13,7 @@ import {
   stageDevelopmentGeneration,
 } from "#internal/nitro/development-generation.js";
 import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "#internal/application/runtime-compiled-artifacts-source.js";
+import type { MaterializedInstrumentation } from "#internal/materialized-authored-modules.js";
 import { useScenarioApp } from "#internal/testing/scenario-app.js";
 
 describe("development generation artifacts", () => {
@@ -118,7 +119,7 @@ describe("development generation artifacts", () => {
       ),
     });
     const subagent = compileResult.manifest.subagents[0];
-    const sourceId = subagent?.agent.config.source?.sourceId;
+    const sourceId = subagent?.sourceId;
     expect(sourceId).toBeDefined();
     const moduleNamespace = moduleMap.nodes[subagent!.nodeId]?.modules[sourceId!] as {
       default: { events: Record<string, Function> };
@@ -139,6 +140,41 @@ describe("development generation artifacts", () => {
     expect(registered).toBeDefined();
     const credentials = registered!() as { headers(): Record<string, string> };
     expect(credentials.headers()).toEqual({ authorization: "Bearer fresh" });
+  });
+
+  it("hydrates a dynamic directory subagent resolver relative to the child root", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/instructions.md": "Use the available subagent.",
+        "agent/subagents/conditional/agent.mjs": [
+          'const defineDynamic = (definition) => ({ ...definition, kind: "eve:dynamic" });',
+          "export default defineDynamic({",
+          "  events: {",
+          '    "session.started": () => ({',
+          '      description: "Conditionally available.",',
+          '      model: "openai/gpt-5.4",',
+          "    }),",
+          "  },",
+          "});",
+          "",
+        ].join("\n"),
+      },
+      name: "dynamic-directory-subagent-source-map",
+    });
+
+    const compileResult = await compileAgent({ startPath: app.appRoot });
+    const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
+      compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(app.appRoot),
+    });
+    const subagent = compileResult.manifest.subagents[0];
+    if (subagent?.configResolver === undefined) throw new Error("expected a dynamic subagent");
+
+    const moduleNamespace = moduleMap.nodes[subagent.nodeId]?.modules[
+      subagent.configResolver.sourceId
+    ] as { default: { events: Record<string, Function> } };
+
+    expect(moduleNamespace.default.events["session.started"]).toBeDefined();
   });
 
   it("preserves extension scope in a shared generation graph", async () => {
@@ -454,9 +490,12 @@ describe("development generation artifacts", () => {
         join(first.runtimeAppRoot, ".eve", "compile", "authored-modules.json"),
         "utf8",
       ),
-    ) as { readonly instrumentation?: string };
+    ) as { readonly instrumentation?: MaterializedInstrumentation };
+    if (firstIndex.instrumentation?.kind !== "file") {
+      throw new Error("expected materialized file instrumentation");
+    }
     const materializedInstrumentation = await readFile(
-      join(first.runtimeAppRoot, ".eve", "compile", firstIndex.instrumentation!),
+      join(first.runtimeAppRoot, ".eve", "compile", firstIndex.instrumentation.modulePath),
       "utf8",
     );
 

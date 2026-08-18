@@ -145,7 +145,10 @@ const rasterizeLogo = async (logo: ReactNode): Promise<RasterizedLogo> => {
 const collectLogoColors = (node: ReactNode, colors = new Set<string>()): Set<string> => {
   if (!isValidElement(node)) return colors;
 
-  const { children, fill, stroke } = (node as ReactElement<LogoElementProps>).props;
+  const element = node as ReactElement<LogoElementProps>;
+  if (element.type === "mask") return colors;
+
+  const { children, fill, stroke } = element.props;
   for (const color of [fill, stroke]) {
     if (color && color !== "none" && color !== "currentColor") colors.add(color.toLowerCase());
   }
@@ -174,6 +177,8 @@ const recolorLogo = (node: ReactNode, preserveTones: boolean): ReactNode => {
   if (!isValidElement(node)) return node;
 
   const element = node as ReactElement<LogoElementProps>;
+  if (element.type === "mask") return element;
+
   const props = element.props;
   const recolor = (color: string | undefined): string | undefined => {
     if (!color || color === "none") return color;

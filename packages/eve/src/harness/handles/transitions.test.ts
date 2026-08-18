@@ -13,9 +13,11 @@ import {
 import {
   abandonRunningAgentTurns,
   confirmAgentStarted,
+  confirmTaskAgentAddress,
   prepareAgentContinuation,
   prepareAgentStart,
   rejectAgentEffect,
+  removeTaskAgentAddress,
   settleAgentTurn,
 } from "#harness/handles/transitions.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -140,6 +142,26 @@ describe("confirmAgentStarted", () => {
     expect(() =>
       confirmAgentStarted(createSession(), { address, operationId: "op_unprepared" }),
     ).toThrow("op_unprepared");
+  });
+});
+
+describe("task agent addresses", () => {
+  it("confirms a persistent address without an execution phase", () => {
+    const addressed = confirmTaskAgentAddress(preparedSession(), {
+      address,
+      operationId: startOperation.id,
+    });
+
+    expect(handlesOf(addressed)).toEqual([{ address, identity, phase: "addressed" }]);
+  });
+
+  it("removes only the addressed task agent", () => {
+    const addressed = confirmTaskAgentAddress(preparedSession(), {
+      address,
+      operationId: startOperation.id,
+    });
+
+    expect(handlesOf(removeTaskAgentAddress(addressed, identity.id))).toEqual([]);
   });
 });
 

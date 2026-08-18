@@ -15,7 +15,6 @@ import {
   DISCOVER_EXTENSION_MOUNT_MISSING_DECLARATION,
   DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
   DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT,
-  DISCOVER_EXTENSION_SCHEDULE_UNSUPPORTED,
 } from "#discover/extensions.js";
 import {
   DISCOVER_DEPRECATED_SYSTEM_SLOT,
@@ -89,7 +88,8 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.instructions).toEqual([
       {
         definition: {
-          markdown: "You are a precise assistant.",
+          content: "You are a precise assistant.",
+          role: "system",
         },
         sourceKind: "markdown",
         logicalPath: "instructions.md",
@@ -174,7 +174,8 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.instructions).toEqual([
       {
         definition: {
-          markdown: "You are a precise assistant.",
+          content: "You are a precise assistant.",
+          role: "system",
         },
         sourceKind: "markdown",
         logicalPath: "system.md",
@@ -226,7 +227,8 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.instructions).toEqual([
       {
         definition: {
-          markdown: "Preferred instructions.",
+          content: "Preferred instructions.",
+          role: "system",
         },
         sourceKind: "markdown",
         logicalPath: "instructions.md",
@@ -252,7 +254,8 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.instructions).toEqual([
       {
         definition: {
-          markdown: "Uppercase instructions.",
+          content: "Uppercase instructions.",
+          role: "system",
         },
         sourceKind: "markdown",
         logicalPath: "instructions.md",
@@ -475,7 +478,8 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.instructions).toEqual([
       {
         definition: {
-          markdown: "You are a precise assistant.",
+          content: "You are a precise assistant.",
+          role: "system",
         },
         sourceKind: "markdown",
         logicalPath: "instructions.md",
@@ -502,13 +506,31 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.instructions).toEqual([
       {
         definition: {
-          markdown: "You are a precise assistant.",
+          content: "You are a precise assistant.",
+          role: "system",
         },
         sourceKind: "markdown",
         logicalPath: "instructions.md",
         sourceId: "instructions.md",
       },
     ]);
+  });
+
+  it("recognizes the instrumentation provider directory", async () => {
+    const project = buildMemoryAgentProject({
+      agentDirectories: ["instrumentation"],
+      agentFiles: {
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics).toEqual([]);
   });
 
   it("rejects authored tool filenames that violate the tool-name charset", async () => {
@@ -954,7 +976,7 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.resolvedExtensions).toEqual([]);
   });
 
-  it("rejects an agent-root tool that overrides a mounted extension's namespace", async () => {
+  it("rejects agent-root contributions that override a mounted extension's namespace", async () => {
     const project = buildMemoryAgentProject({
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
@@ -969,6 +991,7 @@ describe("discoverAgent (memory)", () => {
         // A root tool using the mounted `crm__` prefix would shadow the
         // extension from outside its mount directory.
         "tools/crm__search.ts": "export default {};\n",
+        "subagents/crm__reviewer.ts": "export default {};\n",
         "instructions.md": "You are a precise assistant.",
       },
     });
@@ -979,11 +1002,11 @@ describe("discoverAgent (memory)", () => {
       source: project.source,
     });
 
-    const collision = result.diagnostics.find(
+    const collisions = result.diagnostics.filter(
       (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT,
     );
-    expect(collision).toBeDefined();
-    expect(collision?.message).toContain("extensions/crm/");
+    expect(collisions).toHaveLength(2);
+    expect(collisions[0]?.message).toContain("extensions/crm/");
   });
 
   it("rejects a mounted extension that requires an unsupported capability version", async () => {
@@ -1061,7 +1084,7 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.resolvedExtensions).toHaveLength(1);
   });
 
-  it("rejects an extension that declares schedules", async () => {
+  it("discovers schedules declared by an extension", async () => {
     const project = buildMemoryAgentProject({
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
@@ -1070,7 +1093,6 @@ describe("discoverAgent (memory)", () => {
         }),
         "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
         "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
-        // Background scheduling is the consuming agent's to own, not an extension's.
         "node_modules/@acme/crm/extension/schedules/sweep.md":
           '---\ncron: "0 9 * * *"\n---\nSweep.',
       },
@@ -1086,9 +1108,14 @@ describe("discoverAgent (memory)", () => {
       source: project.source,
     });
 
-    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
-      DISCOVER_EXTENSION_SCHEDULE_UNSUPPORTED,
-    );
+    expect(result.diagnostics).toEqual([]);
+    expect(result.manifest.resolvedExtensions[0]?.manifest.schedules).toMatchObject([
+      {
+        logicalPath: "schedules/sweep.md",
+        sourceId: "schedules/sweep.md",
+        sourceKind: "markdown",
+      },
+    ]);
   });
 
   it("rejects an extension that mounts another extension", async () => {

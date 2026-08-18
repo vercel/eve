@@ -14,6 +14,7 @@ import {
   createResultCompletedEvent,
   createSessionWaitingEvent,
   createStepStartedEvent,
+  createSubagentCalledEvent,
   createTurnCancelledEvent,
   encodeMessageStreamEvent,
   stampMessageStreamEvent,
@@ -23,7 +24,7 @@ import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 
 describe("message stream protocol", () => {
   it("pins the stream version for timed session events", () => {
-    expect(EVE_MESSAGE_STREAM_VERSION).toBe("21");
+    expect(EVE_MESSAGE_STREAM_VERSION).toBe("22");
   });
 
   it("creates preliminary tool-result snapshots", () => {
@@ -52,6 +53,32 @@ describe("message stream protocol", () => {
         turnId: "turn_1",
       },
       type: "action.partial",
+    });
+  });
+
+  it("authors local and remote child stream paths", () => {
+    const input = {
+      callId: "call/1",
+      childSessionId: "child/1",
+      name: "research",
+      sequence: 1,
+      sessionId: "parent/1",
+      toolName: "research",
+      turnId: "turn_1",
+      workflowId: "workflow_1",
+    };
+
+    expect(createSubagentCalledEvent(input).data.childStreamPath).toBe(
+      "/eve/v1/session/child%2F1/stream",
+    );
+    expect(
+      createSubagentCalledEvent({
+        ...input,
+        remote: { resolverId: "remote/research", url: "https://remote.example" },
+      }).data,
+    ).toMatchObject({
+      childStreamPath: "/eve/v1/session/parent%2F1/subagents/call%2F1/child%2F1/stream",
+      remote: { resolverId: "remote/research", url: "https://remote.example" },
     });
   });
 
@@ -102,7 +129,12 @@ describe("message stream protocol", () => {
 
   it("stamps durable envelope metadata and preserves it through encoding", () => {
     const stamped = stampMessageStreamEvent(
-      createStepStartedEvent({ sequence: 0, stepIndex: 1, turnId: "turn_0" }),
+      createStepStartedEvent({
+        modelId: "openai/gpt-5.5",
+        sequence: 0,
+        stepIndex: 1,
+        turnId: "turn_0",
+      }),
     );
 
     expect(isEventId(stamped.meta.id)).toBe(true);
@@ -115,7 +147,12 @@ describe("message stream protocol", () => {
   });
 
   it("mints a distinct id for each emission of an identical payload", () => {
-    const event = createStepStartedEvent({ sequence: 0, stepIndex: 0, turnId: "turn_0" });
+    const event = createStepStartedEvent({
+      modelId: "openai/gpt-5.5",
+      sequence: 0,
+      stepIndex: 0,
+      turnId: "turn_0",
+    });
 
     expect(stampMessageStreamEvent(event).meta.id).not.toBe(stampMessageStreamEvent(event).meta.id);
   });
@@ -141,6 +178,7 @@ describe("message stream protocol", () => {
 
     const webhookUrl = `https://eve.example.com${createEveConnectionCallbackRoutePath(
       "linear",
+      "attempt-1",
       "abc",
     )}`;
     const full = createAuthorizationRequiredEvent({

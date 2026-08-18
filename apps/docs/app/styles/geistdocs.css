@@ -25,6 +25,34 @@ body:has([data-home-route]) footer {
   @apply bg-background-200;
 }
 
+/* Nights is an intentionally immersive standalone route. */
+body:has([data-nights-route]) {
+  background: #000;
+  color-scheme: dark;
+}
+
+@keyframes eve-nights-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+[data-nights-route][data-shader-state="loading"] [data-nights-animated] {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body:has([data-nights-route]) [data-nights-animated] {
+    animation: none;
+  }
+}
+
 /* On home routes the navbar starts borderless and fades its bottom border in
    only once the page is scrolled (ScrollState toggles [data-scrolled]). */
 body:has([data-home-route]) header {

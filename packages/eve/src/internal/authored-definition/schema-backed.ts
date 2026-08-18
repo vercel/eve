@@ -16,9 +16,10 @@ import {
   serializeOutputSchema,
   type ToolSchemaSource,
 } from "#shared/tool-schema.js";
+import { normalizeApproval } from "#internal/authored-definition/approval.js";
 import {
+  assertResolverOnlyDynamicSentinel,
   isDynamicSentinel,
-  rejectDynamicSentinelFallback,
   type DynamicToolEventName,
 } from "#shared/dynamic-tool-definition.js";
 
@@ -59,7 +60,7 @@ type NormalizedToolEntry =
  */
 export function normalizeToolDefinition(value: unknown, message: string): NormalizedToolEntry {
   if (isDynamicSentinel(value)) {
-    rejectDynamicSentinelFallback(value, message);
+    assertResolverOnlyDynamicSentinel(value, message);
     return {
       kind: "dynamic-tool",
       eventNames: Object.keys(value.events) as DynamicToolEventName[],
@@ -116,7 +117,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
    * the module export and attaches them to the ResolvedToolDefinition.
    */
   if (record.approval !== undefined) {
-    expectFunction(record.approval, message);
+    normalizeApproval(record.approval, message);
   }
 
   if (record.toModelOutput !== undefined) {

@@ -1,4 +1,5 @@
 import { type ApplicationInspection, inspectApplication } from "#services/inspect-application.js";
+import type { CompiledInstructionsDefinition } from "#compiler/manifest.js";
 import { type CliRow, createCliTheme, renderCliBanner, renderCliSection } from "#cli/ui/output.js";
 
 interface CliInfoLogger {
@@ -35,6 +36,12 @@ export interface ApplicationInfoJson {
   } | null;
 }
 
+function formatInstructions(instructions: readonly CompiledInstructionsDefinition[]): string {
+  return instructions
+    .map((instructions) => `${instructions.logicalPath} (${instructions.role})`)
+    .join(", ");
+}
+
 /**
  * Projects a structured inspection into the stable `eve info --json` contract.
  * Tools and channels an agent relies on to verify setup come straight from the
@@ -53,8 +60,11 @@ export function buildApplicationInfoJson(inspection: ApplicationInspection): App
           warnings: compiledState.metadata.discovery.summary.warnings,
         }
       : null,
-    model: compiledState?.manifest.config.model.id ?? null,
-    instructions: compiledState?.manifest.instructions?.logicalPath ?? null,
+    model: compiledState?.manifest.config.model?.id ?? null,
+    instructions:
+      compiledState === null || compiledState.manifest.instructions.length === 0
+        ? null
+        : formatInstructions(compiledState.manifest.instructions),
     skills: (compiledState?.manifest.skills ?? []).map((skill) => skill.name),
     tools: (compiledState?.manifest.tools ?? []).map((tool) => tool.name),
     subagents: (compiledState?.manifest.subagents ?? []).map((subagent) => subagent.name),
@@ -171,7 +181,10 @@ export async function printApplicationInfo(
       },
       {
         label: "Instructions",
-        value: compiledState.manifest.instructions?.logicalPath ?? "none",
+        value:
+          compiledState.manifest.instructions.length === 0
+            ? "none"
+            : formatInstructions(compiledState.manifest.instructions),
       },
       {
         label: "Skills",
@@ -213,14 +226,14 @@ export async function printApplicationInfo(
       },
     );
     instructionsRows.push(
-      compiledState.manifest.instructions === undefined
+      compiledState.manifest.instructions.length === 0
         ? {
             label: "Instructions",
             value: "No instructions prompt discovered.",
           }
         : {
             label: "Instructions",
-            value: compiledState.manifest.instructions.logicalPath,
+            value: formatInstructions(compiledState.manifest.instructions),
           },
     );
   } else {

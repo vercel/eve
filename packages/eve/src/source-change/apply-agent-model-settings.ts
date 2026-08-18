@@ -1,7 +1,7 @@
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 
 import { applyAgentConfigStringPath } from "./agent-config-string-path.js";
-import { applyModelNameToSource } from "./apply-model-name.js";
+import { applyModelSelectionToSource } from "./apply-model-selection.js";
 
 export type FieldPatch<T> =
   | { readonly kind: "keep" }
@@ -36,7 +36,7 @@ export async function applyAgentModelSettingsToSource(
     return { kind: "bail", reason: "the required `model` property cannot be removed", line: 1 };
   }
   if (patch.model.kind === "set") {
-    const edit = await applyModelNameToSource(nextSource, patch.model.value);
+    const edit = await applyModelSelectionToSource(nextSource, patch.model.value);
     if (edit.kind === "bail") return edit;
     if (edit.nextSource !== nextSource) changed.push("model");
     nextSource = edit.nextSource;

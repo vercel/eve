@@ -7,22 +7,30 @@ import type {
   SelectOption,
   SingleSelectOptions,
 } from "./prompter.js";
+import type { SetupPrerequisite } from "./integrations/shared/prerequisite.js";
+import type { SetupWireQuestion } from "./setup-question-wire.js";
 
-export const REGISTRY_SETUP_PROTOCOL_VERSION = 1;
+export const REGISTRY_SETUP_PROTOCOL_VERSION = 2;
 
-export type RegistrySetupFact = {
-  label: string;
-  value: string;
-  kind?: "text" | "url" | "phone";
+export type RegistrySetupFact = { label: string; value: string; kind?: "text" | "url" | "phone" };
+export type RegistrySetupCompletion = {
+  facts: readonly RegistrySetupFact[];
+  deploymentRequired?: true;
 };
-
+export type RegistrySetupBlocker =
+  | {
+      status: "input_required";
+      question: SetupWireQuestion;
+      issue?: { code: "invalid_answer"; message: string };
+    }
+  | { status: "prerequisite_required"; prerequisite: SetupPrerequisite };
 export type RegistrySetupError = {
   message: string;
   details?: readonly string[];
 };
-
 export type RegistrySetupOutcome =
-  | { kind: "completed"; facts: readonly RegistrySetupFact[] }
+  | ({ kind: "completed" } & RegistrySetupCompletion)
+  | { kind: "blocked"; blocker: RegistrySetupBlocker }
   | { kind: "cancelled" }
   | { kind: "failed"; error: RegistrySetupError };
 
@@ -48,11 +56,7 @@ export type RegistrySetupPrompt =
   | { kind: "acknowledge"; options: AcknowledgeOptions }
   | {
       kind: "choice";
-      options: {
-        status: string;
-        context: string;
-        actions: readonly SelectOption<string>[];
-      };
+      options: { status: string; context: string; actions: readonly SelectOption<string>[] };
     };
 
 export type RegistrySetupChildMessage =

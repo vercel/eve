@@ -76,7 +76,7 @@ describe("runRegistrySetupCommand", () => {
         "channel/slack",
         options(),
       ),
-    ).resolves.toEqual({ kind: "completed", output: [] });
+    ).resolves.toEqual({ kind: "completed", facts: [] });
 
     expect(spawn).toHaveBeenCalledWith(
       process.execPath,
@@ -86,7 +86,7 @@ describe("runRegistrySetupCommand", () => {
         env: expect.objectContaining({
           EVE_SETUP: "1",
           EVE_SETUP_ITEM: "channel/slack",
-          EVE_SETUP_PROTOCOL: "1",
+          EVE_SETUP_PROTOCOL: "2",
         }),
         stdio: ["ignore", "pipe", "pipe", "ipc"],
       }),
@@ -119,7 +119,7 @@ describe("runRegistrySetupCommand", () => {
     );
   });
 
-  it("streams child output through the parent prompter", async () => {
+  it("streams child output through a plain parent prompter", async () => {
     const child = protocolChild();
     const prompter = createPrompter();
     spawn.mockReturnValue(child);
@@ -135,7 +135,33 @@ describe("runRegistrySetupCommand", () => {
     expect(prompter.log.commandOutput).toHaveBeenCalledWith("connecting");
   });
 
-  it("uses a structured child failure instead of the exit code", async () => {
+  it("keeps successful child presentation transient for replaceable TUI flows", async () => {
+    const child = protocolChild(0, null, (running) => {
+      running.emit("message", { type: "log", level: "success", text: "Scaffolded channel" });
+      running.emit("message", {
+        type: "note",
+        title: "Text your agent",
+        message: "+15551234567",
+        tone: "success",
+      });
+      running.emit("message", { type: "result", outcome: { kind: "completed", facts: [] } });
+    });
+    const prompter = createPrompter();
+    prompter.replaceContent = vi.fn();
+    spawn.mockReturnValue(child);
+
+    await runRegistrySetupCommand(
+      "/project",
+      { package: "@acme/slack", bin: "acme-slack", args: [] },
+      "channel/photon-imessage",
+      { prompter },
+    );
+
+    expect(prompter.log.success).not.toHaveBeenCalled();
+    expect(prompter.note).not.toHaveBeenCalled();
+  });
+
+  it("uses a structured child failure without exposing its stack", async () => {
     const child = protocolChild(1, null, (running) => {
       running.emit("message", {
         type: "result",
@@ -154,7 +180,34 @@ describe("runRegistrySetupCommand", () => {
         "channel/photon-imessage",
         options(),
       ),
-    ).rejects.toThrow("Photon approval was denied.\nat setupPhoton");
+    ).rejects.toThrow(/^Photon approval was denied\.$/);
+  });
+
+  it("preserves additive deployment metadata on protocol v1", async () => {
+    const child = protocolChild(0, null, (running) => {
+      running.emit("message", {
+        type: "result",
+        outcome: {
+          kind: "completed",
+          facts: [{ label: "Open Linear", value: "https://linear.app", kind: "url" }],
+          deploymentRequired: true,
+        },
+      });
+    });
+    spawn.mockReturnValue(child);
+
+    await expect(
+      runRegistrySetupCommand(
+        "/project",
+        { package: "@acme/slack", bin: "acme-slack", args: [] },
+        "channel/linear",
+        options(),
+      ),
+    ).resolves.toEqual({
+      kind: "completed",
+      facts: [{ label: "Open Linear", value: "https://linear.app", kind: "url" }],
+      deploymentRequired: true,
+    });
   });
 
   it("returns durable setup notes with successful completion", async () => {
@@ -185,9 +238,13 @@ describe("runRegistrySetupCommand", () => {
       ),
     ).resolves.toEqual({
       kind: "completed",
-      output: [
-        "Text your agent: +15550000000",
-        "Photon project: https://app.photon.codes/dashboard/project-id",
+      facts: [
+        { label: "Text your agent", value: "+15550000000", kind: "phone" },
+        {
+          label: "Photon project",
+          value: "https://app.photon.codes/dashboard/project-id",
+          kind: "url",
+        },
       ],
     });
   });
@@ -239,6 +296,35 @@ describe("runRegistrySetupCommand", () => {
         options(),
       ),
     ).rejects.toThrow("exited with code 0 before reporting a result");
+  });
+
+  it("returns a structured setup blocker from the child", async () => {
+    spawn.mockReturnValue(
+      protocolChild(0, null, (child) =>
+        child.emit("message", {
+          type: "result",
+          outcome: {
+            kind: "blocked",
+            blocker: {
+              status: "input_required",
+              question: { key: "mode", kind: "confirm", message: "Mode?", required: true },
+            },
+          },
+        }),
+      ),
+    );
+
+    await expect(
+      runRegistrySetupCommand(
+        "/project",
+        { package: "@acme/slack", bin: "acme-slack", args: [] },
+        "channel/slack",
+        options(),
+      ),
+    ).resolves.toMatchObject({
+      kind: "blocked",
+      blocker: { status: "input_required", question: { key: "mode" } },
+    });
   });
 
   it("rejects a binary the installed package does not declare", async () => {

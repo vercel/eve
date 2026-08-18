@@ -3,9 +3,9 @@ title: "Schedules"
 description: "Run an agent on a cron cadence, either a fire-and-forget prompt or a handler that hands work off to a channel."
 ---
 
-A schedule starts the agent on its own clock instead of waiting for an inbound message. Use one for daily digests, data syncs, cleanup sweeps, heartbeats, or anything that should fire on a cadence. Each one is a single file under `agent/schedules/` carrying a cron expression. Schedules are root-only, so declared subagents cannot have a `schedules/` directory.
+A schedule starts the agent on its own clock instead of waiting for an inbound message. Use one for daily digests, data syncs, cleanup sweeps, heartbeats, or anything that should fire on a cadence. Root-authored schedules are single files under `agent/schedules/`, and mounted extensions can contribute them from `extension/schedules/`. Declared subagents cannot have a `schedules/` directory.
 
-The name comes from the path under `schedules/` (`agent/schedules/billing/sweep.ts` → `"billing/sweep"`), and nested directories are fine.
+The name comes from the path under `schedules/` (`agent/schedules/billing/sweep.ts` → `"billing/sweep"`), and nested directories are fine. An extension mount prefixes that name (`extension/schedules/sweep.ts` mounted as `crm` → `"crm__sweep"`) without changing its cron expression.
 
 ## `defineSchedule`
 

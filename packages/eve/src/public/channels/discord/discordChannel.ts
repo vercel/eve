@@ -1,7 +1,7 @@
 import type { DiscordInstrumentationMetadata } from "#public/channels/discord/index.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
@@ -105,11 +105,13 @@ export interface DiscordReceiveTarget {
  * - `auth`: session auth context for the dispatched turn, or `null` for anonymous.
  * - `ephemeral`: when `true`, the deferred reply is visible only to the invoking user.
  * - `context`: model-visible context lines appended after the Discord context block.
+ * - `title`: workflow run title override that does not change model input.
  */
 export type DiscordCommandResult = {
   readonly auth: SessionAuthContext | null;
   readonly ephemeral?: boolean;
   readonly context?: readonly string[];
+  readonly title?: string;
 } | null;
 
 /** Sync or async {@link DiscordCommandResult}. */
@@ -151,6 +153,8 @@ export interface DiscordChannelConfig {
   readonly credentials?: DiscordChannelCredentials;
   /** Override the default interaction route path (`/eve/v1/discord`). */
   readonly route?: string;
+  /** Policy for accepted messages that arrive while a turn is active. */
+  readonly turnPolicy?: TurnPolicy;
 
   /** Inbound command hook. Defaults to user-scoped Discord auth and dispatch. Return `{ auth }` to dispatch, or `null` to acknowledge without running the agent. */
   onCommand?(
@@ -219,6 +223,7 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
     DiscordInstrumentationMetadata
   >({
     kindHint: "discord",
+    turnPolicy: config.turnPolicy,
     state: initialDiscordState(),
     metadata: (state) => ({ channelId: state.channelId, guildId: state.guildId }),
 
@@ -601,6 +606,7 @@ async function dispatchCommand(input: {
         auth: input.result.auth,
         context: [contextBlock, ...channelContext],
         state: input.state,
+        title: input.result.title,
       });
   } catch (error) {
     log.error("command delivery failed", { error });

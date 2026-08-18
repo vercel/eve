@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { HookPayload } from "#channel/types.js";
+import { SessionDynamicModelReferenceKey } from "#context/keys.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
@@ -334,18 +335,18 @@ describe("turnWorkflow", () => {
 
     expect(vi.mocked(turnStep).mock.calls[0]?.[0].abortSignal).toBeInstanceOf(AbortSignal);
     expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
-      serializedContext: { state: "start" },
+      serializedContext: { state: "cancelled" },
       sessionState,
     });
     // The command inbox forwards cancellation to this turn-private hook.
     expect(cancelHookTokens()).toEqual(["turn-token:cancel"]);
-    // The cancelled result is a pure marker: the control payload carries
-    // the cursor's last settled state, not the aborted step's echo.
+    // The cancelled step has already rolled its context back to the allowed
+    // carve-outs, which must reach the driver cancellation epilogue.
     expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
       action: {
         cancelled: true,
         kind: "park",
-        serializedContext: { state: "start" },
+        serializedContext: { state: "cancelled" },
         sessionState,
       },
       kind: "turn-result",
@@ -355,13 +356,20 @@ describe("turnWorkflow", () => {
 
   it("honors cancellation observed while a durable turn step returns", async () => {
     const sessionState = createSessionState();
+    const sessionModel = {
+      id: "openai/gpt-5.6-sol",
+      contextWindowTokens: 1_000_000,
+    };
     installInbox([], { cancelPayloads: [{}] });
     vi.mocked(turnStep).mockImplementationOnce(async (stepInput) => {
       await vi.waitFor(() => expect(stepInput.abortSignal?.aborted).toBe(true));
       return {
         action: "done",
         output: "must not complete",
-        serializedContext: { state: "done" },
+        serializedContext: {
+          state: "done",
+          [SessionDynamicModelReferenceKey.name]: sessionModel,
+        },
         sessionState,
       };
     });
@@ -372,15 +380,19 @@ describe("turnWorkflow", () => {
     });
     await turnWorkflow(input);
 
+    const cancelledContext = {
+      state: "start",
+      [SessionDynamicModelReferenceKey.name]: sessionModel,
+    };
     expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
-      serializedContext: { state: "start" },
+      serializedContext: cancelledContext,
       sessionState,
     });
     expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
       action: {
         cancelled: true,
         kind: "park",
-        serializedContext: { state: "start" },
+        serializedContext: cancelledContext,
         sessionState,
       },
       kind: "turn-result",
@@ -551,6 +563,7 @@ describe("turnWorkflow", () => {
   });
 
   it("keeps a local subagent result inside one turn workflow", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_234);
     const initialState = createSessionState({ continuationToken: "slack:C1:" });
     const pendingState = createSessionState({ continuationToken: "slack:C1:T1" });
     const completedState = createSessionState({ continuationToken: "slack:C1:T1" });
@@ -573,6 +586,7 @@ describe("turnWorkflow", () => {
       sessionState: withRunningChildren(pendingState, [
         { callId: "call-1", sessionId: "child-session" },
       ]),
+      pendingTasks: [],
     });
     vi.mocked(turnStep)
       .mockResolvedValueOnce({
@@ -613,8 +627,14 @@ describe("turnWorkflow", () => {
     });
     expect(vi.mocked(turnStep).mock.calls[1]?.[0]).toMatchObject({
       input: {
+        acceptedAtMsByCallId: { "call-1": 1_234 },
         kind: "runtime-action-result",
-        results: [expect.objectContaining({ callId: "call-1", output: "child output" })],
+        results: [
+          expect.objectContaining({
+            callId: "call-1",
+            output: "child output",
+          }),
+        ],
       },
     });
     expect(resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-result")).toEqual([
@@ -631,6 +651,7 @@ describe("turnWorkflow", () => {
         action: expect.objectContaining({ kind: "dispatch-runtime-actions" }),
       }),
     );
+    now.mockRestore();
   });
 
   it("waits for dispatch adoption before cascading a cancellation", async () => {
@@ -638,11 +659,16 @@ describe("turnWorkflow", () => {
     const pendingState = createSessionState({ continuationToken: "http:parent:turn" });
     const adoptedState = createSessionState({ continuationToken: "http:parent:turn:adopted" });
     let finishDispatch:
-      | ((value: { results: readonly []; sessionState: DurableSessionState }) => void)
+      | ((value: {
+          results: readonly [];
+          sessionState: DurableSessionState;
+          pendingTasks: readonly [];
+        }) => void)
       | undefined;
     const dispatchResult = new Promise<{
       results: readonly [];
       sessionState: DurableSessionState;
+      pendingTasks: readonly [];
     }>((resolve) => {
       finishDispatch = resolve;
     });
@@ -672,12 +698,12 @@ describe("turnWorkflow", () => {
     await vi.waitFor(() => expect(dispatchRuntimeActionsStep).toHaveBeenCalledOnce());
     expect(cancelDescendantTurnsStep).not.toHaveBeenCalled();
 
-    finishDispatch?.({ results: [], sessionState: adoptedState });
+    finishDispatch?.({ results: [], sessionState: adoptedState, pendingTasks: [] });
     await workflow;
 
     expect(vi.mocked(turnStep).mock.calls[1]?.[0].abortSignal?.aborted).toBe(true);
     expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
-      serializedContext: { state: "pending" },
+      serializedContext: { state: "cancelled" },
       sessionState: adoptedState,
     });
     expect(vi.mocked(dispatchRuntimeActionsStep).mock.invocationCallOrder[0]).toBeLessThan(
@@ -686,6 +712,7 @@ describe("turnWorkflow", () => {
   });
 
   it("keeps dynamic-workflow child dispatch and immediate remote failures in the same turn", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(2_345);
     const pendingState = createSessionState();
     const completedState = createSessionState();
     installInbox([]);
@@ -701,6 +728,7 @@ describe("turnWorkflow", () => {
         },
       ],
       sessionState: pendingState,
+      pendingTasks: [],
     });
     vi.mocked(turnStep)
       .mockResolvedValueOnce({
@@ -731,12 +759,14 @@ describe("turnWorkflow", () => {
       sessionState: pendingState,
     });
     expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toEqual({
+      acceptedAtMsByCallId: { "call-1": 2_345 },
       kind: "runtime-action-result",
       results: [expect.objectContaining({ callId: "call-1", isError: true })],
     });
     expect(
       resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-result"),
     ).toHaveLength(1);
+    now.mockRestore();
   });
 
   it("proxies child HITL and pulls the response through the active turn", async () => {
@@ -746,6 +776,7 @@ describe("turnWorkflow", () => {
       createSessionState({ hasProxyInputRequests: true }),
       runningChildren,
     );
+    const retiredProxyState = withRunningChildren(createSessionState(), runningChildren);
     const completedState = createSessionState();
     const requestId = "turn-token:inbox:delivery:0";
     installInbox([
@@ -781,6 +812,7 @@ describe("turnWorkflow", () => {
     vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
       results: [],
       sessionState: withRunningChildren(pendingState, runningChildren),
+      pendingTasks: [],
     });
     vi.mocked(runProxySubagentEventStep).mockResolvedValue({
       serializedContext: { state: "proxied" },
@@ -789,6 +821,8 @@ describe("turnWorkflow", () => {
     vi.mocked(routeDeliverToChildren).mockResolvedValue({
       kind: "continue",
       remainder: undefined,
+      serializedContext: { state: "proxied" },
+      sessionState: retiredProxyState,
     });
     vi.mocked(turnStep)
       .mockResolvedValueOnce({
@@ -826,15 +860,20 @@ describe("turnWorkflow", () => {
     });
     expect(routeDeliverToChildren).toHaveBeenCalledWith(
       expect.objectContaining({
-        payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval-1" }] }],
+        delivery: {
+          kind: "deliver",
+          payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval-1" }] }],
+        },
         sessionState: proxyState,
       }),
     );
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].sessionState).toBe(retiredProxyState);
   });
 
   it("lets the parent cancel after a descendant consumes a session-limit Stop response", async () => {
     const pendingState = createSessionState();
     const proxyState = createSessionState({ hasProxyInputRequests: true });
+    const retiredProxyState = createSessionState();
     const requestId = "child-limit-request";
     installInbox([
       {
@@ -857,6 +896,7 @@ describe("turnWorkflow", () => {
     vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
       results: [],
       sessionState: pendingState,
+      pendingTasks: [],
     });
     vi.mocked(runProxySubagentEventStep).mockResolvedValue({
       serializedContext: { state: "proxied" },
@@ -864,6 +904,8 @@ describe("turnWorkflow", () => {
     });
     vi.mocked(routeDeliverToChildren).mockResolvedValue({
       kind: "cancel-turn",
+      serializedContext: { state: "proxied" },
+      sessionState: retiredProxyState,
     });
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "park",
@@ -883,7 +925,7 @@ describe("turnWorkflow", () => {
 
     expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
       serializedContext: { state: "proxied" },
-      sessionState: proxyState,
+      sessionState: retiredProxyState,
     });
     expect(turnStep).toHaveBeenCalledOnce();
     expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
@@ -891,7 +933,7 @@ describe("turnWorkflow", () => {
         cancelled: true,
         kind: "park",
         serializedContext: { state: "proxied" },
-        sessionState: proxyState,
+        sessionState: retiredProxyState,
       },
       kind: "turn-result",
     });
@@ -958,6 +1000,7 @@ describe("turnWorkflow", () => {
     vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
       results: [],
       sessionState: dispatchedState,
+      pendingTasks: [],
     });
     vi.mocked(runProxySubagentEventStep)
       .mockResolvedValueOnce({
@@ -1073,10 +1116,13 @@ describe("turnWorkflow", () => {
         { callId: "call-1", sessionId: "child-session-1" },
         { callId: "call-2", sessionId: "child-session-2" },
       ]),
+      pendingTasks: [],
     });
     vi.mocked(routeDeliverToChildren).mockResolvedValue({
       kind: "continue",
       remainder: undefined,
+      serializedContext: {},
+      sessionState: pendingState,
     });
     vi.mocked(turnStep)
       .mockResolvedValueOnce({

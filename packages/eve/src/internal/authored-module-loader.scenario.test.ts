@@ -1119,12 +1119,14 @@ describe("loadAuthoredModuleNamespace", () => {
         appRoot: app.appRoot,
       });
       const manifest = await compileAgentManifest(discovered.manifest);
+      const subagent = manifest.subagents[0];
+      if (subagent?.configResolver !== undefined) {
+        throw new Error("expected a static subagent");
+      }
 
       expect(manifest.config.build?.externalDependencies).toEqual(["external-only"]);
-      expect(manifest.subagents[0]?.agent.config.build?.externalDependencies).toEqual([
-        "external-only",
-      ]);
-      expect(manifest.subagents[0]?.agent.tools).toHaveLength(1);
+      expect(subagent?.agent.config.build?.externalDependencies).toEqual(["external-only"]);
+      expect(subagent?.agent.tools).toHaveLength(1);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }

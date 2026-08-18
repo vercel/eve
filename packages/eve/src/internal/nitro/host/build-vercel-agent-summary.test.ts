@@ -171,13 +171,16 @@ describe("buildVercelAgentSummary", () => {
       skills: [makeFlatSkill("get-weather"), makePackagedSkill("research")],
       subagentEdges: [subagentEdge],
       subagents: [subagent],
-      instructions: {
-        logicalPath: "instructions.md",
-        markdown: "You are a helpful test agent. Always cite tools you use.",
-        name: "instructions",
-        sourceId: "instructions.md",
-        sourceKind: "markdown",
-      },
+      instructions: [
+        {
+          content: "You are a helpful test agent. Always cite tools you use.",
+          logicalPath: "instructions.md",
+          name: "instructions",
+          role: "system",
+          sourceId: "instructions.md",
+          sourceKind: "markdown",
+        },
+      ],
       tools: [makeTool("get-weather"), makeTool("send-slack")],
     });
 
@@ -196,11 +199,14 @@ describe("buildVercelAgentSummary", () => {
       name: "test-agent",
     });
 
-    expect(summary.instructions).toEqual({
-      logicalPath: "instructions.md",
-      markdown: "You are a helpful test agent. Always cite tools you use.",
-      sourceKind: "markdown",
-    });
+    expect(summary.instructions).toEqual([
+      {
+        content: "You are a helpful test agent. Always cite tools you use.",
+        logicalPath: "instructions.md",
+        role: "system",
+        sourceKind: "markdown",
+      },
+    ]);
 
     expect(summary.tools).toEqual([
       {
@@ -349,13 +355,10 @@ describe("buildVercelAgentSummary", () => {
 
     expect(typeof summary.generatorVersion).toBe("string");
     expect(summary.generatorVersion.length).toBeGreaterThan(0);
-    // Agents without authored instructions explicitly report null so
-    // dashboard consumers can render "uses framework default" without
-    // having to guess from a missing field.
-    expect(summary.instructions).toBeNull();
+    expect(summary.instructions).toEqual([]);
   });
 
-  it("captures module-backed instructions with their resolved markdown", () => {
+  it("captures module-backed instructions with their resolved content and role", () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: AGENT_ROOT,
       appRoot: APP_ROOT,
@@ -363,22 +366,28 @@ describe("buildVercelAgentSummary", () => {
         model: { id: "openai/gpt-5.4", routing: { kind: "gateway", target: "openai" } },
         name: "module-instructions-agent",
       },
-      instructions: {
-        logicalPath: "instructions.ts",
-        markdown: "Module-backed instructions rendered at build time.",
-        name: "instructions",
-        sourceId: "instructions.ts",
-        sourceKind: "module",
-      },
+      instructions: [
+        {
+          content: "Module-backed instructions rendered at build time.",
+          logicalPath: "instructions.ts",
+          name: "instructions",
+          role: "user",
+          sourceId: "instructions.ts",
+          sourceKind: "module",
+        },
+      ],
     });
 
     const summary = buildVercelAgentSummary({ manifest });
 
-    expect(summary.instructions).toEqual({
-      logicalPath: "instructions.ts",
-      markdown: "Module-backed instructions rendered at build time.",
-      sourceKind: "module",
-    });
+    expect(summary.instructions).toEqual([
+      {
+        content: "Module-backed instructions rendered at build time.",
+        logicalPath: "instructions.ts",
+        role: "user",
+        sourceKind: "module",
+      },
+    ]);
   });
 });
 

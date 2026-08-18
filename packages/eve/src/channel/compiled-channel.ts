@@ -5,7 +5,7 @@ import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { TypedReceiveTarget } from "#channel/receive-target.js";
 import type { RouteDefinition } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 
 export const CHANNEL_SENTINEL = "eve:channel" as const;
 const CHANNEL_INSTRUMENTATION_KIND = Symbol.for("eve.channel.instrumentationKind");
@@ -45,6 +45,7 @@ export interface CompiledChannel<
     },
     ctx: ChannelReceiveContext<TState>,
   ) => Promise<Session>;
+  readonly turnPolicy?: TurnPolicy;
 }
 
 export function isCompiledChannel(value: unknown): value is CompiledChannel {

@@ -119,10 +119,10 @@ const followUp = await followUpResponse.result();
 console.log(followUp.data); // undefined unless this turn also requested a schema
 ```
 
-For task-mode output that belongs to the agent or subagent definition itself, see [`agent.ts`](../../agent-config#outputschema) and [Subagents](../../subagents).
+For task-mode output that belongs to the agent or subagent definition itself, see [`agent.ts`](../../agent-config#other-defineagent-fields) and [Subagents](../../subagents).
 
 ## What to read next
 
 - [Messages](./messages): send turns with `send()`
 - [Streaming](./streaming): handle `result.completed` live
-- [`agent.ts`](../../agent-config#outputschema): configured task-mode output
+- [`agent.ts`](../../agent-config#other-defineagent-fields): configured task-mode output

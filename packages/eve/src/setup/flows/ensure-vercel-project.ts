@@ -9,15 +9,19 @@ import { readProjectLink, type VercelProjectReference } from "../project-resolut
 import { runInteractive, type AnySetupBox } from "../runner.js";
 import { snapshotSetupState, type SetupState } from "../state.js";
 import { WizardCancelledError } from "../step.js";
+import { requireAuth } from "../vercel-project.js";
 import { inProjectSetupState, prompterSink } from "./in-project.js";
+import { runLoginFlow } from "./login.js";
 
 export interface EnsureVercelProjectDeps {
   resolveProvisioning?: ResolveProvisioningDeps;
   linkProject?: LinkProjectDeps;
   readProjectLink: typeof readProjectLink;
+  requireAuth: typeof requireAuth;
+  runLoginFlow: typeof runLoginFlow;
 }
 
-/** Ensures a project link using eve-owned prompts and a non-interactive Vercel command. */
+/** Ensures Vercel authentication and a project link using eve-owned prompts. */
 export async function ensureVercelProject(input: {
   appRoot: string;
   prompter: Prompter;
@@ -26,6 +30,18 @@ export async function ensureVercelProject(input: {
   deps?: Partial<EnsureVercelProjectDeps>;
 }): Promise<VercelProjectReference> {
   const readLink = input.deps?.readProjectLink ?? readProjectLink;
+  const login = await (input.deps?.runLoginFlow ?? runLoginFlow)({
+    appRoot: input.appRoot,
+    prompter: input.prompter,
+    signal: input.signal,
+  });
+  if (login.kind === "cancelled") throw new WizardCancelledError();
+  if (login.kind !== "already" && login.kind !== "logged-in") {
+    await (input.deps?.requireAuth ?? requireAuth)(input.appRoot, input.prompter, {
+      signal: input.signal,
+    });
+  }
+
   const existing = await readLink(input.appRoot);
   if (existing !== undefined) return existing;
 

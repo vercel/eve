@@ -7,8 +7,9 @@ Use `photonIMessageChannel` to receive and reply to iMessages through a Photon p
 
 Run `eve add channel/photon-imessage` to create or use a Photon project and register
 your phone number. It then asks whether to configure Vercel Connect or portable
-credentials. With Vercel Connect, eve creates the connector and configures
-Photon’s webhook through Connect. The channel resolves credentials lazily when
+credentials. With Vercel Connect, eve signs you in and creates or links a Vercel
+project when needed, then creates the connector and configures Photon’s webhook
+through Connect. The channel resolves credentials lazily when
 the adapter first initializes:
 
 ```ts title="agent/channels/photon.ts"
@@ -26,7 +27,9 @@ read, and continues the same eve session for every message in an iMessage
 conversation. A new accepted message cooperatively cancels an active turn and
 steers its replacement turn.
 
-Customize inbound dispatch with `onMessage`. Return `null` to ignore a message:
+Set `turnPolicy: "queue"` when every response should finish before Photon starts the next message.
+
+Customize inbound dispatch with `onMessage`. Return `null` to ignore a message, or return `title` alongside `auth` to set the title when the dispatch starts a run:
 
 ```ts
 export default photonIMessageChannel({

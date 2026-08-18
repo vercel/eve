@@ -26,9 +26,7 @@ export function printStreamEvent(event: MessageStreamEvent): void {
   switch (event.type) {
     case "session.started":
       process.stdout.write(
-        theme.muted(
-          `[session.started] ${event.data.runtime?.agentName ?? "?"} · ${event.data.runtime?.modelId ?? "?"}\n`,
-        ),
+        theme.muted(`[session.started] ${event.data.runtime?.agentName ?? "?"}\n`),
       );
       return;
 
@@ -117,6 +115,9 @@ export function printStreamEvent(event: MessageStreamEvent): void {
       return;
 
     case "step.started":
+      process.stdout.write(theme.muted(`[model ${event.data.modelId}]\n`));
+      return;
+
     case "step.completed":
     case "session.waiting":
     case "session.completed":

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  createCompiledAgentResources,
   createCompiledAgentManifest,
   createCompiledAgentNodeManifest,
   ROOT_COMPILED_AGENT_NODE_ID,
@@ -145,23 +146,16 @@ describe("resolveRuntimeAgentGraph", () => {
       ],
       subagents: [
         {
-          agent: createCompiledAgentNodeManifest({
+          agent: createCompiledAgentResources({
             agentRoot: "/app/agent/subagents/researcher",
             appRoot: "/app",
-            config: {
-              model: {
-                id: TEST_DEFAULT_MODEL_ID,
-                routing: { kind: "gateway", target: "openai" },
-              },
-              name: "researcher",
-              source: {
-                logicalPath: "agent.ts",
-                sourceId: "agent-config",
-                sourceKind: "module",
-              },
-            },
           }),
-          dynamic: { eventNames: ["session.started"] },
+          configResolver: {
+            eventNames: ["session.started"],
+            logicalPath: "agent.ts",
+            sourceId: "agent.ts",
+            sourceKind: "module",
+          },
           entryPath: "/app/agent/subagents/researcher/agent.ts",
           logicalPath: "subagents/researcher",
           name: "researcher",
@@ -180,7 +174,7 @@ describe("resolveRuntimeAgentGraph", () => {
           [ROOT_COMPILED_AGENT_NODE_ID]: { modules: {} },
           "subagents/researcher": {
             modules: {
-              "agent-config": { default: dynamic },
+              "agent.ts": { default: dynamic },
             },
           },
         },
@@ -219,13 +213,16 @@ describe("resolveRuntimeAgentGraph", () => {
         },
         name: "reviewer",
       },
-      instructions: {
-        name: "reviewer-instructions",
-        logicalPath: "instructions.md",
-        markdown: "Review drafts carefully.",
-        sourceId: "instructions.md",
-        sourceKind: "markdown",
-      },
+      instructions: [
+        {
+          content: "Review drafts carefully.",
+          name: "reviewer-instructions",
+          logicalPath: "instructions.md",
+          role: "system",
+          sourceId: "instructions.md",
+          sourceKind: "markdown",
+        },
+      ],
     });
     const researcherDefinition = defineAgent({
       description: "Investigate one task in depth.",
@@ -242,13 +239,16 @@ describe("resolveRuntimeAgentGraph", () => {
         },
         name: "researcher",
       },
-      instructions: {
-        name: "researcher-instructions",
-        logicalPath: "instructions.md",
-        markdown: "Investigate one task in depth.",
-        sourceId: "instructions.md",
-        sourceKind: "markdown",
-      },
+      instructions: [
+        {
+          content: "Investigate one task in depth.",
+          name: "researcher-instructions",
+          logicalPath: "instructions.md",
+          role: "system",
+          sourceId: "instructions.md",
+          sourceKind: "markdown",
+        },
+      ],
       tools: [
         {
           description: "Search the web.",
@@ -270,13 +270,16 @@ describe("resolveRuntimeAgentGraph", () => {
         },
         name: "weather-agent",
       },
-      instructions: {
-        name: "instructions",
-        logicalPath: "instructions.md",
-        markdown: "Answer weather questions.",
-        sourceId: "instructions.md",
-        sourceKind: "markdown",
-      },
+      instructions: [
+        {
+          content: "Answer weather questions.",
+          name: "instructions",
+          logicalPath: "instructions.md",
+          role: "system",
+          sourceId: "instructions.md",
+          sourceKind: "markdown",
+        },
+      ],
       subagentEdges: [
         {
           childNodeId: "subagents/researcher",
@@ -380,14 +383,6 @@ describe("resolveRuntimeAgentGraph", () => {
       },
       {
         kind: "authored-tool",
-        name: "glob",
-      },
-      {
-        kind: "authored-tool",
-        name: "grep",
-      },
-      {
-        kind: "authored-tool",
         name: "read_file",
       },
       {
@@ -445,14 +440,17 @@ describe("resolveRuntimeAgentGraph", () => {
     const researcherNode = graph.nodesByNodeId.get("subagents/researcher");
     const reviewerNode = graph.nodesByNodeId.get("subagents/researcher::subagents/reviewer");
 
-    expect(researcherNode?.agent.config.name).toBe("researcher");
-    expect(researcherNode?.agent.instructions).toEqual({
-      name: "researcher-instructions",
-      logicalPath: "instructions.md",
-      markdown: "Investigate one task in depth.",
-      sourceId: "instructions.md",
-      sourceKind: "markdown",
-    });
+    expect(researcherNode?.agent.config?.name).toBe("researcher");
+    expect(researcherNode?.agent.instructions).toEqual([
+      {
+        content: "Investigate one task in depth.",
+        name: "researcher-instructions",
+        logicalPath: "instructions.md",
+        role: "system",
+        sourceId: "instructions.md",
+        sourceKind: "markdown",
+      },
+    ]);
     expect(researcherNode?.turnAgent.tools).toMatchObject([
       {
         description:
@@ -464,14 +462,6 @@ describe("resolveRuntimeAgentGraph", () => {
         description: "Execute a shell command in the shared workspace environment.",
         kind: "authored-tool",
         name: "bash",
-      },
-      {
-        kind: "authored-tool",
-        name: "glob",
-      },
-      {
-        kind: "authored-tool",
-        name: "grep",
       },
       {
         kind: "authored-tool",
@@ -528,13 +518,16 @@ describe("resolveRuntimeAgentGraph", () => {
         sourceId: "subagents/reviewer",
       },
     ]);
-    expect(reviewerNode?.agent.instructions).toEqual({
-      name: "reviewer-instructions",
-      logicalPath: "instructions.md",
-      markdown: "Review drafts carefully.",
-      sourceId: "instructions.md",
-      sourceKind: "markdown",
-    });
+    expect(reviewerNode?.agent.instructions).toEqual([
+      {
+        content: "Review drafts carefully.",
+        name: "reviewer-instructions",
+        logicalPath: "instructions.md",
+        role: "system",
+        sourceId: "instructions.md",
+        sourceKind: "markdown",
+      },
+    ]);
   });
 
   it("resolves remote subagents from the owning node manifest only", async () => {
@@ -778,8 +771,6 @@ describe("resolveRuntimeAgentGraph", () => {
     });
     expect(tools.map((tool) => tool.name)).toEqual([
       "ask_question",
-      "glob",
-      "grep",
       "read_file",
       "write_file",
       "todo",
@@ -818,8 +809,6 @@ describe("resolveRuntimeAgentGraph", () => {
     expect(graph.root.turnAgent.tools.map((tool) => tool.name)).toEqual([
       "ask_question",
       "bash",
-      "glob",
-      "grep",
       "read_file",
       "write_file",
       "todo",
@@ -903,8 +892,6 @@ describe("resolveRuntimeAgentGraph", () => {
 
     expect(tools.map((tool) => tool.name)).toEqual([
       "ask_question",
-      "glob",
-      "grep",
       "read_file",
       "write_file",
       "todo",

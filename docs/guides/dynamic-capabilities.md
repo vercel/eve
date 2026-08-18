@@ -7,26 +7,64 @@ description: "Resolve models, subagents, tools, skills, and instructions at runt
 
 ## Dynamic models
 
-The `model` field in `agent.ts` accepts `defineDynamic({ fallback, events })`.
-Resolvers run at `session.started`, `turn.started`, or `step.started`
-(precedence: step > turn > session > `fallback`); `null` leaves a scope unset
-and failures degrade to the next scope. Prefer `session.started` — prompt
-caches are per model, so switching mid-session re-ingests the conversation at
-uncached prices. See
+The `model` field in `agent.ts` accepts `defineDynamic({ events })`. Resolvers
+run at `session.started`, `turn.started`, or `step.started` (precedence: step >
+turn > session). Every matching handler must return a concrete model. A
+missing, invalid, or throwing selection fails the turn before model-dependent
+work begins. Prefer `session.started` — prompt caches are per model, so
+switching mid-session re-ingests the conversation at uncached prices. See
 [agent configuration](../agent-config#choose-the-model-dynamically) for the
 full contract.
 
-The agent always needs exactly one model, so the compiled fallback anchors
-build-time metadata. Tools, skills, instructions, and subagents default by
-authoring a static entry (or returning `null`), so `fallback` on their
-`defineDynamic` export is a build error.
+Dynamic models do not compile a default model or model metadata. When a
+resolver first selects a model, eve normalizes the selection and resolves any
+omitted context-window metadata from the AI Gateway catalog. Dynamic tools,
+skills, instructions, and subagents may return `null` to omit a capability.
+
+### Route image inputs to a vision model
+
+Use `step.started` when model choice depends on the current messages. This
+keeps GLM for text and switches to Gemini Flash when user history contains an
+image:
+
+```ts title="agent/agent.ts"
+import { defineAgent, defineDynamic } from "eve";
+
+export default defineAgent({
+  model: defineDynamic({
+    events: {
+      "step.started": (_event, ctx) => {
+        const hasImage = ctx.messages.some(
+          (message) =>
+            message.role === "user" &&
+            Array.isArray(message.content) &&
+            message.content.some(
+              (part) =>
+                part.type === "image" ||
+                (part.type === "file" &&
+                  (part.mediaType === "image" || part.mediaType.startsWith("image/"))),
+            ),
+        );
+
+        return hasImage ? "google/gemini-3.5-flash" : "zai/glm-5.2";
+      },
+    },
+  }),
+});
+```
+
+eve stages byte-backed `file` parts under `/workspace/attachments` before
+`step.started`, but keeps their media type in `ctx.messages`. When an image
+reaches the provider, vision models can process it and non-vision models reject
+it. eve does not reroute automatically. See [Inbound
+attachments](../sandbox#inbound-attachments).
 
 ## Dynamic subagents
 
 Wrap a declared subagent's own `agent.ts` in `defineDynamic` when its
 availability depends on the caller, tenant, environment, or a feature flag.
-Return the child definition to configure and expose it. Return `null` or
-`undefined` to omit it from the parent's model-visible tools.
+Return the child definition to configure and expose it. Return `null` to omit
+it from the parent's model-visible tools.
 
 ```ts title="agent/subagents/finance/agent.ts"
 import { defineAgent, defineDynamic } from "eve";
@@ -44,15 +82,19 @@ export default defineDynamic({
 });
 ```
 
-eve always compiles the subagent's filesystem manifest, including its
-instructions, tools, skills, connections, sandbox, and nested subagents. When
-the resolver selects it, eve injects the returned agent configuration into that
-compiled manifest. Each resolution can return a different model or other
-runtime agent settings. Runtime-selected models must use string model IDs;
-build and Workflow-world configuration cannot be selected at runtime.
+eve always compiles the subagent's filesystem resources, including its
+instructions, tools, skills, connections, sandbox, and nested subagents. It
+does not compile an agent config or placeholder model for a dynamic subagent.
+When the resolver selects the subagent, eve combines the returned config with
+those resources before starting the child session. Each resolution can return
+a different model or other runtime agent settings. A returned local config
+must use a static model; it cannot contain another `defineDynamic` model.
+Runtime-selected models must use string model IDs. Put build configuration on
+the outer `defineDynamic` definition; build and Workflow-world configuration
+cannot be selected in a handler result.
 
 A single-file remote subagent uses the same lifecycle. Return
-`defineRemoteAgent(...)` to expose the selected deployment, or nil to omit it:
+`defineRemoteAgent(...)` to expose the selected deployment, or `null` to omit it:
 
 ```ts title="agent/subagents/finance.ts"
 import { defineDynamic, defineRemoteAgent } from "eve";
@@ -77,7 +119,7 @@ outbound request without entering durable workflow state.
 
 Dynamic subagents support `session.started` and `turn.started`. A turn selection
 shadows the session selection for that turn, including when the turn handler
-returns nil. If a resolver throws or returns an invalid definition, eve logs the
+returns `null`. If a resolver throws or returns an invalid definition, eve logs the
 failure and omits the subagent.
 
 The resolved set applies to local and remote direct delegation and the
@@ -208,7 +250,7 @@ Skills follow the same naming rule as tools: a single `defineSkill(...)` is name
 
 ## Dynamic instructions
 
-A dynamic instructions file resolves the per-session system prompt the same way, returning `defineInstructions(...)` built from the principal, tenant, or external data:
+A dynamic instructions file returns `defineInstructions({ content, role? })` built from the principal, tenant, channel, or external data. Omit `role` for system context:
 
 ```ts title="agent/instructions/persona.ts"
 import { defineDynamic, defineInstructions } from "eve/instructions";
@@ -218,19 +260,41 @@ export default defineDynamic({
     "session.started": (_event, ctx) => {
       const plan = ctx.session.auth.current?.attributes.plan ?? "free";
       return defineInstructions({
-        markdown: `The caller is on the ${plan} plan. Match the depth of your answers to it.`,
+        content: `The caller is on the ${plan} plan. Match the depth of your answers to it.`,
       });
     },
   },
 });
 ```
 
-Both resolve before the prompt is assembled, so the model sees the right instructions and skill set for whoever is calling, without that context reaching anyone else.
+Use `role: "user"` when the resolved value is application or user context that should become part of durable history:
+
+```ts title="agent/instructions/brief.ts"
+import { defineDynamic, defineInstructions } from "eve/instructions";
+import { loadBrief } from "../lib/briefs";
+
+export default defineDynamic({
+  events: {
+    "turn.started": async (_event, ctx) => {
+      const brief = await loadBrief(ctx.session.auth.current);
+      return brief ? defineInstructions({ content: brief, role: "user" }) : null;
+    },
+  },
+});
+```
+
+Instruction resolvers support `session.started` and `turn.started` only. A system result lives in that scope and stays outside history. A user result is appended to history at the lifecycle boundary, with session results before turn results and both before the current delivery. There is no automatic deduplication: returning the same user content on a later turn intentionally appends another message.
+
+Resolver snapshots reflect that order. At `session.started`, `ctx.messages` includes static user-role instructions. At `turn.started`, it also includes user-role results from `session.started`. These augmented snapshots are specific to instruction resolvers; tools, skills, models, and subagents keep their existing message snapshots.
+
+Returning `null` or blank content contributes nothing. A throwing or invalid session resolver leaves any wider valid system selection in place. Every turn starts with fresh turn-scoped system instructions, so a failed or empty turn result cannot leak the previous turn's value. Completed lifecycle steps are replay-safe: parking, resuming, or replaying them does not duplicate user-role messages.
+
+Dynamic system content that changes frequently can reduce provider prompt-cache reuse. Prefer session scope for stable values and use turn scope only when the context must be refreshed. Cache behavior remains provider-specific.
 
 ## What to read next
 
 - Conditionally expose a specialist → [Subagents](../subagents)
 - The static tool basics this builds on → [Tools](../tools)
-- The built-in tools and how to override them → [Default harness](../concepts/default-harness)
+- The built-in tools and how to override them → [Built-in tools](../concepts/built-in-tools)
 - Authenticate a tool or connection to an external service → [Auth & route protection](./auth-and-route-protection)
-- Durable per-session memory for resolvers to read → [State](./state)
+- Durable per-session memory for resolvers to read → [State](../concepts/state)

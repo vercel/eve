@@ -103,6 +103,10 @@ export interface SetupFlowRenderer {
   readChoice(options: ChannelSetupChoiceOptions): ChannelSetupChoice;
   setStatus(status: SetupFlowStatus | undefined): void;
   renderLine(text: string, tone: "info" | "success" | "warning" | "error"): void;
+  replaceContent?(content?: {
+    headline: string;
+    facts: readonly { label: string; value: string }[];
+  }): void;
   renderOutput(text: string): void;
   /** Temporarily restores the terminal while a child process inherits stdio. */
   withInheritedStdio<T>(task: () => Promise<T>): Promise<T>;
@@ -132,6 +136,7 @@ export type SetupFlowPrompterRenderer = Pick<
   | "readChoice"
   | "setStatus"
   | "renderLine"
+  | "replaceContent"
   | "renderOutput"
   | "withInheritedStdio"
   | "withExclusiveTerminal"

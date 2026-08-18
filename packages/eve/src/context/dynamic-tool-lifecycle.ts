@@ -1,7 +1,11 @@
 import type { ModelMessage } from "ai";
 
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import type { ApprovalContext } from "#public/definitions/approval.js";
+import {
+  resolveApprovalPolicy,
+  type ApprovalContext,
+  type ApprovalResponseContext,
+} from "#public/definitions/approval.js";
 import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
 import type { UnstampedMessageStreamEvent, SessionStartedStreamEvent } from "#protocol/message.js";
 import {
@@ -309,12 +313,24 @@ async function resolveToolsFromEvent(
       }
 
       let approvalStepFnName: string | undefined;
+      let approvalResponseStepFnName: string | undefined;
       if (entry.approval !== undefined) {
         approvalStepFnName = `eve:dynamic-tool-approval:${resolver.slug}:${entryKey}`;
-        const originalApproval = entry.approval.bind(entry);
+        const originalApproval = resolveApprovalPolicy(entry.approval).bind(entry);
         registerStepFunction(approvalStepFnName, (_closureVars: unknown, approvalCtx: unknown) =>
           originalApproval(approvalCtx as ApprovalContext),
         );
+
+        const responsePolicy =
+          typeof entry.approval === "function" ? undefined : entry.approval.response;
+        if (responsePolicy !== undefined) {
+          approvalResponseStepFnName = `eve:dynamic-tool-approval-response:${resolver.slug}:${entryKey}`;
+          registerStepFunction(
+            approvalResponseStepFnName,
+            (_closureVars: unknown, responseCtx: unknown) =>
+              responsePolicy(responseCtx as ApprovalResponseContext),
+          );
+        }
       }
 
       metadata.push({
@@ -326,6 +342,7 @@ async function resolveToolsFromEvent(
         entryKey,
         executeStepFnName,
         approvalStepFnName,
+        approvalResponseStepFnName,
         closureVars: serializedClosureVars,
       });
     }
@@ -338,12 +355,50 @@ async function resolveToolsFromEvent(
 // Dispatch: route to the scope-appropriate durable key
 // ---------------------------------------------------------------------------
 
+const resolvedStepTools = new WeakMap<
+  ContextContainer,
+  { readonly coordinate: string; readonly tools: readonly HarnessToolDefinition[] }
+>();
+
 /**
  * Dispatches a stream event to dynamic tool resolvers. Each
  * resolver's metadata replaces its slot (by slug) in the
  * scope-appropriate durable key. The tool-loop calls
  * {@link buildDynamicTools} to assemble the effective toolset.
  */
+/** Resolves step-scoped tools once for one internal policy/model pass. */
+export async function resolveStepDynamicTools(input: {
+  readonly ctx: ContextContainer;
+  readonly resolvers: readonly ResolvedDynamicToolResolver[];
+  readonly event: UnstampedMessageStreamEvent;
+  readonly messages: readonly ModelMessage[];
+}): Promise<void> {
+  const data = ("data" in input.event ? input.event.data : undefined) as
+    | { readonly stepIndex?: unknown; readonly turnId?: unknown }
+    | undefined;
+  const coordinate =
+    typeof data?.turnId === "string" && typeof data.stepIndex === "number"
+      ? `${data.turnId}:${String(data.stepIndex)}`
+      : undefined;
+  const cached = resolvedStepTools.get(input.ctx);
+  if (coordinate !== undefined && cached?.coordinate === coordinate) {
+    input.ctx.setVirtualContext(LiveStepToolsKey, cached.tools);
+    return;
+  }
+
+  const matching = input.resolvers.filter((resolver) =>
+    resolver.eventNames.includes("step.started"),
+  );
+  const { liveTools } =
+    matching.length === 0
+      ? { liveTools: [] }
+      : await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages);
+  input.ctx.setVirtualContext(LiveStepToolsKey, liveTools);
+  if (coordinate !== undefined) {
+    resolvedStepTools.set(input.ctx, { coordinate, tools: liveTools });
+  }
+}
+
 export async function dispatchDynamicToolEvent(input: {
   readonly ctx: ContextContainer;
   readonly resolvers: readonly ResolvedDynamicToolResolver[];
@@ -354,6 +409,11 @@ export async function dispatchDynamicToolEvent(input: {
 
   if (!ALLOWED_DYNAMIC_TOOL_EVENTS.has(event.type)) return;
 
+  if (event.type === "step.started") {
+    await resolveStepDynamicTools(input);
+    return;
+  }
+
   const matching = resolvers.filter((r) => r.eventNames.includes(event.type));
   if (matching.length === 0) {
     if (event.type === "session.started") {
@@ -362,15 +422,7 @@ export async function dispatchDynamicToolEvent(input: {
     return;
   }
 
-  const { metadata, liveTools } = await resolveToolsFromEvent(ctx, matching, event, messages);
-
-  // Step-scoped tools store live definitions (with original execute
-  // closures) since they re-resolve every step and don't need
-  // cross-step replay from durable metadata.
-  if (event.type === "step.started") {
-    ctx.setVirtualContext(LiveStepToolsKey, liveTools);
-    return;
-  }
+  const { metadata } = await resolveToolsFromEvent(ctx, matching, event, messages);
 
   // Session/turn: store durable metadata for cross-step replay via
   // the bundler's registered step functions.

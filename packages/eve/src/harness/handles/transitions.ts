@@ -9,7 +9,7 @@ import {
   type ContinueOperation,
   type StartOperation,
 } from "#harness/handles/store.js";
-import type { HarnessSession } from "#harness/types.js";
+import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 
 /**
@@ -124,7 +124,8 @@ function findActiveHandle(
 ): ActiveAgentHandle | undefined {
   return handles.find(
     (handle): handle is ActiveAgentHandle =>
-      handle.phase !== "parked" && handle.operation.id === operationId,
+      (handle.phase === "starting" || handle.phase === "running") &&
+      handle.operation.id === operationId,
   );
 }
 
@@ -164,6 +165,60 @@ export function confirmAgentStarted(
         : handle,
     ),
   );
+}
+
+/** Confirms a task-mode child as a persistent identity/address record. */
+export function confirmTaskAgentAddress(
+  session: HarnessSession,
+  input: {
+    readonly operationId: string;
+    readonly address: AgentAddress;
+  },
+): HarnessSession {
+  const handles = getAgentHandleStore(session.state)?.handles ?? [];
+  const existing = findActiveHandle(handles, input.operationId);
+  if (existing === undefined) {
+    throw new Error(`No prepared agent handle for operation "${input.operationId}".`);
+  }
+  if (existing.phase === "running") {
+    throw new Error(
+      `Task agent operation "${input.operationId}" was confirmed as a running handle.`,
+    );
+  }
+
+  return writeHandles(
+    session,
+    handles.map((handle) =>
+      handle === existing
+        ? {
+            address: input.address,
+            identity: existing.identity,
+            phase: "addressed" as const,
+          }
+        : handle,
+    ),
+  );
+}
+
+/** Removes a task-mode address after permanent delivery failure. */
+export function removeTaskAgentAddress(session: HarnessSession, agentId: string): HarnessSession {
+  return { ...session, state: removeTaskAgentAddressFromState(session.state, agentId) };
+}
+
+/** State-only variant used while consuming a terminal task wake. */
+export function removeTaskAgentAddressFromState(
+  state: SessionStateMap | undefined,
+  agentId: string,
+): SessionStateMap {
+  const handles = getAgentHandleStore(state)?.handles ?? [];
+  return {
+    ...state,
+    [AGENT_HANDLES_STATE_KEY]: assertPersistableAgentHandleStore({
+      handles: handles.filter(
+        (handle) => !(handle.phase === "addressed" && handle.identity.id === agentId),
+      ),
+    }),
+  };
 }
 
 /**

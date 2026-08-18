@@ -15,7 +15,7 @@ import type { ConnectionAuthorizationChallenge } from "#public/connections/error
 import {
   type AuthorizationSignal,
   consumeAuthorizationResult,
-  getHookUrl,
+  createAuthorizationAttempt,
   requestAuthorization,
 } from "#harness/authorization.js";
 import type { JsonValue } from "#public/types/json.js";
@@ -24,7 +24,12 @@ import {
   readCachedToken,
   writeCachedToken,
 } from "#runtime/connections/authorization-tokens.js";
-import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
+import {
+  principalKey,
+  resolveConnectionPrincipal,
+  resolveConnectionPrincipalFromAuth,
+} from "#runtime/connections/principal.js";
+import type { SessionAuthContext } from "#context/keys.js";
 import {
   type AuthorizationDefinition,
   type ConnectionAuthorizationContext,
@@ -42,6 +47,7 @@ const LOCAL_HTTP_VERCEL_CONNECT_HOSTNAMES: ReadonlySet<string> = new Set(["127.0
  * {@link ConnectionAuthorizationContext} handed to every callback.
  */
 export interface ScopedAuthorization {
+  readonly boundResponder?: SessionAuthContext;
   readonly scope: string;
   readonly authorization: Readonly<AuthorizationDefinition>;
   readonly connection: ConnectionAuthorizationContext;
@@ -68,7 +74,7 @@ export async function resolveScopedToken(input: ScopedAuthorization): Promise<To
   // place that tolerates a missing context; authored code uses
   // `loadContext()` so misuse fails loudly.
   const ctx = contextStorage.getStore();
-  const principal = resolveConnectionPrincipal(scope, authorization, ctx);
+  const principal = resolveScopedPrincipal(input, ctx);
 
   if (ctx === undefined) {
     return await authorization.getToken({ connection, principal });
@@ -106,7 +112,7 @@ export async function evictScopedToken(input: ScopedAuthorization): Promise<void
   if (ctx === undefined) return;
   let principal;
   try {
-    principal = resolveConnectionPrincipal(scope, authorization, ctx);
+    principal = resolveScopedPrincipal(input, ctx);
     evictCachedToken(ctx, scope, principalKey(principal));
   } catch {
     // Eviction is best-effort; without a principal we can drop neither
@@ -141,7 +147,7 @@ export async function completeScopedAuthorization(input: ScopedAuthorization): P
 
   const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
   const ctx: AlsContext = loadContext();
-  const principal = resolveConnectionPrincipal(scope, interactive, ctx);
+  const principal = result.principal ?? resolveScopedPrincipal(input, ctx);
   const token = await interactive.completeAuthorization({
     callbackUrl: result.hookUrl,
     connection,
@@ -167,12 +173,15 @@ export async function startScopedAuthorization(
   const { scope, authorization, connection } = input;
   if (!supportsInteractiveAuthorization(authorization)) return undefined;
 
-  const hookUrl = getHookUrl(scope);
-  if (hookUrl === undefined) return undefined;
+  const attempt = createAuthorizationAttempt(scope);
+  if (attempt === undefined) return undefined;
 
   const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
-  const principal = resolveConnectionPrincipal(scope, interactive);
-  const callbackUrl = resolveAuthorizationCallbackUrl({ authorization, callbackUrl: hookUrl });
+  const principal = resolveScopedPrincipal(input);
+  const callbackUrl = resolveAuthorizationCallbackUrl({
+    authorization,
+    callbackUrl: attempt.hookUrl,
+  });
   const { challenge, resume } = await interactive.startAuthorization({
     callbackUrl,
     connection,
@@ -180,19 +189,28 @@ export async function startScopedAuthorization(
   });
   return requestAuthorization([
     {
+      attemptId: attempt.attemptId,
       challenge: stampChallengeDisplayName(challenge, authorization),
       hookUrl: callbackUrl,
       name: scope,
+      principal,
       resume,
     },
   ]);
 }
 
-/**
- * Vercel Connect accepts local HTTP callback URLs only when their hostname is
- * literally `localhost`. Other authorization providers keep the framework's
- * original callback URL so their registered redirect URI remains unchanged.
- */
+function resolveScopedPrincipal(input: ScopedAuthorization, ctx?: AlsContext) {
+  return input.boundResponder === undefined
+    ? resolveConnectionPrincipal(input.scope, input.authorization, ctx)
+    : resolveConnectionPrincipalFromAuth(
+        input.scope,
+        input.authorization,
+        input.boundResponder,
+        ctx,
+      );
+}
+
+/** Normalizes callback URLs for providers with localhost requirements. */
 export function resolveAuthorizationCallbackUrl(input: {
   readonly authorization: Readonly<AuthorizationDefinition>;
   readonly callbackUrl: string;

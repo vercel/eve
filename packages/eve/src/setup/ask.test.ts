@@ -30,6 +30,9 @@ function untouchableAsker(): Asker {
     ask(question): Promise<never> {
       throw new Error(`untouchableAsker was asked "${question.key}"`);
     },
+    askEditable(question): Promise<never> {
+      throw new Error(`untouchableAsker was asked "${question.key}"`);
+    },
     askMany(question): Promise<never> {
       throw new Error(`untouchableAsker was asked "${question.key}"`);
     },
@@ -124,6 +127,74 @@ describe("interactiveAsker", () => {
     );
   });
 
+  it("preserves an editable select as one interactive prompter control", async () => {
+    const { prompter } = createFakePrompter();
+    prompter.selectEditable = async <T>() => ({
+      kind: "edited" as const,
+      value: "red" as T,
+      text: "crimson",
+    });
+    const editable = vi.spyOn(prompter, "selectEditable");
+    const events = recordingEvents();
+
+    const value = await interactiveAsker(prompter, events).askEditable({
+      key: "color",
+      message: "Pick a color",
+      options: COLOR_OPTIONS,
+      recommended: RED,
+      required: true,
+      editable: {
+        key: "color-name",
+        value: RED,
+        label: "Name",
+        recommended: "scarlet",
+      },
+    });
+
+    expect(value).toEqual({ value: RED, text: "crimson" });
+    expect(editable).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Pick a color",
+        initialValue: "red",
+        editable: expect.objectContaining({ value: "red", defaultValue: "scarlet" }),
+      }),
+    );
+    expect(events.resolutions).toEqual([
+      { key: "color", value: RED, source: "asked" },
+      { key: "color-name", value: "crimson", source: "asked" },
+    ]);
+  });
+
+  it("falls back to select then text when inline editing is unavailable", async () => {
+    const { prompter } = createFakePrompter({
+      single: () => "red",
+      text: () => " crimson ",
+    });
+
+    const value = await interactiveAsker(prompter).askEditable({
+      key: "color",
+      message: "Pick a color",
+      options: COLOR_OPTIONS,
+      recommended: RED,
+      editable: {
+        key: "color-name",
+        value: RED,
+        label: "Name",
+        recommended: "scarlet",
+      },
+    });
+
+    expect(value).toEqual({ value: RED, text: "crimson" });
+  });
+
+  it("rejects a select recommendation that is not one of its options", async () => {
+    const { prompter } = selectPrompter(() => "red");
+
+    await expect(
+      interactiveAsker(prompter).ask(colorQuestion({ recommended: { hex: "#bad" } })),
+    ).rejects.toThrow('Question "color" has a recommendation that is not one of its options.');
+  });
+
   it("renders a confirm as the repo's yes/no select and returns a boolean", async () => {
     const { single, prompter } = selectPrompter(() => "yes");
 
@@ -176,7 +247,12 @@ describe("interactiveAsker", () => {
     const { prompter } = createFakePrompter({ password });
 
     const value = await interactiveAsker(prompter).ask(
-      text({ key: "apiKey", message: "Gateway key?", sensitive: true }),
+      text({
+        key: "apiKey",
+        message: "Gateway key?",
+        sensitive: true,
+        environment: "AI_GATEWAY_API_KEY",
+      }),
     );
 
     expect(value).toBe("s3cret");
@@ -286,6 +362,50 @@ describe("headlessAsker", () => {
 });
 
 describe("withAnswers", () => {
+  it("prefers an explicit sensitive answer over its environment variable", async () => {
+    const previous = process.env.DISCORD_BOT_TOKEN;
+    process.env.DISCORD_BOT_TOKEN = "environment-token";
+    try {
+      await expect(
+        withAnswers({ token: "answer-token" })(headlessAsker()).ask(
+          text({
+            key: "token",
+            message: "Token",
+            required: true,
+            sensitive: true,
+            environment: "DISCORD_BOT_TOKEN",
+          }),
+        ),
+      ).resolves.toBe("answer-token");
+    } finally {
+      if (previous === undefined) delete process.env.DISCORD_BOT_TOKEN;
+      else process.env.DISCORD_BOT_TOKEN = previous;
+    }
+  });
+
+  it("uses an environment-backed secret headlessly and refuses when absent", async () => {
+    const previous = process.env.DISCORD_BOT_TOKEN;
+    process.env.DISCORD_BOT_TOKEN = "environment-token";
+    const question = text({
+      key: "token",
+      message: "Token",
+      required: true,
+      sensitive: true,
+      environment: "DISCORD_BOT_TOKEN",
+    });
+    try {
+      await expect(withAnswers({})(headlessAsker()).ask(question)).resolves.toBe(
+        "environment-token",
+      );
+      delete process.env.DISCORD_BOT_TOKEN;
+      await expect(withAnswers({})(headlessAsker()).ask(question)).rejects.toMatchObject({
+        prerequisite: { kind: "environment", variable: "DISCORD_BOT_TOKEN" },
+      });
+    } finally {
+      if (previous === undefined) delete process.env.DISCORD_BOT_TOKEN;
+      else process.env.DISCORD_BOT_TOKEN = previous;
+    }
+  });
   it("resolves a matching key without reaching the inner rung", async () => {
     const events = recordingEvents();
     const asker = withAnswers({ color: "red" }, events)(untouchableAsker());
@@ -341,6 +461,45 @@ describe("withAnswers", () => {
     expect(events.resolutions).toEqual([
       { key: "colors", value: [BLUE, RED, WHITE], source: "answer" },
     ]);
+  });
+
+  it("resolves an editable selection and its text from separate stable keys", async () => {
+    const events = recordingEvents();
+    const asker = withAnswers(
+      { color: "red", "color-name": "crimson" },
+      events,
+    )(untouchableAsker());
+
+    const value = await asker.askEditable({
+      key: "color",
+      message: "Pick a color",
+      options: COLOR_OPTIONS,
+      required: true,
+      editable: { key: "color-name", value: RED, label: "Name", recommended: "scarlet" },
+    });
+
+    expect(value).toEqual({ value: RED, text: "crimson" });
+    expect(events.resolutions).toEqual([
+      { key: "color", value: RED, source: "answer" },
+      { key: "color-name", value: "crimson", source: "answer" },
+    ]);
+  });
+
+  it("refuses the editable text before mutation when only its option is answered", async () => {
+    const asker = withAnswers({ color: "red" })(headlessAsker());
+
+    await expect(
+      asker.askEditable({
+        key: "color",
+        message: "Pick a color",
+        options: COLOR_OPTIONS,
+        required: true,
+        editable: { key: "color-name", value: RED, label: "Name", recommended: "scarlet" },
+      }),
+    ).rejects.toMatchObject({
+      name: "InteractionRequired",
+      question: expect.objectContaining({ key: "color-name" }),
+    });
   });
 
   it("rejects an unknown multi-select id naming the alternatives, and a non-array answer", async () => {
@@ -512,7 +671,14 @@ describe("decorator stacking", () => {
     await expect(stack.ask(colorQuestion({ detected: BLUE }))).resolves.toBe(RED);
     // Without an answer, the policy resolves before the base is reached.
     await expect(
-      stack.ask(select({ key: "shade", message: "Shade?", options: [], detected: "dark" })),
+      stack.ask(
+        select({
+          key: "shade",
+          message: "Shade?",
+          options: [{ id: "dark", label: "Dark", value: "dark" }],
+          detected: "dark",
+        }),
+      ),
     ).resolves.toBe("dark");
     expect(events.resolutions.map((resolution) => resolution.source)).toEqual([
       "answer",

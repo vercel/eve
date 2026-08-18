@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveReadmeHref, sanitizeReadmeHref } from "./readme-links";
+import {
+  createResolveReadmeLinksPlugin,
+  resolveReadmeHref,
+  sanitizeReadmeHref,
+} from "./readme-links";
 
 const sourceRevisionHref =
   "https://github.com/vercel/eve/tree/0123456789abcdef/apps/fixtures/weather-agent";
@@ -27,6 +31,22 @@ describe("resolveReadmeHref", () => {
 
   it("rejects relative links when the source is not a pinned GitHub tree", () => {
     expect(resolveReadmeHref("docs/setup.md", "https://example.com/template")).toBeUndefined();
+  });
+});
+
+describe("createResolveReadmeLinksPlugin", () => {
+  it("resolves links before the markdown renderer sanitizes relative URLs", () => {
+    const tree = {
+      type: "root",
+      children: [
+        { type: "link", url: "docs/setup.md", children: [{ type: "text", value: "Setup" }] },
+        { type: "paragraph", children: [{ type: "text", value: "No link" }] },
+      ],
+    };
+
+    createResolveReadmeLinksPlugin(sourceRevisionHref)()(tree);
+
+    expect(tree.children[0].url).toBe(`${sourceRevisionHref}/docs/setup.md`);
   });
 });
 

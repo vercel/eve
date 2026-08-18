@@ -39,6 +39,14 @@ function buildRuntimeSubagentRunInput(
   return buildSubagentRunInput({ ...input, source: { type: "runtime" } });
 }
 
+function makeInheritingGraph(nodeId: string) {
+  return {
+    nodesByNodeId: new Map([
+      [nodeId, { sandboxRegistry: { sandbox: { definition: { inheritsParent: true } } } }],
+    ]),
+  };
+}
+
 describe("buildSubagentRunInput", () => {
   it("forwards parent capabilities to the child run input", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
@@ -336,18 +344,51 @@ describe("buildSubagentRunInput", () => {
     });
   });
 
-  it("does not include sandbox sharing fields for normal subagents", () => {
+  it("carries parent sandbox state for declared subagents that opt into sharing", () => {
     const sandboxState = { initialized: true, session: null };
     const session = { ...makeSession(), sandboxState };
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
       batchEvent: { sequence: 0, turnId: "turn-0" },
+      graph: makeInheritingGraph(makeAction().nodeId),
       initiatorAuth: null,
       session,
     });
 
+    expect(runInput.adapter.state).toMatchObject({
+      parentSandboxState: sandboxState,
+      sandboxSessionId: "parent-session",
+    });
+  });
+
+  it("preserves the root sandbox identity through nested inheritance", () => {
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      graph: makeInheritingGraph(makeAction().nodeId),
+      initiatorAuth: null,
+      sandboxSessionId: "root-sandbox-session",
+      session: { ...makeSession(), sessionId: "intermediate-child-session" },
+    });
+
+    expect(runInput.adapter.state).toMatchObject({
+      sandboxSessionId: "root-sandbox-session",
+    });
+  });
+
+  it("carries the parent session id before the inherited sandbox has been opened", () => {
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      graph: makeInheritingGraph(makeAction().nodeId),
+      initiatorAuth: null,
+      session: makeSession(),
+    });
+
+    expect(runInput.adapter.state).toMatchObject({ sandboxSessionId: "parent-session" });
     expect(runInput.adapter.state).not.toHaveProperty("parentSandboxState");
-    expect(runInput.adapter.state).not.toHaveProperty("sandboxSessionId");
   });
 });

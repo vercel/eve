@@ -27,12 +27,23 @@ import {
   type GatewayCredentialPresence,
   resolveModelEndpointStatus,
 } from "#internal/resolve-model-endpoint-status.js";
+import type { ChatGptAuthState } from "#public/models/openai/chatgpt/token-broker.js";
+
+function toChatGptEndpoint(state: ChatGptAuthState | undefined) {
+  if (state === undefined) return undefined;
+  return {
+    state: state.kind,
+    ...(state.kind === "ready" &&
+      state.accountLabel !== undefined && { accountLabel: state.accountLabel }),
+  };
+}
 
 export function buildAgentInfoResponseFromManifest(
   data: AgentInfoManifestData,
   input: {
     readonly mode: AgentInfoResponse["mode"];
     readonly gatewayCredentials: GatewayCredentialPresence;
+    readonly chatgptAuth?: ChatGptAuthState;
   },
 ): AgentInfoResponse {
   const manifest = data.manifest;
@@ -86,18 +97,27 @@ export function buildAgentInfoResponseFromManifest(
       appRoot: manifest.appRoot,
       configSource: manifest.config.source ? toSource(manifest.config.source) : undefined,
       description: manifest.config.description,
-      model: {
-        contextWindowTokens: manifest.config.model.contextWindowTokens,
-        id: manifest.config.model.id,
-        providerOptions: manifest.config.model.providerOptions,
-        reasoning: manifest.config.reasoning,
-        source: manifest.config.model.source ? toSource(manifest.config.model.source) : undefined,
-        routing: manifest.config.model.routing,
-        endpoint: resolveModelEndpointStatus(
-          manifest.config.model.routing,
-          input.gatewayCredentials,
-        ),
-      },
+      model:
+        manifest.config.dynamicModel === undefined
+          ? {
+              contextWindowTokens: manifest.config.model.contextWindowTokens,
+              id: manifest.config.model.id,
+              providerOptions: manifest.config.model.providerOptions,
+              reasoning: manifest.config.reasoning,
+              source: manifest.config.model.source
+                ? toSource(manifest.config.model.source)
+                : undefined,
+              routing: manifest.config.model.routing,
+              endpoint: resolveModelEndpointStatus(
+                manifest.config.model.routing,
+                input.gatewayCredentials,
+                toChatGptEndpoint(input.chatgptAuth),
+              ),
+            }
+          : {
+              reasoning: manifest.config.reasoning,
+              routing: { kind: "dynamic" },
+            },
       name: manifest.config.name,
       outputSchema: manifest.config.outputSchema,
     },
@@ -159,14 +179,12 @@ export function buildAgentInfoResponseFromManifest(
       dynamic: manifest.dynamicInstructions.map((resolver) =>
         renderDynamicResolver(resolver, { origin: "authored" }),
       ),
-      static:
-        manifest.instructions === undefined
-          ? null
-          : {
-              ...toSource(manifest.instructions),
-              markdown: manifest.instructions.markdown,
-              name: manifest.instructions.name,
-            },
+      static: manifest.instructions.map((instructions) => ({
+        ...toSource(instructions),
+        content: instructions.content,
+        name: instructions.name,
+        role: instructions.role,
+      })),
     },
     kind: "eve-agent-info",
     mode: input.mode,
@@ -214,7 +232,7 @@ export function buildAgentInfoResponseFromManifest(
       framework: frameworkToolInfo.framework,
       reserved: [WORKFLOW_TOOL_NAME, LOAD_SKILL_TOOL_NAME],
     },
-    version: 1,
+    version: 2,
     workflow: {
       enabled: manifest.workflowTool !== undefined,
       toolName: WORKFLOW_TOOL_NAME,

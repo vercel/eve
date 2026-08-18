@@ -14,7 +14,7 @@ Run the registry setup from the agent directory:
 eve add channel/github
 ```
 
-The flow checks that the Vercel CLI is authenticated, creates or links a Vercel project when needed, provisions an app-scoped GitHub Connect client, and replaces its default trigger with `/eve/v1/github`. It then installs `@vercel/connect` and writes `agent/channels/github.ts` with the connector UID.
+The flow signs you in to Vercel when needed, creates or links a Vercel project, provisions an app-scoped GitHub Connect client, and registers `/eve/v1/github` as a trigger destination. It then installs `@vercel/connect` and writes `agent/channels/github.ts` with the connector UID.
 
 Vercel Connect creates the GitHub App, receives and verifies its webhooks, and forwards them to the deployed agent. After deploying, open the GitHub App in the Connect dashboard and install it in the organization or account where you want to use it. Add the generated invocation token (for example, `@my-agent`) to a new issue, pull request, or review comment to start a conversation. GitHub may not autocomplete the token or render it as a linked mention.
 
@@ -58,7 +58,7 @@ GITHUB_WEBHOOK_SECRET=...    # verifies the webhook signature
 GITHUB_APP_SLUG=...          # supplies botName when it is not set in config
 ```
 
-`appId`/`privateKey`/`webhookSecret` also take a lazy resolver function if you'd rather fetch them on demand.
+`appId`/`privateKey`/`webhookSecret` also take a lazy resolver function if you'd rather fetch them on demand, and so does `botName`: it resolves on first use inside request handling, caches on success, and retries on the next event after a failure, so a resolver that depends on request-scoped credentials works in production. When `botName` is not configured, the channel falls back to the credentials' `appSlug`, then to `GITHUB_APP_SLUG`.
 
 Point the GitHub App webhook URL at `https://<deployment>/eve/v1/github`. For comment-invoked turns, subscribe to `issue_comment` and `pull_request_review_comment`; add `issues`, `pull_request`, `check_suite`, `check_run`, or `workflow_run` if you wire up their opt-in hooks. After installing the App for the repository, a new comment that includes `@botName` starts a turn. This is a text invocation token, not a GitHub-native mention: GitHub may display the App as `botName[bot]`, but it may not autocomplete or link `@botName`.
 
@@ -66,7 +66,7 @@ Point the GitHub App webhook URL at `https://<deployment>/eve/v1/github`. For co
 
 ### Dispatch
 
-Inbound hooks return `{ auth }` to dispatch, or `null` to ignore. Use `defaultGitHubAuth(ctx)` to derive auth from the actor.
+Inbound hooks return `{ auth }` to dispatch, or `null` to ignore. Return `title` alongside `auth` to set the title when the dispatch starts a run. Use `defaultGitHubAuth(ctx)` to derive auth from the actor.
 
 ```ts
 import { defaultGitHubAuth, githubChannel } from "eve/channels/github";

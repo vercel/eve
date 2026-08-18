@@ -10,16 +10,24 @@ import {
   bundleAuthoredModuleMapForGeneration,
 } from "#internal/authored-module-loader.js";
 import { serializeCompiledManifestForFingerprint } from "#internal/compiled-manifest-fingerprint.js";
+import { resolveInstrumentationLayout } from "#internal/instrumentation-layout.js";
 
 const MATERIALIZED_MODULES_DIRECTORY = "authored-modules";
 const MATERIALIZED_MODULES_INDEX = "authored-modules.json";
-const INSTRUMENTATION_EXTENSIONS = [".ts", ".mts", ".js", ".mjs"] as const;
+
+/**
+ * The materialized instrumentation modules, mirroring the layout they were
+ * authored in. Paths are relative to `.eve/compile`.
+ */
+export type MaterializedInstrumentation =
+  | { readonly kind: "file"; readonly modulePath: string }
+  | { readonly kind: "directory"; readonly modulePathsBySlot: Readonly<Record<string, string>> };
 
 export interface MaterializedAuthoredModuleIndex {
   readonly fingerprint: string;
-  readonly instrumentation?: string;
+  readonly instrumentation?: MaterializedInstrumentation;
   readonly moduleMap: string;
-  readonly version: 2;
+  readonly version: 3;
 }
 
 export async function materializeAuthoredModules(input: {
@@ -54,22 +62,40 @@ export async function materializeAuthoredModules(input: {
   await writeFile(join(modulesRoot, moduleMapFileName), moduleMapCode);
   fingerprint.update("module-map\0").update(moduleMapCode).update("\0");
 
-  const instrumentation = resolveInstrumentationModule(manifest.agentRoot);
-  let instrumentationPath: string | undefined;
-
-  if (instrumentation !== undefined) {
-    const code = await bundleAuthoredModuleForGeneration(instrumentation, {
-      externalDependencies: manifest.config.build?.externalDependencies ?? [],
-    });
+  const layout = resolveInstrumentationLayout({
+    agentRoot: manifest.agentRoot,
+    providersEnabled: manifest.config.experimental?.instrumentationProviders ?? false,
+  });
+  const externalDependencies = manifest.config.build?.externalDependencies ?? [];
+  const materializeInstrumentationModule = async (
+    sourceId: string,
+    sourcePath: string,
+  ): Promise<string> => {
+    const code = await bundleAuthoredModuleForGeneration(sourcePath, { externalDependencies });
     const fileName = createMaterializedModuleFileName(
       ROOT_COMPILED_AGENT_NODE_ID,
-      "instrumentation",
+      `instrumentation:${sourceId}`,
       code,
     );
 
     await writeFile(join(modulesRoot, fileName), code);
-    instrumentationPath = join(MATERIALIZED_MODULES_DIRECTORY, fileName);
-    fingerprint.update("instrumentation\0").update(code).update("\0");
+    fingerprint.update(`instrumentation:${sourceId}\0`).update(code).update("\0");
+    return join(MATERIALIZED_MODULES_DIRECTORY, fileName);
+  };
+
+  let instrumentation: MaterializedInstrumentation | undefined;
+
+  if (layout?.kind === "file") {
+    instrumentation = {
+      kind: "file",
+      modulePath: await materializeInstrumentationModule("file", layout.modulePath),
+    };
+  } else if (layout?.kind === "directory") {
+    const modulePathsBySlot: Record<string, string> = {};
+    for (const [slot, sourcePath] of Object.entries(layout.modulePathsBySlot)) {
+      modulePathsBySlot[slot] = await materializeInstrumentationModule(slot, sourcePath);
+    }
+    instrumentation = { kind: "directory", modulePathsBySlot };
   }
 
   await hashDirectoryIfPresent({
@@ -79,16 +105,16 @@ export async function materializeAuthoredModules(input: {
   });
   const index: {
     fingerprint: string;
-    instrumentation?: string;
+    instrumentation?: MaterializedInstrumentation;
     moduleMap: string;
-    version: 2;
+    version: 3;
   } = {
     fingerprint: fingerprint.digest("hex"),
     moduleMap: moduleMapPath,
-    version: 2,
+    version: 3,
   };
-  if (instrumentationPath !== undefined) {
-    index.instrumentation = instrumentationPath;
+  if (instrumentation !== undefined) {
+    index.instrumentation = instrumentation;
   }
   await writeFile(join(compileRoot, MATERIALIZED_MODULES_INDEX), `${JSON.stringify(index)}\n`);
   return index;
@@ -106,17 +132,37 @@ export async function readMaterializedAuthoredModuleIndex(
     await readFile(indexPath, "utf8"),
   ) as Partial<MaterializedAuthoredModuleIndex>;
   if (
-    parsed.version !== 2 ||
+    parsed.version !== 3 ||
     typeof parsed.fingerprint !== "string" ||
     parsed.fingerprint.length === 0 ||
     typeof parsed.moduleMap !== "string" ||
     parsed.moduleMap.length === 0 ||
-    (parsed.instrumentation !== undefined && typeof parsed.instrumentation !== "string")
+    !isMaterializedInstrumentation(parsed.instrumentation)
   ) {
     throw new Error(`Invalid materialized authored module index at "${indexPath}".`);
   }
 
   return parsed as MaterializedAuthoredModuleIndex;
+}
+
+function isMaterializedInstrumentation(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (typeof value !== "object" || value === null) return false;
+
+  const candidate = value as Partial<MaterializedInstrumentation>;
+  if (candidate.kind === "file") {
+    return typeof (candidate as { modulePath?: unknown }).modulePath === "string";
+  }
+  if (candidate.kind === "directory") {
+    const paths = (candidate as { modulePathsBySlot?: unknown }).modulePathsBySlot;
+    return (
+      typeof paths === "object" &&
+      paths !== null &&
+      Object.values(paths).every((path) => typeof path === "string")
+    );
+  }
+
+  return false;
 }
 
 async function readCompiledManifest(path: string): Promise<CompiledAgentManifest> {
@@ -127,17 +173,6 @@ async function readCompiledManifest(path: string): Promise<CompiledAgentManifest
   }
 
   return manifest;
-}
-
-function resolveInstrumentationModule(agentRoot: string): string | undefined {
-  for (const extension of INSTRUMENTATION_EXTENSIONS) {
-    const candidate = join(agentRoot, `instrumentation${extension}`);
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  return undefined;
 }
 
 function createMaterializedModuleFileName(nodeId: string, sourceId: string, code: string): string {

@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import type { NodeEngineOverride } from "../../node-engine.js";
+import type { AgentReasoningDefinition } from "../../../shared/agent-definition.js";
 import { pathExists, writeTextFile } from "../files.js";
 import { patchPackageJson, type PackageJsonPatch } from "../update/package-json.js";
 import { resolveVersionToken } from "../version-tokens.js";
@@ -24,6 +25,7 @@ import {
 export interface AddAgentToProjectOptions {
   projectRoot: string;
   model: string;
+  reasoning?: AgentReasoningDefinition;
   /**
    * The host project's package manager, which owns any manager-specific
    * generated project configuration. Defaults to pnpm.
@@ -85,7 +87,17 @@ export async function addAgentToProject(
     );
   }
 
-  const files = agentTemplateFiles(options.model);
+  let packageJson: unknown;
+  try {
+    packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Cannot add an eve agent because "${packageJsonPath}" is not valid JSON. No files were changed. Fix the file, then retry eve init. ${detail}`,
+    );
+  }
+
+  const files = agentTemplateFiles(options.model, options.reasoning);
   const conflicts: string[] = [];
   for (const relativePath of Object.keys(files)) {
     if (await pathExists(join(options.projectRoot, relativePath))) {
@@ -126,7 +138,6 @@ export async function addAgentToProject(
     filesWritten.push(filePath);
   }
 
-  const packageJson: unknown = JSON.parse(await readFile(packageJsonPath, "utf8"));
   const wanted: Record<string, string> = {
     "@vercel/connect": connectVersion,
     ai: aiVersion,

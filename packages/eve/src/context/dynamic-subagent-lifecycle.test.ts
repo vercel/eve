@@ -105,11 +105,13 @@ describe("dynamic subagent lifecycle", () => {
           defineAgent({
             description: "Research the request.",
             model: "anthropic/claude-sonnet-4.5",
+            modelContextWindowTokens: 200_000,
           }),
         "turn.started": () =>
           defineAgent({
             description: "Research the request deeply.",
             model: "anthropic/claude-opus-4.6",
+            modelContextWindowTokens: 200_000,
           }),
       },
     };
@@ -276,6 +278,7 @@ function createResolver(
   const agentConfig = defineAgent({
     description: "Research the request.",
     model: "openai/gpt-5.5",
+    modelContextWindowTokens: 200_000,
   });
   const eventNames = input.eventNames ?? ["session.started"];
   const handler = input.handler ?? (() => null);

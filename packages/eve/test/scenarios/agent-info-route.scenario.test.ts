@@ -122,10 +122,11 @@ describe("eve agent info route", () => {
     const payload = (await response.json()) as AgentInfoResponse;
 
     expect(payload.kind).toBe("eve-agent-info");
-    expect(payload.version).toBe(1);
+    expect(payload.version).toBe(2);
     expect(payload.mode).toBe("development");
     expect(payload.agent.model.id).toBe("openai/gpt-5.4");
-    expect(payload.instructions.static?.markdown).toContain("precise assistant");
+    expect(payload.instructions.static[0]?.content).toContain("precise assistant");
+    expect(payload.instructions.static[0]?.role).toBe("system");
     expect(payload.instructions.dynamic).toEqual([]);
     expect(payload.tools.authored.map((tool) => tool.name)).toEqual(["get_weather"]);
     expect(payload.tools.available.map((tool) => tool.name)).toContain("bash");

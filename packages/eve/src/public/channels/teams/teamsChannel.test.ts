@@ -90,6 +90,7 @@ describe("teamsChannel", () => {
             principalId: "USER",
             principalType: "user",
           },
+          title: "Teams run",
         };
       },
     });
@@ -108,6 +109,7 @@ describe("teamsChannel", () => {
         replyToActivityId: null,
         serviceUrl: "https://smba.example.test/teams",
       },
+      title: "Teams run",
     });
     expect(send.mock.calls[0]![1].context[0]).toContain("<teams_context>");
   });
@@ -228,7 +230,7 @@ describe("teamsChannel", () => {
       eve_input: {
         replyToActivityId: "THREAD_ROOT",
         requestId: "REQ",
-        optionId: "deny",
+        optionId: "cancel",
       },
     };
     const channel = teamsChannel({
@@ -243,7 +245,7 @@ describe("teamsChannel", () => {
     expect(send).toHaveBeenCalledWith(
       "TENANT:CONV:THREAD_ROOT",
       expect.objectContaining({
-        inputResponses: [{ optionId: "deny", requestId: "REQ" }],
+        inputResponses: [{ optionId: "cancel", requestId: "REQ" }],
       }),
     );
   });

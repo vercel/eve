@@ -20,6 +20,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { buildToolApproval, buildToolSet, buildToolSetWithProviderTools } from "#harness/tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import type { ApprovalContext } from "#public/definitions/approval.js";
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
@@ -386,8 +387,8 @@ describe("buildToolSet", () => {
   });
 
   it.each([
-    [{ id: "openai/gpt-5.4" }, WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA],
-    [{ id: "anthropic/claude-opus-4.6" }, WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA],
+    [{ id: "openai/gpt-5.4" }, WEB_SEARCH_EXA_OUTPUT_SCHEMA],
+    [{ id: "anthropic/claude-opus-4.6" }, WEB_SEARCH_EXA_OUTPUT_SCHEMA],
     [
       {
         id: "openai.chat/gpt-5.4",
@@ -424,7 +425,7 @@ describe("buildToolSet", () => {
       },
       WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
     ],
-    [{ id: "mistral/mistral-large" }, WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA],
+    [{ id: "mistral/mistral-large" }, WEB_SEARCH_EXA_OUTPUT_SCHEMA],
   ] satisfies Array<readonly [RuntimeModelReference, JsonObject]>)(
     "injects the selected web_search provider output schema",
     async (modelReference, expectedOutputSchema) => {
@@ -448,7 +449,7 @@ describe("buildToolSet", () => {
     },
   );
 
-  it("injects Exa when configured for an AI Gateway model", async () => {
+  it("injects Parallel when configured for an AI Gateway model", async () => {
     const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
       [
         "web_search",
@@ -463,10 +464,10 @@ describe("buildToolSet", () => {
     const result = await buildToolSetWithProviderTools({
       modelReference: { id: "openai/gpt-5.4" },
       tools,
-      webSearchProvider: "exa",
+      webSearchProvider: "parallel",
     });
 
-    expect(getOutputJsonSchema(result.web_search)).toEqual(WEB_SEARCH_EXA_OUTPUT_SCHEMA);
+    expect(getOutputJsonSchema(result.web_search)).toEqual(WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA);
   });
 
   it("omits provider-managed web_search when no provider backend is available", async () => {
@@ -991,7 +992,7 @@ describe("buildToolSet", () => {
     });
 
     it("passes the active caller and session context into approval", async () => {
-      let capturedCtx: Parameters<NonNullable<HarnessToolDefinition["approval"]>>[0] | undefined;
+      let capturedCtx: ApprovalContext | undefined;
       const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
         [
           "delete_project",

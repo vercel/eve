@@ -72,11 +72,13 @@ async function resolveSelections(input: {
 
       const agentConfig = normalizeDynamicSubagentAgentConfig({
         name: resolver.name,
+        state: input.ctx,
         value: result,
       });
+      const resolvedAgentConfig = await agentConfig;
       const prepared = createPreparedRuntimeSubagentTool(
         {
-          description: agentConfig.description,
+          description: resolvedAgentConfig.description,
           kind: "subagent",
           logicalPath: resolver.logicalPath,
           name: resolver.name,
@@ -87,7 +89,10 @@ async function resolveSelections(input: {
         inputSchema,
       );
 
-      return [resolver.nodeId, { agentConfig, kind: "subagent", prepared }] as const;
+      return [
+        resolver.nodeId,
+        { agentConfig: resolvedAgentConfig, kind: "subagent", prepared },
+      ] as const;
     }),
   );
   const selections: Record<string, DurableDynamicSubagentSelection> = {};

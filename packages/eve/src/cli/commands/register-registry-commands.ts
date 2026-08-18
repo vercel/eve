@@ -1,4 +1,7 @@
 import { InvalidArgumentError, type Command } from "#compiled/commander/index.js";
+import { applicationCommand, type CliApplicationContext } from "#cli/application-command.js";
+
+import { parseSetupAnswer } from "./setup-answers.js";
 
 interface RegistryCommandLogger {
   error(message: string): void;
@@ -26,24 +29,50 @@ function parseSearchLimit(value: string): number {
 export function registerRegistryCommands(input: {
   program: Command;
   logger: RegistryCommandLogger;
-  appRoot: string;
+  applicationContext: CliApplicationContext;
 }): void {
-  const { appRoot, logger, program } = input;
+  const { applicationContext, logger, program } = input;
 
-  program
-    .command("add <item>")
+  const add = applicationCommand(program.command("add [item]"), applicationContext)
     .description("Install a registry item; relative paths use the official eve registry.")
     .option("-o, --overwrite", "Overwrite existing files.")
     .option("--skip-install", "Run the item's setup flow without installing it.")
     .option("--skip-setup", "Skip the item's setup flow.")
+    .option(
+      "--non-interactive",
+      "Run without interactive prompts, instead emit structured NDJSON when further input is required",
+    )
+    .option(
+      "--answer <key=value>",
+      "Answer a setup question with JSON; requires --non-interactive; repeat for multiple answers.",
+      parseSetupAnswer,
+    )
     .option("-y, --yes", "Run setup and accept its recommended defaults.")
+    .addHelpText("after", "\nSearch the registry:\n  $ eve registry search <query>\n")
     .action(
       async (
-        item: string,
-        options: { skipInstall?: boolean; overwrite?: boolean; skipSetup?: boolean; yes?: boolean },
+        item: string | undefined,
+        options: {
+          skipInstall?: boolean;
+          overwrite?: boolean;
+          skipSetup?: boolean;
+          nonInteractive?: boolean;
+          answer?: Record<string, unknown>;
+          yes?: boolean;
+        },
       ) => {
+        if (item === undefined) {
+          add.outputHelp();
+          return;
+        }
+        if (options.answer !== undefined && !options.nonInteractive) {
+          throw new InvalidArgumentError("--answer requires --non-interactive.");
+        }
         const { runAddCommand } = await import("./registry.js");
-        await runAddCommand(logger, appRoot, item, options);
+        await runAddCommand(logger, applicationContext.root, item, {
+          ...options,
+          answers: options.answer,
+        });
       },
     );
 
@@ -51,26 +80,23 @@ export function registerRegistryCommands(input: {
     .command("registry")
     .description("Configure and browse extension and agent registry catalogs.");
 
-  registry
-    .command("add <registries...>")
+  applicationCommand(registry.command("add <registries...>"), applicationContext)
     .description("Add registry namespace mappings to package.json.")
     .action(async (registries: string[]) => {
       const { runRegistryAddCommand } = await import("./registry.js");
-      await runRegistryAddCommand(logger, appRoot, registries);
+      await runRegistryAddCommand(logger, applicationContext.root, registries);
     });
 
-  registry
-    .command("list")
+  applicationCommand(registry.command("list"), applicationContext)
     .description("List items from all registries or one source.")
     .option("-r, --registry <source>", "List items from one registry.")
     .option("--json", "Output as JSON")
     .action(async (options: { json?: boolean; registry?: string }) => {
       const { runRegistryListCommand } = await import("./registry.js");
-      await runRegistryListCommand(logger, appRoot, options.registry, options);
+      await runRegistryListCommand(logger, applicationContext.root, options.registry, options);
     });
 
-  registry
-    .command("search <query>")
+  applicationCommand(registry.command("search <query>"), applicationContext)
     .description("Search all registries or one source.")
     .option("-r, --registry <source>", "Search one registry.")
     .option(
@@ -83,15 +109,21 @@ export function registerRegistryCommands(input: {
     .action(
       async (query: string, options: { json?: boolean; limit: number; registry?: string }) => {
         const { runRegistrySearchCommand } = await import("./registry.js");
-        await runRegistrySearchCommand(logger, appRoot, query, options.registry, options);
+        await runRegistrySearchCommand(
+          logger,
+          applicationContext.root,
+          query,
+          options.registry,
+          options,
+        );
       },
     );
 
-  registry
-    .command("view <item>")
-    .description("Print one registry item as JSON.")
-    .action(async (item: string) => {
+  applicationCommand(registry.command("view <item>"), applicationContext)
+    .description("Inspect one registry item.")
+    .option("--json", "Output the raw registry item as JSON.")
+    .action(async (item: string, options: { json?: boolean }) => {
       const { runRegistryViewCommand } = await import("./registry.js");
-      await runRegistryViewCommand(logger, appRoot, item);
+      await runRegistryViewCommand(logger, applicationContext.root, item, options);
     });
 }

@@ -193,6 +193,28 @@ describe.skipIf(process.platform === "win32")("connectMicrosandbox", () => {
 });
 
 describe.skipIf(process.platform === "win32")("MicrosandboxVm", () => {
+  it("propagates an authored stop failure", async () => {
+    const sandbox = {
+      detach: vi.fn(async () => {}),
+      stop: vi.fn(async () => {
+        throw new Error("stop failed");
+      }),
+    };
+    const vm = new MicrosandboxVm(
+      {
+        module: {} as never,
+        options: resolveMicrosandboxOptions({ image: MICROSANDBOX_DEFAULT_IMAGE }),
+        sessionKey: "session-key",
+      },
+      sandbox as never,
+      "sandbox-name",
+      undefined,
+    );
+
+    await expect(vm.stop()).rejects.toThrow("stop failed");
+    expect(sandbox.detach).not.toHaveBeenCalled();
+  });
+
   it("stops the VM before detaching the SDK client on shutdown", async () => {
     const sandbox = {
       detach: vi.fn(async () => {}),

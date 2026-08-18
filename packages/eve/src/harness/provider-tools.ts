@@ -71,7 +71,7 @@ export function resolveWebSearchOutputSchema(backend: WebSearchBackend): JsonObj
 /**
  * Determines the web search backend for a model reference.
  *
- * - All AI Gateway models: the configured search provider (Parallel by default)
+ * - All AI Gateway models: the configured search provider (Exa by default)
  * - Direct/BYO OpenAI models: native OpenAI search
  * - Direct/BYO Anthropic models: native Anthropic search
  * - Direct/BYO Google models: native Google search grounding
@@ -79,7 +79,7 @@ export function resolveWebSearchOutputSchema(backend: WebSearchBackend): JsonObj
  */
 export function resolveWebSearchBackend(
   modelRef: RuntimeModelReference,
-  gatewayProvider: WebSearchProvider = "parallel",
+  gatewayProvider: WebSearchProvider = "exa",
 ): WebSearchBackend | null {
   if (modelRef.source === undefined) {
     return gatewayProvider;

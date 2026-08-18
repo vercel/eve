@@ -1,7 +1,7 @@
 import type { TeamsInstrumentationMetadata } from "#public/channels/teams/index.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
@@ -137,6 +137,8 @@ export interface TeamsReceiveTarget {
 export type TeamsInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Overrides the workflow run title without changing the message sent to the model. */
+  readonly title?: string;
 } | null;
 
 /** Sync or async {@link TeamsInboundResult}. */
@@ -195,6 +197,8 @@ export interface TeamsChannelConfig {
   readonly files?: TeamsFilesConfig;
   /** Override the default webhook route path (`/eve/v1/teams`). */
   readonly route?: string;
+  /** Policy for accepted messages that arrive while a turn is active. */
+  readonly turnPolicy?: TurnPolicy;
 
   /** Inbound message hook. Defaults to user-scoped auth and mention-gated dispatch outside personal chats. */
   onMessage?(
@@ -283,6 +287,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
     TeamsInstrumentationMetadata
   >({
     kindHint: "teams",
+    turnPolicy: config.turnPolicy,
     state: initialTeamsState(),
     fetchFile: createTeamsFetchFile(filesPolicy),
     metadata: (state) => ({
@@ -609,6 +614,7 @@ async function dispatchMessage(input: {
       auth: result.auth,
       context: [formatTeamsContextBlock(inboundContext), ...channelContext],
       state,
+      title: result.title,
     });
   } catch (error) {
     log.error("Teams message delivery failed", { error });

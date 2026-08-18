@@ -1,6 +1,7 @@
 import type { CompiledToolDefinition } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
+import { normalizeApproval } from "#internal/authored-definition/approval.js";
 import { registerDefinitionSource, stampDefinitionKey } from "#public/tool-result-narrowing.js";
 import { isToolSchema, toInputSchema, toOutputSchema } from "#shared/tool-schema.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -103,10 +104,10 @@ function extractOptionalHooks(
   const optional: OptionalResolvedFields = {};
 
   if (record.approval !== undefined) {
-    optional.approval = expectFunction(
+    optional.approval = normalizeApproval(
       record.approval,
-      describe(definition, "to provide an approval function"),
-    ) as ResolvedToolDefinition["approval"];
+      describe(definition, "to provide a valid approval definition"),
+    );
   }
 
   if (record.toModelOutput !== undefined) {

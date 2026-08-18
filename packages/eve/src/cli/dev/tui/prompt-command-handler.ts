@@ -117,6 +117,7 @@ export function createPromptCommandHandler(
           appRoot: target.workspaceRoot,
           renderer: flow,
           withExclusiveTerminal: context.withExclusiveTerminal,
+          chatGptAccountLabel: context.chatGptAccountLabel,
         };
         if (context.initialModelStep !== undefined) {
           commandInput.initialModelStep = context.initialModelStep;

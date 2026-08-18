@@ -27,6 +27,7 @@ import {
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { SpanKind, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
   getHookByToken,
   getRun,
@@ -48,6 +49,7 @@ import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
 import { walkCauseChain } from "#shared/errors.js";
+import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { sendCommandToDelivery } from "#execution/session-command-wire.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
@@ -55,6 +57,7 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
 const SESSION_TIMEOUT_WORKFLOW_NAME = "sessionTimeoutWorkflow";
+const TASK_RUN_WORKFLOW_NAME = "taskRunWorkflow";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const COMMAND_HOOK_READY_TIMEOUT_MS = 30_000;
 
@@ -75,11 +78,13 @@ export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
   WORKFLOW_ENTRY_NAME,
   TURN_WORKFLOW_NAME,
   SESSION_TIMEOUT_WORKFLOW_NAME,
+  TASK_RUN_WORKFLOW_NAME,
 ]);
 
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
 
 const log = createLogger("execution.workflow-runtime");
+const workflowTracer = trace.getTracer("workflow");
 
 interface WorkflowHookRecord {
   readonly runId: string;
@@ -109,6 +114,11 @@ export const turnWorkflowReference = {
 /** Stable workflow reference for session deadline timers. */
 export const sessionTimeoutWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${SESSION_TIMEOUT_WORKFLOW_NAME}`,
+};
+
+/** Stable workflow reference for durable task runs (`experimental.tasks`). */
+export const taskRunWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${TASK_RUN_WORKFLOW_NAME}`,
 };
 
 /**
@@ -145,8 +155,7 @@ export function createWorkflowRuntime(config: {
       if (sessionTimeoutMs !== undefined) {
         workflowInput.sessionTimeoutMs = sessionTimeoutMs;
       }
-
-      const attributes =
+      const sessionAttributes =
         parentLineage.sessionId === undefined
           ? buildSessionAttributes({
               inputMessage: input.title ?? input.input.message,
@@ -160,6 +169,12 @@ export function createWorkflowRuntime(config: {
               rootSessionId: parentLineage.rootSessionId ?? parentLineage.sessionId,
               serializedContext,
             });
+      const attributes = {
+        ...sessionAttributes,
+        ...(input.externalInvocation === undefined
+          ? {}
+          : buildInvocationAttributes(input.externalInvocation)),
+      };
 
       let run: Awaited<ReturnType<typeof startWorkflowPreferLatest>>;
       try {
@@ -174,7 +189,6 @@ export function createWorkflowRuntime(config: {
         throw error;
       }
 
-      await waitForOwnedCommandHook(sessionCommandHookToken(run.runId), run.runId);
       if (input.continuationToken) {
         const owner = await waitForCommandHookOwner(input.continuationToken);
         if (owner.runId !== run.runId) {
@@ -185,10 +199,11 @@ export function createWorkflowRuntime(config: {
           });
         }
       }
+      await waitForOwnedCommandHook(sessionCommandHookToken(run.runId), run.runId);
 
       let events: ReadableStream<MessageStreamEvent> | undefined;
       const getEvents = () => {
-        events ??= parseNdjsonStream<MessageStreamEvent>(() => getRun(run.runId).getReadable());
+        events ??= createLiveEventStream(run.runId);
         return events;
       };
 
@@ -308,10 +323,12 @@ function inactiveCommandResult<TCommand extends SessionCommand>(
 export async function requestWorkflowTurnCancellation(
   input: CancelTurnInput,
 ): Promise<CancelTurnResult> {
-  return await dispatchWorkflowCommand(sessionCommandHookToken(input.sessionId), {
+  const command: { kind: "cancel"; taskId?: string; turnId?: string } = {
     kind: "cancel",
-    turnId: input.turnId,
-  });
+  };
+  if (input.taskId !== undefined) command.taskId = input.taskId;
+  if (input.turnId !== undefined) command.turnId = input.turnId;
+  return await dispatchWorkflowCommand(sessionCommandHookToken(input.sessionId), command);
 }
 
 function isInactiveCommandTarget(error: unknown): boolean {
@@ -339,7 +356,7 @@ async function waitForOwnedCommandHook(token: string, sessionId: string): Promis
   }
 }
 
-async function waitForCommandHookOwner(token: string): Promise<WorkflowHookRecord> {
+export async function waitForCommandHookOwner(token: string): Promise<WorkflowHookRecord> {
   const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
   while (true) {
     try {
@@ -404,6 +421,46 @@ export async function startWorkflowPreferLatest<TArgs extends unknown[], TResult
  */
 function shouldRouteToLatestDeployment(): boolean {
   return process.env.VERCEL_ENV === "production" || isEveDevEnvironment();
+}
+
+function createLiveEventStream(sessionId: string): ReadableStream<MessageStreamEvent> {
+  let sequence = 0;
+  return parseNdjsonStream<MessageStreamEvent>(() => getRun(sessionId).getReadable()).pipeThrough(
+    new TransformStream({
+      transform(event, controller) {
+        const eventSequence = sequence;
+        sequence += 1;
+        const readAtMs = Date.now();
+        controller.enqueue(event);
+        recordLiveStreamEventRead({ event, readAtMs, sequence: eventSequence, sessionId });
+      },
+    }),
+  );
+}
+
+function recordLiveStreamEventRead(input: {
+  readonly event: MessageStreamEvent;
+  readonly readAtMs: number;
+  readonly sequence: number;
+  readonly sessionId: string;
+}): void {
+  const writtenAtMs = Date.parse(input.event.meta?.at ?? "");
+  if (!Number.isFinite(writtenAtMs)) return;
+
+  try {
+    workflowTracer
+      .startSpan("workflow.stream.follow.read", {
+        attributes: {
+          "workflow.run.id": input.sessionId,
+          "workflow.stream.sequence": input.sequence,
+        },
+        kind: SpanKind.CLIENT,
+        startTime: writtenAtMs,
+      })
+      .end(input.readAtMs);
+  } catch {
+    // Telemetry must not interrupt event delivery.
+  }
 }
 
 function isLatestDeploymentUnsupportedError(error: unknown): boolean {

@@ -44,6 +44,7 @@ export type AgentRootEntryKind =
   | "extensions-directory"
   | "hooks-directory"
   | "ignored-directory"
+  | "instrumentation-directory"
   | "instructions-directory"
   | "instructions-markdown"
   | "instructions-module"
@@ -177,6 +178,10 @@ export function classifyAgentRootEntry(
 
     if (name === "instructions") {
       return "instructions-directory";
+    }
+
+    if (name === "instrumentation") {
+      return "instrumentation-directory";
     }
 
     if (name === "lib") {

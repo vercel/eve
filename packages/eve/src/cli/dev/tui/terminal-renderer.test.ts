@@ -78,10 +78,12 @@ function stubDiagnostics() {
   };
 }
 
+type StaticAgentInfoModel = Extract<AgentInfoResult["agent"]["model"], { readonly id: string }>;
+
 function agentInfoWithModel(
   modelId: string,
-  endpoint?: AgentInfoResult["agent"]["model"]["endpoint"],
-  extras?: Partial<AgentInfoResult["agent"]["model"]>,
+  endpoint?: StaticAgentInfoModel["endpoint"],
+  extras?: Partial<StaticAgentInfoModel>,
 ): AgentInfoResult {
   return {
     agent: {
@@ -90,6 +92,7 @@ function agentInfoWithModel(
       model: {
         id: modelId,
         endpoint,
+        routing: { kind: "gateway" as const, target: modelId.split("/")[0] ?? "openai" },
         ...extras,
       },
       name: "Weather Agent",
@@ -111,7 +114,7 @@ function agentInfoWithModel(
     hooks: [],
     instructions: {
       dynamic: [],
-      static: null,
+      static: [],
     },
     kind: "eve-agent-info",
     mode: "development",
@@ -133,7 +136,7 @@ function agentInfoWithModel(
       framework: [],
       reserved: [],
     },
-    version: 1,
+    version: 2,
     workflow: {
       enabled: false,
       toolName: "Workflow",
@@ -984,6 +987,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("settles an authorization block when its callback arrives in a later stream pass", async () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.beginSubagent({ callId: "background", name: "researcher" });
+    renderer.backgroundSubagent({ callId: "background" });
     renderer.upsertConnectionAuth({
       name: "linear",
       description: "Authorization required for linear",
@@ -1012,6 +1017,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
+    expect(countOccurrences(snapshot, "linear · authorization")).toBe(1);
     expect(snapshot).toContain("linear · authorization · authorized");
     expect(snapshot).toContain("Authorization complete");
     expect(snapshot).not.toContain("linear · authorization · required");
@@ -1146,6 +1152,54 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("keeps late background child output inside its section across parent turns", async () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.beginSubagent({ callId: "s1", name: "researcher" });
+    renderer.backgroundSubagent({ callId: "s1" });
+
+    await renderer.renderStream(
+      streamOf([
+        { type: "assistant-delta", id: "parent-1", delta: "Research task started." },
+        { type: "assistant-complete", id: "parent-1" },
+        { type: "finish" },
+      ]),
+      { continueSession: true },
+    );
+    await renderer.renderStream(
+      streamOf([
+        { type: "assistant-delta", id: "parent-2", delta: "It is still running." },
+        { type: "assistant-complete", id: "parent-2" },
+        { type: "finish" },
+      ]),
+      { continueSession: true, submittedPrompt: "cool" },
+    );
+
+    // The child emits after both parent turns. It still inserts beside its
+    // call's header, not at the current transcript edge beneath parent-2.
+    renderer.upsertSubagentTool({
+      callId: "s1",
+      subagentName: "researcher",
+      childCallId: "dig-1",
+      toolName: "dig",
+      input: { phase: "sources" },
+      status: "executing",
+    });
+
+    const snapshot = screen.snapshot();
+    const header = snapshot.indexOf("※ subagent(researcher)");
+    const child = snapshot.indexOf("dig");
+    const firstParent = snapshot.indexOf("Research task started.");
+    const user = snapshot.indexOf("cool");
+    const secondParent = snapshot.indexOf("It is still running.");
+    expect(firstParent).toBeGreaterThan(-1);
+    expect(user).toBeGreaterThan(firstParent);
+    expect(secondParent).toBeGreaterThan(user);
+    expect(header).toBeGreaterThan(secondParent);
+    expect(child).toBeGreaterThan(header);
+    renderer.shutdown();
+  });
+
   it("swaps a dispatch's preparing placeholder for the section header", async () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
@@ -1246,7 +1300,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("Fetched https://one.example");
     expect(screen.snapshot()).not.toContain("Done");
 
-    renderer.completeSubagent({ callId: "s1" });
+    renderer.completeSubagent({ authoritative: true, callId: "s1" });
     const snapshot = screen.snapshot();
     // Completed: the corner reports Done with the counted footnote and the
     // children fold away — the parent's reply carries the conclusion.
@@ -1255,6 +1309,112 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).not.toContain("SUBAGENT_TOKEN=echo-marker-9F2X");
     renderer.shutdown();
   });
+
+  it("commits an authoritative background completion out of the live prompt region", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.beginSubagent({ callId: "s1", name: "researcher" });
+    renderer.backgroundSubagent({ callId: "s1" });
+    renderer.upsertSubagentTool({
+      callId: "s1",
+      subagentName: "researcher",
+      childCallId: "dig-1",
+      toolName: "dig",
+      input: { phase: "sources" },
+      status: "done",
+      output: { ok: true },
+    });
+
+    renderer.completeSubagent({ authoritative: true, callId: "s1" });
+    const outputAfterCommit = screen.rawOutput().length;
+    const prompt = renderer.readPrompt();
+    input.type("next message");
+
+    // Prompt repaint must not redraw the completed subagent cohort: it has
+    // moved to immutable scrollback and no longer occupies the live region.
+    expect(screen.rawOutput().slice(outputAfterCommit)).not.toContain("subagent(researcher)");
+    input.enter();
+    expect(await prompt).toBe("next message");
+    renderer.shutdown();
+  });
+
+  it("keeps parent completion provisional until delayed child output reaches its boundary", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.beginSubagent({ callId: "s1", name: "researcher" });
+    renderer.upsertSubagentStep({
+      callId: "s1",
+      subagentName: "researcher",
+      sectionKey: 0,
+      reasoning: "",
+      message: "parent-visible output",
+      finalized: true,
+    });
+    renderer.completeSubagent({ authoritative: false, callId: "s1" });
+    await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
+
+    renderer.beginSubagent({ callId: "s1", name: "researcher" });
+    renderer.upsertSubagentStep({
+      callId: "s1",
+      subagentName: "researcher",
+      sectionKey: 1,
+      reasoning: "",
+      message: "delayed child output",
+      finalized: true,
+    });
+
+    expect(screen.snapshot()).toContain("delayed child output");
+    expect(screen.snapshot()).not.toContain("└ Done");
+
+    renderer.completeSubagent({ authoritative: true, callId: "s1" });
+    const outputAfterCommit = screen.rawOutput().length;
+    const prompt = renderer.readPrompt();
+    input.type("next");
+    expect(screen.rawOutput().slice(outputAfterCommit)).not.toContain("subagent(researcher)");
+    input.enter();
+    await prompt;
+    renderer.shutdown();
+  });
+
+  it.each(["active", "idle"] as const)(
+    "settles only the %s cancelled turn's top-level tools",
+    async (mode) => {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      renderer.beginSubagent({ callId: "background", name: "researcher" });
+      renderer.backgroundSubagent({ callId: "background" });
+      renderer.upsertSubagentTool({
+        callId: "background",
+        subagentName: "researcher",
+        childCallId: "child-bash",
+        toolName: "bash",
+        input: { command: "background-child" },
+        status: "executing",
+      });
+      const result = streamOf([
+        {
+          type: "tool-call",
+          toolCallId: "current-bash",
+          toolName: "bash",
+          input: { command: "idle-current" },
+        },
+        { type: "turn-cancelled" },
+        { type: "finish" },
+      ]);
+
+      if (mode === "active") {
+        await renderer.renderStream(result, { continueSession: true });
+      } else {
+        await renderer.renderIdleStream(result, { continueSession: true });
+      }
+
+      const snapshot = screen.snapshot();
+      expect(snapshot).toContain("background-child");
+      expect(snapshot).toContain("idle-current");
+      expect(countOccurrences(snapshot, "interrupted")).toBe(1);
+      renderer.shutdown();
+    },
+  );
 
   it("renders parallel calls to the same subagent as ordinal-numbered sections", async () => {
     const { screen, renderer } = makeRenderer();
@@ -1402,6 +1562,39 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("renders an idle wake turn without corrupting the active prompt draft", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const prompt = renderer.readPrompt();
+    input.type("draft in progress");
+
+    await renderer.renderIdleStream(
+      streamOf([
+        {
+          type: "tool-call",
+          input: { taskIds: ["task_123"] },
+          toolCallId: "peek-1",
+          toolName: "task_peek",
+        },
+        {
+          type: "tool-result",
+          output: { tasks: [{ status: "completed", taskId: "task_123" }] },
+          toolCallId: "peek-1",
+        },
+        { type: "assistant-delta", id: "wake-1", delta: "Research finished." },
+        { type: "assistant-complete", id: "wake-1" },
+        { type: "finish" },
+      ]),
+      { continueSession: true },
+    );
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("Research finished.");
+    expect(snapshot).toContain("draft in progress");
+    input.enter();
+    expect(await prompt).toBe("draft in progress");
+    renderer.shutdown();
+  });
+
   it("never submits an empty or whitespace-only prompt", async () => {
     const { input, renderer } = makeRenderer();
 
@@ -1462,6 +1655,20 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     expect(screen.snapshot()).toContain("\u23bf  /model dismissed.");
+  });
+
+  it("strips complete ANSI styles from command outcomes", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandResult(
+      "Model changed to \u001b[1mchatgpt/gpt-5.6-sol\u001b[22m. Live on your next prompt.",
+    );
+    renderer.shutdown();
+
+    expect(screen.snapshot()).toContain(
+      "\u23bf  Model changed to chatgpt/gpt-5.6-sol. Live on your next prompt.",
+    );
+    expect(screen.snapshot()).not.toContain("[1m");
+    expect(screen.snapshot()).not.toContain("[22m");
   });
 
   it("hangs a successful command outcome from an elbow into a full-intensity rail", () => {
@@ -3617,6 +3824,29 @@ describe("TerminalRenderer setup panel", () => {
     renderer.shutdown();
   });
 
+  it("selects ChatGPT as a provider sibling", async () => {
+    const { screen, input, renderer } = makeRenderer();
+
+    const answer = renderer.setupFlow.readProviderPicker({
+      message: "Provider",
+      options: [
+        { value: "ai-gateway-project", label: "AI Gateway via Project" },
+        { value: "ai-gateway-key", label: "AI Gateway via AI_GATEWAY_API_KEY" },
+        { value: "chatgpt", label: "ChatGPT subscription" },
+        { value: "external", label: "Other providers" },
+      ],
+      initialValue: "ai-gateway-project",
+      validateInlineKey: async () => ({ kind: "valid" }),
+    });
+
+    expect(screen.snapshot()).toContain("ChatGPT subscription");
+    input.down();
+    input.down();
+    input.enter();
+    await expect(answer).resolves.toEqual({ kind: "chatgpt" });
+    renderer.shutdown();
+  });
+
   it("validates a masked key without replacing the provider frame", async () => {
     const { screen, input, renderer } = makeRenderer();
     let resolveValidation:
@@ -3631,8 +3861,8 @@ describe("TerminalRenderer setup panel", () => {
 
     const answer = renderer.setupFlow.readProviderPicker({
       message: "Provider",
-      options: [{ value: "own-key", label: "AI Gateway via AI_GATEWAY_API_KEY" }],
-      initialValue: "own-key",
+      options: [{ value: "ai-gateway-key", label: "AI Gateway via AI_GATEWAY_API_KEY" }],
+      initialValue: "ai-gateway-key",
       validateInlineKey: validate,
     });
 
@@ -3654,7 +3884,7 @@ describe("TerminalRenderer setup panel", () => {
     input.enter();
     resolveValidation?.({ kind: "valid" });
     await expect(answer).resolves.toEqual({
-      kind: "inline-key",
+      kind: "ai-gateway-key",
       key: "bad-keyx",
       validation: { kind: "valid" },
     });
@@ -3671,8 +3901,8 @@ describe("TerminalRenderer setup panel", () => {
       const { screen, input, renderer } = makeRenderer();
       const answer = renderer.setupFlow.readProviderPicker({
         message: "Provider",
-        options: [{ value: "own-key", label: "AI Gateway via AI_GATEWAY_API_KEY" }],
-        initialValue: "own-key",
+        options: [{ value: "ai-gateway-key", label: "AI Gateway via AI_GATEWAY_API_KEY" }],
+        initialValue: "ai-gateway-key",
         validateInlineKey: async () => ({ kind: "valid" }),
       });
       let settled = false;
@@ -3702,8 +3932,8 @@ describe("TerminalRenderer setup panel", () => {
     const validations: Array<{ key: string; signal: AbortSignal; finish(): void }> = [];
     const answer = renderer.setupFlow.readProviderPicker({
       message: "Provider",
-      options: [{ value: "own-key", label: "AI Gateway key" }],
-      initialValue: "own-key",
+      options: [{ value: "ai-gateway-key", label: "AI Gateway key" }],
+      initialValue: "ai-gateway-key",
       validateInlineKey: (key, signal) => {
         return new Promise<{ kind: "valid" }>((resolve) => {
           validations.push({ key, signal, finish: () => resolve({ kind: "valid" }) });
@@ -3725,7 +3955,7 @@ describe("TerminalRenderer setup panel", () => {
     await Promise.resolve();
     validations[1]?.finish();
     await expect(answer).resolves.toEqual({
-      kind: "inline-key",
+      kind: "ai-gateway-key",
       key: "sk-second",
       validation: { kind: "valid" },
     });
@@ -3862,7 +4092,7 @@ describe("TerminalRenderer setup panel", () => {
 });
 
 describe("TerminalRenderer setup flow session", () => {
-  it("restores the terminal while a child process inherits stdio", async () => {
+  it("discards inherited subprocess output when restoring the transcript", async () => {
     const { screen, input, renderer } = makeRenderer();
 
     renderer.renderNotice("anchor");
@@ -3871,11 +4101,15 @@ describe("TerminalRenderer setup flow session", () => {
     await renderer.setupFlow.withInheritedStdio(async () => {
       inherited = true;
       input.pause();
+      screen.write("temporary OAuth instructions\n");
+      expect(screen.snapshot()).toContain("temporary OAuth instructions");
     });
 
     expect(inherited).toBe(true);
     expect(input.resumeCalls).toBe(2);
+    expect(screen.snapshot()).toContain("anchor");
     expect(screen.snapshot()).toContain("Add integration");
+    expect(screen.snapshot()).not.toContain("temporary OAuth instructions");
     renderer.setupFlow.end();
     renderer.shutdown();
   });
@@ -4100,6 +4334,41 @@ describe("TerminalRenderer setup flow session", () => {
 
     input.send("\x1b");
     await expect(third).resolves.toBeUndefined();
+    renderer.setupFlow.end({ preserveDiagnostics: false });
+    renderer.shutdown();
+  });
+
+  it("replaces setup lines with a compact current-item summary", async () => {
+    const { screen, input, renderer } = makeRenderer();
+
+    renderer.setupFlow.begin("Add to your agent");
+    renderer.setupFlow.renderLine("Scaffolded channel: photon", "success");
+    renderer.setupFlow.renderLine("Photon project: https://app.photon.codes", "success");
+    renderer.setupFlow.replaceContent?.({
+      headline: "Scaffolded channel/photon-imessage",
+      facts: [
+        { label: "Agent phone number", value: "+15551234567" },
+        { label: "Photon project dashboard", value: "https://app.photon.codes" },
+      ],
+    });
+    const answer = renderer.setupFlow.readSelect({
+      kind: "task-list",
+      message: "What would you like to do next?",
+      options: [
+        { value: "add-more", label: "Add more" },
+        { value: "finish", label: "Finish", trailingAction: true },
+      ],
+    });
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("Scaffolded channel/photon-imessage");
+    expect(snapshot).toContain("Agent phone number: +15551234567");
+    expect(snapshot).toContain("Photon project dashboard: https://app.photon.codes");
+    expect(snapshot).not.toContain("Scaffolded channel: photon");
+    expect(snapshot).not.toContain("Photon project: https://app.photon.codes");
+
+    input.enter();
+    await expect(answer).resolves.toEqual(["add-more"]);
     renderer.setupFlow.end({ preserveDiagnostics: false });
     renderer.shutdown();
   });
