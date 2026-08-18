@@ -1,0 +1,46 @@
+---
+title: Sendblue
+description: Connect an eve agent to iMessage, SMS, and RCS through Sendblue.
+---
+
+Use Sendblue to receive and reply to iMessage, SMS, and RCS conversations. Run
+`eve add channel/sendblue` to add `agent/channels/sendblue.ts` through the guided
+setup.
+
+Choose **Set up Vercel Connect** to provision a managed Sendblue account and
+phone number. Connect stores the permanent Sendblue credentials, configures its
+verified trigger at `/eve/v1/sendblue`, and issues short-lived credentials to
+the deployed agent:
+
+```ts title="agent/channels/sendblue.ts"
+import { connectSendblueChannel } from "@vercel/connect/eve";
+import { sendblueChannel } from "eve/channels/sendblue";
+
+export default sendblueChannel({
+  ...connectSendblueChannel("sendblue/my-agent"),
+});
+```
+
+The channel resolves a fresh Connect bearer token for each Sendblue API
+operation. The provisioned `fromNumber` limits inbound events to that Sendblue
+line, so unrelated account lines do not reach the agent. When no direct
+webhook secret is configured, the channel verifies Connect-forwarded webhooks
+with Vercel OIDC.
+
+## Other hosts
+
+Choose **Use portable credentials** during `eve add channel/sendblue` when the
+agent is not deployed through Vercel Connect. eve writes the API key, secret,
+and sending number to `.env.local`, then scaffolds a channel that reads them
+from the environment.
+
+After deploying the agent:
+
+1. Configure Sendblue webhooks for `https://<your-host>/eve/v1/sendblue`.
+2. Configure a signing secret for the webhook in Sendblue.
+3. Set `SENDBLUE_API_KEY`, `SENDBLUE_API_SECRET`, `SENDBLUE_FROM_NUMBER`, and
+   `SENDBLUE_WEBHOOK_SECRET` as encrypted environment variables on the host.
+
+For direct Sendblue webhooks, `SENDBLUE_WEBHOOK_SECRET` authenticates the
+`sb-signing-secret` header. Use a `webhookVerifier` only when a trusted proxy
+verifies inbound Sendblue events instead.

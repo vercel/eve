@@ -1800,27 +1800,22 @@
       }
     },
     {
-      "name": "channel/chat-sdk-sendblue",
+      "name": "channel/sendblue",
       "type": "registry:item",
       "title": "Sendblue",
-      "description": "Send and receive iMessage, SMS, and RCS through Sendblue.",
-      "dependencies": ["chat", "chat-adapter-sendblue", "@chat-adapter/state-memory"],
-      "envVars": {
-        "SENDBLUE_API_KEY": "",
-        "SENDBLUE_API_SECRET": "",
-        "SENDBLUE_FROM_NUMBER": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/chat-sdk-sendblue.ts",
-          "type": "registry:file",
-          "target": "agent/channels/sendblue.ts"
-        }
-      ],
+      "description": "Connect an eve agent to iMessage, SMS, and RCS through Sendblue with guided setup.",
+      "dependencies": ["@vercel/connect@>=0.8.0"],
       "meta": {
         "eve": {
-          "docs": "/integrations/chat-sdk-sendblue#configure",
-          "implementation": "chat-sdk"
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "sendblue"]
+          },
+          "requires": ">=0.31.4",
+          "docs": "/docs/channels/sendblue",
+          "implementation": "native"
         }
       }
     },

@@ -1337,6 +1337,9 @@ importers:
       chat:
         specifier: 4.34.0
         version: 4.34.0(ai@7.0.58(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
+      chat-adapter-sendblue:
+        specifier: 0.2.0
+        version: 0.2.0(chat@4.34.0(ai@7.0.58(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))
       chokidar:
         specifier: 5.0.0
         version: 5.0.0
@@ -23798,6 +23801,11 @@ snapshots:
   chat-adapter-sendblue@0.2.0(chat@4.34.0(ai@6.0.191(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)):
     dependencies:
       chat: 4.34.0(ai@6.0.191(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
+      sendblue: 3.10.1
+
+  chat-adapter-sendblue@0.2.0(chat@4.34.0(ai@7.0.58(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)):
+    dependencies:
+      chat: 4.34.0(ai@7.0.58(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
       sendblue: 3.10.1
 
   chat@4.30.0(ai@6.0.191(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3):
