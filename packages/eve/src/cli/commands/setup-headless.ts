@@ -52,10 +52,23 @@ export type HeadlessSetupEvent =
 export function headlessSetupContinuation(input: {
   item: string;
   installed: boolean;
+  question?: Extract<RegistrySetupBlocker, { status: "input_required" }>["question"];
 }): HeadlessSetupCommand {
+  const answer =
+    input.question?.kind === "environment"
+      ? []
+      : input.question === undefined
+        ? []
+        : ["--answer", `${input.question.key}=<JSON value>`];
   return {
     command: "eve",
-    args: ["add", input.item, "--non-interactive", ...(input.installed ? ["--skip-install"] : [])],
+    args: [
+      "add",
+      input.item,
+      "--non-interactive",
+      ...(input.installed ? ["--skip-install"] : []),
+      ...answer,
+    ],
   };
 }
 

@@ -261,7 +261,10 @@ describe("registry commands", () => {
       item: "linear",
       installed: false,
       question: { key: "components" },
-      next: { command: "eve", args: ["add", "linear", "--non-interactive"] },
+      next: {
+        command: "eve",
+        args: ["add", "linear", "--non-interactive", "--answer", "components=<JSON value>"],
+      },
     });
     expect(process.exitCode).toBe(2);
   });
