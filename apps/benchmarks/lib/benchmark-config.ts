@@ -90,7 +90,14 @@ export const publishedBenchmarkModels = benchmarkModels.filter(
 );
 
 export const publishedBenchmark = {
-  caseIds: ["author-001-weather-tool", "author-002-new-project"],
+  caseIds: [
+    "author-001-weather-tool",
+    "author-002-new-project",
+    "author-003-openapi-connection",
+    "author-004-packaged-skill",
+    "author-005-conditional-approval",
+    "author-006-custom-channel",
+  ],
   runs: 3,
 } as const;
 
