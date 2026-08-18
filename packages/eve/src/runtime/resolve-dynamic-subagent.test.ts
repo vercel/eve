@@ -13,7 +13,7 @@ describe("normalizeResolvedDynamicSubagentDefinition", () => {
         sourceKind: "module",
       },
       {
-        build: { externalDependencies: ["@eve/selfmod"] },
+        build: { externalDependencies: ["@eve/self-modification"] },
         events: { "session.started": handler },
         kind: "eve:dynamic",
       },

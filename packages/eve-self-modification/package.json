@@ -1,5 +1,5 @@
 {
-  "name": "@eve/selfmod",
+  "name": "@eve/self-modification",
   "version": "0.0.0",
   "description": "Development-only source editing subagent for eve applications.",
   "keywords": [
@@ -16,7 +16,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/vercel/eve.git",
-    "directory": "packages/eve-selfmod"
+    "directory": "packages/eve-self-modification"
   },
   "files": [
     "dist",
@@ -44,12 +44,6 @@
       "types": "./scaffold/sandbox.d.ts",
       "import": "./scaffold/sandbox.js",
       "default": "./scaffold/sandbox.js"
-    },
-    "./replace-in-file": {
-      "eve-source": "./src/replace-in-file.ts",
-      "types": "./scaffold/replace-in-file.d.ts",
-      "import": "./scaffold/replace-in-file.js",
-      "default": "./scaffold/replace-in-file.js"
     },
     "./extension": {
       "types": "./dist/index.d.ts",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import replaceInFile, { replaceExactlyOnce } from "./replace-in-file.js";
+import replaceInFile, { replaceExactlyOnce } from "../extension/tools/replace_in_file.js";
 
 describe("replaceExactlyOnce", () => {
   it("replaces one exact match", () => {

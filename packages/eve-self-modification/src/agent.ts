@@ -1,12 +1,14 @@
 import { defineAgent, defineDynamic, type AgentStaticModelDefinition } from "eve";
 
-/** Default model used by selfmod when `defineSelfmod` does not override it. */
-export const DEFAULT_SELFMOD_MODEL = "anthropic/claude-sonnet-5";
+/** Default model used by self-modification when `defineSelfModification` does not override it. */
+export const DEFAULT_SELF_MODIFICATION_MODEL = "anthropic/claude-sonnet-5";
 
-/** Creates selfmod's development-only dynamic subagent definition. */
-export function createSelfmodAgent(model: AgentStaticModelDefinition = DEFAULT_SELFMOD_MODEL) {
+/** Creates the development-only self-modification dynamic subagent definition. */
+export function createSelfModificationAgent(
+  model: AgentStaticModelDefinition = DEFAULT_SELF_MODIFICATION_MODEL,
+) {
   return defineDynamic({
-    build: { externalDependencies: ["@eve/selfmod"] },
+    build: { externalDependencies: ["@eve/self-modification"] },
     events: {
       "session.started": () =>
         process.env.EVE_DEV === "1"
@@ -27,4 +29,4 @@ export function createSelfmodAgent(model: AgentStaticModelDefinition = DEFAULT_S
   });
 }
 
-export default createSelfmodAgent();
+export default createSelfModificationAgent();

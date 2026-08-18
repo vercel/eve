@@ -5,7 +5,7 @@ import { join } from "node:path";
 import * as justBash from "just-bash";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createSelfmodFilesystem } from "./filesystem.js";
+import { createSelfModificationFilesystem } from "./filesystem.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -18,7 +18,7 @@ afterEach(async () => {
 });
 
 async function createAppRoot(): Promise<string> {
-  const appRoot = await mkdtemp(join(tmpdir(), "eve-selfmod-sandbox-"));
+  const appRoot = await mkdtemp(join(tmpdir(), "eve-self-modification-sandbox-"));
   temporaryDirectories.push(appRoot);
   await mkdir(join(appRoot, "agent"), { recursive: true });
   await mkdir(join(appRoot, "node_modules/eve/docs"), { recursive: true });
@@ -26,10 +26,10 @@ async function createAppRoot(): Promise<string> {
   return appRoot;
 }
 
-describe("selfmod filesystem", () => {
+describe("self-modification filesystem", () => {
   it("mounts authored source read-write and installed eve docs read-only", async () => {
     const appRoot = await createAppRoot();
-    const filesystem = await createSelfmodFilesystem({
+    const filesystem = await createSelfModificationFilesystem({
       appRoot,
       defaultFilesystem: new justBash.InMemoryFs(),
       justBash,

@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 
 import type { IFileSystem } from "just-bash";
 
-export async function createSelfmodFilesystem(input: {
+export async function createSelfModificationFilesystem(input: {
   readonly appRoot: string;
   readonly defaultFilesystem: IFileSystem;
   readonly justBash: typeof import("just-bash");
