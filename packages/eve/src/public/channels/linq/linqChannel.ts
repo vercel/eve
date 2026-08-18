@@ -120,10 +120,27 @@ async function dispatchMessage(
 ): Promise<void> {
   const result = await onMessage({ thread }, message);
   if (result === null) return;
+  await markReadBestEffort(bridge.bot.getAdapter("linq"), thread, message);
   const content = linqInboundContent(message);
   if (content === undefined) return;
   await bridge.send(
     { context: [...(result.context ?? [])], message: content },
     { auth: result.auth, thread, title: result.title },
   );
+}
+
+async function markReadBestEffort(
+  adapter: ReturnType<typeof createLinqAdapter>,
+  thread: Thread,
+  message: Message,
+): Promise<void> {
+  const markRead = (
+    adapter as { markRead?: (threadId: string, messageId: string) => Promise<void> }
+  ).markRead;
+  if (markRead === undefined) return;
+  try {
+    await markRead.call(adapter, thread.id, message.id);
+  } catch {
+    // A read receipt should never prevent the user's message from reaching eve.
+  }
 }

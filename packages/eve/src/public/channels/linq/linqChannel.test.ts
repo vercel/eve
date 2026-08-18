@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { directMessage, newMessage, send } = vi.hoisted(() => ({
+const { directMessage, markRead, newMessage, send } = vi.hoisted(() => ({
   directMessage: vi.fn(),
+  markRead: vi.fn(),
   newMessage: vi.fn(),
   send: vi.fn(),
 }));
@@ -9,6 +10,7 @@ const { directMessage, newMessage, send } = vi.hoisted(() => ({
 vi.mock("#public/channels/chat-sdk/index.js", () => ({
   chatSdkChannel: () => ({
     bot: {
+      getAdapter: () => ({ markRead }),
       onDirectMessage: directMessage,
       onNewMessage: newMessage,
     },
@@ -48,6 +50,7 @@ describe("linqChannel", () => {
 
     await handler(thread, message);
 
+    expect(markRead).toHaveBeenCalledWith(thread.id, message.id);
     expect(send).toHaveBeenCalledWith(
       { context: [], message: "Hello Linq" },
       { auth: null, thread, title: undefined },
@@ -69,6 +72,7 @@ describe("linqChannel", () => {
 
     await handler(thread, message);
 
+    expect(markRead).toHaveBeenCalledWith(thread.id, message.id);
     expect(send).not.toHaveBeenCalled();
   });
 });
