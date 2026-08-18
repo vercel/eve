@@ -127,6 +127,8 @@ const resumed = await session.respond(
 await resumed.result();
 ```
 
+After eve accepts the reply, the durable stream emits `input.resolved`. Its `resolutions` array includes each request's `requestId`, `kind`, terminal `outcome`, and the accepted `response` when the client provided one. Persist this authoritative event instead of relying on the submitting client's optimistic state when rebuilding message history.
+
 `send(message, options)` and `respond(inputResponses, options)` are separate operations. Put `clientContext`, `outputSchema`, headers, or stream options in the second argument to either method.
 
 ## Single-use responses

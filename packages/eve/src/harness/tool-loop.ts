@@ -60,6 +60,7 @@ import {
   createCompactionCompletedEvent,
   createCompactionRequestedEvent,
   createContextClearedEvent,
+  createInputResolvedEvent,
   createInputRequestedEvent,
   createResultCompletedEvent,
   createSessionWaitingEvent,
@@ -1035,13 +1036,33 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       return { next: null, session: pending.session };
     }
 
-    if (config.instrumentation?.hooks !== undefined && pending.resolvedInputs !== undefined) {
+    if (pending.resolvedInputs !== undefined) {
       for (const batch of pending.resolvedInputs) {
-        await publishInputResolutions({
-          batch,
-          hooks: config.instrumentation.hooks,
-          sessionId: session.sessionId,
-        });
+        if (config.instrumentation?.hooks !== undefined) {
+          await publishInputResolutions({
+            batch,
+            hooks: config.instrumentation.hooks,
+            sessionId: session.sessionId,
+          });
+        }
+        if (emit) {
+          await emit(
+            createInputResolvedEvent({
+              resolutions: batch.inputs.map((resolved) => {
+                const resolution = {
+                  kind: resolved.request.kind,
+                  outcome: resolved.outcome,
+                  requestId: resolved.request.requestId,
+                };
+                if (resolved.response === undefined) return resolution;
+                return { ...resolution, response: resolved.response };
+              }),
+              sequence: batch.event.sequence,
+              stepIndex: batch.event.stepIndex,
+              turnId: batch.event.turnId,
+            }),
+          );
+        }
       }
     }
 

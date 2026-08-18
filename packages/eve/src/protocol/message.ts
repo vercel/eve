@@ -27,7 +27,7 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "22";
+export const EVE_MESSAGE_STREAM_VERSION = "23";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -273,6 +273,31 @@ export interface InputRequestedStreamEvent {
     turnId: string;
   };
   type: "input.requested";
+}
+
+/** Authoritative terminal outcome for one human-input request. */
+export type InputResolutionOutcome = "answered" | "approved" | "denied" | "ignored" | "invalid";
+
+/** One server-accepted resolution from a pending human-input batch. */
+export interface InputResolution {
+  readonly kind: InputRequest["kind"];
+  readonly outcome: InputResolutionOutcome;
+  readonly requestId: string;
+  readonly response?: InputResponse;
+}
+
+/**
+ * Stream event emitted after eve accepts a terminal resolution for one or more
+ * pending human-input requests.
+ */
+export interface InputResolvedStreamEvent {
+  data: {
+    resolutions: readonly InputResolution[];
+    sequence: number;
+    stepIndex: number;
+    turnId: string;
+  };
+  type: "input.resolved";
 }
 
 /**
@@ -712,6 +737,7 @@ export type UnstampedMessageStreamEvent =
   | SubagentStartedStreamEvent
   | ActionsRequestedStreamEvent
   | InputRequestedStreamEvent
+  | InputResolvedStreamEvent
   | ActionPartialStreamEvent
   | ActionResultStreamEvent
   | ReasoningCompletedStreamEvent
@@ -1171,6 +1197,24 @@ export function createInputRequestedEvent(input: {
       turnId: input.turnId,
     },
     type: "input.requested",
+  };
+}
+
+/** Creates the authoritative `input.resolved` event for one pending HITL batch. */
+export function createInputResolvedEvent(input: {
+  readonly resolutions: readonly InputResolution[];
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly turnId: string;
+}): InputResolvedStreamEvent {
+  return {
+    data: {
+      resolutions: input.resolutions,
+      sequence: input.sequence,
+      stepIndex: input.stepIndex,
+      turnId: input.turnId,
+    },
+    type: "input.resolved",
   };
 }
 

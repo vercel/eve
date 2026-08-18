@@ -1797,7 +1797,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
       usage: { inputTokens: 7, outputTokens: 3 },
     });
-    const { emit } = createEventCollector();
+    const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
 
     const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
@@ -1812,6 +1812,24 @@ describe("createToolLoopHarness", () => {
     expect(getSessionTokenLimitViolation(resumed.session)).toBeNull();
     // The parked user message survives into model history for the resumed call.
     expect(resumed.session.history).toContainEqual({ content: "Hi again", role: "user" });
+    const resolutionIndex = events.findIndex((event) => event.type === "input.resolved");
+    expect(resolutionIndex).toBeGreaterThan(-1);
+    expect(events[resolutionIndex]).toMatchObject({
+      data: {
+        resolutions: [
+          {
+            kind: "session-limit",
+            outcome: "answered",
+            requestId: LIMIT_REQUEST_ID,
+            response: { optionId: "continue", requestId: LIMIT_REQUEST_ID },
+          },
+        ],
+      },
+      type: "input.resolved",
+    });
+    expect(
+      events.findIndex((event, index) => index > resolutionIndex && event.type === "step.started"),
+    ).toBeGreaterThan(resolutionIndex);
   });
 
   it("grants the budget when the user types the continue option as plain text", async () => {

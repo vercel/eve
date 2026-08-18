@@ -21,7 +21,11 @@ import {
   toMessageInputRequest,
 } from "#client/message-action-parts.js";
 import type { InputResponse } from "#runtime/input/types.js";
-import type { AuthorizationCompletedStreamEvent, MessageReceivedPart } from "#protocol/message.js";
+import type {
+  AuthorizationCompletedStreamEvent,
+  InputResolution,
+  MessageReceivedPart,
+} from "#protocol/message.js";
 
 export type {
   EveAuthorizationChallenge,
@@ -85,6 +89,14 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       let next = data;
       for (const response of event.data.responses) {
         next = respondToInputRequest(next, response);
+      }
+      return next;
+    }
+
+    case "input.resolved": {
+      let next = data;
+      for (const resolution of event.data.resolutions) {
+        next = resolveInputRequest(next, resolution);
       }
       return next;
     }
@@ -355,9 +367,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
 
 function respondToInputRequest(data: EveMessageData, response: InputResponse): EveMessageData {
   const existing = findToolPartByApprovalId(data, response.requestId);
-  if (!existing) {
-    return data;
-  }
+  if (!existing) return data;
 
   const approval: { id: string; reason?: string } = {
     id: response.requestId,
@@ -379,6 +389,26 @@ function respondToInputRequest(data: EveMessageData, response: InputResponse): E
         name: existing.toolMetadata?.eve?.name ?? existing.toolName,
       },
     }),
+    toolName: existing.toolName,
+    type: "dynamic-tool",
+  });
+}
+
+function resolveInputRequest(data: EveMessageData, resolution: InputResolution): EveMessageData {
+  if (resolution.response !== undefined) {
+    return respondToInputRequest(data, resolution.response);
+  }
+
+  const existing = findToolPartByApprovalId(data, resolution.requestId);
+  if (!existing) return data;
+
+  return updateToolPart(data, existing.toolCallId, {
+    input: existing.input,
+    output: { status: resolution.outcome },
+    state: "output-available",
+    stepIndex: existing.stepIndex,
+    toolCallId: existing.toolCallId,
+    toolMetadata: existing.toolMetadata,
     toolName: existing.toolName,
     type: "dynamic-tool",
   });
