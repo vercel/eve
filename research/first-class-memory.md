@@ -276,7 +276,7 @@ interface MemoryOperationContext extends SessionContext {
   readonly abortSignal: AbortSignal;
   /** Durable model history at this lifecycle boundary. Excludes memory projections. */
   readonly messages: readonly ModelMessage[];
-  /** Identifies one logical slot operation and may repeat across replay or reconstruction. */
+  /** Identifies one logical recall or save operation across workflow replay. */
   readonly operationId: string;
   readonly memory: {
     /** Current projection for this slot and the active scope, if one exists. */
