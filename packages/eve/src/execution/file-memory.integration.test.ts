@@ -19,8 +19,20 @@ describe("file memory integration", () => {
       agent: { name: "file-memory-integration" },
       memories: [
         {
-          definition: defineMemory({ provider, scope: byPrincipal }),
+          definition: defineMemory({
+            description: "Personal preferences for the authenticated user.",
+            provider,
+            scope: byPrincipal,
+          }),
           slot: "facts",
+        },
+        {
+          definition: defineMemory({
+            description: "Shared conventions for this channel.",
+            provider,
+            scope: "channel-1",
+          }),
+          slot: "channel",
         },
       ],
     });
