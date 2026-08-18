@@ -14,7 +14,7 @@ import type {
   InstrumentationAttemptScope,
   InstrumentationProviderDefinition,
 } from "#harness/instrumentation/lifecycle.js";
-import { actionIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+import { actionIdempotencyKey, attemptIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
 import { setAgentUsage } from "#tracing/agent-otel-usage.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
@@ -46,20 +46,17 @@ export function createAgentActionInstrumentation(input: {
   readonly idGenerator: AgentSpanIdGenerator;
   readonly recordInputs: boolean;
   readonly recordOutputs: boolean;
-  readonly resolveParent: (
+  readonly resolveTraceContext: (
     event: InstrumentationActionStartedEvent,
-  ) =>
-    | { readonly context: Context; readonly spanContext: SpanContext }
-    | undefined
-    | PromiseLike<{ readonly context: Context; readonly spanContext: SpanContext } | undefined>;
+  ) => SpanContext | undefined | PromiseLike<SpanContext | undefined>;
   readonly stateStore: AgentTraceStateStore;
   readonly tracer: Tracer;
 }): AgentActionInstrumentation {
   const byAttempt = new Map<string, Set<string>>();
 
   const onStarted = async (event: InstrumentationActionStartedEvent): Promise<void> => {
-    const parent = await input.resolveParent(event);
-    if (parent === undefined) return;
+    const traceContext = await input.resolveTraceContext(event);
+    if (traceContext === undefined) return;
 
     const existing = await input.stateStore.getAction(event.idempotencyKey);
     const state: AgentActionTraceState = existing ?? {
@@ -69,9 +66,9 @@ export function createAgentActionInstrumentation(input: {
       kind: event.kind,
       name: event.name,
       parent: {
-        spanId: parent.spanContext.spanId,
-        traceFlags: parent.spanContext.traceFlags,
-        traceId: parent.spanContext.traceId,
+        spanId: input.idGenerator.deriveSpanId(attemptIdempotencyKey(event.scope)),
+        traceFlags: traceContext.traceFlags,
+        traceId: traceContext.traceId,
       },
       rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
       sessionId: event.scope.sessionId,

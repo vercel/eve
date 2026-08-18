@@ -35,7 +35,7 @@ afterEach(async () => {
 });
 
 describe("local instrumentation runtime", () => {
-  it("persists agent, AI, and user spans in one trace", async () => {
+  it("persists the agent trace hierarchy in OTLP segments", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "eve-local-traces-"));
     temporaryDirectories.push(appRoot);
     // Resolve and cache the public API tracer before eve installs its vendored
@@ -195,19 +195,17 @@ describe("local instrumentation runtime", () => {
       }),
     );
     const spans = spanGroups.flat();
-    expect(spans.map((span) => span.name)).toEqual(
-      expect.arrayContaining([
-        "agent.turn",
-        "agent.step",
-        "ai.streamText",
-        "chat model-1",
-        "agent.action",
-        "ai.toolCall",
-        "user.model-work",
-        "user.tool-work",
-      ]),
-    );
-    expect(span(spans, "agent.step").parentSpanId).toBe(span(spans, "agent.turn").spanId);
+    expect(formatTraceTree(spans)).toEqual([
+      "agent.session",
+      "  agent.turn",
+      "    agent.step",
+      "      agent.action",
+      "        ai.toolCall",
+      "          user.tool-work",
+      "      ai.streamText",
+      "        chat model-1",
+      "          user.model-work",
+    ]);
     expect(span(spans, "agent.step").links).toEqual([
       expect.objectContaining({
         attributes: expect.arrayContaining([
@@ -220,12 +218,6 @@ describe("local instrumentation runtime", () => {
         traceId: delivery.spanContext().traceId,
       }),
     ]);
-    expect(span(spans, "ai.streamText").parentSpanId).toBe(span(spans, "agent.step").spanId);
-    expect(span(spans, "chat model-1").parentSpanId).toBe(span(spans, "ai.streamText").spanId);
-    expect(span(spans, "user.model-work").parentSpanId).toBe(span(spans, "chat model-1").spanId);
-    expect(span(spans, "agent.action").parentSpanId).toBe(span(spans, "agent.turn").spanId);
-    expect(span(spans, "ai.toolCall").parentSpanId).toBe(span(spans, "agent.action").spanId);
-    expect(span(spans, "user.tool-work").parentSpanId).toBe(span(spans, "ai.toolCall").spanId);
     const listed = await listLocalTraces(appRoot);
     expect(listed).toHaveLength(1);
     expect(listed[0]).toMatchObject({ sessionId: "session-1", traceId });
@@ -279,4 +271,30 @@ interface OtlpRequest {
 
 function span(spans: readonly OtlpSpan[], name: string): OtlpSpan {
   return spans.find((candidate) => candidate.name === name)!;
+}
+
+function formatTraceTree(spans: readonly OtlpSpan[]): string[] {
+  const children = Map.groupBy(spans, (candidate) => candidate.parentSpanId);
+  const lines: string[] = [];
+  const visited = new Set<string>();
+
+  const append = (current: OtlpSpan, depth: number): void => {
+    visited.add(current.spanId);
+    lines.push(`${"  ".repeat(depth)}${current.name}`);
+    for (const child of (children.get(current.spanId) ?? []).toSorted((a, b) =>
+      a.name.localeCompare(b.name),
+    )) {
+      append(child, depth + 1);
+    }
+  };
+
+  for (const root of (children.get(undefined) ?? []).toSorted((a, b) =>
+    a.name.localeCompare(b.name),
+  )) {
+    append(root, 0);
+  }
+  for (const orphan of spans.filter((candidate) => !visited.has(candidate.spanId))) {
+    lines.push(`[orphan parent=${orphan.parentSpanId ?? "none"}] ${orphan.name}`);
+  }
+  return lines;
 }

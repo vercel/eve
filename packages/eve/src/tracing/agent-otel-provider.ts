@@ -43,6 +43,7 @@ import type {
   InstrumentationTurnStartedEvent,
   InstrumentationTurnTerminalEvent,
 } from "#harness/instrumentation/lifecycle.js";
+import { attemptIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
 
 interface SpanState {
   readonly context: Context;
@@ -99,11 +100,9 @@ export function createAgentOtelInstrumentation(
     idGenerator: input.idGenerator,
     recordInputs,
     recordOutputs,
-    resolveParent: async (event) => {
+    resolveTraceContext: async (event) => {
       const turn = await input.stateStore.getTurn(event.scope.sessionId, event.scope.turnId);
-      return turn === undefined
-        ? undefined
-        : { context: contextFromSpanContext(turn.context), spanContext: turn.context };
+      return turn?.context;
     },
     stateStore: input.stateStore,
     tracer: input.tracer,
@@ -146,31 +145,35 @@ export function createAgentOtelInstrumentation(
     if (turn === undefined) return;
     const turnContext = contextFromSpanContext(turn.context);
     const activeSpanContext = trace.getSpan(context.active())?.spanContext();
-    const stepSpan = input.tracer.startSpan(
-      "agent.step",
-      {
-        attributes: {
-          "agent.session.id": event.scope.sessionId,
-          "agent.framework.name": "eve",
-          "agent.framework.version": input.frameworkVersion,
-          "agent.root.session.id": event.scope.rootSessionId ?? event.scope.sessionId,
-          "agent.step.attempt": event.scope.attemptIndex,
-          "agent.step.index": event.scope.stepIndex,
-          "agent.turn.id": event.scope.turnId,
-          "agent.name": event.scope.functionId,
-          ...runtimeContextAttributes(event.runtimeContext),
-        },
-        links:
-          activeSpanContext === undefined || activeSpanContext.traceId === turn.context.traceId
-            ? undefined
-            : [
-                {
-                  attributes: { "eve.link.type": "workflow.delivery" },
-                  context: activeSpanContext,
-                },
-              ],
-      },
-      turnContext,
+    const stepSpan = input.idGenerator.withSpanId(
+      input.idGenerator.deriveSpanId(attemptIdempotencyKey(event.scope)),
+      () =>
+        input.tracer.startSpan(
+          "agent.step",
+          {
+            attributes: {
+              "agent.session.id": event.scope.sessionId,
+              "agent.framework.name": "eve",
+              "agent.framework.version": input.frameworkVersion,
+              "agent.root.session.id": event.scope.rootSessionId ?? event.scope.sessionId,
+              "agent.step.attempt": event.scope.attemptIndex,
+              "agent.step.index": event.scope.stepIndex,
+              "agent.turn.id": event.scope.turnId,
+              "agent.name": event.scope.functionId,
+              ...runtimeContextAttributes(event.runtimeContext),
+            },
+            links:
+              activeSpanContext === undefined || activeSpanContext.traceId === turn.context.traceId
+                ? undefined
+                : [
+                    {
+                      attributes: { "eve.link.type": "workflow.delivery" },
+                      context: activeSpanContext,
+                    },
+                  ],
+          },
+          turnContext,
+        ),
     );
     stepSpan.addEvent("step.started");
     const stepContext = trace.setSpan(turnContext, stepSpan);

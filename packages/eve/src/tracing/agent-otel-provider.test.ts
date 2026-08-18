@@ -677,7 +677,7 @@ describe("createAgentOtelInstrumentation", () => {
           apiTrace.getSpan(parent as never)?.spanContext().spanId === model.spanContext().spanId,
       ),
     ).toBe(true);
-    expect(action.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
+    expect(action.parentSpanContext?.spanId).toBe(step.spanContext().spanId);
     expect(tool.parentSpanContext?.spanId).toBe(action.spanContext().spanId);
     expect(
       new Set(
@@ -765,7 +765,7 @@ describe("createAgentOtelInstrumentation", () => {
     }
   });
 
-  it("keeps logical ids stable but separates physical redeliveries", async () => {
+  it("keeps replayable boundary ids stable across physical redeliveries", async () => {
     const first = createRuntime();
     const redelivery = createRuntime();
     const parentTraceContext: InstrumentationTraceContext = {
@@ -788,12 +788,12 @@ describe("createAgentOtelInstrumentation", () => {
 
     const firstSpans = first.exporter.getFinishedSpans();
     const redeliverySpans = redelivery.exporter.getFinishedSpans();
-    for (const name of ["agent.turn", "agent.action", "ai.toolCall"]) {
+    for (const name of ["agent.turn", "agent.step", "agent.action", "ai.toolCall"]) {
       expect(byName(redeliverySpans, name)[0]!.spanContext().spanId).toBe(
         byName(firstSpans, name)[0]!.spanContext().spanId,
       );
     }
-    for (const name of ["agent.step", "ai.streamText", "chat claude-test"]) {
+    for (const name of ["ai.streamText", "chat claude-test"]) {
       expect(byName(redeliverySpans, name)[0]!.spanContext().spanId).not.toBe(
         byName(firstSpans, name)[0]!.spanContext().spanId,
       );
@@ -971,7 +971,7 @@ describe("createAgentOtelInstrumentation", () => {
     const action = byName(replacementSpans, "agent.action")[0]!;
     const tool = byName(replacementSpans, "ai.toolCall")[0]!;
     expect(action.spanContext().spanId).toBe(tool.parentSpanContext?.spanId);
-    expect(action.parentSpanContext?.spanId).toBe(step.parentSpanContext?.spanId);
+    expect(action.parentSpanContext?.spanId).toBe(step.spanContext().spanId);
     expect(action.attributes).toMatchObject({
       "agent.action.kind": "tool-call",
       "agent.action.name": "weather",
@@ -1508,7 +1508,7 @@ describe("createAgentOtelInstrumentation", () => {
     const action = byName(replacementSpans, "agent.action")[0]!;
 
     expect(step.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
-    expect(action.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
+    expect(action.parentSpanContext?.spanId).toBe(step.spanContext().spanId);
     expect(step.spanContext().traceId).toBe(turn.spanContext().traceId);
   });
 
