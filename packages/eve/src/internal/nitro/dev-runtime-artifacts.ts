@@ -5,6 +5,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
 import { copyDevelopmentSourceSnapshot } from "#internal/nitro/dev-runtime-source-snapshot-copy.js";
 import {
   createDevelopmentSourceSnapshotPlan,
@@ -153,6 +154,18 @@ export async function activateDevelopmentRuntimeArtifactsSnapshotTransaction(inp
   readonly appRoot: string;
   readonly snapshot: DevelopmentRuntimeArtifactsSnapshot;
 }): Promise<DevelopmentRuntimeArtifactsActivation> {
+  const materializedIndex = await readMaterializedAuthoredModuleIndex(
+    input.snapshot.runtimeAppRoot,
+  );
+  if (
+    materializedIndex === undefined ||
+    !existsSync(join(input.snapshot.runtimeAppRoot, ".eve", "compile", materializedIndex.moduleMap))
+  ) {
+    throw new Error(
+      `Cannot activate development runtime generation "${input.snapshot.snapshotRoot}" before its authored modules are materialized.`,
+    );
+  }
+
   const markerPath = join(
     input.snapshot.snapshotRoot,
     DEVELOPMENT_RUNTIME_ARTIFACTS_ACTIVATED_MARKER,

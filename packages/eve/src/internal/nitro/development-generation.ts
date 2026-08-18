@@ -1,7 +1,10 @@
 import { rm } from "node:fs/promises";
 
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
-import { materializeAuthoredModules } from "#internal/materialized-authored-modules.js";
+import {
+  prepareMaterializedAuthoredModules,
+  writeMaterializedAuthoredModules,
+} from "#internal/materialized-authored-modules.js";
 import {
   activateDevelopmentRuntimeArtifactsSnapshotTransaction,
   pruneDevelopmentRuntimeArtifactsSnapshots,
@@ -24,10 +27,15 @@ const developmentGenerationPruneStates = new Map<string, DevelopmentGenerationPr
 export async function stageDevelopmentGeneration(
   compileResult: CompileAgentResult,
 ): Promise<DevelopmentGeneration> {
+  const prepared = await prepareMaterializedAuthoredModules({
+    manifest: compileResult.manifest,
+    moduleMapPath: compileResult.paths.moduleMapPath,
+  });
   const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot(compileResult);
 
   try {
-    const materialized = await materializeAuthoredModules({
+    const materialized = await writeMaterializedAuthoredModules({
+      prepared,
       runtimeAppRoot: snapshot.runtimeAppRoot,
     });
 
