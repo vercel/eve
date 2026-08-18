@@ -27,6 +27,7 @@ import type { AuthoringTokenUsage, AuthoringTranscriptEntry } from "./protocol.j
 import { BenchmarkTimings } from "./timing.js";
 
 const HARNESS_BRIDGE_PORT = 4172;
+const POST_RUN_GRADER_DIRECTORY = ".eve-grader";
 const BOOTSTRAP_VERSION = "v8";
 // A turn that stops producing output should end the turn, not the eval: the
 // remaining turns still run and the graders still see what the agent did.
@@ -235,19 +236,19 @@ export function createAuthoringAgent(subject: {
         );
         await Promise.all([
           context.write(
-            `${AGENT_EVAL_DIRECTORY}/EVAL.test.ts`,
+            `${POST_RUN_GRADER_DIRECTORY}/EVAL.test.ts`,
             readFileSync(`${fixturePath}/EVAL.ts`, "utf8"),
           ),
           context.write(
-            `${AGENT_EVAL_DIRECTORY}/grader.ts`,
+            `${POST_RUN_GRADER_DIRECTORY}/grader.ts`,
             readFileSync(new URL("./grader.ts", import.meta.url), "utf8"),
           ),
           context.write(
-            `${AGENT_EVAL_DIRECTORY}/paths.ts`,
+            `${POST_RUN_GRADER_DIRECTORY}/paths.ts`,
             readFileSync(new URL("./paths.ts", import.meta.url), "utf8"),
           ),
           context.write(
-            `${AGENT_EVAL_DIRECTORY}/protocol.ts`,
+            `${POST_RUN_GRADER_DIRECTORY}/protocol.ts`,
             readFileSync(new URL("./protocol.ts", import.meta.url), "utf8"),
           ),
         ]);
@@ -256,7 +257,7 @@ export function createAuthoringAgent(subject: {
         const test = await timings.measure("validation.grader", () =>
           resultOf(
             activeSandbox!,
-            `ln -s ${AGENT_EVAL_DIRECTORY} .eve-grader && trap 'rm -f .eve-grader' EXIT && vitest run .eve-grader/EVAL.test.ts`,
+            `vitest run ${POST_RUN_GRADER_DIRECTORY}/EVAL.test.ts`,
             projectWorkspace,
           ),
         );
