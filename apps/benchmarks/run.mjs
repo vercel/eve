@@ -30,6 +30,10 @@ const { values, positionals } = parseArgs({
     model: { type: "string", default: "claude-sonnet-5" },
     treatment: { type: "string", default: "guided" },
     verbose: { type: "boolean" },
+    // The runner discards a run it decides failed for infrastructure reasons,
+    // which throws away the transcript you need to tell a real stall from a
+    // misjudged one.
+    "keep-failures": { type: "boolean" },
     help: { type: "boolean", short: "h" },
   },
   strict: true,
@@ -70,7 +74,9 @@ mkdirSync(join(appRoot, "results"), { recursive: true });
 writeExperiments(subjects, runs, benchmark, treatment, values.verbose ?? false);
 const executable = join(appRoot, "node_modules/.bin/agent-eval");
 const experimentNames = subjects.map((subject) => subject.label);
-const args = values.dry ? ["status", ...experimentNames] : ["run", ...experimentNames, "--force"];
+const args = values.dry
+  ? ["status", ...experimentNames]
+  : ["run", ...experimentNames, "--force", ...(values["keep-failures"] ? ["--ack-failures"] : [])];
 
 for (const subject of subjects) console.log(`> ${subject.label}: ${subject.description}`);
 const result = spawnSync(executable, args, {
@@ -112,6 +118,6 @@ function parseRuns(value) {
 
 function usage() {
   console.log(`Usage:
-  pnpm benchmark [eval-name] [--model <id>] [--runs N] [--treatment baseline|guided] [--dry] [--verbose]
+  pnpm benchmark [eval-name] [--model <id>] [--runs N] [--treatment baseline|guided] [--dry] [--verbose] [--keep-failures]
   pnpm benchmark [eval-name] --base <revision> [--head <revision>] [--model <id>] [--runs N] [--treatment baseline|guided] [--dry]`);
 }

@@ -34,6 +34,10 @@ const TURN_TIMEOUT_SECONDS = Number(process.env.EVE_BENCHMARK_TURN_TIMEOUT ?? 48
 // A turn that has produced no chunk for this long is waiting on the runtime, not
 // working: the longest legitimate gap is a single slow tool call.
 const TURN_STALL_SECONDS = Number(process.env.EVE_BENCHMARK_TURN_STALL ?? 120);
+// A finished step with nothing after it is the ordinary end of a turn, and the
+// gap before a model starts another step is seconds. Waiting the full stall
+// budget there only burns wall clock on a turn that is already over.
+const STEP_IDLE_MILLIS = 30_000;
 // How long to let an aborted turn settle before starting the next one.
 const TURN_SETTLE_MILLIS = 15_000;
 
@@ -355,11 +359,12 @@ async function runTurn(input: {
   const turnTimeout = Math.min(timeout, TURN_TIMEOUT_SECONDS);
   let stall: string | undefined;
 
-  // The runtime leaves a turn open when the model's last step is text with no
-  // tool call — the case where the agent ends by asking the user something — and
-  // it honors neither the total nor the per-chunk budget the SDK passes down.
-  // Silence only counts as a stall while no tool call is outstanding: a slow
-  // install or build legitimately produces nothing for minutes.
+  // The runtime routinely leaves a turn open after the model's last step and
+  // honors neither the total nor the per-chunk budget the SDK passes down, so
+  // the harness has to decide when a turn is over. How long silence is allowed
+  // to run depends on what the stream was doing when it went quiet: a slow
+  // install legitimately produces nothing for minutes, while a step that has
+  // already finished is almost certainly the end of the turn.
   const controller = new AbortController();
   const abort = () => controller.abort();
   input.abortSignal?.addEventListener("abort", abort, { once: true });
@@ -374,20 +379,20 @@ async function runTurn(input: {
     });
     const stream = result.fullStream[Symbol.asyncIterator]();
     let pendingTools = 0;
+    let stepFinished = false;
     for (;;) {
-      const idle = pendingTools > 0 ? Number.POSITIVE_INFINITY : TURN_STALL_SECONDS * 1000;
+      const idle = pendingTools > 0 ? Number.POSITIVE_INFINITY : idleBudget(stepFinished);
       const budget = Math.min(idle, deadline - Date.now());
       const next = await withDeadline(stream.next(), budget);
       if (next === "expired") {
-        stall =
-          Date.now() >= deadline
-            ? `turn exceeded its ${turnTimeout}s budget`
-            : `turn produced no output for ${TURN_STALL_SECONDS}s`;
-        await settleStalledTurn(stream, controller, stall);
+        if (Date.now() >= deadline) stall = `turn exceeded its ${turnTimeout}s budget`;
+        else if (!stepFinished) stall = `turn produced no output for ${TURN_STALL_SECONDS}s`;
+        await settleStalledTurn(stream, controller, stall ?? "turn finished its last step");
         break;
       }
       if (next.done === true) break;
       const part = next.value;
+      stepFinished = part.type === "finish-step" || part.type === "finish";
       if (part.type === "text-delta") {
         current += part.text;
         if (verbose) {
@@ -421,6 +426,10 @@ async function runTurn(input: {
   if (current.trim().length > 0) steps.push(current.trim());
   const turn: AuthoringTurnResult = { text: steps.join("\n\n"), toolCalls, usage };
   return stall === undefined ? turn : { ...turn, stall };
+}
+
+function idleBudget(stepFinished: boolean): number {
+  return stepFinished ? STEP_IDLE_MILLIS : TURN_STALL_SECONDS * 1000;
 }
 
 // Aborting is what marks the turn finished. Walking away from the stream is not
