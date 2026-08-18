@@ -18,22 +18,36 @@ export class BenchmarkTimings {
     const started = performance.now();
     try {
       const result = await operation();
-      this.entries.push({
+      const entry: {
+        phase: string;
+        startedAt: string;
+        durationMs: number;
+        outcome: BenchmarkTiming["outcome"];
+        details?: Readonly<Record<string, string | number | boolean>>;
+      } = {
         phase,
         startedAt,
         durationMs: Math.round(performance.now() - started),
         outcome: "success",
-        ...(details === undefined ? {} : { details }),
-      });
+      };
+      if (details !== undefined) entry.details = details;
+      this.entries.push(entry);
       return result;
     } catch (error) {
-      this.entries.push({
+      const entry: {
+        phase: string;
+        startedAt: string;
+        durationMs: number;
+        outcome: BenchmarkTiming["outcome"];
+        details?: Readonly<Record<string, string | number | boolean>>;
+      } = {
         phase,
         startedAt,
         durationMs: Math.round(performance.now() - started),
         outcome: "failure",
-        ...(details === undefined ? {} : { details }),
-      });
+      };
+      if (details !== undefined) entry.details = details;
+      this.entries.push(entry);
       throw error;
     }
   }
@@ -44,12 +58,19 @@ export class BenchmarkTimings {
     outcome: BenchmarkTiming["outcome"] = "success",
     details?: Readonly<Record<string, string | number | boolean>>,
   ): void {
-    this.entries.push({
+    const entry: {
+      phase: string;
+      startedAt: string;
+      durationMs: number;
+      outcome: BenchmarkTiming["outcome"];
+      details?: Readonly<Record<string, string | number | boolean>>;
+    } = {
       phase,
       startedAt: new Date(Date.now() - durationMs).toISOString(),
       durationMs: Math.round(durationMs),
       outcome,
-      ...(details === undefined ? {} : { details }),
-    });
+    };
+    if (details !== undefined) entry.details = details;
+    this.entries.push(entry);
   }
 }

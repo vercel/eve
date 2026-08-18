@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 import { findBenchmarkModel, parseAuthoringTreatment } from "./lib/benchmark-config.ts";
+import {
+  prepareFixtures,
+  resetExperiments,
+  writeExperiment,
+  writeSubjectArchives,
+} from "./lib/experiment-files.mjs";
 import { revisionSubject, workingTreeSubject } from "./lib/source.mjs";
 
 const appRoot = dirname(fileURLToPath(import.meta.url));
@@ -59,7 +65,7 @@ const subjects =
           : revisionSubject(repositoryRoot, values.head, "head"),
       ];
 
-prepareFixtures();
+prepareFixtures(evalsRoot, selectedEval === undefined ? undefined : [selectedEval]);
 mkdirSync(join(appRoot, "results"), { recursive: true });
 writeExperiments(subjects, runs, benchmark, treatment, values.verbose ?? false);
 const executable = join(appRoot, "node_modules/.bin/agent-eval");
@@ -75,49 +81,24 @@ const result = spawnSync(executable, args, {
 if (result.error) throw result.error;
 process.exit(result.status ?? 1);
 
-function prepareFixtures() {
-  const names = selectedEval === undefined ? fixtureNames() : [selectedEval];
-  for (const name of names) {
-    const fixtureRoot = join(evalsRoot, name);
-    writeFileSync(join(fixtureRoot, "PROMPT.md"), "");
-    writeFileSync(
-      join(fixtureRoot, "package.json"),
-      `${JSON.stringify({ name: `eve-authoring-${name}`, private: true, type: "module" }, null, 2)}\n`,
-    );
-  }
-}
-
-function fixtureNames() {
-  return readdirSync(evalsRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && existsSync(join(evalsRoot, entry.name, "CASE.ts")))
-    .map((entry) => entry.name);
-}
-
 function writeExperiments(subjects, runs, benchmark, treatment, verbose) {
-  rmSync(experimentsRoot, { recursive: true, force: true });
-  mkdirSync(experimentsRoot, { recursive: true });
+  resetExperiments(experimentsRoot);
   for (const subject of subjects) {
-    const archivePath = join(experimentsRoot, `${subject.label}.source.tar.gz`);
-    writeFileSync(archivePath, subject.archive);
-    writeFileSync(
-      join(experimentsRoot, `${subject.label}.dependencies.tar.gz`),
-      subject.dependencyArchive,
+    const { archiveName, dependencyArchiveName } = writeSubjectArchives(
+      experimentsRoot,
+      subject,
+      subject.label,
     );
-    writeFileSync(
-      join(experimentsRoot, `${subject.label}.ts`),
-      `import { readFileSync } from "node:fs";\n` +
-        `import { authoringExperiment } from "../lib/experiment.js";\n\n` +
-        `export default authoringExperiment({\n` +
-        `  archive: readFileSync(new URL(${JSON.stringify(`./${subject.label}.source.tar.gz`)}, import.meta.url)),\n` +
-        `  dependencyArchive: readFileSync(new URL(${JSON.stringify(`./${subject.label}.dependencies.tar.gz`)}, import.meta.url)),\n` +
-        `  digest: ${JSON.stringify(subject.digest)},\n` +
-        `  dependencyDigest: ${JSON.stringify(subject.dependencyDigest)},\n` +
-        `  runs: ${runs},\n` +
-        `  benchmark: ${JSON.stringify(benchmark)},\n` +
-        `  treatment: ${JSON.stringify(treatment)},\n` +
-        `  verbose: ${verbose},\n` +
-        `});\n`,
-    );
+    writeExperiment(experimentsRoot, subject.label, {
+      archiveName,
+      dependencyArchiveName,
+      digest: subject.digest,
+      dependencyDigest: subject.dependencyDigest,
+      runs,
+      benchmark,
+      treatment,
+      verbose,
+    });
   }
 }
 

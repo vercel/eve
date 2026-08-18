@@ -132,9 +132,7 @@ export function createAuthoringAgent(subject: {
 
       try {
         session = await timings.measure("session.create", () =>
-          withBootstrapInitialization(bootstrapHash(authoringCase, subject), () =>
-            agent.createSession({ abortSignal: options.signal }),
-          ),
+          agent.createSession({ abortSignal: options.signal }),
         );
         if (activeSandbox === undefined || workspace === undefined) {
           throw new Error("HarnessAgent did not initialize its sandbox session.");
@@ -152,8 +150,8 @@ export function createAuthoringAgent(subject: {
                 ? streamTurn(agent, session!, prompt, options.timeout, options.signal)
                 : generateTurn(agent, session!, prompt, options.timeout, options.signal),
             );
-            const toolCalls = authoringToolCalls(result.toolCalls);
-            const usage = normalizeUsage(result.usage);
+            const toolCalls = result.toolCalls;
+            const usage = result.usage;
             transcript.push({ role: "assistant", content: result.text, toolCalls, usage });
             timings.record(`agent.turn.${turn}.summary`, 0, "success", {
               promptCharacters: prompt.length,
@@ -489,43 +487,6 @@ function bootstrapHash(authoringCase: AuthoringCase, subject: { readonly digest:
     .map((setup) => setup.id)
     .join("-");
   return `eve-authoring-${BOOTSTRAP_VERSION}-${subject.digest}-${authoringCase.startingPoint.id}-${setupIds}`;
-}
-
-const bootstrapCoordination = globalThis as typeof globalThis & {
-  __eveAuthoringBootstrapLocks?: Map<string, Promise<void>>;
-  __eveAuthoringBootstrapsReady?: Set<string>;
-};
-
-async function withBootstrapInitialization<T>(
-  key: string,
-  operation: () => Promise<T>,
-): Promise<T> {
-  const ready = (bootstrapCoordination.__eveAuthoringBootstrapsReady ??= new Set());
-  if (ready.has(key)) return operation();
-
-  const locks = (bootstrapCoordination.__eveAuthoringBootstrapLocks ??= new Map());
-  const previous = locks.get(key) ?? Promise.resolve();
-  let release = () => {};
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const tail = previous.then(() => current);
-  locks.set(key, tail);
-
-  await previous;
-  if (ready.has(key)) {
-    release();
-    if (locks.get(key) === tail) locks.delete(key);
-    return operation();
-  }
-  try {
-    const result = await operation();
-    ready.add(key);
-    return result;
-  } finally {
-    release();
-    if (locks.get(key) === tail) locks.delete(key);
-  }
 }
 
 async function resultOf(

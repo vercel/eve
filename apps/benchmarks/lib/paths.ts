@@ -6,4 +6,3 @@ export const SOURCE_ROOT = "/tmp/eve-source";
 export const SOURCE_ARCHIVE_PATH = "/tmp/eve-source.tar.gz";
 export const EVE_PACKAGE_PATH = "/tmp/eve-package/eve.tgz";
 export const AUTHORING_EVAL_DIRECTORY_ENV = "EVE_AUTHORING_EVAL_DIRECTORY";
-export const AUTHORING_MODEL = "openai/gpt-5.5";

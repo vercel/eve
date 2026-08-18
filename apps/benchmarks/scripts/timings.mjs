@@ -39,15 +39,20 @@ const setup = byPhase.get("session.create") ?? 0;
 const agent = phases
   .filter((timing) => /^agent\.turn\.\d+$/u.test(timing.phase))
   .reduce((total, timing) => total + timing.durationMs, 0);
-const validation = Math.max(
+const grader = byPhase.get("validation.grader") ?? 0;
+const checks = Math.max(
   0,
   ...phases
-    .filter((timing) => timing.phase.startsWith("validation."))
+    .filter(
+      (timing) => timing.phase.startsWith("validation.") && timing.phase !== "validation.grader",
+    )
     .map((timing) => timing.durationMs),
 );
 console.log(`\nSetup:      ${formatDuration(setup)}`);
 console.log(`Agent:      ${formatDuration(agent)}`);
-console.log(`Validation: ${formatDuration(validation)}`);
+console.log(`Grader:     ${formatDuration(grader)}`);
+console.log(`Checks:     ${formatDuration(checks)}`);
+console.log(`Validation: ${formatDuration(grader + checks)}`);
 console.log(`Total:      ${formatDuration(byPhase.get("run.total") ?? 0)}`);
 
 function resolveTimingsPath(input) {
