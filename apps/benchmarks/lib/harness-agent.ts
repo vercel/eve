@@ -225,6 +225,7 @@ export function createAuthoringAgent(subject: {
             ? workspace
             : `${workspace}/${authoringCase.projectDirectory}`;
         const context = setupContext(activeSandbox, workspace);
+        const graderContext = setupContext(activeSandbox, projectWorkspace);
         await prepareGraderDirectory(context);
         await context.write(
           `${AGENT_EVAL_DIRECTORY}/results.json`,
@@ -235,19 +236,19 @@ export function createAuthoringAgent(subject: {
           JSON.stringify(transcript),
         );
         await Promise.all([
-          context.write(
+          graderContext.write(
             `${POST_RUN_GRADER_DIRECTORY}/EVAL.test.ts`,
             readFileSync(`${fixturePath}/EVAL.ts`, "utf8"),
           ),
-          context.write(
+          graderContext.write(
             `${POST_RUN_GRADER_DIRECTORY}/grader.ts`,
             readFileSync(new URL("./grader.ts", import.meta.url), "utf8"),
           ),
-          context.write(
+          graderContext.write(
             `${POST_RUN_GRADER_DIRECTORY}/paths.ts`,
             readFileSync(new URL("./paths.ts", import.meta.url), "utf8"),
           ),
-          context.write(
+          graderContext.write(
             `${POST_RUN_GRADER_DIRECTORY}/protocol.ts`,
             readFileSync(new URL("./protocol.ts", import.meta.url), "utf8"),
           ),
