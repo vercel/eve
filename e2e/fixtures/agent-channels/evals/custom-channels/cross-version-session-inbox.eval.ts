@@ -78,7 +78,7 @@ export default defineEval({
       await waitForAliasToServe(t, OLD_DEPLOYMENT_MARKER);
 
       const sessionRef = crypto.randomUUID();
-      const started = await postChannel<MessageResponse>(t.target, "/webhook", {
+      const started = await postChannel<MessageResponse>(t.target, "/cross-version-webhook", {
         message: ACTIVE_TURN_MESSAGE,
         sessionRef,
       });
@@ -107,7 +107,7 @@ export default defineEval({
       await deployToAlias(t, alias, `eve@${currentEveVersion}`);
       await waitForAliasToServe(t, CURRENT_DEPLOYMENT_MARKER);
 
-      const replacement = await postChannel<MessageResponse>(t.target, "/webhook", {
+      const replacement = await postChannel<MessageResponse>(t.target, "/cross-version-webhook", {
         message: `Reply with exactly ${FOLLOW_UP_TOKEN}.`,
         sessionRef,
         turnPolicy: "queue",
