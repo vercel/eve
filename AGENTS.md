@@ -217,6 +217,10 @@ live under `packages/eve/test/tui-client` and run with `pnpm test:tui`. See
 - When moving a published route, update authored links to the new URL and add a
   permanent redirect from every old HTML and supported Markdown URL.
 - Sidebar order lives in `docs/meta.json`.
+- Use Title Case for page `title` frontmatter and `meta.json` section titles
+  (Fumadocs renders `title` as both the sidebar entry and the `<h1>`), and
+  sentence case for in-page headings — capitalize only the first word plus
+  proper nouns and acronyms, e.g. `Next.js`, `CLI`, `agent.ts`.
 - Keep markdown framework-agnostic — no MDX-only constructs unless the page is
   `.mdx`.
 

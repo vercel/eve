@@ -293,121 +293,59 @@ dist
 `,
   "AGENTS.md": `# eve Agent App
 
-This project uses the eve framework. For a content-only change to the root agent's
-identity, purpose, tone, or response guidelines, edit its existing authored
-instructions. Fresh projects use \`agent/instructions.md\`; a project may instead
-use \`agent/instructions.ts\` or files under \`agent/instructions/\`. You do not
-need to read the framework docs for a content-only instructions change.
+This project uses the eve framework: an agent is a directory of files under \`agent/\`, and eve compiles and runs it.
 
-Before adding or changing eve framework features, classify the requested
-capability. A self-contained typed tool can use the routine recipe below without
-further discovery. For other changes, open the relevant guide directly from the
-installed eve package docs:
+For a content-only change to the root agent's identity, purpose, tone, or response guidelines, edit its existing authored instructions. Fresh projects use \`agent/instructions.md\`; a project may instead use \`agent/instructions.ts\` or files under \`agent/instructions/\`. You do not need to read the framework docs for a content-only instructions change. A fresh project already has its selected model in \`agent/agent.ts\`; preserve that file unless the user asks to change the model.
 
-- tools beyond the routine recipe: \`node_modules/eve/docs/tools/overview.mdx\`
-- tool approvals: \`node_modules/eve/docs/tools/human-in-the-loop.md\`
-- connections: \`node_modules/eve/docs/connections/overview.mdx\`
-- channels: \`node_modules/eve/docs/channels/overview.mdx\`
-- skills: \`node_modules/eve/docs/skills.mdx\`
-- subagents: \`node_modules/eve/docs/subagents/index.mdx\`
-- schedules: \`node_modules/eve/docs/schedules.mdx\`
-- authentication: \`node_modules/eve/docs/guides/auth-and-route-protection.md\`
-- deployment: \`node_modules/eve/docs/guides/deployment/overview.md\`
+## Read the docs before writing code
+
+\`\`\`sh
+ls node_modules/eve/docs
+\`\`\`
+
+Start with \`docs/README.md\`: it maps each task to the page that covers it. Read that page before authoring tools, connections, channels, skills, subagents, schedules, or deployment. In a workspace or local package install, resolve the installed \`eve\` package location first. If the package docs are missing, use https://eve.dev/docs.
 
 Use a bounded authoring loop:
 
-1. Read this file and the relevant guide's opening example and contract.
-2. Inspect only existing files you will modify or need to imitate.
-3. Stop discovery once the file location, imports, and definition shape are
-   clear. Implement the smallest complete behavior the user requested.
-4. Run one narrow verification. Expand investigation only when it fails or the
-   request needs project-specific integration details.
+1. Read the relevant page and inspect only files you will modify or need to imitate.
+2. Stop discovery once the file location, imports, and definition shape are clear. Implement the smallest complete behavior the user requested.
+3. Run one narrow verification. Expand investigation only when it fails or the request needs project-specific details.
 
-Do not create a plan or todo list for a contained one-file change. Do not
-recursively glob \`node_modules\`, enumerate the entire docs tree, or read
-unrelated scaffold files when the direct path is known. Package-manager links
-can hide files from recursive glob tools even though direct reads work.
+Do not recursively glob \`node_modules\`, enumerate the entire docs tree, or read unrelated scaffold files when the direct path is known. Package-manager links can hide files from recursive glob tools even though direct reads work.
 
-In workspaces or local package installs where \`node_modules/eve\` is absent,
-resolve it with \`realpath node_modules/eve\` or the package manager, then open
-the same path below its \`docs/\` directory. If package docs are unavailable,
-use https://eve.dev/docs as a fallback.
+## Prefer an existing integration
 
-## Routine typed tools
-
-For a self-contained typed action, the standard shape is enough; do not inspect
-unrelated agent config or invent a third-party integration the user did not ask
-for:
-
-\`\`\`ts
-// agent/tools/<tool_name>.ts — the filename supplies the tool name.
-import { defineTool } from "eve/tools";
-import { z } from "zod";
-
-export default defineTool({
-  description: "Describe when the model should call this tool.",
-  inputSchema: z.object({ value: z.string() }),
-  async execute({ value }) {
-    return { value };
-  },
-});
-\`\`\`
-
-Omitting \`approval\` allows calls without human approval, equivalent to
-\`approval: never()\`. Read the tools guide when the implementation needs
-approval, authentication, sandbox access, streaming output, or custom model
-output.
-
-## Adding integrations
-
-Before implementing an integration yourself, discover existing integrations:
+When a task names an external product or service, search the registry before implementing its integration. For a generic capability, author a tool instead.
 
 \`\`\`sh
 eve registry search <query> --json
 eve registry view <item>
 \`\`\`
 
-Prefer registry items whose \`implementation\` is \`native\`; use Chat SDK adapters when no
-native channel fits. \`registry view\` provides the selected item's documentation link.
+Prefer items whose \`implementation\` is \`native\`; use Chat SDK adapters when no native channel fits. \`registry view\` links the item's documentation.
 
-Install and configure one without driving interactive terminal prompts:
+Install without driving interactive prompts:
 
 \`\`\`sh
 eve add <item> --non-interactive
 \`\`\`
 
-Exit code 0 means setup completed, 1 means setup failed, and 2 means setup needs
-input or a prerequisite. On exit 2, parse the final NDJSON event and use its
-\`next.command\` as the continuation.
+Exit code 0 means setup completed, 1 failed, and 2 needs an answer or a prerequisite. On exit 2, run the \`next.command\` from the final NDJSON event. For a non-secret question, replace its \`<JSON value>\` answer placeholder with the answer you collected; string values need JSON quotes. Never pass a secret in \`--answer\`. See \`docs/install-integrations.mdx\` for setup prerequisites.
 
-Every \`--answer\` value is JSON, so strings need JSON quotes. For an editable
-question, you may supply its nested \`editable.key\` with the parent key in one
-invocation:
+## Use eve for Vercel operations
+
+Use eve to link and deploy Vercel projects:
 
 \`\`\`sh
-eve add channel/photon-imessage --non-interactive \\
-  --answer 'photon-project-source="create"' \\
-  --answer 'photon-project-name="eve · my-agent"'
+eve link --non-interactive --project <name-or-id> [--team <team-id-or-slug>]
+eve deploy --non-interactive --yes [--project <name-or-id>]
 \`\`\`
 
-Never pass secrets in \`--answer\`; use the documented environment variable or
-secret store. Add \`--yes\` to accept recommended setup values and reduce setup
-round trips; explicit \`--answer\` values take precedence. Use the reported
-\`--skip-install\` continuation after installation.
+A setup may report \`eve link\` as a prerequisite; run it, then retry the continuation. When a completed setup event has \`deploymentRequired: true\`, run the \`next\` command it reports.
 
-A Vercel Connect setup may report \`eve link\` as a prerequisite; run it and
-retry the continuation. For a named Vercel project in CI or an agent run, use
-\`eve link --non-interactive --project <name-or-id> [--team <team-id-or-slug>]\`.
-To deploy non-interactively, use
-\`eve deploy --non-interactive --yes [--project <name-or-id>] [--team <team-id-or-slug>]\`.
-Use these eve commands instead of calling \`vercel\` directly; eve owns the
-link, environment pull, and deploy lifecycle.
+## Validate the change
 
-An \`external_action\` event with \`blocking: true\` means the command is still
-running while it waits for the user. Surface its URL and code, keep the process
-alive, and wait for its matching \`external_action_resolved\` event or a terminal
-event. Do not start a continuation. When a completed event has
-\`deploymentRequired: true\`, recommend its \`next\` command to deploy the changes.
+Run the validation the task requests. When it does not establish the behavior you changed, run the narrowest relevant check.
 `,
   "CLAUDE.md": `@AGENTS.md
 `,
