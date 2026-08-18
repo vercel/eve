@@ -31,7 +31,7 @@ const ConnectorSchema = z.object({
   data: z.object({ phoneNumbers: z.array(z.string().min(1)).optional() }).optional(),
 });
 
-/** Parses `vercel connect create -F json` output for an app-scoped Linq connector. */
+/** Parses Vercel Connect JSON for an app-scoped Linq connector. */
 export function parseCreatedLinqConnector(stdout: string): LinqConnectorRef | undefined {
   try {
     const result = ConnectorSchema.safeParse(JSON.parse(stdout));
@@ -97,7 +97,14 @@ export async function provisionLinqConnector(input: {
     ),
   );
   input.signal?.throwIfAborted();
-  const connector = requireCreatedConnector(result);
+  const created = requireCreatedConnector(result);
+  const connector = await readLinqConnector({
+    connector: created,
+    projectRoot: input.projectRoot,
+    orgId: input.project.orgId,
+    signal: input.signal,
+    deps,
+  });
   const attachment = await withPhase(input.log, "Connecting Linq credentials...", () =>
     replaceConnectTrigger({
       connectorUid: connector.uid,
@@ -117,4 +124,31 @@ export async function provisionLinqConnector(input: {
     );
   }
   return connector;
+}
+
+/** Reads managed connector data after browser creation so setup can show its line. */
+async function readLinqConnector(input: {
+  connector: LinqConnectorRef;
+  projectRoot: string;
+  orgId: string;
+  signal?: AbortSignal;
+  deps: ProvisionLinqConnectorDeps;
+}): Promise<LinqConnectorRef> {
+  const result = await input.deps.runVercelCaptureStdout(
+    [
+      "api",
+      `/v1/connect/connectors/${encodeURIComponent(input.connector.id)}`,
+      "--scope",
+      input.orgId,
+    ],
+    { cwd: input.projectRoot, nonInteractive: true, signal: input.signal },
+  );
+  if (!result.ok) return input.connector;
+  const connector = parseCreatedLinqConnector(result.stdout);
+  return connector === undefined
+    ? input.connector
+    : {
+        ...input.connector,
+        ...(connector.phoneNumber === undefined ? {} : { phoneNumber: connector.phoneNumber }),
+      };
 }
