@@ -11,6 +11,10 @@ import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createLogger, isLogLevelEnabled } from "#internal/logging.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
+import {
+  DEFAULT_EVE_PACKAGE_CONTRACT,
+  type EvePackageContract,
+} from "#setup/eve-package-contract.js";
 import { formatNodeEngineOverrideWarning, type NodeEngineOverride } from "#setup/node-engine.js";
 import {
   detectInvokingPackageManager,
@@ -35,10 +39,6 @@ import {
   isPackageManagerWorkspaceMember,
   type WorkspaceRootMutation,
 } from "#setup/scaffold/workspace-root.js";
-import {
-  DEFAULT_EVE_PACKAGE_CONTRACT,
-  type EvePackageContract,
-} from "#setup/scaffold/create/project.js";
 
 import { initAgentDevHandoff, initAgentReplPrompt } from "./agent-instructions.js";
 import { confirmInitInNonEmptyDirectory } from "./init-confirm.js";

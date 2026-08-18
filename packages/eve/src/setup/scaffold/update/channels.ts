@@ -5,6 +5,7 @@ import { appendEnv } from "../../append-env.js";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor, type NodeEngineOverride } from "../../node-engine.js";
+import { resolveEvePackageContract } from "../../eve-package-contract.js";
 import { pathExists, writeTextFile } from "../files.js";
 import { resolveVersionToken } from "../version-tokens.js";
 import {
@@ -15,7 +16,7 @@ import {
 } from "../workspace-root.js";
 import { getSupportedModuleBaseName, matchesSupportedModuleBaseName } from "./module-files.js";
 import { patchPackageJson, type PackageJsonPatch } from "./package-json.js";
-import { CURRENT_DIRECTORY_PROJECT_NAME, resolveEvePackageContract } from "../create/project.js";
+import { CURRENT_DIRECTORY_PROJECT_NAME } from "../create/project.js";
 import {
   WEB_APP_SIGN_IN_WITH_VERCEL_TEMPLATE_FILES,
   WEB_APP_TEMPLATE_FILES,

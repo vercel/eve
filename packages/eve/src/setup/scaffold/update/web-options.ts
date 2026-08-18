@@ -1,4 +1,7 @@
-import { DEFAULT_EVE_PACKAGE_CONTRACT, type EvePackageContract } from "../create/project.js";
+import {
+  DEFAULT_EVE_PACKAGE_CONTRACT,
+  type EvePackageContract,
+} from "../../eve-package-contract.js";
 
 const DEFAULT_AI_PACKAGE_VERSION = "__AI_SDK_VERSION__";
 const DEFAULT_BETTER_AUTH_PACKAGE_VERSION = "__BETTER_AUTH_VERSION__";

@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import type { NodeEngineOverride } from "../../node-engine.js";
+import { resolveEvePackageContract, type EvePackageContract } from "../../eve-package-contract.js";
 import type { AgentReasoningDefinition } from "../../../shared/agent-definition.js";
 import { pathExists, writeTextFile } from "../files.js";
 import { patchPackageJson, type PackageJsonPatch } from "../update/package-json.js";
@@ -18,8 +19,6 @@ import {
   DEFAULT_CONNECT_PACKAGE_VERSION,
   DEFAULT_ZOD_PACKAGE_VERSION,
   formatEveDependencySpecifier,
-  resolveEvePackageContract,
-  type EvePackageContract,
 } from "./project.js";
 
 export interface AddAgentToProjectOptions {

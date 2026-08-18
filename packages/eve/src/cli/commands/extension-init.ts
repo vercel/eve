@@ -9,6 +9,10 @@ import { EVE_WORDMARK } from "#cli/banner.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createLogger, isLogLevelEnabled } from "#internal/logging.js";
+import {
+  DEFAULT_EVE_PACKAGE_CONTRACT,
+  type EvePackageContract,
+} from "#setup/eve-package-contract.js";
 import { formatNodeEngineOverrideWarning } from "#setup/node-engine.js";
 import {
   detectInvokingPackageManager,
@@ -24,10 +28,6 @@ import {
 } from "#setup/primitives/index.js";
 import type { ProcessOutputLine } from "#setup/primitives/process-output.js";
 import { blockingCreateInPlaceEntries } from "#setup/scaffold/create-in-place.js";
-import {
-  DEFAULT_EVE_PACKAGE_CONTRACT,
-  type EvePackageContract,
-} from "#setup/scaffold/create/project.js";
 import { scaffoldExtensionProject } from "#setup/scaffold/index.js";
 import type { WorkspaceRootMutation } from "#setup/scaffold/workspace-root.js";
 

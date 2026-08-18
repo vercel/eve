@@ -3,6 +3,7 @@ import { basename, join, resolve } from "node:path";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor } from "../../node-engine.js";
+import { resolveEvePackageContract, type EvePackageContract } from "../../eve-package-contract.js";
 import type { AgentReasoningDefinition } from "../../../shared/agent-definition.js";
 import { parseChatGptModelSelection } from "../../../shared/chatgpt-model.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "../update/module-files.js";
@@ -24,34 +25,7 @@ export const DEFAULT_CONNECT_PACKAGE_VERSION = "__VERCEL_CONNECT_VERSION__";
 export const DEFAULT_ZOD_PACKAGE_VERSION = "__ZOD_VERSION__";
 const DEFAULT_TYPESCRIPT_PACKAGE_VERSION = "__TYPESCRIPT_VERSION__";
 
-/**
- * The eve package metadata that generated projects consume together. Keeping
- * the dependency version and Node.js requirement in one value prevents a
- * scaffold from installing one eve release while declaring another release's
- * runtime contract.
- */
-export interface EvePackageContract {
-  /** eve dependency version or npm specifier written to the generated package. */
-  version: string;
-  /** The matching eve release's authored `package.json` `engines.node` value. */
-  nodeEngine: string;
-}
-
-export const DEFAULT_EVE_PACKAGE_CONTRACT: EvePackageContract = {
-  version: "__EVE_PACKAGE_DEPENDENCY_VERSION__",
-  nodeEngine: "__NODE_ENGINE__",
-};
-
-/** Resolves a stamped or explicitly supplied eve package contract. */
-export function resolveEvePackageContract(
-  contract: EvePackageContract = DEFAULT_EVE_PACKAGE_CONTRACT,
-): EvePackageContract {
-  return {
-    version: resolveVersionToken("evePackage.version", contract.version),
-    nodeEngine: resolveVersionToken("evePackage.nodeEngine", contract.nodeEngine),
-  };
-}
-
+export type { EvePackageContract } from "../../eve-package-contract.js";
 interface TemplateContext {
   appName: string;
   model: string;

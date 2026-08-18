@@ -3,6 +3,11 @@ import { basename, resolve } from "node:path";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor } from "../../node-engine.js";
+import {
+  DEFAULT_EVE_PACKAGE_CONTRACT,
+  resolveEvePackageContract,
+  type EvePackageContract,
+} from "../../eve-package-contract.js";
 import { pathExists, writeTextFile } from "../files.js";
 import { blockingCreateInPlaceEntries } from "../create-in-place.js";
 import { resolveVersionToken } from "../version-tokens.js";
@@ -14,11 +19,8 @@ import {
 } from "../workspace-root.js";
 import {
   CURRENT_DIRECTORY_PROJECT_NAME,
-  DEFAULT_EVE_PACKAGE_CONTRACT,
   DEFAULT_ZOD_PACKAGE_VERSION,
-  resolveEvePackageContract,
   ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX,
-  type EvePackageContract,
 } from "./project.js";
 
 const DEFAULT_TYPESCRIPT_PACKAGE_VERSION = "__TYPESCRIPT_VERSION__";

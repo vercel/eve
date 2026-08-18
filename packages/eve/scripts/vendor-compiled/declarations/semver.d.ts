@@ -14,6 +14,7 @@ export interface SemVerApi {
   Range: new (range: string) => Range;
   intersects(rangeA: string, rangeB: string): boolean;
   minVersion(range: string): SemVer | null;
+  satisfies(version: string, range: string): boolean;
   subset(candidateRange: string, requiredRange: string): boolean;
   validRange(range: string): string | null;
 }
