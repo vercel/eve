@@ -351,7 +351,7 @@ function reportExistingProjectChanges(
 ): void {
   logger.log("Updated existing project:");
   for (const path of project.filesWritten) {
-    logger.log(`  Created ${relative(project.projectPath, path)}`);
+    logger.log(`  Created ${relative(project.projectPath, path).replaceAll("\\", "/")}`);
   }
   if (project.dependenciesAdded.length > 0) {
     logger.log(`  Added dependencies: ${project.dependenciesAdded.join(", ")}`);
