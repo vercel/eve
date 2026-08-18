@@ -9,7 +9,7 @@ test("creates the filesystem-named OpenAPI connection", () => {
   const source = readFileSync(connectionPath, "utf8");
   expect(source).toMatch(/defineOpenAPIConnection\s*\(/);
   expect(source).toMatch(/inventoryOpenApiSpec/);
-  expect(source).toContain("https://inventory.example.com");
+  expect(source).toContain("https://api.northstar-fulfillment.com");
 });
 
 test("keeps credentials out of model control and exposes only getStock", () => {
