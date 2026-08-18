@@ -28,7 +28,8 @@ Important naming note:
 | Delegate work to a specialist child agent                | [Subagents](./subagents/index.mdx)                                                     |
 | Run work on a recurring schedule                         | [Schedules](./schedules.mdx)                                                           |
 | Install an existing integration instead of writing one   | [Add Integrations](./install-integrations.mdx)                                         |
-| Deploy, link a Vercel project, or self-host              | [Deployment](./guides/deployment/overview.md)                                          |
+| Link a Vercel project and deploy to production           | [Deploy to Vercel](./guides/deployment/vercel.mdx)                                     |
+| Self-host, or compare hosting strategies                 | [Deployment](./guides/deployment/overview.md)                                          |
 | Authorize routes, sessions, and per-user access          | [Authentication](./guides/auth-and-route-protection.md)                                |
 | Build a web UI, or stream a session to a client          | [Client SDK](./guides/client/overview.mdx), [Frontend](./guides/frontend/overview.mdx) |
 | Test the agent's behavior                                | [Evals](./evals/overview.mdx)                                                          |
