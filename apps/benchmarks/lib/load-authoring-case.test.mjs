@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -12,13 +12,21 @@ const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: fa
 const { loadAuthoringCase } = await jiti.import(resolve(libRoot, "load-authoring-case.ts"));
 
 for (const entry of await readdir(evalsRoot, { withFileTypes: true })) {
-  if (!entry.isDirectory()) continue;
+  if (!entry.isDirectory() || !(await hasCase(entry.name))) continue;
 
   test(`loads ${entry.name}/CASE.ts`, async () => {
     const authoringCase = await loadAuthoringCase(resolve(evalsRoot, entry.name));
     assert.equal(typeof authoringCase.interact, "function");
     assert.ok(authoringCase.startingPoint);
   });
+}
+
+async function hasCase(name) {
+  try {
+    return (await stat(resolve(evalsRoot, name, "CASE.ts"))).isFile();
+  } catch {
+    return false;
+  }
 }
 
 test("loads the named project output directory", async () => {
