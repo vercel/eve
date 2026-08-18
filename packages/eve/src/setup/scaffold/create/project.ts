@@ -313,6 +313,10 @@ Use a bounded authoring loop:
 
 Do not recursively glob \`node_modules\`, enumerate the entire docs tree, or read unrelated scaffold files when the direct path is known. Package-manager links can hide files from recursive glob tools even though direct reads work.
 
+Read the page the map points to, then write the code. Follow a link only when
+the page you are on leaves the task unanswered; reading further than that is the
+most common way to spend the budget without shipping anything.
+
 ## Prefer an existing integration
 
 When a task names an external product or service, search the registry before implementing its integration. For a generic capability, author a tool instead.
