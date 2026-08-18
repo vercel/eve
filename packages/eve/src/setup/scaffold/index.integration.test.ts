@@ -989,8 +989,16 @@ describe("scaffoldBaseProject", () => {
     expect(agentsMd).toContain("`agent/instructions.ts` or files under `agent/instructions/`");
     expect(agentsMd).toContain("Before adding or changing eve framework features");
     expect(agentsMd).toContain("installed eve package docs");
-    expect(agentsMd).toContain("node_modules/eve/docs/");
-    expect(agentsMd).toContain("resolve the installed `eve` package location");
+    expect(agentsMd).toContain("node_modules/eve/docs/tools/overview.mdx");
+    expect(agentsMd).toContain("node_modules/eve/docs/connections/overview.mdx");
+    expect(agentsMd).toContain("Use a bounded authoring loop");
+    expect(agentsMd).toContain("Stop discovery once the file location");
+    expect(agentsMd).toContain("Do not create a plan or todo list");
+    expect(agentsMd).toContain("recursively glob `node_modules`");
+    expect(agentsMd).toContain("realpath node_modules/eve");
+    expect(agentsMd).toContain("## Routine typed tools");
+    expect(agentsMd).toContain('import { defineTool } from "eve/tools"');
+    expect(agentsMd).toContain("Omitting `approval` allows calls without human approval");
     expect(agentsMd).toContain("eve registry search <query> --json");
     expect(agentsMd).toContain("eve registry view <item>");
     expect(agentsMd).toContain("eve add <item> --non-interactive");
