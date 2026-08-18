@@ -17,6 +17,7 @@ import {
 } from "#context/dynamic-subagent-lifecycle.js";
 import {
   dispatchDynamicToolEvent,
+  hydrateDynamicSessionTools,
   refreshDynamicSessionToolsForRuntimeRevision,
 } from "#context/dynamic-tool-lifecycle.js";
 import {
@@ -103,14 +104,8 @@ const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
   "Task mode cannot complete while input requests remain pending.";
 
 /**
- * Result of one durable harness step, consumed by the turn workflow.
- *
- * `park` carries the pending fields needed to choose a
- * {@link import("#execution/next-driver-action.js").NextDriverAction} without re-reading state.
- *
- * `cancelled` converts the harness's cancellation throw into a *returned*
- * result so workflow-core never classifies the abort as a step failure or
- * retries it; the epilogue runs in `settleCancelledTurnStep`.
+ * Result of one durable harness step. `cancelled` is returned so workflow-core
+ * does not retry it; `park` carries the pending state needed by the next action.
  */
 export type DurableStepResult =
   | {
@@ -206,13 +201,8 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     // Outside a workflow context (e.g. tests) — getHookUrl will return undefined.
   }
 
-  // Authorization callback. If the delivery carries an
-  // `authorizationCallback` and there's a pending authorization on
-  // session state, extract it, build AuthorizationResult entries, and
-  // populate PendingAuthorizationResultKey so tools can complete auth.
-  // Strip the callback from the delivery so the adapter doesn't see it.
-  // Completion event names are collected here; emission happens after
-  // the `emit` function is created below.
+  // Resolve authorization callbacks before the adapter sees the delivery.
+  // Completion events are emitted after `emit` is created below.
   const pendingAuth = getPendingAuthorization(durableSession.state);
   let completedAuths: ReturnType<typeof matchAuthorizationCallbacks>["matches"] | undefined;
   if (pendingAuth && input.input?.kind === "deliver") {
@@ -386,6 +376,12 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           runtimeRevision: dynamicRuntimeRevision,
         }),
       ]);
+      await hydrateDynamicSessionTools({
+        ctx,
+        resolvers: dynamicToolResolvers,
+        event: refreshEvent,
+        messages: initialSession.history,
+      });
     }
   } catch (error) {
     await failChannelDeliveries(error);
