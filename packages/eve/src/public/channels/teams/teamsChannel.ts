@@ -1,3 +1,4 @@
+import { defaultDeliverResult } from "#channel/adapter.js";
 import type { TeamsInstrumentationMetadata } from "#public/channels/teams/index.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
@@ -42,7 +43,9 @@ import {
 import {
   deriveTeamsInputResponses,
   isTeamsInputResponseActivity,
+  isTeamsToolApprovalResponseActivity,
   readTeamsInputReplyToActivityId,
+  readTeamsToolApprovalPrompt,
   teamsInvokeResponse,
 } from "#public/channels/teams/hitl.js";
 import {
@@ -86,6 +89,11 @@ export interface TeamsChannelContext extends TeamsContext {
 export interface TeamsEventContext extends TeamsChannelContext, ChannelContinuationOps {}
 
 /** JSON-serializable Teams channel state. */
+export interface TeamsPendingApprovalCard {
+  readonly activityId: string;
+  readonly prompt: string;
+}
+
 export interface TeamsChannelState {
   /** Bot account captured from the inbound activity recipient. */
   bot: TeamsChannelAccount | null;
@@ -102,6 +110,8 @@ export interface TeamsChannelState {
   triggeringUser: TeamsChannelAccount | null;
   /** Activity id for the default connection-auth card, when posted. */
   pendingAuthActivityId?: string | null;
+  pendingApprovalCards?: Record<string, TeamsPendingApprovalCard>;
+  approvalResponderAccounts?: Record<string, TeamsChannelAccount>;
 }
 
 /** Teams channel credentials. */
@@ -166,6 +176,8 @@ type TeamsSessionFailedHandler = (
 
 /** Event handlers supported by `teamsChannel({ events })`. */
 export interface TeamsChannelEvents {
+  readonly "approval.candidate"?: TeamsEventHandler<"approval.candidate">;
+  readonly "approval.settled"?: TeamsEventHandler<"approval.settled">;
   readonly "turn.started"?: TeamsEventHandler<"turn.started">;
   readonly "actions.requested"?: TeamsEventHandler<"actions.requested">;
   readonly "action.partial"?: TeamsEventHandler<"action.partial">;
@@ -298,6 +310,25 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
 
     context(state, session) {
       return rebuildTeamsContext(state, session, config);
+    },
+
+    deliver(payload, channel) {
+      const state = payload.state as Partial<TeamsChannelState> | undefined;
+      const cards = state?.pendingApprovalCards;
+      if (cards !== undefined) {
+        channel.state.pendingApprovalCards = {
+          ...cards,
+          ...channel.state.pendingApprovalCards,
+        };
+      }
+      const responders = state?.approvalResponderAccounts;
+      if (responders !== undefined) {
+        channel.state.approvalResponderAccounts = {
+          ...channel.state.approvalResponderAccounts,
+          ...responders,
+        };
+      }
+      return defaultDeliverResult(payload);
     },
 
     routes: [
@@ -535,10 +566,12 @@ function buildTeamsHandle(input: {
       const address = requireAddress();
       return updateTeamsActivity({
         ...api,
-        body: buildOutboundActivity(state, activity),
+        body: buildUpdateActivity(state, activity),
         credentials,
         activityId,
-        conversationId: address.conversationId,
+        conversationId: normalizeTeamsContinuationAddress({
+          conversationId: address.conversationId,
+        }).conversationId,
         serviceUrl: address.serviceUrl,
       });
     },
@@ -669,6 +702,7 @@ async function dispatchInputResponses(input: {
   try {
     await input.from(resolveInputContinuationToken(input.activity, state)).respond(inputResponses, {
       auth: result.auth,
+      state: approvalResponseStatePatch(input.activity, result.auth),
     });
   } catch (error) {
     log.error("Teams input response delivery failed", { error });
@@ -709,6 +743,29 @@ function resolveInputContinuationToken(
   });
 }
 
+function approvalResponseStatePatch(
+  activity: TeamsInvokeActivity | TeamsMessageActivity,
+  auth: SessionAuthContext | null,
+): Partial<TeamsChannelState> | undefined {
+  if (auth?.principalId === undefined || !isTeamsToolApprovalResponseActivity(activity)) {
+    return undefined;
+  }
+  const requestId = deriveTeamsInputResponses(activity)[0]?.requestId;
+  const activityId = activity.replyToId;
+  if (requestId === undefined || activityId === undefined) {
+    return { approvalResponderAccounts: { [auth.principalId]: activity.from } };
+  }
+  return {
+    approvalResponderAccounts: { [auth.principalId]: activity.from },
+    pendingApprovalCards: {
+      [requestId]: {
+        activityId,
+        prompt: readTeamsToolApprovalPrompt(activity) ?? "Tool approval",
+      },
+    },
+  };
+}
+
 function defaultOnInputResponse(
   _ctx: TeamsContext,
   activity: TeamsInvokeActivity | TeamsMessageActivity,
@@ -726,6 +783,8 @@ function initialTeamsState(): TeamsChannelState {
     channelId: null,
     conversationId: null,
     conversationType: null,
+    approvalResponderAccounts: {},
+    pendingApprovalCards: {},
     pendingAuthActivityId: null,
     replyToActivityId: null,
     serviceUrl: null,
@@ -763,6 +822,26 @@ function buildOutboundActivity(
     replyToId: state.replyToActivityId ?? undefined,
     type: "message",
   };
+}
+
+function buildUpdateActivity(
+  _state: TeamsChannelState,
+  message: TeamsMessageBody | TeamsOutboundActivity | string,
+): TeamsOutboundActivity {
+  if (typeof message !== "string" && "type" in message && message.type === "typing") {
+    throw new Error("teamsChannel: cannot replace an activity with a typing indicator.");
+  }
+  const body = normalizeTeamsPostInput(message);
+  const {
+    channelData: _channelData,
+    conversation: _conversation,
+    from: _from,
+    recipient: _recipient,
+    replyToId: _replyToId,
+    type: _type,
+    ...content
+  } = body as TeamsOutboundActivity;
+  return { ...content, type: "message" };
 }
 
 function mergeChannelData(

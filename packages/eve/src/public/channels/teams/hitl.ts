@@ -30,6 +30,12 @@ export const TEAMS_HITL_CHOICE_INPUT_ID = "eve_option";
 /** Text input id used for freeform HITL requests. */
 export const TEAMS_HITL_FREEFORM_INPUT_ID = "eve_freeform_text";
 
+/** Request kind carried on approval actions so lifecycle handling can distinguish them from questions. */
+export const TEAMS_HITL_REQUEST_KIND_KEY = "kind";
+
+/** Prompt carried on approval actions so a response can recover its card record. */
+export const TEAMS_HITL_PROMPT_KEY = "prompt";
+
 /** Renders one input request as a Teams message body containing an Adaptive Card. */
 export function renderInputRequestMessage(
   request: InputRequest,
@@ -92,10 +98,12 @@ export function renderInputRequestAttachment(
 
 /** Renders an answered Teams card that replaces a pending HITL prompt. */
 export function renderAnsweredInputRequestMessage(input: {
+  readonly includeText?: boolean;
   readonly label?: string;
   readonly prompt: string;
 }): TeamsMessageBody {
-  return {
+  const text = input.label ? `Answered: ${input.label}` : "Answered";
+  const result: TeamsMessageBody = {
     attachments: [
       {
         content: parseJsonObject({
@@ -106,12 +114,7 @@ export function renderAnsweredInputRequestMessage(input: {
               type: "TextBlock",
               wrap: true,
             },
-            {
-              color: "good",
-              text: input.label ? `Answered: ${input.label}` : "Answered",
-              type: "TextBlock",
-              wrap: true,
-            },
+            { color: "good", text, type: "TextBlock", wrap: true },
           ],
           type: "AdaptiveCard",
           version: "1.5",
@@ -119,13 +122,29 @@ export function renderAnsweredInputRequestMessage(input: {
         contentType: TEAMS_ADAPTIVE_CARD_CONTENT_TYPE,
       },
     ],
-    text: input.label ? `Answered: ${input.label}` : "Answered",
   };
+  if (input.includeText !== false) return { ...result, text };
+  return result;
 }
 
 /** Returns true when a Teams activity carries an eve HITL submit payload. */
 export function isTeamsInputResponseActivity(activity: TeamsActivity): boolean {
   return deriveTeamsInputResponses(activity).length > 0;
+}
+
+/** Returns whether an eve HITL activity answers a tool approval. */
+export function isTeamsToolApprovalResponseActivity(activity: TeamsActivity): boolean {
+  const value = readActivityValue(activity);
+  const payload = value && readHitlPayload(value);
+  return payload?.[TEAMS_HITL_REQUEST_KIND_KEY] === "tool-approval";
+}
+
+/** Reads the original prompt from a tool-approval submit activity. */
+export function readTeamsToolApprovalPrompt(activity: TeamsActivity): string | undefined {
+  const value = readActivityValue(activity);
+  const payload = value && readHitlPayload(value);
+  const prompt = payload?.[TEAMS_HITL_PROMPT_KEY];
+  return typeof prompt === "string" && prompt.length > 0 ? prompt : undefined;
 }
 
 /**
@@ -223,6 +242,10 @@ function renderActions(
 ): readonly Record<string, unknown>[] {
   const payload = (optionId?: string): Record<string, unknown> => {
     const value: Record<string, unknown> = { requestId: request.requestId };
+    if (request.kind === "tool-approval") {
+      value[TEAMS_HITL_REQUEST_KIND_KEY] = "tool-approval";
+      value[TEAMS_HITL_PROMPT_KEY] = request.prompt;
+    }
     if (replyToActivityId !== undefined) value.replyToActivityId = replyToActivityId;
     if (optionId !== undefined) value.optionId = optionId;
     return value;
