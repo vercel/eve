@@ -801,14 +801,16 @@ Mounted extensions cannot contribute memory slots.
       thread](https://github.com/vercel/eve/pull/1581#discussion_r3807561187)
       once that boundary is unambiguous.
 
-- [ ] **Give the model a safe memory-slot purpose.** Decide whether the
-      consuming definition or provider configuration supplies a model-facing
-      description that distinguishes destinations such as personal preferences
-      and channel conventions. Keep raw namespace and scope values out of model
-      input, and state that descriptions guide tool choice rather than enforce
-      authorization. Verify that multiple `fileMemory()` slots expose enough
-      information for the model to choose the intended qualified tool. Then
-      close the [model-facing attribution
+- [x] **Give the model a safe memory-slot purpose.** The consuming
+      `defineMemory(...)` may supply an optional static `description`. eve
+      validates it and prepends it to every provider tool description before
+      storing durable dynamic metadata. Omitting it preserves provider
+      descriptions unchanged. The implementation neither derives nor exposes
+      namespace or scope values, and the docs distinguish model routing
+      guidance from authorization. Unit coverage verifies two slots sharing one
+      provider receive different descriptions without mutating provider tools;
+      file-memory integration and e2e coverage exercise described
+      `fileMemory()` slots. This resolves the [model-facing attribution
       thread](https://github.com/vercel/eve/pull/1581#discussion_r3807269437).
 
 - [ ] **Explain projection placement and tool invocation semantics.** Keep or
