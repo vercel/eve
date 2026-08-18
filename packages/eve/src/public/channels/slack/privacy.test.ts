@@ -6,35 +6,41 @@ import {
 } from "#public/channels/slack/privacy.js";
 
 describe("Slack conversation privacy", () => {
-  it("reads explicit conversation types without an API lookup", async () => {
+  it("reads explicit private conversation types without an API lookup", async () => {
     const request = vi.fn();
 
-    expect(readSlackConversationPrivacy({ channel_type: "channel" })).toBe("public");
+    expect(readSlackConversationPrivacy({ channel_type: "channel" })).toBe("unknown");
     expect(readSlackConversationPrivacy({ channel_type: "im" })).toBe("private");
     expect(readSlackConversationPrivacy({ channel_type: "mpim" })).toBe("private");
     expect(readSlackConversationPrivacy({ channel_type: "group" })).toBe("private");
     expect(readSlackConversationPrivacy({})).toBe("unknown");
-    await expect(
-      isPrivateSlackConversation({
-        channelId: "C01",
-        raw: { channel_type: "channel" },
-        request,
-      }),
-    ).resolves.toBe(false);
     await expect(
       isPrivateSlackConversation({ channelId: "D01", raw: { channel_type: "im" }, request }),
     ).resolves.toBe(true);
     expect(request).not.toHaveBeenCalled();
   });
 
-  it("resolves missing conversation privacy through conversations.info", async () => {
-    const request = vi.fn().mockResolvedValue({ ok: true, channel: { is_private: false } });
+  it.each([
+    { isPrivate: false, expected: false },
+    { isPrivate: true, expected: true },
+  ])(
+    "resolves channel visibility through conversations.info when is_private is $isPrivate",
+    async ({ isPrivate, expected }) => {
+      const request = vi.fn().mockResolvedValue({
+        ok: true,
+        channel: { is_private: isPrivate },
+      });
 
-    await expect(isPrivateSlackConversation({ channelId: "C01", raw: {}, request })).resolves.toBe(
-      false,
-    );
-    expect(request).toHaveBeenCalledWith("conversations.info", { channel: "C01" });
-  });
+      await expect(
+        isPrivateSlackConversation({
+          channelId: "C01",
+          raw: { channel_type: "channel" },
+          request,
+        }),
+      ).resolves.toBe(expected);
+      expect(request).toHaveBeenCalledWith("conversations.info", { channel: "C01" });
+    },
+  );
 
   it.each([
     { response: { ok: true, channel: { is_private: true } }, label: "private channel" },
