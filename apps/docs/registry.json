@@ -56,11 +56,6 @@
           "target": "agent/subagents/selfmod/extensions/selfmod.ts"
         },
         {
-          "path": "registry/experimental/selfmod/bash.ts",
-          "type": "registry:file",
-          "target": "agent/subagents/selfmod/tools/bash.ts"
-        },
-        {
           "path": "registry/experimental/selfmod/replace-in-file.ts",
           "type": "registry:file",
           "target": "agent/subagents/selfmod/tools/replace_in_file.ts"
