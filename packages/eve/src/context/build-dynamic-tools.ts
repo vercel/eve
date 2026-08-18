@@ -1,6 +1,6 @@
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessToolMap } from "#harness/types.js";
-import type { ContextKey } from "#context/key.js";
+import type { ContextReader } from "#context/key.js";
 import {
   SessionDynamicToolMetadataKey,
   TurnDynamicToolMetadataKey,
@@ -116,12 +116,11 @@ function buildReplayedApproval(
  * so they win on name collision (the tool-loop uses `??=` for dedup).
  *
  * Step tools are live closures (re-resolved every step via
- * `LiveStepToolsKey`). Session/turn tools are replayed from durable
- * metadata via the bundler's registered step functions.
+ * `LiveStepToolsKey`). Session and turn tools replay durable metadata.
  */
 export function buildResponseAuthorizationTools(input: {
   readonly authoredTools: HarnessToolMap;
-  readonly context?: { get<T>(key: ContextKey<T>): T | undefined };
+  readonly context?: ContextReader;
 }): HarnessToolMap {
   const tools = new Map<string, HarnessToolDefinition>();
   for (const tool of input.context === undefined ? [] : buildDynamicTools(input.context)) {
@@ -133,9 +132,7 @@ export function buildResponseAuthorizationTools(input: {
   return tools;
 }
 
-export function buildDynamicTools(ctx: {
-  get<T>(key: ContextKey<T>): T | undefined;
-}): readonly HarnessToolDefinition[] {
+export function buildDynamicTools(ctx: ContextReader): readonly HarnessToolDefinition[] {
   const step = ctx.get(LiveStepToolsKey) ?? [];
   const turn = replayTools(ctx.get(TurnDynamicToolMetadataKey) ?? []);
   const session = replayTools(ctx.get(SessionDynamicToolMetadataKey) ?? []);

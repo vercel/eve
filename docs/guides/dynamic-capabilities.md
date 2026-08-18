@@ -160,9 +160,11 @@ export default defineDynamic({
 });
 ```
 
-### `execute` must be an inline function
+### Prefer an inline `execute` function
 
-Write `execute` as an inline function expression, arrow, or method shorthand placed directly as the property value. The bundler transform does not detect `execute: myFn` or `execute: makeFn()`, so those tools work on the first step but do not survive replay (re-running a step after a crash or resume; see [Execution model & durability](../concepts/execution-model-and-durability)). On later steps the transform reconstructs each `execute` from its stored closure variables instead of re-running the resolver, which is why it has to be inline.
+Write `execute` as an inline function expression, arrow, or method shorthand placed directly as the property value. The bundler transform stores the function and its closure variables for durable replay without rerunning the resolver.
+
+The transform does not detect `execute: myFn`, `execute: makeFn()`, or executors created inside an imported dependency. For a `session.started` tool, eve can reconstruct these live functions by rerunning the owning resolver after a durable resume. Keep session resolvers idempotent and avoid unnecessary side effects. A `turn.started` tool still requires an inline executor to survive a fresh runtime.
 
 ### Naming
 
@@ -179,11 +181,13 @@ A dynamic tool or skill whose name matches an **authored** one **overrides** it 
 
 ### Events
 
-| Event             | Resolver runs          | Tools available for             |
-| ----------------- | ---------------------- | ------------------------------- |
-| `session.started` | Once per session       | Every model call in the session |
-| `turn.started`    | Once per turn          | Every model call in the turn    |
-| `step.started`    | Before each model call | That model call                 |
+| Event             | Resolver runs                              | Tools available for             |
+| ----------------- | ------------------------------------------ | ------------------------------- |
+| `session.started` | At session start; sometimes after a pause¹ | Every model call in the session |
+| `turn.started`    | Once per turn                              | Every model call in the turn    |
+| `step.started`    | Before each model call                     | That model call                 |
+
+¹ If a session pauses to wait for approval or other input, eve may run the resolver again when the session continues. Design session resolvers so they can safely run more than once. They do not run before every model call.
 
 ### Execution order
 

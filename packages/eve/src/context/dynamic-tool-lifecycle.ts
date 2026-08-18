@@ -26,6 +26,7 @@ import type { ContextKey } from "#context/key.js";
 import {
   SessionDynamicToolMetadataKey,
   SessionDynamicToolRuntimeRevisionKey,
+  SessionIdKey,
   TurnDynamicToolMetadataKey,
   LiveStepToolsKey,
 } from "#context/keys.js";
@@ -158,8 +159,48 @@ function lookupStepFunction(stepId: string): ((...args: unknown[]) => unknown) |
   }
 }
 
-function registerStepFunction(stepId: string, fn: Function): void {
-  getStepRegistry().set(stepId, fn);
+function hasMissingProcessCallback(metadata: DurableDynamicToolMetadata): boolean {
+  return (
+    (metadata.executeStepFnName?.startsWith("eve:framework-dynamic:") === true &&
+      lookupStepFunction(metadata.executeStepFnName) === null) ||
+    (metadata.approvalStepFnName !== undefined &&
+      lookupStepFunction(metadata.approvalStepFnName) === null) ||
+    (metadata.approvalResponseStepFnName !== undefined &&
+      lookupStepFunction(metadata.approvalResponseStepFnName) === null)
+  );
+}
+
+const MAX_PROCESS_CALLBACK_GROUPS = 256;
+interface ProcessCallbackGroup {
+  readonly id: string;
+  readonly callbackIds: Set<string>;
+}
+const processCallbackQueue: ProcessCallbackGroup[] = [];
+const processCallbackGroups = new Map<string, ProcessCallbackGroup>();
+
+function registerProcessCallbacks(groupId: string, callbacks: ReadonlyMap<string, Function>): void {
+  const registry = getStepRegistry();
+  const previous = processCallbackGroups.get(groupId);
+  if (previous !== undefined) {
+    for (const callbackId of previous.callbackIds) registry.delete(callbackId);
+  }
+
+  if (callbacks.size === 0) {
+    processCallbackGroups.delete(groupId);
+    return;
+  }
+
+  const group = { id: groupId, callbackIds: new Set(callbacks.keys()) };
+  processCallbackGroups.set(groupId, group);
+  processCallbackQueue.push(group);
+  for (const [callbackId, callback] of callbacks) registry.set(callbackId, callback);
+
+  while (processCallbackQueue.length > MAX_PROCESS_CALLBACK_GROUPS) {
+    const evicted = processCallbackQueue.shift()!;
+    if (processCallbackGroups.get(evicted.id) !== evicted) continue;
+    processCallbackGroups.delete(evicted.id);
+    for (const callbackId of evicted.callbackIds) registry.delete(callbackId);
+  }
 }
 
 function safeSerialize(obj: Record<string, unknown>): Record<string, unknown> {
@@ -187,16 +228,6 @@ function durableKeyForEvent(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Build: assemble live tools from all scoped durable keys
-// ---------------------------------------------------------------------------
-
-/**
- * Builds live dynamic tool definitions from session + turn + step
- * durable metadata keys. Session-scoped tools appear first, then
- * turn, then step. The tool-loop calls this right before the model
- * call — no virtual key needed.
- */
 // ---------------------------------------------------------------------------
 // Resolve: run resolver handlers, capture closures, write durable metadata
 // ---------------------------------------------------------------------------
@@ -268,6 +299,7 @@ async function resolveToolsFromEvent(
 
     const { resolver, entries, isSingle } = outcome.value;
     const named = qualifyDynamicToolNames(resolver, isSingle, entries);
+    const processCallbacks = new Map<string, Function>();
     for (const { name, entryKey, entry } of named) {
       const previousOwner = dynamicToolOwners.get(name);
       if (previousOwner !== undefined && previousOwner !== resolver.slug) {
@@ -295,14 +327,11 @@ async function resolveToolsFromEvent(
       let serializedClosureVars =
         closureVars !== undefined ? safeSerialize(closureVars) : undefined;
 
-      // Framework tools skip the bundler AST transform, so they carry
-      // no __executeStepFn/__closureVars. Register the live execute
-      // closure in the step registry so session/turn-scoped metadata
-      // can replay them the same way as authored tools.
+      const callbackScope = event.type === "session.started" ? `${ctx.require(SessionIdKey)}:` : "";
       if (executeStepFnName === undefined) {
-        const syntheticId = `eve:framework-dynamic:${resolver.slug}:${entryKey}`;
+        const syntheticId = `eve:framework-dynamic:${callbackScope}${resolver.slug}:${entryKey}`;
         const originalExecute = entry.execute.bind(entry);
-        registerStepFunction(syntheticId, (_closureVars: unknown, input: unknown, ctx: unknown) =>
+        processCallbacks.set(syntheticId, (_closureVars: unknown, input: unknown, ctx: unknown) =>
           originalExecute(
             input as Record<string, unknown>,
             ctx as Parameters<typeof entry.execute>[1],
@@ -315,17 +344,17 @@ async function resolveToolsFromEvent(
       let approvalStepFnName: string | undefined;
       let approvalResponseStepFnName: string | undefined;
       if (entry.approval !== undefined) {
-        approvalStepFnName = `eve:dynamic-tool-approval:${resolver.slug}:${entryKey}`;
+        approvalStepFnName = `eve:dynamic-tool-approval:${callbackScope}${resolver.slug}:${entryKey}`;
         const originalApproval = resolveApprovalPolicy(entry.approval).bind(entry);
-        registerStepFunction(approvalStepFnName, (_closureVars: unknown, approvalCtx: unknown) =>
+        processCallbacks.set(approvalStepFnName, (_closureVars: unknown, approvalCtx: unknown) =>
           originalApproval(approvalCtx as ApprovalContext),
         );
 
         const responsePolicy =
           typeof entry.approval === "function" ? undefined : entry.approval.response;
         if (responsePolicy !== undefined) {
-          approvalResponseStepFnName = `eve:dynamic-tool-approval-response:${resolver.slug}:${entryKey}`;
-          registerStepFunction(
+          approvalResponseStepFnName = `eve:dynamic-tool-approval-response:${callbackScope}${resolver.slug}:${entryKey}`;
+          processCallbacks.set(
             approvalResponseStepFnName,
             (_closureVars: unknown, responseCtx: unknown) =>
               responsePolicy(responseCtx as ApprovalResponseContext),
@@ -345,6 +374,14 @@ async function resolveToolsFromEvent(
         approvalResponseStepFnName,
         closureVars: serializedClosureVars,
       });
+    }
+
+    if (event.type === "session.started") {
+      registerProcessCallbacks(`${ctx.require(SessionIdKey)}:${resolver.slug}`, processCallbacks);
+    } else {
+      for (const [callbackId, callback] of processCallbacks) {
+        getStepRegistry().set(callbackId, callback);
+      }
     }
   }
 
@@ -466,4 +503,38 @@ export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
 
   input.ctx.set(SessionDynamicToolMetadataKey, metadata);
   input.ctx.set(SessionDynamicToolRuntimeRevisionKey, input.runtimeRevision);
+}
+
+/** Re-registers missing process-local session callbacks in a fresh runtime. */
+export async function hydrateDynamicSessionTools(input: {
+  readonly ctx: ContextContainer;
+  readonly resolvers: readonly ResolvedDynamicToolResolver[];
+  readonly event: SessionStartedStreamEvent;
+  readonly messages: readonly ModelMessage[];
+}): Promise<void> {
+  const storedMetadata = input.ctx.get(SessionDynamicToolMetadataKey) ?? [];
+  const missing = storedMetadata.filter(hasMissingProcessCallback);
+  if (missing.length === 0) return;
+
+  const owners = new Set(missing.map((entry) => entry.resolverSlug));
+  const matching = input.resolvers.filter(
+    (resolver) => resolver.eventNames.includes("session.started") && owners.has(resolver.slug),
+  );
+  const { metadata } =
+    matching.length === 0
+      ? { metadata: [] }
+      : await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages);
+  const durableOwners = new Map(storedMetadata.map((entry) => [entry.name, entry.resolverSlug]));
+  const resolvedOwners = new Map(metadata.map((entry) => [entry.name, entry.resolverSlug]));
+  if (metadata.some((entry) => durableOwners.get(entry.name) !== entry.resolverSlug)) {
+    throw new Error("Dynamic session tool callback hydration changed durable ownership.");
+  }
+  if (
+    missing.some(
+      (entry) =>
+        resolvedOwners.get(entry.name) !== entry.resolverSlug || hasMissingProcessCallback(entry),
+    )
+  ) {
+    log.warn("Dynamic session tool callback hydration did not reproduce durable ownership.");
+  }
 }

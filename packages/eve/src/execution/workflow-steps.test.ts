@@ -2294,13 +2294,25 @@ describe("turnStep", () => {
 
   it("refreshes session-scoped dynamic tools from the current deployment", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_new");
-    const handler = vi.fn(() => ({
-      current_tool: defineTool({
-        description: "Current deployment tool",
-        inputSchema: { type: "object" },
-        execute: async () => ({ ok: true }),
-      }),
-    }));
+    const lifecycleOrder: string[] = [];
+    const originalClearVirtualContext = ContextContainer.prototype.clearVirtualContext;
+    vi.spyOn(ContextContainer.prototype, "clearVirtualContext").mockImplementation(
+      function (this: ContextContainer) {
+        lifecycleOrder.push("clear");
+        originalClearVirtualContext.call(this);
+      },
+    );
+    const handler = vi.fn(() => {
+      lifecycleOrder.push("refresh");
+      return {
+        current_tool: defineTool({
+          description: "Current deployment tool",
+          inputSchema: { type: "object" },
+          approval: () => "not-applicable" as const,
+          execute: async () => ({ ok: true }),
+        }),
+      };
+    });
     const dynamicToolResolver = {
       eventNames: ["session.started"],
       events: { "session.started": handler },
@@ -2334,10 +2346,13 @@ describe("turnStep", () => {
     } as never;
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
     vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (session): Promise<StepResult> => ({
-        next: { done: true, output: "ok" },
-        session,
-      });
+      return async (session): Promise<StepResult> => {
+        lifecycleOrder.push("execute");
+        return {
+          next: { done: true, output: "ok" },
+          session,
+        };
+      };
     });
 
     const session = createStubSession({
@@ -2390,6 +2405,7 @@ describe("turnStep", () => {
     });
 
     expect(handler).toHaveBeenCalledOnce();
+    expect(lifecycleOrder).toEqual(["refresh", "clear", "execute"]);
     expect(result.serializedContext[SessionDynamicToolRuntimeRevisionKey.name]).toBe(
       "deployment:dpl_new",
     );
