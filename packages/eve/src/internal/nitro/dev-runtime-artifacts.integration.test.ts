@@ -440,6 +440,7 @@ describe("development runtime artifact snapshots", () => {
     await writeFile(join(worktreeRoot, "duplicate.ts"), "export const duplicate = true;\n");
     await writeFile(join(nestedRepositoryRoot, "duplicate.ts"), "export const duplicate = true;\n");
     await writeFile(join(regularDirectoryRoot, "source.ts"), "export const copied = true;\n");
+
     await writeFile(
       join(compileDirectoryPath, "compiled-agent-manifest.json"),
       `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`,
@@ -456,6 +457,98 @@ describe("development runtime artifact snapshots", () => {
     expect(existsSync(join(snapshot.runtimeAppRoot, "vendor", "nested-repository"))).toBe(false);
     expect(
       existsSync(join(snapshot.runtimeAppRoot, "vendor", "regular-directory", "source.ts")),
+    ).toBe(true);
+  });
+
+  it("honors gitignored data directories while copying source snapshots", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-gitignored-data-");
+    const agentRoot = join(appRoot, "agent");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+    const ignoredVectorStoreRoot = join(
+      appRoot,
+      "analysts",
+      ".cognee",
+      "system",
+      "databases",
+      "cognee.lancedb",
+    );
+
+    await mkdir(agentRoot, { recursive: true });
+    await mkdir(ignoredVectorStoreRoot, { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(
+      join(appRoot, ".gitignore"),
+      ["analysts/.cognee/", "*.tmp", "!keep.tmp", "agent/secret-notes.md", ""].join("\n"),
+    );
+    await writeFile(join(appRoot, "package.json"), '{"type":"module"}\n');
+    await writeFile(join(agentRoot, "agent.ts"), "export const answer = 42;\n");
+    await writeFile(join(agentRoot, "secret-notes.md"), "do not copy\n");
+    await writeFile(join(appRoot, "trace.tmp"), "ignored scratch file\n");
+    await writeFile(join(appRoot, "keep.tmp"), "kept by negation\n");
+    await writeFile(join(ignoredVectorStoreRoot, "Entity_name.lance"), "large vector data\n");
+    await writeFile(
+      join(compileDirectoryPath, "compiled-agent-manifest.json"),
+      `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`,
+    );
+
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+
+    expect(existsSync(join(snapshot.runtimeAppRoot, "agent", "agent.ts"))).toBe(true);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "keep.tmp"))).toBe(true);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "analysts", ".cognee"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "trace.tmp"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "agent", "secret-notes.md"))).toBe(false);
+  });
+
+  it("honors globstar-slash gitignore rules at zero and nested directory depth", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-gitignore-globstar-");
+    const agentRoot = join(appRoot, "agent");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+
+    await mkdir(join(appRoot, "nested"), { recursive: true });
+    await mkdir(join(appRoot, "assets", "generated"), { recursive: true });
+    await mkdir(join(appRoot, "assets", "nested", "generated"), { recursive: true });
+    await mkdir(join(appRoot, "assets", "keep", "generated"), { recursive: true });
+    await mkdir(agentRoot, { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(
+      join(appRoot, ".gitignore"),
+      ["**/*.tmp", "!keep.tmp", "assets/**/generated/", "!assets/keep/generated/", ""].join("\n"),
+    );
+    await writeFile(join(appRoot, "package.json"), '{"type":"module"}\n');
+    await writeFile(join(agentRoot, "agent.ts"), "export const answer = 42;\n");
+    await writeFile(join(appRoot, "ignored.tmp"), "ignore top-level file\n");
+    await writeFile(join(appRoot, "nested", "ignored.tmp"), "ignore nested file\n");
+    await writeFile(join(appRoot, "keep.tmp"), "keep top-level file\n");
+    await writeFile(join(appRoot, "assets", "generated", "direct.txt"), "ignore direct child\n");
+    await writeFile(
+      join(appRoot, "assets", "nested", "generated", "deep.txt"),
+      "ignore nested child\n",
+    );
+    await writeFile(
+      join(appRoot, "assets", "keep", "generated", "preserved.txt"),
+      "keep negated directory\n",
+    );
+    await writeFile(
+      join(compileDirectoryPath, "compiled-agent-manifest.json"),
+      `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`,
+    );
+
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+
+    expect(existsSync(join(snapshot.runtimeAppRoot, "ignored.tmp"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "nested", "ignored.tmp"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "keep.tmp"))).toBe(true);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "assets", "generated"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "assets", "nested", "generated"))).toBe(false);
+    expect(
+      existsSync(join(snapshot.runtimeAppRoot, "assets", "keep", "generated", "preserved.txt")),
     ).toBe(true);
   });
 
@@ -917,6 +1010,7 @@ describe("development runtime artifact snapshots", () => {
       join(appRoot, "tsconfig.json"),
       '{ "compilerOptions": { "target": "ES2024" } }\n',
     );
+    await writeFile(join(appRoot, ".gitignore"), "dist\nnode_modules\n");
     await writeFile(
       join(packageRoot, "package.json"),
       JSON.stringify(
