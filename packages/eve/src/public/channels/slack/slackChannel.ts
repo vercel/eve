@@ -79,6 +79,7 @@ export type {
 } from "#public/channels/slack/session-operations.js";
 
 const log = createLogger("slack.channel");
+const PRIVATE_SLACK_RUN_TITLE = "Private message";
 
 type EventData<T extends UnstampedMessageStreamEvent["type"]> =
   Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
@@ -1131,17 +1132,19 @@ async function dispatchSlackMessage(input: {
       triggeringUserId: author?.userId ?? null,
     },
   });
+  let privateConversation: Promise<boolean> | undefined;
+  const isDMOrPrivateChannel = () =>
+    (privateConversation ??= isPrivateSlackConversation({
+      channelId: input.message.channelId,
+      raw: input.message.raw,
+      request: slack.request,
+    }));
   const ctx: SlackInboundMessageContext = {
     ...sessionOperations,
     isBotMentioned: () =>
       input.kind === "app_mention" ||
       (input.botUserId !== undefined && input.message.text.includes(`<@${input.botUserId}`)),
-    isDMOrPrivateChannel: () =>
-      isPrivateSlackConversation({
-        channelId: input.message.channelId,
-        raw: input.message.raw,
-        request: slack.request,
-      }),
+    isDMOrPrivateChannel,
     isSubscribed: async () => (await sessionOperations.resolveSession()) !== undefined,
     slack,
     thread,
@@ -1161,6 +1164,7 @@ async function dispatchSlackMessage(input: {
   await deliverSlackMessage({
     credentials: input.credentials,
     kind: input.kind,
+    isPrivateConversation: await isDMOrPrivateChannel(),
     message: input.message,
     result,
     sessionOperations,
@@ -1256,6 +1260,7 @@ async function verifyInbound(
 async function deliverSlackMessage(input: {
   readonly sessionOperations: SlackSessionOperations;
   readonly credentials: SlackChannelCredentials | undefined;
+  readonly isPrivateConversation: boolean;
   readonly kind: string;
   readonly message: SlackMessage;
   readonly result: Exclude<SlackInboundResult, null>;
@@ -1292,7 +1297,9 @@ async function deliverSlackMessage(input: {
     );
 
     const channelContext = input.result.context ?? [];
-    const title = input.result.title ?? message.markdown;
+    const title = input.isPrivateConversation
+      ? PRIVATE_SLACK_RUN_TITLE
+      : (input.result.title ?? message.markdown);
     const sendOptions: SlackSendOptions =
       channelContext.length === 0
         ? { auth: input.result.auth, title }

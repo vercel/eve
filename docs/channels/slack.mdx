@@ -125,7 +125,7 @@ Check the delivery path in order so you can identify where a Slack event stops:
 
 ### Message hooks
 
-Message hooks return `{ auth }` to dispatch, `null` to drop, or `{ auth, context }` to inject background into history. Return `title` alongside `auth` to set the title when the dispatch starts a run. When omitted, the title continues to use the triggering message text.
+Message hooks return `{ auth }` to dispatch, `null` to drop, or `{ auth, context }` to inject background into history. Public conversations use the returned `title`, or the triggering message text when `title` is omitted. DMs and private channels always use `Private message` so the run title does not expose message details.
 
 - `onMessage(ctx, message)` handles Slack `message` events. eve drops messages authored by the installed app before this hook runs, preventing self-reply loops. Messages from other bots remain visible; check `message.author?.isBot` when those should also be ignored. `ctx.isBotMentioned()` and `ctx.isSubscribed()` support mention and active-thread policies.
 - `onAppMention(ctx, message)` handles only `app_mention` and takes precedence over `onMessage`. Its default derives workspace-scoped auth and posts `Thinking…`.

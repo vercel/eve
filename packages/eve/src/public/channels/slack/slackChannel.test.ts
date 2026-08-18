@@ -1181,10 +1181,14 @@ describe("slackChannel() inbound mention pipeline", () => {
 
   beforeEach(() => {
     process.env.SLACK_SIGNING_SECRET = SIGNING_SECRET;
-    fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
-        headers: { "content-type": "application/json" },
-      }),
+    fetchMock = vi.fn(async (request: string | URL | Request) =>
+      String(request).includes("conversations.info")
+        ? new Response(JSON.stringify({ ok: true, channel: { is_private: false } }), {
+            headers: { "content-type": "application/json" },
+          })
+        : new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
+            headers: { "content-type": "application/json" },
+          }),
     );
     vi.stubGlobal("fetch", fetchMock);
   });
@@ -1485,19 +1489,52 @@ describe("slackChannel() inbound mention pipeline", () => {
     expect(input.title).toBe("hello");
   });
 
-  it("uses the run title returned by onAppMention without changing the message", async () => {
+  it("uses the run title returned by onAppMention for a public channel", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       onAppMention: () => ({ auth: null, title: "Run" }),
     });
 
-    const { body } = buildMentionBody({ text: "private message text" });
+    const { body } = buildMentionBody({ text: "public message text" });
     const { send } = await firePost(channel, buildSignedRequest({ body }));
 
     expect(send).toHaveBeenCalledTimes(1);
     const [, input] = send.mock.calls[0]!;
     expect(input.title).toBe("Run");
-    expect(input.message).toContain("<content>\nprivate message text\n</content>");
+    expect(input.message).toContain("<content>\npublic message text\n</content>");
+  });
+
+  it("uses an opaque run title for private channel mentions", async () => {
+    fetchMock.mockImplementation(async (request: string | URL | Request) =>
+      String(request).includes("conversations.info")
+        ? new Response(JSON.stringify({ ok: true, channel: { is_private: true } }), {
+            headers: { "content-type": "application/json" },
+          })
+        : new Response(JSON.stringify({ ok: true, messages: [] }), {
+            headers: { "content-type": "application/json" },
+          }),
+    );
+    let isPrivate: boolean | undefined;
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onAppMention(ctx) {
+        isPrivate = await ctx.isDMOrPrivateChannel();
+        return { auth: null, title: "sensitive message" };
+      },
+    });
+
+    const { body } = buildMentionBody({ text: "sensitive message" });
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(isPrivate).toBe(true);
+    expect(
+      fetchMock.mock.calls.filter(([request]) => String(request).includes("conversations.info")),
+    ).toHaveLength(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    const [, input] = send.mock.calls[0]!;
+    expect(input.title).toBe("Private message");
+    expect(input.title).not.toContain("sensitive message");
+    expect(input.message).toContain("<content>\nsensitive message\n</content>");
   });
 
   it("uses only this app's reply as the incremental thread context boundary", async () => {
@@ -2216,13 +2253,13 @@ describe("slackChannel() inbound direct message pipeline", () => {
     const opts = options as { auth: unknown; state: { channelId: string } };
     expect(opts.auth).toMatchObject({ principalId: "U01", authenticator: "test" });
     expect(opts.state.channelId).toBe(channelId);
-    expect(options.title).toBe("hello");
+    expect(options.title).toBe("Private message");
   });
 
-  it("uses the run title returned by onDirectMessage", async () => {
+  it("uses an opaque run title for direct messages", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
-      onDirectMessage: () => ({ auth: null, title: "Private support case" }),
+      onDirectMessage: () => ({ auth: null, title: "sensitive message" }),
     });
 
     const { body } = buildDirectMessageBody({ text: "sensitive message" });
@@ -2230,7 +2267,8 @@ describe("slackChannel() inbound direct message pipeline", () => {
 
     expect(send).toHaveBeenCalledTimes(1);
     const [, options] = send.mock.calls[0]!;
-    expect(options.title).toBe("Private support case");
+    expect(options.title).toBe("Private message");
+    expect(options.title).not.toContain("sensitive message");
     expect(options.message).toContain("<content>\nsensitive message\n</content>");
   });
 
