@@ -293,11 +293,19 @@ dist
 `,
   "AGENTS.md": `# eve Agent App
 
-This project uses the eve framework. Before writing code, read the relevant guide
-from the installed eve package docs. In most installs, those docs are at
-\`node_modules/eve/docs/\`. In workspaces or local package installs, resolve the
-installed \`eve\` package location first and read its \`docs/\` directory. If
-package docs are unavailable, use https://eve.dev/docs as a fallback.
+This project uses the eve framework. For a content-only change to the root agent's
+identity, purpose, tone, or response guidelines, edit its existing authored
+instructions. Fresh projects use \`agent/instructions.md\`; a project may instead
+use \`agent/instructions.ts\` or files under \`agent/instructions/\`. You do not
+need to read the framework docs for a content-only instructions change.
+
+Before adding or changing eve framework features such as tools, connections,
+channels, skills, subagents, schedules, authentication, or deployment, read the
+relevant guide from the installed eve package docs. In most installs, those docs
+are at \`node_modules/eve/docs/\`. In workspaces or local package installs,
+resolve the installed \`eve\` package location first and read its \`docs/\`
+directory. If package docs are unavailable, use https://eve.dev/docs as a
+fallback.
 
 ## Adding integrations
 
