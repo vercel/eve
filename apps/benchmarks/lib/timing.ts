@@ -6,48 +6,24 @@ export interface BenchmarkTiming {
   readonly details?: Readonly<Record<string, string | number | boolean>>;
 }
 
+type TimingDetails = BenchmarkTiming["details"];
+
 export class BenchmarkTimings {
   readonly entries: BenchmarkTiming[] = [];
 
   async measure<T>(
     phase: string,
     operation: () => Promise<T>,
-    details?: Readonly<Record<string, string | number | boolean>>,
+    details?: TimingDetails,
   ): Promise<T> {
     const startedAt = new Date().toISOString();
     const started = performance.now();
     try {
       const result = await operation();
-      const entry: {
-        phase: string;
-        startedAt: string;
-        durationMs: number;
-        outcome: BenchmarkTiming["outcome"];
-        details?: Readonly<Record<string, string | number | boolean>>;
-      } = {
-        phase,
-        startedAt,
-        durationMs: Math.round(performance.now() - started),
-        outcome: "success",
-      };
-      if (details !== undefined) entry.details = details;
-      this.entries.push(entry);
+      this.add(phase, startedAt, performance.now() - started, "success", details);
       return result;
     } catch (error) {
-      const entry: {
-        phase: string;
-        startedAt: string;
-        durationMs: number;
-        outcome: BenchmarkTiming["outcome"];
-        details?: Readonly<Record<string, string | number | boolean>>;
-      } = {
-        phase,
-        startedAt,
-        durationMs: Math.round(performance.now() - started),
-        outcome: "failure",
-      };
-      if (details !== undefined) entry.details = details;
-      this.entries.push(entry);
+      this.add(phase, startedAt, performance.now() - started, "failure", details);
       throw error;
     }
   }
@@ -56,21 +32,24 @@ export class BenchmarkTimings {
     phase: string,
     durationMs: number,
     outcome: BenchmarkTiming["outcome"] = "success",
-    details?: Readonly<Record<string, string | number | boolean>>,
+    details?: TimingDetails,
   ): void {
-    const entry: {
-      phase: string;
-      startedAt: string;
-      durationMs: number;
-      outcome: BenchmarkTiming["outcome"];
-      details?: Readonly<Record<string, string | number | boolean>>;
-    } = {
+    this.add(phase, new Date(Date.now() - durationMs).toISOString(), durationMs, outcome, details);
+  }
+
+  private add(
+    phase: string,
+    startedAt: string,
+    durationMs: number,
+    outcome: BenchmarkTiming["outcome"],
+    details: TimingDetails,
+  ): void {
+    const entry = {
       phase,
-      startedAt: new Date(Date.now() - durationMs).toISOString(),
+      startedAt,
       durationMs: Math.round(durationMs),
       outcome,
     };
-    if (details !== undefined) entry.details = details;
-    this.entries.push(entry);
+    this.entries.push(details === undefined ? entry : { ...entry, details });
   }
 }
