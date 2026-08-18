@@ -187,7 +187,7 @@ describe("runInitCommand", () => {
     // Substring assertions keep the expectations color-agnostic; picocolors
     // decides at import time whether the strings carry escape codes. The boot
     // banner is the CLI program's pre-action hook, not the command's output.
-    expect(output.messages).toHaveLength(5);
+    expect(output.messages).toHaveLength(4);
     expect(output.messages[0]).toContain("Preparing project...");
     expect(output.messages[1]).toContain("✓");
     expect(output.messages[1]).toContain("Created an eve agent in ");
@@ -195,16 +195,15 @@ describe("runInitCommand", () => {
     expect(output.messages[1]).toContain("in 467ms");
     expect(output.messages[2]).toContain("Installed dependencies");
     expect(output.messages[2]).toContain("in 13.2s");
-    expect(output.messages[3]).toBe(
-      `\nProject ready:\n  Path: ${projectPath}\n  Model: ${DEFAULT_AGENT_MODEL_ID} (eve default)\n  Instructions: ${join(projectPath, "agent/instructions.md")}\n  Dependencies: installed with pnpm`,
-    );
-    expect(output.messages[4]).toContain("$ eve dev");
+    expect(output.messages[3]).toContain("$ eve dev");
+    expect(output.messages.join("\n")).not.toContain("Instructions ");
   });
 
   it("creates a new agent with model settings selected by init options", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-model-"));
     const output = logger();
     const deps = dependencies();
+    deps.isCodingAgentLaunch.mockResolvedValue(true);
 
     await runInitCommand(
       output,
@@ -217,8 +216,10 @@ describe("runInitCommand", () => {
     const projectPath = join(parentDirectory, "my-agent");
     const agentSource = await readFile(join(projectPath, "agent/agent.ts"), "utf8");
     expect(agentSource).toContain('model: "openai/gpt-5.5"');
-    expect(output.messages.join("\n")).toContain("Model: openai/gpt-5.5\n");
-    expect(output.messages.join("\n")).not.toContain("openai/gpt-5.5 (eve default)");
+    const messages = stripAnsi(output.messages.join("\n"));
+    expect(messages).toContain("✓ Model openai/gpt-5.5");
+    expect(messages).not.toContain("openai/gpt-5.5 (eve default)");
+    expect(messages).toContain(`✓ Instructions ${join(projectPath, "agent/instructions.md")}`);
     expect(agentSource).toContain('reasoning: "high"');
     expect(deps.validateModelSlug).toHaveBeenCalledWith(
       expect.stringContaining(".eve-init-"),
@@ -1169,9 +1170,10 @@ describe("runInitCommand", () => {
     expect(deps.selectInitHandoff).not.toHaveBeenCalled();
     expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
-    expect(output.messages.join("\n")).toContain(
-      "pnpm --config.minimum-release-age=0 exec eve dev --no-ui",
-    );
+    const messages = stripAnsi(output.messages.join("\n"));
+    expect(messages).toContain(`✓ Model ${DEFAULT_AGENT_MODEL_ID} (eve default)`);
+    expect(messages).toContain(`✓ Instructions ${join(projectPath, "agent/instructions.md")}`);
+    expect(messages).toContain("pnpm --config.minimum-release-age=0 exec eve dev --no-ui");
   });
 
   it("derives the agent dev handoff command from the existing project's own manager", async () => {

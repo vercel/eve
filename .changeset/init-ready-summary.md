@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Successful `eve init` runs now summarize the generated path, model, instructions file, and dependency installation.
+Coding-agent `eve init` runs now report the selected model and generated instructions file without changing the interactive human flow.

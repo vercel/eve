@@ -605,18 +605,6 @@ export async function runInitCommand(
     `${pc.green("✓")} Installed dependencies ${pc.dim(`in ${formatElapsed(result.installElapsedMs)}`)}`,
   );
 
-  const selectedModel = options.model ?? DEFAULT_AGENT_MODEL_ID;
-  logger.log(
-    [
-      "",
-      "Project ready:",
-      `  Path: ${result.projectPath}`,
-      `  Model: ${selectedModel}${options.model === undefined ? " (eve default)" : ""}`,
-      `  Instructions: ${join(result.projectPath, "agent/instructions.md")}`,
-      `  Dependencies: installed with ${result.packageManager}`,
-    ].join("\n"),
-  );
-
   if (result.kind === "created" && result.gitResult.kind === "failed") {
     logger.error(
       pc.yellow(
@@ -640,6 +628,13 @@ export async function runInitCommand(
   });
 
   if (result.agentLaunched) {
+    const selectedModel = options.model ?? DEFAULT_AGENT_MODEL_ID;
+    logger.log(
+      `${pc.green("✓")} Model ${pc.bold(selectedModel)}${options.model === undefined ? pc.dim(" (eve default)") : ""}`,
+    );
+    logger.log(
+      `${pc.green("✓")} Instructions ${pc.bold(join(result.projectPath, "agent/instructions.md"))}`,
+    );
     logger.log(agentHandoff);
     return;
   }
