@@ -16,6 +16,7 @@ export const LINQ_TRIGGER_EVENTS = ["message.received", "reaction.added", "react
 export interface LinqConnectorRef {
   id: string;
   uid: string;
+  phoneNumber?: string;
 }
 
 export interface ProvisionLinqConnectorDeps {
@@ -27,13 +28,20 @@ const ConnectorSchema = z.object({
   id: z.string().min(1),
   uid: z.string().min(1),
   supportedSubjectTypes: z.array(z.string()).refine((types) => types.includes("app")),
+  data: z.object({ phoneNumbers: z.array(z.string().min(1)).optional() }).optional(),
 });
 
 /** Parses `vercel connect create -F json` output for an app-scoped Linq connector. */
 export function parseCreatedLinqConnector(stdout: string): LinqConnectorRef | undefined {
   try {
     const result = ConnectorSchema.safeParse(JSON.parse(stdout));
-    return result.success ? { id: result.data.id, uid: result.data.uid } : undefined;
+    if (!result.success) return undefined;
+    const phoneNumber = result.data.data?.phoneNumbers?.[0];
+    return {
+      id: result.data.id,
+      uid: result.data.uid,
+      ...(phoneNumber === undefined ? {} : { phoneNumber }),
+    };
   } catch {
     return undefined;
   }
@@ -60,21 +68,14 @@ export async function provisionLinqConnector(input: {
   projectRoot: string;
   slug: string;
   signal?: AbortSignal;
-  /** Receives the managed-connector URL printed by the Vercel CLI. */
-  onBrowserUrl?: (url: string) => void;
   deps?: ProvisionLinqConnectorDeps;
 }): Promise<LinqConnectorRef> {
   const deps = input.deps ?? { runVercel, runVercelCaptureStdout };
   const commandOutput = createPromptCommandOutput(input.log);
   const onOutput: ProcessOutputHandler = (line) => {
-    const url = URL.parse(line.text)?.href;
-    if (url !== undefined) {
-      // The setup UI renders this as a durable external action. Avoid routing
-      // the enormous query-string URL through transient command output, where
-      // terminals wrap it into an uncopyable value.
-      input.onBrowserUrl?.(url);
-      return;
-    }
+    // The headless-browser shim captures this URL separately. Keeping it out
+    // of the setup renderer prevents terminal wrapping from making it unusable.
+    if (URL.parse(line.text) !== null) return;
     commandOutput(line);
   };
   const result = await withPhase(input.log, "Creating Linq connector...", () =>
