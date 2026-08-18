@@ -33,7 +33,9 @@ const BOOTSTRAP_VERSION = "v8";
 const TURN_TIMEOUT_SECONDS = Number(process.env.EVE_BENCHMARK_TURN_TIMEOUT ?? 480);
 // A turn that has produced no chunk for this long is waiting on the runtime, not
 // working: the longest legitimate gap is a single slow tool call.
-const TURN_STALL_SECONDS = Number(process.env.EVE_BENCHMARK_TURN_STALL ?? 180);
+const TURN_STALL_SECONDS = Number(process.env.EVE_BENCHMARK_TURN_STALL ?? 120);
+// How long to let an aborted turn settle before starting the next one.
+const TURN_SETTLE_MILLIS = 15_000;
 
 // The coding agent's own question tool is the one place it can ask the user
 // mid-turn. Left unanswered it waits for a human and the runtime stops driving
@@ -353,10 +355,9 @@ async function runTurn(input: {
   const turnTimeout = Math.min(timeout, TURN_TIMEOUT_SECONDS);
   let stall: string | undefined;
 
-  // The runtime can leave a turn open after the model's last message, and it
-  // honors neither the total nor the per-chunk budget the SDK passes down. When
-  // the stream goes quiet this stops reading it without aborting the shared
-  // session, so the turn yields what it produced and later turns still run.
+  // The runtime leaves a turn open when the model's last step is text with no
+  // tool call — the case where the agent ends by asking the user something — and
+  // it honors neither the total nor the per-chunk budget the SDK passes down.
   // Silence only counts as a stall while no tool call is outstanding: a slow
   // install or build legitimately produces nothing for minutes.
   const controller = new AbortController();
@@ -382,6 +383,7 @@ async function runTurn(input: {
           Date.now() >= deadline
             ? `turn exceeded its ${turnTimeout}s budget`
             : `turn produced no output for ${TURN_STALL_SECONDS}s`;
+        await settleStalledTurn(stream, controller, stall);
         break;
       }
       if (next.done === true) break;
@@ -419,6 +421,28 @@ async function runTurn(input: {
   if (current.trim().length > 0) steps.push(current.trim());
   const turn: AuthoringTurnResult = { text: steps.join("\n\n"), toolCalls, usage };
   return stall === undefined ? turn : { ...turn, stall };
+}
+
+// Aborting is what marks the turn finished. Walking away from the stream is not
+// enough: the session keeps the turn open and rejects the next prompt as one
+// already in progress, which loses every remaining turn of the case. Draining
+// afterwards gives that settlement time to land before the next prompt.
+async function settleStalledTurn(
+  stream: AsyncIterator<unknown>,
+  controller: AbortController,
+  reason: string,
+): Promise<void> {
+  controller.abort(new Error(reason));
+  await withDeadline(
+    (async () => {
+      try {
+        while ((await stream.next()).done !== true);
+      } catch {
+        // The abort surfaces here as a rejection, which is the settlement.
+      }
+    })(),
+    TURN_SETTLE_MILLIS,
+  );
 }
 
 async function withDeadline<T>(promise: Promise<T>, millis: number): Promise<T | "expired"> {
