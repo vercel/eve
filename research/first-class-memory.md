@@ -13,8 +13,9 @@ session. A memory provider owns how it stores, retrieves, and updates memory.
 eve owns when the provider participates in the agent lifecycle.
 
 Each memory definition binds a provider to an application namespace, a trusted
-scope, and a projection visibility policy. The provider contract has three
-methods:
+scope, and a projection visibility policy. It may also describe the slot's
+purpose to the model through provider tool descriptions. The provider contract
+has three methods:
 
 - `recall` updates the context projected into model calls.
 - `save` observes history before compaction and after a completed turn.
@@ -79,8 +80,8 @@ agent/memory/              # directory of named slots
 
 The flat file and directory forms are mutually exclusive. Each module
 default-exports `defineMemory(...)`. The definition contains the provider, an
-optional namespace, a required trusted scope, and optional eve-owned projection
-policy:
+optional model-facing description, an optional namespace, a required trusted
+scope, and optional eve-owned projection policy:
 
 ```ts title="agent/memory/user.ts"
 import { defineMemory } from "eve/memory";
@@ -88,6 +89,7 @@ import { byPrincipal } from "eve/memory/scope";
 import { customMemory } from "../lib/custom-memory";
 
 export default defineMemory({
+  description: "Personal preferences and durable facts for the authenticated user.",
   provider: customMemory,
   namespace: () => `acme:${process.env.DEPLOYMENT_REGION ?? "local"}`,
   scope: byPrincipal,
@@ -98,6 +100,65 @@ The same provider instance may back several slots. Their projections, tools,
 and provider invocations remain independent. The default namespace includes the
 slot identity, so each slot receives a distinct provider address. Definitions
 that resolve the same custom namespace and scope intentionally share an address.
+
+## Model-facing description
+
+`description` is an optional static description of the slot's purpose:
+
+```ts
+interface MemoryDefinition {
+  readonly description?: string;
+  readonly namespace?: MemoryNamespaceDefinition;
+  readonly provider: MemoryProvider;
+  readonly scope: MemoryScopeDefinition;
+  readonly visibility?: MemoryVisibility;
+}
+```
+
+The consuming definition owns this description because one provider may back
+several destinations with different purposes. For example, two `fileMemory()`
+slots can distinguish personal preferences from shared channel conventions:
+
+```ts title="agent/memory/personal.ts"
+import { defineMemory } from "eve/memory";
+import { fileMemory } from "eve/memory/file";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Personal preferences belonging only to the authenticated user.",
+  provider: fileMemory(),
+  scope: byPrincipal,
+});
+```
+
+```ts title="agent/memory/channel.ts"
+import { defineMemory } from "eve/memory";
+import { fileMemory } from "eve/memory/file";
+import { channelScope } from "../lib/channel-scope";
+
+export default defineMemory({
+  description: "Shared conventions for this channel. Do not store personal preferences here.",
+  provider: fileMemory(),
+  scope: channelScope,
+});
+```
+
+When the provider returns tools, eve prepends the slot description and two
+newline characters to every provider-authored tool description. For example,
+the first slot's `save_memory` description begins with its personal-memory
+purpose before the provider's generic save guidance. eve performs this
+composition after the `tools` resolver returns and before the dynamic tool
+metadata is captured, so every model step and parked continuation sees the same
+description. Omitting `description` preserves each provider tool description
+unchanged. An empty or whitespace-only description is invalid; authors omit the
+field when no slot-specific purpose is needed.
+
+The description is trusted application-authored model guidance. eve does not
+derive it from the slot name, namespace, scope, or request context, and does not
+expose those values through it. The description is not added to projections or
+the prompt separately, so a provider without tools does not expose it to the
+model. It helps the model choose among qualified tools but does not enforce
+authorization or replace scope isolation.
 
 ## Namespace
 
@@ -688,6 +749,9 @@ Mounted extensions cannot contribute memory slots.
 - Provider tools are slot-qualified, scope-bound `turn.started` dynamic tools.
   Each turn resolves one complete tool set, every model step uses it, and a
   durable call keeps its originating definition until settlement.
+- An optional static slot description is prepended to every provider tool
+  description before durable capture. It never derives from or exposes the
+  namespace or scope, and it guides model routing without granting access.
 - Completed-turn save settles before the next ready boundary.
 
 ## Non-goals
