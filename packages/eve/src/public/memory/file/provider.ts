@@ -46,46 +46,56 @@ export function fileMemory(options: FileMemoryOptions = {}): MemoryProvider {
   return defineMemoryProvider({
     recall: (context) => recallMemory(backend, context),
     tools(context) {
-      const key = context.memory.scope.key;
-
-      return {
-        remove_memory: defineTool({
-          description:
-            "Remove one persistent memory by the index shown in recalled memory. Use when it is wrong, outdated, or no longer needed.",
-          async execute(input, toolContext) {
-            await removeMemory({
-              backend,
-              index: input.index,
-              key,
-              signal: toolContext.abortSignal,
-            });
-          },
-          inputSchema: z.object({
-            index: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-          }),
-        }),
-        save_memory: defineTool({
-          description:
-            "Save one concise, stable fact or preference for future conversations. Omit secrets, instructions, and current-task details.",
-          async execute(input, toolContext) {
-            return await saveMemory({
-              backend,
-              key,
-              maxEntries,
-              signal: toolContext.abortSignal,
-              text: input.text,
-            });
-          },
-          inputSchema: z.object({
-            text: z.string().min(1),
-          }),
-          outputSchema: z.object({
-            index: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-          }),
-        }),
-      };
+      return createFileMemoryTools({
+        backend,
+        key: context.memory.scope.key,
+        maxEntries,
+      });
     },
   });
+}
+
+function createFileMemoryTools(input: {
+  readonly backend: MemoryDocumentBackend;
+  readonly key: string;
+  readonly maxEntries: number;
+}) {
+  return {
+    remove_memory: defineTool({
+      description:
+        "Remove one persistent memory by the index shown in recalled memory. Use when it is wrong, outdated, or no longer needed.",
+      async execute(toolInput, toolContext) {
+        await removeMemory({
+          backend: input.backend,
+          index: toolInput.index,
+          key: input.key,
+          signal: toolContext.abortSignal,
+        });
+      },
+      inputSchema: z.object({
+        index: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+      }),
+    }),
+    save_memory: defineTool({
+      description:
+        "Save one concise, stable fact or preference for future conversations. Omit secrets, instructions, and current-task details.",
+      async execute(toolInput, toolContext) {
+        return await saveMemory({
+          backend: input.backend,
+          key: input.key,
+          maxEntries: input.maxEntries,
+          signal: toolContext.abortSignal,
+          text: toolInput.text,
+        });
+      },
+      inputSchema: z.object({
+        text: z.string().min(1),
+      }),
+      outputSchema: z.object({
+        index: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+      }),
+    }),
+  };
 }
 
 async function recallMemory(
