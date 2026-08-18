@@ -377,7 +377,7 @@ async function bootstrapSubject(
   await timings.measure("subject.eve-build", () =>
     run(sandbox, `pnpm --dir ${SOURCE_ROOT} --filter eve build`),
   );
-  await timings.measure("subject.eve-package-install", () =>
+  await timings.measure("subject.eve-pack-and-cli", () =>
     run(
       sandbox,
       `mkdir -p /tmp/eve-package && pnpm --dir ${SOURCE_ROOT}/packages/eve pack --pack-destination /tmp/eve-package && mv $(find /tmp/eve-package -name '*.tgz' -print -quit) ${EVE_PACKAGE_PATH} && ln -sf ${SOURCE_ROOT}/packages/eve/bin/eve.js /usr/local/bin/eve && command -v eve`,

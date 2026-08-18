@@ -17,17 +17,19 @@ test("reports timing phases and aggregate durations", () => {
         { phase: "run.context", durationMs: 0, outcome: "success", details: { cache: "cold" } },
         { phase: "dependency-snapshot.get-or-create", durationMs: 1_000, outcome: "success" },
         { phase: "subject-snapshot.get-or-create", durationMs: 2_000, outcome: "success" },
+        { phase: "session.create", durationMs: 6_000, outcome: "success" },
         { phase: "agent.turn.1", durationMs: 3_000, outcome: "success" },
+        { phase: "validation.typecheck", durationMs: 2_000, outcome: "success" },
         { phase: "validation.build", durationMs: 4_000, outcome: "success" },
-        { phase: "run.total", durationMs: 10_000, outcome: "success" },
+        { phase: "run.total", durationMs: 13_000, outcome: "success" },
       ]),
     );
     const output = execFileSync(process.execPath, [script.pathname, path], { encoding: "utf8" });
     assert.match(output, /dependency-snapshot\.get-or-create\s+1\.0s\s+success/u);
-    assert.match(output, /Setup:\s+3\.0s/u);
+    assert.match(output, /Setup:\s+6\.0s/u);
     assert.match(output, /Agent:\s+3\.0s/u);
     assert.match(output, /Validation:\s+4\.0s/u);
-    assert.match(output, /Total:\s+10\.0s/u);
+    assert.match(output, /Total:\s+13\.0s/u);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

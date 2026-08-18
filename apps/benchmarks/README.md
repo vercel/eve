@@ -35,9 +35,11 @@ pnpm benchmark author-000-imessage \
 ```
 
 The runner archives each subject locally and uploads it to the sandbox. Revisions and local-only
-commits do not need to be pushed. Dependency downloads are cached by lockfile, so source-only
-changes reuse the prepared pnpm store. For one eval and one run, `--verbose` streams setup
-phases, assistant text, tool calls, grading, and build progress.
+commits do not need to be pushed. It maintains two persistent snapshot layers: a dependency
+snapshot keyed by package-manager inputs, and a subject snapshot keyed by the source tree,
+starting point, setup IDs, and bootstrap version. Source-only changes reuse the dependency snapshot
+but create a new subject snapshot. For one eval and one run, `--verbose` streams setup phases,
+assistant text, tool calls, grading, and build progress.
 
 Local runs use the `guided` treatment by default, which keeps the `AGENTS.md` and aliases generated
 by `eve init`. Pass `--treatment baseline` to remove those files before the coding agent starts.
