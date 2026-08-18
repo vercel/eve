@@ -26,6 +26,7 @@ import {
   SessionDynamicInstructionsKey,
   SessionDynamicModelReferenceKey,
   SessionDynamicSubagentSelectionsKey,
+  TurnTaskDeliveryKey,
 } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
@@ -11013,6 +11014,23 @@ describe("createToolLoopHarness", () => {
       expect(instructions).toBe("You are a test assistant.");
     });
 
+    it("adds conditional-delivery guidance to a top-level framework wake", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const ctx = new ContextContainer();
+      ctx.set(TurnTaskDeliveryKey, true);
+
+      await contextStorage.run(ctx, () =>
+        runStep(createTestSession(), { message: "Background task task_1 is completed." }),
+      );
+
+      const { instructions } = getLastAgentSettings();
+      expect(instructions).toEqual({
+        role: "system",
+        content: `You are a test assistant.\n\n${CONDITIONAL_DELIVERY_INSTRUCTION}`,
+      });
+    });
+
     it("does not add conditional-delivery guidance to a human continuation", async () => {
       setupMockAgent(defaultModelResult());
       const runStep = createToolLoopHarness(createTestConfig("conversation"));
@@ -11032,14 +11050,15 @@ describe("createToolLoopHarness", () => {
       expect(instructions).toBe("You are a test assistant.");
     });
 
-    it("does not add conditional-delivery guidance to a delegated run", async () => {
+    it("does not add conditional-delivery guidance to a task-owned conversation child", async () => {
       setupMockAgent(defaultModelResult());
-      const runStep = createToolLoopHarness(createTestConfig("task"));
-      const ctx = createScheduleContext();
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const ctx = new ContextContainer();
+      ctx.set(TurnTaskDeliveryKey, true);
       setDelegatedParent(ctx);
 
       await contextStorage.run(ctx, () =>
-        runStep(createTestSession(), { message: "Handle delegated work." }),
+        runStep(createTestSession(), { message: "Resume after HITL." }),
       );
 
       const { instructions } = getLastAgentSettings();

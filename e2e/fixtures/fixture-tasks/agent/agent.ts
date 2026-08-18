@@ -8,6 +8,8 @@ import {
 } from "eve/evals";
 
 const TASK_ID_PATTERN = /task_[a-z0-9]+/iu;
+const EMPTY_DELIVERY_SENTINEL = "<eve-empty-delivery/>";
+const CONDITIONAL_DELIVERY_MARKER = "Conditional delivery";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
   // Framework agent-list notes are model context, not scenario turns.
@@ -42,6 +44,13 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   }
   if (message.includes("TASK-C8-REMOTE-CHILD")) return runRemoteGate(request);
   if (message.startsWith("Background task ")) {
+    if (request.userMessages.includes("TASK-WAKE-CONDITIONAL-DELIVERY")) {
+      return request.messages.some(
+        (entry) => entry.role === "system" && entry.text.includes(CONDITIONAL_DELIVERY_MARKER),
+      )
+        ? EMPTY_DELIVERY_SENTINEL
+        : "TASK-WAKE-WAS-NOT-CONDITIONAL";
+    }
     // Scenarios that act on wake notifications route to their script;
     // every other scenario acknowledges them without running tools.
     // The exclusivity race delegates so a completion notification that
@@ -55,6 +64,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
 
   if (message === "TASK-FANOUT-PARENT-UPDATES") return fanoutTasks(request, 10);
   if (message === "TASK-PARENT-WAKE-UPDATES") return fanoutTasks(request, 3);
+  if (message === "TASK-WAKE-CONDITIONAL-DELIVERY") return startConditionalWakeWorker(request);
   if (message === "TASK-FAN-IN") return fanInTasks(request);
   if (message === "TASK-UPDATE-SETUP") return startTaskUpdateChild(request);
   if (message === "TASK-CANCEL-SETUP") return setupCancelWorker(request);
@@ -117,6 +127,21 @@ function startTaskUpdateChild(request: MockModelRequest): MockModelResponse | st
     };
   }
   return "TASK-UPDATE-STARTED";
+}
+
+function startConditionalWakeWorker(request: MockModelRequest): MockModelResponse | string {
+  if (resultById(request, "task-conditional-wake-worker") === undefined) {
+    return {
+      toolCalls: [
+        {
+          id: "task-conditional-wake-worker",
+          input: { message: "TASK-WAKE-CONDITIONAL-CHILD" },
+          name: "busy-worker",
+        },
+      ],
+    };
+  }
+  return "TASK-WAKE-CONDITIONAL-STARTED";
 }
 
 function sendTaskUpdate(request: MockModelRequest): MockModelResponse | string {

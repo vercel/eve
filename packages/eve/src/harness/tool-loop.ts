@@ -36,6 +36,7 @@ import {
   ParentSessionKey,
   ParentTraceContextKey,
   SessionCallbackKey,
+  TurnTaskDeliveryKey,
 } from "#context/keys.js";
 import {
   buildDynamicInstructionMessages,
@@ -1226,10 +1227,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const approvedTools = getApprovedTools(session);
 
     const emptyDeliveryEnabled =
+      // A structured-output run must always produce its declared result.
       session.outputSchema === undefined &&
+      // Eligibility requires durable framework provenance from the active context.
       ctx !== undefined &&
-      isScheduleAppAuth(ctx.get(AuthKey)) &&
-      ctx.get(ParentSessionKey) === undefined;
+      // A child must always return its result to its parent, even when framework-triggered.
+      ctx.get(ParentSessionKey) === undefined &&
+      // A schedule-initiated root turn may have nothing worth delivering.
+      (isScheduleAppAuth(ctx.get(AuthKey)) ||
+        // A task-notification root turn may act on the wake without messaging the user.
+        ctx.get(TurnTaskDeliveryKey) === true);
 
     // --- Execute via ToolLoopAgent ------------------------------------------
 
