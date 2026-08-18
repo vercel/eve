@@ -124,6 +124,7 @@ import {
   extractQuestionInputRequests,
   extractToolApprovalInputRequests,
 } from "#harness/input-extraction.js";
+import { renderPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
 import { createToolResultMessagePartFromToolError } from "#harness/action-result-helpers.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import {
@@ -1472,6 +1473,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           bridgeIntegration,
         ),
         toolApproval: buildToolApproval(modelTools),
+        toolChoice: hasPendingApprovalBatch(session) ? ("none" as const) : undefined,
         tools: effectiveTools,
       };
       const agent = new ToolLoopAgent(agentSettings);
@@ -2486,6 +2488,13 @@ async function handleStepResult(input: {
     excludedCallIds: new Set([...invalidInputToolCallIds, ...approvalRequestCallIds]),
   });
   const inputRequests: InputRequest[] = [...approvalRequests, ...questionRequests];
+  const pendingApprovals = renderPendingApprovalsSnippet(approvalRequests);
+  const parkedInputHistory: ModelMessage[] = [
+    ...promptMessages,
+    ...(pendingApprovals === undefined
+      ? []
+      : [{ content: pendingApprovals, role: "user" as const }]),
+  ];
   const advertisedRuntimeActionTools = getAdvertisedTools({
     delegatedCaller: input.delegatedCaller,
     session: baseSession,
@@ -2548,7 +2557,7 @@ async function handleStepResult(input: {
         turnId: emissionState.turnId,
       },
       responseMessages,
-      session: { ...baseSession, history: [...promptMessages] },
+      session: { ...baseSession, history: parkedInputHistory },
     });
 
     // The runtime-action batch already owns the shared assistant response.
@@ -2605,7 +2614,7 @@ async function handleStepResult(input: {
         })
         .map((request) => request.requestId),
       responseMessages,
-      session: { ...baseSession, history: [...promptMessages] },
+      session: { ...baseSession, history: parkedInputHistory },
     });
 
     if (emit) {

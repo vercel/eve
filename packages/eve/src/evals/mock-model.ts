@@ -1,6 +1,9 @@
 import type { LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 
+import { AGENTS_SNIPPET_LABEL } from "#harness/handles/prompt.js";
+import { isPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
+
 type GenerateOptions = Parameters<MockLanguageModelV3["doGenerate"]>[0];
 type GenerateResult = Awaited<ReturnType<MockLanguageModelV3["doGenerate"]>>;
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
@@ -47,11 +50,11 @@ export interface MockModelToolResult {
 export interface MockModelRequest {
   /** Every prompt message in order, with text content extracted. */
   readonly messages: readonly MockModelMessage[];
-  /** All user-message text in order. */
+  /** Authored user-message text in order, excluding framework scaffolding. */
   readonly userMessages: readonly string[];
-  /** The latest user-message text, or `null` before the first user message. */
+  /** The latest authored user-message text, or `null` before the first user message. */
   readonly lastUserMessage: string | null;
-  /** Number of user messages in the prompt. */
+  /** Number of authored user messages in the prompt. */
   readonly userMessageCount: number;
   /** Tools available for this model call. */
   readonly tools: readonly MockModelTool[];
@@ -158,7 +161,8 @@ function createRequest(options: GenerateOptions): MockModelRequest {
   }));
   const userMessages = messages
     .filter((message) => message.role === "user")
-    .map((message) => message.text);
+    .map((message) => message.text)
+    .filter((message) => !isFrameworkScaffolding(message));
 
   return {
     lastUserMessage: userMessages.at(-1) ?? null,
@@ -168,6 +172,11 @@ function createRequest(options: GenerateOptions): MockModelRequest {
     userMessageCount: userMessages.length,
     userMessages,
   };
+}
+
+function isFrameworkScaffolding(message: string): boolean {
+  const text = message.trim();
+  return text.startsWith(AGENTS_SNIPPET_LABEL) || isPendingApprovalsSnippet(text);
 }
 
 function extractMessageText(message: GenerateOptions["prompt"][number]): string {
