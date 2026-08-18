@@ -12,15 +12,15 @@ Use an [MCP connection](../connections/mcp) instead when your eve agent needs to
 Create `agent/channels/mcp.ts`. Authentication is required explicitly, even during development.
 
 ```ts title="agent/channels/mcp.ts"
-import { localDev, vercelOidc } from "eve/channels/auth";
+import { localDev } from "eve/channels/auth";
 import { mcpChannel } from "eve/channels/mcp";
 
 export default mcpChannel({
-  auth: [vercelOidc(), localDev()],
+  auth: localDev(),
 });
 ```
 
-This accepts Vercel-issued bearer tokens in a deployment and admits a synthetic local principal under `eve dev` or `vercel dev`. `localDev()` checks the running environment, not the request hostname: accessing an `eve start` production process through localhost does not activate it.
+This accepts a synthetic local principal under `eve dev` or `vercel dev` and rejects all requests in production. Before deploying, replace it with one of the production authentication modes below. `localDev()` checks the running environment, not the request hostname: accessing an `eve start` production process through localhost does not activate it.
 
 ### Routes
 
