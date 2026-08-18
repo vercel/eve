@@ -104,7 +104,7 @@
  *   rule 39 — No inline `kind: "send"` / `kind: "deliver"` payload literal at
  *             a `resumeHook(...)` call outside `src/execution/wire/`. Session
  *             hook payloads are durable wire formats that outlive deployments;
- *             they must route through the owning family's `encode*` function
+ *             they must route through the owning family's wire encoder
  *             from a versioned wire codec under `execution/wire/` so shape
  *             changes are visible as wire changes (see
  *             research/session-inbox-wire-schema.md). Test files and
@@ -501,15 +501,15 @@ function checkRule39(posix, lines, violations) {
   lines.forEach((line, idx) => {
     if (!RESUME_HOOK_CALL_RE.test(line)) return;
     const window = lines.slice(idx, idx + 1 + RULE_39_WINDOW).join("\n");
-    // A literal handed to a wire-module encoder (`encodeXxx(...)`) is
+    // A literal handed to a wire-module encoder is
     // routed, not raw.
-    if (/\bencode[A-Z]\w*\s*\(/.test(window)) return;
+    if (/\b(?:encode[A-Z]\w*|sessionInboxWire\.encode)\s*\(/.test(window)) return;
     if (SESSION_WIRE_LITERAL_RE.test(window)) {
       violations.push({
         rule: 39,
         file: posix,
         line: idx + 1,
-        message: `passes an inline \`kind: "send"\`/\`kind: "deliver"\` literal to resumeHook(). Session hook payloads are durable wire formats that outlive deployments — route them through the owning family's encode* function under execution/wire/ so shape changes stay visible as wire changes (research/session-inbox-wire-schema.md).`,
+        message: `passes an inline \`kind: "send"\`/\`kind: "deliver"\` literal to resumeHook(). Session hook payloads are durable wire formats that outlive deployments — route them through \`sessionInboxWire.encode\` under execution/wire/ so shape changes stay visible as wire changes (research/session-inbox-wire-schema.md).`,
       });
     }
   });

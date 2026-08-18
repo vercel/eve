@@ -4,7 +4,7 @@ import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
 import type { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import {
-  decodeSessionInbox,
+  sessionInboxWire,
   SessionInboxWireError,
   type DecodedSessionInbox,
 } from "#execution/wire/session-inbox-wire.js";
@@ -196,7 +196,7 @@ async function waitForNextSessionAction(input: {
 
     let decoded: DecodedSessionInbox;
     try {
-      decoded = decodeSessionInbox(first.value);
+      decoded = sessionInboxWire.decode(first.value);
     } catch (error) {
       if (!(error instanceof SessionInboxWireError)) throw error;
       // A lost delivery with an operator-visible signal is the designed

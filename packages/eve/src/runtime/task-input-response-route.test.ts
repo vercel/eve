@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { encodeSessionCommand } from "#execution/wire/session-inbox-encoder.js";
+import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
 import { EVE_TASK_INPUT_ROUTE_PATTERN } from "#protocol/routes.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import {
@@ -9,16 +9,27 @@ import {
 } from "#runtime/task-input-response-route.js";
 
 const resumeHookMock = vi.fn();
+const getHookByTokenMock = vi.fn();
 const DIGEST = "0123456789abcdef0123456789abcdef";
 const CAPABILITY_TOKEN = `eve:task-input:${DIGEST}`;
 const TARGET_TOKEN = `eve:eve:op:${DIGEST}`;
+const TARGET_HOOK = {
+  metadata: { sessionInboxWireVersion: 1 },
+  runId: "child-session",
+  token: TARGET_TOKEN,
+};
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
-  resumeHook: (token: string, payload: unknown) => resumeHookMock(token, payload),
+  getHookByToken: (...args: unknown[]) => getHookByTokenMock(...args),
+  resumeHook: (...args: unknown[]) => resumeHookMock(...args),
 }));
 
 describe("task input response capability", () => {
-  beforeEach(() => resumeHookMock.mockReset());
+  beforeEach(() => {
+    getHookByTokenMock.mockReset();
+    getHookByTokenMock.mockResolvedValue(TARGET_HOOK);
+    resumeHookMock.mockReset();
+  });
 
   it("registers one capability-scoped POST route", () => {
     expect(getTaskInputResponseChannelDefinitions()).toEqual([
@@ -34,12 +45,16 @@ describe("task input response capability", () => {
     );
 
     expect(response.status).toBe(202);
+    expect(getHookByTokenMock).toHaveBeenCalledWith(TARGET_TOKEN);
     expect(resumeHookMock).toHaveBeenCalledWith(
-      TARGET_TOKEN,
-      encodeSessionCommand({
-        kind: "send",
-        payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
-      }),
+      TARGET_HOOK,
+      sessionInboxWire.encode(
+        {
+          kind: "send",
+          payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
+        },
+        { version: 1 },
+      ),
     );
   });
 

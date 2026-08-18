@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { z } from "#compiled/zod/index.js";
 
-import { encodeSessionCommand } from "#execution/wire/session-inbox-encoder.js";
+import { sessionInboxWire as sessionInboxWireEncoder } from "#execution/wire/session-inbox-encoder.js";
 import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
-import { decodeSessionInbox, SessionInboxWireError } from "#execution/wire/session-inbox-wire.js";
+import {
+  sessionInboxWire as sessionInboxWireDecoder,
+  SessionInboxWireError,
+} from "#execution/wire/session-inbox-wire.js";
 import { sessionInboxWireV1Schema } from "#execution/wire/session-inbox-wire.v1.js";
 
 const FROZEN_SHAPES = [1] as const;
@@ -27,14 +30,17 @@ describe("session inbox wire v1", () => {
   });
 
   it("encodes a send as the frozen v1 delivery and round-trips", () => {
-    const wire = encodeSessionCommand({
-      auth: null,
-      kind: "send",
-      payload: { message: "wire" },
-      requestId: "req-wire",
-    });
+    const wire = sessionInboxWireEncoder.encode(
+      {
+        auth: null,
+        kind: "send",
+        payload: { message: "wire" },
+        requestId: "req-wire",
+      },
+      { version: 1 },
+    );
     expect(stableStringify(wire)).toBe(FROZEN_FIXTURES.deliver);
-    expect(decodeSessionInbox(JSON.parse(JSON.stringify(wire)))).toEqual({
+    expect(sessionInboxWireDecoder.decode(JSON.parse(JSON.stringify(wire)))).toEqual({
       auth: null,
       caller: undefined,
       kind: "deliver",
@@ -68,21 +74,24 @@ describe("session inbox wire v1", () => {
         },
       ],
     };
-    const wire = encodeSessionCommand({
-      caller,
-      delivery: {
-        channelKind: "http",
-        channelName: "web",
-        deliveryId: "delivery-1",
-        requestTraceContext: { spanId: "span-1", traceFlags: 1, traceId: "trace-1" },
+    const wire = sessionInboxWireEncoder.encode(
+      {
+        caller,
+        delivery: {
+          channelKind: "http",
+          channelName: "web",
+          deliveryId: "delivery-1",
+          requestTraceContext: { spanId: "span-1", traceFlags: 1, traceId: "trace-1" },
+        },
+        kind: "send",
+        payload: { task },
+        taskDeliveryId: "task-delivery-1",
+        turnPolicy: "queue",
       },
-      kind: "send",
-      payload: { task },
-      taskDeliveryId: "task-delivery-1",
-      turnPolicy: "queue",
-    });
+      { version: 1 },
+    );
 
-    expect(decodeSessionInbox(JSON.parse(JSON.stringify(wire)))).toEqual({
+    expect(sessionInboxWireDecoder.decode(JSON.parse(JSON.stringify(wire)))).toEqual({
       auth: undefined,
       caller,
       deliveryMetadata: [
@@ -100,39 +109,44 @@ describe("session inbox wire v1", () => {
       taskDeliveryId: "task-delivery-1",
       turnPolicy: "queue",
     });
-    expect(decodeSessionInbox(encodeSessionCommand({ kind: "cancel", taskId: "task-1" }))).toEqual({
-      kind: "cancel",
-      taskId: "task-1",
-      turnId: undefined,
-    });
+    expect(
+      sessionInboxWireDecoder.decode(
+        sessionInboxWireEncoder.encode({ kind: "cancel", taskId: "task-1" }, { version: 1 }),
+      ),
+    ).toEqual({ kind: "cancel", taskId: "task-1", turnId: undefined });
   });
 
   it("encodes controls with v1 and round-trips", () => {
-    const clear = encodeSessionCommand({ kind: "clear" });
+    const clear = sessionInboxWireEncoder.encode({ kind: "clear" }, { version: 1 });
     expect(stableStringify(clear)).toBe(FROZEN_FIXTURES.clear);
-    expect(decodeSessionInbox(clear)).toEqual({ kind: "clear" });
-    expect(decodeSessionInbox(encodeSessionCommand({ kind: "session-timeout" }))).toEqual({
-      kind: "session-timeout",
-    });
-    expect(decodeSessionInbox(encodeSessionCommand({ kind: "cancel", turnId: "turn_9" }))).toEqual({
-      kind: "cancel",
-      turnId: "turn_9",
-    });
+    expect(sessionInboxWireDecoder.decode(clear)).toEqual({ kind: "clear" });
+    expect(
+      sessionInboxWireDecoder.decode(
+        sessionInboxWireEncoder.encode({ kind: "session-timeout" }, { version: 1 }),
+      ),
+    ).toEqual({ kind: "session-timeout" });
+    expect(
+      sessionInboxWireDecoder.decode(
+        sessionInboxWireEncoder.encode({ kind: "cancel", turnId: "turn_9" }, { version: 1 }),
+      ),
+    ).toEqual({ kind: "cancel", turnId: "turn_9" });
   });
 
   it("keeps the transitional mirror equal to the delivery", () => {
-    const wire = encodeSessionCommand({ kind: "send", payload: { message: "m" } });
+    const wire = sessionInboxWireEncoder.encode(
+      { kind: "send", payload: { message: "m" } },
+      { version: 1 },
+    );
     expect(wire.kind).toBe("deliver");
     if (wire.kind === "deliver") expect(wire.payloads[0]).toEqual(wire.payload);
   });
 
   it("does not persist undeclared command fields and preserves adapter extensions", () => {
     const payload = { interaction: { slack: true }, message: "hi" };
-    const encoded = encodeSessionCommand({
-      kind: "send",
-      payload,
-      stowaway: "must not persist",
-    } as never);
+    const encoded = sessionInboxWireEncoder.encode(
+      { kind: "send", payload, stowaway: "must not persist" } as never,
+      { version: 1 },
+    );
     expect(encoded).not.toHaveProperty("stowaway");
     expect(encoded.kind === "deliver" && encoded.payloads[0]).toEqual(payload);
   });
@@ -143,9 +157,9 @@ describe("session inbox wire v1", () => {
     ["message part", { message: [{ text: 7, type: "text" }] }],
     ["output schema", { outputSchema: { invalid: () => undefined } }],
   ])("rejects a malformed eve-owned %s before persistence", (_name, payload) => {
-    expect(() => encodeSessionCommand({ kind: "send", payload } as never)).toThrowError(
-      SessionInboxWireError,
-    );
+    expect(() =>
+      sessionInboxWireEncoder.encode({ kind: "send", payload } as never, { version: 1 }),
+    ).toThrowError(SessionInboxWireError);
   });
 
   it.each([
@@ -153,13 +167,13 @@ describe("session inbox wire v1", () => {
     ["a non-numeric version", { kind: "deliver", payloads: [], version: "1" }],
     ["an unrecognized kind", { kind: "mystery", version: 1 }],
   ])("rejects %s instead of reinterpreting it", (_name, payload) => {
-    expect(() => decodeSessionInbox(payload)).toThrowError(SessionInboxWireError);
+    expect(() => sessionInboxWireDecoder.decode(payload)).toThrowError(SessionInboxWireError);
   });
 
   it("reports an unknown newer version as written by a newer deployment", () => {
-    expect(() => decodeSessionInbox({ kind: "deliver", payloads: [], version: 99 })).toThrowError(
-      /newer/,
-    );
+    expect(() =>
+      sessionInboxWireDecoder.decode({ kind: "deliver", payloads: [], version: 99 }),
+    ).toThrowError(/newer/);
   });
 });
 

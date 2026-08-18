@@ -10,7 +10,7 @@ import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
 import { turnCancellationHookToken } from "#execution/turn-cancellation-token.js";
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import {
-  decodeSessionInbox,
+  sessionInboxWire,
   SessionInboxWireError,
   type DecodedSessionInbox,
 } from "#execution/wire/session-inbox-wire.js";
@@ -174,10 +174,10 @@ export class TurnControlReceiver {
         return await this.nextControlOrCommand();
       }
       try {
-        return { command: decodeSessionInbox(winner.value.value), kind: "command" };
+        return { command: sessionInboxWire.decode(winner.value.value), kind: "command" };
       } catch (error) {
         if (!(error instanceof SessionInboxWireError)) throw error;
-        // Drop loudly and keep servicing the turn; see decodeSessionInbox.
+        // Drop loudly and keep servicing the turn; see sessionInboxWire.decode.
         await reportDroppedWirePayloadStep({ detail: error.message, family: "session-inbox" });
         return await this.nextControlOrCommand();
       }
@@ -245,10 +245,10 @@ export class TurnControlReceiver {
       }
       let decoded: DecodedSessionInbox;
       try {
-        decoded = decodeSessionInbox(winner.value.value);
+        decoded = sessionInboxWire.decode(winner.value.value);
       } catch (error) {
         if (!(error instanceof SessionInboxWireError)) throw error;
-        // Drop loudly and keep servicing the request; see decodeSessionInbox.
+        // Drop loudly and keep servicing the request; see sessionInboxWire.decode.
         await reportDroppedWirePayloadStep({ detail: error.message, family: "session-inbox" });
         continue;
       }

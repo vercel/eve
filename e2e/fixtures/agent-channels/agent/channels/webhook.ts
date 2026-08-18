@@ -13,6 +13,7 @@ export default defineChannel({
       const body = (await req.json().catch(() => ({}))) as {
         message?: string;
         sessionRef?: string;
+        turnPolicy?: "queue" | "steer";
       };
       const session = await ctx
         .to(target, { sessionRef: body.sessionRef ?? crypto.randomUUID() })
@@ -23,6 +24,7 @@ export default defineChannel({
             principalId: "smoke-test",
             principalType: "service",
           },
+          turnPolicy: body.turnPolicy,
         });
       return Response.json({ ok: true, sessionId: session.id });
     }),

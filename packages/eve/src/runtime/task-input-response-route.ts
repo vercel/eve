@@ -1,6 +1,5 @@
-import { encodeSessionCommand } from "#execution/wire/session-inbox-encoder.js";
 import { readTaskInputTargetToken } from "#execution/task-input-capability.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import { EVE_TASK_INPUT_ROUTE_PATTERN } from "#protocol/routes.js";
 import type { ChannelMethod, RouteContext } from "#public/definitions/channel.js";
 import type { InputResponse } from "#runtime/input/types.js";
@@ -53,9 +52,8 @@ export async function handleTaskInputResponseRequest(
   }
   // Child inboxes outlive deployments; cross the hook in the durable
   // delivery envelope like every other session-inbox producer.
-  const command = encodeSessionCommand({ kind: "send", payload: { inputResponses } });
   try {
-    await resumeHook(targetToken, command);
+    await resumeSessionInbox(targetToken, { kind: "send", payload: { inputResponses } });
   } catch {
     return Response.json(
       { error: "Task input target is not pending.", ok: false },

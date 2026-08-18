@@ -6,8 +6,7 @@ import type {
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
-import { encodeSessionCommand } from "#execution/wire/session-inbox-encoder.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import { createLogger } from "#internal/logging.js";
 import {
   isTerminalTaskStatus,
@@ -73,7 +72,7 @@ export async function wakeTaskAuthorizationParentStep(input: {
     taskDeliveryId: `${input.taskId}:authorization:${input.request.event.type}:${data.turnId}:${data.stepIndex}:${data.sequence}:${taskAuthorizationRequestId(input.request.event)}`,
   };
   try {
-    await resumeHook(input.token, encodeSessionCommand(command));
+    await resumeSessionInbox(input.token, command);
   } catch (error) {
     if (isTaskWorkflowTargetGone(error)) return;
     throw error;
@@ -104,7 +103,7 @@ export async function wakeTaskParentStep(input: {
     taskDeliveryId: `${input.view.taskId}:ready:${input.view.status}`,
   };
   try {
-    await resumeHook(input.token, encodeSessionCommand(command));
+    await resumeSessionInbox(input.token, command);
   } catch (error) {
     if (isTaskWorkflowTargetGone(error)) {
       log.warn("task wake target is gone; the parent session already ended", {
@@ -133,7 +132,7 @@ export async function wakeTaskUpdateParentStep(input: {
     taskDeliveryId: `${input.view.taskId}:update:${input.update.childTurnId}:${input.update.childStepIndex}:${input.update.callId}`,
   };
   try {
-    await resumeHook(input.token, encodeSessionCommand(command));
+    await resumeSessionInbox(input.token, command);
   } catch (error) {
     if (isTaskWorkflowTargetGone(error)) return;
     throw error;
@@ -163,7 +162,7 @@ export async function wakeTaskInputRequestParentStep(input: {
     taskDeliveryId: `${input.taskId}:input:${input.request.event.turnId}:${input.request.event.stepIndex}:${input.request.event.sequence}`,
   };
   try {
-    await resumeHook(input.token, encodeSessionCommand(command));
+    await resumeSessionInbox(input.token, command);
   } catch (error) {
     if (isTaskWorkflowTargetGone(error)) return;
     throw error;
@@ -208,7 +207,7 @@ export async function deliverTaskInputResponsesStep(input: {
       if (!response.ok)
         throw new Error(`Remote task input delivery failed with HTTP ${response.status}.`);
     } else {
-      await resumeHook(input.answer.childContinuationToken, encodeSessionCommand(command));
+      await resumeSessionInbox(input.answer.childContinuationToken, command);
     }
     return "delivered";
   } catch (error) {

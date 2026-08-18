@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { decodeSessionInbox, SessionInboxWireError } from "#execution/wire/session-inbox-wire.js";
+import { sessionInboxWire as sessionInboxWireEncoder } from "#execution/wire/session-inbox-encoder.js";
+import {
+  sessionInboxWire as sessionInboxWireDecoder,
+  SessionInboxWireError,
+} from "#execution/wire/session-inbox-wire.js";
 
 /** Every payload shape persisted before explicit wire versioning. */
 const FROZEN_FIXTURES: ReadonlyArray<{
@@ -9,12 +13,12 @@ const FROZEN_FIXTURES: ReadonlyArray<{
   readonly decoded: unknown;
 }> = [
   {
-    name: "legacy deliver envelope (≤0.30.2 producers)",
+    name: "legacy deliver envelope (≤0.30.4 producers)",
     payload: '{"kind":"deliver","payloads":[{"message":"legacy"}]}',
     decoded: { kind: "deliver", payloads: [{ message: "legacy" }] },
   },
   {
-    name: "raw send command (0.30.3–0.30.8 producers)",
+    name: "raw send command (0.30.5–0.30.8 producers)",
     payload:
       '{"auth":null,"delivery":{"channelKind":"http","channelName":"web","deliveryId":"delivery-0"},"kind":"send","payload":{"message":"mid"},"requestId":"req-0","taskDeliveryId":"task-delivery-0","turnPolicy":"queue"}',
     decoded: {
@@ -48,7 +52,7 @@ const FROZEN_FIXTURES: ReadonlyArray<{
 
 describe("session inbox wire v0", () => {
   it.each(FROZEN_FIXTURES)("migrates the frozen $name fixture", ({ payload, decoded }) => {
-    expect(decodeSessionInbox(JSON.parse(payload))).toEqual(decoded);
+    expect(sessionInboxWireDecoder.decode(JSON.parse(payload))).toEqual(decoded);
   });
 
   it.each([
@@ -57,6 +61,42 @@ describe("session inbox wire v0", () => {
     ["legacy send with malformed delivery metadata", { kind: "send", payload: {}, delivery: 1 }],
     ["a non-object payload", "deliver"],
   ])("rejects %s instead of reinterpreting it", (_name, payload) => {
-    expect(() => decodeSessionInbox(payload)).toThrowError(SessionInboxWireError);
+    expect(() => sessionInboxWireDecoder.decode(payload)).toThrowError(SessionInboxWireError);
+  });
+
+  it("encodes sends for the legacy deliver cohort", () => {
+    expect(
+      sessionInboxWireEncoder.encode(
+        { auth: null, kind: "send", payload: { message: "legacy" }, requestId: "req-0" },
+        { variant: "deliver", version: 0 },
+      ),
+    ).toEqual({
+      auth: null,
+      caller: undefined,
+      deliveryMetadata: undefined,
+      kind: "deliver",
+      payloads: [{ message: "legacy" }],
+      requestId: "req-0",
+      taskDeliveryId: undefined,
+      turnPolicy: undefined,
+    });
+  });
+
+  it("encodes sends for the legacy raw-send cohort", () => {
+    expect(
+      sessionInboxWireEncoder.encode(
+        { kind: "send", payload: { message: "mid" } },
+        { variant: "send", version: 0 },
+      ),
+    ).toEqual({
+      auth: undefined,
+      caller: undefined,
+      delivery: undefined,
+      kind: "send",
+      payload: { message: "mid" },
+      requestId: undefined,
+      taskDeliveryId: undefined,
+      turnPolicy: undefined,
+    });
   });
 });

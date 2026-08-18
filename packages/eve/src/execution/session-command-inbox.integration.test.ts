@@ -41,7 +41,7 @@ describe("session command inbox integration", () => {
     }
   });
 
-  it("resumes a 0.30.3–0.30.8 parked consumer from a current send command", async () => {
+  it("resumes a 0.30.5–0.30.8 parked consumer from a current send command", async () => {
     const token = "http:session-command-inbox:mid-cohort-delivery";
     const run = await start(midCohortSessionDeliveryWorkflow, [{ token }]);
 
@@ -72,7 +72,7 @@ describe("session command inbox integration", () => {
     }
   });
 
-  it("stamps the consumer eve version onto inbox hooks, readable pre-resume", async () => {
+  it("stamps the consumer wire version onto inbox hooks, readable pre-resume", async () => {
     const channelToken = "http:session-command-inbox:version-stamp";
     const run = await start(sessionCommandInboxWorkflow, [{ token: channelToken }]);
     const stableToken = sessionCommandHookToken(run.runId);
@@ -84,8 +84,11 @@ describe("session command inbox integration", () => {
       ]);
 
       for (const token of [stableToken, channelToken]) {
-        const hook = (await getHookByToken(token)) as { metadata?: { eveVersion?: unknown } };
+        const hook = (await getHookByToken(token)) as {
+          metadata?: { eveVersion?: unknown; sessionInboxWireVersion?: unknown };
+        };
         expect(hook.metadata?.eveVersion, `hook ${token}`).toMatch(/^\d+\.\d+\.\d+/);
+        expect(hook.metadata?.sessionInboxWireVersion, `hook ${token}`).toBe(1);
       }
     } finally {
       const status = await run.status;

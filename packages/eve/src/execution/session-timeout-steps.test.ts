@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   cancelSessionTimeoutStep,
@@ -9,18 +9,31 @@ import { sessionTimeoutWorkflowReference } from "#execution/workflow-runtime.js"
 
 const cancelRunMock = vi.fn();
 const getWorldMock = vi.fn();
+const getHookByTokenMock = vi.fn();
 const resumeHookMock = vi.fn();
 const startMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   cancelRun: (...args: unknown[]) => cancelRunMock(...args),
+  getHookByToken: (...args: unknown[]) => getHookByTokenMock(...args),
   getWorld: (...args: unknown[]) => getWorldMock(...args),
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
   start: (...args: unknown[]) => startMock(...args),
 }));
 
+const TIMEOUT_HOOK = {
+  metadata: { sessionInboxWireVersion: 1 },
+  runId: "session-1",
+  token: "session-1:session-timeout",
+};
+
+beforeEach(() => {
+  getHookByTokenMock.mockResolvedValue(TIMEOUT_HOOK);
+});
+
 afterEach(() => {
   cancelRunMock.mockReset();
+  getHookByTokenMock.mockReset();
   getWorldMock.mockReset();
   resumeHookMock.mockReset();
   startMock.mockReset();
@@ -45,7 +58,7 @@ describe("session timeout steps", () => {
 
     await signalSessionTimeoutStep({ token: "session-1:session-timeout" });
 
-    expect(resumeHookMock).toHaveBeenCalledWith("session-1:session-timeout", {
+    expect(resumeHookMock).toHaveBeenCalledWith(TIMEOUT_HOOK, {
       kind: "session-timeout",
       version: 1,
     });

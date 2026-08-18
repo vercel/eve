@@ -30,7 +30,6 @@ import { SpanKind, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
   getHookByToken,
   getRun,
-  resumeHook,
   start,
   type Run,
   type StartOptionsWithoutDeploymentId,
@@ -50,10 +49,7 @@ import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
 import { walkCauseChain } from "#shared/errors.js";
 import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import {
-  encodeSessionCommand,
-  type SessionInboxWire,
-} from "#execution/wire/session-inbox-encoder.js";
+import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
@@ -273,7 +269,7 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
 ): Promise<SessionCommandResult<TCommand>> {
   let hook: WorkflowHookRecord;
   try {
-    hook = normalizeWorkflowHook(await resumeHook(token, sessionHookPayload(command)));
+    hook = normalizeWorkflowHook(await resumeSessionInbox(token, command));
   } catch (error) {
     if (isInactiveCommandTarget(error)) {
       return inactiveCommandResult(command);
@@ -290,10 +286,6 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   }
 
   return activeCommandResult(command, hook.runId);
-}
-
-function sessionHookPayload(command: SessionCommand): SessionInboxWire {
-  return encodeSessionCommand(command);
 }
 
 function activeCommandResult<TCommand extends SessionCommand>(

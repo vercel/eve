@@ -17,8 +17,8 @@ import { sessionInboxWireV0Migration } from "#execution/wire/session-inbox-wire.
 
 /**
  * The session inbox wire family: every payload persisted to a session's
- * durable inbox hooks crosses through `encodeSessionCommand` /
- * `decodeSessionInbox`.
+ * durable inbox hooks crosses through `sessionInboxWire.encode` /
+ * `sessionInboxWire.decode`.
  *
  * Historic migrations live in `session-inbox-wire.vN.ts` modules; the
  * current schema and encoder live in the current version module. This file
@@ -47,7 +47,7 @@ const sessionInboxMigrations: readonly VersionMigration[] = [sessionInboxWireV0M
  * with an operator-visible signal is the designed failure; a reinterpreted
  * delivery is the bug this module exists to prevent.
  */
-export function decodeSessionInbox(value: unknown): DecodedSessionInbox {
+function decode(value: unknown): DecodedSessionInbox {
   let migrated: unknown;
   try {
     migrated = runMigrationChain({
@@ -69,6 +69,9 @@ export function decodeSessionInbox(value: unknown): DecodedSessionInbox {
   }
   return normalizeWire(wire as SessionInboxWire);
 }
+
+/** Workflow-safe consumer facade. */
+export const sessionInboxWire = { decode } as const;
 
 /** Strips wire-only fields (`version`, the deliver mirror) for consumption. */
 function normalizeWire(wire: SessionInboxWire): DecodedSessionInbox {

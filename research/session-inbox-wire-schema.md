@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1765
 status: proposed
-last_updated: "2026-08-07"
+last_updated: "2026-08-18"
 ---
 
 # Versioned wire schema for the session inbox
@@ -13,8 +13,9 @@ them, but their shape is currently an emergent property of whatever TypeScript
 type flows into `resumeHook`. A shared type is not a wire contract: both sides
 recompile together while pinned deployments keep executing the old decode.
 That gap produced two silent-loss incidents from one refactor (#1586 →
-#1751): consumers on eve ≤0.30.2 dropped unknown payload kinds without a
-trace, and consumers on 0.30.3–0.30.8 miscast them into empty deliveries.
+#1751): consumers on eve ≤0.30.4 require the legacy `deliver` envelope,
+while consumers on 0.30.5–0.30.8 require the raw `send` command during an
+active turn.
 
 This plan gives the session inbox a declared, versioned wire schema: one
 module owns every shape that crosses the hook, encoding and decoding are the
@@ -38,6 +39,9 @@ delivery adopt the same split in follow-ups.
 ```ts
 // Dependency-free contract imported by encoder and decoder.
 export const SESSION_INBOX_WIRE_VERSION = 1;
+export type SessionInboxWireTarget =
+  | { version: 0; variant: "deliver" | "send" }
+  | { version: 1 };
 
 // One append-only module per shipped version:
 // execution/wire/session-inbox-wire.v1.ts (server/step only)
@@ -58,14 +62,14 @@ encodeSessionCommandV1(input) // build → parse complete value once → persist
 // execution/wire/session-inbox-wire.v0.ts (dependency-free, temporary)
 export const sessionInboxWireV0Migration: VersionMigration = { from: 0, to: 1, migrate };
 
-// Stable encoder facade selects the current version.
-encodeSessionCommand(input) // delegates to encodeSessionCommandV1
+// Server/step-safe encoder facade selects the target consumer's version.
+sessionInboxWire.encode(input, target)
 
 // Workflow-safe decoder: execution/wire/session-inbox-wire.ts
 import type { SessionInboxWireV1 } from "./session-inbox-wire.v1.js";
 export class SessionInboxWireError extends Error { ... }
 const sessionInboxMigrations: readonly VersionMigration[] = [{ from: 0, to: 1, migrate }];
-decodeSessionInbox(value) // runMigrationChain (initialVersion: 0) → version/kind → trust → normalize
+sessionInboxWire.decode(value) // runMigrationChain (initialVersion: 0) → version/kind → trust → normalize
 ```
 
 Normative rules:
@@ -100,23 +104,25 @@ Normative rules:
   payload — sends and controls alike — is built and validated against the
   current schema before it persists, so producer drift dies at the producer
   instead of at a pinned consumer weeks later.
-- Per family, the `encode*` function **must** be the only producer of
-  persisted payloads and `decode*` the only consumer-side interpretation.
+- Per family, `sessionInboxWire.encode` **must** be the only producer of
+  persisted payloads and `sessionInboxWire.decode` the only consumer-side
+  interpretation.
 
 ## Version signals and their semantics
 
 Two complementary signals, each covering the other's blind side:
 
 ```text
-producer ──getHookByToken──▶ hook.metadata.eveVersion   (what can they decode?)
-producer ──resumeHook──────▶ { v: N, ... }              (what did I send?)
-consumer ──decode──────────▶ known v → typed payload
-                             unknown v → loud failure, session stays alive
+producer ──getHookByToken──▶ hook.metadata.sessionInboxWireVersion
+                                              (what can they decode?)
+producer ──resumeHook──────▶ { version: N, ... }        (what did I send?)
+consumer ──decode──────────▶ known version → typed payload
+                             unknown version → loud failure, session stays alive
 ```
 
-- **Envelope `v` (consumer-facing).** Every versioned payload carries `v`.
-  Decode of an unrecognized `v` **must not** fall through to any legacy
-  interpretation: it raises `SessionInboxWireError`, which the driver
+- **Envelope `version` (consumer-facing).** Every versioned payload carries
+  `version`. Decode of an unrecognized `version` **must not** fall through to
+  any legacy interpretation: it raises `SessionInboxWireError`, which the driver
   surfaces through a recorded reporting step (a durable trace in the run's
   event log plus a structured error log — the driver body cannot log
   directly, since logging pulls Node builtins the workflow bundle rejects),
@@ -125,28 +131,33 @@ consumer ──decode──────────▶ known v → typed payload
   plan removes. A channel-visible error event **may** be added when the
   pattern generalizes beyond the session inbox.
 - **Hook metadata stamp (producer-facing).** Consumers stamp
-  `metadata: { eveVersion }` at `createHook` (part of this plan; the #1752
-  mitigation deliberately shipped without it). When more
-  than one emit-able version exists, the encoder maps the consumer's stamp to
-  the newest wire version that eve release decodes; a markerless hook means
-  the consumer predates the stamp and receives the legacy-compatible shape.
-  The mapping lives in the wire module as data, not scattered conditionals.
-- **Cost boundary.** Gating requires one `getHookByToken` before
-  `resumeHook`. While only v1 exists the encoder emits v1 unconditionally and
-  performs no pre-resume read; the read cost starts with the first release
-  that emits two versions.
+  `metadata: { eveVersion, sessionInboxWireVersion }` at `createHook` (the
+  direct wire marker is the capability; `eveVersion` remains diagnostic).
+  The producer reads the marker and passes the resulting target to
+  `sessionInboxWire.encode`.
+- **Markerless historical classification.** Version 0 had two incompatible
+  shapes. A markerless stable session inbox, or a markerless continuation hook
+  whose run owns that stable inbox, identifies eve 0.30.5–0.30.8 and receives
+  raw `send`. A markerless continuation without the stable inbox identifies
+  eve ≤0.30.4 and receives legacy `deliver`. This tests a concrete historical
+  capability rather than guessing from deployment or package metadata.
+- **Cost boundary.** Every producer performs one target `getHookByToken`
+  before `resumeHook`. Markerless continuation hooks require one additional
+  lookup for the stable-inbox capability. `resumeHook` receives the inspected
+  hook object, preventing the encoding decision from being applied to a
+  different hook that later reused the same token.
 
 ## Compatibility and payoff timeline
 
-`v` is additive: every legacy cohort ignores unknown fields (≤0.30.2 reads
-`payloads`, 0.30.3–0.30.8 reads `payload`, 0.30.9+ reads `payloads`), so v1
-is byte-compatible with today's hybrid envelope and ships without gating.
+The producer now emits the consumer's actual contract: eve ≤0.30.4 receives
+unversioned `deliver`, eve 0.30.5–0.30.8 receives unversioned `send`, and
+stamped current consumers receive v1.
 
-| Phase                                               | Emit                                              | Removable                                                                      |
-| --------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Now                                                 | v1 (hybrid + `version: 1`) to everyone            | —                                                                              |
-| Pre-stamp cohorts aged out (30-day session timeout) | v2 (no mirror) to stamped hooks; v1 to markerless | markerless branch soon after                                                   |
-| Pre-version cohorts aged out                        | v2 only                                           | legacy unversioned decode paths, `SessionCommand` inbox fallback, mirror field |
+| Phase                                               | Emit                                                        | Removable                                                                      |
+| --------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Now                                                 | v0 `deliver`, v0 `send`, or v1 according to the target hook | —                                                                              |
+| Pre-stamp cohorts aged out (30-day session timeout) | current version to stamped hooks                            | markerless classifier and both v0 encoders                                     |
+| Pre-version payloads aged out                       | current version only                                        | legacy unversioned decode paths, `SessionCommand` inbox fallback, mirror field |
 
 Each removable row already has its condition written next to the code it
 deletes; #1765 tracks the cleanups.
@@ -187,7 +198,8 @@ mechanical guard in the existing CI lint job (`pnpm guard:invariants`):
   round-trip) runs in the required unit tier, which executes the schemas.
   Both are required checks; neither can be skipped to merge.
 - The existing e2e byte gate (`continuation-wire.eval.ts`) stays as the
-  end-to-end backstop and asserts the current emitted version.
+  current-version end-to-end backstop, while the agent-channels cross-version
+  redeploy eval runs a current producer against an actual eve@0.30.8 consumer.
 
 ## Alternatives considered
 
