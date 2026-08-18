@@ -55,7 +55,7 @@ const expectedDelivery = {
 };
 
 async function createEve0308TurnControlReceiver(): Promise<Eve0308TurnControlReceiver> {
-  const packageEntry = import.meta.resolve("eve-0-30-8");
+  const packageEntry = import.meta.resolve("historical-eve-0-30-8");
   const receiverModuleUrl = new URL("./execution/turn-control-receiver.js", packageEntry);
   const receiverModule = (await import(receiverModuleUrl.href)) as {
     readonly TurnControlReceiver: Eve0308TurnControlReceiverConstructor;

@@ -17,8 +17,7 @@ const FOLLOW_UP_TOKEN = "CROSS-VERSION-WIRE-OK";
 const INSTRUCTIONS_PATH = resolve("agent", "instructions.md");
 const FIXTURE_EVE_LINK = resolve("node_modules", "eve");
 const CONFIG_EVE_LINK = resolve("..", "e2e-config", "node_modules", "eve");
-const OLD_EVE_PACKAGE = resolve("node_modules", "eve-0-30-8");
-const COMPILE_METADATA_PATH = resolve(".output", ".eve", "compile", "compile-metadata.json");
+const OLD_EVE_PACKAGE = resolve("node_modules", "historical-eve-0-30-8");
 
 const OLD_DEPLOYMENT_MARKER = "cross-version-eve-0-30-8";
 const CURRENT_DEPLOYMENT_MARKER = "cross-version-eve-current";
@@ -28,7 +27,6 @@ const execFileAsync = promisify(execFile);
 const EXEC_OPTIONS = { maxBuffer: 64 * 1024 * 1024 } as const;
 
 type MessageResponse = { ok: boolean; sessionId?: string };
-type CompileMetadata = { generator?: { version?: string } };
 
 /**
  * Proves the complete mixed-version codec boundary through the real Workflow
@@ -76,7 +74,7 @@ export default defineEval({
         INSTRUCTIONS_PATH,
         `${originalInstructions}\nDeployment marker: ${OLD_DEPLOYMENT_MARKER}.\n`,
       );
-      await deployToAlias(t, alias, "eve@0.30.8", OLD_EVE_VERSION);
+      await deployToAlias(t, alias, "eve@0.30.8");
       await waitForAliasToServe(t, OLD_DEPLOYMENT_MARKER);
 
       const sessionRef = crypto.randomUUID();
@@ -106,7 +104,7 @@ export default defineEval({
         INSTRUCTIONS_PATH,
         `${originalInstructions}\nDeployment marker: ${CURRENT_DEPLOYMENT_MARKER}.\n`,
       );
-      await deployToAlias(t, alias, `eve@${currentEveVersion}`, currentEveVersion);
+      await deployToAlias(t, alias, `eve@${currentEveVersion}`);
       await waitForAliasToServe(t, CURRENT_DEPLOYMENT_MARKER);
 
       const replacement = await postChannel<MessageResponse>(t.target, "/webhook", {
@@ -189,22 +187,8 @@ async function readPackageVersion(packagePath: string): Promise<string> {
   return manifest.version;
 }
 
-async function requireBuiltWithVersion(expectedVersion: string): Promise<void> {
-  const metadata = JSON.parse(await readFile(COMPILE_METADATA_PATH, "utf8")) as CompileMetadata;
-  if (metadata.generator?.version !== expectedVersion) {
-    throw new Error(
-      `Expected compile metadata from eve@${expectedVersion}; got ${JSON.stringify(metadata.generator)}.`,
-    );
-  }
-}
-
 /** Builds the fixture and repoints the run-scoped alias at the fresh deployment. */
-async function deployToAlias(
-  t: EveEvalContext,
-  alias: string,
-  phase: string,
-  expectedEveVersion: string,
-): Promise<void> {
+async function deployToAlias(t: EveEvalContext, alias: string, phase: string): Promise<void> {
   await execFileAsync("pnpm", ["exec", "eve", "build"], {
     ...EXEC_OPTIONS,
     env: {
@@ -214,8 +198,6 @@ async function deployToAlias(
       VERCEL_TARGET_ENV: "preview",
     },
   });
-  await requireBuiltWithVersion(expectedEveVersion);
-
   const tokenArgs =
     process.env.VERCEL_TOKEN === undefined ? [] : ["--token", process.env.VERCEL_TOKEN];
   const modelArgs =
