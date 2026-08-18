@@ -5,6 +5,7 @@ import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
+import { defaultDeliverResult } from "#channel/adapter.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
@@ -22,10 +23,15 @@ import {
   type DiscordMessageBody,
   type DiscordPostedMessage,
 } from "#public/channels/discord/api.js";
-import { defaultEvents, defaultOnCommand } from "#public/channels/discord/defaults.js";
+import {
+  defaultDiscordAuth,
+  defaultEvents,
+  defaultOnCommand,
+} from "#public/channels/discord/defaults.js";
 import {
   deriveComponentInputResponses,
   deriveModalInputResponses,
+  discordContinuationKeyFromCustomId,
   buildFreeformModalResponse,
   isDiscordFreeformComponent,
 } from "#public/channels/discord/hitl.js";
@@ -69,6 +75,11 @@ export type DiscordChannelContext = DiscordContext & { state: DiscordChannelStat
 export interface DiscordEventContext extends DiscordChannelContext, ChannelContinuationOps {}
 
 /** JSON-serializable Discord channel state. */
+export interface DiscordPendingApprovalMessage {
+  readonly channelId: string;
+  readonly messageId: string;
+}
+
 export interface DiscordChannelState {
   /** Discord channel id. */
   channelId: string | null;
@@ -84,6 +95,9 @@ export interface DiscordChannelState {
   initialResponseSent: boolean;
   /** Whether `conversationId` is a real Discord message id. */
   hasMessageAnchor: boolean;
+  pendingApprovalMessages?: Record<string, DiscordPendingApprovalMessage>;
+  approvalResponderUsers?: Record<string, string>;
+  hitlContinuationKey?: string;
 }
 
 /** Discord channel credentials. */
@@ -130,6 +144,8 @@ type DiscordSessionFailedHandler = (
 
 /** Per-event handlers for `discordChannel({ events })`. Supplied handlers override built-in defaults per key; unspecified events keep their defaults. `session.failed` receives only `(data, channel)` and exposes the ID as `data.sessionId`; every other handler also gets the session `ctx`. */
 export interface DiscordChannelEvents {
+  readonly "approval.candidate"?: DiscordEventHandler<"approval.candidate">;
+  readonly "approval.settled"?: DiscordEventHandler<"approval.settled">;
   readonly "turn.started"?: DiscordEventHandler<"turn.started">;
   readonly "actions.requested"?: DiscordEventHandler<"actions.requested">;
   readonly "action.partial"?: DiscordEventHandler<"action.partial">;
@@ -229,6 +245,25 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
 
     context(state, session) {
       return rebuildDiscordContext(state, session, config);
+    },
+
+    deliver(payload, channel) {
+      const state = payload.state as Partial<DiscordChannelState> | undefined;
+      const messages = state?.pendingApprovalMessages;
+      if (messages !== undefined) {
+        channel.state.pendingApprovalMessages = {
+          ...channel.state.pendingApprovalMessages,
+          ...messages,
+        };
+      }
+      const responders = state?.approvalResponderUsers;
+      if (responders !== undefined) {
+        channel.state.approvalResponderUsers = {
+          ...channel.state.approvalResponderUsers,
+          ...responders,
+        };
+      }
+      return defaultDeliverResult(payload);
     },
 
     routes: [
@@ -553,7 +588,11 @@ function handleComponentInteraction(input: {
   if (inputResponses.length > 0) {
     input.waitUntil(
       dispatchInputResponses({
-        conversationId: input.interaction.messageId,
+        continuationToken: discordContinuationToken(
+          input.interaction.channelId,
+          discordContinuationKeyFromCustomId(input.interaction.customId) ??
+            input.interaction.messageId,
+        ),
         inputResponses,
         interaction: input.interaction,
         from: input.from,
@@ -572,7 +611,12 @@ function handleModalSubmitInteraction(input: {
   if (inputResponses.length > 0) {
     input.waitUntil(
       dispatchInputResponses({
-        conversationId: input.interaction.messageId ?? input.interaction.id,
+        continuationToken: discordContinuationToken(
+          input.interaction.channelId,
+          discordContinuationKeyFromCustomId(input.interaction.customId) ??
+            input.interaction.messageId ??
+            input.interaction.id,
+        ),
         inputResponses,
         interaction: input.interaction,
         from: input.from,
@@ -614,17 +658,20 @@ async function dispatchCommand(input: {
 }
 
 async function dispatchInputResponses(input: {
-  readonly conversationId: string;
+  readonly continuationToken: string;
   readonly inputResponses: readonly { requestId: string; optionId?: string; text?: string }[];
   readonly interaction: DiscordComponentInteraction | DiscordModalSubmitInteraction;
   readonly from: ChannelFrom<DiscordChannelState>;
 }): Promise<void> {
   try {
-    await input
-      .from(discordContinuationToken(input.interaction.channelId, input.conversationId))
-      .respond(input.inputResponses, {
-        auth: null,
-      });
+    await input.from(input.continuationToken).respond(input.inputResponses, {
+      auth: defaultDiscordAuth(input.interaction),
+      state: {
+        approvalResponderUsers: {
+          [defaultDiscordAuth(input.interaction).principalId]: input.interaction.user.id,
+        },
+      },
+    });
   } catch (error) {
     log.error("interaction response delivery failed", { error });
   }
@@ -658,6 +705,9 @@ function initialDiscordState(): DiscordChannelState {
     hasMessageAnchor: false,
     initialResponseSent: false,
     interactionToken: null,
+    approvalResponderUsers: {},
+    pendingApprovalMessages: {},
+    hitlContinuationKey: undefined,
   };
 }
 

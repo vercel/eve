@@ -147,6 +147,26 @@ export async function sendDiscordChannelMessage(
   return toPostedMessage(response.body);
 }
 
+/** Edits a bot-authored Discord channel message. */
+export async function editDiscordChannelMessage(
+  input: DiscordApiOptions & {
+    readonly body: DiscordMessageBody;
+    readonly channelId: string;
+    readonly messageId: string;
+  },
+): Promise<DiscordPostedMessage> {
+  const response = await callDiscordApi({
+    apiBaseUrl: input.apiBaseUrl,
+    body: normalizeMessageBody(input.body),
+    botToken: input.credentials?.botToken,
+    fetch: input.fetch,
+    method: "PATCH",
+    path: `/channels/${encodeURIComponent(input.channelId)}/messages/${encodeURIComponent(input.messageId)}`,
+  });
+  if (!response.ok) throw new Error(`Discord edit message failed with HTTP ${response.status}.`);
+  return toPostedMessage(response.body);
+}
+
 /** Triggers Discord's short-lived channel typing indicator with bot auth. */
 export async function triggerDiscordTypingIndicator(
   input: DiscordApiOptions & {

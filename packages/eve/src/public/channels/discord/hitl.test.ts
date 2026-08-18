@@ -5,6 +5,7 @@ import {
   buildFreeformModalResponse,
   deriveComponentInputResponses,
   deriveModalInputResponses,
+  discordContinuationKeyFromCustomId,
   isDiscordFreeformComponent,
   renderInputRequestComponents,
 } from "#public/channels/discord/hitl.js";
@@ -60,6 +61,22 @@ describe("renderInputRequestComponents", () => {
         values: [],
       }),
     ).toEqual([{ optionId: "approve", requestId: "call_1" }]);
+  });
+
+  it("keeps continuation-bearing approval ids within Discord's custom-id limit", () => {
+    const components = renderInputRequestComponents(
+      request({
+        display: "confirmation",
+        options: [{ id: "approve", label: "Approve" }],
+        requestId: "aitxt-YBaLlpdLtVRnTJ6wWVOnqb5o",
+      }),
+      { continuationKey: "h123456789abc" },
+    );
+    const customId = (components[0] as { components: Array<{ custom_id: string }> }).components[0]!
+      .custom_id;
+
+    expect(customId.length).toBeLessThanOrEqual(100);
+    expect(discordContinuationKeyFromCustomId(customId)).toBe("h123456789abc");
   });
 
   it("renders select requests as a string select and decodes selected values", () => {

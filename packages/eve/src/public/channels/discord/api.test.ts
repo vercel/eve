@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   callDiscordApi,
   discordContinuationToken,
+  editDiscordChannelMessage,
   sendDiscordChannelMessage,
   splitDiscordMessageContent,
   triggerDiscordTypingIndicator,
@@ -79,6 +80,26 @@ describe("sendDiscordChannelMessage", () => {
       allowed_mentions: { parse: [] },
       content: "hello @everyone",
     });
+  });
+});
+
+describe("editDiscordChannelMessage", () => {
+  it("patches a bot-authored channel message", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ channel_id: "C01", id: "M01" }));
+
+    await editDiscordChannelMessage({
+      apiBaseUrl: "https://discord.test/api/v10",
+      body: { components: [], content: "Approved by <@U01>" },
+      channelId: "C01",
+      credentials: { botToken: "bot-token" },
+      fetch: fetchMock,
+      messageId: "M01",
+    });
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe("https://discord.test/api/v10/channels/C01/messages/M01");
+    expect((init as RequestInit).method).toBe("PATCH");
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({ components: [] });
   });
 });
 

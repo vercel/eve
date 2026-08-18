@@ -1,11 +1,15 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { extractErrorId, formatErrorHint } from "#internal/logging.js";
-import { splitDiscordMessageContent } from "#public/channels/discord/api.js";
-import type { DiscordCommandInteraction } from "#public/channels/discord/inbound.js";
+import { DISCORD_NO_MENTIONS, splitDiscordMessageContent } from "#public/channels/discord/api.js";
+import type {
+  DiscordCommandInteraction,
+  DiscordInteraction,
+} from "#public/channels/discord/inbound.js";
 import { renderInputRequestComponents } from "#public/channels/discord/hitl.js";
 import type {
   DiscordChannelEvents,
+  DiscordEventContext,
   DiscordCommandResult,
   DiscordContext,
 } from "#public/channels/discord/discordChannel.js";
@@ -17,7 +21,7 @@ import type {
  * `principalType` `service` for bot actors or `user` otherwise. Copies the
  * channel, interaction, user, guild, and member-nick attributes.
  */
-export function defaultDiscordAuth(interaction: DiscordCommandInteraction): SessionAuthContext {
+export function defaultDiscordAuth(interaction: DiscordInteraction): SessionAuthContext {
   const attributes: Record<string, string> = {
     channel_id: interaction.channelId,
     interaction_id: interaction.id,
@@ -50,6 +54,16 @@ export function defaultOnCommand(
 }
 
 /** Built-in Discord event handlers for typing, replies, HITL, and terminal errors. */
+function discordHitlContinuationKey(channel: DiscordEventContext): string | undefined {
+  if (channel.continuation === undefined) return undefined;
+  const existing = channel.state.hitlContinuationKey;
+  if (existing !== undefined) return existing;
+  const key = `h${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+  channel.continuation.rekey(`${channel.discord.channelId}:${key}`);
+  channel.state.hitlContinuationKey = key;
+  return key;
+}
+
 export const defaultEvents: DiscordChannelEvents = {
   async "turn.started"(_event, channel, _ctx) {
     await channel.discord.startTyping();
@@ -66,13 +80,46 @@ export const defaultEvents: DiscordChannelEvents = {
   },
 
   async "input.requested"(event, channel, _ctx) {
+    const continuationKey = discordHitlContinuationKey(channel);
     for (const request of event.requests) {
       const content = splitDiscordMessageContent(request.prompt)[0] ?? request.prompt;
-      await channel.discord.post({
-        components: renderInputRequestComponents(request),
+      const posted = await channel.discord.post({
+        components: renderInputRequestComponents(request, { continuationKey }),
         content,
       });
+      if (request.kind === "tool-approval" && posted.id) {
+        channel.state.pendingApprovalMessages = {
+          ...channel.state.pendingApprovalMessages,
+          [request.requestId]: {
+            channelId: posted.channelId ?? channel.discord.channelId,
+            messageId: posted.id,
+          },
+        };
+      }
     }
+  },
+
+  async "approval.settled"(event, channel, _ctx) {
+    const messages = channel.state.pendingApprovalMessages ?? {};
+    const message = messages[event.requestId];
+    if (message === undefined) return;
+    const label = event.outcome === "approved" ? "Approved" : "Cancelled";
+    const userId = channel.state.approvalResponderUsers?.[event.responderPrincipalId];
+    const response = await channel.discord.request(
+      `/channels/${encodeURIComponent(message.channelId)}/messages/${encodeURIComponent(message.messageId)}`,
+      {
+        allowed_mentions: DISCORD_NO_MENTIONS,
+        components: [],
+        content: userId === undefined ? label : `${label} by <@${userId}>`,
+      },
+      { botAuth: true, method: "PATCH" },
+    );
+    if (!response.ok) {
+      throw new Error(`Discord approval message update failed with HTTP ${response.status}.`);
+    }
+    const next = { ...messages };
+    delete next[event.requestId];
+    channel.state.pendingApprovalMessages = next;
   },
 
   async "message.completed"(event, channel, _ctx) {

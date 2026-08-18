@@ -37,6 +37,7 @@ const DISCORD_ACTION_ROW_LIMIT = 5;
 const DISCORD_SELECT_OPTION_LIMIT = 25;
 
 interface HitlCustomIdPayload {
+  readonly continuationKey?: string;
   readonly optionId?: string;
   readonly requestId: string;
 }
@@ -49,6 +50,7 @@ interface HitlCustomIdPayload {
  */
 export function renderInputRequestComponents(
   request: InputRequest,
+  renderOptions: { readonly continuationKey?: string } = {},
 ): readonly Readonly<Record<string, unknown>>[] {
   const options = request.options;
   const acceptsFreeform = request.allowFreeform === true || !options || options.length === 0;
@@ -59,6 +61,7 @@ export function renderInputRequestComponents(
         components: [
           {
             custom_id: encodeHitlCustomId(DISCORD_HITL_CUSTOM_ID_PREFIX, {
+              continuationKey: renderOptions.continuationKey,
               requestId: request.requestId,
             }),
             options: options.slice(0, DISCORD_SELECT_OPTION_LIMIT).map((option) => {
@@ -88,6 +91,7 @@ export function renderInputRequestComponents(
       (row) => ({
         components: row.map((option) => ({
           custom_id: encodeHitlCustomId(DISCORD_HITL_CUSTOM_ID_PREFIX, {
+            continuationKey: renderOptions.continuationKey,
             optionId: option.id,
             requestId: request.requestId,
           }),
@@ -106,6 +110,7 @@ export function renderInputRequestComponents(
         components: [
           {
             custom_id: encodeHitlCustomId(DISCORD_HITL_FREEFORM_CUSTOM_ID_PREFIX, {
+              continuationKey: renderOptions.continuationKey,
               requestId: request.requestId,
             }),
             label: "Type your answer",
@@ -151,12 +156,21 @@ export function buildFreeformModalResponse(input: {
         },
       ],
       custom_id: encodeHitlCustomId(DISCORD_HITL_FREEFORM_CUSTOM_ID_PREFIX, {
+        continuationKey: payload.continuationKey,
         requestId: payload.requestId,
       }),
       title: truncate(input.prompt ?? "Your answer", DISCORD_MODAL_TITLE_MAX_LENGTH),
     },
     type: DISCORD_INTERACTION_RESPONSE_TYPE.MODAL,
   };
+}
+
+/** Returns the originating Discord continuation token, when encoded. */
+export function discordContinuationKeyFromCustomId(customId: string): string | undefined {
+  return (
+    decodeHitlCustomId(customId, DISCORD_HITL_CUSTOM_ID_PREFIX)?.continuationKey ??
+    decodeHitlCustomId(customId, DISCORD_HITL_FREEFORM_CUSTOM_ID_PREFIX)?.continuationKey
+  );
 }
 
 /** Returns true when a component custom id starts the freeform modal flow. */
@@ -202,7 +216,10 @@ export function deriveModalInputResponses(
 }
 
 function encodeHitlCustomId(prefix: string, payload: HitlCustomIdPayload): string {
-  const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const encoded = Buffer.from(
+    JSON.stringify([payload.continuationKey ?? null, payload.optionId ?? null, payload.requestId]),
+    "utf8",
+  ).toString("base64url");
   const customId = `${prefix}${encoded}`;
   if (customId.length > DISCORD_CUSTOM_ID_MAX_LENGTH) {
     throw new Error("discordChannel: HITL custom_id exceeded Discord's 100-character limit.");
@@ -214,15 +231,29 @@ function decodeHitlCustomId(customId: string, prefix: string): HitlCustomIdPaylo
   if (!customId.startsWith(prefix)) return null;
   try {
     const decoded = Buffer.from(customId.slice(prefix.length), "base64url").toString("utf8");
-    const parsed = JSON.parse(decoded) as {
-      optionId?: unknown;
-      requestId?: unknown;
+    const parsed = JSON.parse(decoded) as
+      | [unknown, unknown, unknown]
+      | {
+          c?: unknown;
+          continuationKey?: unknown;
+          o?: unknown;
+          optionId?: unknown;
+          r?: unknown;
+          requestId?: unknown;
+        };
+    const [continuationKey, optionId, requestId] = Array.isArray(parsed)
+      ? parsed
+      : [
+          parsed.c ?? parsed.continuationKey,
+          parsed.o ?? parsed.optionId,
+          parsed.r ?? parsed.requestId,
+        ];
+    if (typeof requestId !== "string" || requestId.length === 0) return null;
+    const result: { continuationKey?: string; optionId?: string; requestId: string } = {
+      requestId,
     };
-    if (typeof parsed.requestId !== "string" || parsed.requestId.length === 0) return null;
-    const result: HitlCustomIdPayload = { requestId: parsed.requestId };
-    if (typeof parsed.optionId === "string") {
-      return { ...result, optionId: parsed.optionId };
-    }
+    if (typeof continuationKey === "string") result.continuationKey = continuationKey;
+    if (typeof optionId === "string") result.optionId = optionId;
     return result;
   } catch {
     return null;

@@ -220,7 +220,6 @@ describe("discordChannel() inbound route", () => {
       state: {
         applicationId: "APP1",
         channelId: "C01",
-        conversationId: "I01",
         guildId: "G01",
         hasMessageAnchor: false,
         initialResponseSent: false,
@@ -267,15 +266,18 @@ describe("discordChannel() inbound route", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("delivers HITL button clicks as inputResponses", async () => {
+  it("resumes HITL button clicks against their original command", async () => {
     const { privateKey, publicKeyHex } = testKeys();
-    const components = renderInputRequestComponents({
-      action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "ask_question" },
-      kind: "question",
-      options: [{ id: "approve", label: "Approve" }],
-      prompt: "Approve?",
-      requestId: "call_1",
-    });
+    const components = renderInputRequestComponents(
+      {
+        action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "ask_question" },
+        kind: "question",
+        options: [{ id: "approve", label: "Approve" }],
+        prompt: "Approve?",
+        requestId: "call_1",
+      },
+      { continuationKey: "h123456789abc" },
+    );
     const customId = (components[0] as { components: Array<{ custom_id: string }> }).components[0]!
       .custom_id;
     const body = JSON.stringify({
@@ -296,10 +298,11 @@ describe("discordChannel() inbound route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ type: 6 });
     expect(send).toHaveBeenCalledWith(
-      "C01:M01",
+      "C01:h123456789abc",
       expect.objectContaining({
-        auth: null,
+        auth: expect.objectContaining({ principalId: "discord:U01" }),
         inputResponses: [{ optionId: "approve", requestId: "call_1" }],
+        state: { approvalResponderUsers: { "discord:U01": "U01" } },
       }),
     );
   });
@@ -374,6 +377,67 @@ describe("discordChannel() inbound route", () => {
         inputResponses: [{ requestId: "call_1", text: "freeform answer" }],
       }),
     );
+  });
+});
+
+describe("discordChannel() approval lifecycle", () => {
+  it("updates a settled approval message with the responder", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ channel_id: "C01", id: "M_APPROVAL" }))
+      .mockResolvedValueOnce(Response.json({ channel_id: "C01", id: "M_APPROVAL" }));
+    const channel = discordChannel({
+      api: { fetch: fetchMock },
+      credentials: { botToken: "bot-token" },
+    });
+    const adapter = withState(getAdapter(channel), { channelId: "C01" });
+    const { accessor } = captureAccessor("discord:C01:M01");
+    const ctx = buildAdapterContext(adapter, accessor);
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", {
+        requests: [
+          {
+            action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "deploy" },
+            kind: "tool-approval",
+            options: [
+              { id: "approve", label: "Approve" },
+              { id: "cancel", label: "Cancel" },
+            ],
+            prompt: "Approve deployment?",
+            requestId: "approval_1",
+          },
+        ],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+    ctx.state.approvalResponderUsers = { "discord:G01:U01": "U01" };
+
+    await callEvent(
+      adapter,
+      makeEvent("approval.settled", {
+        outcome: "approved",
+        requestId: "approval_1",
+        responderPrincipalId: "discord:G01:U01",
+        sequence: 1,
+        stepIndex: 1,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+
+    const [, update] = fetchMock.mock.calls[1]!;
+    expect((update as RequestInit).method).toBe("PATCH");
+    expect(JSON.parse(String((update as RequestInit).body))).toEqual({
+      allowed_mentions: { parse: [] },
+      components: [],
+      content: "Approved by <@U01>",
+    });
+    expect(ctx.state.pendingApprovalMessages).toEqual({});
   });
 });
 
@@ -488,7 +552,6 @@ describe("discordChannel() default event handlers", () => {
       {
         applicationId: "APP1",
         channelId: "C01",
-        conversationId: "I01",
         guildId: "G01",
         hasMessageAnchor: false,
         initialResponseSent: false,
