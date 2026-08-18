@@ -67,9 +67,15 @@ export async function provisionLinqConnector(input: {
   const deps = input.deps ?? { runVercel, runVercelCaptureStdout };
   const commandOutput = createPromptCommandOutput(input.log);
   const onOutput: ProcessOutputHandler = (line) => {
-    commandOutput(line);
     const url = URL.parse(line.text)?.href;
-    if (url !== undefined) input.onBrowserUrl?.(url);
+    if (url !== undefined) {
+      // The setup UI renders this as a durable external action. Avoid routing
+      // the enormous query-string URL through transient command output, where
+      // terminals wrap it into an uncopyable value.
+      input.onBrowserUrl?.(url);
+      return;
+    }
+    commandOutput(line);
   };
   const result = await withPhase(input.log, "Creating Linq connector...", () =>
     deps.runVercelCaptureStdout(
