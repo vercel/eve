@@ -12,28 +12,11 @@ import type { PackageManagerStrategy } from "./types.js";
 
 export const PNPM_WORKSPACE_PATH = "pnpm-workspace.yaml";
 export const PNPM_WORKSPACE_MEMBERSHIP_ARGUMENTS = ["list", "--depth", "-1", "--json"] as const;
-const RELEASE_AGE_EXCLUSIONS = [
-  "@ai-sdk/*",
-  "@rolldown/*",
-  "@vercel/*",
-  "@workflow/*",
-  "ai",
-  "experimental-ai-sdk-code-mode",
-  "eve",
-  "nitro",
-  "rolldown",
-  "workflow",
-] as const;
-
-function formatReleaseAgeExclusion(exclusion: string): string {
-  return `  - ${exclusion.includes("*") ? JSON.stringify(exclusion) : exclusion}`;
-}
 
 // eve@0.6.0-beta.13 through 0.7.0 imported `oxc-parser` at runtime while
 // declaring it only as a devDependency. Fixed releases use their own manifest.
 export const PNPM_WORKSPACE_CONTENT = [
-  "minimumReleaseAgeExclude:",
-  ...RELEASE_AGE_EXCLUSIONS.map(formatReleaseAgeExclusion),
+  "minimumReleaseAgeStrict: true",
   "allowBuilds:",
   "  sharp: false",
   "# Compatibility for eve releases with an incomplete runtime manifest.",
@@ -46,13 +29,6 @@ export const PNPM_WORKSPACE_CONTENT = [
 
 const SHARP_BUILD_POLICY = "  sharp: false";
 
-function releaseAgeExclusionName(line: string): string {
-  return line
-    .trim()
-    .replace(/^-\s+/u, "")
-    .replace(/^["']|["']$/gu, "");
-}
-
 function findYamlBlockEnd(lines: readonly string[], startIndex: number): number {
   let blockEnd = startIndex + 1;
   while (blockEnd < lines.length) {
@@ -63,57 +39,28 @@ function findYamlBlockEnd(lines: readonly string[], startIndex: number): number 
   return blockEnd;
 }
 
-function withSharpBuildPolicy(source: string): string {
+function withPnpmWorkspacePolicy(source: string): string {
   const normalized = source.endsWith("\n") ? source : `${source}\n`;
-  const lines = normalized.split("\n");
-  const allowBuildsIndex = lines.findIndex((line) => line === "allowBuilds:");
+  const policyLines = normalized.split("\n");
+  const allowBuildsIndex = policyLines.findIndex((line) => line === "allowBuilds:");
 
   if (allowBuildsIndex < 0) {
     const prefix = normalized.trim().length === 0 ? "" : `${normalized}\n`;
     return `${prefix}allowBuilds:\n${SHARP_BUILD_POLICY}\n`;
   }
 
-  const blockEnd = findYamlBlockEnd(lines, allowBuildsIndex);
-  const allowBuildsBlock = lines.slice(allowBuildsIndex + 1, blockEnd);
+  const blockEnd = findYamlBlockEnd(policyLines, allowBuildsIndex);
+  const allowBuildsBlock = policyLines.slice(allowBuildsIndex + 1, blockEnd);
   if (allowBuildsBlock.some((line) => /^\s+sharp:/.test(line))) {
-    return source;
+    return normalized;
   }
 
   let insertAt = blockEnd;
-  while (insertAt > allowBuildsIndex + 1 && lines[insertAt - 1] === "") {
+  while (insertAt > allowBuildsIndex + 1 && policyLines[insertAt - 1] === "") {
     insertAt -= 1;
   }
-  lines.splice(insertAt, 0, SHARP_BUILD_POLICY);
-  return lines.join("\n");
-}
-
-function withReleaseAgeExclusions(source: string): string {
-  const normalized = source.endsWith("\n") ? source : `${source}\n`;
-  const lines = normalized.split("\n");
-  const excludeIndex = lines.findIndex((line) => line === "minimumReleaseAgeExclude:");
-
-  if (excludeIndex < 0) {
-    const prefix = normalized.trim().length === 0 ? "" : `${normalized}\n`;
-    const exclusions = RELEASE_AGE_EXCLUSIONS.map(formatReleaseAgeExclusion).join("\n");
-    return `${prefix}minimumReleaseAgeExclude:\n${exclusions}\n`;
-  }
-
-  const blockEnd = findYamlBlockEnd(lines, excludeIndex);
-  const excludeBlock = lines.slice(excludeIndex + 1, blockEnd);
-  const existingExclusions = new Set(excludeBlock.map(releaseAgeExclusionName));
-  const missingExclusions = RELEASE_AGE_EXCLUSIONS.filter(
-    (exclusion) => !existingExclusions.has(exclusion),
-  );
-  if (missingExclusions.length === 0) {
-    return source;
-  }
-
-  let insertAt = blockEnd;
-  while (insertAt > excludeIndex + 1 && lines[insertAt - 1] === "") {
-    insertAt -= 1;
-  }
-  lines.splice(insertAt, 0, ...missingExclusions.map(formatReleaseAgeExclusion));
-  return lines.join("\n");
+  policyLines.splice(insertAt, 0, SHARP_BUILD_POLICY);
+  return policyLines.join("\n");
 }
 
 async function ensurePnpmWorkspacePolicy(filePath: string): Promise<"skipped" | "written"> {
@@ -123,7 +70,7 @@ async function ensurePnpmWorkspacePolicy(filePath: string): Promise<"skipped" | 
   }
 
   const current = await readFile(filePath, "utf8");
-  const next = withReleaseAgeExclusions(withSharpBuildPolicy(current));
+  const next = withPnpmWorkspacePolicy(current);
   if (next === current) {
     return "skipped";
   }
@@ -302,7 +249,6 @@ export const pnpmPackageManager = {
   installArguments: (options) => [
     "install",
     "--no-frozen-lockfile",
-    ...(options.bypassMinimumReleaseAge === true ? ["--config.minimum-release-age=0"] : []),
     ...(options.ignoreWorkspace === true ? ["--ignore-workspace"] : []),
   ],
   prepareArguments: (projectRoot, args) => ["--dir", projectRoot, ...args],

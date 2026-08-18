@@ -179,26 +179,11 @@ describe("eve init smoke", () => {
     await expect(pathExists(join(projectDir, "vercel.json"))).resolves.toBe(false);
     expect(await fakePnpm.readCalls()).toEqual([
       {
-        args: [
-          "--dir",
-          canonicalProjectDir,
-          "install",
-          "--no-frozen-lockfile",
-          "--config.minimum-release-age=0",
-        ],
+        args: ["--dir", canonicalProjectDir, "install", "--no-frozen-lockfile"],
         cwd: canonicalProjectDir,
       },
       {
-        args: [
-          "--dir",
-          canonicalProjectDir,
-          "--config.minimum-release-age=0",
-          "exec",
-          "eve",
-          "dev",
-          "--input",
-          "/model",
-        ],
+        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--input", "/model"],
         cwd: canonicalProjectDir,
       },
     ]);
@@ -236,11 +221,7 @@ describe("eve init smoke", () => {
       "export default withEve(nextConfig);",
     );
     const [installCall, devCall] = await fakePnpm.readCalls();
-    expect(installCall?.args.slice(-3)).toEqual([
-      "install",
-      "--no-frozen-lockfile",
-      "--config.minimum-release-age=0",
-    ]);
+    expect(installCall?.args.slice(-2)).toEqual(["install", "--no-frozen-lockfile"]);
     expect(devCall?.args.slice(-5)).toEqual(["exec", "eve", "dev", "--input", "/model"]);
   });
 
@@ -262,7 +243,7 @@ describe("eve init smoke", () => {
     await expect(pathExists(join(projectDir, "package-lock.json"))).resolves.toBe(true);
     expect(await fakeNpm.readCalls()).toEqual([
       {
-        args: ["install", "--min-release-age=0"],
+        args: ["install"],
         cwd: canonicalProjectDir,
       },
       {
@@ -304,10 +285,9 @@ describe("eve init smoke", () => {
     expect(await readFile(join(scratch, "pnpm-workspace.yaml"), "utf8")).toContain(
       '"eve@>=0.6.0-beta.13 <=0.7.0":',
     );
-    expect((await fakePnpm.readCalls()).map((call) => call.args.slice(-3))).toEqual([
-      ["install", "--no-frozen-lockfile", "--config.minimum-release-age=0"],
-      ["exec", "eve", "dev"],
-    ]);
+    const calls = await fakePnpm.readCalls();
+    expect(calls[0]?.args.slice(-2)).toEqual(["install", "--no-frozen-lockfile"]);
+    expect(calls[1]?.args.slice(-3)).toEqual(["exec", "eve", "dev"]);
   });
 
   it("scaffolds the current directory for a coding agent that omits the target", async () => {
@@ -325,13 +305,7 @@ describe("eve init smoke", () => {
     await expect(pathExists(join(scratch, ".git"))).resolves.toBe(true);
     expect(await fakePnpm.readCalls()).toEqual([
       {
-        args: [
-          "--dir",
-          canonicalProjectDir,
-          "install",
-          "--no-frozen-lockfile",
-          "--config.minimum-release-age=0",
-        ],
+        args: ["--dir", canonicalProjectDir, "install", "--no-frozen-lockfile"],
         cwd: canonicalProjectDir,
       },
     ]);
@@ -370,26 +344,11 @@ describe("eve init smoke", () => {
     await expect(pathExists(join(scratch, ".git"))).resolves.toBe(true);
     expect(await fakePnpm.readCalls()).toEqual([
       {
-        args: [
-          "--dir",
-          canonicalProjectDir,
-          "install",
-          "--no-frozen-lockfile",
-          "--config.minimum-release-age=0",
-        ],
+        args: ["--dir", canonicalProjectDir, "install", "--no-frozen-lockfile"],
         cwd: canonicalProjectDir,
       },
       {
-        args: [
-          "--dir",
-          canonicalProjectDir,
-          "--config.minimum-release-age=0",
-          "exec",
-          "eve",
-          "dev",
-          "--input",
-          "/model",
-        ],
+        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--input", "/model"],
         cwd: canonicalProjectDir,
       },
     ]);
@@ -417,13 +376,7 @@ describe("eve init smoke", () => {
     // later in a controllable background process.
     expect(await fakePnpm.readCalls()).toEqual([
       {
-        args: [
-          "--dir",
-          canonicalProjectDir,
-          "install",
-          "--no-frozen-lockfile",
-          "--config.minimum-release-age=0",
-        ],
+        args: ["--dir", canonicalProjectDir, "install", "--no-frozen-lockfile"],
         cwd: canonicalProjectDir,
       },
     ]);
