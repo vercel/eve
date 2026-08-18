@@ -308,9 +308,13 @@ function recallContext(phase: MemoryRecallContext["phase"]): MemoryRecallContext
 
 function toolsContext(): MemoryToolsContext {
   return {
-    ...operationContext(),
-    phase: "step.started",
-    step: { modelId: "mock/model", stepIndex: 0 },
+    channel: { kind: "http" },
+    memory: operationContext().memory,
+    messages: [],
+    session: {
+      auth: { current: null, initiator: null },
+      id: "session-1",
+    },
     turn: { input: [], sequence: 1, turnId: "turn-1" },
   };
 }
