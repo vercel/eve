@@ -100,11 +100,16 @@ function writeExperiments(subjects, runs, benchmark, treatment, verbose) {
     const archivePath = join(experimentsRoot, `${subject.label}.source.tar.gz`);
     writeFileSync(archivePath, subject.archive);
     writeFileSync(
+      join(experimentsRoot, `${subject.label}.dependencies.tar.gz`),
+      subject.dependencyArchive,
+    );
+    writeFileSync(
       join(experimentsRoot, `${subject.label}.ts`),
       `import { readFileSync } from "node:fs";\n` +
         `import { authoringExperiment } from "../lib/experiment.js";\n\n` +
         `export default authoringExperiment({\n` +
         `  archive: readFileSync(new URL(${JSON.stringify(`./${subject.label}.source.tar.gz`)}, import.meta.url)),\n` +
+        `  dependencyArchive: readFileSync(new URL(${JSON.stringify(`./${subject.label}.dependencies.tar.gz`)}, import.meta.url)),\n` +
         `  digest: ${JSON.stringify(subject.digest)},\n` +
         `  dependencyDigest: ${JSON.stringify(subject.dependencyDigest)},\n` +
         `  runs: ${runs},\n` +

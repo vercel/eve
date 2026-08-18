@@ -6,6 +6,7 @@ import { createAuthoringAgent } from "./harness-agent.js";
 
 export function authoringExperiment(options: {
   readonly archive: Uint8Array;
+  readonly dependencyArchive: Uint8Array;
   readonly digest: string;
   readonly dependencyDigest: string;
   readonly runs?: number;
@@ -17,6 +18,7 @@ export function authoringExperiment(options: {
   const agent = createAuthoringAgent({
     model: options.benchmark.model,
     archive: options.archive,
+    dependencyArchive: options.dependencyArchive,
     digest: options.digest,
     dependencyDigest: options.dependencyDigest,
   });

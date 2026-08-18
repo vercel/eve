@@ -43,7 +43,16 @@ Local runs use the `guided` treatment by default, which keeps the `AGENTS.md` an
 by `eve init`. Pass `--treatment baseline` to remove those files before the coding agent starts.
 
 Results are written under `apps/benchmarks/results/`. Each run includes the transcript,
-grader output, summary, and copied project files. Vercel Sandbox and AI Gateway credentials are
+grader output, summary, copied project files, and `project/benchmark/timings.json`. The timing
+artifact records the snapshot-cache outcome, source installation and build phases, workspace setup,
+each user turn with token and tool-call counts, and grading and validation durations. Use it to
+separate sandbox setup time from agent time when comparing runs. Print a compact local report with:
+
+```sh
+pnpm benchmark:timings results/current/<timestamp>/<case>/run-1
+```
+
+Pass `--json` to print the original timing artifact. Vercel Sandbox and AI Gateway credentials are
 required.
 
 ## Publish canonical results

@@ -1,6 +1,5 @@
 export const WORKSPACE = "workspace";
-export const AGENT_EVAL_DIRECTORY = "/tmp/eve-grader";
-export const WORKSPACE_ENV = "EVE_BENCHMARK_WORKSPACE";
+export const AGENT_EVAL_DIRECTORY = ".eve-grader";
 export const AUTHORING_EVAL_DIRECTORY = "/tmp/photon";
 export const WORLD_EVENTS_PATH = `${AUTHORING_EVAL_DIRECTORY}/world-events.jsonl`;
 export const SOURCE_ROOT = "/tmp/eve-source";

@@ -8,7 +8,8 @@
     "benchmark:publish": "node publish.mjs",
     "benchmark:export": "node scripts/export-results.mjs",
     "test": "node --test lib/*.test.mjs lib/setups/*.test.mjs scripts/*.test.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "benchmark:timings": "node scripts/timings.mjs"
   },
   "dependencies": {
     "@ai-sdk/harness": "1.0.72",
