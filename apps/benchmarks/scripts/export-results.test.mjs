@@ -38,7 +38,7 @@ test("exports missing cells without publishing private artifacts", () => {
     const output = JSON.parse(raw);
 
     assert.equal(output.schemaVersion, 1);
-    assert.equal(output.suite.caseCount, 6);
+    assert.equal(output.suite.caseCount, 7);
     assert.match(output.suite.caseFingerprint, /^[0-9a-f]{64}$/u);
     assert.equal(output.experiments.length, 12);
     assert.deepEqual(
@@ -52,7 +52,7 @@ test("exports missing cells without publishing private artifacts", () => {
         "Gemini 3.1 Pro Preview",
       ],
     );
-    assert.equal(output.results.length, 72);
+    assert.equal(output.results.length, 84);
     assert.ok(output.results.every((result) => result.status === "missing"));
     for (const privateField of ["transcript", "commands", "worldEvents", "files"]) {
       assert.equal(raw.includes(`"${privateField}"`), false);

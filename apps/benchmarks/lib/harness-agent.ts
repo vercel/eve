@@ -198,19 +198,20 @@ export function createAuthoringAgent(subject: {
             const toolCalls = result.toolCalls;
             const usage = result.usage;
             transcript.push({ role: "assistant", content: result.text, toolCalls, usage });
+            const details: Record<string, string | number | boolean> = {
+              promptCharacters: prompt.length,
+              responseCharacters: result.text.length,
+              toolCalls: toolCalls.length,
+              inputTokens: usage.inputTokens,
+              outputTokens: usage.outputTokens,
+              reasoningTokens: usage.reasoningTokens,
+            };
+            if (result.stall !== undefined) details.stall = result.stall;
             timings.record(
               `agent.turn.${turn}.summary`,
               0,
               result.stall === undefined ? "success" : "failure",
-              {
-                promptCharacters: prompt.length,
-                responseCharacters: result.text.length,
-                toolCalls: toolCalls.length,
-                inputTokens: usage.inputTokens,
-                outputTokens: usage.outputTokens,
-                reasoningTokens: usage.reasoningTokens,
-                ...(result.stall === undefined ? {} : { stall: result.stall }),
-              },
+              details,
             );
             if (result.stall !== undefined) log(`[turn ${turn}] ${result.stall}`);
             commands.push(...shellCommands(result.toolCalls));
