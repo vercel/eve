@@ -91,8 +91,10 @@ function analyzeRun(runPath) {
     toolCalls: toolCalls.length,
     commands: commands.length,
     usage,
-    docsRead: docsPages(commands, toolCalls),
-    agentsMdRead: commands.some((command) => /\bAGENTS\.md\b/.test(command)),
+    docsRead: docsCounts(docsSequence(toolCalls)),
+    // Which page the agent opened first. `README.md` means the routing index did
+    // its job; anything else means the agent guessed or searched its way in.
+    docsEntry: docsSequence(toolCalls)[0] ?? "(none)",
     registryCalls: commands.filter((command) => /\beve\s+(registry|add)\b/.test(command)).length,
     failedCommands: failedCommands(commands),
     stalls: timings
@@ -106,21 +108,25 @@ function analyzeRun(runPath) {
 }
 
 // Recovers `docs/<page>` paths from any tool input that mentions them, so a
-// `cat`, `sed -n`, `grep -r`, or read-tool path all count as one read each.
-function docsPages(commands, toolCalls) {
-  const texts = [...commands, ...toolCalls.flatMap((call) => call.paths)];
-  const counts = new Map();
-  for (const text of texts) {
-    for (const match of text.matchAll(/eve\/docs\/([\w./-]*\.mdx?)/g)) {
-      const page = match[1];
-      counts.set(page, (counts.get(page) ?? 0) + 1);
-    }
-    // A bare directory listing or a glob read counts as a directory probe.
-    for (const match of text.matchAll(/eve\/docs\/([\w/-]+)\/(?:\*|$|\s)/g)) {
-      const page = `${match[1]}/*`;
-      counts.set(page, (counts.get(page) ?? 0) + 1);
+// `cat`, `sed -n`, `grep -r`, or read-tool path all count as one read each. Call
+// order is preserved: the first page tells you which entry point the agent used.
+function docsSequence(toolCalls) {
+  const pages = [];
+  for (const call of toolCalls) {
+    for (const text of [call.command ?? "", ...call.paths]) {
+      for (const match of text.matchAll(/eve\/docs\/([\w./-]*\.mdx?)/g)) pages.push(match[1]);
+      // A bare directory listing or a glob read counts as a directory probe.
+      for (const match of text.matchAll(/eve\/docs\/([\w/-]+)\/(?:\*|$|\s)/g)) {
+        pages.push(`${match[1]}/*`);
+      }
     }
   }
+  return pages;
+}
+
+function docsCounts(pages) {
+  const counts = new Map();
+  for (const page of pages) counts.set(page, (counts.get(page) ?? 0) + 1);
   return Object.fromEntries([...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])));
 }
 
@@ -204,11 +210,11 @@ function reportRuns(records, target) {
       `${mark}  ${record.case} ${record.run}  ${record.durationSeconds}s total / ${record.agentSeconds}s agent / ${record.setupSeconds}s setup`,
     );
     console.log(
-      `      turns=${record.turns} tools=${record.toolCalls} in=${record.usage.inputTokens} out=${record.usage.outputTokens} reasoning=${record.usage.reasoningTokens} registry=${record.registryCalls} agentsMd=${record.agentsMdRead}`,
+      `      turns=${record.turns} tools=${record.toolCalls} in=${record.usage.inputTokens} out=${record.usage.outputTokens} reasoning=${record.usage.reasoningTokens} registry=${record.registryCalls}`,
     );
     const docs = Object.entries(record.docsRead);
     console.log(
-      `      docs: ${docs.length === 0 ? "(none)" : docs.map(([page, count]) => (count > 1 ? `${page}×${count}` : page)).join(", ")}`,
+      `      docs: entered at ${record.docsEntry}${docs.length === 0 ? "" : ` — ${docs.map(([page, count]) => (count > 1 ? `${page}×${count}` : page)).join(", ")}`}`,
     );
     for (const stall of record.stalls) console.log(`      ! ${stall}`);
     for (const failure of record.failures) console.log(`      ! ${failure}`);
