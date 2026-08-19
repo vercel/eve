@@ -1,5 +1,15 @@
 # eve
 
+## 0.39.3
+
+### Patch Changes
+
+- c2bfee1: Keep top-level sessions in an independent `agent.session` trace while preserving shared trace context for local and remote subagents.
+- 9a7964b: Add a configurable, development-only `@eve/self-modification` source-editing subagent that mounts authored agent source read-write, exposes its instructions through an extension, and uses structured file tools to inspect and safely update source.
+- 542c380: Preserve the configured `turnPolicy` on built-in and custom channels, and restore the option for Slack channels.
+- 75bd9c8: Allow extension-owned external dependencies to use ESM-only packages that do not expose a CommonJS entry.
+- 6fc904d: Session inbox hook payloads are now a validated, versioned wire format following eve's existing durable-format idioms. Producers inspect the target hook's wire capability and encode the shape its pinned consumer understands, including sessions created by eve 0.30.8; readers migrate legacy shapes forward and reject unknown versions instead of reinterpreting them.
+
 ## 0.39.2
 
 ### Patch Changes
