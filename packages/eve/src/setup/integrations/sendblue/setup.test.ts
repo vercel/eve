@@ -91,7 +91,7 @@ describe("Sendblue setup", () => {
     );
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/agent/channels/sendblue.ts",
-      expect.stringContaining('connectSendblueChannel("sendblue/agent")'),
+      expect.stringContaining('connectSendblueCredentials("sendblue/agent")'),
       { force: undefined },
     );
   });

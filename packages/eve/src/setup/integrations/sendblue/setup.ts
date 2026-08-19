@@ -54,11 +54,12 @@ export default sendblueChannel({
 `;
 
 function connectTemplate(uid: string): string {
-  return `import { connectSendblueChannel } from "@vercel/connect/eve";
+  return `import { connectSendblueCredentials, connectSendblueFromNumber } from "@vercel/connect/eve";
 import { sendblueChannel } from "eve/channels/sendblue";
 
 export default sendblueChannel({
-  ...connectSendblueChannel(${JSON.stringify(uid)}),
+  credentials: connectSendblueCredentials(${JSON.stringify(uid)}),
+  fromNumber: connectSendblueFromNumber(${JSON.stringify(uid)}),
 });
 `;
 }
