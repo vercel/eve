@@ -11,7 +11,8 @@ import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js"
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 import type { RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-import { findSessionTaskEntry, SESSION_TASKS_STATE_KEY } from "#tasks/session-index.js";
+import { SESSION_TASKS_STATE_KEY } from "#tasks/session-index-state-key.js";
+import { findSessionTaskEntry } from "#tasks/session-index.js";
 
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({
   readLatestTaskView: vi.fn(),

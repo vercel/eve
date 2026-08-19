@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { HarnessSession } from "#harness/types.js";
+import { SESSION_TASKS_STATE_KEY } from "#tasks/session-index-state-key.js";
 import {
-  SESSION_TASKS_STATE_KEY,
   clearObservedReadyTask,
   findSessionTaskEntry,
   getSessionTaskIndex,
-  isObservedReadyTaskDelivery,
   recordObservedReadyTaskViews,
   recordSessionTask,
 } from "#tasks/session-index.js";
@@ -178,7 +177,7 @@ describe("session task index", () => {
     ).toThrow(`Corrupt task index under session state key "${SESSION_TASKS_STATE_KEY}"`);
   });
 
-  it("records ready views and suppresses only their update and matching ready deliveries", () => {
+  it("records ready views returned by task_peek", () => {
     const observed = recordObservedReadyTaskViews(createTaskSession(), [
       {
         lastOutput: { data: "done", type: "result" },
@@ -189,11 +188,6 @@ describe("session task index", () => {
     ]);
 
     expect(findSessionTaskEntry(observed.state, "task_a")?.lastPeekedReadyStatus).toBe("completed");
-    expect(isObservedReadyTaskDelivery(observed.state, "task_a:update:turn:0:call")).toBe(true);
-    expect(isObservedReadyTaskDelivery(observed.state, "task_a:ready:completed")).toBe(true);
-    expect(isObservedReadyTaskDelivery(observed.state, "task_a:ready:failed")).toBe(false);
-    expect(isObservedReadyTaskDelivery(observed.state, "task_b:ready:completed")).toBe(false);
-    expect(isObservedReadyTaskDelivery(observed.state, undefined)).toBe(false);
   });
 
   it("clears an observed input_required view after its answer resumes the task", () => {
@@ -208,7 +202,6 @@ describe("session task index", () => {
     const cleared = clearObservedReadyTask(observed.state, "task_a");
 
     expect(findSessionTaskEntry(cleared, "task_a")?.lastPeekedReadyStatus).toBeUndefined();
-    expect(isObservedReadyTaskDelivery(cleared, "task_a:update:turn:0:call")).toBe(false);
   });
 
   it("clears a prior ready observation when a later task_peek returns working", () => {

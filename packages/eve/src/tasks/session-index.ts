@@ -4,23 +4,11 @@ import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { JsonValue } from "#shared/json.js";
 import {
   isReadyTaskStatus,
+  type ReadyTaskStatus,
   type TaskMetadata,
-  type TaskStatus,
   type TaskView,
 } from "#tasks/types.js";
-
-/**
- * Session-state key for the parent's live-task index.
- *
- * The parent session stores only this index; the mutable task record
- * lives in the dedicated durable task run. The PR #1190 spike found the
- * session-state boundary unworkable for task state itself: session state
- * threads through step results, while callback routes and child
- * executors must update tasks without holding the current snapshot.
- */
-export const SESSION_TASKS_STATE_KEY = "eve.tasks";
-
-type ReadyTaskStatus = Exclude<TaskStatus, "working">;
+import { SESSION_TASKS_STATE_KEY } from "#tasks/session-index-state-key.js";
 
 /**
  * One task owned by this session. Immutable model-safe metadata keeps the
@@ -247,21 +235,6 @@ export function clearObservedReadyTask(
   return changed
     ? { ...state, [SESSION_TASKS_STATE_KEY]: { tasks } satisfies SessionTaskIndex }
     : state;
-}
-
-/** True when `task_peek` already exposed the state represented by this delivery. */
-export function isObservedReadyTaskDelivery(
-  state: SessionStateMap | undefined,
-  deliveryId: string | undefined,
-): boolean {
-  if (deliveryId === undefined) return false;
-  for (const entry of getSessionTaskIndex(state)) {
-    const status = entry.lastPeekedReadyStatus;
-    if (status === undefined) continue;
-    if (deliveryId.startsWith(`${entry.taskId}:update:`)) return true;
-    if (deliveryId === `${entry.taskId}:ready:${status}`) return true;
-  }
-  return false;
 }
 
 /**

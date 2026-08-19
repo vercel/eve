@@ -4,7 +4,7 @@ import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
 import { sendCommandToDelivery } from "#execution/session-command-wire.js";
 import type { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { coalesceDeliveries } from "#harness/messages.js";
-import { isObservedReadyTaskDelivery } from "#tasks/session-index.js";
+import { isObservedReadyTaskDelivery } from "#tasks/session-index-query.js";
 
 type NextSessionAction =
   | { readonly kind: "clear" }

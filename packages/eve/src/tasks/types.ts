@@ -21,6 +21,9 @@ import type { SubagentAuthorizationEvent } from "#channel/types.js";
  */
 export type TaskStatus = "working" | "input_required" | "completed" | "failed" | "cancelled";
 
+/** A task status whose transition wakes the parent. */
+export type ReadyTaskStatus = Exclude<TaskStatus, "working">;
+
 /**
  * Immutable identity of the delegated work behind a task.
  *
@@ -357,6 +360,6 @@ export function isTerminalTaskStatus(status: TaskStatus): boolean {
 }
 
 /** True when a transition into this status should wake the parent. */
-export function isReadyTaskStatus(status: TaskStatus): status is Exclude<TaskStatus, "working"> {
+export function isReadyTaskStatus(status: TaskStatus): status is ReadyTaskStatus {
   return status === "input_required" || isTerminalTaskStatus(status);
 }

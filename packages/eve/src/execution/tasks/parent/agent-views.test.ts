@@ -8,7 +8,7 @@ import { findActiveTaskForAgent } from "#execution/tasks/parent/control-shared.j
 import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 import type { HarnessSession } from "#harness/types.js";
-import { SESSION_TASKS_STATE_KEY } from "#tasks/session-index.js";
+import { SESSION_TASKS_STATE_KEY } from "#tasks/session-index-state-key.js";
 import type { TaskStatus, TaskView } from "#tasks/types.js";
 
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({
