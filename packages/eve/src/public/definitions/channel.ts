@@ -17,7 +17,7 @@ import type {
 } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
 import type { Session, SessionHandle } from "#channel/session.js";
-import type { DeliverPayload } from "#channel/types.js";
+import type { DeliverPayload, TurnPolicy } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -250,6 +250,7 @@ export interface Channel<
     input: ReceiveInput<TReceiveTarget>,
     ctx: ChannelReceiveContext<TState>,
   ) => Promise<Session>;
+  readonly turnPolicy?: TurnPolicy;
 }
 
 /**
@@ -282,6 +283,7 @@ export function defineChannel<
     adapter,
     cors,
     receive: definition.receive,
+    turnPolicy: definition.turnPolicy,
   };
 
   return compiled;

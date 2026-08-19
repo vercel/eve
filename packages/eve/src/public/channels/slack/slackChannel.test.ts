@@ -329,6 +329,14 @@ async function firePost(
   return { cancel, reset, response, send, waitUntil };
 }
 
+describe("slackChannel()", () => {
+  it("preserves the configured turn policy", () => {
+    const channel = slackChannel({ turnPolicy: "queue" });
+
+    expect(channel).toMatchObject({ turnPolicy: "queue" });
+  });
+});
+
 describe("slackChannel() default event handlers", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   beforeEach(() => {
