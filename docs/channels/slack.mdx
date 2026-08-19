@@ -385,7 +385,21 @@ export default slackChannel({
 });
 ```
 
-The renderer updates Slack's assistant-thread status from turn, tool, delegation, and blocker events. Progress from local and compatible remote subagents routes to the root Slack thread without starting another parent turn. Blockers take priority, parallel work is summarized, and the status clears after the represented work settles. Without `progress`, Slack keeps the default event-based typing behavior described above.
+The renderer updates Slack's assistant-thread status from turn, tool, delegation, and blocker events. Progress from local and compatible remote subagents routes to the root Slack thread without starting another parent turn. Blockers take priority, parallel work is summarized, and the status clears after the represented work settles.
+
+Add `slackActivityProgress()` when the thread should also retain one activity message per originating root turn:
+
+```ts title="agent/channels/slack.ts"
+import { slackActivityProgress, slackChannel, slackStatusProgress } from "eve/channels/slack";
+
+export default slackChannel({
+  progress: {
+    renderers: [slackStatusProgress(), slackActivityProgress()],
+  },
+});
+```
+
+The activity renderer groups descendant work under the root turn that started it, keeps updating the same message while background work continues, and retains the settled result in the thread. It tags messages with Slack metadata so a replay can recover the existing message instead of posting a duplicate. Without `progress`, Slack keeps the default event-based typing behavior described above.
 
 Outbound text preserves bare `@` tokens as literal text. To mention a user, embed Slack's `<@USER_ID>` syntax directly or use `channel.thread.mentionUser(userId)`.
 
