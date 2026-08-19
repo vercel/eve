@@ -18,6 +18,7 @@ import {
   CapabilitiesKey,
   ChannelInstrumentationKey,
   ProgressCallbackKey,
+  ProgressGroupKey,
   InitiatorAuthKey,
   SandboxKey,
 } from "#context/keys.js";
@@ -156,6 +157,7 @@ export interface PreparedRuntimeActionDispatch {
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly progressCallback?: import("#channel/types.js").ProgressCallbackV1;
+  readonly progressGroupId: string;
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly plan: readonly DispatchPlanEntry[];
@@ -235,6 +237,7 @@ export async function prepareRuntimeActionDispatch(input: {
     parentTraceContext: readSessionTraceContext(input.serializedContext, session.sessionId),
     plan,
     progressCallback: ctx.get(ProgressCallbackKey),
+    progressGroupId: ctx.get(ProgressGroupKey) ?? `turn:${session.sessionId}:${batch.event.turnId}`,
     sandboxSessionId,
     serializedContext: input.serializedContext,
     session,
@@ -499,6 +502,7 @@ export async function startSubagent(input: {
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly persistentSessions: boolean;
   readonly progressCallback?: import("#channel/types.js").ProgressCallbackV1;
+  readonly progressGroupId: string;
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly session: RuntimeSession;
@@ -530,6 +534,7 @@ export async function startSubagent(input: {
         parentTraceContext,
         persistentSessions: input.persistentSessions,
         progressCallback: input.progressCallback,
+        progressGroupId: input.progressGroupId,
         sandboxSessionId: input.sandboxSessionId,
         session: input.session,
         source: input.target.source,
@@ -550,6 +555,7 @@ export async function startSubagent(input: {
         parentTraceContext,
         persistentSessions: input.persistentSessions,
         progressCallback: input.progressCallback,
+        progressGroupId: input.progressGroupId,
         session: input.session,
         taskOwned: input.taskOwned,
       });

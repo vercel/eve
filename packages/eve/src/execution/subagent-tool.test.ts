@@ -61,6 +61,19 @@ describe("buildSubagentRunInput", () => {
     expect(runInput.capabilities).toEqual({ requestInput: true });
   });
 
+  it("forwards the originating progress group to the child run input", () => {
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      progressGroupId: "turn:root:root-turn",
+      session: makeSession(),
+    });
+
+    expect(runInput.progressGroupId).toBe("turn:root:root-turn");
+  });
+
   it("leaves capabilities undefined when the parent has none", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),

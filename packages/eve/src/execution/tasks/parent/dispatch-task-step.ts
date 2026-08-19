@@ -161,6 +161,8 @@ export async function dispatchTaskStep(
             // `experimental.subagentPersistentSessions` never produces a
             // third mode here.
             persistentSessions: true,
+            progressCallback: prepared.progressCallback,
+            progressGroupId: prepared.progressGroupId,
             sandboxSessionId: prepared.sandboxSessionId,
             serializedContext: prepared.serializedContext,
             session,

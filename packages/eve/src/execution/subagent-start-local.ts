@@ -36,6 +36,7 @@ export async function startLocalSubagent(input: {
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly progressCallback?: Parameters<typeof buildSubagentRunInput>[0]["progressCallback"];
+  readonly progressGroupId: string;
   readonly persistentSessions: boolean;
   readonly sandboxSessionId: string;
   readonly session: RuntimeSession;
@@ -61,6 +62,7 @@ export async function startLocalSubagent(input: {
     parentTraceContext: input.parentTraceContext,
     persistentSessions: input.persistentSessions,
     progressCallback: input.progressCallback,
+    progressGroupId: input.progressGroupId,
     sandboxSessionId: input.sandboxSessionId,
     session: input.session,
     source,

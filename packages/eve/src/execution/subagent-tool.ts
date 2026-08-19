@@ -96,6 +96,7 @@ export function buildSubagentRunInput(input: {
   readonly parentContinuationToken?: string;
   readonly parentTraceContext?: SessionTraceContext;
   readonly progressCallback?: import("#channel/types.js").ProgressCallbackV1;
+  readonly progressGroupId?: string;
   /**
    * Whether the parent agent opted into
    * `experimental.subagentPersistentSessions`. Persistent children run in
@@ -183,6 +184,7 @@ export function buildSubagentRunInput(input: {
     },
     parentTraceContext: input.parentTraceContext,
     progressCallback: input.progressCallback,
+    progressGroupId: input.progressGroupId,
     subagentDepth: subagentDepth.nextChildDepth,
   };
 

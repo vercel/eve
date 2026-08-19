@@ -100,6 +100,8 @@ export const SubagentDepthKey = new ContextKey<number>("eve.subagentDepth");
  */
 export const CapabilitiesKey = new ContextKey<SessionCapabilities>("eve.capabilities");
 export const ProgressCallbackKey = new ContextKey<ProgressCallbackV1>("eve.progressCallback");
+/** Root turn whose channel artifact owns descendant progress. */
+export const ProgressGroupKey = new ContextKey<string>("eve.progressGroup");
 
 /**
  * Optional framework-owned caller callback captured when the session is created.

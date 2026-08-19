@@ -62,6 +62,7 @@ export async function startRemoteSubagent(input: {
   readonly parentTraceContext: Parameters<typeof startRemoteAgentSession>[0]["parentTraceContext"];
   readonly persistentSessions: boolean;
   readonly progressCallback?: Parameters<typeof startRemoteAgentSession>[0]["progressCallback"];
+  readonly progressGroupId: string;
   readonly session: RuntimeSession;
   readonly taskOwned: boolean;
 }): Promise<DispatchOutcome> {
@@ -118,6 +119,7 @@ export async function startRemoteSubagent(input: {
       operationId: operation.id,
       parentTraceContext: input.parentTraceContext,
       persistentSessions: input.persistentSessions,
+      progressGroupId: input.progressGroupId,
       progressCallback: resolveRemoteProgressCallback({
         callbackBaseUrl,
         enabled: input.capabilities?.progress === true,

@@ -202,6 +202,20 @@ describe("reduceProgressCommand", () => {
     ).toBeUndefined();
   });
 
+  it("accepts bounded root-turn grouping on the wire", () => {
+    expect(
+      parseProgressCommandV1(
+        command([
+          {
+            eventId: "grouped-turn",
+            kind: "turn",
+            turn: { ...turn, groupId: "turn:root:root-turn" },
+          },
+        ]),
+      ),
+    ).toBeDefined();
+  });
+
   it("bounds command and event deduplication", () => {
     let snapshot = createProgressSnapshot();
     for (let index = 0; index <= MAX_PROGRESS_DEDUPLICATION_IDS; index += 1) {

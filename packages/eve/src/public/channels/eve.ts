@@ -324,6 +324,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             capabilities,
             callback: body.callback,
             progressCallback: body.progressCallback,
+            progressGroupId: body.progressGroupId,
             continuationToken: operationToken,
             initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
             input: {
@@ -824,6 +825,7 @@ interface ParsedCreateBody {
   callback?: SessionCallback;
   capabilities?: SessionCapabilities;
   progressCallback?: ProgressCallbackV1;
+  progressGroupId?: string;
   message: string | UserContent;
   mode?: RunMode;
   context?: readonly string[];
@@ -880,6 +882,22 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
     );
   }
 
+  const progressGroupId = payload.progressGroupId;
+  if (
+    progressGroupId !== undefined &&
+    (typeof progressGroupId !== "string" ||
+      progressGroupId.length === 0 ||
+      progressGroupId.length > 500)
+  ) {
+    return Response.json(
+      {
+        error: "Expected 'progressGroupId' to be a non-empty string of at most 500 characters.",
+        ok: false,
+      },
+      { status: 400 },
+    );
+  }
+
   const mode = parseModeField(payload.mode);
   if (mode instanceof Response) return mode;
 
@@ -909,6 +927,7 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
     context,
     outputSchema,
     progressCallback,
+    progressGroupId,
   };
   if (typeof rawOperationId === "string") result.operationId = rawOperationId;
   return result;

@@ -199,6 +199,37 @@ describe("startRemoteAgentSession", () => {
     });
   });
 
+  it("forwards the originating progress group", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { ok: true, sessionId: "remote-session", status: "accepted" },
+          { status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      progressGroupId: "turn:root:root-turn",
+      remote: createRemoteAgent(),
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+        state: {},
+      },
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).progressGroupId).toBe(
+      "turn:root:root-turn",
+    );
+  });
+
   it("posts the formatted subagent message and callback metadata", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

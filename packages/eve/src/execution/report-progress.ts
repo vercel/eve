@@ -1,5 +1,5 @@
 import { loadContext } from "#context/container.js";
-import { ProgressCallbackKey, SessionKey } from "#context/keys.js";
+import { ProgressCallbackKey, ProgressGroupKey, SessionKey } from "#context/keys.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import {
@@ -29,6 +29,7 @@ export async function reportProgress(input: {
         kind: "report",
         report: { id: input.callId, message, reportedAt: now },
         turn: {
+          groupId: context.get(ProgressGroupKey),
           id: progressTurnId(session.sessionId, session.turn.id),
           phase: "running",
           sequence: session.turn.sequence,

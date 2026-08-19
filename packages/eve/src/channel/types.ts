@@ -472,6 +472,8 @@ export interface RunInput {
    */
   readonly callback?: SessionCallback;
   readonly progressCallback?: ProgressCallbackV1;
+  /** Framework-owned originating root turn for progress artifact grouping. */
+  readonly progressGroupId?: string;
   /**
    * Session continuation token for delivery and hook creation. Channels can
    * re-key the session during the first turn via

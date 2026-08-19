@@ -1,5 +1,5 @@
 import type { ContextContainer } from "#context/container.js";
-import { CapabilitiesKey, SessionKey, type Session } from "#context/keys.js";
+import { CapabilitiesKey, ProgressGroupKey, SessionKey, type Session } from "#context/keys.js";
 import { submitProgressCommand } from "#execution/submit-progress.js";
 import {
   normalizeProgressText,
@@ -17,8 +17,9 @@ import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions
 export function projectStructuralProgress(
   session: Session,
   event: MessageStreamEvent,
+  progressGroupId?: string,
 ): ProgressCommandV1 | undefined {
-  const events = projectEvents(session, event);
+  const events = projectEvents(session, event, progressGroupId);
   if (events.length === 0) return undefined;
   return {
     commandId: `structural:${session.sessionId}:${event.meta.id}`,
@@ -35,7 +36,7 @@ export async function publishStructuralProgress(
 ): Promise<void> {
   if (ctx.get(CapabilitiesKey)?.progress !== true) return;
   const session = ctx.require(SessionKey);
-  const command = projectStructuralProgress(session, event);
+  const command = projectStructuralProgress(session, event, ctx.get(ProgressGroupKey));
   if (command === undefined) return;
 
   try {
@@ -45,7 +46,11 @@ export async function publishStructuralProgress(
   }
 }
 
-function projectEvents(session: Session, event: MessageStreamEvent): readonly ProgressEventV1[] {
+function projectEvents(
+  session: Session,
+  event: MessageStreamEvent,
+  progressGroupId?: string,
+): readonly ProgressEventV1[] {
   switch (event.type) {
     case "turn.started":
       return [
@@ -53,6 +58,7 @@ function projectEvents(session: Session, event: MessageStreamEvent): readonly Pr
           eventId: eventId(session, event),
           kind: "turn",
           turn: {
+            groupId: progressGroupId,
             id: progressTurnId(session.sessionId, event.data.turnId),
             phase: "running",
             sequence: event.data.sequence,
@@ -61,14 +67,14 @@ function projectEvents(session: Session, event: MessageStreamEvent): readonly Pr
         },
       ];
     case "turn.completed":
-      return [turnSettlement(session, event, "completed")];
+      return [turnSettlement(session, event, "completed", progressGroupId)];
     case "turn.failed":
-      return [turnSettlement(session, event, "failed")];
+      return [turnSettlement(session, event, "failed", progressGroupId)];
     case "turn.cancelled":
-      return [turnSettlement(session, event, "cancelled")];
+      return [turnSettlement(session, event, "cancelled", progressGroupId)];
     case "actions.requested":
       return event.data.actions.map((action) => ({
-        entity: actionEntity(session, event.data.turnId, action, "running"),
+        entity: actionEntity(session, event.data.turnId, action, "running", progressGroupId),
         eventId: eventId(session, event, action.callId),
         kind: "entity",
       }));
@@ -80,6 +86,7 @@ function projectEvents(session: Session, event: MessageStreamEvent): readonly Pr
             event.data.turnId,
             resultAsAction(event.data.result),
             resultPhase(event.data.result, event.data.status),
+            progressGroupId,
           ),
           eventId: eventId(session, event, event.data.result.callId),
           kind: "entity",
@@ -93,6 +100,7 @@ function projectEvents(session: Session, event: MessageStreamEvent): readonly Pr
           `input:${session.sessionId}:${request.requestId}`,
           request.prompt,
           "blocked",
+          progressGroupId,
         ),
         eventId: eventId(session, event, request.requestId),
         kind: "entity",
@@ -105,6 +113,7 @@ function projectEvents(session: Session, event: MessageStreamEvent): readonly Pr
           `input:${session.sessionId}:${resolution.requestId}`,
           resolution.kind,
           resolution.outcome === "invalid" ? "failed" : "completed",
+          progressGroupId,
         ),
         eventId: eventId(session, event, resolution.requestId),
         kind: "entity",
@@ -121,6 +130,7 @@ function projectEvents(session: Session, event: MessageStreamEvent): readonly Pr
             `authorization:${session.sessionId}:${id}`,
             required ? event.data.description : event.data.name,
             required ? "blocked" : event.data.outcome === "authorized" ? "completed" : "failed",
+            progressGroupId,
           ),
           eventId: eventId(session, event),
           kind: "entity",
@@ -136,11 +146,13 @@ function turnSettlement(
   session: Session,
   event: Extract<MessageStreamEvent, { type: "turn.cancelled" | "turn.completed" | "turn.failed" }>,
   phase: Extract<ProgressPhase, "cancelled" | "completed" | "failed">,
+  groupId?: string,
 ): ProgressEventV1 {
   return {
     eventId: eventId(session, event),
     kind: "turn",
     turn: {
+      groupId,
       id: progressTurnId(session.sessionId, event.data.turnId),
       phase,
       sequence: event.data.sequence,
@@ -155,8 +167,10 @@ function actionEntity(
   turnId: string,
   action: RuntimeActionRequest,
   phase: ProgressPhase,
+  groupId?: string,
 ): ProgressEntityV1 {
   const base = {
+    groupId,
     id: progressActionId(session.sessionId, action.callId),
     phase,
     turnId: progressTurnId(session.sessionId, turnId),
@@ -179,8 +193,10 @@ function blocker(
   id: string,
   label: string,
   phase: ProgressPhase,
+  groupId?: string,
 ): ProgressEntityV1 {
   return {
+    groupId,
     id,
     kind: "blocker",
     label: normalizeProgressText(label),

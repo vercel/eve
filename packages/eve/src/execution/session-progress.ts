@@ -17,6 +17,7 @@ export interface ProgressReportV1 {
 }
 
 export interface ProgressTurnV1 {
+  readonly groupId?: string;
   readonly id: string;
   readonly sequence: number;
   readonly phase: ProgressPhase;
@@ -26,6 +27,7 @@ export interface ProgressTurnV1 {
 }
 
 export interface ProgressEntityV1 {
+  readonly groupId?: string;
   readonly id: string;
   readonly turnId: string;
   readonly kind: "tool" | "subagent" | "remote-agent" | "skill" | "blocker";
@@ -86,6 +88,7 @@ const progressReportSchema = z
   .strict();
 const progressTurnSchema = z
   .object({
+    groupId: z.string().min(1).max(500).optional(),
     id: z.string().min(1),
     phase: progressPhaseSchema,
     report: progressReportSchema.optional(),
@@ -96,6 +99,7 @@ const progressTurnSchema = z
   .strict();
 const progressEntitySchema = z
   .object({
+    groupId: z.string().min(1).max(500).optional(),
     id: z.string().min(1),
     kind: z.enum(["tool", "subagent", "remote-agent", "skill", "blocker"]),
     label: z.string(),
