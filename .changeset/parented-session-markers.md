@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Give every session an independent `agent.session` trace, linking handed trace contexts instead of adopting them for HTTP and delegated agents.
+Keep top-level sessions in an independent `agent.session` trace while preserving shared trace context for local and remote subagents.

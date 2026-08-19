@@ -256,7 +256,12 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         const body = parseCreateBody(payload);
         if (body instanceof Response) return body;
-        const parentTraceContext = parseTraceparent(req.headers.get("traceparent"));
+        // Top-level sessions own their trace. Callback sessions are delegated
+        // remote agents and intentionally continue the dispatching agent trace.
+        const parentTraceContext =
+          body.callback === undefined
+            ? undefined
+            : parseTraceparent(req.headers.get("traceparent"));
 
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
