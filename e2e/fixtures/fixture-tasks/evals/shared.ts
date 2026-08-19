@@ -87,13 +87,13 @@ export function requireBackgroundTaskId(turn: EveEvalTurn): string {
   throw new Error("Turn completed without a background task receipt.");
 }
 
-/** Returns the exact model-visible task view for one owned task id. */
+/** Returns the exact model-visible task view from a task-control result. */
 export function requireTaskView(output: unknown, taskId: string): Record<string, unknown> {
   if (output === null || typeof output !== "object") {
-    throw new Error("task_peek did not return an object.");
+    throw new Error("Task control did not return an object.");
   }
   const tasks = Reflect.get(output, "tasks");
-  if (!Array.isArray(tasks)) throw new Error("task_peek did not return a tasks array.");
+  if (!Array.isArray(tasks)) throw new Error("Task control did not return a tasks array.");
   const matches = tasks.filter(
     (candidate) =>
       candidate !== null &&
@@ -101,7 +101,7 @@ export function requireTaskView(output: unknown, taskId: string): Record<string,
       Reflect.get(candidate, "taskId") === taskId,
   );
   if (matches.length !== 1) {
-    throw new Error(`task_peek returned ${matches.length} views for ${taskId}.`);
+    throw new Error(`Task control returned ${matches.length} views for ${taskId}.`);
   }
   return matches[0] as Record<string, unknown>;
 }
@@ -138,7 +138,7 @@ export async function sendAndFollowQueuedTurn(
   throw new Error(`Queued message "${message}" was not received after 20 turns.`);
 }
 
-/** Polls the non-blocking task view until the expected task is completed. */
+/** Waits for completion, then reads the immutable terminal view through no-op cancellation. */
 export async function waitForCompletedTask(
   t: EveEvalContext,
   session: TaskEvalSessionDriver,
@@ -148,7 +148,7 @@ export async function waitForCompletedTask(
   return await waitForTaskStatus(t, session, verificationMessage, taskId, "completed");
 }
 
-/** Polls the non-blocking task view until the expected task reaches `status`. */
+/** Waits for a terminal status, then reads it through no-op cancellation. */
 export async function waitForTaskStatus(
   t: EveEvalContext,
   session: TaskEvalSessionDriver,
@@ -170,20 +170,20 @@ export async function waitForTaskStatus(
     }
     const turn = followed.turn;
     currentSession = followed.session;
-    const peeked = turn.toolCalls.find((call) => call.name === "task_peek");
-    if (taskStatus(peeked?.output, taskId) === status) {
+    const inspected = turn.toolCalls.find((call) => call.name === "task_cancel");
+    if (taskStatus(inspected?.output, taskId) === status) {
       await t.require(
-        peeked?.output,
+        inspected?.output,
         satisfies(
           (output) => taskStatus(output, taskId) === status,
-          `task_peek returns ${status} task ${taskId}`,
+          `task_cancel preserves ${status} task ${taskId}`,
         ),
       );
       return turn;
     }
     await t.sleep(100);
   }
-  throw new Error(`Task ${taskId} did not reach "${status}" after 20 task_peek attempts.`);
+  throw new Error(`Task ${taskId} did not reach "${status}" after 20 verification attempts.`);
 }
 
 function messageText(message: unknown): string {

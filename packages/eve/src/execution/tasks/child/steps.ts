@@ -8,6 +8,7 @@ import type {
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { createLogger } from "#internal/logging.js";
+import type { JsonValue } from "#shared/json.js";
 import {
   isTerminalTaskStatus,
   taskAuthorizationRequestId,
@@ -224,7 +225,17 @@ export async function deliverTaskInputResponsesStep(input: {
 function formatTaskNotification(view: TaskView): string {
   const subject = `Background task ${view.taskId} (${view.metadata.name})`;
   if (view.status === "input_required") {
-    return `${subject} needs input. Use task_peek to inspect the outstanding requests.`;
+    return `${subject} needs input.`;
   }
-  return `${subject} is ${view.status}. Use task_peek to read its output.`;
+  if (view.status === "completed") {
+    return `${subject} is completed.\n\nResult:\n${formatTaskOutput(view.lastOutput.data)}`;
+  }
+  if (view.status === "failed") {
+    return `${subject} failed.\n\nError:\n${formatTaskOutput(view.lastOutput.data)}`;
+  }
+  return `${subject} is cancelled.`;
+}
+
+function formatTaskOutput(output: JsonValue): string {
+  return typeof output === "string" ? output : (JSON.stringify(output) ?? "null");
 }

@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
 status: draft
-last_updated: "2026-08-01"
+last_updated: "2026-08-19"
 ---
 
 # Subagents as tasks: additive delivery plan
@@ -102,12 +102,12 @@ lifecycle path.
 
 ### Stage 2 — task tools, undiscoverable
 
-Register the task tools (`task_peek`, `task_cancel`, `task_sleep`, `task_update`)
+Register the task tools (`task_cancel`, `task_sleep`, `task_update`)
 as framework tools, filtered out of the tool set unless the flag is on. The first implementation
 has no child-facing task tool.
 
 - `task_sleep` reuses the existing durable turn-sleep request.
-- `task_peek` and `task_cancel` read the session task index; an `agentId` continuation resolves a
+- `task_cancel` reads the session task index; an `agentId` continuation resolves a
   terminal task's child address through the agent handle store and starts a new task.
 
 Verification: unit tests per tool; a scenario test that the tools are absent from advertised
@@ -127,8 +127,8 @@ In the runtime-action dispatch step, add a delegated mode alongside the existing
 
 Step 4 is what keeps the parent turn moving and history provider-valid: the receipt is the one
 result the existing key-based batch matching consumes, so the turn continues without a second
-result path. A task notification starts or nudges a parent turn, and the model can read additional
-current state through `task_peek`. Nothing selects this mode yet.
+result path. A task notification starts or nudges a parent turn and carries its ready result or
+error directly. Nothing selects this mode yet.
 
 Verification: integration tests invoking the mode directly; replay tests proving the same
 originating call returns the same task and never dispatches twice.
@@ -175,7 +175,8 @@ deliberately; they get their own plans if anything nontrivial surfaces.
    nonterminal tasks, with at most one such task per child session; busy agents remain visible in
    `<agents>` with their active task id and status.
 2. **Wake policy.** Terminal and `input_required` transitions wake a parked parent through the
-   session delivery path; they are the only wake triggers. The resulting parent turn is
+   session delivery path; they are the only wake triggers. Terminal notifications carry the full
+   result or error so the model needs no follow-up state read. The resulting parent turn is
    conditionally delivered: the model sees the framework notification, but it may intentionally
    produce no channel message.
 3. **Continuation to a busy child.** An `agentId` continuation to a `working` task surfaces `AGENT_BUSY` as a tool
@@ -193,8 +194,7 @@ deliberately; they get their own plans if anything nontrivial surfaces.
 1. **Remote parity is release-blocking.** Remote task children must support the same HITL,
    authorization, cancellation, and terminal lifecycle as local children before the flag ships.
 2. **Blocked vs computing children.** Today a child parked on input or authorization looks like
-   any running child. The `input_required` transition in stage 4 is what makes the difference
-   observable; until then `task_peek` reports `working` for both, which is acceptable for the
-   inert stages but must be closed before the flag ships.
+   any running child. The `input_required` transition in stage 4 makes the difference observable
+   through the parent session's HITL events and must land before the flag ships.
 
 [subagents-as-tasks design]: ./tools-as-tasks.md

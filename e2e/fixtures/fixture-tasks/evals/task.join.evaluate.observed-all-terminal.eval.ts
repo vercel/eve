@@ -13,7 +13,7 @@ const FAN_IN_CALLS = [
 
 type FanInMarker = (typeof FAN_IN_CALLS)[number]["marker"];
 
-/** A join completes only from a peek proving its exact task set is terminal. */
+/** A join completes after result-bearing notifications cover its exact task set. */
 export default defineTaskEval({
   description: "A join observes both exact tasks completed before answering COMPLETE.",
   transition: {
@@ -54,43 +54,24 @@ export default defineTaskEval({
     released.expectOk();
 
     const complete = await waitForTurnMessage(t, blocked.session, "TASK-FAN-IN-COMPLETE", released);
-    const completePeek = complete.toolCalls.find((call) => call.name === "task_peek");
-    await requireExactCompletedPeek(t, completePeek, taskIds, tasksByMarker);
+    complete.notCalledTool("task_peek");
+    for (const { marker } of FAN_IN_CALLS) {
+      const taskId = requireMappedValue(tasksByMarker, marker, "background task");
+      t.event("message.received", {
+        count: 1,
+        data: {
+          message: (message) =>
+            typeof message === "string" &&
+            message.includes(`Background task ${taskId} (`) &&
+            message.includes(" is completed.") &&
+            message.includes(`FANOUT-COMPLETE:${marker}`),
+        },
+      });
+    }
+    t.notCalledTool("task_peek");
     t.noFailedActions();
   },
 });
-
-async function requireExactCompletedPeek(
-  t: EveEvalContext,
-  call: EveEvalTurn["toolCalls"][number] | undefined,
-  taskIds: readonly string[],
-  tasksByMarker: ReadonlyMap<FanInMarker, string>,
-): Promise<void> {
-  await t.require(
-    { input: call?.input, output: call?.output },
-    satisfies((subject: { readonly input: unknown; readonly output: unknown }) => {
-      const inputIds = Reflect.get(subject.input ?? {}, "taskIds");
-      const tasks = Reflect.get(subject.output ?? {}, "tasks");
-      if (!Array.isArray(inputIds) || !Array.isArray(tasks)) return false;
-      const expectedIds = [...taskIds].sort();
-      const outputIds = tasks.map((task) => Reflect.get(task, "taskId")).sort();
-      return (
-        JSON.stringify([...inputIds].sort()) === JSON.stringify(expectedIds) &&
-        JSON.stringify(outputIds) === JSON.stringify(expectedIds) &&
-        FAN_IN_CALLS.every(({ marker }) => {
-          const taskId = tasksByMarker.get(marker);
-          const task = tasks.find((candidate) => Reflect.get(candidate ?? {}, "taskId") === taskId);
-          const lastOutput = Reflect.get(task ?? {}, "lastOutput");
-          return (
-            Reflect.get(task ?? {}, "status") === "completed" &&
-            Reflect.get(lastOutput ?? {}, "type") === "result" &&
-            Reflect.get(lastOutput ?? {}, "data") === `FANOUT-COMPLETE:${marker}`
-          );
-        })
-      );
-    }, "the COMPLETE turn peeks both exact tasks with their completed outputs"),
-  );
-}
 
 interface BlockedFanIn {
   readonly requestsByMarker: ReadonlyMap<FanInMarker, InputRequest>;

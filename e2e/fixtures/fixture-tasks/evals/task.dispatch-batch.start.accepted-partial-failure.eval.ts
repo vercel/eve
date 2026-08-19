@@ -125,7 +125,7 @@ function requireReceiptTaskId(receipts: readonly BackgroundReceipt[], callId: st
 function assertCompletedBusyWorker(turn: EveEvalTurn, taskId: string, marker: string): void {
   turn.expectOk();
   turn.messageIncludes("TASK-D6-STATUS");
-  const view = requireTaskView(turn.requireToolCall("task_peek").output, taskId);
+  const view = requireTaskView(turn.requireToolCall("task_cancel").output, taskId);
   const metadata = Reflect.get(view, "metadata");
   const lastOutput = Reflect.get(view, "lastOutput");
   if (

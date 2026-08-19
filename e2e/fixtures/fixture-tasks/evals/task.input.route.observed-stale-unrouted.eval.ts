@@ -2,7 +2,6 @@ import { satisfies } from "eve/evals/expect";
 
 import {
   requireBackgroundTaskId,
-  requireTaskView,
   sendAndFollowQueuedTurn,
   waitForCompletedTask,
   waitForTaskInput,
@@ -35,7 +34,6 @@ export default defineTaskEval({
     firstAnswer.expectOk();
 
     const second = await waitForTaskInput(t, first.session, "second_gate");
-    const secondChildRequestId = second.request.requestId.replace(`${taskId}:`, "");
     const stale = await second.session.respond([
       {
         optionId: "approve",
@@ -51,20 +49,15 @@ export default defineTaskEval({
       `TASK-INPUT-BATCH-VERIFY ${taskId}`,
       second.session,
     );
-    const peeked = afterStale.turn.toolCalls.find((call) => call.name === "task_peek");
     await t.require(
-      peeked?.output,
-      satisfies((output) => {
-        const view = requireTaskView(output, taskId);
-        const requests = Reflect.get(view, "inputRequests");
-        return (
-          Reflect.get(view, "status") === "input_required" &&
-          Array.isArray(requests) &&
-          requests.length === 1 &&
-          Reflect.get(requests[0], "requestId") === secondChildRequestId
-        );
-      }, "the stale Q1 answer leaves exactly Q2 outstanding"),
+      afterStale.session.pendingInputRequests,
+      satisfies(
+        (requests: readonly (typeof second.request)[]) =>
+          requests.length === 1 && requests[0]?.requestId === second.request.requestId,
+        "the stale Q1 answer leaves exactly Q2 outstanding",
+      ),
     );
+    afterStale.turn.notCalledTool("task_cancel");
 
     // If the stale Q1 answer cleared Q2, this exact Q2 response cannot resume
     // the child and the task never reaches `completed`.

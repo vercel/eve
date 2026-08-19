@@ -95,45 +95,6 @@ function messageRead(message: string): ScriptedRead {
 // instructions or exhaust before any deliver-kind turn payload.
 const sessionState = { sessionId: "ses-parked-wait" } as DurableSessionState;
 
-function observedReadySessionState(observed = true): DurableSessionState {
-  const task: Record<string, unknown> = {
-    createdByTurnId: "turn-parent",
-    metadata: {
-      agentId: "agent-1",
-      kind: "subagent",
-      mode: "local",
-      name: "reviewer",
-    },
-    operationId: "operation-1",
-    taskId: "task-1",
-    taskInboxToken: "task-token",
-    taskRunId: "task-run-1",
-  };
-  if (observed) task.lastPeekedReadyStatus = "completed";
-  const taskState: Record<string, unknown> = {
-    "eve.tasks": {
-      tasks: [task],
-    },
-  };
-  return {
-    continuationToken: "parent-token",
-    emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "turn-parent" },
-    hasProxyInputRequests: false,
-    sessionId: "ses-parked-wait",
-    snapshot: {
-      session: {
-        agent: { system: "" },
-        continuationToken: "parent-token",
-        history: [],
-        sessionId: "ses-parked-wait",
-        state: taskState,
-      },
-      version: 1,
-    },
-    version: 1,
-  };
-}
-
 function waitInput(inbox: SessionCommandInbox): Parameters<typeof nextTurnDelivery>[0] {
   return {
     awaitAuthorizationCallbacks: true,
@@ -256,8 +217,6 @@ describe("nextTurnDelivery", () => {
 
 describe("nextTurnDelivery routing", () => {
   beforeEach(() => vi.clearAllMocks());
-  afterEach(() => vi.restoreAllMocks());
-
   it("keeps waiting instead of starting a parent turn for a fully routed task response", async () => {
     const sessionState = {
       continuationToken: "token",
@@ -313,77 +272,5 @@ describe("nextTurnDelivery routing", () => {
     });
     expect(routeDeliverToChildren).toHaveBeenCalledTimes(2);
     expect(stateCursor.sessionState).toBe(routedSessionState);
-  });
-
-  it.each(["task-1:update:child-turn:0:update-call", "task-1:ready:completed"])(
-    "drops observed-ready task delivery %s before starting a turn",
-    async (taskDeliveryId) => {
-      const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
-      const state = observedReadySessionState();
-      const taskDelivery = {
-        kind: "deliver" as const,
-        payloads: [{ message: "redundant task notification" }],
-        taskDeliveryId,
-      };
-      const ordinaryDelivery = {
-        kind: "deliver" as const,
-        payloads: [{ message: "ordinary" }],
-      };
-      vi.mocked(routeDeliverToChildren).mockImplementation(async ({ delivery, sessionState }) => ({
-        kind: "continue",
-        remainder: delivery,
-        serializedContext: {},
-        sessionState,
-      }));
-      const commands = [taskDelivery, ordinaryDelivery];
-      const commandInbox = createMockInbox(
-        commands.map((value) => ({
-          result: { done: false as const, value },
-          source: "session" as const,
-        })),
-      );
-
-      const result = await nextTurnDelivery({
-        bufferedDeliveries: [],
-        bufferedSessionControls: [],
-        commandInbox,
-        driverWritable: new WritableStream<Uint8Array>(),
-        stateCursor: new SessionStateCursor({ serializedContext: {}, sessionState: state }),
-      });
-
-      expect(result).toMatchObject({ delivery: ordinaryDelivery, kind: "turn" });
-      expect(routeDeliverToChildren).toHaveBeenCalledTimes(2);
-      expect(debug).toHaveBeenCalledWith(
-        "[eve:execution.parked-delivery-wait] dropping task delivery already observed through task_peek",
-        { sessionId: "ses-parked-wait", taskDeliveryId },
-      );
-    },
-  );
-
-  it("keeps the first ready notification when task_peek has not observed it", async () => {
-    const state = observedReadySessionState(false);
-    const delivery = {
-      kind: "deliver" as const,
-      payloads: [{ message: "first task notification" }],
-      taskDeliveryId: "task-1:ready:completed",
-    };
-    vi.mocked(routeDeliverToChildren).mockResolvedValue({
-      kind: "continue",
-      remainder: delivery,
-      serializedContext: {},
-      sessionState: state,
-    });
-
-    const result = await nextTurnDelivery({
-      bufferedDeliveries: [],
-      bufferedSessionControls: [],
-      commandInbox: createMockInbox([
-        { result: { done: false, value: delivery }, source: "session" },
-      ]),
-      driverWritable: new WritableStream<Uint8Array>(),
-      stateCursor: new SessionStateCursor({ serializedContext: {}, sessionState: state }),
-    });
-
-    expect(result).toMatchObject({ delivery, kind: "turn" });
   });
 });

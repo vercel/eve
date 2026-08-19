@@ -131,14 +131,6 @@ const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
     singularNoun: "task",
     pluralNoun: "tasks",
   },
-  task_peek: {
-    verb: "Check",
-    pastVerb: "Checked",
-    argKey: "taskIds",
-    extractItem: taskIdsArg,
-    singularNoun: "task",
-    pluralNoun: "tasks",
-  },
   task_sleep: {
     verb: "Pause",
     pastVerb: "Paused",

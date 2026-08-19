@@ -52,10 +52,10 @@ export default defineTaskEval({
     verified.expectOk();
     verified.messageIncludes("TASK-CANCEL-STATUS");
     await t.require(
-      requireTaskView(verified.requireToolCall("task_peek").output, taskId),
+      requireTaskView(verified.requireToolCall("task_cancel").output, taskId),
       satisfies(
         (view: Record<string, unknown>) => hasSameCancelledFields(view, cancelledView),
-        "task_peek preserves the cancelled task's semantic fields",
+        "no-op cancellation preserves the cancelled task's semantic fields",
       ),
     );
   },

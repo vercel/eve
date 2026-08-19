@@ -4,7 +4,6 @@ import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
 import { sendCommandToDelivery } from "#execution/session-command-wire.js";
 import type { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { coalesceDeliveries } from "#harness/messages.js";
-import { isObservedReadyTaskDelivery } from "#tasks/session-index-query.js";
 
 type NextSessionAction =
   | { readonly kind: "clear" }
@@ -127,22 +126,6 @@ async function awaitNextTurnDelivery(input: {
 
     if (routed.remainder === undefined) {
       // Fully routed to a descendant; keep waiting.
-      continue;
-    }
-
-    if (
-      isObservedReadyTaskDelivery(
-        input.stateCursor.sessionState.snapshot?.session.state,
-        routed.remainder.taskDeliveryId,
-      )
-    ) {
-      console.debug(
-        "[eve:execution.parked-delivery-wait] dropping task delivery already observed through task_peek",
-        {
-          sessionId: input.stateCursor.sessionState.sessionId,
-          taskDeliveryId: routed.remainder.taskDeliveryId,
-        },
-      );
       continue;
     }
 

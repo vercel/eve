@@ -3,8 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AGENT_HANDLES_STATE_KEY, type AgentHandle } from "#harness/handles/store.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
-import { SESSION_TASKS_STATE_KEY } from "#tasks/session-index-state-key.js";
-import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
+import { SESSION_TASKS_STATE_KEY, type SessionTaskIndexEntry } from "#tasks/session-index.js";
 
 const {
   cancelOwnedTaskMock,

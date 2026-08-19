@@ -39,9 +39,7 @@ export default defineTaskEval({
     await requireDistinctTasks(t, taskIds);
     const blocked = await waitForReleaseRequests(t, t, started);
 
-    const marker1 = "TASK-FAN-IN-1";
     const marker2 = "TASK-FAN-IN-2";
-    const marker1TaskId = requireMappedValue(tasksByMarker, marker1, "background task");
     const marker2TaskId = requireMappedValue(tasksByMarker, marker2, "background task");
     const marker2Request = requireMappedValue(blocked.requestsByMarker, marker2, "release request");
 
@@ -56,16 +54,15 @@ export default defineTaskEval({
       "TASK-FAN-IN-WAITING",
       firstReleased,
     );
-    const waitingPeek = waiting.turn.toolCalls.find((call) => call.name === "task_peek");
-    await requireExactPeek(
-      t,
-      waitingPeek,
-      taskIds,
-      [
-        { marker: marker1, status: "input_required", taskId: marker1TaskId },
-        { marker: marker2, status: "completed", taskId: marker2TaskId },
-      ],
-      "the join reads one completed and one input-required exact task",
+    await t.require(
+      waiting.observedTurns,
+      satisfies(
+        (turns: readonly EveEvalTurn[]) =>
+          turns.some((turn) =>
+            hasCompletedNotification(turn, marker2TaskId, `FANOUT-COMPLETE:${marker2}`),
+          ),
+        "the join receives the completed task's result in its notification",
+      ),
     );
     for (const turn of waiting.observedTurns) {
       await t.require(
@@ -76,15 +73,10 @@ export default defineTaskEval({
         ),
       );
     }
+    t.notCalledTool("task_peek");
     t.noFailedActions();
   },
 });
-
-interface ExpectedTask {
-  readonly marker: FanInMarker;
-  readonly status: "completed" | "input_required";
-  readonly taskId: string;
-}
 
 async function requireDistinctTasks(t: EveEvalContext, taskIds: readonly string[]): Promise<void> {
   await t.require(
@@ -96,51 +88,15 @@ async function requireDistinctTasks(t: EveEvalContext, taskIds: readonly string[
   );
 }
 
-async function requireExactPeek(
-  t: EveEvalContext,
-  call: EveEvalTurn["toolCalls"][number] | undefined,
-  taskIds: readonly string[],
-  expectedTasks: readonly ExpectedTask[],
-  description: string,
-): Promise<void> {
-  await t.require(
-    { input: call?.input, output: call?.output },
-    satisfies((subject: { readonly input: unknown; readonly output: unknown }) => {
-      const inputIds = Reflect.get(subject.input ?? {}, "taskIds");
-      const tasks = Reflect.get(subject.output ?? {}, "tasks");
-      if (!Array.isArray(inputIds) || !Array.isArray(tasks)) return false;
-      const expectedIds = [...taskIds].sort();
-      const outputIds = tasks.map((task) => Reflect.get(task, "taskId")).sort();
-      return (
-        JSON.stringify([...inputIds].sort()) === JSON.stringify(expectedIds) &&
-        JSON.stringify(outputIds) === JSON.stringify(expectedIds) &&
-        expectedTasks.every((expectedTask) => {
-          const task = tasks.find(
-            (candidate) => Reflect.get(candidate ?? {}, "taskId") === expectedTask.taskId,
-          );
-          return taskMatchesExpected(task, expectedTask);
-        })
-      );
-    }, description),
+function hasCompletedNotification(turn: EveEvalTurn, taskId: string, result: string): boolean {
+  return turn.events.some(
+    (event) =>
+      event.type === "message.received" &&
+      typeof event.data.message === "string" &&
+      event.data.message.includes(`Background task ${taskId} (`) &&
+      event.data.message.includes(" is completed.") &&
+      event.data.message.includes(result),
   );
-}
-
-function taskMatchesExpected(task: unknown, expected: ExpectedTask): boolean {
-  if (Reflect.get(task ?? {}, "status") !== expected.status) return false;
-  if (expected.status === "completed") {
-    const lastOutput = Reflect.get(task ?? {}, "lastOutput");
-    return (
-      Reflect.get(lastOutput ?? {}, "type") === "result" &&
-      Reflect.get(lastOutput ?? {}, "data") === `FANOUT-COMPLETE:${expected.marker}`
-    );
-  }
-  const inputRequests = Reflect.get(task ?? {}, "inputRequests");
-  if (!Array.isArray(inputRequests)) return false;
-  const release = inputRequests.find(
-    (request) => Reflect.get(Reflect.get(request ?? {}, "action") ?? {}, "toolName") === "release",
-  );
-  const action = Reflect.get(release ?? {}, "action");
-  return Reflect.get(Reflect.get(action ?? {}, "input") ?? {}, "marker") === expected.marker;
 }
 
 interface BlockedFanIn {

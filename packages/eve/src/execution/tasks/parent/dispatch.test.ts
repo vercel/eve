@@ -11,8 +11,7 @@ import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js"
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 import type { RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-import { SESSION_TASKS_STATE_KEY } from "#tasks/session-index-state-key.js";
-import { findSessionTaskEntry } from "#tasks/session-index.js";
+import { SESSION_TASKS_STATE_KEY } from "#tasks/session-index.js";
 
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({
   readLatestTaskView: vi.fn(),
@@ -33,13 +32,6 @@ const action: RuntimeToolCallActionRequest = {
   input: { taskIds: ["task-1"] },
   kind: "tool-call",
   toolName: "task_cancel",
-};
-
-const peekAction: RuntimeToolCallActionRequest = {
-  callId: "call-peek",
-  input: { taskIds: ["task-1"] },
-  kind: "tool-call",
-  toolName: "task_peek",
 };
 
 function createSession(mode: "local" | "remote"): RuntimeSession {
@@ -205,51 +197,5 @@ describe("task cancellation identity", () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-});
-
-describe("task peek observation", () => {
-  beforeEach(() => {
-    vi.resetAllMocks();
-  });
-
-  it("records a completed task as observed in the returned parent session", async () => {
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      lastOutput: { data: "review finding", type: "result" },
-      metadata: { agentId: "agent-1", kind: "subagent", mode: "local", name: "research" },
-      status: "completed",
-      taskId: "task-1",
-    });
-
-    const result = await executeTaskControlAction({
-      action: peekAction,
-      bundle: {} as CompiledBundle,
-      parentTurnId: "turn-parent",
-      session: createSession("local"),
-    });
-
-    expect(result.result).toMatchObject({ output: { tasks: [{ status: "completed" }] } });
-    expect(findSessionTaskEntry(result.session.state, "task-1")?.lastPeekedReadyStatus).toBe(
-      "completed",
-    );
-  });
-
-  it("does not mark a working task as ready-observed", async () => {
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      metadata: { agentId: "agent-1", kind: "subagent", mode: "local", name: "research" },
-      status: "working",
-      taskId: "task-1",
-    });
-
-    const result = await executeTaskControlAction({
-      action: peekAction,
-      bundle: {} as CompiledBundle,
-      parentTurnId: "turn-parent",
-      session: createSession("local"),
-    });
-
-    expect(
-      findSessionTaskEntry(result.session.state, "task-1")?.lastPeekedReadyStatus,
-    ).toBeUndefined();
   });
 });

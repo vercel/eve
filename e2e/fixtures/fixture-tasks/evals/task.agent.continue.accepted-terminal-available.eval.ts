@@ -42,7 +42,7 @@ export default defineTaskEval({
       firstTaskId,
     );
     const firstView = requireTaskView(
-      firstTerminal.requireToolCall("task_peek").output,
+      firstTerminal.requireToolCall("task_cancel").output,
       firstTaskId,
     );
     const firstAgentId = requireAgentId(firstView);
@@ -82,7 +82,7 @@ export default defineTaskEval({
       secondTaskId,
     );
     const secondView = requireTaskView(
-      secondTerminal.requireToolCall("task_peek").output,
+      secondTerminal.requireToolCall("task_cancel").output,
       secondTaskId,
     );
     await t.require(

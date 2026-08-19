@@ -29,7 +29,10 @@ export default defineTaskEval({
       "CHILD-TASK-EXCLUSIVITY-VERIFY",
       initialTaskId,
     );
-    const agentId = agentIdFromTaskView(initial.requireToolCall("task_peek").output, initialTaskId);
+    const agentId = agentIdFromTaskView(
+      initial.requireToolCall("task_cancel").output,
+      initialTaskId,
+    );
 
     const race = await sendAndFollowQueuedTurn(t, "CHILD-TASK-EXCLUSIVITY-RACE", t, {
       allowFailedActions: true,

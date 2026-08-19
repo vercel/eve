@@ -10,7 +10,7 @@ import type { ToolExecuteOptions } from "#shared/tool-definition.js";
  * The harness records the tool call and the runtime executes it later.
  *
  * `task-control` marks the `experimental.tasks` parent tools
- * (`task_peek`, `task_cancel`): they carry no child
+ * (`task_cancel`, `task_update`): they carry no child
  * address of their own — the dispatch step resolves targets through the
  * session task index by tool name.
  */

@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
 status: draft
-last_updated: "2026-08-17"
+last_updated: "2026-08-19"
 ---
 
 # Subagents as tasks
@@ -11,8 +11,9 @@ last_updated: "2026-08-17"
 Under an opt-in `experimental.tasks` mode, eve should represent long-running work as durable,
 addressable tasks. This plan applies that model only to local and remote subagents. A subagent call
 returns a task receipt after dispatch instead of keeping the parent turn blocked until the child
-finishes. The parent can inspect, message, or cancel the task with framework-owned tools,
-and the child can intentionally report progress to its parent with one framework-owned tool.
+finishes. The parent receives result-bearing lifecycle notifications and can wait for or cancel
+the task with framework-owned tools. The child can intentionally report progress to its parent
+with one framework-owned tool.
 
 Without the flag, current tool and subagent behavior must remain unchanged.
 
@@ -125,7 +126,6 @@ The parent receives these framework-owned tools:
 ```ts
 interface TaskParentTools {
   task_cancel(input: { taskIds: string[] }): Promise<TaskToolResult<boolean>>;
-  task_peek(input: { taskIds: string[] }): Promise<TaskToolResult<TaskView[]>>;
   task_update(input: { message: string }): Promise<{ status: "sent"; taskId: string }>;
   task_sleep(input: { seconds: number }): Promise<TaskToolResult<boolean>>;
 }
@@ -136,8 +136,6 @@ on the parent session, and eve routes matching responses directly to the blocked
 
 The controls have distinct behavior:
 
-- `task_peek` reads current state without blocking and does not return credentials or routing
-  handles.
 - Passing `agentId` to the original subagent tool sends a follow-up after the prior task became terminal, creating a new task
   bound to the same child session. It never reopens a terminal task or answers HITL.
 - `task_cancel` requests cooperative cancellation. A committed terminal state is final, so a late
@@ -194,8 +192,9 @@ gets one receipt:
 ```
 
 The eventual child result must not become a second result for that call. A framework-authored
-task notification starts or nudges a parent turn, and the model reads any additional current state
-with `task_peek`. This keeps history append-only and leaves no dangling provider tool call.
+task notification starts or nudges a parent turn and carries the ready state's result or error
+directly. The notification is separate append-only conversation input, so history remains
+provider-valid without a second read racing the queued notification.
 
 ## Task state and ownership
 
@@ -316,7 +315,7 @@ sequenceDiagram
     C->>T: task.update or authorization
     T->>H: full task snapshot
     H->>H: queue until safe boundary
-    H-->>M: task notification; task_peek if needed
+    H-->>M: task notification with result or error
 ```
 
 ### Agent-to-agent dependency
@@ -346,8 +345,10 @@ The current [MCP Tasks extension] provides the closest standard vocabulary:
 - full task snapshots in `notifications/tasks`;
 - terminal states that do not change.
 
-eve's `task_peek` and `task_cancel` map to those operations. `task_sleep` is an eve
-control, not an MCP method. eve is not implementing the MCP wire protocol in this work.
+eve's `task_cancel` maps to cancellation. Result-bearing notifications replace a model-facing
+`tasks/get` operation: the model receives ready state at the transition that wakes it instead of
+performing a second read that can race the queued notification. `task_sleep` is an eve control,
+not an MCP method. eve is not implementing the MCP wire protocol in this work.
 
 One semantic difference is decided. MCP treats a tool-level `isError: true` result as
 `completed`; `failed` is reserved for JSON-RPC execution failure. eve diverges: child failure
@@ -382,9 +383,8 @@ than MCP compatibility.
 - The original tool call has exactly one result in durable history. Later task output cannot be
   attached to that call a second time.
 - Local and remote subagents support the same five parent-child flows.
-- Terminal and `input_required` transitions wake the parent; the model can inspect all relevant
-  task views with `task_peek` and decide whether the available state is sufficient.
-- `task_peek` observes current state without waking or mutating the executor.
+- Terminal and `input_required` transitions wake the parent. Terminal notifications carry the
+  task result or error directly, and input requests use the parent session's ordinary HITL events.
 - Parent-session responses route directly to the intended local task child without a parent model
   turn and cannot cross task or session ownership. Follow-up messages use the original subagent tool with `agentId`.
 - One child session owns at most one nonterminal task; repeated sends return `AGENT_BUSY` and do
