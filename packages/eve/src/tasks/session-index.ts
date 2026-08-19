@@ -2,7 +2,12 @@ import { z } from "#compiled/zod/index.js";
 
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { JsonValue } from "#shared/json.js";
-import type { TaskMetadata, TaskView } from "#tasks/types.js";
+import {
+  isReadyTaskStatus,
+  type TaskMetadata,
+  type TaskStatus,
+  type TaskView,
+} from "#tasks/types.js";
 
 /**
  * Session-state key for the parent's live-task index.
@@ -14,6 +19,8 @@ import type { TaskMetadata, TaskView } from "#tasks/types.js";
  * executors must update tasks without holding the current snapshot.
  */
 export const SESSION_TASKS_STATE_KEY = "eve.tasks";
+
+type ReadyTaskStatus = Exclude<TaskStatus, "working">;
 
 /**
  * One task owned by this session. Immutable model-safe metadata keeps the
@@ -29,6 +36,8 @@ export interface SessionTaskIndexEntry {
   readonly taskRunId: string;
   /** Immutable fallback once the owning workflow run expires. */
   readonly terminalView?: TaskView;
+  /** Ready state already returned to the parent by `task_peek`. */
+  readonly lastPeekedReadyStatus?: ReadyTaskStatus;
   readonly taskInboxToken: string;
   readonly createdByStepIndex?: number;
   readonly createdByTurnId: string;
@@ -89,6 +98,7 @@ const sessionTaskIndexEntrySchema: z.ZodType<SessionTaskIndexEntry> = z.strictOb
   createdByTurnId: z.string().min(1),
   metadata: taskMetadataSchema,
   operationId: z.string().min(1),
+  lastPeekedReadyStatus: z.enum(["input_required", "completed", "failed", "cancelled"]).optional(),
   taskId: z.string().min(1),
   taskRunId: z.string().min(1),
   terminalView: taskViewSchema.optional(),
@@ -192,6 +202,68 @@ export function findSessionTaskEntry(
   return getSessionTaskIndex(state).find((entry) => entry.taskId === taskId);
 }
 
+/** Records ready task views returned to the parent by `task_peek`. */
+export function recordObservedReadyTaskViews(
+  session: HarnessSession,
+  views: readonly TaskView[],
+): HarnessSession {
+  const viewsByTaskId = new Map(views.map((view) => [view.taskId, view]));
+  let changed = false;
+  const tasks = getSessionTaskIndex(session.state).map((entry) => {
+    const view = viewsByTaskId.get(entry.taskId);
+    if (view === undefined) return entry;
+    const status = isReadyTaskStatus(view.status) ? view.status : undefined;
+    if (entry.lastPeekedReadyStatus === status) return entry;
+    changed = true;
+    if (status !== undefined) return { ...entry, lastPeekedReadyStatus: status };
+    const next = { ...entry };
+    delete next.lastPeekedReadyStatus;
+    return next;
+  });
+  return changed
+    ? {
+        ...session,
+        state: {
+          ...session.state,
+          [SESSION_TASKS_STATE_KEY]: { tasks } satisfies SessionTaskIndex,
+        },
+      }
+    : session;
+}
+
+/** Clears a peeked nonterminal ready state after an input answer resumes the task. */
+export function clearObservedReadyTask(
+  state: SessionStateMap | undefined,
+  taskId: string,
+): SessionStateMap | undefined {
+  let changed = false;
+  const tasks = getSessionTaskIndex(state).map((entry) => {
+    if (entry.taskId !== taskId || entry.lastPeekedReadyStatus === undefined) return entry;
+    changed = true;
+    const next = { ...entry };
+    delete next.lastPeekedReadyStatus;
+    return next;
+  });
+  return changed
+    ? { ...state, [SESSION_TASKS_STATE_KEY]: { tasks } satisfies SessionTaskIndex }
+    : state;
+}
+
+/** True when `task_peek` already exposed the state represented by this delivery. */
+export function isObservedReadyTaskDelivery(
+  state: SessionStateMap | undefined,
+  deliveryId: string | undefined,
+): boolean {
+  if (deliveryId === undefined) return false;
+  for (const entry of getSessionTaskIndex(state)) {
+    const status = entry.lastPeekedReadyStatus;
+    if (status === undefined) continue;
+    if (deliveryId.startsWith(`${entry.taskId}:update:`)) return true;
+    if (deliveryId === `${entry.taskId}:ready:${status}`) return true;
+  }
+  return false;
+}
+
 /**
  * Records one task, replacing any entry with the same id so replayed
  * creation for the same originating call stays idempotent.
@@ -201,7 +273,12 @@ export function recordSessionTask(
   entry: SessionTaskIndexEntry,
 ): HarnessSession {
   const existing = getSessionTaskIndex(session.state);
-  const tasks = [...existing.filter((candidate) => candidate.taskId !== entry.taskId), entry];
+  const previous = existing.find((candidate) => candidate.taskId === entry.taskId);
+  const recorded =
+    previous?.lastPeekedReadyStatus === undefined
+      ? entry
+      : { ...entry, lastPeekedReadyStatus: previous.lastPeekedReadyStatus };
+  const tasks = [...existing.filter((candidate) => candidate.taskId !== entry.taskId), recorded];
   return {
     ...session,
     state: {

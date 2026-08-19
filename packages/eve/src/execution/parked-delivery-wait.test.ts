@@ -96,26 +96,25 @@ function messageRead(message: string): ScriptedRead {
 const sessionState = { sessionId: "ses-parked-wait" } as DurableSessionState;
 
 function observedReadySessionState(observed = true): DurableSessionState {
+  const task: Record<string, unknown> = {
+    createdByTurnId: "turn-parent",
+    metadata: {
+      agentId: "agent-1",
+      kind: "subagent",
+      mode: "local",
+      name: "reviewer",
+    },
+    operationId: "operation-1",
+    taskId: "task-1",
+    taskInboxToken: "task-token",
+    taskRunId: "task-run-1",
+  };
+  if (observed) task.lastPeekedReadyStatus = "completed";
   const taskState: Record<string, unknown> = {
     "eve.tasks": {
-      tasks: [
-        {
-          createdByTurnId: "turn-parent",
-          metadata: {
-            agentId: "agent-1",
-            kind: "subagent",
-            mode: "local",
-            name: "reviewer",
-          },
-          operationId: "operation-1",
-          taskId: "task-1",
-          taskInboxToken: "task-token",
-          taskRunId: "task-run-1",
-        },
-      ],
+      tasks: [task],
     },
   };
-  if (observed) taskState["eve.taskObservations"] = { "task-1": "completed" };
   return {
     continuationToken: "parent-token",
     emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "turn-parent" },

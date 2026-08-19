@@ -30,8 +30,7 @@ import {
   TASK_PEEK_TOOL_NAME,
   TASK_UPDATE_TOOL_NAME,
 } from "#runtime/framework-tools/tasks.js";
-import { recordObservedReadyTaskViews } from "#tasks/session-observations.js";
-import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
+import { recordObservedReadyTaskViews, type SessionTaskIndexEntry } from "#tasks/session-index.js";
 import { isTerminalTaskStatus, type TaskView } from "#tasks/types.js";
 
 const log = createLogger("execution.tasks.dispatch");

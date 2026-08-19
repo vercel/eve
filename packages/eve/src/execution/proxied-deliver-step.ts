@@ -9,8 +9,7 @@ import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import type { InputResponse } from "#runtime/input/types.js";
-import { clearObservedReadyTask } from "#tasks/session-observations.js";
-import { findSessionTaskEntry } from "#tasks/session-index.js";
+import { clearObservedReadyTask, findSessionTaskEntry } from "#tasks/session-index.js";
 import {
   createTaskInputRequestId,
   getProxyInputRequests,
