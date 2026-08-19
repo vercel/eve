@@ -934,13 +934,62 @@ describe("scaffoldExtensionProject", () => {
     expect(tsconfig.include).toEqual(["extension/**/*.ts"]);
 
     const agentsMd = await readFile(join(projectRoot, "AGENTS.md"), "utf8");
+    expect(agentsMd).toContain("eve extension");
+    expect(agentsMd).toContain("extensions.md");
+    expect(agentsMd).toContain("development dependency pinned exactly");
+    expect(agentsMd).toContain("cannot declare");
+  });
+});
+
+describe("scaffoldBaseProject", () => {
+  test("writes a base eve project with the catalog TypeScript version", async () => {
+    const targetDirectory = await createTempDir();
+    const projectRoot = await scaffoldBaseProject({
+      projectName: "demo-agent",
+      model: "openai/gpt-5-mini",
+      targetDirectory,
+      evePackage: TEST_EVE_PACKAGE,
+      aiPackageVersion: "7.0.0",
+      connectPackageVersion: "0.2.2",
+      zodPackageVersion: "4.4.3",
+    });
+
+    const agentSource = await readFile(join(projectRoot, "agent/agent.ts"), "utf8");
+    expect(agentSource).toContain('model: "openai/gpt-5-mini"');
+    expect(agentSource).not.toContain("modelOptions");
+    const packageJson = await readFile(join(projectRoot, "package.json"), "utf8");
+    expect(packageJson).toContain('"eve": "^0.25.0"');
+    // Channels added later (`eve add channel/slack`, possibly next to a
+    // running `eve dev`) import @vercel/connect; init ships it so a later
+    // channel add never introduces a missing dependency.
+    expect(packageJson).toContain('"@vercel/connect": "0.2.2"');
+    // The default path used by `eve init` must carry the stable toolchain
+    // version captured from the workspace catalog into generated projects.
+    expect(JSON.parse(packageJson)).toMatchObject({
+      devDependencies: { typescript: "7.0.2" },
+      engines: { node: "24.x" },
+    });
+    // Every scaffold ships @types/node plus tsconfig `types: ["node"]` so agent
+    // code touching `process`/`fs` typechecks out of the box, matching the eve
+    // agent fixtures (without the `types` entry, NodeNext resolution does not
+    // auto-include the ambient node types under pnpm's symlinked layout).
+    expect(packageJson).toContain('"@types/node": "24.x"');
+    const tsconfig = JSON.parse(await readFile(join(projectRoot, "tsconfig.json"), "utf8")) as {
+      compilerOptions: { types?: string[] };
+      include?: string[];
+    };
+    expect(tsconfig.compilerOptions.types).toEqual(["node"]);
+    expect(tsconfig.include).toEqual(["agent/**/*.ts", "evals/**/*.ts"]);
+    await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
+      PNPM_WORKSPACE_CONTENT,
+    );
+    const agentsMd = await readFile(join(projectRoot, "AGENTS.md"), "utf8");
     expect(agentsMd).toContain("content-only change to the root agent's");
     expect(agentsMd).toContain("You do not need to read the framework docs");
     expect(agentsMd).toContain("preserve that file unless the user asks to change the model");
     expect(agentsMd).toContain("`agent/instructions.ts` or files under `agent/instructions/`");
     expect(agentsMd).toContain("ls node_modules/eve/docs");
     expect(agentsMd).toContain("Start with `docs/README.md`: it maps each task");
-    expect(agentsMd).toContain("resolve the installed `eve` package location first");
     expect(agentsMd).toContain("Use a bounded authoring loop");
     expect(agentsMd).toContain("Stop discovery once the file location");
     expect(agentsMd).toContain("Follow links or inspect public types only");
@@ -956,7 +1005,6 @@ describe("scaffoldExtensionProject", () => {
     expect(agentsMd).toContain("eve deploy --non-interactive --yes");
     expect(agentsMd).toContain("Use eve to link and deploy Vercel projects");
     expect(agentsMd).toContain("Run the validation the task requests");
-    expect(agentsMd).toContain("When it does not establish the behavior you changed");
     // `vercel deploy` uploads everything a .vercelignore doesn't exclude, and
     // the platform default-ignores only the .env.local variants — eve's dev
     // artifacts and a bare .env must be excluded here or a source deploy
