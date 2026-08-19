@@ -571,6 +571,14 @@ export const messengerLogo = (props: LogoProps) => <SiMessenger color="default" 
 
 export const xLogo = (props: LogoProps) => <SiX {...props} />;
 
+export const blitzreelsLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 240 174" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path d="M85 0h155v174h-95L0 0h85Z" fill="#0E8062" opacity="0.85" />
+    <path d="M0 0h215v174h-70L0 0Z" fill="#17FFA6" />
+    <path d="M55 0h160v87h-46L98 0H55Z" fill="#15D990" opacity="0.62" />
+  </svg>
+);
+
 export const browserbaseLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" {...props}>
     <rect fill="white" height="124" width="134" x="30" y="36" />
@@ -754,6 +762,7 @@ export const logos = {
   whatsapp: whatsappLogo,
   messenger: messengerLogo,
   x: xLogo,
+  blitzreels: blitzreelsLogo,
   browserbase: browserbaseLogo,
   jetty: jettyLogo,
   "agent-browser": agentBrowserLogo,

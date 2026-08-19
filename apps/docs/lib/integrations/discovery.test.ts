@@ -73,6 +73,19 @@ describe("integration discovery", () => {
     expect(integrationSearchText(browserbase!)).toContain("Stagehand");
   });
 
+  it("renders the BlitzReels extension setup", () => {
+    const blitzreels = getIntegration("blitzreels");
+    expect(blitzreels).toBeDefined();
+
+    const markdown = integrationMarkdown(blitzreels!);
+    expect(markdown).toContain("eve add extension/blitzreels");
+    expect(markdown).toContain('import blitzreels from "@blitzreels/eve"');
+    expect(markdown).toContain("BLITZREELS_API_KEY");
+    expect(markdown).toContain("blitzreels__create_clip_batch");
+    expect(markdown).toContain("require eve approval");
+    expect(integrationSearchText(blitzreels!)).toContain("video editing");
+  });
+
   it("renders the Jetty extension and eval reporter setup", () => {
     const jetty = getIntegration("jetty");
     expect(jetty).toBeDefined();

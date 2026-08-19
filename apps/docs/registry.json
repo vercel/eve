@@ -43,6 +43,23 @@
       ]
     },
     {
+      "name": "extension/blitzreels",
+      "type": "registry:item",
+      "title": "BlitzReels",
+      "description": "Turn long videos into short clips, generate media, repair edits, and export.",
+      "dependencies": ["@blitzreels/eve"],
+      "envVars": {
+        "BLITZREELS_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/extensions/blitzreels.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/blitzreels.ts"
+        }
+      ]
+    },
+    {
       "name": "extension/browserbase",
       "type": "registry:item",
       "title": "Browserbase",

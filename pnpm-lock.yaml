@@ -250,6 +250,9 @@ importers:
       '@beeper/chat-adapter-matrix':
         specifier: 0.2.0
         version: 0.2.0(@opentelemetry/api@1.9.1)(ai@6.0.191(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
+      '@blitzreels/eve':
+        specifier: ^0.2.1
+        version: 0.2.1(eve@packages+eve)
       '@browserbasehq/eve':
         specifier: ^0.1.0
         version: 0.1.0(@cfworker/json-schema@4.1.1)(eve@packages+eve)(supports-color@10.2.2)
@@ -1837,6 +1840,20 @@ packages:
   '@beeper/chat-adapter-matrix@0.2.0':
     resolution: {integrity: sha512-eqKbU0iosIUkBn2dkRqyg+72a9c+v4vi85U81ZM8ETgjqHuZ34xWWntG2UL4ly6sHE/LiO4WL/k2Q+vlzLh8hw==}
     engines: {node: '>=22'}
+
+  '@blitzreels/contracts@0.2.0':
+    resolution: {integrity: sha512-2NOBMoQatxBB164mIkVfx8rsVAuNi2z5PKAqg1696+BstoUZtDodPHQ5SHrhXQKKiyrfCVgCZKO7BdjclhkFAg==}
+    engines: {node: '>=20'}
+
+  '@blitzreels/eve@0.2.1':
+    resolution: {integrity: sha512-mgw/0YpDb+Skc0jyH41+EiUxHwKRD/46OkarfQyC85TmeoQm7h+PXQftjVTIo5i5eImVNFAcQBAxuMq3eRjsXQ==}
+    engines: {node: '>=24'}
+    peerDependencies:
+      eve: '*'
+
+  '@blitzreels/sdk@0.2.0':
+    resolution: {integrity: sha512-Jtowqe6Vpwo/+LO/7KzJKrC9KaNrCaGbndQ7ps9M7O8epvXTT/E/y4Ns0At93izMbDRBJa1fFfY0EuqmWN19cw==}
+    engines: {node: '>=20'}
 
   '@bomb.sh/tab@0.0.19':
     resolution: {integrity: sha512-dTRfo9Q9B+lbLG3JCu8a/AGQSfD2XXcFcnakQzVjSOX+VvR/s9zpsH8TlqV3iHqazniRn1Ypwd1hcRlXcu/4BA==}
@@ -16100,6 +16117,18 @@ snapshots:
       - supports-color
       - workflow
       - zod
+
+  '@blitzreels/contracts@0.2.0': {}
+
+  '@blitzreels/eve@0.2.1(eve@packages+eve)':
+    dependencies:
+      '@blitzreels/sdk': 0.2.0
+      eve: link:packages/eve
+      zod: 4.4.3
+
+  '@blitzreels/sdk@0.2.0':
+    dependencies:
+      '@blitzreels/contracts': 0.2.0
 
   '@bomb.sh/tab@0.0.19(cac@6.7.14)(citty@0.2.2)(commander@14.0.3)':
     optionalDependencies:
