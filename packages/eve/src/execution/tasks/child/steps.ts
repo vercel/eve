@@ -222,7 +222,7 @@ export async function deliverTaskInputResponsesStep(input: {
   }
 }
 
-function formatTaskNotification(view: TaskView): string {
+export function formatTaskNotification(view: TaskView): string {
   const subject = `Background task ${view.taskId} (${view.metadata.name})`;
   if (view.status === "input_required") {
     return `${subject} needs input.`;

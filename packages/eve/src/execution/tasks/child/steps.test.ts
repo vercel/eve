@@ -1,10 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { wakeTaskParentStep } from "#execution/tasks/child/steps.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { formatTaskNotification } from "#execution/tasks/child/steps.js";
 import type { TaskView } from "#tasks/types.js";
-
-vi.mock("#internal/workflow/runtime.js", () => ({ resumeHook: vi.fn() }));
 
 const metadata = {
   agentId: "agent-reviewer",
@@ -43,42 +40,21 @@ const notificationCases: readonly { readonly expected: string; readonly view: Ta
   },
 ];
 
-describe("wakeTaskParentStep", () => {
-  beforeEach(() => {
-    vi.resetAllMocks();
-    vi.mocked(resumeHook).mockResolvedValue({} as never);
-  });
-
+describe("formatTaskNotification", () => {
   it.each(notificationCases)(
     "includes terminal output in the parent notification",
-    async ({ expected, view }) => {
-      await wakeTaskParentStep({ token: "parent-token", view });
-
-      expect(resumeHook).toHaveBeenCalledExactlyOnceWith(
-        "parent-token",
-        expect.objectContaining({
-          payload: expect.objectContaining({ message: expected, task: { views: [view] } }),
-        }),
-      );
+    ({ expected, view }) => {
+      expect(formatTaskNotification(view)).toBe(expected);
     },
   );
 
-  it("reports cancellation without inventing output", async () => {
+  it("reports cancellation without inventing output", () => {
     const view = {
       metadata,
       status: "cancelled",
       taskId: "task-1",
     } satisfies TaskView;
 
-    await wakeTaskParentStep({ token: "parent-token", view });
-
-    expect(resumeHook).toHaveBeenCalledExactlyOnceWith(
-      "parent-token",
-      expect.objectContaining({
-        payload: expect.objectContaining({
-          message: "Background task task-1 (reviewer) is cancelled.",
-        }),
-      }),
-    );
+    expect(formatTaskNotification(view)).toBe("Background task task-1 (reviewer) is cancelled.");
   });
 });
