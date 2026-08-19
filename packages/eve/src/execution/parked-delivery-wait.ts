@@ -2,6 +2,7 @@ import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
 import { sendCommandToDelivery } from "#execution/session-command-wire.js";
+import type { SessionProgressHandler } from "#execution/session-progress.js";
 import type { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 
@@ -62,6 +63,7 @@ export async function nextTurnDelivery(input: {
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
   readonly driverWritable: WritableStream<Uint8Array>;
+  readonly progressHandler?: SessionProgressHandler;
   readonly seenTaskDeliveries?: Set<string>;
   readonly stateCursor: SessionStateCursor;
 }): Promise<NextTurnInstruction> {
@@ -84,6 +86,7 @@ async function awaitNextTurnDelivery(input: {
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
   readonly driverWritable: WritableStream<Uint8Array>;
+  readonly progressHandler?: SessionProgressHandler;
   readonly seenTaskDeliveries?: Set<string>;
   readonly stateCursor: SessionStateCursor;
 }): Promise<NextTurnInstruction> {
@@ -96,6 +99,7 @@ async function awaitNextTurnDelivery(input: {
       cancelledTaskIds,
       commandInbox: input.commandInbox,
       deferDeliveries: input.deferDeliveries,
+      progressHandler: input.progressHandler,
       seenTaskDeliveries,
     });
 
@@ -139,6 +143,7 @@ async function waitForNextSessionAction(input: {
   readonly cancelledTaskIds: Set<string>;
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
+  readonly progressHandler?: SessionProgressHandler;
   readonly seenTaskDeliveries: Set<string>;
 }): Promise<NextSessionAction> {
   const pendingSessionControl = input.bufferedSessionControls.shift();
@@ -208,6 +213,11 @@ async function waitForNextSessionAction(input: {
     // Child results also arrive through this inbox, but the runtime-action
     // collector owns them. They are not channel deliveries.
     if (first.value.kind === "runtime-action-result") {
+      continue;
+    }
+
+    if (first.value.kind === "progress") {
+      await input.progressHandler?.handleProgress(first.value);
       continue;
     }
 

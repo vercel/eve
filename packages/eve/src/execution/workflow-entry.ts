@@ -47,6 +47,12 @@ import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { isTaskOwnedSerializedContext } from "#execution/tasks/child/instructions.js";
+import {
+  createProgressSnapshot,
+  reduceProgressCommand,
+  type SessionProgressHandler,
+} from "#execution/session-progress.js";
+import { renderSessionProgressStep } from "#execution/session-progress-renderer-step.js";
 
 const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
   "Agent workflow failed. Inspect the private session trace for details.";
@@ -354,6 +360,7 @@ async function runDriverLoop(input: {
         commandInbox,
         deferDeliveries: input.mode === "task" && expectedAttemptIds.size > 0,
         driverWritable: input.driverWritable,
+        progressHandler,
         seenTaskDeliveries,
         stateCursor,
       });
@@ -413,6 +420,20 @@ async function runDriverLoop(input: {
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,
   });
+  let progressState = { renderCount: 0, snapshot: createProgressSnapshot() };
+  const progressHandler: SessionProgressHandler | undefined =
+    input.capabilities?.progress === true
+      ? {
+          async handleProgress(command) {
+            const snapshot = reduceProgressCommand(progressState.snapshot, command);
+            if (snapshot.revision === progressState.snapshot.revision) return;
+            progressState = await renderSessionProgressStep({
+              previousRenderCount: progressState.renderCount,
+              snapshot,
+            });
+          },
+        }
+      : undefined;
 
   // Control-hook disposal is deferred one turn — see DispatchedTurn.
   let disposeSettledTurnControl: (() => Promise<void>) | undefined;
@@ -440,6 +461,7 @@ async function runDriverLoop(input: {
       delivery,
       mode: input.mode,
       parentWritable: input.driverWritable,
+      progressHandler,
       serializedContext,
       seenTaskDeliveries,
       sessionState: stateCursor.sessionState,

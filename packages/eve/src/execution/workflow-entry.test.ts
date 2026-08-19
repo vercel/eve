@@ -26,6 +26,7 @@ import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.j
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import type { SessionInboxPayload } from "#execution/session-command-inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { renderSessionProgressStep } from "#execution/session-progress-renderer-step.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: vi.fn(),
@@ -101,6 +102,13 @@ vi.mock("./settle-cancelled-turn-step.js", () => ({
 
 vi.mock("./session-timeout-control.js", () => ({
   createSessionTimeoutControl: vi.fn(),
+}));
+
+vi.mock("./session-progress-renderer-step.js", () => ({
+  renderSessionProgressStep: vi.fn(async ({ previousRenderCount, snapshot }) => ({
+    renderCount: previousRenderCount + 1,
+    snapshot,
+  })),
 }));
 
 function createSessionStateForMock(
@@ -211,6 +219,56 @@ describe("workflowEntry", () => {
       serializedContext: expect.any(Object),
       sessionState,
     });
+  });
+
+  it("reduces and renders parked progress without dispatching another turn", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      stableHook: {
+        values: [
+          {
+            commandId: "progress_1",
+            events: [
+              {
+                eventId: "turn_start",
+                kind: "turn",
+                turn: {
+                  id: "turn:wrun_test_123:turn_0",
+                  phase: "running",
+                  sequence: 0,
+                  startedAt: "2026-01-01T00:00:01.000Z",
+                },
+              },
+            ],
+            kind: "progress",
+            version: 1,
+          },
+          { kind: "reset" },
+        ],
+      },
+      turnControls: [turnResult({ action: "park", sessionState })],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "hello" },
+        serializedContext: createSerializedContext({
+          "eve.capabilities": { progress: true },
+        }),
+      }),
+    ).resolves.toEqual({ output: "" });
+
+    expect(renderSessionProgressStep).toHaveBeenCalledWith({
+      previousRenderCount: 0,
+      snapshot: expect.objectContaining({
+        revision: 1,
+        turns: expect.objectContaining({
+          "turn:wrun_test_123:turn_0": expect.objectContaining({ phase: "running" }),
+        }),
+      }),
+    });
+    expect(dispatchTurnStep).toHaveBeenCalledOnce();
   });
 
   it("exits a conflicting initial continuation before dispatching the first turn", async () => {

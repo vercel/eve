@@ -204,6 +204,13 @@ export type SessionCommand =
       readonly turnPolicy?: TurnPolicy;
     }
   | { readonly kind: "cancel"; readonly taskId?: string; readonly turnId?: string }
+  | {
+      /** Internal-only presentation command; authored channel APIs never create this shape. */
+      readonly kind: "progress";
+      readonly version: 1;
+      readonly commandId: string;
+      readonly events: readonly import("#execution/session-progress.js").ProgressEventV1[];
+    }
   | { readonly kind: "compact" }
   | { readonly kind: "clear" }
   | { readonly kind: "reset"; readonly reason?: string };
@@ -222,11 +229,13 @@ export type SessionCommandResult<TCommand extends SessionCommand = SessionComman
     ? SessionSendCommandResult
     : TCommand extends { readonly kind: "cancel" }
       ? CancelTurnResult
-      : TCommand extends { readonly kind: "compact" }
-        ? CompactSessionResult
-        : TCommand extends { readonly kind: "clear" }
-          ? ClearSessionResult
-          : ResetSessionResult;
+      : TCommand extends { readonly kind: "progress" }
+        ? { readonly status: "accepted" }
+        : TCommand extends { readonly kind: "compact" }
+          ? CompactSessionResult
+          : TCommand extends { readonly kind: "clear" }
+            ? ClearSessionResult
+            : ResetSessionResult;
 
 export interface DispatchContinuationInput<TCommand extends SessionCommand = SessionCommand> {
   readonly command: TCommand;
@@ -407,6 +416,8 @@ export interface SessionCapabilities {
    *    approvals and `ask_question` prompts the model has already emitted.
    */
   readonly requestInput?: boolean;
+  /** Internal channel opt-in for presentation-only progress. */
+  readonly progress?: boolean;
 }
 
 // ---------------------------------------------------------------------------
