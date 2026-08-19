@@ -86,9 +86,7 @@ A handler-form session runs on the same durable runtime engine as any other sess
 
 ## Session continuity
 
-Markdown schedules start a new session on every fire. Handler schedules do too,
-unless they send to an existing conversation, such as a Slack thread. Store data
-that must survive across fires outside session state.
+Markdown schedules start a new session on every fire. Handler schedules do too, unless they send to an existing conversation, such as a Slack thread. Store data that must survive across fires outside session state.
 
 ## Trigger a schedule while iterating
 

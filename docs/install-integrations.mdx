@@ -28,9 +28,7 @@ When an official item declares an interactive setup flow or flows, eve asks whet
 
 ## Automate setup
 
-Use `eve add <item> --non-interactive` when a script or coding agent cannot
-answer terminal prompts. It prints NDJSON events and exits with a status you can
-branch on:
+Use `eve add <item> --non-interactive` when a script or coding agent cannot answer terminal prompts. It prints NDJSON events and exits with a status you can branch on:
 
 | Exit code | Meaning                                         |
 | --------- | ----------------------------------------------- |
@@ -38,15 +36,9 @@ branch on:
 | `1`       | Installation or setup failed.                   |
 | `2`       | Setup needs an answer or an unmet prerequisite. |
 
-On exit code `2`, read the final event and run its `next.command`. For a
-non-secret question, replace its `<JSON value>` placeholder with the answer you
-collected. Never pass a secret in `--answer`; use the environment variable or
-secret store the integration documents. Add `--yes` to accept recommended
-values; explicit answers take precedence.
+On exit code `2`, read the final event and run its `next.command`. For a non-secret question, replace its `<JSON value>` placeholder with the answer you collected. Never pass a secret in `--answer`; use the environment variable or secret store the integration documents. Add `--yes` to accept recommended values; explicit answers take precedence.
 
-A setup may report `eve link` as a prerequisite. Run it, then retry the
-continuation. See [Deployment](./guides/deployment/vercel.mdx) for the
-non-interactive `eve link` and `eve deploy` forms.
+A setup may report `eve link` as a prerequisite. Run it, then retry the continuation. See [Deployment](./guides/deployment/vercel.mdx) for the non-interactive `eve link` and `eve deploy` forms.
 
 ## Find an integration
 

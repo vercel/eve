@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Include a non-secret answer placeholder in blocked non-interactive `eve add` continuation commands, so callers can resume setup with the requested key instead of reconstructing the command.
+Improve non-interactive setup recovery: `eve add` now reports terminal outcomes on every path and includes non-secret answer placeholders in blocked continuation commands. `eve link` and `eve deploy` also point non-interactive callers to eve's own project commands.

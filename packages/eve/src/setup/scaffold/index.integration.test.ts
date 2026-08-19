@@ -940,8 +940,10 @@ describe("scaffoldExtensionProject", () => {
     expect(agentsMd).toContain("`agent/instructions.ts` or files under `agent/instructions/`");
     expect(agentsMd).toContain("ls node_modules/eve/docs");
     expect(agentsMd).toContain("Start with `docs/README.md`: it maps each task");
+    expect(agentsMd).toContain("resolve the installed `eve` package location first");
     expect(agentsMd).toContain("Use a bounded authoring loop");
     expect(agentsMd).toContain("Stop discovery once the file location");
+    expect(agentsMd).toContain("Follow links or inspect public types only");
     expect(agentsMd).toContain("recursively glob `node_modules`");
     expect(agentsMd).toContain("eve registry search <query> --json");
     expect(agentsMd).toContain("eve registry view <item>");
@@ -954,6 +956,7 @@ describe("scaffoldExtensionProject", () => {
     expect(agentsMd).toContain("eve deploy --non-interactive --yes");
     expect(agentsMd).toContain("Use eve to link and deploy Vercel projects");
     expect(agentsMd).toContain("Run the validation the task requests");
+    expect(agentsMd).toContain("When it does not establish the behavior you changed");
     // `vercel deploy` uploads everything a .vercelignore doesn't exclude, and
     // the platform default-ignores only the .env.local variants — eve's dev
     // artifacts and a bare .env must be excluded here or a source deploy

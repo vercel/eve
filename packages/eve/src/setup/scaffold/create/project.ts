@@ -311,7 +311,7 @@ Use a bounded authoring loop:
 2. Stop discovery once the file location, imports, and definition shape are clear. Implement the smallest complete behavior the user requested.
 3. Run one narrow verification. Expand investigation only when it fails or the request needs project-specific details.
 
-Do not recursively glob \`node_modules\`, enumerate the entire docs tree, or read unrelated scaffold files when the direct path is known. Package-manager links can hide files from recursive glob tools even though direct reads work.
+Follow links or inspect public types only when the routed page leaves the task unanswered. Do not recursively glob \`node_modules\`, enumerate the entire docs tree, or read unrelated scaffold files when the direct path is known. Package-manager links can hide files from recursive glob tools even though direct reads work.
 
 ## Prefer an existing integration
 

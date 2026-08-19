@@ -13,7 +13,7 @@ Link the agent directory to a Vercel project:
 eve link
 ```
 
-The command links an existing project or creates one, then pulls its environment variables. Without a terminal — in continuous integration (CI), or from a coding agent — name the project instead of picking it:
+The command links an existing project or creates one, then pulls its environment variables. For non-interactive use, name the project instead of picking it:
 
 ```bash
 eve link --project your_project_name --non-interactive
@@ -59,7 +59,7 @@ eve deploy
 
 `eve deploy` installs dependencies, runs `vercel deploy --prod`, and pulls the project environment after deployment. You can also push to a Git-connected Vercel project. Hosted Vercel builds set `VERCEL`, so `eve build` writes the deployment bundle under `.vercel/output`.
 
-Without a terminal, confirm the production deploy up front. `--project` links first, so a new project needs no separate `eve link`:
+For non-interactive use, confirm the production deploy up front. `--project` links first, so a new project needs no separate `eve link`:
 
 ```bash
 eve deploy --project your_project_name --non-interactive --yes
