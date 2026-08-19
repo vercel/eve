@@ -746,7 +746,7 @@ describe("runInitCommand", () => {
 
     const projectPath = join(parentDirectory, "my-agent");
     expect(stripAnsi(output.errors.join("\n"))).toContain(
-      `Git initialization failed during commit: commit refused\nThe Git repository and staged files were preserved at "${projectPath}".\n\nResolve the Git error above, then retry:\n  git -C ${JSON.stringify(projectPath)} commit -m "Initial commit from eve"`,
+      `Git initialization failed during commit: commit refused\nThe eve agent was created successfully. Git repository metadata and staged files were preserved at "${projectPath}"; the initial commit is optional.\n\nTo create it later, configure Git identity and run:\n  git -C ${JSON.stringify(projectPath)} commit -m "Initial commit from eve"`,
     );
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
       "--config.minimum-release-age=0",

@@ -313,22 +313,9 @@ Use a bounded authoring loop:
 
 Do not recursively glob \`node_modules\`, enumerate the entire docs tree, or read unrelated scaffold files when the direct path is known. Package-manager links can hide files from recursive glob tools even though direct reads work.
 
-Read the page the map points to, then write the code. Follow a link only when
-the page you are on leaves the task unanswered; reading further than that is the
-most common way to spend the budget without shipping anything.
-
 ## Prefer an existing integration
 
-<<<<<<< HEAD
 When a task names an external product or service, search the registry before implementing its integration. For a generic capability, author a tool instead.
-=======
-The registry packages integrations with named external products — Slack,
-Linear, iMessage, a specific MCP server. When the task names one, look for it
-before implementing it yourself. A generic capability such as \`get_weather\` is
-a tool: read \`docs/tools/overview.mdx\`, author \`agent/tools/<name>.ts\`, then
-run the project's normal validation. Do not search the registry for a generic
-tool.
->>>>>>> cfbb77d8 (perf(benchmarks): keep authoring cases on task)
 
 \`\`\`sh
 eve registry search <query> --json
@@ -354,24 +341,11 @@ eve link --non-interactive --project <name-or-id> [--team <team-id-or-slug>]
 eve deploy --non-interactive --yes [--project <name-or-id>]
 \`\`\`
 
-<<<<<<< HEAD
 A setup may report \`eve link\` as a prerequisite; run it, then retry the continuation. When a completed setup event has \`deploymentRequired: true\`, run the \`next\` command it reports.
 
 ## Validate the change
 
 Run the validation the task requests. When it does not establish the behavior you changed, run the narrowest relevant check.
-=======
-A setup may report \`eve link\` as a prerequisite; run it, then retry the
-continuation. When a completed setup event has \`deploymentRequired: true\`, run
-the \`next\` command it reports.
-
-## Validate only what the task asks for
-
-After authoring files, run the requested build or typecheck and stop when it
-passes. Do not inspect generated output, start \`eve dev\`, dispatch schedules,
-inspect session streams, or change Git history unless the user asks for runtime
-verification or repository work.
->>>>>>> cfbb77d8 (perf(benchmarks): keep authoring cases on task)
 `,
   "CLAUDE.md": `@AGENTS.md
 `,

@@ -26,36 +26,27 @@ Some integrations package several independently installable components. For exam
 
 When an official item declares an interactive setup flow or flows, eve asks whether to run them after installation and runs multiple flows in declaration order. Run the printed `eve add <item> --skip-install` command to resume a skipped or cancelled setup later; it reruns the selected components' declared flows from the beginning.
 
-## Set up an integration without prompts
+## Automate setup
 
-`eve add <item> --non-interactive` never prompts. Instead of asking, it prints a structured NDJSON event describing what it still needs and exits with a code you can branch on:
+Use `eve add <item> --non-interactive` when a script or coding agent cannot
+answer terminal prompts. It prints NDJSON events and exits with a status you can
+branch on:
 
 | Exit code | Meaning                                         |
 | --------- | ----------------------------------------------- |
-| `0`       | Setup completed.                                |
-| `1`       | Setup failed.                                   |
+| `0`       | Installation and setup completed.               |
+| `1`       | Installation or setup failed.                   |
 | `2`       | Setup needs an answer or an unmet prerequisite. |
 
-Every non-interactive run ends on exactly one terminal event — `completed`, `blocked`, `failed`, or `cancelled` — including a `--skip-install` continuation. That event, not a repeat of the command, is how you confirm the outcome.
+On exit code `2`, read the final event and run its `next.command`. For a
+non-secret question, replace its `<JSON value>` placeholder with the answer you
+collected. Never pass a secret in `--answer`; use the environment variable or
+secret store the integration documents. Add `--yes` to accept recommended
+values; explicit answers take precedence.
 
-On exit code `2`, read the final event and run its `next.command`. For a non-secret question, the command includes `--answer key=<JSON value>`; replace `<JSON value>` with the answer you collected. The continuation already carries `--skip-install` once the registry files are installed, so the retry only resumes setup. Resupply any answers you provided earlier — each invocation starts from the recorded state, not from a live session.
-
-Every `--answer` value is JSON, so strings need JSON quotes. When a question has a nested `editable.key`, you may answer both keys in one invocation:
-
-```bash
-eve add channel/photon-imessage --non-interactive \
-  --answer 'photon-project-source="create"' \
-  --answer 'photon-project-name="eve · my-agent"'
-```
-
-Add `--yes` to accept recommended values and reduce round trips; explicit `--answer` values still take precedence. Never pass a secret in `--answer` — supply it through the environment variable or secret store the integration documents.
-
-Two events need handling beyond a plain retry:
-
-- An `external_action` event with `blocking: true` means the command is still running while it waits for a person to finish something out of band, such as an OAuth grant. Surface its URL and code, keep the process alive, and wait for the matching `external_action_resolved` event or a terminal event. Do not start a continuation.
-- A completed event with `deploymentRequired: true` means the change only takes effect once deployed. Run the `next` command it reports.
-
-A setup that authenticates through Vercel may report `eve link` as a prerequisite. Run it, then retry the continuation. See [Deployment](./guides/deployment/vercel.mdx) for the non-interactive `eve link` and `eve deploy` forms.
+A setup may report `eve link` as a prerequisite. Run it, then retry the
+continuation. See [Deployment](./guides/deployment/vercel.mdx) for the
+non-interactive `eve link` and `eve deploy` forms.
 
 ## Find an integration
 

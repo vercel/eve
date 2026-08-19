@@ -947,23 +947,13 @@ describe("scaffoldExtensionProject", () => {
     expect(agentsMd).toContain("eve registry view <item>");
     expect(agentsMd).toContain("For a generic capability, author a tool instead.");
     expect(agentsMd).toContain("eve add <item> --non-interactive");
-<<<<<<< HEAD
-=======
-    expect(agentsMd).toContain("Do not search the registry for a generic\ntool.");
-    expect(agentsMd).toContain("`deploymentRequired: true`");
->>>>>>> cfbb77d8 (perf(benchmarks): keep authoring cases on task)
     expect(agentsMd).toContain("Exit code 0 means setup completed");
     expect(agentsMd).toContain("replace its `<JSON value>` answer placeholder");
     expect(agentsMd).toContain("docs/install-integrations.mdx");
     expect(agentsMd).toContain("eve link --non-interactive --project <name-or-id>");
     expect(agentsMd).toContain("eve deploy --non-interactive --yes");
-<<<<<<< HEAD
     expect(agentsMd).toContain("Use eve to link and deploy Vercel projects");
     expect(agentsMd).toContain("Run the validation the task requests");
-=======
-    expect(agentsMd).toContain("instead of\ncalling `vercel` directly");
-    expect(agentsMd).toContain("run the requested build or typecheck and stop when it\npasses");
->>>>>>> cfbb77d8 (perf(benchmarks): keep authoring cases on task)
     // `vercel deploy` uploads everything a .vercelignore doesn't exclude, and
     // the platform default-ignores only the .env.local variants — eve's dev
     // artifacts and a bare .env must be excluded here or a source deploy

@@ -615,7 +615,7 @@ export async function runInitCommand(
     if (result.gitResult.stage === "commit") {
       logger.error(
         pc.yellow(
-          `The Git repository and staged files were preserved at "${result.projectPath}".\n\nResolve the Git error above, then retry:\n  git -C ${JSON.stringify(result.projectPath)} commit -m "Initial commit from eve"`,
+          `The eve agent was created successfully. Git repository metadata and staged files were preserved at "${result.projectPath}"; the initial commit is optional.\n\nTo create it later, configure Git identity and run:\n  git -C ${JSON.stringify(result.projectPath)} commit -m "Initial commit from eve"`,
         ),
       );
     }

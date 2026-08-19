@@ -58,11 +58,10 @@ export default defineChannel({
 });
 ```
 
-Route paths mount verbatim on the app. The channel id is not a prefix, so the
+A route's `path` is its app URL; the channel filename does not prefix it. The
 route above answers at `POST /threads/:threadId/messages`, not
-`/support/threads/:threadId/messages`. Give each channel its own path segment:
-two channels that claim the same method and path collide, and only one of them
-will see the request. `/eve/v1` is reserved for framework transport routes.
+`/support/threads/:threadId/messages`. Use a unique method-and-path pair for
+each route, and do not use the framework-owned `/eve/v1/*` namespace.
 
 Each route receives these operation surfaces:
 

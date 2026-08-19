@@ -128,6 +128,20 @@ describe("registry commands", () => {
     expect(logger.errors).toEqual([]);
   });
 
+  it("reports completion after installing an item without setup headlessly", async () => {
+    const logger = createLogger();
+    getRegistryItems.mockResolvedValue([{ name: "extension/browser", type: "registry:item" }]);
+
+    await runAddCommand(logger, "/project", "extension/browser", { nonInteractive: true });
+
+    expect(JSON.parse(logger.logs[0]!)).toEqual({
+      version: 1,
+      type: "completed",
+      item: "extension/browser",
+      completedItems: ["extension/browser"],
+    });
+  });
+
   it("suggests matching registry items when an item is not found", async () => {
     const logger = createLogger();
     getRegistryItems.mockRejectedValue(
@@ -688,6 +702,30 @@ describe("registry commands", () => {
     expect(runSetup).not.toHaveBeenCalled();
     expect(logger.logs).toEqual([
       "Setup skipped. Run `eve add channel/slack --skip-install` when you're ready.",
+    ]);
+  });
+
+  it("reports completion when non-interactive setup is skipped", async () => {
+    const logger = createLogger();
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: { eve: { setup: [{ package: "@acme/slack", bin: "eve-slack", args: ["setup"] }] } },
+      },
+    ]);
+
+    await runAddCommand(logger, "/project", "channel/slack", {
+      nonInteractive: true,
+      skipSetup: true,
+    });
+
+    expect(logger.logs.map((entry) => JSON.parse(entry))).toEqual([
+      { version: 1, type: "progress", message: "Installed channel/slack" },
+      {
+        version: 1,
+        type: "completed",
+        item: "channel/slack",
+        completedItems: ["channel/slack"],
+      },
     ]);
   });
 

@@ -556,7 +556,9 @@ export async function runAddCommand(
       overwrite: options.overwrite,
       silent: options.silent,
     });
-    if (eveMetadata?.setup === undefined) return;
+    if (eveMetadata?.setup === undefined) {
+      return reportCompletion(logger, item, { facts: [] }, options.nonInteractive);
+    }
 
     const interactive =
       dependencies.hasInteractiveTerminal?.() ??
@@ -570,9 +572,16 @@ export async function runAddCommand(
         }),
       );
     }
+    if (options.skipSetup === true) {
+      if (options.nonInteractive) return reportCompletion(logger, item, { facts: [] }, true);
+      logger.log(setupReminder(item, "skipped"));
+      return;
+    }
     if (
-      options.skipSetup === true ||
-      (!options.nonInteractive && !options.yes && !interactive && options.setupAuthorized !== true)
+      !options.nonInteractive &&
+      !options.yes &&
+      !interactive &&
+      options.setupAuthorized !== true
     ) {
       logger.log(setupReminder(item, "skipped"));
       return;

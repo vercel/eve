@@ -84,11 +84,14 @@ The agent does not have to deliver a message on every run. When a prompt makes d
 
 A handler-form session runs on the same durable runtime engine as any other session, so it can park (durably suspend), for instance when the channel handoff is waiting for a Slack reply. Only markdown task mode is barred from waiting.
 
-## What a fire carries over
+## Session continuity
 
-Nothing, by default. A markdown-form fire starts a fresh session every time, so it opens with no history from the previous run. A handler-form fire is also a new session unless the target it sends to resolves to a continuation address an earlier session still owns — then it lands as another turn on that conversation, with its history and [state](./concepts/state) intact. A target that resolves to a new address each time, such as a proactive Slack send with a `channelId` and no `threadTs`, starts a new session on every fire.
-
-So a schedule that has to remember something from one run to the next keeps it in a store you own. [State](./concepts/state) covers where session-scoped memory ends, and [dynamic scheduling](./patterns/dynamic-scheduling) shows the pattern for schedule data that outlives any one run.
+Each markdown schedule fire starts a new session, so it does not inherit an
+earlier run's history or [state](./concepts/state). Handler schedules also start
+new sessions unless they send to a channel address that an existing conversation
+owns, such as a Slack thread. Store data that must survive across fires outside
+session state; [dynamic scheduling](./patterns/dynamic-scheduling) shows one
+such pattern.
 
 ## Trigger a schedule while iterating
 
