@@ -12,9 +12,8 @@ const EMPTY_DELIVERY_SENTINEL = "<eve-empty-delivery/>";
 const CONDITIONAL_DELIVERY_MARKER = "Conditional delivery";
 const REDUNDANT_REVIEW_SCENARIO = "TASK-WAKE-REDUNDANT-REVIEW";
 const REDUNDANT_REVIEW_FINDING = "blocker: task admission can discard deferred user input.";
-// Match the production repro: generic permission to be silent is insufficient
-// unless the instruction names already-delivered information as a no-report case.
-const REDUNDANT_DELIVERY_RULE = /\b(?:already|duplicate|previously|redundant)\b/iu;
+const REDUNDANT_DELIVERY_GUIDANCE =
+  "results already delivered or incorporated into an earlier response";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
   // Framework agent-list notes are model context, not scenario turns.
@@ -182,7 +181,7 @@ function handleRedundantReviewWake(
   );
   if (conditionalInstruction === undefined) return "TASK-WAKE-WAS-NOT-CONDITIONAL";
 
-  return REDUNDANT_DELIVERY_RULE.test(conditionalInstruction.text)
+  return conditionalInstruction.text.includes(REDUNDANT_DELIVERY_GUIDANCE)
     ? EMPTY_DELIVERY_SENTINEL
     : "already incorporated into the review above.";
 }
