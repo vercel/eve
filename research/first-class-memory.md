@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1510
 status: proposed
-last_updated: "2026-08-18"
+last_updated: "2026-08-19"
 ---
 
 # First-class memory
@@ -13,11 +13,11 @@ session. A memory provider owns how it stores, retrieves, and updates memory.
 eve owns when the provider participates in the agent lifecycle.
 
 Each memory definition binds a provider to an application namespace, a trusted
-scope, and a projection visibility policy. It may also describe the slot's
+scope, and a recall visibility policy. It may also describe the slot's
 purpose to the model through provider tool descriptions. The provider contract
 has three methods:
 
-- `recall` updates the context projected into model calls.
+- `recall` appends provider context to durable history as a user-role message.
 - `save` observes history before compaction and after a completed turn.
 - `tools` contributes model tools bound to the active memory scope.
 
@@ -34,8 +34,8 @@ compaction.completed  ---> recall(phase: "compaction.completed")
 turn.completed        ---> save(phase: "turn.completed")
 ```
 
-eve owns namespace and scope resolution, invocation order, scope-bound context
-projection, projection visibility, tool qualification, and replay behavior. The
+eve owns namespace and scope resolution, invocation order, recall-message
+attribution and visibility, tool qualification, and replay behavior. The
 provider owns storage, retrieval, ranking, extraction, formatting, retention,
 and its model-facing operations. A hosted semantic service and a bounded text
 file can therefore implement the same provider contract without sharing a
@@ -43,12 +43,12 @@ record or storage model.
 
 ## Public API at a glance
 
-| Import path              | Public surface                                                                                                        |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `eve/memory`             | `defineMemory`, `defineMemoryProvider`, `defaultNamespace`, provider contexts, addressing types, and projection types |
-| `eve/memory/scope`       | `byPrincipal`                                                                                                         |
-| `eve/memory/file`        | `fileMemory`, `inMemory`, and the portable document backend contract                                                  |
-| `eve/memory/file/vercel` | `vercelBlob`                                                                                                          |
+| Import path              | Public surface                                                                                                    |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `eve/memory`             | `defineMemory`, `defineMemoryProvider`, `defaultNamespace`, provider contexts, addressing types, and recall types |
+| `eve/memory/scope`       | `byPrincipal`                                                                                                     |
+| `eve/memory/file`        | `fileMemory`, `inMemory`, and the portable document backend contract                                              |
+| `eve/memory/file/vercel` | `vercelBlob`                                                                                                      |
 
 The smallest complete memory slot uses the built-in file provider:
 
@@ -81,7 +81,7 @@ agent/memory/              # directory of named slots
 The flat file and directory forms are mutually exclusive. Each module
 default-exports `defineMemory(...)`. The definition contains the provider, an
 optional model-facing description, an optional namespace, a required trusted
-scope, and optional eve-owned projection policy:
+scope, and an optional eve-owned visibility policy:
 
 ```ts title="agent/memory/user.ts"
 import { defineMemory } from "eve/memory";
@@ -96,10 +96,11 @@ export default defineMemory({
 });
 ```
 
-The same provider instance may back several slots. Their projections, tools,
-and provider invocations remain independent. The default namespace includes the
-slot identity, so each slot receives a distinct provider address. Definitions
-that resolve the same custom namespace and scope intentionally share an address.
+The same provider instance may back several slots. Their recalled messages,
+tools, and provider invocations remain independent. The default namespace
+includes the slot identity, so each slot receives a distinct provider address.
+Definitions that resolve the same custom namespace and scope intentionally
+share an address.
 
 ## Model-facing description
 
@@ -155,10 +156,10 @@ field when no slot-specific purpose is needed.
 
 The description is trusted application-authored model guidance. eve does not
 derive it from the slot name, namespace, scope, or request context, and does not
-expose those values through it. The description is not added to projections or
-the prompt separately, so a provider without tools does not expose it to the
-model. It helps the model choose among qualified tools but does not enforce
-authorization or replace scope isolation.
+expose those values through it. The description is not added to recalled
+messages or the prompt separately, so a provider without tools does not expose
+it to the model. It helps the model choose among qualified tools but does not
+enforce authorization or replace scope isolation.
 
 ## Namespace
 
@@ -242,7 +243,7 @@ component must be a non-empty string. eve resolves scope before namespace. A
 `null` scope disables the slot without invoking its namespace resolver.
 Otherwise eve resolves the namespace. A `null` namespace also disables the
 slot. A disabled slot does not call the provider, expose its tools, or include
-any of its projections in model context.
+its recalled messages in model context.
 
 For an active slot, eve validates both values and derives the provider scope key
 from exactly the resolved namespace and scope:
@@ -270,8 +271,8 @@ unscoped provider invocation path.
 
 eve locks scope for the active turn, including model steps and durable approved
 call continuations. A standalone manual compaction resolves and locks scope for
-that operation. Every projection remains attributed to the slot and scope key
-under which it was recalled.
+that operation. Every recalled message remains attributed to the slot and scope
+key under which it was appended.
 
 Passing `byPrincipal` as the scope resolver identifies the authenticated caller
 from principal type, authenticator, optional issuer, and principal ID. It is a
@@ -311,10 +312,10 @@ data must not cross that boundary. Resolver output is evaluated once when eve
 locks the operation's memory scopes, and every provider call and tool in that
 operation uses the locked value.
 
-## Projection visibility across scope changes
+## Recall visibility across scope changes
 
 `visibility` is an eve-owned `defineMemory` option. It controls which
-previously recalled projections enter a model request when the slot resolves a
+previously recalled messages enter a model request when the slot resolves a
 different scope. The option belongs to the consuming memory definition rather
 than the provider because eve owns prompt assembly and the application owns the
 session's audience boundary:
@@ -335,37 +336,38 @@ export default defineMemory({
 type MemoryVisibility = "scope" | "session";
 ```
 
-| Value               | Model context after a scope change                                                                                                          | Prompt cache                                                                                       |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `"scope"` (default) | Include only the projection whose scope key matches the active turn. Exclude projections recalled for earlier participants.                 | Filtering an anchored projection changes the prompt prefix and invalidates the affected cache.     |
-| `"session"`         | Keep projections recalled for earlier scopes visible, then add the active scope's first projection immediately before its first turn input. | A scope change keeps earlier messages in place; replacing or clearing a projection may still bust. |
+| Value               | Model context after a scope change                                                                                            | Prompt cache                                                                                  |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `"scope"` (default) | Include recalled messages whose slot and scope key match the active turn. Exclude recalled messages for earlier participants. | Filtering earlier messages changes the prompt prefix and invalidates the affected cache.      |
+| `"session"`         | Keep every recalled message for the slot visible in its durable history position.                                             | Existing prompt messages remain in place; later recall results only extend the cached prefix. |
 
-The default favors projection isolation over cache reuse when the authenticated
-participant changes.
+The default favors recalled-context isolation over cache reuse when the
+authenticated participant changes.
 
 For a Slack thread where one authenticated participant follows another,
 `"scope"` removes the first participant's recalled memory before the second
-participant's model call. `"session"` keeps both projections visible. The
+participant's model call. `"session"` keeps both recalled messages visible. The
 second mode is an explicit cross-scope disclosure policy and is appropriate
 only when the session participants form one trusted audience.
 
 ```text
-scope:   ... -> participant A turn -> assistant -> participant B projection -> participant B turn
-session: ... -> participant A projection -> participant A turn -> assistant -> participant B projection -> participant B turn
+durable: ... -> participant A memory -> participant A turn -> assistant -> participant B memory -> participant B turn
+scope:   ... -> participant A turn -> assistant -> participant B memory -> participant B turn
+session: ... -> participant A memory -> participant A turn -> assistant -> participant B memory -> participant B turn
 ```
 
 This option never changes provider scope. `recall`, `save`, and `tools` still
 receive only the active turn's locked scope. The provider cannot select the
-visibility mode, and eve never passes another scope or its projection into a
-provider method. A `null` scope suppresses all of the slot's projections in both
-modes.
+visibility mode. A `null` scope suppresses all recalled messages belonging to
+the slot in both modes.
 
-Projection visibility does not remove ordinary user, assistant, or tool
-messages already in the conversation. It also cannot undo information an
-earlier assistant response derived from memory. Applications that require hard
-isolation between participants must use separate sessions. Provider tools that
-return memory content place that content in ordinary tool history and therefore
-own the same shared-session risk.
+Recall visibility changes only scope-attributed recall messages in the model
+request. It does not remove ordinary user, assistant, or tool messages from
+durable history, and it cannot undo information an earlier assistant response
+derived from memory. Applications that require hard isolation between
+participants must use separate sessions. Provider tools that return memory
+content place that content in ordinary tool history and therefore own the same
+shared-session risk.
 
 ## Provider contract
 
@@ -377,10 +379,18 @@ import type { ModelMessage } from "ai";
 import type { SessionContext } from "eve/context";
 import type { DynamicResolveContext, ToolDefinition } from "eve/tools";
 
-interface MemoryProjection {
-  /** Non-empty provider context projected as one synthetic user-role message. */
+interface MemoryRecallMessage {
+  /** Provider context appended to durable model history. */
   readonly content: string;
+  readonly role: "user";
 }
+
+interface MemoryMessageAttribution {
+  readonly scope: MemoryScope;
+  readonly slot: string;
+}
+
+function getMemoryMessageAttribution(message: ModelMessage): MemoryMessageAttribution | null;
 
 interface MemoryTurnContext {
   readonly turnId: string;
@@ -392,13 +402,11 @@ interface MemoryTurnContext {
 
 interface MemoryOperationContext extends SessionContext {
   readonly abortSignal: AbortSignal;
-  /** Durable model history at this lifecycle boundary. Excludes memory projections. */
+  /** Durable model history at this lifecycle boundary, including prior recalls. */
   readonly messages: readonly ModelMessage[];
   /** Identifies one logical recall or save operation across workflow replay. */
   readonly operationId: string;
   readonly memory: {
-    /** Current projection for this slot and the active scope, if one exists. */
-    readonly current: MemoryProjection | null;
     readonly scope: MemoryScope;
     /** Path-derived slot identity, such as "memory" or "user". */
     readonly slot: string;
@@ -443,15 +451,13 @@ type MemorySaveContext = MemoryOperationContext &
 interface MemoryToolsContext extends DynamicResolveContext {
   readonly turn: MemoryTurnContext;
   readonly memory: {
-    /** Current projection after turn-start recall. */
-    readonly current: MemoryProjection | null;
     readonly scope: MemoryScope;
     /** Path-derived slot identity, such as "memory" or "user". */
     readonly slot: string;
   };
 }
 
-type MemoryRecallResult = MemoryProjection | null | undefined;
+type MemoryRecallResult = MemoryRecallMessage | null | undefined;
 type MemoryToolSet = Readonly<Record<string, ToolDefinition>>;
 
 interface MemoryProvider {
@@ -472,7 +478,8 @@ import { defineTool } from "eve/tools";
 
 const customMemory = defineMemoryProvider({
   async recall(ctx) {
-    return loadProjection(ctx.memory.scope.key);
+    const content = await loadMemory(ctx.memory.scope.key);
+    return content === null ? null : { content, role: "user" };
   },
   tools: async (ctx) => {
     const policy = await loadToolPolicy(ctx.session.auth.current);
@@ -488,64 +495,46 @@ const customMemory = defineMemoryProvider({
 });
 ```
 
-The result of `recall` updates the active scope's projection:
+The result of `recall` is append-only:
 
-| Result                          | Effect                                                  |
-| ------------------------------- | ------------------------------------------------------- |
-| `{ content: non-empty string }` | Replace the current projection for this slot and scope. |
-| `null`                          | Clear the current projection for this slot and scope.   |
-| `undefined` / no return         | Keep the current projection without changing it.        |
+| Result                              | Effect                                         |
+| ----------------------------------- | ---------------------------------------------- |
+| `{ content: string, role: "user" }` | Append one scope-attributed user-role message. |
+| `null`, `undefined`, or no return   | Append nothing at this boundary.               |
 
-This distinction lets a provider skip routine turn-start retrieval without
-losing previously recalled context. It can still clear stale context explicitly.
-An empty string is invalid and fails recall at that lifecycle boundary; it does
-not mean clear or skip. Providers return `null` to clear or `undefined` to
-preserve the current projection.
+eve applies the same content normalization as user-role instructions. It trims
+the returned content and appends nothing when the result is empty after
+trimming. A recall result never replaces, clears, or mutates an earlier message.
 
 `defineMemoryProvider(...)` is an identity-with-types helper. It does not add
 storage behavior or impose a record model.
 
-## Memory projection
+## Recalled messages
 
-Each slot stores at most one projection for every scope key it encounters in a
-session. The durable projection state includes the slot, scope key, content, and
-prompt anchor. `ctx.memory.current` exposes only the projection belonging to the
-active scope.
+Every non-empty recall result becomes one durable user-role message, using the
+same message shape and append behavior as user-role instructions. Turn-start
+recalls are appended immediately before the admitted turn input. Post-compaction
+recalls are appended after the rewritten checkpoint and retained tail. Multiple
+slots append in stable slot-path order.
 
-The first valid projection for a scope anchors one synthetic user-role
-message immediately before that scope's current turn input. Later recall results
-update the projection at the same anchor according to the result table above.
-Replacing, clearing, or filtering an anchored projection changes the prompt
-prefix and may invalidate the provider prompt cache.
+eve records internal slot and scope attribution on each recalled message. The
+attribution is not sent to the model or exposed as tool input. It exists so eve
+can apply `visibility` at model assembly and so provider code can distinguish
+recalled context from ordinary conversation messages. The message itself remains
+part of `ctx.messages`, completed-turn saves, and later compaction input.
 
-At model assembly, eve applies the slot's `visibility`. `"scope"` includes only
-projections matching the active scope. `"session"` includes all of the slot's
-projections in anchor order. Projections created at the same boundary use stable
-slot-path order. The slot and scope attribution remain attached to each
-projection throughout model assembly.
+Recalled messages are not emitted as `message.received`; they are framework
+context rather than new channel input. Compaction may summarize or discard them
+like other durable user-role context. Before compaction, eve applies the active
+visibility policy, so a scope-hidden recall cannot enter the checkpoint and is
+removed with the rewritten history. The post-compaction recall boundary lets a
+provider append fresh context when the rewritten history no longer contains it.
 
-A projection remains separate from ordinary conversation history:
-
-- It is not emitted as `message.received`.
-- It is not summarized by compaction.
-- It is not included in `ctx.messages` passed back to a provider.
-- Its slot and scope attribution are not exposed to the model as tool input.
-
-Although projections occupy stable positions among model messages for prompt
-caching, they remain tagged framework state rather than ordinary durable
-messages. That attribution is what lets eve filter them by scope.
-
-Compaction removes anchors attached to the rewritten history. After the new
-checkpoint, eve reanchors the projections visible for that operation and then
-runs post-compaction recall for the active scope. A hidden projection reanchors
-at the next turn boundary if its scope becomes visible again.
-
-Providers own the content inside a projection. eve owns its user-role placement,
-slot and scope attribution, filtering, and anchoring.
-
-User-role instructions append application context to durable conversation
-history at their lifecycle boundary. Memory projections are replaceable,
-scope-bound provider context kept outside that history.
+Append-only recall preserves the existing prompt prefix in the normal case. It
+also means a provider owns repetition and correction policy. Returning the same
+snapshot at every turn appends duplicates, while a later correction does not
+delete an earlier claim. A provider returns `null` or `undefined` when it has no
+new context to append.
 
 ## Lifecycle
 
@@ -555,35 +544,32 @@ After eve admits and normalizes a new turn, it resolves each memory scope and,
 for a non-null scope, its namespace. It then calls `recall` with
 `phase: "turn.started"` for every active slot. The context contains the
 zero-based turn sequence, stable turn ID, normalized input, durable history
-before the turn, and current projection for the active scope.
+before the turn, and prior recalled messages that remain in that history.
 
 The first turn has `ctx.turn.sequence === 0`. A provider may use that coordinate
-to recall only on the first turn. A provider may check
-`ctx.memory.current === null` when it only needs to recall scopes without a
-projection, including a new participant's scope on a later turn. A provider that
-returns no projection or clears one will see `null` again at the next boundary.
-A semantic provider may recall on every turn using the current input as its
-query.
+to recall only on the first turn. It may use `getMemoryMessageAttribution` to
+find earlier recalls from the same slot and scope, return nothing when its
+current context is already present, or recall on every turn using the current
+input as its query.
 
-The result is ready before the first model call. If automatic compaction runs at
-the same opening boundary, the projection remains outside compaction input and
-the post-compaction recall may replace it before the model runs.
+The results are appended in stable slot order before the first model call. If
+automatic compaction runs at the same opening boundary, the new messages enter
+compaction input. Post-compaction recall may append fresh context after the
+rewritten checkpoint before the model runs.
 
 ### Compaction save and recall
 
 Before automatic or manual compaction rewrites history, eve calls an implemented
 `save` method with `phase: "compaction.requested"`. The provider receives the
-complete durable history about to be compacted, the active projection separately
-as `ctx.memory.current`, and the compaction model and usage metadata. A provider
-may persist a checkpoint, extract facts the summary could omit, or do nothing.
+complete durable history about to be compacted and the compaction model and
+usage metadata. A provider may persist a checkpoint, extract facts the summary
+could omit, or do nothing.
 
 After a checkpoint is durably appended, eve calls `recall` with
 `phase: "compaction.completed"`. The provider receives the settled
-post-compaction history and can replace, clear, or preserve its current
-projection. The call occurs after every successful automatic or manual
-compaction, even when the provider skipped ordinary turn-start recall. Only the
-active scope's projection can change during this call; visibility of other
-projections remains eve-owned policy.
+post-compaction history and may append one fresh user-role message. The call
+occurs after every successful automatic or manual compaction, even when the
+provider skipped ordinary turn-start recall.
 
 Provider tools are not resolved during a standalone compaction because no model
 call follows that boundary.
@@ -593,7 +579,8 @@ call follows that boundary.
 After turn-start recall settles, eve resolves `tools` once for the active turn.
 The function may be synchronous or asynchronous. Its context contains the same
 session, authentication, channel, and message fields as a `defineDynamic`
-resolver, plus the locked memory scope, current projection, slot, and turn.
+resolver, plus the locked memory scope, slot, and turn. Its messages include the
+turn-start recall results followed by the admitted turn input.
 Returning `null` or an empty record exposes no tools for the slot.
 
 The memory definition is implicit `defineDynamic` authoring: eve adapts each
@@ -644,9 +631,9 @@ the turn, update a remote profile, enqueue its own work, or do nothing.
 Every recall and save invocation receives an `operationId` for one logical slot
 operation. eve reuses the ID across workflow replay, so it is not a unique
 callback-attempt identifier. A provider must use it as the idempotency key for
-externally visible `save` side effects. eve records recall results, scope
-attribution, prompt anchors, and turn-scoped dynamic tool metadata in durable
-session state.
+externally visible `save` side effects. eve records recalled messages with their
+scope attribution and keeps turn-scoped dynamic tool metadata in durable session
+state.
 
 Failure behavior follows the point at which the method runs:
 
@@ -676,8 +663,10 @@ function fileMemory(options?: FileMemoryOptions): MemoryProvider;
 ```
 
 Its `recall` method loads the current document at every turn start and after
-every successful compaction. Its `tools` method exposes
-`save_memory({ text })` and `remove_memory({ index })`. Each tool completes after
+every successful compaction. It appends the formatted document when the active
+slot and scope do not already have an identical latest recall in durable
+history. An empty or unchanged document appends nothing. Its `tools` method
+exposes `save_memory({ text })` and `remove_memory({ index })`. Each tool completes after
 its conditional write, and the next recall reflects the updated document.
 `save_memory` normalizes whitespace, returns the existing index for duplicate
 text, and fails when the document reaches `maxEntries`. `remove_memory` is a
@@ -713,8 +702,8 @@ The same lifecycle also supports a hosted semantic provider:
 
 | Boundary               | Bounded file provider       | Hosted semantic provider                    |
 | ---------------------- | --------------------------- | ------------------------------------------- |
-| `turn.started` recall  | Load the current document   | Retrieve against the current turn input     |
-| Post-compaction recall | Reload the current document | Refresh against the compacted history       |
+| `turn.started` recall  | Append a changed document   | Retrieve against the current turn input     |
+| Post-compaction recall | Append if context is absent | Refresh against the compacted history       |
 | Pre-compaction save    | Omit                        | Preserve facts or checkpoint provider state |
 | Completed-turn save    | Omit                        | Capture the completed interaction           |
 | Turn tools             | Save and remove entries     | Provider-defined search, save, or forget    |
@@ -726,7 +715,7 @@ nothing in `save`, or return `null` from `tools`.
 
 A provider package exports a `MemoryProvider` or provider factory. It may own
 credentials, remote APIs, migrations, retrieval, capture, and model tools. The
-consuming agent owns the slot path, namespace, scope, and projection visibility.
+consuming agent owns the slot path, namespace, scope, and recall visibility.
 Mounted extensions cannot contribute memory slots.
 
 ## Design invariants
@@ -736,16 +725,16 @@ Mounted extensions cannot contribute memory slots.
   slot.
 - The resolved namespace and scope are the only variable inputs to the provider
   key. Custom namespaces receive no path or deployment suffixes.
-- One scope lock applies to every provider call, projection, model step, and
+- One scope lock applies to every provider call, recalled message, model step, and
   durable tool continuation in an operation.
 - Recall and save phases identify their exact lifecycle boundary. Every provider
-  context includes durable history, the current projection, and a replay-stable
-  operation ID.
-- Projections enter model calls as scope-attributed user-role context but remain
-  outside durable history and compaction input. `visibility` controls which
-  projections enter the prompt after a scope change.
-- A recall result can replace, clear, or preserve only the active scope's
-  projection. Empty projection content is invalid.
+  context includes durable history and a replay-stable operation ID.
+- A non-empty recall result appends one scope-attributed user-role message to
+  durable history. `null`, `undefined`, and empty normalized content append
+  nothing; recall never mutates an earlier message.
+- `visibility` controls which attributed recall messages enter a model request
+  after a scope change. Session visibility preserves append-only prompt order;
+  scope visibility may filter an earlier prefix.
 - Provider tools are slot-qualified, scope-bound `turn.started` dynamic tools.
   Each turn resolves one complete tool set, every model step uses it, and a
   durable call keeps its originating definition until settlement.
@@ -763,7 +752,7 @@ Mounted extensions cannot contribute memory slots.
   guarantee.
 - Cross-provider search, mutation, or record reconciliation.
 - Model-selected alternate scopes or unscoped provider invocations.
-- Treating projection visibility as complete participant isolation for ordinary
+- Treating recall visibility as complete participant isolation for ordinary
   conversation messages or provider tool results.
 - Preventing faulty or malicious provider code from ignoring the supplied scope.
 - Standardizing provider credentials, migrations, inspection tools, or
@@ -813,27 +802,31 @@ Mounted extensions cannot contribute memory slots.
       `fileMemory()` slots. This resolves the [model-facing attribution
       thread](https://github.com/vercel/eve/pull/1581#discussion_r3807269437).
 
-- [ ] **Explain projection placement and tool invocation semantics.** Keep or
-      revise the current replaceable, scope-attributed projection model only
-      after documenting its prompt-cache, chronology, stale-context, and suffix
-      placement tradeoffs. State directly that eve invokes `recall` at fixed
-      lifecycle boundaries and resolves the tool set once per turn, while the
-      model decides whether to call an exposed tool. Close the [replacement and
-      cache thread](https://github.com/vercel/eve/pull/1581#discussion_r3807382863),
+- [x] **Define recall placement and tool invocation semantics.** Every non-empty
+      recall result appends one scope-attributed user-role message to durable
+      history at its lifecycle boundary. `null`, `undefined`, and normalized
+      empty content append nothing and never clear earlier history. Session
+      visibility preserves append-only prompt order; scope visibility may
+      filter earlier recalled messages after a scope change. eve invokes
+      `recall` deterministically and resolves one tool set per turn, while the
+      model decides whether to call an exposed tool. This resolves the
+      [replacement and cache
+      thread](https://github.com/vercel/eve/pull/1581#discussion_r3807382863),
       [suffix placement
       thread](https://github.com/vercel/eve/pull/1581#discussion_r3807481674),
-      and [recall versus tool
-      thread](https://github.com/vercel/eve/pull/1581#discussion_r3807408005)
-      after the proposal records the chosen rationale.
+      [recall versus tool
+      thread](https://github.com/vercel/eve/pull/1581#discussion_r3807408005),
+      [null sentinel
+      thread](https://github.com/vercel/eve/pull/1581#discussion_r3807387086),
+      and [falsy return
+      thread](https://github.com/vercel/eve/pull/1581#discussion_r3807755029).
 
 - [ ] **Reconcile the remaining review threads with the final contract.**
-      Correct the earlier additive-recall reply: the current contract keeps one
-      replaceable projection per slot and scope. Correct the cross-provider
-      reply: provider `ctx.messages` excludes other memory projections, and
-      cross-provider reconciliation remains a non-goal. Reply to or resolve the
-      remaining no-change questions about `phase`, `null` and `undefined`,
-      visibility, and the namespace/scope split, then resolve the outdated and
-      approval-only threads. Start with the [cross-provider
+      Provider `ctx.messages` includes recalled history, and
+      `getMemoryMessageAttribution` identifies its originating slot and scope.
+      Reply to or resolve the remaining questions about settled-turn metadata,
+      the namespace/scope split, and cross-provider coordination, then resolve
+      outdated and approval-only threads. Start with the [cross-provider
       thread](https://github.com/vercel/eve/pull/1581#discussion_r3807280622)
       and the [outdated turn-input
       thread](https://github.com/vercel/eve/pull/1581#discussion_r3772094622).
