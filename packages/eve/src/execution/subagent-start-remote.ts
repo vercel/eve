@@ -1,5 +1,8 @@
 import type { DispatchOutcome, RuntimeSession } from "#execution/agent-handle-dispatch.js";
 import { createRemoteAgentStartFailureResult } from "#execution/dispatch-action-failures.js";
+import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
+import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { mintStartOperation } from "#execution/dispatch-start-operation.js";
 import {
   resolveRemoteAgentForAction,
@@ -17,6 +20,19 @@ import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 
 const log = createLogger("execution.subagent-start-remote");
 
+function createRootProgressCallback(
+  session: RuntimeSession,
+  callbackBaseUrl: string,
+): Parameters<typeof startRemoteAgentSession>[0]["progressCallback"] {
+  if (session.rootSessionId !== undefined) return undefined;
+  const token = sessionCommandHookToken(session.sessionId);
+  return {
+    token,
+    url: createWorkflowCallbackUrl(callbackBaseUrl, createEveCallbackRoutePath(token)),
+    version: 1,
+  };
+}
+
 /** Starts one remote subagent after dispatch planning has selected its target. */
 export async function startRemoteSubagent(input: {
   readonly action: RuntimeRemoteAgentCallActionRequest;
@@ -32,6 +48,7 @@ export async function startRemoteSubagent(input: {
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof startRemoteAgentSession>[0]["parentTraceContext"];
   readonly persistentSessions: boolean;
+  readonly progressCallback?: Parameters<typeof startRemoteAgentSession>[0]["progressCallback"];
   readonly session: RuntimeSession;
   readonly taskOwned: boolean;
 }): Promise<DispatchOutcome> {
@@ -88,6 +105,8 @@ export async function startRemoteSubagent(input: {
       operationId: operation.id,
       parentTraceContext: input.parentTraceContext,
       persistentSessions: input.persistentSessions,
+      progressCallback:
+        input.progressCallback ?? createRootProgressCallback(input.session, callbackBaseUrl),
       remote: resolvedRemote,
       session: input.session,
     });

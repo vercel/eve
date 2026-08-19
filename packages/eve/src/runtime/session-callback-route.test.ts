@@ -475,6 +475,43 @@ describe("session callback route", () => {
     expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
+  it("routes a versioned progress command to the authenticated callback token", async () => {
+    resumeHookMock.mockResolvedValue(undefined);
+    const command = {
+      commandId: "progress_1",
+      events: [],
+      kind: "progress",
+      version: 1,
+    };
+    const response = await handleSessionCallbackRequest(
+      new Request("https://app.example.com/eve/v1/callback/root-token", {
+        body: JSON.stringify({ command, kind: "session.progress", version: 1 }),
+        method: "POST",
+      }),
+      createRouteContext({ token: "root-token" }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(resumeHookMock).toHaveBeenCalledWith("root-token", command);
+  });
+
+  it("rejects unknown progress versions without resuming the hook", async () => {
+    const response = await handleSessionCallbackRequest(
+      new Request("https://app.example.com/eve/v1/callback/root-token", {
+        body: JSON.stringify({
+          command: { commandId: "progress_1", events: [], kind: "progress", version: 2 },
+          kind: "session.progress",
+          version: 2,
+        }),
+        method: "POST",
+      }),
+      createRouteContext({ token: "root-token" }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
   it("resumes a failed conversation turn as an error result carrying its outcome", async () => {
     resumeHookMock.mockResolvedValue(undefined);
 
