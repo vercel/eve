@@ -29,10 +29,6 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.mjs"
     },
-    "./config": {
-      "types": "./scaffold/index.d.ts",
-      "default": "./scaffold/index.js"
-    },
     "./agent": {
       "eve-source": "./src/agent.ts",
       "types": "./scaffold/agent.d.ts",
