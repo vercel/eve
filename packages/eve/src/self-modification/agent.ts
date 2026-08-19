@@ -1,22 +1,24 @@
 import type { DynamicResolveContext } from "#dynamic/definition.js";
-import { defineAgent, defineDynamic, type AgentStaticModelDefinition } from "#public/index.js";
+import {
+  defineAgent,
+  defineDynamic,
+  type AgentStaticModelDefinition,
+  type DynamicSentinel,
+  type DynamicSubagentDefinition,
+} from "#public/index.js";
 
 import { resolveSelfModificationConfig, type SelfModificationConfig } from "./config.js";
 import { hasGitHubCredential } from "./credentials.js";
 import { resolveSelfModificationMode } from "./mode.js";
 
-/** Default model used by the self-modification subagent. */
-export const DEFAULT_SELF_MODIFICATION_MODEL = "anthropic/claude-sonnet-5";
+/** Fallback model when neither the self-modification agent nor its parent configures one. */
+export const FALLBACK_SELF_MODIFICATION_MODEL = "anthropic/claude-sonnet-5";
 
 /** Configuration for the self-modification subagent. */
 export interface SelfModificationAgentOptions {
   /** Policy shared with the sandbox and extension mount. */
   readonly config?: SelfModificationConfig;
-  /**
-   * Model used by the self-modification subagent.
-   *
-   * @default "anthropic/claude-sonnet-5"
-   */
+  /** Model used by the self-modification subagent; defaults to the effective parent model. */
   readonly model?: AgentStaticModelDefinition;
 }
 
@@ -53,12 +55,14 @@ const deployedEffectiveEdits =
   "Source edits do not affect the caller’s current turn. The subagent can publish only a draft pull request, and changes become effective only after review, merge, and redeployment.";
 
 /** Defines the environment-aware self-modification dynamic subagent. */
-export function defineSelfModificationAgent(options: SelfModificationAgentOptions = {}) {
-  const model = options.model ?? DEFAULT_SELF_MODIFICATION_MODEL;
+export function defineSelfModificationAgent(
+  options: SelfModificationAgentOptions = {},
+): DynamicSentinel<DynamicSubagentDefinition | null> {
   const config = resolveSelfModificationConfig(options.config);
 
   const resolve = async (_event: unknown, ctx: DynamicResolveContext) => {
     const mode = resolveSelfModificationMode(config);
+    const model = options.model ?? ctx.model?.id ?? FALLBACK_SELF_MODIFICATION_MODEL;
     const description = renderDescription([
       "Delegate here when the user asks to change this eve agent or its authored source.",
       sourceDelegation,
