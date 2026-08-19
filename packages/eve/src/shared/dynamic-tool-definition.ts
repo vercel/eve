@@ -47,6 +47,8 @@ export const ALLOWED_DYNAMIC_SKILL_EVENTS: ReadonlySet<string> = new Set<Dynamic
  * the session context inside tool `execute` functions.
  */
 export interface DynamicResolveContext {
+  /** Effective language model, or `null` before a dynamic-only agent selects one. */
+  readonly model: { readonly id: string } | null;
   readonly session: {
     readonly id: string;
     readonly auth: SessionAuth;
