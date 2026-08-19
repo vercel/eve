@@ -88,6 +88,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The agent-channels upgrade eval builds HEAD^1 as its pinned
+          # consumer, while the checked-out PR merge commit is the producer.
+          fetch-depth: 2
 
       - name: Setup pnpm
         if: needs.changes.outputs.relevant == 'true'
@@ -109,6 +112,15 @@ jobs:
         # Full build, not build:js: the deployed/runtime bundles must carry the
         # stamped package version (scripts/stamp-version-tokens.mjs) and docs.
         run: pnpm --filter eve run build
+
+      - name: Build PR-base eve package for upgrade coverage
+        if: needs.changes.outputs.relevant == 'true' && matrix.name == 'agent-channels'
+        run: |
+          BASE_WORKTREE="$RUNNER_TEMP/eve-pr-base"
+          git worktree add --detach "$BASE_WORKTREE" HEAD^1
+          pnpm --dir "$BASE_WORKTREE" install --frozen-lockfile
+          pnpm --dir "$BASE_WORKTREE" --filter eve run build
+          echo "EVE_E2E_BASE_EVE_PACKAGE=$BASE_WORKTREE/packages/eve" >> "$GITHUB_ENV"
 
       - name: Build extension fixtures
         if: needs.changes.outputs.relevant == 'true'

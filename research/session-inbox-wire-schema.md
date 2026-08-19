@@ -193,7 +193,9 @@ mechanical guard in the existing CI lint job (`pnpm guard:invariants`):
 - Exact current-version bytes stay in the unit contract, where the encoded
   object can be asserted without decoding workflow-owned serde. The
   agent-channels cross-version redeploy eval is the end-to-end backstop: it
-  runs a current producer against an actual eve@0.30.8 consumer.
+  runs the PR merge candidate against both the PR-base consumer (the generic
+  upgrade invariant) and an actual eve@0.30.8 consumer (the historical
+  regression).
 
 ## Alternatives considered
 
