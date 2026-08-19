@@ -1,14 +1,37 @@
 "use client";
 
 import { ChevronRightIcon } from "lucide-react";
-import { Fragment, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 
 import type { BenchmarkRow } from "@/lib/evals/results";
 
+type SortKey =
+  | "modelDisplayName"
+  | "harness"
+  | "averageDurationMs"
+  | "averageEstimatedListCostUsd"
+  | "baselineSuccessRate"
+  | "guidedSuccessRate";
+
+type SortDirection = "ascending" | "descending";
+
+interface SortState {
+  key: SortKey;
+  direction: SortDirection;
+}
+
 export const ResultsTable = ({ rows }: { rows: BenchmarkRow[] }) => {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const [sort, setSort] = useState<SortState>({
+    key: "guidedSuccessRate",
+    direction: "descending",
+  });
+  const sortedRows = useMemo(
+    () => [...rows].sort((left, right) => compareRows(left, right, sort)),
+    [rows, sort],
+  );
 
-  const toggle = (groupId: string) => {
+  const toggleExpanded = (groupId: string) => {
     setExpanded((current) => {
       const next = new Set(current);
       if (next.has(groupId)) next.delete(groupId);
@@ -17,23 +40,71 @@ export const ResultsTable = ({ rows }: { rows: BenchmarkRow[] }) => {
     });
   };
 
+  const toggleSort = (key: SortKey) => {
+    setSort((current) =>
+      current.key === key
+        ? {
+            key,
+            direction: current.direction === "ascending" ? "descending" : "ascending",
+          }
+        : {
+            key,
+            direction: key === "modelDisplayName" || key === "harness" ? "ascending" : "descending",
+          },
+    );
+  };
+
   return (
     <div className="overflow-x-auto rounded-xl border border-gray-400">
       <table className="w-full min-w-[760px] border-collapse text-left text-sm">
         <thead className="bg-gray-100 text-gray-900">
           <tr>
-            <HeaderCell>Model</HeaderCell>
-            <HeaderCell>Harness</HeaderCell>
-            <HeaderCell align="right">Avg Duration</HeaderCell>
-            <HeaderCell align="right">Avg List Cost</HeaderCell>
-            <HeaderCell align="right" sortDirection="descending">
+            <HeaderCell
+              onSort={() => toggleSort("modelDisplayName")}
+              sortDirection={sort.key === "modelDisplayName" ? sort.direction : undefined}
+            >
+              Model
+            </HeaderCell>
+            <HeaderCell
+              onSort={() => toggleSort("harness")}
+              sortDirection={sort.key === "harness" ? sort.direction : undefined}
+            >
+              Harness
+            </HeaderCell>
+            <HeaderCell
+              align="right"
+              onSort={() => toggleSort("averageDurationMs")}
+              sortDirection={sort.key === "averageDurationMs" ? sort.direction : undefined}
+            >
+              Avg Duration
+            </HeaderCell>
+            <HeaderCell
+              align="right"
+              onSort={() => toggleSort("averageEstimatedListCostUsd")}
+              sortDirection={
+                sort.key === "averageEstimatedListCostUsd" ? sort.direction : undefined
+              }
+            >
+              Avg List Cost
+            </HeaderCell>
+            <HeaderCell
+              align="right"
+              onSort={() => toggleSort("baselineSuccessRate")}
+              sortDirection={sort.key === "baselineSuccessRate" ? sort.direction : undefined}
+            >
               Success Rate
             </HeaderCell>
-            <HeaderCell align="right">Success Rate with AGENTS.md *</HeaderCell>
+            <HeaderCell
+              align="right"
+              onSort={() => toggleSort("guidedSuccessRate")}
+              sortDirection={sort.key === "guidedSuccessRate" ? sort.direction : undefined}
+            >
+              Success Rate with AGENTS.md *
+            </HeaderCell>
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => {
+          {sortedRows.map((row) => {
             const isExpanded = expanded.has(row.groupId);
             return (
               <Fragment key={row.groupId}>
@@ -42,7 +113,7 @@ export const ResultsTable = ({ rows }: { rows: BenchmarkRow[] }) => {
                     <button
                       aria-expanded={isExpanded}
                       className="flex items-center gap-2 font-medium text-gray-1000"
-                      onClick={() => toggle(row.groupId)}
+                      onClick={() => toggleExpanded(row.groupId)}
                       type="button"
                     >
                       <span className="flex size-6 items-center justify-center rounded-md border border-gray-500">
@@ -114,18 +185,30 @@ export const ResultsTable = ({ rows }: { rows: BenchmarkRow[] }) => {
 const HeaderCell = ({
   align = "left",
   children,
+  onSort,
   sortDirection,
 }: {
   align?: "left" | "right";
   children: React.ReactNode;
-  sortDirection?: "ascending" | "descending";
+  onSort?: () => void;
+  sortDirection?: SortDirection;
 }) => (
   <th
-    aria-sort={sortDirection}
+    aria-sort={onSort ? (sortDirection ?? "none") : undefined}
     className={`whitespace-nowrap px-4 py-3 font-medium ${align === "right" ? "text-right" : "text-left"}`}
     scope="col"
   >
-    {children}
+    {onSort ? (
+      <button
+        className={`flex w-full items-center gap-1.5 hover:text-gray-1000 ${align === "right" ? "justify-end" : "justify-start"}`}
+        onClick={onSort}
+        type="button"
+      >
+        {children}
+      </button>
+    ) : (
+      children
+    )}
   </th>
 );
 
@@ -142,6 +225,34 @@ const Cell = ({
 );
 
 const NotAvailable = () => <span className="text-gray-700">N/A</span>;
+
+function compareRows(left: BenchmarkRow, right: BenchmarkRow, sort: SortState): number {
+  const comparison =
+    sort.key === "modelDisplayName" || sort.key === "harness"
+      ? compareText(left[sort.key], right[sort.key], sort.direction)
+      : compareNullableNumbers(left[sort.key], right[sort.key], sort.direction);
+
+  return (
+    comparison ||
+    left.modelDisplayName.localeCompare(right.modelDisplayName) ||
+    left.groupId.localeCompare(right.groupId)
+  );
+}
+
+function compareText(left: string, right: string, direction: SortDirection): number {
+  const comparison = left.localeCompare(right);
+  return direction === "ascending" ? comparison : -comparison;
+}
+
+function compareNullableNumbers(
+  left: number | null,
+  right: number | null,
+  direction: SortDirection,
+): number {
+  if (left === null) return right === null ? 0 : 1;
+  if (right === null) return -1;
+  return direction === "ascending" ? left - right : right - left;
+}
 
 function formatDuration(value: number | null): React.ReactNode {
   if (value === null) return <NotAvailable />;

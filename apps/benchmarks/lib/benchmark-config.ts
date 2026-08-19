@@ -39,7 +39,7 @@ export const benchmarkModels = [
     model: "xai/grok-4.6",
     displayName: "Grok 4.6",
     harness: "OpenCode",
-    support: "candidate",
+    support: "supported",
   },
   {
     id: "gpt-5-6-sol",
@@ -60,14 +60,14 @@ export const benchmarkModels = [
     model: "anthropic/claude-sonnet-5",
     displayName: "Claude Sonnet 5",
     harness: "OpenCode",
-    support: "candidate",
+    support: "supported",
   },
   {
-    id: "glm-5-1",
-    model: "zai/glm-5.1",
-    displayName: "GLM-5.1",
+    id: "glm-5-2",
+    model: "zai/glm-5.2",
+    displayName: "GLM 5.2",
     harness: "OpenCode",
-    support: "candidate",
+    support: "supported",
   },
   {
     id: "claude-opus-5",
