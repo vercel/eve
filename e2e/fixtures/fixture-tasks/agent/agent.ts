@@ -10,6 +10,11 @@ import {
 const TASK_ID_PATTERN = /task_[a-z0-9]+/iu;
 const EMPTY_DELIVERY_SENTINEL = "<eve-empty-delivery/>";
 const CONDITIONAL_DELIVERY_MARKER = "Conditional delivery";
+const REDUNDANT_REVIEW_SCENARIO = "TASK-WAKE-REDUNDANT-REVIEW";
+const REDUNDANT_REVIEW_FINDING = "blocker: task admission can discard deferred user input.";
+// Match the production repro: generic permission to be silent is insufficient
+// unless the instruction names already-delivered information as a no-report case.
+const REDUNDANT_DELIVERY_RULE = /\b(?:already|duplicate|previously|redundant)\b/iu;
 
 function respond(request: MockModelRequest): MockModelResponse | string {
   // Framework agent-list notes are model context, not scenario turns.
@@ -44,12 +49,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   }
   if (message.includes("TASK-C8-REMOTE-CHILD")) return runRemoteGate(request);
   if (message.startsWith("Background task ")) {
-    if (request.userMessages.includes("TASK-WAKE-CONDITIONAL-DELIVERY")) {
-      return request.messages.some(
-        (entry) => entry.role === "system" && entry.text.includes(CONDITIONAL_DELIVERY_MARKER),
-      )
-        ? EMPTY_DELIVERY_SENTINEL
-        : "TASK-WAKE-WAS-NOT-CONDITIONAL";
+    if (request.userMessages.includes(REDUNDANT_REVIEW_SCENARIO)) {
+      return handleRedundantReviewWake(request, message);
     }
     // Scenarios that act on wake notifications route to their script;
     // every other scenario acknowledges them without running tools.
@@ -64,7 +65,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
 
   if (message === "TASK-FANOUT-PARENT-UPDATES") return fanoutTasks(request, 10);
   if (message === "TASK-PARENT-WAKE-UPDATES") return fanoutTasks(request, 3);
-  if (message === "TASK-WAKE-CONDITIONAL-DELIVERY") return startConditionalWakeWorker(request);
+  if (message === REDUNDANT_REVIEW_SCENARIO) return startRedundantReviewers(request);
   if (message === "TASK-FAN-IN") return fanInTasks(request);
   if (message === "TASK-UPDATE-SETUP") return startTaskUpdateChild(request);
   if (message === "TASK-CANCEL-SETUP") return setupCancelWorker(request);
@@ -129,19 +130,61 @@ function startTaskUpdateChild(request: MockModelRequest): MockModelResponse | st
   return "TASK-UPDATE-STARTED";
 }
 
-function startConditionalWakeWorker(request: MockModelRequest): MockModelResponse | string {
-  if (resultById(request, "task-conditional-wake-worker") === undefined) {
+function startRedundantReviewers(request: MockModelRequest): MockModelResponse | string {
+  const reviewers = [
+    {
+      id: "task-redundant-review-fast",
+      message: `Review PR #2277. Return this finding: ${REDUNDANT_REVIEW_FINDING}`,
+    },
+    {
+      id: "task-redundant-review-late",
+      message: `BUSY-WORKER-A Review PR #2277. Return this finding: ${REDUNDANT_REVIEW_FINDING}`,
+    },
+  ] as const;
+  const pending = reviewers.filter(({ id }) => resultById(request, id) === undefined);
+  if (pending.length > 0) {
     return {
-      toolCalls: [
-        {
-          id: "task-conditional-wake-worker",
-          input: { message: "TASK-WAKE-CONDITIONAL-CHILD" },
-          name: "busy-worker",
-        },
-      ],
+      toolCalls: pending.map(({ id, message }) => ({
+        id,
+        input: { message },
+        name: "busy-worker",
+      })),
     };
   }
-  return "TASK-WAKE-CONDITIONAL-STARTED";
+  return "TASK-REDUNDANT-REVIEWERS-STARTED";
+}
+
+function handleRedundantReviewWake(
+  request: MockModelRequest,
+  message: string,
+): MockModelResponse | string {
+  const taskId = TASK_ID_PATTERN.exec(message)?.[0];
+  if (taskId === undefined) throw new Error(`Task notification has no task id: ${message}`);
+
+  const callId = `task-redundant-review-peek-${taskId}`;
+  const peeked = resultById(request, callId);
+  if (peeked === undefined) {
+    return { toolCalls: [{ id: callId, input: { taskIds: [taskId] }, name: "task_peek" }] };
+  }
+  if (!findString(peeked.output, "BUSY-WORKER:")?.includes(REDUNDANT_REVIEW_FINDING)) {
+    throw new Error("The completed reviewer did not return the expected finding.");
+  }
+
+  const findingWasAlreadyReported = request.messages.some(
+    (entry) => entry.role === "assistant" && entry.text.includes(REDUNDANT_REVIEW_FINDING),
+  );
+  if (!findingWasAlreadyReported) {
+    return `request changes on PR #2277.\n\n- ${REDUNDANT_REVIEW_FINDING}`;
+  }
+
+  const conditionalInstruction = request.messages.find(
+    (entry) => entry.role === "system" && entry.text.includes(CONDITIONAL_DELIVERY_MARKER),
+  );
+  if (conditionalInstruction === undefined) return "TASK-WAKE-WAS-NOT-CONDITIONAL";
+
+  return REDUNDANT_DELIVERY_RULE.test(conditionalInstruction.text)
+    ? EMPTY_DELIVERY_SENTINEL
+    : "already incorporated into the review above.";
 }
 
 function sendTaskUpdate(request: MockModelRequest): MockModelResponse | string {
