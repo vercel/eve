@@ -34,11 +34,9 @@ import {
   type RegistrySearchPresentationSection,
 } from "./registry-presentation.js";
 import type { runRegistrySetupCommand } from "./registry-setup-command.js";
-import { serializeHeadlessSetupEvent } from "./setup-headless.js";
+import { reportHeadlessSetupCompletion, serializeHeadlessSetupEvent } from "./setup-headless.js";
 import { addRegistryMappings, readRegistryConfig } from "./registry-project.js";
-
 export type { RegistryCommandLogger } from "./registry-recovery.js";
-
 export interface AddCommandOptions {
   skipInstall?: boolean;
   overwrite?: boolean;
@@ -530,7 +528,7 @@ export async function runAddCommand(
           setupReminder: (packageItem) => setupReminder(packageItem, "skipped"),
         },
       });
-      return reportCompletion(logger, item, completion, options.nonInteractive);
+      return reportCompletion(logger, item, completion, options);
     }
 
     if (options.skipInstall === true) {
@@ -547,7 +545,7 @@ export async function runAddCommand(
         cancelledReminder: setupReminder(item, "cancelled"),
         resumeCommand: setupResumeCommand(item),
       });
-      return reportCompletion(logger, item, completion, options.nonInteractive);
+      return reportCompletion(logger, item, completion, options);
     }
 
     await addRegistryItems([address], {
@@ -556,9 +554,8 @@ export async function runAddCommand(
       overwrite: options.overwrite,
       silent: options.silent,
     });
-    if (eveMetadata?.setup === undefined) {
-      return reportCompletion(logger, item, { facts: [] }, options.nonInteractive);
-    }
+    if (eveMetadata?.setup === undefined)
+      return reportCompletion(logger, item, { facts: [] }, options);
 
     const interactive =
       dependencies.hasInteractiveTerminal?.() ??
@@ -573,7 +570,7 @@ export async function runAddCommand(
       );
     }
     if (options.skipSetup === true) {
-      if (options.nonInteractive) return reportCompletion(logger, item, { facts: [] }, true);
+      if (options.nonInteractive) return reportCompletion(logger, item, { facts: [] }, options);
       logger.log(setupReminder(item, "skipped"));
       return;
     }
@@ -622,35 +619,21 @@ export async function runAddCommand(
       cancelledReminder: setupReminder(item, "cancelled"),
       resumeCommand: setupResumeCommand(item),
     });
-    return reportCompletion(logger, item, completion, options.nonInteractive);
+    return reportCompletion(logger, item, completion, options);
   });
 }
-
-// Every non-interactive `eve add` has to end on exactly one terminal event, on
-// whichever path it took. `--skip-install` is the continuation a blocked setup
-// hands back, so a caller resuming there is the one that most needs to be told
-// the item is done and whether a deploy still has to follow.
 function reportCompletion(
   logger: RegistryCommandLogger,
   item: string,
   completion: RegistrySetupCompletion | false,
-  nonInteractive: boolean | undefined,
+  options: AddCommandOptions,
 ): RegistrySetupCompletion | undefined {
-  if (completion === false) return undefined;
-  if (nonInteractive === true) {
-    logger.log(
-      serializeHeadlessSetupEvent({
-        version: 1,
-        type: "completed",
-        item,
-        completedItems: [item],
-        ...(completion.deploymentRequired === true
-          ? { deploymentRequired: true as const, next: { command: "eve", args: ["deploy"] } }
-          : {}),
-      }),
-    );
-  }
-  return completion;
+  return reportHeadlessSetupCompletion({
+    logger,
+    item,
+    completion,
+    nonInteractive: options.nonInteractive,
+  });
 }
 
 /** Adds registry namespace mappings to the project's package.json. */

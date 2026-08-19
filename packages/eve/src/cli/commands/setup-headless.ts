@@ -1,4 +1,7 @@
-import type { RegistrySetupBlocker } from "#setup/registry-setup-protocol.js";
+import type {
+  RegistrySetupBlocker,
+  RegistrySetupCompletion,
+} from "#setup/registry-setup-protocol.js";
 
 export interface HeadlessSetupCommand {
   command: string;
@@ -86,6 +89,29 @@ export type HeadlessIntegrationSetupEvent =
   | { version: 1; type: "completed"; item: string }
   | { version: 1; type: "cancelled"; item: string }
   | ({ version: 1; type: "blocked" } & RegistrySetupBlocker);
+
+export function reportHeadlessSetupCompletion(input: {
+  logger: { log(message: string): void };
+  item: string;
+  completion: RegistrySetupCompletion | false;
+  nonInteractive: boolean | undefined;
+}): RegistrySetupCompletion | undefined {
+  if (input.completion === false) return undefined;
+  if (input.nonInteractive === true) {
+    input.logger.log(
+      serializeHeadlessSetupEvent({
+        version: 1,
+        type: "completed",
+        item: input.item,
+        completedItems: [input.item],
+        ...(input.completion.deploymentRequired === true
+          ? { deploymentRequired: true as const, next: { command: "eve", args: ["deploy"] } }
+          : {}),
+      }),
+    );
+  }
+  return input.completion;
+}
 
 export function serializeHeadlessSetupEvent(
   event: HeadlessSetupEvent | HeadlessIntegrationSetupEvent,
