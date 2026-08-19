@@ -256,6 +256,8 @@ describe("nextTurnDelivery", () => {
 
 describe("nextTurnDelivery routing", () => {
   beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.restoreAllMocks());
+
   it("keeps waiting instead of starting a parent turn for a fully routed task response", async () => {
     const sessionState = {
       continuationToken: "token",
@@ -316,6 +318,7 @@ describe("nextTurnDelivery routing", () => {
   it.each(["task-1:update:child-turn:0:update-call", "task-1:ready:completed"])(
     "drops observed-ready task delivery %s before starting a turn",
     async (taskDeliveryId) => {
+      const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
       const state = observedReadySessionState();
       const taskDelivery = {
         kind: "deliver" as const,
@@ -350,6 +353,10 @@ describe("nextTurnDelivery routing", () => {
 
       expect(result).toMatchObject({ delivery: ordinaryDelivery, kind: "turn" });
       expect(routeDeliverToChildren).toHaveBeenCalledTimes(2);
+      expect(debug).toHaveBeenCalledWith(
+        "[eve:execution.parked-delivery-wait] dropping task delivery already observed through task_peek",
+        { sessionId: "ses-parked-wait", taskDeliveryId },
+      );
     },
   );
 

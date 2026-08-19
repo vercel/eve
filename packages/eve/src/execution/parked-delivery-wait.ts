@@ -136,6 +136,13 @@ async function awaitNextTurnDelivery(input: {
         routed.remainder.taskDeliveryId,
       )
     ) {
+      console.debug(
+        "[eve:execution.parked-delivery-wait] dropping task delivery already observed through task_peek",
+        {
+          sessionId: input.stateCursor.sessionState.sessionId,
+          taskDeliveryId: routed.remainder.taskDeliveryId,
+        },
+      );
       continue;
     }
 
