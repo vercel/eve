@@ -141,6 +141,15 @@ export async function dispatchTaskStep(
             }),
             currentSession: nextSession,
             parentToken: delegated.taskInboxToken,
+            remoteTransport:
+              entry.action.kind === "remote-agent-call"
+                ? {
+                    resolverId:
+                      entry.dynamicRemoteAgent === undefined
+                        ? entry.action.nodeId
+                        : entry.dynamicRemoteAgent.credentialsStepId,
+                  }
+                : undefined,
           });
           break;
         case "start":

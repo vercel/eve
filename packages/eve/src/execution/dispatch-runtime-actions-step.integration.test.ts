@@ -27,6 +27,7 @@ import {
   CapabilitiesKey,
   ChannelInstrumentationKey,
   InitiatorAuthKey,
+  SessionDynamicSubagentSelectionsKey,
   SessionIdKey,
   SessionKey,
 } from "#context/keys.js";
@@ -414,6 +415,45 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     ]);
   });
 
+  it("records the responder transport policy on a remote task address", async () => {
+    const session = createStartSession({ kind: "remote" });
+    installContext(
+      session,
+      {
+        definition: { ...REMOTE_REGISTRY_DEFINITION, forwardPrincipal: true },
+        nodeId: "remote/research",
+      },
+      true,
+    );
+    vi.spyOn(taskRunControl, "sendTaskCommandToOwner").mockResolvedValue({
+      runId: "task-run-1",
+    });
+
+    const result = await dispatchTaskStep({
+      callbackBaseUrl: "https://caller.example.com",
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
+      handles: [
+        expect.objectContaining({
+          address: {
+            callbackBaseUrl: "https://caller.example.com",
+            forwardPrincipal: true,
+            kind: "agent/remote",
+            resolverId: "remote/research",
+            sessionId: "remote-session-123456789012",
+            url: "https://registry.example.com",
+          },
+          phase: "addressed",
+        }),
+      ],
+    });
+  });
+
   it("silently rejects a tasks-mode start that failed before index admission", async () => {
     const session = createStartSession({ kind: "local" });
     installContext(
@@ -745,6 +785,96 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
     });
     expect(mocks.dispatchSession).not.toHaveBeenCalled();
     expect(mocks.startWorkflowPreferLatest).not.toHaveBeenCalled();
+  });
+
+  it("replaces task callback policy with the current dynamic remote selection", async () => {
+    const currentCredentialsStepId = "eve:dynamic-remote-agent//current-research";
+    const registryKey = Symbol.for("@workflow/core//registeredSteps");
+    const globalRecord = globalThis as Record<
+      symbol,
+      Map<string, () => { headers: Record<string, string> }> | undefined
+    >;
+    const stepRegistry = globalRecord[registryKey] ?? new Map();
+    globalRecord[registryKey] = stepRegistry;
+    stepRegistry.set(currentCredentialsStepId, () => ({
+      headers: { authorization: "Bearer current" },
+    }));
+    const remoteAddress = REMOTE_PARKED_HANDLE.address;
+    if (remoteAddress.kind !== "agent/remote") throw new Error("Expected a remote test handle.");
+    const addressedHandle: AgentHandle = {
+      address: {
+        ...remoteAddress,
+        forwardPrincipal: true,
+        resolverId: "eve:dynamic-remote-agent//start-research",
+      },
+      identity: REMOTE_PARKED_HANDLE.identity,
+      phase: "addressed",
+    };
+    const session = createRemotePendingSession({
+      agentId: addressedHandle.identity.id,
+      handle: addressedHandle,
+    });
+    installContext(
+      session,
+      {
+        definition: {
+          ...REMOTE_REGISTRY_DEFINITION,
+          logicalPath: "agent/subagents/research.ts",
+          sourceId: "agent/subagents/research.ts",
+          sourceKind: "module",
+        },
+        nodeId: REMOTE_PARKED_HANDLE.identity.nodeId,
+      },
+      true,
+      {
+        nodeId: REMOTE_PARKED_HANDLE.identity.nodeId,
+        selection: {
+          kind: "remote",
+          prepared: {},
+          remoteAgent: {
+            credentialsStepId: currentCredentialsStepId,
+            description: "Current remote research",
+            forwardPrincipal: false,
+            path: "/current/session",
+            url: "https://current.example.com",
+          },
+        },
+      },
+    );
+
+    const result = await dispatchTaskStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(mocks.continueRemoteAgentSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        remote: expect.objectContaining({
+          forwardPrincipal: false,
+          path: "/current/session",
+          url: remoteAddress.url,
+        }),
+      }),
+    );
+    expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
+      handles: [
+        {
+          address: {
+            callbackBaseUrl: remoteAddress.callbackBaseUrl,
+            forwardPrincipal: false,
+            kind: "agent/remote",
+            resolverId: currentCredentialsStepId,
+            sessionId: remoteAddress.sessionId,
+            url: remoteAddress.url,
+          },
+          identity: addressedHandle.identity,
+          phase: "addressed",
+        },
+      ],
+    });
+    stepRegistry.delete(currentCredentialsStepId);
   });
 
   const continueOperationId = deriveAgentOperationId({
@@ -1167,10 +1297,33 @@ function createPendingSession(input: {
   });
 }
 
+function createRemotePendingSession(input: {
+  readonly handle: AgentHandle;
+  readonly agentId: string;
+}): HarnessSession {
+  return setPendingRuntimeActionBatch({
+    actions: [
+      {
+        callId: "call-1",
+        description: "Research",
+        input: { agentId: input.agentId, message: "continue with current credentials" },
+        kind: "remote-agent-call",
+        name: "research",
+        nodeId: "remote/research",
+        remoteAgentName: "research",
+      },
+    ],
+    event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
+    responseMessages: [],
+    session: createBaseSession(input.handle),
+  });
+}
+
 function installContext(
   session: HarnessSession,
   remote?: { readonly definition: unknown; readonly nodeId: string },
   tasks = false,
+  dynamic?: { readonly nodeId: string; readonly selection: unknown },
 ): void {
   const subagentsByNodeId = new Map<string, { definition: unknown }>();
   if (remote !== undefined) {
@@ -1179,7 +1332,10 @@ function installContext(
   const bundle = {
     compiledArtifactsSource: {},
     resolvedAgent: { config: tasks ? { experimental: { tasks: true } } : {} },
-    subagentRegistry: { subagentsByNodeId },
+    subagentRegistry: {
+      dynamicNodeIds: dynamic === undefined ? undefined : new Set([dynamic.nodeId]),
+      subagentsByNodeId,
+    },
     turnAgent: {
       id: "test-agent",
       instructions: [],
@@ -1197,6 +1353,11 @@ function installContext(
     [InitiatorAuthKey, null],
     [ChannelKey, ADAPTER],
   ]);
+  if (dynamic !== undefined) {
+    values.set(SessionDynamicSubagentSelectionsKey, {
+      [dynamic.nodeId]: dynamic.selection,
+    });
+  }
   mocks.deserializeContext.mockResolvedValue({
     get: (key: unknown) => values.get(key),
     require: (key: unknown) => {

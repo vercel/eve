@@ -43,6 +43,7 @@ import {
   EVE_SESSION_RESET_ROUTE_PATTERN,
   EVE_SESSION_STREAM_ROUTE_PATTERN,
   EVE_SUBAGENT_STREAM_ROUTE_PATTERN,
+  EVE_TASK_INPUT_ROUTE_PATTERN,
   createEveSessionStreamRoutePath,
   createEveSubagentStreamRoutePath,
 } from "#protocol/routes.js";
@@ -67,6 +68,7 @@ import {
 import type { ChannelMethod } from "#public/definitions/channel.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import { handleTaskInputResponseRequest } from "#runtime/task-input-response-route.js";
 
 const log = createLogger("eve.channel");
 
@@ -155,20 +157,17 @@ export interface EveChannelInput {
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
   /**
    * The trusted-forwarders policy: which transport-authenticated callers may
-   * assert a forwarded principal on the create-session route (the
-   * `forwardedPrincipal` body field a `defineRemoteAgent({ forwardPrincipal:
-   * true })` sender emits). The predicate receives the *verified* route-auth
-   * principal of the forwarder — who is asserting, never what is asserted —
-   * and must match it precisely (for example
+   * assert a forwarded principal on session creation or a scoped task-input
+   * response. The predicate receives the *verified* route-auth principal of
+   * the forwarder — who is asserting, never what is asserted — and must match
+   * it precisely (for example
    * `(forwarder) => forwarder.subject === vercelSubject({ teamSlug, projectName })`).
    * A permissive predicate lets any authenticated forwarder assert any
    * principal.
    *
-   * When a trusted forwarder's assertion is accepted, the forwarded
-   * principal replaces the session principal (`session.auth.current` /
-   * `session.auth.initiator`) exactly as if that user had called this
-   * deployment directly, and the forwarder is recorded on the accepted
-   * contexts as the `eve:forwarded-by` attribute. Omit the option to reject
+   * Session creation seeds `session.auth.current` and `.initiator` from an
+   * accepted assertion; task input replaces only `current`. The forwarder is
+   * recorded as the `eve:forwarded-by` attribute. Omit the option to reject
    * every forwarded assertion with 403.
    */
   readonly trustedForwarders?: TrustedForwarders;
@@ -210,8 +209,9 @@ export interface EveChannel extends Channel {}
 /**
  * Builds the default eve HTTP channel: a {@link defineChannel} instance serving the
  * built-in `/eve/v1` routes (GET inspects the agent, POST creates a session,
- * ID-addressed POST routes deliver follow-ups and controls, and GET streams a
- * session's NDJSON event feed). Every route
+ * ID-addressed POST routes deliver follow-ups and controls, scoped task-input
+ * routes answer a background child, and GET streams a session's NDJSON event
+ * feed). Every route
  * runs {@link EveChannelInput.auth} via {@link routeAuth} before dispatching.
  * Default-export the result as your `agent/channels/eve.ts` channel; reach for
  * {@link defineChannel} directly only for a custom transport.
@@ -355,6 +355,34 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             status: 202,
           },
         );
+      }),
+
+      POST(EVE_TASK_INPUT_ROUTE_PATTERN, async (req, { params }) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+
+        const payload = await parseJsonRequest(req);
+        if (payload instanceof Response) return payload;
+        const forwarded = await resolveForwardedPrincipal({
+          trustedForwarders: input.trustedForwarders,
+          forwarder: authResult,
+          payload,
+        });
+        if (forwarded instanceof Response) return forwarded;
+
+        const inputResponses = parseInputResponses(payload.inputResponses);
+        if (inputResponses instanceof Response) return inputResponses;
+        if (inputResponses === undefined) {
+          return Response.json(
+            { error: "Expected a non-empty 'inputResponses' array.", ok: false },
+            { status: 400 },
+          );
+        }
+        return await handleTaskInputResponseRequest({
+          auth: forwarded.auth,
+          inputResponses,
+          token: params.token,
+        });
       }),
 
       POST(EVE_SESSION_ROUTE_PATTERN, async (req, { attachSession, params }) => {
@@ -906,7 +934,11 @@ function parseSessionMessageBody(
   if (tokenRejection !== null) return tokenRejection;
   if (payload.forwardedPrincipal !== undefined) {
     return Response.json(
-      { error: "A forwarded principal is only accepted on session creation.", ok: false },
+      {
+        error:
+          "A forwarded principal is only accepted on session creation or scoped task-input responses.",
+        ok: false,
+      },
       { status: 400 },
     );
   }

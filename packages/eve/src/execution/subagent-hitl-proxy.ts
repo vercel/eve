@@ -63,7 +63,6 @@ export async function emitProxiedInputRequest(input: {
 /** One proxied-child bucket of a routed deliver payload. */
 export interface RoutedChildDelivery {
   readonly childContinuationToken: string;
-  readonly childResponseUrl?: string;
   readonly payload: { readonly inputResponses: readonly InputResponse[] };
   /** Parent-visible request IDs safe to retire once this bucket is forwarded. */
   readonly retireRequestIds: readonly string[];
@@ -85,7 +84,6 @@ export interface RoutedDeliverPayload {
 /** In-progress accumulation for one `forChildren` bucket. */
 interface ChildResponseBucket {
   readonly childContinuationToken: string;
-  readonly childResponseUrl?: string;
   /** Parent-visible request IDs answered in this bucket. */
   readonly parentRequestIds: string[];
   readonly responses: InputResponse[];
@@ -121,7 +119,7 @@ export function routeDeliverPayload(input: {
     const bucketKey =
       route.taskId === undefined
         ? route.childContinuationToken
-        : `${route.childContinuationToken}\0${route.childResponseUrl ?? "local"}\0${route.taskId}`;
+        : `${route.childContinuationToken}\0${route.taskId}`;
     const existing = responsesByChild.get(bucketKey);
 
     if (existing === undefined) {
@@ -130,7 +128,6 @@ export function routeDeliverPayload(input: {
         parentRequestIds: [response.requestId],
         responses: [toChildInputResponse(response, route)],
         routes: [route],
-        ...(route.childResponseUrl !== undefined && { childResponseUrl: route.childResponseUrl }),
         ...(route.taskId !== undefined && { taskId: route.taskId }),
       });
     } else {
@@ -143,7 +140,6 @@ export function routeDeliverPayload(input: {
   const forChildren = [...responsesByChild.values()].map(
     ({
       childContinuationToken,
-      childResponseUrl,
       parentRequestIds,
       responses,
       routes,
@@ -168,7 +164,6 @@ export function routeDeliverPayload(input: {
         childContinuationToken,
         payload: { inputResponses: responses },
         retireRequestIds: [...retireRequestIds],
-        ...(childResponseUrl !== undefined && { childResponseUrl }),
         ...(taskId !== undefined && { taskId }),
       };
     },

@@ -1,7 +1,6 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { InputRequestKind } from "#runtime/input/types.js";
-import { isLoopbackHostname } from "#shared/network-address.js";
 
 const PROXY_INPUT_REQUESTS_KEY = "eve.runtime.proxyInputRequests";
 
@@ -18,8 +17,6 @@ export interface ProxyInputRequest {
   readonly childContinuationToken: string;
   /** Child-local id restored before forwarding a namespaced task response. */
   readonly childRequestId?: string;
-  /** Trusted parent-derived capability URL for a remote task child. */
-  readonly childResponseUrl?: string;
   readonly kind: InputRequestKind;
   /** Present when the route is authorized by a parent-owned durable task. */
   readonly taskId?: string;
@@ -154,10 +151,10 @@ export function retireProxyInputRequests<T extends { readonly state?: SessionSta
 }
 
 /** Removes every proxy route owned by one durable task. */
-export function clearProxyInputRequestsForTask(
-  session: HarnessSession,
+export function clearProxyInputRequestsForTask<T extends { readonly state?: SessionStateMap }>(
+  session: T,
   taskId: string,
-): HarnessSession {
+): T {
   const current = readMap(session.state);
   const next: Record<string, ProxyInputRequest> = {};
   let changed = false;
@@ -199,7 +196,6 @@ export function toProxyInputRequestEntries(
   return payload.event.requests.map((request) => {
     const route: {
       readonly childContinuationToken: string;
-      childResponseUrl?: string;
       readonly kind: InputRequestKind;
       taskId?: string;
     } & { readonly batch: ProxyInputRequestBatch } = {
@@ -259,7 +255,6 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
   }
   const taskId = "taskId" in value ? value.taskId : undefined;
   const childRequestId = "childRequestId" in value ? value.childRequestId : undefined;
-  const childResponseUrl = "childResponseUrl" in value ? value.childResponseUrl : undefined;
   if (taskId !== undefined && (typeof taskId !== "string" || taskId.length === 0)) {
     return undefined;
   }
@@ -270,18 +265,11 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
     return undefined;
   }
   if ((taskId === undefined) !== (childRequestId === undefined)) return undefined;
-  if (
-    childResponseUrl !== undefined &&
-    (typeof childResponseUrl !== "string" || !isAllowedChildResponseUrl(childResponseUrl))
-  ) {
-    return undefined;
-  }
   const batch = "batch" in value ? parseProxyInputRequestBatch(value.batch) : undefined;
   const request: {
     batch?: ProxyInputRequestBatch;
     readonly childContinuationToken: string;
     childRequestId?: string;
-    childResponseUrl?: string;
     readonly kind: InputRequestKind;
     taskId?: string;
   } = {
@@ -290,7 +278,6 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
   };
   if (batch !== undefined && batch.requestIds.includes(requestId)) request.batch = batch;
   if (typeof childRequestId === "string") request.childRequestId = childRequestId;
-  if (typeof childResponseUrl === "string") request.childResponseUrl = childResponseUrl;
   if (typeof taskId === "string") request.taskId = taskId;
   return request;
 }
@@ -312,17 +299,6 @@ function parseProxyInputRequestBatch(value: unknown): ProxyInputRequestBatch | u
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string");
-}
-
-function isAllowedChildResponseUrl(value: string): boolean {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
-  }
-  if (url.protocol === "https:") return true;
-  return url.protocol === "http:" && isLoopbackHostname(url.hostname);
 }
 
 function isInputRequestKind(value: unknown): value is InputRequestKind {

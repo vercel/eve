@@ -205,6 +205,26 @@ export function removeTaskAgentAddress(session: HarnessSession, agentId: string)
   return { ...session, state: removeTaskAgentAddressFromState(session.state, agentId) };
 }
 
+/** Updates the transport policy used by later task-input callbacks. */
+export function replaceTaskAgentAddress(
+  session: HarnessSession,
+  input: { readonly address: AgentAddress; readonly agentId: string },
+): HarnessSession {
+  const handles = getAgentHandleStore(session.state)?.handles ?? [];
+  const existing = handles.find(
+    (handle): handle is Extract<AgentHandle, { readonly phase: "addressed" }> =>
+      handle.phase === "addressed" && handle.identity.id === input.agentId,
+  );
+  if (existing === undefined || existing.address === input.address) return session;
+
+  return writeHandles(
+    session,
+    handles.map((handle) =>
+      handle === existing ? { ...existing, address: input.address } : handle,
+    ),
+  );
+}
+
 /** State-only variant used while consuming a terminal task wake. */
 export function removeTaskAgentAddressFromState(
   state: SessionStateMap | undefined,

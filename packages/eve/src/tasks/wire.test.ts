@@ -190,9 +190,10 @@ describe("translateTaskInboundPayload", () => {
   it("leaves answered input to the run, which must deliver before recording it", () => {
     expect(
       translateTaskInboundPayload({
-        childContinuationToken: "child-token",
+        auth: null,
         inputResponses: [{ requestId: "req-1", text: "west" }],
         kind: "input-response",
+        target: { continuationToken: "child-token", kind: "local" },
         taskId: "task-1",
       }),
     ).toBeUndefined();

@@ -1,11 +1,15 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
-import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
-import { createTaskInputCapabilityToken } from "#execution/task-input-capability.js";
-import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
-import { createRemoteTaskInputCallbackUrl } from "#execution/workflow-callback-url.js";
 import {
+  type DurableSessionState,
+  readDurableSession,
+  replaceDurableSessionSnapshot,
+} from "#execution/durable-session-store.js";
+import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
+import {
+  clearProxyInputRequestsForTask,
   createTaskInputRequestId,
+  retireProxyInputRequests,
   toProxyInputRequestEntries,
   upsertProxyInputRequestState,
 } from "#harness/proxy-input-requests.js";
@@ -13,13 +17,11 @@ import { getAgentHandleStore } from "#harness/handles/store.js";
 import { removeTaskAgentAddressFromState } from "#harness/handles/transitions.js";
 import { isInputRequest } from "#runtime/input/types.js";
 import { cacheTerminalTaskView, findSessionTaskEntry } from "#tasks/session-index.js";
-import { createEveTaskInputRoutePath } from "#protocol/routes.js";
 import { isTerminalTaskStatus, type TaskView } from "#tasks/types.js";
 
 /** Validates and durably records one task-owned child HITL route batch. */
 export async function recordTaskInputRequestStep(input: {
   readonly hookPayload: SubagentInputRequestHookPayload;
-  readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly taskId: string;
 }): Promise<
@@ -71,7 +73,7 @@ export async function recordTaskInputRequestStep(input: {
   }
 
   const hookPayload = namespaceTaskInputRequests(input.hookPayload, input.taskId);
-  let entries = toProxyInputRequestEntries(hookPayload, input.taskId).map(
+  const entries = toProxyInputRequestEntries(hookPayload, input.taskId).map(
     ([requestId, route], index) => {
       const childRequestId = input.hookPayload.event.requests[index]!.requestId;
       return [
@@ -83,17 +85,6 @@ export async function recordTaskInputRequestStep(input: {
       ] as const;
     },
   );
-  if (handle.address.kind === "agent/remote") {
-    const childResponseUrl = createRemoteTaskInputCallbackUrl(
-      handle.address.url,
-      createEveTaskInputRoutePath(
-        createTaskInputCapabilityToken(input.hookPayload.childContinuationToken),
-      ),
-    );
-    entries = entries.map(
-      ([requestId, route]) => [requestId, { ...route, childResponseUrl }] as const,
-    );
-  }
   const state = upsertProxyInputRequestState({
     entries,
     forChildContinuationToken: input.hookPayload.childContinuationToken,
@@ -134,12 +125,12 @@ export async function acceptTaskAuthorizationEventStep(input: {
   readonly hookPayload: SubagentAuthorizationEventHookPayload;
   readonly sessionState: DurableSessionState;
   readonly taskId: string;
-}): Promise<boolean> {
+}): Promise<{ readonly accepted: boolean; readonly sessionState: DurableSessionState }> {
   "use step";
 
   const durableSession = await readDurableSession(input.sessionState);
   const entry = findSessionTaskEntry(durableSession.state, input.taskId);
-  if (entry === undefined) return false;
+  if (entry === undefined) return { accepted: false, sessionState: input.sessionState };
   const handle = (getAgentHandleStore(durableSession.state)?.handles ?? []).find(
     (candidate) =>
       candidate.phase === "addressed" && candidate.identity.id === entry.metadata.agentId,
@@ -148,15 +139,28 @@ export async function acceptTaskAuthorizationEventStep(input: {
     handle?.phase !== "addressed" ||
     handle.address.sessionId !== input.hookPayload.childSessionId
   ) {
-    return false;
+    return { accepted: false, sessionState: input.sessionState };
   }
   const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
-  return (
-    view !== undefined &&
-    !isTerminalTaskStatus(view.status) &&
-    view.executor?.childSessionId === input.hookPayload.childSessionId &&
-    view.metadata.agentId === entry.metadata.agentId
-  );
+  if (
+    view === undefined ||
+    isTerminalTaskStatus(view.status) ||
+    view.executor?.childSessionId !== input.hookPayload.childSessionId ||
+    view.metadata.agentId !== entry.metadata.agentId
+  ) {
+    return { accepted: false, sessionState: input.sessionState };
+  }
+
+  if (input.hookPayload.event.type !== "approval.settled") {
+    return { accepted: true, sessionState: input.sessionState };
+  }
+  const session = retireProxyInputRequests(durableSession, [
+    createTaskInputRequestId(input.taskId, input.hookPayload.event.data.requestId),
+  ]);
+  return {
+    accepted: true,
+    sessionState: replaceDurableSessionSnapshot({ session, state: input.sessionState }),
+  };
 }
 
 /** Caches terminal task views before their workflow runs can expire. */
@@ -170,16 +174,14 @@ export async function recordTerminalTaskViewsStep(input: {
   let state = durableSession.state;
   for (const view of input.views) {
     state = cacheTerminalTaskView(state, view);
+    state = clearProxyInputRequestsForTask({ ...durableSession, state }, view.taskId).state;
     if (view.executor?.lifecycle === "terminal") {
       state = removeTaskAgentAddressFromState(state, view.metadata.agentId);
     }
   }
   if (state === durableSession.state) return input.sessionState;
-  return {
-    ...input.sessionState,
-    snapshot: {
-      session: { ...durableSession, state },
-      version: input.sessionState.version,
-    },
-  };
+  return replaceDurableSessionSnapshot({
+    session: { ...durableSession, state },
+    state: input.sessionState,
+  });
 }

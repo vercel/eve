@@ -15,8 +15,8 @@ const log = createLogger("channel.forwarded-principal");
 export const FORWARDED_BY_ATTRIBUTE = "eve:forwarded-by";
 
 /**
- * Wire shape of the create-session `forwardedPrincipal` body field: the
- * dispatching turn's session principals, asserted by a trusted forwarder.
+ * Wire shape of a remote request's `forwardedPrincipal` body field: session
+ * principals asserted by a trusted forwarder.
  * Only principal metadata crosses the wire — never tokens or credentials.
  */
 export interface ForwardedPrincipal {
@@ -43,10 +43,9 @@ export type ForwardedPrincipalParseResult =
     };
 
 /**
- * The create route's effective session principals after the forwarded
- * principal gate: the transport principal untouched when the body carries no
- * assertion, or the stamped forwarded contexts once a trusted forwarder's
- * assertion is accepted.
+ * Effective principals after the forwarded-principal gate: the transport
+ * principal untouched when the body carries no assertion, or the stamped
+ * forwarded contexts once a trusted forwarder's assertion is accepted.
  */
 export type ResolvedForwardedPrincipal =
   | {
@@ -85,8 +84,8 @@ const forwardedPrincipalSchema = z
   .strict();
 
 /**
- * Gates the create-session `forwardedPrincipal` body field and resolves the
- * effective session principals. Returns the failure `Response` on rejection:
+ * Gates a `forwardedPrincipal` body field and resolves the effective session
+ * principals. Returns the failure `Response` on rejection:
  * 403 when the channel accepts no forwarded principal or the predicate
  * refuses the forwarder, 400 on a malformed payload, 500 when the authored
  * predicate throws. Accepted contexts are stamped with
@@ -141,8 +140,8 @@ export async function resolveForwardedPrincipal(input: {
 }
 
 /**
- * Parses the create-session `forwardedPrincipal` body field against the
- * strict wire schema. Mirrors `parseSessionCallback` for `callback`: strict
+ * Parses a `forwardedPrincipal` body field against the strict wire schema.
+ * Mirrors `parseSessionCallback` for `callback`: strict
  * keys, formatted error strings, and no exceptions.
  */
 export function parseForwardedPrincipal(value: unknown): ForwardedPrincipalParseResult {

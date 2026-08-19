@@ -63,12 +63,23 @@ export function translateTaskInboundPayload(
         kind: "start-turn",
         taskId: payload.taskId,
       };
-    case "authorization-event": {
-      const requestId = taskAuthorizationRequestId(payload.event);
-      return payload.event.type === "authorization.required"
-        ? { kind: "require-authorization", requestId }
-        : { kind: "answered", requestIds: [requestId] };
-    }
+    case "authorization-event":
+      switch (payload.event.type) {
+        case "authorization.required":
+          return {
+            kind: "require-authorization",
+            requestId: taskAuthorizationRequestId(payload.event),
+          };
+        case "authorization.completed":
+          return {
+            kind: "answered",
+            requestIds: [taskAuthorizationRequestId(payload.event)],
+          };
+        case "approval.settled":
+          return { kind: "answered", requestIds: [payload.event.data.requestId] };
+        case "approval.candidate":
+          return undefined;
+      }
     default:
       return undefined;
   }

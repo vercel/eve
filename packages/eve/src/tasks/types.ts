@@ -1,5 +1,5 @@
 import type { JsonValue } from "#shared/json.js";
-import type { SubagentAuthorizationEvent } from "#channel/types.js";
+import type { SessionAuthContext, SubagentAuthorizationEvent } from "#channel/types.js";
 
 /**
  * Task lifecycle contract for `experimental.tasks`.
@@ -132,6 +132,16 @@ export function readTaskInputRequestId(request: TaskInputRequest): string | unde
   if (request === null || typeof request !== "object" || Array.isArray(request)) return undefined;
   const requestId = Reflect.get(request, "requestId");
   return typeof requestId === "string" ? requestId : undefined;
+}
+
+/** Whether accepting a response is enough to clear this request. */
+export function isTaskInputSettledByDelivery(request: unknown): boolean {
+  return (
+    request === null ||
+    typeof request !== "object" ||
+    Array.isArray(request) ||
+    Reflect.get(request, "kind") !== "tool-approval"
+  );
 }
 
 /** Fields shared by every durable task view. */
@@ -310,10 +320,10 @@ export interface TaskInboundUpdate {
 }
 
 /**
- * Arrives when the delegated child emits `authorization.required` or
- * `authorization.completed`. The former exposes an authorization blocker in
- * the task view; the latter clears it. The event is forwarded separately
- * to the parent and is never copied into the view.
+ * Arrives when the delegated child emits an authorization or approval event.
+ * `authorization.required` creates a task blocker; `approval.settled` clears
+ * the matching approval input request. Events are forwarded separately to the
+ * parent and are never copied into the view.
  */
 export interface TaskInboundAuthorizationEvent {
   readonly callId: string;
@@ -329,12 +339,26 @@ export interface TaskInboundAuthorizationEvent {
  * batch it clears is exactly the batch it forwarded — the parent can no
  * longer unblock the child while the run still believes it is blocked.
  */
+export type TaskInputDeliveryTarget =
+  | {
+      readonly continuationToken: string;
+      readonly kind: "local";
+    }
+  | {
+      readonly continuationToken: string;
+      readonly forwardPrincipal: boolean | undefined;
+      readonly kind: "remote";
+      readonly name: string;
+      readonly resolverId: string | undefined;
+      readonly serializedBundle: unknown;
+      readonly url: string;
+    };
+
 export interface TaskInboundAnswerInput {
-  readonly auth?: unknown;
-  readonly childContinuationToken: string;
-  readonly childResponseUrl?: string;
+  readonly auth: SessionAuthContext | null;
   readonly inputResponses: readonly TaskInputResponse[];
   readonly kind: "input-response";
+  readonly target: TaskInputDeliveryTarget;
   readonly taskId: string;
 }
 

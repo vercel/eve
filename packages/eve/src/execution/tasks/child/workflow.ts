@@ -15,6 +15,7 @@ import { translateTaskInboundPayload } from "#tasks/wire.js";
 import {
   isReadyTaskStatus,
   isTerminalTaskStatus,
+  isTaskInputSettledByDelivery,
   readTaskInputRequestId,
   readTaskUsage,
   type TaskCommand,
@@ -102,15 +103,18 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
         next.value.kind === "subagent-authorization-event"
           ? { ...next.value, kind: "authorization-event" }
           : next.value;
-      // Approval lifecycle events (`approval.candidate`/`approval.settled`)
-      // are intra-child responder bookkeeping, not task blockers: only
-      // `authorization.required`/`authorization.completed` may block or
-      // unblock a task. Forwarding them would mint bogus `answered`
-      // commands and race the terminal wake.
-      if (
-        payload.kind === "authorization-event" &&
-        (payload.event.type === "approval.candidate" || payload.event.type === "approval.settled")
-      ) {
+      // A candidate reports one responder attempt. Only approval.settled
+      // clears the approval request, so candidates bypass task transitions.
+      if (payload.kind === "authorization-event" && payload.event.type === "approval.candidate") {
+        if (dispatchAcknowledged && !isTerminalTaskStatus(view.status)) {
+          await wakeTaskAuthorizationParentStep({
+            request: payload,
+            taskId: view.taskId,
+            token: input.parentContinuationToken,
+          });
+        } else {
+          pendingAuthorizationEvents.push(payload);
+        }
         continue;
       }
       const isReadinessCommand =
@@ -239,10 +243,10 @@ async function resolveAnsweredCommand(
 ): Promise<TaskCommand | undefined> {
   if (answer.taskId !== view.taskId) return undefined;
 
-  const outstanding = new Set(
+  const outstanding = new Map(
     view.inputRequests.flatMap((request) => {
       const requestId = readTaskInputRequestId(request);
-      return requestId === undefined ? [] : [requestId];
+      return requestId === undefined ? [] : [[requestId, request] as const];
     }),
   );
   const requestIds = answer.inputResponses
@@ -251,5 +255,12 @@ async function resolveAnsweredCommand(
   if (requestIds.length === 0) return undefined;
 
   const delivery = await deliverTaskInputResponsesStep({ answer, requestIds });
-  return delivery === "delivered" ? { kind: "answered", requestIds } : undefined;
+  if (delivery !== "delivered") return undefined;
+
+  const settledRequestIds = requestIds.filter((requestId) =>
+    isTaskInputSettledByDelivery(outstanding.get(requestId)),
+  );
+  return settledRequestIds.length === 0
+    ? undefined
+    : { kind: "answered", requestIds: settledRequestIds };
 }

@@ -22,6 +22,12 @@ import {
 } from "#context/keys.js";
 import { createMessageCompletedEvent } from "#protocol/message.js";
 
+const handleTaskInputResponseRequestMock = vi.hoisted(() => vi.fn());
+
+vi.mock("#runtime/task-input-response-route.js", () => ({
+  handleTaskInputResponseRequest: (input: unknown) => handleTaskInputResponseRequestMock(input),
+}));
+
 /**
  * Unit coverage for the inbound HTTP route's message-body parser and
  * the upload-policy enforcement layer.
@@ -177,6 +183,21 @@ function createEveContinueHandler(input: EveChannelInput) {
         params: { sessionId: "test-session-id" },
       };
       return (continueRoute as any).handler(req, args);
+    },
+  };
+}
+
+function createEveTaskInputHandler(input: EveChannelInput) {
+  const channel = eveChannel(input);
+  const taskInputRoute = channel.routes.find(
+    (route) => route.method === "POST" && route.path === "/eve/v1/task-input/:token",
+  );
+  if (!taskInputRoute) throw new Error("No task-input POST route found");
+
+  return {
+    async fetch(req: Request, token = "task-capability") {
+      const args: RouteHandlerArgs = { ...createRouteArgs(), params: { token } };
+      return (taskInputRoute as any).handler(req, args);
     },
   };
 }
@@ -2165,6 +2186,41 @@ describe("eveChannel — forwarded principal", () => {
     expect(options.initiatorAuth).toBeUndefined();
   });
 
+  it("authenticates a scoped task-input response and forwards its asserted principal", async () => {
+    handleTaskInputResponseRequestMock.mockReset();
+    handleTaskInputResponseRequestMock.mockResolvedValue(
+      Response.json({ ok: true, status: "accepted" }, { status: 202 }),
+    );
+    const handler = createEveTaskInputHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+    });
+
+    const response = await handler.fetch(
+      new Request("https://example.com/eve/v1/task-input/task-capability", {
+        body: JSON.stringify({
+          forwardedPrincipal: { current: FORWARDED_CURRENT },
+          inputResponses: [{ optionId: "approve", requestId: "request-1" }],
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(handleTaskInputResponseRequestMock).toHaveBeenCalledWith({
+      auth: {
+        ...FORWARDED_CURRENT,
+        attributes: {
+          ...FORWARDED_CURRENT.attributes,
+          "eve:forwarded-by": ROUTER_CALLER.principalId,
+        },
+      },
+      inputResponses: [{ optionId: "approve", requestId: "request-1" }],
+      token: "task-capability",
+    });
+  });
+
   it("rejects forwarded principal on the continue route", async () => {
     const handler = createEveContinueHandler({
       trustedForwarders: () => true,
@@ -2185,7 +2241,8 @@ describe("eveChannel — forwarded principal", () => {
     expect(response.status).toBe(400);
     expect(handler.send).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
-      error: "A forwarded principal is only accepted on session creation.",
+      error:
+        "A forwarded principal is only accepted on session creation or scoped task-input responses.",
       ok: false,
     });
   });

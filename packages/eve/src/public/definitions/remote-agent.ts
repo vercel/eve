@@ -23,12 +23,14 @@ export interface RemoteAgentDefinition {
    */
   readonly description: string;
   /**
-   * Forwards the dispatching turn's session principal to the remote
-   * deployment as the `forwardedPrincipal` create-session body field, so the
-   * remote session runs as the same end user as the parent (per-user
-   * Connect, local subagents, and further remote hops all see that
-   * principal). Defaults to `false` — forwarding identity to another
-   * deployment is an explicit decision, never ambient.
+   * Forwards the dispatching turn's session principal to the remote deployment
+   * as the `forwardedPrincipal` create-session body field. A background-task
+   * input response also forwards its responding principal through the scoped
+   * task-input route. The remote session therefore runs each affected turn as
+   * the same end user as the parent (per-user Connect, local subagents, and
+   * further remote hops all see that principal). Defaults to `false` —
+   * forwarding identity to another deployment is an explicit decision, never
+   * ambient.
    *
    * Only principal metadata crosses the wire, never tokens or credentials —
    * {@link auth} keeps authenticating *this* deployment to the remote. The

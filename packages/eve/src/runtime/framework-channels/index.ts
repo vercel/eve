@@ -11,10 +11,6 @@ import {
   getSessionCallbackChannelNames,
 } from "#runtime/session-callback-route.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
-import {
-  getTaskInputResponseChannelDefinitions,
-  getTaskInputResponseChannelNames,
-} from "#runtime/task-input-response-route.js";
 
 const EVE_CHANNEL_NAME = "eve";
 
@@ -50,7 +46,6 @@ export function getFrameworkChannelDefinitions(): readonly ResolvedChannelDefini
   result.push(
     ...getConnectionCallbackChannelDefinitions(),
     ...getSessionCallbackChannelDefinitions(),
-    ...getTaskInputResponseChannelDefinitions(),
   );
 
   return result;
@@ -61,6 +56,5 @@ export function getAllFrameworkChannelNames(): ReadonlySet<string> {
     EVE_CHANNEL_NAME,
     ...getConnectionCallbackChannelNames(),
     ...getSessionCallbackChannelNames(),
-    ...getTaskInputResponseChannelNames(),
   ]);
 }

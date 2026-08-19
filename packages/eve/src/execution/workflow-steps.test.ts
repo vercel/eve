@@ -45,7 +45,10 @@ import { defineTool } from "#public/definitions/tool.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import { readLatestTaskView, sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
-import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
+import {
+  acceptTaskAuthorizationEventStep,
+  recordTaskInputRequestStep,
+} from "#execution/tasks/parent/hitl-proxy-steps.js";
 import { appendTaskAgentAnnouncement } from "#execution/tasks/parent/agent-views.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
@@ -391,6 +394,19 @@ describe("routeProxiedDeliverStep", () => {
           options?.owned === false
             ? undefined
             : {
+                [AGENT_HANDLES_STATE_KEY]: {
+                  handles: [
+                    {
+                      address: {
+                        continuationToken: "child-token",
+                        kind: "agent/local",
+                        sessionId: "child-session",
+                      },
+                      identity: { id: "agent-1", name: "research", nodeId: "node-1" },
+                      phase: "addressed",
+                    },
+                  ],
+                },
                 "eve.tasks": {
                   tasks: [
                     {
@@ -418,26 +434,85 @@ describe("routeProxiedDeliverStep", () => {
     sessionState: createStubSessionState({ hasProxyInputRequests: true }),
   };
 
-  it("hands a task-owned answer to the task run instead of the child", async () => {
-    installSessionStoreMocks([createTaskRouteSession()]);
+  it("keeps a delivered approval routed so another responder can retry", async () => {
+    const session = createTaskRouteSession();
+    installSessionStoreMocks([session, session]);
 
-    const result = await routeProxiedDeliverStep({
+    const first = await routeProxiedDeliverStep({
       ...taskRouteInput,
       parentWritable: createTestWritable(),
     });
-    expect(result).toMatchObject({ kind: "continue", remainder: undefined });
+    const second = await routeProxiedDeliverStep({
+      ...taskRouteInput,
+      parentWritable: createTestWritable(),
+    });
+
+    expect(first).toMatchObject({ kind: "continue", remainder: undefined });
+    expect(second).toMatchObject({ kind: "continue", remainder: undefined });
+    expect(sendTaskInboundPayload).toHaveBeenCalledTimes(2);
     expect(sendTaskInboundPayload).toHaveBeenCalledWith({
       taskInboxToken: "task-token",
       payload: {
-        auth: undefined,
-        childContinuationToken: "child-token",
+        auth: null,
         inputResponses: [{ optionId: "approve", requestId: "request-1" }],
         kind: "input-response",
+        target: { continuationToken: "child-token", kind: "local" },
         taskId: "task-1",
       },
     });
     expect(resumeHookMock).not.toHaveBeenCalled();
+    expect(first.sessionState).toBe(taskRouteInput.sessionState);
+    expect(second.sessionState).toBe(taskRouteInput.sessionState);
+  });
+
+  it("retires the approval route when the child reports settlement", async () => {
+    const session = createTaskRouteSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(readLatestTaskView).mockResolvedValue({
+      executor: { childSessionId: "child-session" },
+      inputRequests: [
+        {
+          action: { callId: "tool-call-1", input: {}, kind: "tool-call", toolName: "deploy" },
+          kind: "tool-approval",
+          prompt: "Approve deploy?",
+          requestId: "request-1",
+        },
+      ],
+      metadata: {
+        agentId: "agent-1",
+        kind: "subagent",
+        mode: "local",
+        name: "research",
+      },
+      status: "input_required",
+      taskId: "task-1",
+    });
+
+    const result = await acceptTaskAuthorizationEventStep({
+      hookPayload: {
+        callId: "call-task",
+        childSessionId: "child-session",
+        event: {
+          data: {
+            outcome: "approved",
+            requestId: "request-1",
+            responderPrincipalId: "user-2",
+            sequence: 3,
+            stepIndex: 3,
+            turnId: "turn-child",
+          },
+          type: "approval.settled",
+        },
+        kind: "subagent-authorization-event",
+        subagentName: "research",
+      },
+      sessionState: taskRouteInput.sessionState,
+      taskId: "task-1",
+    });
+
+    expect(result.accepted).toBe(true);
     expect(getProxyInputRequests(result.sessionState.snapshot?.session.state).size).toBe(0);
+    expect(result.sessionState.hasProxyInputRequests).toBe(false);
   });
 
   it("keeps a response for a task this session does not own on the parent", async () => {
@@ -559,7 +634,6 @@ describe("recordTaskInputRequestStep", () => {
 
     const result = await recordTaskInputRequestStep({
       hookPayload,
-      serializedContext: createSerializedContext(),
       sessionState: createStubSessionState(),
       taskId: "task-1",
     });
@@ -592,7 +666,6 @@ describe("recordTaskInputRequestStep", () => {
 
     const result = await recordTaskInputRequestStep({
       hookPayload,
-      serializedContext: createSerializedContext(),
       sessionState: createStubSessionState(),
       taskId: "foreign-task",
     });

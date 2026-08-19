@@ -549,12 +549,109 @@ describe("taskRunWorkflow answered input", () => {
 
   function answer(...requestIds: readonly string[]): TaskInboundAnswerInput {
     return {
-      childContinuationToken: "child-token",
+      auth: null,
       inputResponses: requestIds.map((requestId) => ({ requestId, text: "answer" })),
       kind: "input-response",
+      target: { continuationToken: "child-token", kind: "local" },
       taskId: "task_abc123",
     };
   }
+
+  function requireApproval(requestId: string): TaskRunInboundPayload {
+    return {
+      command: {
+        inputRequests: [
+          {
+            action: {
+              callId: "tool-call-1",
+              input: {},
+              kind: "tool-call",
+              toolName: "deploy",
+            },
+            kind: "tool-approval",
+            prompt: "Approve deploy?",
+            requestId,
+          },
+        ],
+        kind: "require-input",
+      },
+      kind: "task-command",
+    };
+  }
+
+  it("keeps an approval retryable until the child reports settlement", async () => {
+    vi.mocked(deliverTaskInputResponsesStep).mockResolvedValue("delivered");
+    const rejectedCandidate: SubagentAuthorizationEventHookPayload = {
+      callId: "call-task",
+      childSessionId: "child-session",
+      event: {
+        data: {
+          candidateId: "candidate-1",
+          outcome: "rejected",
+          reason: "Responder is not allowed to approve this tool.",
+          requestId: "approval-1",
+          responderPrincipalId: "user-1",
+          sequence: 2,
+          stepIndex: 3,
+          turnId: "turn-child",
+        },
+        type: "approval.candidate",
+      },
+      kind: "subagent-authorization-event",
+      subagentName: "research",
+    };
+    const settlement: SubagentAuthorizationEventHookPayload = {
+      callId: "call-task",
+      childSessionId: "child-session",
+      event: {
+        data: {
+          outcome: "approved",
+          requestId: "approval-1",
+          responderPrincipalId: "user-2",
+          sequence: 3,
+          stepIndex: 3,
+          turnId: "turn-child",
+        },
+        type: "approval.settled",
+      },
+      kind: "subagent-authorization-event",
+      subagentName: "research",
+    };
+    mockCommandHook([
+      { command: { kind: "ready" }, kind: "task-command" },
+      requireApproval("approval-1"),
+      answer("approval-1"),
+      rejectedCandidate,
+      answer("approval-1"),
+      settlement,
+      { command: { data: "done", kind: "complete" }, kind: "task-command" },
+    ]);
+
+    await taskRunWorkflow({
+      taskInboxToken: "task-token",
+      initialView: createWorkingView(),
+      parentContinuationToken: "parent-session-token",
+    });
+
+    expect(deliverTaskInputResponsesStep).toHaveBeenCalledTimes(2);
+    expect(appendedStatuses()).toEqual([
+      "working",
+      "working",
+      "input_required",
+      "working",
+      "completed",
+    ]);
+    expect(wakeTaskAuthorizationParentStep).toHaveBeenNthCalledWith(1, {
+      request: { ...rejectedCandidate, kind: "authorization-event" },
+      taskId: "task_abc123",
+      token: "parent-session-token",
+    });
+    expect(wakeTaskAuthorizationParentStep).toHaveBeenNthCalledWith(2, {
+      request: { ...settlement, kind: "authorization-event" },
+      taskId: "task_abc123",
+      token: "parent-session-token",
+    });
+  });
 
   it("forwards the answer to the child before recording it as unblocked", async () => {
     vi.mocked(deliverTaskInputResponsesStep).mockResolvedValue("delivered");

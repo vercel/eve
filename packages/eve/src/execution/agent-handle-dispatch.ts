@@ -21,6 +21,7 @@ import {
   prepareAgentContinuation,
   rejectAgentEffect,
   removeTaskAgentAddress,
+  replaceTaskAgentAddress,
 } from "#harness/handles/transitions.js";
 import type {
   RuntimeActionRequest,
@@ -230,6 +231,7 @@ export async function dispatchToTaskAgentAddress(input: {
   readonly bundle: CompiledBundle;
   readonly currentSession: RuntimeSession;
   readonly parentToken: string;
+  readonly remoteTransport?: { readonly resolverId?: string };
 }): Promise<DispatchOutcome> {
   const { action, agentId } = input;
   const invokedName =
@@ -267,6 +269,7 @@ export async function dispatchToTaskAgentAddress(input: {
     bundle: input.bundle,
     identity: record.identity,
     parentToken: input.parentToken,
+    remoteTransport: input.remoteTransport,
   });
   if (!delivery.ok) {
     const { cause, permanent } = delivery.error;
@@ -289,16 +292,22 @@ export async function dispatchToTaskAgentAddress(input: {
       }),
       session: permanent
         ? removeTaskAgentAddress(input.currentSession, agentId)
-        : input.currentSession,
+        : replaceTaskAgentAddress(input.currentSession, {
+            address: delivery.error.address,
+            agentId,
+          }),
     };
   }
 
   return {
-    address: record.address,
+    address: delivery.value,
     callId: action.callId,
     kind: "called",
     name: action.name,
-    session: input.currentSession,
+    session: replaceTaskAgentAddress(input.currentSession, {
+      address: delivery.value,
+      agentId,
+    }),
     toolName: record.identity.name,
   };
 }
@@ -319,10 +328,16 @@ async function deliverToAgentAddress(input: {
   readonly bundle: CompiledBundle;
   readonly identity: AgentIdentity;
   readonly parentToken: string;
+  readonly remoteTransport?: { readonly resolverId?: string };
 }): Promise<
   Result<
-    void,
-    { readonly cause: unknown; readonly deliveryAmbiguous: boolean; readonly permanent: boolean }
+    AgentAddress,
+    {
+      readonly address: AgentAddress;
+      readonly cause: unknown;
+      readonly deliveryAmbiguous: boolean;
+      readonly permanent: boolean;
+    }
   >
 > {
   const { action, address, bundle, identity } = input;
@@ -338,8 +353,16 @@ async function deliverToAgentAddress(input: {
     } catch (error) {
       // The agent's node is gone from the compiled bundle; no retry can
       // reach this handle again.
-      return err({ cause: error, deliveryAmbiguous: false, permanent: true });
+      return err({ address, cause: error, deliveryAmbiguous: false, permanent: true });
     }
+    const deliveryAddress: AgentAddress =
+      input.remoteTransport === undefined
+        ? address
+        : {
+            ...address,
+            forwardPrincipal: resolvedRemote.forwardPrincipal,
+            resolverId: input.remoteTransport.resolverId,
+          };
     try {
       await continueRemoteAgentSession({
         callback: {
@@ -359,12 +382,13 @@ async function deliverToAgentAddress(input: {
       });
     } catch (error) {
       return err({
+        address: deliveryAddress,
         cause: error,
         deliveryAmbiguous: isAmbiguousRemoteAgentContinueError(error),
         permanent: !isRetryableRemoteAgentContinueError(error),
       });
     }
-    return ok(undefined);
+    return ok(deliveryAddress);
   }
 
   const childRuntime = createWorkflowRuntime({
@@ -390,6 +414,7 @@ async function deliverToAgentAddress(input: {
     });
     if (result.status === "session_not_active") {
       return err({
+        address,
         cause: new Error(`Agent session "${address.sessionId}" is no longer active.`),
         deliveryAmbiguous: false,
         permanent: true,
@@ -397,9 +422,9 @@ async function deliverToAgentAddress(input: {
     }
   } catch (error) {
     const permanent = isRuntimeNoActiveSessionError(error);
-    return err({ cause: error, deliveryAmbiguous: !permanent, permanent });
+    return err({ address, cause: error, deliveryAmbiguous: !permanent, permanent });
   }
-  return ok(undefined);
+  return ok(address);
 }
 
 export function createAgentErrorResult(input: {

@@ -272,45 +272,4 @@ describe("getProxyInputRequests type safety", () => {
       ["malformed", { childContinuationToken: "child-a", kind: "tool-approval" }],
     ]);
   });
-
-  it("accepts HTTPS child response URLs", () => {
-    expect(readChildResponseUrl("https://remote.example/eve/v1/task-input/token")).toBe(
-      "https://remote.example/eve/v1/task-input/token",
-    );
-  });
-
-  it.each([
-    "http://localhost:3000/eve/v1/task-input/token",
-    "http://worker.localhost:3000/eve/v1/task-input/token",
-    "http://127.0.0.1:3000/eve/v1/task-input/token",
-    "http://127.0.0.2:3000/eve/v1/task-input/token",
-    "http://[::1]:3000/eve/v1/task-input/token",
-    "http://[::ffff:7f00:1]:3000/eve/v1/task-input/token",
-  ])("accepts an HTTP loopback child response URL: %s", (url) => {
-    expect(readChildResponseUrl(url)).toBe(url);
-  });
-
-  it.each([
-    "http://remote.example/eve/v1/task-input/token",
-    "http://10.0.0.1/eve/v1/task-input/token",
-    "http://localhost.example/eve/v1/task-input/token",
-    "ftp://localhost/eve/v1/task-input/token",
-    "not a URL",
-  ])("rejects a non-HTTPS, non-loopback, or malformed child response URL: %s", (url) => {
-    expect(readChildResponseUrl(url)).toBeUndefined();
-  });
 });
-
-function readChildResponseUrl(childResponseUrl: string): string | undefined {
-  return getProxyInputRequests({
-    "eve.runtime.proxyInputRequests": {
-      "task-1:req-1": {
-        childContinuationToken: "child-a",
-        childRequestId: "req-1",
-        childResponseUrl,
-        kind: "question",
-        taskId: "task-1",
-      },
-    },
-  }).get("task-1:req-1")?.childResponseUrl;
-}

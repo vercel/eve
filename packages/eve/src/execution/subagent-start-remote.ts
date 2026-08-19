@@ -11,6 +11,7 @@ import {
   prepareAgentStart,
   rejectAgentEffect,
 } from "#harness/handles/transitions.js";
+import type { AgentAddress } from "#harness/handles/store.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
@@ -91,12 +92,22 @@ export async function startRemoteSubagent(input: {
       remote: resolvedRemote,
       session: input.session,
     });
-    const address = {
+    const resolverId =
+      input.dynamicRemoteAgent === undefined
+        ? action.nodeId
+        : input.dynamicRemoteAgent.credentialsStepId;
+    const address: AgentAddress = {
       callbackBaseUrl,
+      ...(input.taskOwned
+        ? {
+            forwardPrincipal: resolvedRemote.forwardPrincipal,
+            resolverId,
+          }
+        : {}),
       kind: "agent/remote",
       sessionId: child.sessionId,
       url: resolvedRemote.url,
-    } as const;
+    };
     return {
       address,
       callId: action.callId,

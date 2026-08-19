@@ -9,11 +9,15 @@ import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import type { InputResponse } from "#runtime/input/types.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { findSessionTaskEntry } from "#tasks/session-index.js";
 import {
   createTaskInputRequestId,
+  getProxyInputRequests,
   retireProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
+import { getAgentHandleStore } from "#harness/handles/store.js";
+import { isTaskInputSettledByDelivery, type TaskInboundAnswerInput } from "#tasks/types.js";
 
 export type RoutedDeliverResult =
   | {
@@ -43,7 +47,6 @@ type LegacyRoutedDeliverResult =
 
 interface ChildBucket {
   readonly childContinuationToken: string;
-  readonly childResponseUrl?: string;
   readonly metadata: NonNullable<DeliverHookPayload["deliveryMetadata"]>[number][];
   readonly payloads: DeliverPayload[];
   readonly retireRequestIds: string[];
@@ -108,14 +111,9 @@ export async function routeProxiedDeliverStep(
       const key =
         forChild.taskId === undefined
           ? forChild.childContinuationToken
-          : [
-              forChild.childContinuationToken,
-              forChild.childResponseUrl ?? "",
-              forChild.taskId,
-            ].join("\0");
+          : [forChild.childContinuationToken, forChild.taskId].join("\0");
       const child = children.get(key) ?? {
         childContinuationToken: forChild.childContinuationToken,
-        childResponseUrl: forChild.childResponseUrl,
         metadata: [],
         payloads: [],
         retireRequestIds: [],
@@ -150,14 +148,23 @@ export async function routeProxiedDeliverStep(
         mergeStrandedResponses(parentPayloads, child, taskId);
         continue;
       }
+      const target = createTaskInputDeliveryTarget({
+        childContinuationToken: child.childContinuationToken,
+        entry,
+        serializedBundle: input.serializedContext?.[BundleKey.name],
+        state: durableSession.state,
+      });
+      if (target === undefined) {
+        mergeStrandedResponses(parentPayloads, child, taskId);
+        continue;
+      }
       const delivery = await sendTaskInboundPayload({
         taskInboxToken: entry.taskInboxToken,
         payload: {
-          auth: sourceDelivery.auth,
-          childContinuationToken: child.childContinuationToken,
-          childResponseUrl: child.childResponseUrl,
+          auth: sourceDelivery.auth ?? null,
           inputResponses: coalesceDeliverPayloads(child.payloads).inputResponses ?? [],
           kind: "input-response",
+          target,
           taskId,
         },
       });
@@ -165,11 +172,14 @@ export async function routeProxiedDeliverStep(
         mergeStrandedResponses(parentPayloads, child, taskId);
         continue;
       }
-      // Hand-off to the task run succeeded. Retire the parent-visible
-      // routes so a later click cannot re-enter the same batch after the
-      // run has already accepted (or no-op'd) this answer.
-      durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);
-      retired = true;
+      const routes = getProxyInputRequests(durableSession.state);
+      const settledRequestIds = child.retireRequestIds.filter((requestId) =>
+        isTaskInputSettledByDelivery(routes.get(requestId)),
+      );
+      if (settledRequestIds.length > 0) {
+        durableSession = retireProxyInputRequests(durableSession, settledRequestIds);
+        retired = true;
+      }
       continue;
     }
 
@@ -212,6 +222,35 @@ export async function routeProxiedDeliverStep(
             payloads: orderedParentPayloads.map(([, payload]) => payload),
           };
   return { ...context, kind: "continue", remainder };
+}
+
+function createTaskInputDeliveryTarget(input: {
+  readonly childContinuationToken: string;
+  readonly entry: NonNullable<ReturnType<typeof findSessionTaskEntry>>;
+  readonly serializedBundle: unknown;
+  readonly state: Parameters<typeof getAgentHandleStore>[0];
+}): TaskInboundAnswerInput["target"] | undefined {
+  if (input.entry.metadata.mode === "local") {
+    return { continuationToken: input.childContinuationToken, kind: "local" };
+  }
+
+  const handle = (getAgentHandleStore(input.state)?.handles ?? []).find(
+    (candidate) =>
+      candidate.phase === "addressed" &&
+      candidate.identity.id === input.entry.metadata.agentId &&
+      candidate.address.kind === "agent/remote",
+  );
+  if (handle?.phase !== "addressed" || handle.address.kind !== "agent/remote") return undefined;
+
+  return {
+    continuationToken: input.childContinuationToken,
+    forwardPrincipal: handle.address.forwardPrincipal,
+    kind: "remote",
+    name: handle.identity.name,
+    resolverId: handle.address.resolverId,
+    serializedBundle: input.serializedBundle,
+    url: handle.address.url,
+  };
 }
 
 // Answers to a task that finished mid-flight rejoin the parent-local

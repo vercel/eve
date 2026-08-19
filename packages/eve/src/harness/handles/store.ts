@@ -87,6 +87,10 @@ export type AgentAddress =
       readonly sessionId: string;
       readonly url: string;
       readonly callbackBaseUrl: string;
+      /** Current policy for forwarding the responding principal to this task child. */
+      readonly forwardPrincipal?: boolean | undefined;
+      /** Current authored credential resolver; resolved values are never persisted. */
+      readonly resolverId?: string | undefined;
     };
 
 /**
@@ -184,7 +188,9 @@ const addressSchema: z.ZodType<AgentAddress> = z.discriminatedUnion("kind", [
   }),
   z.strictObject({
     callbackBaseUrl: z.url(),
+    forwardPrincipal: z.boolean().optional(),
     kind: z.literal("agent/remote"),
+    resolverId: nonEmptyString.optional(),
     sessionId: nonEmptyString,
     url: z.url(),
   }),

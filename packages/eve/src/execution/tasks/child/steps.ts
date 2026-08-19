@@ -5,9 +5,16 @@ import type {
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
+import { deserializeContext } from "#context/serialize.js";
+import { resolveRemoteAgentStreamHeaders } from "#execution/remote-agent-dispatch.js";
+import { createTaskInputCapabilityToken } from "#execution/task-input-capability.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
+import { createRemoteTaskInputCallbackUrl } from "#execution/workflow-callback-url.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { createLogger } from "#internal/logging.js";
+import { createEveTaskInputRoutePath } from "#protocol/routes.js";
+import type { InputResponse } from "#runtime/input/types.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import {
   isTerminalTaskStatus,
   taskAuthorizationRequestId,
@@ -16,6 +23,7 @@ import {
   type TaskInboundAuthorizationEvent,
   type TaskInboundInputRequest,
   type TaskInboundUpdate,
+  type TaskInputDeliveryTarget,
   type TaskView,
 } from "#tasks/types.js";
 
@@ -185,29 +193,45 @@ export async function deliverTaskInputResponsesStep(input: {
   "use step";
 
   const answered = new Set(input.requestIds);
+  const inputResponses = input.answer.inputResponses.filter((response) =>
+    answered.has(response.requestId),
+  );
   const command: SessionCommand = {
-    auth: input.answer.auth as SessionAuthContext | null | undefined,
+    auth: input.answer.auth,
     kind: "send",
-    payload: {
-      inputResponses: input.answer.inputResponses.filter((response) =>
-        answered.has(response.requestId),
-      ),
-    },
+    payload: { inputResponses },
     taskDeliveryId: `${input.answer.taskId}:${[...input.requestIds].sort().join(",")}`,
   };
   try {
-    if (input.answer.childResponseUrl !== undefined) {
-      const response = await fetch(input.answer.childResponseUrl, {
-        body: JSON.stringify({ inputResponses: command.payload.inputResponses }),
-        headers: { "content-type": "application/json" },
-        method: "POST",
-        redirect: "error",
-      });
+    if (input.answer.target.kind === "remote") {
+      const target = input.answer.target;
+      const body: {
+        forwardedPrincipal?: { readonly current: SessionAuthContext };
+        inputResponses: readonly InputResponse[];
+      } = { inputResponses };
+      if (target.forwardPrincipal === true && input.answer.auth !== null) {
+        body.forwardedPrincipal = { current: input.answer.auth };
+      }
+      const response = await fetch(
+        createRemoteTaskInputCallbackUrl(
+          target.url,
+          createEveTaskInputRoutePath(createTaskInputCapabilityToken(target.continuationToken)),
+        ),
+        {
+          body: JSON.stringify(body),
+          headers: {
+            "content-type": "application/json",
+            ...(await resolveTaskInputResponseHeaders(target)),
+          },
+          method: "POST",
+          redirect: "error",
+        },
+      );
       if (response.status === 404) return "unreachable";
       if (!response.ok)
         throw new Error(`Remote task input delivery failed with HTTP ${response.status}.`);
     } else {
-      await resumeHook(input.answer.childContinuationToken, command);
+      await resumeHook(input.answer.target.continuationToken, command);
     }
     return "delivered";
   } catch (error) {
@@ -219,6 +243,19 @@ export async function deliverTaskInputResponsesStep(input: {
     }
     throw error;
   }
+}
+
+async function resolveTaskInputResponseHeaders(
+  target: Extract<TaskInputDeliveryTarget, { readonly kind: "remote" }>,
+): Promise<Record<string, string>> {
+  if (target.resolverId === undefined) return {};
+  const ctx = await deserializeContext({ [BundleKey.name]: target.serializedBundle });
+  return await resolveRemoteAgentStreamHeaders({
+    bundle: ctx.require(BundleKey),
+    name: target.name,
+    resolverId: target.resolverId,
+    url: target.url,
+  });
 }
 
 function formatTaskNotification(view: TaskView): string {

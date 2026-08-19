@@ -45,7 +45,6 @@ export async function routeDeliverToChildren(input: {
   for (const request of payload.task?.inputRequests ?? []) {
     const recorded = await recordTaskInputRequestStep({
       hookPayload: request.hookPayload,
-      serializedContext,
       sessionState,
       taskId: request.taskId,
     });
@@ -62,12 +61,13 @@ export async function routeDeliverToChildren(input: {
   }
 
   for (const request of payload.task?.authorizationEvents ?? []) {
-    const accepted = await acceptTaskAuthorizationEventStep({
+    const authorization = await acceptTaskAuthorizationEventStep({
       hookPayload: request.hookPayload,
       sessionState,
       taskId: request.taskId,
     });
-    if (!accepted) continue;
+    sessionState = authorization.sessionState;
+    if (!authorization.accepted) continue;
     const emitted = await emitRecordedTaskAuthorizationEventStep({
       hookPayload: request.hookPayload,
       parentWritable: input.parentWritable,
