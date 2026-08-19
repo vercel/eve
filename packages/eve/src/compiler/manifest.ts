@@ -672,6 +672,7 @@ const compiledHookDefinitionSchema: z.ZodType<CompiledHookDefinition> = z
 
 const compiledExtensionMountSchema: z.ZodType<CompiledExtensionMount> = z
   .object({
+    externalDependencies: z.array(z.string()).readonly(),
     namespace: z.string(),
     packageName: z.string(),
     packageNamespace: z.string(),
@@ -767,6 +768,8 @@ const compiledSubagentEdgeSchema: z.ZodType<CompiledSubagentEdge> = z
  * call binds the extension's config before any tool runs.
  */
 export interface CompiledExtensionMount {
+  /** Runtime packages this extension requires the consuming application to externalize. */
+  readonly externalDependencies: readonly string[];
   /** Mount-derived namespace that prefixes the extension's tool/skill names. */
   readonly namespace: string;
   readonly packageName: string;

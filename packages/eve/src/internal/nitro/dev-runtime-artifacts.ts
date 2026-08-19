@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
@@ -7,6 +7,7 @@ import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
 import { copyDevelopmentSourceSnapshot } from "#internal/nitro/dev-runtime-source-snapshot-copy.js";
+import { resolveExtensionExternalDependencyPaths } from "#internal/nitro/host/extension-external-dependency-plugin.js";
 import {
   createDevelopmentSourceSnapshotPlan,
   toDevelopmentSourceSnapshotPath,
@@ -94,6 +95,10 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
 
   try {
     await copyDevelopmentSourceSnapshot(sourceSnapshotPlan);
+    await mountExtensionExternalDependencies({
+      manifest: compileResult.manifest,
+      runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot,
+    });
     await cp(
       compileResult.paths.compileDirectoryPath,
       join(sourceSnapshotPlan.runtimeAppRoot, ".eve", "compile"),
@@ -137,6 +142,56 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
     snapshotSourceRoot: sourceSnapshotPlan.snapshotSourceRoot,
     sourceRoot: sourceSnapshotPlan.sourceRoot,
   };
+}
+
+async function mountExtensionExternalDependencies(input: {
+  readonly manifest?: CompiledAgentManifest;
+  readonly runtimeAppRoot: string;
+}): Promise<void> {
+  if (input.manifest === undefined) {
+    return;
+  }
+
+  const mounts = [
+    input.manifest,
+    ...(input.manifest.subagents ?? []).map((subagent) => subagent.agent),
+  ]
+    .flatMap((node) => node.extensionMounts ?? [])
+    .filter((mount) => (mount.externalDependencies ?? []).length > 0);
+
+  for (const [dependency, entryPath] of Object.entries(
+    resolveExtensionExternalDependencyPaths(mounts),
+  )) {
+    const packageRoot = findPackageRoot(entryPath, dependency);
+    const mountPath = join(input.runtimeAppRoot, "node_modules", ...dependency.split("/"));
+    await mkdir(dirname(mountPath), { recursive: true });
+    await rm(mountPath, { force: true, recursive: true });
+    await symlink(packageRoot, mountPath, "junction");
+  }
+}
+
+function findPackageRoot(entryPath: string, packageName: string): string {
+  let directory = dirname(entryPath);
+
+  while (true) {
+    const packageJsonPath = join(directory, "package.json");
+    if (existsSync(packageJsonPath)) {
+      try {
+        const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { name?: unknown };
+        if (pkg.name === packageName) {
+          return directory;
+        }
+      } catch {}
+    }
+
+    const parent = dirname(directory);
+    if (parent === directory) {
+      throw new Error(
+        `Cannot locate package root for extension external dependency "${packageName}".`,
+      );
+    }
+    directory = parent;
+  }
 }
 
 /**

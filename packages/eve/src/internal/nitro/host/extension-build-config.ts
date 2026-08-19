@@ -16,6 +16,8 @@ export interface ExtensionBuildConfig {
   readonly shortName: string;
   /** Packages allowed to remain as imports in the published distribution. */
   readonly runtimeDependencies: readonly string[];
+  /** Runtime packages the consuming application must preserve outside generated bundles. */
+  readonly externalDependencies: readonly string[];
 }
 
 /** Reads and validates the extension producer contract from `package.json`. */
@@ -65,19 +67,30 @@ export async function tryReadExtensionBuildConfig(
 
   const packageName = typeof pkg.name === "string" && pkg.name.length > 0 ? pkg.name : "extension";
   const bareName = packageName.slice(packageName.lastIndexOf("/") + 1);
+  const runtimeDependencies = [
+    ...new Set([
+      ...Object.keys(pkg.dependencies ?? {}),
+      ...Object.keys(pkg.optionalDependencies ?? {}),
+      ...Object.keys(pkg.peerDependencies ?? {}),
+    ]),
+  ].sort();
+  const externalDependencies = [...(extension.externalDependencies ?? [])].sort();
+  const undeclaredExternalDependencies = externalDependencies.filter(
+    (dependency) => !runtimeDependencies.includes(dependency),
+  );
+  if (undeclaredExternalDependencies.length > 0) {
+    throw new Error(
+      `\`eve.extension.externalDependencies\` must name packages declared in dependencies, optionalDependencies, or peerDependencies. Missing runtime declarations: ${undeclaredExternalDependencies.join(", ")}.`,
+    );
+  }
   return {
     sourceRoot,
     distRoot,
     outDir,
     packageName,
     shortName: safeJsIdentifier(bareName),
-    runtimeDependencies: [
-      ...new Set([
-        ...Object.keys(pkg.dependencies ?? {}),
-        ...Object.keys(pkg.optionalDependencies ?? {}),
-        ...Object.keys(pkg.peerDependencies ?? {}),
-      ]),
-    ].sort(),
+    runtimeDependencies,
+    externalDependencies,
   };
 }
 

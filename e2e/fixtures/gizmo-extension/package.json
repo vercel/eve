@@ -33,7 +33,10 @@
   "eve": {
     "extension": {
       "source": "./extension",
-      "dist": "./dist/extension"
+      "dist": "./dist/extension",
+      "externalDependencies": [
+        "zod"
+      ]
     }
   }
 }

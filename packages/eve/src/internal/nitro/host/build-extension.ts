@@ -84,6 +84,9 @@ export async function buildExtensionPackage(
       kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
       formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
       builtWithEve: resolveInstalledPackageInfo().version,
+      ...(config.externalDependencies.length === 0
+        ? {}
+        : { build: { externalDependencies: config.externalDependencies } }),
       requires: await deriveExtensionCapabilityRequirements({
         declarationModule,
         manifest,

@@ -92,6 +92,7 @@ async function compileAgentNodeManifest(
   const externalDependencies = mergeExternalDependencies(
     options.externalDependencies,
     rawConfig.build?.externalDependencies,
+    manifest.resolvedExtensions.flatMap((mount) => mount.externalDependencies),
   );
   const config =
     externalDependencies.length === 0
@@ -282,6 +283,7 @@ function compileExtensionMounts(manifest: AgentSourceManifest): CompiledExtensio
       (entry) => mountRefNamespace(entry.logicalPath) === mount.namespace,
     );
     return {
+      externalDependencies: [...mount.externalDependencies],
       namespace: mount.namespace,
       packageName: mount.packageName,
       packageNamespace: packageStateNamespace(mount.packageName),

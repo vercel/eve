@@ -570,6 +570,47 @@ describe("application Nitro creation", () => {
     expect(traceDeps).not.toContain("eve");
   });
 
+  it("fully traces dependencies requested by mounted extensions", async () => {
+    const nitroStub = createNitroStub();
+    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
+
+    const { createProductionApplicationNitro } =
+      await import("#internal/nitro/host/create-application-nitro.js");
+    const preparedHost = createPreparedHost();
+    preparedHost.compileResult.manifest.extensionMounts = [
+      {
+        externalDependencies: ["zod", "sharp"],
+        mountLogicalPath: "extensions/layout.ts",
+        mountSourceId: "extensions/layout.ts",
+        namespace: "layout",
+        packageName: "layout-extension",
+        packageNamespace: "layout-extension",
+        sourceRoot: process.cwd(),
+      },
+    ];
+    preparedHost.compileResult.manifest.config = {
+      ...preparedHost.compileResult.manifest.config,
+      build: { externalDependencies: ["sharp"] },
+    } as typeof preparedHost.compileResult.manifest.config;
+
+    await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
+
+    const traceDeps = createNitroMock.mock.calls[0]?.[0].traceDeps;
+    expect(traceDeps).toEqual(expect.arrayContaining(["zod*", "sharp", "sharp*"]));
+    const plugins = createNitroMock.mock.calls[0]?.[0].rolldownConfig.plugins;
+    const externalPlugin = plugins.find(
+      (plugin: { name?: string }) => plugin.name === "eve-extension-external-dependency",
+    );
+    expect(externalPlugin.resolveId("zod")).toEqual({
+      external: true,
+      id: "zod",
+    });
+    expect(createNitroMock.mock.calls[0]?.[0].traceOpts.nft.paths).toEqual({
+      zod: expect.stringMatching(/zod[/\\].*index\.(?:c?js|mjs)$/),
+      sharp: expect.stringMatching(/sharp[/\\]lib[/\\]index\.js$/),
+    });
+  });
+
   it("traces configured hosted dependencies from subagent configs", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);

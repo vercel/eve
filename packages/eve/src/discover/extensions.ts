@@ -91,6 +91,8 @@ export interface ExtensionMountLocation {
   readonly packageRoot: string;
   /** Absolute path to the extension's agent-shaped distribution root. */
   readonly sourceRoot: string;
+  /** Runtime packages this extension requires the consuming application to externalize. */
+  readonly externalDependencies: readonly string[];
 }
 
 /**
@@ -217,6 +219,7 @@ export async function locateExtensionMount(input: {
       packageName: location.packageName,
       packageRoot: location.packageRoot,
       sourceRoot: location.distRoot,
+      externalDependencies: compatibility.build?.externalDependencies ?? [],
     },
     diagnostics: [],
   };

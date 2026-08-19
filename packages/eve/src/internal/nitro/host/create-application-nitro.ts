@@ -19,6 +19,10 @@ import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artif
 import { createCompiledSandboxBackendPrunePlugin } from "#internal/nitro/host/compiled-sandbox-backend-prune-plugin.js";
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import {
+  createExtensionExternalDependencyPlugin,
+  resolveExtensionExternalDependencyPaths,
+} from "#internal/nitro/host/extension-external-dependency-plugin.js";
+import {
   configureDevelopmentNitroRoutes,
   configureProductionNitroRoutes,
 } from "#internal/nitro/host/configure-nitro-routes.js";
@@ -100,6 +104,9 @@ function collectHostedTraceDependencies(
   preparedHost: PreparedApplicationHost,
   configuredOptionalEnginePackages: readonly string[],
 ): string[] {
+  const extensionExternalDependencies = new Set(
+    collectExtensionExternalDependencies(preparedHost.compileResult.manifest),
+  );
   const configuredExternalDependencies = [
     ...(preparedHost.compileResult.manifest.config.build?.externalDependencies ?? []),
     ...preparedHost.compileResult.manifest.subagents.flatMap((subagent) =>
@@ -121,8 +128,18 @@ function collectHostedTraceDependencies(
     // output.
     ...configuredOptionalEnginePackages,
     ...configuredExternalDependencies,
+    ...[...extensionExternalDependencies].map((dependencyName) => `${dependencyName}*`),
   ]);
-  return [...merged].filter((dependencyName) => dependencyName !== EVE_PACKAGE_NAME);
+  return [...merged].filter(
+    (dependencyName) =>
+      dependencyName !== EVE_PACKAGE_NAME && dependencyName !== `${EVE_PACKAGE_NAME}*`,
+  );
+}
+
+function collectExtensionExternalDependencies(manifest: CompiledAgentManifest): string[] {
+  return [manifest, ...manifest.subagents.map((subagent) => subagent.agent)].flatMap((node) =>
+    node.extensionMounts.flatMap((mount) => mount.externalDependencies),
+  );
 }
 
 /**
@@ -634,9 +651,14 @@ function createApplicationNitroBundlerConfiguration(
       })),
     ),
   );
+  const extensionMounts = [
+    preparedHost.compileResult.manifest,
+    ...preparedHost.compileResult.manifest.subagents.map((subagent) => subagent.agent),
+  ].flatMap((node) => node.extensionMounts);
   const nitroBundlerPlugins = [
     compiledSandboxBackendPrunePlugin,
     createOptionalEngineDependencyPlugin(unconfiguredOptionalEnginePackages),
+    createExtensionExternalDependencyPlugin(extensionMounts),
     extensionScopePlugin,
   ].filter((plugin) => plugin !== null);
   const nitroRolldownConfig = createNitroBundlerConfig(nitroBundlerPlugins);
@@ -645,11 +667,13 @@ function createApplicationNitroBundlerConfiguration(
     preparedHost,
     configuredOptionalEnginePackages,
   );
+  const tracedAppDependencyPaths = resolveExtensionExternalDependencyPaths(extensionMounts);
 
   return {
     nitroRolldownConfig,
     nitroRollupConfig,
     tracedAppDependencies,
+    tracedAppDependencyPaths,
   };
 }
 
@@ -756,6 +780,7 @@ export async function createDevelopmentApplicationNitro(
       rootDir: preparedHost.appRoot,
       serverDir: false,
       traceDeps: bundler.tracedAppDependencies,
+      traceOpts: { nft: { paths: bundler.tracedAppDependencyPaths } },
       vercel: createEveVercelOptions({
         agentName: preparedHost.compileResult.manifest.config.name,
         enabled: false,
@@ -827,6 +852,7 @@ export async function createProductionApplicationNitro(
     rootDir: preparedHost.appRoot,
     serverDir: false,
     traceDeps: bundler.tracedAppDependencies,
+    traceOpts: { nft: { paths: bundler.tracedAppDependencyPaths } },
     vercel: createEveVercelOptions({
       agentName: preparedHost.compileResult.manifest.config.name,
       enabled: preset === "vercel",
