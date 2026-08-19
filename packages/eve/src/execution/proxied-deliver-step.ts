@@ -9,9 +9,11 @@ import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import type { InputResponse } from "#runtime/input/types.js";
+import { clearObservedReadyTask } from "#tasks/session-observations.js";
 import { findSessionTaskEntry } from "#tasks/session-index.js";
 import {
   createTaskInputRequestId,
+  getProxyInputRequests,
   retireProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
 
@@ -169,6 +171,15 @@ export async function routeProxiedDeliverStep(
       // routes so a later click cannot re-enter the same batch after the
       // run has already accepted (or no-op'd) this answer.
       durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);
+      const taskStillHasInput = [...getProxyInputRequests(durableSession.state).values()].some(
+        (route) => route.taskId === taskId,
+      );
+      if (!taskStillHasInput) {
+        durableSession = {
+          ...durableSession,
+          state: clearObservedReadyTask(durableSession.state, taskId),
+        };
+      }
       retired = true;
       continue;
     }

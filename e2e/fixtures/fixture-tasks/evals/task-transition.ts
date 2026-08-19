@@ -359,6 +359,23 @@ export const TASK_TRANSITIONS = {
       sideEffects: { executed: ["parent-wake"] },
     },
   }),
+  "task.parent.wake.suppressed-observed-ready": transition({
+    preState: {
+      lifecycle: ["input_required", "completed", "failed", "cancelled"],
+      parent: "active",
+    },
+    input: "task-notification",
+    guards: ["task-peek-already-observed-the-ready-status"],
+    expected: {
+      outcome: "noop",
+      postState: {
+        lifecycle: ["input_required", "completed", "failed", "cancelled"],
+        parent: "parked",
+      },
+      events: { suppressed: ["task-ready-notification", "task-update-notification"] },
+      sideEffects: { suppressed: ["parent-model-step"] },
+    },
+  }),
   "task.parent-interaction.send.accepted-live-children": transition({
     preState: { agent: "busy", parent: "active" },
     input: "parent-message",

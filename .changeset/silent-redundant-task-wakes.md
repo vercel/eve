@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Keep conditionally delivered task wakes silent when their result adds no new user-facing information, including results already covered by an earlier response.
+Drop task update and ready notifications after `task_peek` has already exposed the task's ready state, avoiding a redundant model turn. Conditional task delivery also treats results incorporated into an earlier response as having nothing new to report.

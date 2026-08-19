@@ -30,6 +30,7 @@ import {
   TASK_PEEK_TOOL_NAME,
   TASK_UPDATE_TOOL_NAME,
 } from "#runtime/framework-tools/tasks.js";
+import { recordObservedReadyTaskViews } from "#tasks/session-observations.js";
 import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
 import { isTerminalTaskStatus, type TaskView } from "#tasks/types.js";
 
@@ -97,7 +98,10 @@ export async function executeTaskControlAction(input: {
   switch (action.toolName) {
     case TASK_PEEK_TOOL_NAME: {
       const views = await readTaskViews(entries);
-      return { result: createTaskViewsResult(action, views), session };
+      return {
+        result: createTaskViewsResult(action, views),
+        session: recordObservedReadyTaskViews(session, views),
+      };
     }
     case TASK_CANCEL_TOOL_NAME: {
       const views: TaskView[] = [];

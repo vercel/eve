@@ -357,6 +357,6 @@ export function isTerminalTaskStatus(status: TaskStatus): boolean {
 }
 
 /** True when a transition into this status should wake the parent. */
-export function isReadyTaskStatus(status: TaskStatus): boolean {
+export function isReadyTaskStatus(status: TaskStatus): status is Exclude<TaskStatus, "working"> {
   return status === "input_required" || isTerminalTaskStatus(status);
 }
