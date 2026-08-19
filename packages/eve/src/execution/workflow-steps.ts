@@ -99,6 +99,7 @@ import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/s
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { isTaskToolAvailable, TASK_UPDATE_TOOL_NAME } from "#runtime/framework-tools/tasks.js";
+import { publishStructuralProgress } from "#execution/structural-progress.js";
 
 const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
   "Task mode cannot complete while input requests remain pending.";
@@ -408,6 +409,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     // otherwise two TUIs can present and answer the same request.
     const forwardedToTaskParent = await forwardTaskEventToSessionCallback(ctx, event);
     const emitted = forwardedToTaskParent ? stampMessageStreamEvent(event) : await emit(event);
+    await publishStructuralProgress(ctx, emitted);
     await dispatchStreamEventHooks({ ctx, registry: hookRegistry, event: emitted });
     if (emitted.type !== "step.started") {
       await dispatchDynamicModelEvent({
