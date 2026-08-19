@@ -36,11 +36,6 @@
       "dependencies": ["@eve/self-modification"],
       "files": [
         {
-          "path": "registry/experimental/self-modification/config.ts",
-          "type": "registry:file",
-          "target": "agent/subagents/self-modification/config.ts"
-        },
-        {
           "path": "registry/experimental/self-modification/agent.ts",
           "type": "registry:file",
           "target": "agent/subagents/self-modification/agent.ts"

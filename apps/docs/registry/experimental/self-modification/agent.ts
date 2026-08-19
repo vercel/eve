@@ -1,3 +1,5 @@
-import { selfModification } from "./config";
+import { defineSelfModificationAgent } from "@eve/self-modification/agent";
 
-export default selfModification.agent;
+export default defineSelfModificationAgent({
+  model: "anthropic/claude-sonnet-5",
+});

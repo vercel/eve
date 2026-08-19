@@ -1,3 +1,1 @@
-import { selfModification } from "./config";
-
-export default selfModification.sandbox;
+export { default } from "@eve/self-modification/sandbox";
