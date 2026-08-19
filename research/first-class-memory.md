@@ -622,6 +622,14 @@ and the settled durable history, including the assistant response and tool
 results. The method does not run for failed, cancelled, input-deferred, or
 adapter-consumed turns.
 
+Completed-turn save is a semantic memory boundary, not an instrumentation
+export. It does not receive token usage, provider cost, latency, trace
+identifiers, or unsuccessful outcomes. A provider that also consumes
+instrumentation can correlate the two surfaces with `ctx.session.id` and
+`ctx.turn.turnId`. The `usageInputTokens` field on `compaction.requested` is
+specific to that boundary because it describes the context about to be
+compacted.
+
 eve awaits completed-turn saves before emitting `session.waiting` in
 conversation mode or `session.completed` in task mode. A provider may capture
 the turn, update a remote profile, enqueue its own work, or do nothing.
@@ -750,6 +758,8 @@ Mounted extensions cannot contribute memory slots.
 - Framework-provided remember, forget, purge, export, or administrative APIs.
 - A built-in capture model, extractor, formatter, retention policy, or erasure
   guarantee.
+- A memory-specific observability feed for usage, cost, latency, traces, errors,
+  or cancelled turns.
 - Cross-provider search, mutation, or record reconciliation.
 - Model-selected alternate scopes or unscoped provider invocations.
 - Treating recall visibility as complete participant isolation for ordinary
@@ -778,17 +788,17 @@ Mounted extensions cannot contribute memory slots.
       coordinates for private memory. This resolves the [scope and Slack privacy
       thread](https://github.com/vercel/eve/pull/1581#discussion_r3807248748).
 
-- [ ] **Decide what settled-turn metadata memory receives.** Determine whether
-      `save` with `phase: "turn.completed"` receives aggregate input, output,
-      cache, and cost usage, and document how `session.id` plus `turnId` link a
-      memory operation to instrumentation. Explicitly keep failed, cancelled,
-      and deferred turns in instrumentation, or add separate typed phases if
-      memory providers are expected to learn from those outcomes. Close the
+- [x] **Keep settled-turn telemetry out of memory.** `save` with
+      `phase: "turn.completed"` receives completed input and durable history,
+      but not usage, cost, latency, trace identifiers, or unsuccessful
+      outcomes. Instrumentation owns that data and can be correlated through
+      `session.id` plus `turnId`. `compaction.requested` retains its input-token
+      count because that value describes the context being compacted. This
+      resolves the
       [usage and trace
       thread](https://github.com/vercel/eve/pull/1581#discussion_r3807526107)
       and [terminal outcome
-      thread](https://github.com/vercel/eve/pull/1581#discussion_r3807561187)
-      once that boundary is unambiguous.
+      thread](https://github.com/vercel/eve/pull/1581#discussion_r3807561187).
 
 - [x] **Give the model a safe memory-slot purpose.** The consuming
       `defineMemory(...)` may supply an optional static `description`. eve
@@ -821,12 +831,13 @@ Mounted extensions cannot contribute memory slots.
       and [falsy return
       thread](https://github.com/vercel/eve/pull/1581#discussion_r3807755029).
 
-- [ ] **Reconcile the remaining review threads with the final contract.**
-      Provider `ctx.messages` includes recalled history, and
+- [x] **Reconcile review threads with the final contract.** Provider
+      `ctx.messages` includes recalled history, and
       `getMemoryMessageAttribution` identifies its originating slot and scope.
-      Reply to or resolve the remaining questions about settled-turn metadata,
-      the namespace/scope split, and cross-provider coordination, then resolve
-      outdated and approval-only threads. Start with the [cross-provider
+      The namespace/scope split, lifecycle phases, telemetry boundary, and
+      cross-provider behavior now match the implementation. All outdated,
+      approval-only, and superseded threads are resolved, including the
+      [cross-provider
       thread](https://github.com/vercel/eve/pull/1581#discussion_r3807280622)
       and the [outdated turn-input
       thread](https://github.com/vercel/eve/pull/1581#discussion_r3772094622).
