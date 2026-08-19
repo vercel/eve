@@ -9,8 +9,10 @@ import {
 import { defaultFileMemoryBackend } from "#public/memory/file/backends/default.js";
 import {
   defineMemoryProvider,
+  getMemoryMessageAttribution,
   type MemoryProvider,
   type MemoryRecallContext,
+  type MemoryRecallResult,
 } from "#public/memory/index.js";
 
 const DEFAULT_MAX_ENTRIES = 100;
@@ -101,14 +103,24 @@ function createFileMemoryTools(input: {
 async function recallMemory(
   backend: MemoryDocumentBackend,
   context: MemoryRecallContext,
-): Promise<{ readonly content: string } | null> {
+): Promise<MemoryRecallResult> {
   const document = await readDocument({
     backend,
     key: context.memory.scope.key,
     signal: context.abortSignal,
   });
   const entries = parseMemoryDocument(document?.content ?? "");
-  return entries.length === 0 ? null : { content: formatRecallContext(entries) };
+  if (entries.length === 0) return null;
+
+  const content = formatRecallContext(entries);
+  const latest = context.messages.findLast((message) => {
+    const attribution = getMemoryMessageAttribution(message);
+    return (
+      attribution?.slot === context.memory.slot &&
+      attribution.scope.key === context.memory.scope.key
+    );
+  });
+  return latest?.content === content ? undefined : { content, role: "user" };
 }
 
 async function saveMemory(input: {
