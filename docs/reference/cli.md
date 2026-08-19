@@ -1,43 +1,48 @@
 ---
 title: "CLI"
-description: "Reference for every eve CLI command: init, set, info, build, start, dev, logs, trace, link, deploy, eval, channels, and extension."
+description: "Reference for every eve CLI command: init, set, info, build, start, dev, logs, traces, link, deploy, eval, channels, extension, and telemetry."
 ---
 
-Relevant `eve` commands can run from the application root or any directory beneath it. In an `agents/` workspace, agent-specific commands accept `--agent <name>` and otherwise open a picker when more than one agent exists. Non-interactive runs must pass `--agent`. Running `eve` with no command runs `eve init` when the current directory is not an eve project, or `eve dev` when it is.
+Relevant `eve` commands can run from the application root or any directory beneath it. Running `eve` with no command runs `eve init` when the current directory is not an eve project, or `eve dev` when it is.
 
 ## Commands
 
-| Command                        | Description                                                                                                                        |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `eve`                          | Initialize the current directory, or start development when it is already an eve project                                           |
-| `eve init [target]`            | Create a new agent, or add an agent to an existing project                                                                         |
-| `eve info`                     | Print the resolved application, including static instructions and discovered capabilities, routes, artifact paths, and diagnostics |
-| `eve build`                    | Compile `.eve/` artifacts and build the host output; prints the output directory                                                   |
-| `eve start`                    | Serve the built `.output/` app; prints the listening URL                                                                           |
-| `eve dev`                      | Start the local dev server and open the terminal UI                                                                                |
-| `eve dev <url>`                | Connect the UI to an existing server URL (e.g. a remote deployment) instead of booting a local server                              |
-| `eve acp [url]`                | Serve the local application or an existing eve server URL as a stable ACP v1 agent over stdio                                      |
-| `eve logs [logid]`             | Print an `eve dev` diagnostic log (the most recent when `logid` is omitted)                                                        |
-| `eve logs ls`                  | List `eve dev` diagnostic logs, most recent first                                                                                  |
-| `eve traces ls`                | List locally captured agent traces, most recent first                                                                              |
-| `eve traces [trace]`           | Show a local span tree (the most recent when omitted)                                                                              |
-| `eve link`                     | Link the directory to a Vercel project and pull AI Gateway credentials                                                             |
-| `eve deploy`                   | Deploy the agent to Vercel production (links first if needed)                                                                      |
-| `eve eval`                     | Run evals against the local app or a remote target                                                                                 |
-| `eve channels list`            | List user-authored channels                                                                                                        |
-| `eve extension init [target]`  | Create a new extension package                                                                                                     |
-| `eve extension build`          | Build the current package as an extension                                                                                          |
-| `eve set`                      | Change the root agent's model and reasoning effort                                                                                 |
-| `eve add <item>`               | Install an item from the official or a configured shadcn registry                                                                  |
+| Command                       | Description                                                                                                                        |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `eve`                         | Initialize the current directory, or start development when it is already an eve project                                           |
+| `eve init [target]`           | Create a new agent, or add an agent to an existing project                                                                         |
+| `eve info`                    | Print the resolved application, including static instructions and discovered capabilities, routes, artifact paths, and diagnostics |
+| `eve build`                   | Compile `.eve/` artifacts and build the host output; prints the output directory                                                   |
+| `eve start`                   | Serve the built `.output/` app; prints the listening URL                                                                           |
+| `eve dev`                     | Start the local dev server and open the terminal UI                                                                                |
+| `eve dev <url>`               | Connect the UI to an existing server URL (e.g. a remote deployment) instead of booting a local server                              |
+| `eve acp [url]`               | Serve the local application or an existing eve server URL as a stable ACP v1 agent over stdio                                      |
+| `eve logs [logid]`            | Print an `eve dev` diagnostic log (the most recent when `logid` is omitted)                                                        |
+| `eve logs ls`                 | List `eve dev` diagnostic logs, most recent first                                                                                  |
+| `eve traces ls`               | List locally captured agent traces, most recent first                                                                              |
+| `eve traces [trace]`          | Show a local span tree (the most recent when omitted)                                                                              |
+| `eve telemetry <command>`     | Show, enable, or disable CLI telemetry collection                                                                                  |
+| `eve link`                    | Link the directory to a Vercel project and pull AI Gateway credentials                                                             |
+| `eve deploy`                  | Deploy the agent to Vercel production (links first if needed)                                                                      |
+| `eve eval`                    | Run evals against the local app or a remote target                                                                                 |
+| `eve channels list`           | List user-authored channels                                                                                                        |
+| `eve extension init [target]` | Create a new extension package                                                                                                     |
+| `eve extension build`         | Build the current package as an extension                                                                                          |
+| `eve set`                     | Change the root agent's model and reasoning effort                                                                                 |
+| `eve add <item>`              | Install an item from the official or a configured shadcn registry                                                                  |
 | `eve integration setup <kind>` | Run a built-in setup flow directly after its registry files are installed                                                          |
-| `eve registry <command>`       | Add sources and list, search, or view registry catalog items                                                                       |
+| `eve registry <command>`      | Add sources and list, search, or view registry catalog items                                                                       |
 
 When `eve build` fails on discovery errors, it prints the full diagnostics report (severity, message, source path) and the diagnostics artifact path.
+
+## CLI telemetry
+
+eve collects CLI telemetry by default to improve the command-line interface. Run `eve telemetry disable` to disable it for this machine, or set `EVE_TELEMETRY_DISABLED=1` for one command. See [CLI telemetry](./telemetry) for the current data fields, exclusions, debug mode, notice, and local preference storage.
 
 ## `eve init`
 
 ```bash
-eve init [target] [--agents <name,...>] [--model <provider/model-id>] [--reasoning <effort>] [--channel-web-nextjs]
+eve init [target] [--model <provider/model-id>] [--reasoning <effort>] [--channel-web-nextjs]
 ```
 
 Creates a new agent app or adds an agent to an existing app. Always installs dependencies. New directories also initialize Git.
@@ -48,8 +53,6 @@ Creates a new agent app or adds an agent to an existing app. Always installs dep
 | `eve init` or `eve init .` in an empty directory                           | Creates an agent project in the current directory                                                                                                                        |
 | `eve init` or `eve init .` in a non-empty directory without `package.json` | Asks whether to scaffold in the current directory or a named subdirectory. Using the current directory preserves unrelated files but overwrites files at generated paths |
 | `eve init .` in an existing project                                        | Adds `agent/` plus missing `eve`, `ai`, and `zod` dependencies. Requires `package.json` and no existing `agent/` files                                                   |
-| `eve init my-project --agents foreman,researcher`                          | Creates a workspace with `agents/foreman/agent/` and `agents/researcher/agent/`                                                                                          |
-| `eve init billing` from an `agents/` workspace                             | Adds only `agents/billing/agent/`; the workspace keeps its existing package, dependencies, and TypeScript configuration                                                  |
 
 Coding-agent launches and non-interactive terminals cannot answer the location prompt and fail before writing. Pass a new directory name, such as `eve init my-agent`, in those environments.
 
@@ -57,7 +60,6 @@ After scaffolding, a human terminal usually continues into `eve dev`. If a codin
 
 | Flag                   | Type   | Default                    | Description                                                                                                              |
 | ---------------------- | ------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `--agents <names>`     | list   | unset                      | Create an `agents/` workspace with one or more comma-separated agent names.                                              |
 | `--model <model>`      | string | `openai/gpt-5.6-luna-fast` | Set the root agent's AI Gateway model ID.                                                                                |
 | `--reasoning <effort>` | enum   | provider default           | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
 | `--channel-web-nextjs` | flag   | off                        | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
@@ -122,8 +124,6 @@ Commands for installing and discovering [shadcn registry](https://ui.shadcn.com/
 eve add extension/agent-browser
 eve add linear
 eve add channel/slack --skip-install
-eve add memory/file
-eve integration setup file-memory
 eve add https://example.com/r/my-extension.json --overwrite
 eve registry add @acme=https://example.com/r/{name}.json
 eve registry search browser
@@ -138,8 +138,6 @@ eve add @acme/my-extension
 Coding agents should use `eve add <item> --non-interactive`, adding `--yes` to accept recommended setup values and reduce setup round trips. Explicit `--answer` values take precedence. This mode never opens an eve prompt. When a component or setup decision is missing, the NDJSON terminal event includes a stable question key and a safe continuation command; add the requested answer to that command. Supply answers with repeatable `--answer 'key=<JSON value>'` options. Follow a reported `eve link` prerequisite before retrying Vercel Connect setup. Do not put secrets in command-line answers; use the integration's documented environment variable or secret store.
 
 When setup is skipped, cancelled, or needs more input after installation, eve prints or returns the matching `eve add <item> --skip-install` continuation. It reruns the selected components' declared flows without reinstalling registry files.
-
-`eve integration setup file-memory` runs the storage setup directly without reinstalling `agent/memory/file.ts`. It authenticates through the Vercel CLI, resolves the linked project, reconciles the private Blob store, and pulls the environment. Use it to repair or verify a previous provisioning attempt; `eve add memory/file` also offers the normal deployment handoff after setup.
 
 `eve registry add` records configured sources in `package.json#registries`. `eve registry list` aggregates the official catalog and all configured sources by default. `eve registry search` also includes [skills.sh](https://skills.sh), available without configuration at `@skills`, and groups results by source with each source's available result count. Search returns up to 10 matches per source by default; pass `--limit <count>` to request between 1 and 100. Either command can browse one supplied URL or namespace. Official and other universal items with explicit file targets do not require shadcn project configuration.
 
