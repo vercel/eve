@@ -32,24 +32,24 @@ export type LinqInboundResult = {
 /** Sync or async {@link LinqInboundResult}. */
 export type LinqInboundResultOrPromise = LinqInboundResult | Promise<LinqInboundResult>;
 
-/** Linq credentials resolved by an external provider, such as Vercel Connect. */
-export interface LinqManagedCredentials {
-  /** Lazy provider for the Linq API key. */
-  readonly credentials: LinqCredentialProvider;
-  /** Trusted webhook verifier for provider-forwarded webhooks. */
+/** A direct value or lazy resolver for a Linq credential. */
+export type LinqCredentialValue = string | (() => string | Promise<string>);
+
+/** Linq credentials for outbound API calls and inbound webhook verification. */
+export interface LinqChannelCredentials {
+  /** API key for outbound Linq API calls. */
+  readonly apiKey?: LinqCredentialValue;
+  /** Signing secret for direct Linq webhook delivery. */
+  readonly signingSecret?: LinqCredentialValue;
+  /** Trusted verifier for webhooks forwarded by a provider such as Vercel Connect. */
   readonly webhookVerifier?: LinqWebhookVerifier;
 }
 
-/** Direct or externally managed Linq credential provider. */
-export type LinqChannelCredentials = LinqCredentialProvider | LinqManagedCredentials;
-
 /** Configuration for {@link linqChannel}. */
 export interface LinqChannelConfig {
-  /** Direct Linq API key. Prefer `credentials` for managed Connect credentials. */
-  readonly apiKey?: string;
   /** Optional Linq API base URL, for example a sandbox endpoint. */
   readonly baseURL?: string;
-  /** Lazy Linq API-key provider, such as `connectLinqCredentials(...)`. */
+  /** Outbound credentials and inbound webhook verification. */
   readonly credentials?: LinqChannelCredentials;
   /** Per-event overrides for the underlying Chat SDK channel. */
   readonly events?: ChatSdkChannelEvents<{ linq: ReturnType<typeof createLinqAdapter> }>;
@@ -62,10 +62,6 @@ export interface LinqChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
-  /** Linq webhook signing secret for direct provider delivery. */
-  readonly signingSecret?: string;
-  /** Trusted webhook verifier. Takes precedence over `signingSecret`. */
-  readonly webhookVerifier?: LinqWebhookVerifier;
   /** Display name used by the Chat SDK runtime. Defaults to `"eve"`. */
   readonly userName?: string;
 }
@@ -89,16 +85,15 @@ export interface LinqChannel extends ChatSdkChannel {}
 export function linqChannel(config: LinqChannelConfig): LinqChannel {
   const credentials = normalizeCredentials(config.credentials);
   const linq = createLinqAdapter({
-    ...(config.apiKey === undefined ? {} : { apiKey: config.apiKey }),
     ...(config.baseURL === undefined ? {} : { baseURL: config.baseURL }),
     ...(credentials.provider === undefined ? {} : { credentials: credentials.provider }),
-    ...(config.webhookVerifier !== undefined
-      ? { webhookVerifier: config.webhookVerifier }
-      : credentials.webhookVerifier !== undefined
-        ? { webhookVerifier: credentials.webhookVerifier }
-        : config.signingSecret === undefined
-          ? { webhookVerifier: vercelOidc() }
-          : { signingSecret: config.signingSecret }),
+    ...(credentials.webhookVerifier !== undefined
+      ? { webhookVerifier: credentials.webhookVerifier }
+      : credentials.signingSecret === undefined
+        ? { webhookVerifier: vercelOidc() }
+        : typeof credentials.signingSecret === "string"
+          ? { signingSecret: credentials.signingSecret }
+          : {}),
   });
   const bridge = chatSdkChannel({
     adapters: { linq },
@@ -124,15 +119,28 @@ export function linqChannel(config: LinqChannelConfig): LinqChannel {
 
 function normalizeCredentials(credentials: LinqChannelConfig["credentials"]): {
   readonly provider?: LinqCredentialProvider;
+  readonly signingSecret?: LinqCredentialValue;
   readonly webhookVerifier?: LinqWebhookVerifier;
 } {
   if (credentials === undefined) return {};
-  return typeof credentials === "function"
-    ? { provider: credentials }
-    : {
-        provider: credentials.credentials,
-        webhookVerifier: credentials.webhookVerifier,
-      };
+  const { apiKey, signingSecret, webhookVerifier } = credentials;
+  return {
+    ...(apiKey === undefined
+      ? {}
+      : {
+          provider: async () => ({
+            apiKey: typeof apiKey === "function" ? await apiKey() : apiKey,
+            ...(signingSecret === undefined
+              ? {}
+              : {
+                  signingSecret:
+                    typeof signingSecret === "function" ? await signingSecret() : signingSecret,
+                }),
+          }),
+        }),
+    ...(signingSecret === undefined ? {} : { signingSecret }),
+    ...(webhookVerifier === undefined ? {} : { webhookVerifier }),
+  };
 }
 
 async function defaultOnMessage(): Promise<LinqInboundResult> {

@@ -37,7 +37,9 @@ describe("linqChannel", () => {
   });
 
   it("dispatches direct messages to eve", async () => {
-    linqChannel({ apiKey: "linq-api-key", signingSecret: "linq-signing-secret" });
+    linqChannel({
+      credentials: { apiKey: "linq-api-key", signingSecret: "linq-signing-secret" },
+    });
     const handler = directMessage.mock.calls[0]?.[0];
     if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
     const thread = { id: "thread-id" };
@@ -58,17 +60,21 @@ describe("linqChannel", () => {
     );
   });
 
-  it("uses the managed credential verifier", () => {
+  it("uses lazy credentials and the managed credential verifier", async () => {
+    const apiKey = vi.fn(async () => "rotating-token");
     const webhookVerifier = vi.fn();
-    const credentials = vi.fn(async () => ({ apiKey: "rotating-token" }));
 
-    linqChannel({ credentials: { credentials, webhookVerifier } });
+    linqChannel({ credentials: { apiKey, webhookVerifier } });
 
-    expect(createLinqAdapter).toHaveBeenCalledWith({ credentials, webhookVerifier });
+    const config = createLinqAdapter.mock.calls[0]?.[0];
+    expect(config).toMatchObject({ webhookVerifier });
+    await expect(config?.credentials?.()).resolves.toEqual({ apiKey: "rotating-token" });
   });
 
   it("drops blank inbound messages", async () => {
-    linqChannel({ apiKey: "linq-api-key", signingSecret: "linq-signing-secret" });
+    linqChannel({
+      credentials: { apiKey: "linq-api-key", signingSecret: "linq-signing-secret" },
+    });
     const handler = directMessage.mock.calls[0]?.[0];
     if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
     const thread = { id: "thread-id" };

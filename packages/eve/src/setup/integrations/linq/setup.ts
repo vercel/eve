@@ -24,8 +24,10 @@ interface LinqSetupPlan {
 const portableTemplate = `import { linqChannel } from "eve/channels/linq";
 
 export default linqChannel({
-  apiKey: process.env.LINQ_API_KEY!,
-  signingSecret: process.env.LINQ_WEBHOOK_SECRET!,
+  credentials: {
+    apiKey: process.env.LINQ_API_KEY!,
+    signingSecret: process.env.LINQ_WEBHOOK_SECRET!,
+  },
 });
 `;
 
