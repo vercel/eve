@@ -1,4 +1,4 @@
-import type { ChannelAdapter } from "#channel/adapter.js";
+import type { ChannelAdapter, ChannelProgressRenderer } from "#channel/adapter.js";
 import type { UserContent } from "ai";
 import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
@@ -73,6 +73,28 @@ export function getChannelInstrumentationKind(value: unknown): string | undefine
 
   const routeSignature = channelRouteSignature(value);
   return routeSignature === undefined ? undefined : channelInstrumentationKinds.get(routeSignature);
+}
+
+export function setChannelProgressRenderers(
+  channel: unknown,
+  input: {
+    readonly destination: NonNullable<ChannelAdapter["progressDestination"]>;
+    readonly renderers: readonly ChannelProgressRenderer[];
+  },
+): void {
+  if (!isCompiledChannel(channel)) throw new TypeError("Expected a compiled channel.");
+  Object.defineProperties(channel.adapter, {
+    progressDestination: {
+      configurable: true,
+      enumerable: false,
+      value: input.destination,
+    },
+    progressRenderers: {
+      configurable: true,
+      enumerable: false,
+      value: input.renderers,
+    },
+  });
 }
 
 export function setChannelInstrumentationKind(channel: CompiledChannel, kind: string): void {

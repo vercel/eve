@@ -420,7 +420,10 @@ async function runDriverLoop(input: {
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,
   });
-  let progressState = { renderCount: 0, snapshot: createProgressSnapshot() };
+  let progressState = {
+    rendererStates: {} as Readonly<Record<string, unknown>>,
+    snapshot: createProgressSnapshot(),
+  };
   const progressHandler: SessionProgressHandler | undefined =
     input.capabilities?.progress === true
       ? {
@@ -428,7 +431,8 @@ async function runDriverLoop(input: {
             const snapshot = reduceProgressCommand(progressState.snapshot, command);
             if (snapshot.revision === progressState.snapshot.revision) return;
             progressState = await renderSessionProgressStep({
-              previousRenderCount: progressState.renderCount,
+              rendererStates: progressState.rendererStates,
+              serializedContext: stateCursor.serializedContext,
               snapshot,
             });
           },

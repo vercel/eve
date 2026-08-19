@@ -105,8 +105,8 @@ vi.mock("./session-timeout-control.js", () => ({
 }));
 
 vi.mock("./session-progress-renderer-step.js", () => ({
-  renderSessionProgressStep: vi.fn(async ({ previousRenderCount, snapshot }) => ({
-    renderCount: previousRenderCount + 1,
+  renderSessionProgressStep: vi.fn(async ({ rendererStates, snapshot }) => ({
+    rendererStates,
     snapshot,
   })),
 }));
@@ -260,7 +260,8 @@ describe("workflowEntry", () => {
     ).resolves.toEqual({ output: "" });
 
     expect(renderSessionProgressStep).toHaveBeenCalledWith({
-      previousRenderCount: 0,
+      rendererStates: {},
+      serializedContext: expect.any(Object),
       snapshot: expect.objectContaining({
         revision: 1,
         turns: expect.objectContaining({

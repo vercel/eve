@@ -116,6 +116,30 @@ describe("createChannelAddress", () => {
     );
   });
 
+  it("enables progress only for a newly created session with configured renderers", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.dispatchContinuation).mockResolvedValue({ status: "session_not_active" });
+    vi.mocked(runtime.createSession).mockResolvedValue({
+      events: new ReadableStream(),
+      sessionId: "sess_progress",
+    });
+    const address = createChannelAddress({
+      adapter: {
+        kind: "slack",
+        progressRenderers: [{ id: "status", render: vi.fn() }],
+      },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      runtime,
+    });
+
+    await address.send("hello", { auth: null });
+
+    expect(runtime.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ capabilities: { progress: true, requestInput: true } }),
+    );
+  });
+
   it("binds every control directly to the namespaced continuation token", async () => {
     const runtime = createRuntime();
     const address = createChannelAddress({

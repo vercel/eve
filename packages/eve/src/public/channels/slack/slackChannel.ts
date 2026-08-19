@@ -8,6 +8,7 @@ import type {
 } from "#channel/channel-operations.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import type { Session, SessionHandle } from "#channel/session.js";
+import { setChannelProgressRenderers } from "#channel/compiled-channel.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { CardElement } from "#compiled/chat/index.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -71,6 +72,11 @@ import {
 import { verifySlackRequest, type SlackWebhookVerifier } from "#public/channels/slack/verify.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 import { markEventHandled } from "./utils.js";
+import {
+  buildSlackProgressRenderers,
+  hasSlackStatusProgress,
+  type SlackProgressRenderer,
+} from "#public/channels/slack/progress.js";
 
 export type {
   SlackRespondOptions,
@@ -529,6 +535,11 @@ export interface SlackChannelConfig {
   readonly credentials?: SlackChannelCredentials;
   readonly botName?: string;
 
+  /** Optional presentation-only progress rendered without starting parent turns. */
+  readonly progress?: {
+    readonly renderers: readonly SlackProgressRenderer[];
+  };
+
   /** Override the default webhook route path (`/eve/v1/slack`). */
   readonly route?: string;
 
@@ -655,6 +666,27 @@ export interface SlackChannelConfig {
   readonly events?: SlackChannelEvents;
 }
 
+const ignoreSlackProgressEvent = async (): Promise<void> => undefined;
+
+const progressOwnedMessageCompleted: NonNullable<SlackChannelEvents["message.completed"]> = async (
+  event,
+  channel,
+) => {
+  channel.state.pendingToolCallMessage = null;
+  if (event.finishReason !== "tool-calls" && event.message) {
+    await channel.thread.post(event.message);
+  }
+};
+
+const clearSlackTurnState: NonNullable<SlackChannelEvents["turn.started"]> = async (
+  _data,
+  channel,
+) => {
+  channel.state.pendingToolCallMessage = null;
+  channel.state.lastReasoningTypingAtMs = null;
+  channel.state.lastReasoningTypingStatus = null;
+};
+
 function rebuildSlackContext(
   state: SlackChannelState,
   session: SessionHandle,
@@ -699,11 +731,29 @@ export interface SlackChannel extends Channel<
 export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const uploadPolicy = mergeUploadPolicy(config.uploadPolicy);
   const slackFetchFile = createSlackFetchFile({ botToken: config.credentials?.botToken });
+  const progressRenderers = buildSlackProgressRenderers({
+    botToken: config.credentials?.botToken,
+    renderers: config.progress?.renderers ?? [],
+  });
   const onInputResponse = config.onInputResponse ?? defaultOnInputResponse;
   const authorizationRequiredOverride = config.events?.["authorization.required"];
   const candidateHandler =
     config.events?.["approval.candidate"] ?? defaultEvents["approval.candidate"]!;
-  const turnStartedHandler = config.events?.["turn.started"] ?? defaultEvents["turn.started"]!;
+  const progressOwnsTypingStatus = hasSlackStatusProgress(config.progress?.renderers);
+  const turnStartedHandler =
+    config.events?.["turn.started"] ??
+    (progressOwnsTypingStatus ? clearSlackTurnState : defaultEvents["turn.started"]!);
+  const reasoningHandler =
+    config.events?.["reasoning.appended"] ??
+    (progressOwnsTypingStatus ? ignoreSlackProgressEvent : defaultEvents["reasoning.appended"]!);
+  const actionsHandler =
+    config.events?.["actions.requested"] ??
+    (progressOwnsTypingStatus ? ignoreSlackProgressEvent : defaultEvents["actions.requested"]!);
+  const messageCompletedHandler =
+    config.events?.["message.completed"] ??
+    (progressOwnsTypingStatus
+      ? progressOwnedMessageCompleted
+      : defaultEvents["message.completed"]!);
   const mergedEvents: SlackChannelInternalEvents = {
     ...defaultEvents,
     ...config.events,
@@ -729,6 +779,9 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       }
       await turnStartedHandler(data, channel, ctx);
     },
+    "reasoning.appended": reasoningHandler,
+    "actions.requested": actionsHandler,
+    "message.completed": messageCompletedHandler,
     "input.requested": config.events?.["input.requested"] ?? defaultInputRequestedHandler(),
     "authorization.required":
       authorizationRequiredOverride === undefined
@@ -740,7 +793,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   // Light weight dedup mechanism - not reliable across multiple invocations.
   const handledEvents = new Set<string>();
 
-  return defineChannel<
+  const channel = defineChannel<
     SlackChannelState,
     SlackChannelContext,
     SlackReceiveTarget,
@@ -828,6 +881,14 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
 
     events: mergedEvents,
   });
+  setChannelProgressRenderers(channel, {
+    destination(state) {
+      const slack = state as Partial<SlackChannelState> | undefined;
+      return { channelId: slack?.channelId ?? null, threadTs: slack?.threadTs ?? null };
+    },
+    renderers: progressRenderers,
+  });
+  return channel;
 }
 
 function defaultOnInputResponse(ctx: SlackInputResponseContext): SlackInputResponseResult {

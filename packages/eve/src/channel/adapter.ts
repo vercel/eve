@@ -5,6 +5,7 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload } from "#channel/types.js";
 import type { FetchFileResult, FetchFileFunction } from "#shared/channel-definition.js";
+import type { ProgressSnapshotV1 } from "#execution/session-progress.js";
 
 const log = createLogger("channel.adapter");
 
@@ -103,6 +104,16 @@ export type ChannelInstrumentationMetadataProjector = (
   state: Record<string, unknown> | undefined,
 ) => ChannelInstrumentationMetadata;
 
+/** Internal channel-owned projection from driver progress state to provider effects. */
+export interface ChannelProgressRenderer {
+  readonly id: string;
+  render(input: {
+    readonly destination: Readonly<Record<string, unknown>>;
+    readonly snapshot: ProgressSnapshotV1;
+    readonly state: unknown;
+  }): Promise<unknown>;
+}
+
 // ---------------------------------------------------------------------------
 // Channel adapter
 // ---------------------------------------------------------------------------
@@ -170,6 +181,13 @@ export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdap
   readonly instrumentation?: {
     readonly metadata?: ChannelInstrumentationMetadataProjector;
   };
+
+  /** Framework-owned progress renderers configured by a channel factory. */
+  readonly progressRenderers?: readonly ChannelProgressRenderer[];
+  /** Immutable provider destination projected from channel state for progress effects. */
+  readonly progressDestination?: (
+    state: Record<string, unknown> | undefined,
+  ) => Readonly<Record<string, unknown>>;
 } & ChannelEventHandlers<TCtx>;
 
 // ---------------------------------------------------------------------------
