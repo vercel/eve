@@ -493,7 +493,7 @@ describe("createAgentOtelInstrumentation", () => {
     expect(replayed[1]!.spanContext().spanId).toBe(replayed[0]!.spanContext().spanId);
   });
 
-  it("preserves a remote parent when delivery starts before the session event", async () => {
+  it("links a remote parent when delivery starts before the session event", async () => {
     const runtime = createRuntime();
     const ctx = new ContextContainer();
     const parentTraceContext = {
@@ -551,12 +551,21 @@ describe("createAgentOtelInstrumentation", () => {
     await runtime.provider.forceFlush();
 
     const spans = runtime.exporter.getFinishedSpans();
+    const session = byName(spans, "agent.session")[0]!;
     const channelDelivery = byName(spans, "agent.channel.delivery")[0]!;
     const turn = byName(spans, "agent.turn")[0]!;
-    expect(byName(spans, "agent.session")).toHaveLength(0);
-    expect(channelDelivery.parentSpanContext).toMatchObject(parentTraceContext);
-    expect(turn.parentSpanContext).toMatchObject(parentTraceContext);
-    expect(turn.spanContext().traceId).toBe(parentTraceContext.traceId);
+    expect(byName(spans, "agent.session")).toHaveLength(1);
+    expect(session.parentSpanContext).toBeUndefined();
+    expect(session.links).toEqual([
+      expect.objectContaining({
+        attributes: { "eve.link.type": "session.parent" },
+        context: expect.objectContaining(parentTraceContext),
+      }),
+    ]);
+    expect(channelDelivery.parentSpanContext?.spanId).toBe(session.spanContext().spanId);
+    expect(turn.parentSpanContext?.spanId).toBe(session.spanContext().spanId);
+    expect(turn.spanContext().traceId).toBe(session.spanContext().traceId);
+    expect(turn.spanContext().traceId).not.toBe(parentTraceContext.traceId);
   });
 
   it("moves a delivery into the same rolled window as its resulting turn", async () => {
@@ -1574,7 +1583,7 @@ describe("createAgentOtelInstrumentation", () => {
     expect(turns[0]!.spanContext().traceId).toBe(sessions[0]!.spanContext().traceId);
   });
 
-  it("records a subagent child into the window its parent had open", async () => {
+  it("opens a linked session trace for a subagent child", async () => {
     const runtime = createRuntime();
     await publishTurnStarted({
       hooks: runtime.hooks,
@@ -1600,16 +1609,34 @@ describe("createAgentOtelInstrumentation", () => {
     const childTurn = byName(spans, "agent.turn").find(
       (span) => span.attributes["agent.session.id"] === "child-1",
     )!;
+    const childSession = byName(spans, "agent.session").find(
+      (span) => span.attributes["agent.session.id"] === "child-1",
+    )!;
 
-    expect(childTurn.spanContext().traceId).toBe(parentWindow.spanContext().traceId);
-    expect(childTurn.parentSpanContext?.spanId).toBe(parentWindow.spanContext().spanId);
+    expect(childSession.spanContext().traceId).not.toBe(parentWindow.spanContext().traceId);
+    expect(childSession.parentSpanContext).toBeUndefined();
+    expect(childSession.links).toEqual([
+      expect.objectContaining({
+        attributes: { "eve.link.type": "session.parent" },
+        context: expect.objectContaining({
+          spanId: parentWindow.spanContext().spanId,
+          traceFlags: parentWindow.spanContext().traceFlags,
+          traceId: parentWindow.spanContext().traceId,
+        }),
+      }),
+    ]);
+    expect(childTurn.spanContext().traceId).toBe(childSession.spanContext().traceId);
+    expect(childTurn.parentSpanContext?.spanId).toBe(childSession.spanContext().spanId);
     expect(childTurn.attributes["agent.root.session.id"]).toBe("session-1");
-    // The child adopts a window rather than opening one, so the trace still
-    // holds exactly the root's window span.
-    expect(byName(spans, "agent.session")).toHaveLength(1);
+    expect(childSession.attributes).toMatchObject({
+      "agent.root.session.id": "session-1",
+      "agent.session.id": "child-1",
+      "agent.session.window": 0,
+    });
+    expect(byName(spans, "agent.session")).toHaveLength(2);
   });
 
-  it("preserves a remote action as the parent of a remote child turn", async () => {
+  it("links a remote action from an independent remote child trace", async () => {
     const runtime = createRuntime();
     const parentTraceContext: InstrumentationTraceContext & { readonly isRemote: true } = {
       isRemote: true,
@@ -1628,10 +1655,79 @@ describe("createAgentOtelInstrumentation", () => {
     await completeTurn(runtime.hooks, "remote-child", "child-turn-1");
     await runtime.provider.forceFlush();
 
-    const childTurn = byName(runtime.exporter.getFinishedSpans(), "agent.turn")[0]!;
-    expect(childTurn.spanContext().traceId).toBe(parentTraceContext.traceId);
-    expect(childTurn.parentSpanContext).toMatchObject(parentTraceContext);
+    const spans = runtime.exporter.getFinishedSpans();
+    const childSession = byName(spans, "agent.session")[0]!;
+    const childTurn = byName(spans, "agent.turn")[0]!;
+    expect(childSession.parentSpanContext).toBeUndefined();
+    expect(childSession.links).toEqual([
+      expect.objectContaining({
+        attributes: { "eve.link.type": "session.parent" },
+        context: expect.objectContaining(parentTraceContext),
+      }),
+    ]);
+    expect(childSession.spanContext().traceId).not.toBe(parentTraceContext.traceId);
+    expect(childTurn.spanContext().traceId).toBe(childSession.spanContext().traceId);
+    expect(childTurn.parentSpanContext?.spanId).toBe(childSession.spanContext().spanId);
     expect(childTurn.attributes["agent.root.session.id"]).toBe("parent-session");
+  });
+
+  it("records nested subagent session markers without changing root lineage", async () => {
+    const runtime = createRuntime();
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+    const rootSession = byName(runtime.exporter.getFinishedSpans(), "agent.session")[0]!;
+
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      parentTraceContext: rootSession.spanContext(),
+      rootSessionId: "session-1",
+      sessionId: "child-1",
+      turnId: "child-turn-1",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+    const childSession = byName(runtime.exporter.getFinishedSpans(), "agent.session").find(
+      (span) => span.attributes["agent.session.id"] === "child-1",
+    )!;
+
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      parentTraceContext: childSession.spanContext(),
+      rootSessionId: "session-1",
+      sessionId: "grandchild-1",
+      turnId: "grandchild-turn-1",
+      turnSequence: 0,
+    });
+    await completeTurn(runtime.hooks, "grandchild-1", "grandchild-turn-1");
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    const grandchildSession = byName(spans, "agent.session").find(
+      (span) => span.attributes["agent.session.id"] === "grandchild-1",
+    )!;
+    const grandchildTurn = byName(spans, "agent.turn").find(
+      (span) => span.attributes["agent.session.id"] === "grandchild-1",
+    )!;
+    expect(grandchildSession.parentSpanContext).toBeUndefined();
+    expect(grandchildSession.links).toEqual([
+      expect.objectContaining({
+        attributes: { "eve.link.type": "session.parent" },
+        context: expect.objectContaining({
+          spanId: childSession.spanContext().spanId,
+          traceFlags: childSession.spanContext().traceFlags,
+          traceId: childSession.spanContext().traceId,
+        }),
+      }),
+    ]);
+    expect(grandchildTurn.parentSpanContext?.spanId).toBe(grandchildSession.spanContext().spanId);
+    expect(grandchildSession.spanContext().traceId).not.toBe(childSession.spanContext().traceId);
+    expect(childSession.spanContext().traceId).not.toBe(rootSession.spanContext().traceId);
+    expect(grandchildSession.attributes["agent.root.session.id"]).toBe("session-1");
   });
 
   it("attributes a child turn to the exact call that dispatched it", async () => {
@@ -1717,7 +1813,7 @@ describe("createAgentOtelInstrumentation", () => {
     expect(sessions[0]!.parentSpanContext).toBeUndefined();
   });
 
-  it("rolls a long subagent child out of the window it adopted", async () => {
+  it("rolls a long subagent child out of its linked session trace", async () => {
     const runtime = createRuntime();
     await publishTurnStarted({
       hooks: runtime.hooks,
@@ -1740,14 +1836,27 @@ describe("createAgentOtelInstrumentation", () => {
     }
     await runtime.provider.forceFlush();
 
-    const rolled = byName(runtime.exporter.getFinishedSpans(), "agent.session").find(
+    const childSessions = byName(runtime.exporter.getFinishedSpans(), "agent.session").filter(
       (span) => span.attributes["agent.session.id"] === "child-1",
-    )!;
+    );
+    expect(childSessions.map((span) => span.attributes["agent.session.window"])).toEqual([0, 1]);
+    expect(childSessions[0]!.parentSpanContext).toBeUndefined();
+    expect(childSessions[0]!.links).toEqual([
+      expect.objectContaining({
+        attributes: { "eve.link.type": "session.parent" },
+        context: expect.objectContaining({
+          spanId: parentWindow.spanContext().spanId,
+          traceFlags: parentWindow.spanContext().traceFlags,
+          traceId: parentWindow.spanContext().traceId,
+        }),
+      }),
+    ]);
+    const rolled = childSessions[1]!;
     expect(rolled.attributes["agent.session.window"]).toBe(1);
     expect(rolled.attributes["agent.session.window.previous.trace.id"]).toBe(
-      parentWindow.spanContext().traceId,
+      childSessions[0]!.spanContext().traceId,
     );
-    expect(rolled.spanContext().traceId).not.toBe(parentWindow.spanContext().traceId);
+    expect(rolled.spanContext().traceId).not.toBe(childSessions[0]!.spanContext().traceId);
   });
 
   it("marks a failed action without failing its turn", async () => {

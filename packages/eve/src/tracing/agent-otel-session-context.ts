@@ -38,10 +38,17 @@ export function createAgentOtelSessionContext(
   const openSessionWindow = (window: {
     readonly agentName?: string;
     readonly index: number;
+    readonly parentTraceContext?: InstrumentationTraceContext;
     readonly previousTraceId?: string;
     readonly rootSessionId: string;
     readonly sessionId: string;
   }): SpanContext => {
+    const parent =
+      window.parentTraceContext === undefined
+        ? undefined
+        : adoptedSpanContext(window.parentTraceContext);
+    // A session owns its durable trace; handed context records causality without
+    // merging the session into a request, parent agent, or remote deployment trace.
     const span = input.tracer.startSpan("agent.session", {
       attributes: {
         "agent.framework.name": "eve",
@@ -55,11 +62,15 @@ export function createAgentOtelSessionContext(
           ? {}
           : { "agent.session.window.previous.trace.id": window.previousTraceId }),
       },
+      links:
+        parent === undefined
+          ? undefined
+          : [{ attributes: { "eve.link.type": "session.parent" }, context: parent }],
       root: true,
     });
     span.addEvent(window.index === 0 ? "session.started" : "session.window.opened");
     // The window outlives this worker and has no guaranteed close — an idle
-    // session never ends — so the root is recorded as a zero-duration marker
+    // session never ends — so the window is recorded as a zero-duration marker
     // and later spans parent through its persisted context.
     span.end();
     return span.spanContext();
@@ -73,15 +84,13 @@ export function createAgentOtelSessionContext(
       state = {
         agentName: event.agentName,
         channelKind: event.channelKind,
-        context:
-          event.parentTraceContext === undefined
-            ? openSessionWindow({
-                agentName: event.agentName,
-                index: 0,
-                rootSessionId: event.rootSessionId,
-                sessionId: event.sessionId,
-              })
-            : adoptedSpanContext(event.parentTraceContext),
+        context: openSessionWindow({
+          agentName: event.agentName,
+          index: 0,
+          parentTraceContext: event.parentTraceContext,
+          rootSessionId: event.rootSessionId,
+          sessionId: event.sessionId,
+        }),
         rootSessionId: event.rootSessionId,
         turnsInWindow: 0,
         window: 0,
