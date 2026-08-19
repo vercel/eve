@@ -827,7 +827,7 @@ import { connectLinqCredentials } from "@vercel/connect/eve";
 import { linqChannel } from "eve/channels/linq";
 
 export default linqChannel({
-  ...connectLinqCredentials("linq/my-agent"),
+  credentials: connectLinqCredentials("linq/my-agent"),
 });
 \`\`\``,
     configure: `The guided setup can provision a managed Linq line with Vercel Connect or collect portable credentials. Connect-backed setup creates a native Linq connector and routes verified triggers to \`/eve/v1/linq\`; portable setup registers a signed Linq webhook directly.`,

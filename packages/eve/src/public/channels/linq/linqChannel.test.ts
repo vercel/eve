@@ -58,14 +58,18 @@ describe("linqChannel", () => {
     );
   });
 
-  it("accepts the Connect credential fragment", () => {
-    const credentials = vi.fn(async () => ({ apiKey: "rotating-token" }));
+  it("uses the credential provider's trusted webhook verifier", () => {
     const webhookVerifier = vi.fn();
+    const credentials = Object.assign(
+      vi.fn(async () => ({ apiKey: "rotating-token" })),
+      {
+        webhookVerifier,
+      },
+    );
 
-    const connectCredentials = { credentials, webhookVerifier };
-    linqChannel({ ...connectCredentials });
+    linqChannel({ credentials });
 
-    expect(createLinqAdapter).toHaveBeenCalledWith(connectCredentials);
+    expect(createLinqAdapter).toHaveBeenCalledWith({ credentials, webhookVerifier });
   });
 
   it("drops blank inbound messages", async () => {

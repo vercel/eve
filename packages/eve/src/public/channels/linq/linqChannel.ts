@@ -32,6 +32,11 @@ export type LinqInboundResult = {
 /** Sync or async {@link LinqInboundResult}. */
 export type LinqInboundResultOrPromise = LinqInboundResult | Promise<LinqInboundResult>;
 
+/** Lazy Linq credentials that can also carry a trusted webhook verifier. */
+export type LinqChannelCredentialProvider = LinqCredentialProvider & {
+  readonly webhookVerifier?: LinqWebhookVerifier;
+};
+
 /** Configuration for {@link linqChannel}. */
 export interface LinqChannelConfig {
   /** Direct Linq API key. Prefer `credentials` for managed Connect credentials. */
@@ -39,7 +44,7 @@ export interface LinqChannelConfig {
   /** Optional Linq API base URL, for example a sandbox endpoint. */
   readonly baseURL?: string;
   /** Lazy Linq API-key provider, such as `connectLinqCredentials(...)`. */
-  readonly credentials?: LinqCredentialProvider;
+  readonly credentials?: LinqChannelCredentialProvider;
   /** Per-event overrides for the underlying Chat SDK channel. */
   readonly events?: ChatSdkChannelEvents<{ linq: ReturnType<typeof createLinqAdapter> }>;
   /** Inbound message policy. Defaults to dispatching every message with no user auth. */
@@ -71,7 +76,7 @@ export interface LinqChannel extends ChatSdkChannel {}
  * import { linqChannel } from "eve/channels/linq";
  *
  * export default linqChannel({
- *   ...connectLinqCredentials("linq/my-agent"),
+ *   credentials: connectLinqCredentials("linq/my-agent"),
  * });
  * ```
  */
@@ -82,9 +87,11 @@ export function linqChannel(config: LinqChannelConfig): LinqChannel {
     ...(config.credentials === undefined ? {} : { credentials: config.credentials }),
     ...(config.webhookVerifier !== undefined
       ? { webhookVerifier: config.webhookVerifier }
-      : config.signingSecret === undefined
-        ? { webhookVerifier: vercelOidc() }
-        : { signingSecret: config.signingSecret }),
+      : config.credentials?.webhookVerifier !== undefined
+        ? { webhookVerifier: config.credentials.webhookVerifier }
+        : config.signingSecret === undefined
+          ? { webhookVerifier: vercelOidc() }
+          : { signingSecret: config.signingSecret }),
   });
   const bridge = chatSdkChannel({
     adapters: { linq },

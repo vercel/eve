@@ -12,7 +12,7 @@ import { connectLinqCredentials } from "@vercel/connect/eve";
 import { linqChannel } from "eve/channels/linq";
 
 export default linqChannel({
-  ...connectLinqCredentials("linq/my-agent"),
+  credentials: connectLinqCredentials("linq/my-agent"),
 });
 ```
 
@@ -24,7 +24,7 @@ Customize inbound dispatch with `onMessage`. Return `null` to ignore a message, 
 
 ```ts
 export default linqChannel({
-  ...connectLinqCredentials("linq/my-agent"),
+  credentials: connectLinqCredentials("linq/my-agent"),
   onMessage(_ctx, message) {
     if (message.author.isBot) return null;
     return {

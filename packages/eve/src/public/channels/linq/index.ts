@@ -2,6 +2,7 @@ export {
   linqChannel,
   type LinqChannel,
   type LinqChannelConfig,
+  type LinqChannelCredentialProvider,
   type LinqInboundMessageContext,
   type LinqInboundResult,
   type LinqInboundResultOrPromise,

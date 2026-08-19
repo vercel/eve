@@ -34,7 +34,7 @@ function connectTemplate(uid: string): string {
 import { linqChannel } from "eve/channels/linq";
 
 export default linqChannel({
-  ...connectLinqCredentials(${JSON.stringify(uid)}),
+  credentials: connectLinqCredentials(${JSON.stringify(uid)}),
 });
 `;
 }
