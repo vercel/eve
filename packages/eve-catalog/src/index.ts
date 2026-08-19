@@ -214,11 +214,11 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
-    slug: "chat-sdk-linq",
+    slug: "linq",
     name: "Linq",
     kind: "channel",
-    tagline: "iMessage and SMS conversations, media, and tapbacks through Linq.",
-    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    tagline: "iMessage and SMS conversations through Linq, with guided Connect or portable setup.",
+    surfaces: { scaffoldable: true, registry: true, gallery: true },
   },
   {
     slug: "chat-sdk-kapso",

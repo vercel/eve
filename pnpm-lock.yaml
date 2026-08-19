@@ -289,9 +289,6 @@ importers:
       '@larksuite/vercel-chat-adapter':
         specifier: 0.1.2
         version: 0.1.2(ai@6.0.191(zod@4.4.3))(bufferutil@4.1.0)(chat@4.34.0(ai@6.0.191(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3)
-      '@linqapp/chat-sdk-adapter':
-        specifier: 0.1.0
-        version: 0.1.0(chat@4.34.0(ai@6.0.191(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))
       '@liveblocks/chat-sdk-adapter':
         specifier: 3.23.0
         version: 3.23.0(@types/json-schema@7.0.15)(chat@4.34.0(ai@6.0.191(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))
@@ -3222,14 +3219,6 @@ packages:
 
   '@larksuiteoapi/node-sdk@1.63.1':
     resolution: {integrity: sha512-bVC2QVkITZ1i6kLP7hI7DXtp61ic9shP/F+bp/2qZ0ISSvrcHp2euu1xt6C29jPJVNieRgvdsBPuapOlybviVw==}
-
-  '@linqapp/chat-sdk-adapter@0.1.0':
-    resolution: {integrity: sha512-/4OSAxcJWYqwoqsG73b1ElUhETOOsL/ufXUanGLgg3t2xGkpu412dUWqUboVffFS1zdDqciSnvXSXpIAWnGpiw==}
-    peerDependencies:
-      chat: ^4.28.1
-
-  '@linqapp/sdk@0.22.1':
-    resolution: {integrity: sha512-JCzOKegSIwHTDdizS6dUgHJ+90iVh9TO8+bLMg5+UE2qWl+r848/Wdy0M+2V8dwoVPUbb+vtG4sDN4ultpzqVQ==}
 
   '@liveblocks/chat-sdk-adapter@3.23.0':
     resolution: {integrity: sha512-tQo6AElxPKkI7g5XuiFLHa+EcT48S3TxPXykGUMf4IdIDt7YqVPCcFPDaI9oyN3AMyrZcavoz7+lTZZZznGC4w==}
@@ -17428,13 +17417,6 @@ snapshots:
       - bufferutil
       - debug
       - utf-8-validate
-
-  '@linqapp/chat-sdk-adapter@0.1.0(chat@4.34.0(ai@6.0.191(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))':
-    dependencies:
-      '@linqapp/sdk': 0.22.1
-      chat: 4.34.0(ai@6.0.191(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
-
-  '@linqapp/sdk@0.22.1': {}
 
   '@liveblocks/chat-sdk-adapter@3.23.0(@types/json-schema@7.0.15)(chat@4.34.0(ai@6.0.191(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))':
     dependencies:

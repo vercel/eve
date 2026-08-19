@@ -47,7 +47,7 @@ agent/
     intake.ts
 ```
 
-Install a channel from the registry with `eve add channel/photon-imessage`, `eve add channel/slack`, or `eve add channel/web`. You can also author the file by hand.
+Install a channel from the registry with `eve add channel/linq`, `eve add channel/slack`, or `eve add channel/web`. You can also author the file by hand.
 
 ## The eve HTTP channel (default)
 
@@ -73,6 +73,7 @@ eve's first-class channels use eve-owned runtimes for webhook handling, verifica
 | Local tooling, SDK clients, `curl`          | [eve HTTP channel](./eve) (default)                        |
 | MCP clients delegating durable work         | [MCP](./mcp)                                               |
 | Slack mentions, DMs, buttons                | [Slack](./slack)                                           |
+| iMessage and SMS                            | [Linq](./linq)                                             |
 | iMessage                                    | [Photon](./photon)                                         |
 | Discord slash commands, components          | [Discord](./discord)                                       |
 | Microsoft Teams messages + Adaptive Cards   | [Teams](./teams)                                           |
@@ -94,7 +95,7 @@ Where an eve agent communicates with people, you may be required to disclose tha
 - [eve HTTP channel](./eve): the default session API behind the TUI, SDK clients, and browser UIs
 - [Slack](./slack): the most common platform channel, end to end
 - [MCP](./mcp): expose the agent as a durable invocation service
-- [Photon](./photon), [Discord](./discord), [Teams](./teams), [Telegram](./telegram), [Twilio](./twilio), [GitHub](./github), and [Linear](./linear): the other first-class platform channels
+- [Linq](./linq), [Photon](./photon), [Discord](./discord), [Teams](./teams), [Telegram](./telegram), [Twilio](./twilio), [GitHub](./github), and [Linear](./linear): the other first-class platform channels
 - [Chat SDK adapters](./chat-sdk): reach services eve has no first-class channel for
 - [Custom channels](./custom): build a channel for any surface with `defineChannel`
 - [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications): post to another platform without starting an agent turn
