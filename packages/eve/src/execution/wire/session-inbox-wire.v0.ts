@@ -4,7 +4,7 @@ import { isObject } from "#shared/guards.js";
 
 /**
  * Version 0 is the unversioned era. Its sole shape change is the raw `send`
- * command persisted by eve 0.30.5–0.30.8; legacy `deliver` already has the
+ * command persisted by eve 0.30.5–0.31.0; legacy `deliver` already has the
  * v1 discriminator and needs only the version stamp.
  *
  * This module is removable once runs created by that cohort have aged out

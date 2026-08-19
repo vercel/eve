@@ -103,8 +103,10 @@
  *             directory and let consumers observe a partial package.
  *   rule 40 — Every shipped wire-version module
  *             (`src/execution/wire/*-wire.vN.ts`) must carry a colocated
- *             `*-wire.vN.test.ts`. Version modules are append-only protocol
- *             history; the paired test pins that version's schema/encoder or
+ *             `*-wire.vN.test.ts`. The session-inbox registry must also be
+ *             contiguous, name every module, and identify its highest version
+ *             as current. Version modules are append-only protocol history;
+ *             the paired test pins that version's schema/encoder or
  *             migration/fixtures so a version cannot exist as untested code.
  *
  * Baselines for rules with pre-existing violations live in
@@ -424,6 +426,7 @@ function importSpecifier(node) {
 // ---------- Rule 40: wire versions carry colocated contract tests ----------
 
 const WIRE_FAMILY_DIR = "packages/eve/src/execution/wire";
+const SESSION_INBOX_WIRE_CONTRACT = `${WIRE_FAMILY_DIR}/session-inbox-contract.ts`;
 
 async function checkRule40WireContracts() {
   /** @type {Violation[]} */
@@ -449,6 +452,53 @@ async function checkRule40WireContracts() {
         message: `wire family "${family}" version ${version} has no colocated contract test (${testName}). Pin this version's schema/encoder or migration/fixtures before shipping it.`,
       });
     }
+  }
+
+  const contractSource = await readFile(join(REPO_ROOT, SESSION_INBOX_WIRE_CONTRACT), "utf8");
+  const registryMatch = contractSource.match(
+    /SESSION_INBOX_WIRE_VERSIONS\s*=\s*\[([^\]]*)\]\s*as const/,
+  );
+  const tokens = registryMatch?.[1]
+    .split(",")
+    .map((token) => token.trim())
+    .filter(Boolean);
+  if (tokens === undefined || tokens.length === 0 || tokens.some((token) => !/^\d+$/.test(token))) {
+    violations.push({
+      rule: 40,
+      file: SESSION_INBOX_WIRE_CONTRACT,
+      line: 1,
+      message:
+        "SESSION_INBOX_WIRE_VERSIONS must be an explicit numeric tuple so CI can compare the declared protocol history with shipped version modules.",
+    });
+    return violations;
+  }
+
+  const line = contractSource.slice(0, registryMatch.index).split("\n").length;
+  const versions = tokens.map(Number);
+  const expectedVersions = versions.map((_, index) => index + 1);
+  if (JSON.stringify(versions) !== JSON.stringify(expectedVersions)) {
+    violations.push({
+      rule: 40,
+      file: SESSION_INBOX_WIRE_CONTRACT,
+      line,
+      message: `SESSION_INBOX_WIRE_VERSIONS must be contiguous and ascending from 1; found [${versions.join(", ")}]. Add new versions without renumbering or removing protocol history.`,
+    });
+  }
+
+  const shippedVersions = entries
+    .flatMap((name) => {
+      const match = name.match(/^session-inbox-wire\.v(\d+)\.ts$/);
+      return match === null ? [] : [Number(match[1])];
+    })
+    .sort((left, right) => left - right);
+  const registeredModules = [0, ...versions];
+  if (JSON.stringify(shippedVersions) !== JSON.stringify(registeredModules)) {
+    violations.push({
+      rule: 40,
+      file: SESSION_INBOX_WIRE_CONTRACT,
+      line,
+      message: `session-inbox wire modules [${shippedVersions.join(", ")}] must exactly match legacy v0 plus registered versions [${registeredModules.join(", ")}].`,
+    });
   }
 
   return violations;

@@ -18,7 +18,7 @@ const FROZEN_FIXTURES: ReadonlyArray<{
     decoded: { kind: "deliver", payloads: [{ message: "legacy" }] },
   },
   {
-    name: "raw send command (0.30.5–0.30.8 producers)",
+    name: "raw send command (0.30.5–0.31.0 producers)",
     payload:
       '{"auth":null,"delivery":{"channelKind":"http","channelName":"web","deliveryId":"delivery-0"},"kind":"send","payload":{"message":"mid"},"requestId":"req-0","taskDeliveryId":"task-delivery-0","turnPolicy":"queue"}',
     decoded: {

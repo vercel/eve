@@ -7,10 +7,7 @@ import type {
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
-import {
-  SESSION_INBOX_WIRE_VERSION,
-  SessionInboxWireError,
-} from "#execution/wire/session-inbox-contract.js";
+import { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
 import { inputRequestSchema, inputResponseSchema } from "#runtime/input/types.js";
 import { formatValidationError } from "#runtime/validation.js";
 import { jsonObjectSchema, jsonValueSchema } from "#shared/json-schemas.js";
@@ -204,7 +201,8 @@ const deliveryMetadataSchema = z
     requestTraceContext: traceContextSchema.optional(),
   })
   .strict();
-const version = z.literal(SESSION_INBOX_WIRE_VERSION);
+const VERSION = 1;
+const version = z.literal(VERSION);
 
 /** The complete schema for persisted session-inbox wire version 1. */
 export const sessionInboxWireV1Schema = z.discriminatedUnion("kind", [
@@ -255,19 +253,19 @@ export function encodeSessionCommandV1(
           requestId: command.requestId,
           taskDeliveryId: command.taskDeliveryId,
           turnPolicy: command.turnPolicy,
-          version: SESSION_INBOX_WIRE_VERSION,
+          version: VERSION,
         }
       : command.kind === "deliver"
         ? {
             ...command,
             payload: coalesceDeliverPayloads(command.payloads),
-            version: SESSION_INBOX_WIRE_VERSION,
+            version: VERSION,
           }
-        : { ...command, version: SESSION_INBOX_WIRE_VERSION };
+        : { ...command, version: VERSION };
   const parsed = sessionInboxWireV1Schema.safeParse(wire);
   if (!parsed.success) {
     throw new SessionInboxWireError(
-      `Produced a session inbox payload that does not match wire version ${SESSION_INBOX_WIRE_VERSION}: ${formatValidationError(parsed.error)}`,
+      `Produced a session inbox payload that does not match wire version ${VERSION}: ${formatValidationError(parsed.error)}`,
     );
   }
   return parsed.data;

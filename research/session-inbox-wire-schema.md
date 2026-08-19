@@ -14,7 +14,7 @@ type flows into `resumeHook`. A shared type is not a wire contract: both sides
 recompile together while pinned deployments keep executing the old decode.
 That gap produced two silent-loss incidents from one refactor (#1586 →
 #1751): consumers on eve ≤0.30.4 require the legacy `deliver` envelope,
-while consumers on 0.30.5–0.30.8 require the raw `send` command during an
+while consumers on 0.30.5–0.31.0 require the raw `send` command during an
 active turn.
 
 This plan gives the session inbox a declared, versioned wire schema: one
@@ -136,9 +136,10 @@ consumer ──decode──────────▶ known version → typed p
   `sessionInboxWire.encode`.
 - **Markerless historical classification.** Version 0 had two incompatible
   shapes. A markerless stable session inbox, or a markerless continuation hook
-  whose run owns that stable inbox, identifies eve 0.30.5–0.30.8 and receives
-  raw `send`. A markerless continuation without the stable inbox identifies
-  eve ≤0.30.4 and receives legacy `deliver`. This tests a concrete historical
+  whose run owns that stable inbox, receives raw `send`. That shape is required
+  by eve 0.30.5–0.31.0 and remains accepted by later pre-stamp stable-inbox
+  consumers. A markerless continuation without the stable inbox identifies eve
+  ≤0.30.4 and receives legacy `deliver`. This tests a concrete historical
   capability rather than guessing from deployment or package metadata.
 - **Cost boundary.** Every producer performs one target `getHookByToken`
   before `resumeHook`. Markerless continuation hooks require one additional
@@ -148,9 +149,10 @@ consumer ──decode──────────▶ known version → typed p
 
 ## Compatibility and payoff timeline
 
-The producer now emits the consumer's actual contract: eve ≤0.30.4 receives
-unversioned `deliver`, eve 0.30.5–0.30.8 receives unversioned `send`, and
-stamped current consumers receive v1.
+The producer now emits the consumer's actual contract: markerless legacy
+continuations receive unversioned `deliver`, markerless stable-inbox consumers
+receive unversioned `send` (required by eve 0.30.5–0.31.0), and stamped
+consumers receive their declared version.
 
 | Phase                                               | Emit                                                        | Removable                                                                      |
 | --------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------ |
@@ -180,22 +182,24 @@ mechanical guard in the existing CI lint job (`pnpm guard:invariants`):
 - **Round-trip.** `encode` output is byte-frozen, declares `currentVersion`,
   and decodes under the current schema — producers cannot drift from the
   schema they claim to emit.
-- **Invariant guard (rule 40).** Every append-only
-  `execution/wire/*-wire.vN.ts` module must have a colocated
-  `*-wire.vN.test.ts`: v0 pins legacy fixtures and migration behavior; v1
-  pins the complete schema, encoder, and round-trip. A version cannot ship
-  as untested protocol history.
-- Enforcement is layered by what each CI job can check: rule 40 runs in the
-  lint job and enforces the presence of a contract test for every version
-  module; the semantic contract (shape bytes, fixture decoding, round-trip)
-  runs in the required unit tier, which executes the schemas. Both are
-  required checks; neither can be skipped to merge.
+- **Invariant guard (rule 40).** The explicit session-inbox version registry
+  must be contiguous from v1, its highest entry must equal `currentVersion`,
+  and its entries must exactly match the append-only
+  `execution/wire/session-inbox-wire.vN.ts` modules. Every wire-version module
+  must also have a colocated `*.test.ts`: v0 pins legacy fixtures and migration
+  behavior; v1 pins the complete schema and encoder. A version cannot ship as
+  unregistered or untested protocol history.
+- Enforcement is layered by what each CI job can check. Rule 40 runs in the
+  lint job and compares declared versions with shipped modules and tests.
+  TypeScript requires an encoder for every registered stamped version. The
+  required unit tier then encodes and decodes every registry entry, while each
+  version's frozen contract pins its exact shape and backwards migration.
 - Exact current-version bytes stay in the unit contract, where the encoded
   object can be asserted without decoding workflow-owned serde. The
-  agent-channels cross-version redeploy eval is the end-to-end backstop: it
-  runs the PR merge candidate against both the PR-base consumer (the generic
-  upgrade invariant) and an actual eve@0.30.8 consumer (the historical
-  regression).
+  deterministic registry checks cover future stamped-version changes. The
+  agent-channels cross-version redeploy eval remains the end-to-end backstop
+  for the pre-versioning gap: it runs the current producer against an actual
+  eve@0.30.8 consumer.
 
 ## Alternatives considered
 

@@ -7,8 +7,8 @@ import type {
 } from "#channel/types.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import {
-  SESSION_INBOX_WIRE_VERSION,
   SESSION_INBOX_WIRE_VERSION_METADATA_KEY,
+  isSessionInboxWireVersion,
   SessionInboxWireError,
   type SessionInboxWireTarget,
 } from "#execution/wire/session-inbox-contract.js";
@@ -37,7 +37,7 @@ export async function resolveSessionInboxWireTarget(
   const metadata = isObject(hook.metadata) ? hook.metadata : undefined;
   if (metadata !== undefined && SESSION_INBOX_WIRE_VERSION_METADATA_KEY in metadata) {
     const version = metadata[SESSION_INBOX_WIRE_VERSION_METADATA_KEY];
-    if (version === SESSION_INBOX_WIRE_VERSION) return { version };
+    if (isSessionInboxWireVersion(version)) return { version };
     throw new SessionInboxWireError(
       `Session inbox target declares unsupported wire version ${JSON.stringify(version)}.`,
     );

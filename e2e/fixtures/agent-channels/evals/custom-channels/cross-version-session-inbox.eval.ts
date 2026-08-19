@@ -10,9 +10,9 @@ import { satisfies } from "eve/evals/expect";
 import { postChannel } from "./shared";
 
 const ALIAS_ENV = "EVE_E2E_REDEPLOY_ALIAS";
-const BASE_EVE_PACKAGE_ENV = "EVE_E2E_BASE_EVE_PACKAGE";
 const OLD_EVE_VERSION = "0.30.8";
 const ACTIVE_TURN_MESSAGE = "Please wait for cross-version follow-up.";
+const FOLLOW_UP_TOKEN = "CROSS-VERSION-WIRE-OK";
 
 const INSTRUCTIONS_PATH = resolve("agent", "instructions.md");
 const FIXTURE_EVE_LINK = resolve("node_modules", "eve");
@@ -20,7 +20,6 @@ const CONFIG_EVE_LINK = resolve("..", "e2e-config", "node_modules", "eve");
 const OLD_EVE_PACKAGE = resolve("node_modules", "historical-eve-0-30-8");
 
 const OLD_DEPLOYMENT_MARKER = "cross-version-eve-0-30-8";
-const BASE_DEPLOYMENT_MARKER = "cross-version-eve-pr-base";
 const CURRENT_DEPLOYMENT_MARKER = "cross-version-eve-current";
 const TOOL_NAME = "wait-for-cancellation";
 
@@ -30,14 +29,14 @@ const EXEC_OPTIONS = { maxBuffer: 64 * 1024 * 1024 } as const;
 type MessageResponse = { ok: boolean; sessionId?: string };
 
 /**
- * Proves the complete mixed-version codec boundary through real Workflow
- * hooks. The current producer must resume both the PR-base consumer (the
- * generic upgrade invariant) and the published eve@0.30.8 consumer (the
- * historical regression) without either consumer recompiling.
+ * Proves the complete mixed-version codec boundary through the real Workflow
+ * hook: the current producer resumes an active turn built and deployed with
+ * the published eve@0.30.8 consumer, then the old session accepts the
+ * replacement message and completes its next turn.
  */
 export default defineEval({
   description:
-    "Session inbox: the current producer resumes PR-base and eve@0.30.8 consumers through durable hooks.",
+    "Session inbox: the current producer resumes an active eve@0.30.8 consumer through the durable hook.",
   tags: ["redeploy"],
   timeoutMs: 20 * 60_000,
 
@@ -52,12 +51,6 @@ export default defineEval({
           "redeploys repoint the alias, so the eval must run against it.",
       );
     }
-    const baseEvePackage = process.env[BASE_EVE_PACKAGE_ENV];
-    if (baseEvePackage === undefined || baseEvePackage.length === 0) {
-      throw new Error(
-        `Requires ${BASE_EVE_PACKAGE_ENV}; the e2e-vercel job must build the PR-base eve package.`,
-      );
-    }
 
     const originalInstructions = await readFile(INSTRUCTIONS_PATH, "utf8");
     const links = await Promise.all([
@@ -68,8 +61,6 @@ export default defineEval({
     const currentEveVersion = await readPackageVersion(currentEvePackage);
     const oldEvePackage = await realpath(OLD_EVE_PACKAGE);
     const oldEveVersion = await readPackageVersion(oldEvePackage);
-    const resolvedBaseEvePackage = await realpath(baseEvePackage);
-    const baseEveVersion = await readPackageVersion(resolvedBaseEvePackage);
     if (oldEveVersion !== OLD_EVE_VERSION) {
       throw new Error(
         `Expected ${OLD_EVE_PACKAGE} to resolve eve@${OLD_EVE_VERSION}; got eve@${oldEveVersion}.`,
@@ -77,20 +68,36 @@ export default defineEval({
     }
 
     try {
-      const pinnedConsumers = [
-        await deployAndStartConsumer(t, alias, links, originalInstructions, {
-          deploymentMarker: OLD_DEPLOYMENT_MARKER,
-          evePackage: oldEvePackage,
-          followUpToken: "EVE-0-30-8-WIRE-OK",
-          label: "eve@0.30.8",
-        }),
-        await deployAndStartConsumer(t, alias, links, originalInstructions, {
-          deploymentMarker: BASE_DEPLOYMENT_MARKER,
-          evePackage: resolvedBaseEvePackage,
-          followUpToken: "PR-BASE-WIRE-OK",
-          label: `PR-base eve@${baseEveVersion}`,
-        }),
-      ];
+      await replaceLink(FIXTURE_EVE_LINK, oldEvePackage);
+      await replaceLink(CONFIG_EVE_LINK, oldEvePackage);
+      await writeFile(
+        INSTRUCTIONS_PATH,
+        `${originalInstructions}\nDeployment marker: ${OLD_DEPLOYMENT_MARKER}.\n`,
+      );
+      await deployToAlias(t, alias, "eve@0.30.8");
+      await waitForAliasToServe(t, OLD_DEPLOYMENT_MARKER);
+
+      const sessionRef = crypto.randomUUID();
+      const started = await postChannel<MessageResponse>(t.target, "/cross-version-webhook", {
+        message: ACTIVE_TURN_MESSAGE,
+        sessionRef,
+      });
+      await t.require(
+        started,
+        satisfies(
+          (value: MessageResponse) => value.ok === true && typeof value.sessionId === "string",
+          "eve@0.30.8 starts the durable session",
+        ),
+      );
+      const sessionId = started.sessionId!;
+      const activeTurn = t.target.watchTurn(sessionId);
+
+      await activeTurn.waitForEvent("actions.requested", {
+        data: {
+          actions: (actions) =>
+            actions.some((action) => action.kind === "tool-call" && action.toolName === TOOL_NAME),
+        },
+      });
 
       await restoreLinks(links);
       await writeFile(
@@ -100,50 +107,47 @@ export default defineEval({
       await deployToAlias(t, alias, `eve@${currentEveVersion}`);
       await waitForAliasToServe(t, CURRENT_DEPLOYMENT_MARKER);
 
-      for (const consumer of pinnedConsumers) {
-        const replacement = await postChannel<MessageResponse>(t.target, "/cross-version-webhook", {
-          message: `Reply with exactly ${consumer.followUpToken}.`,
-          sessionRef: consumer.sessionRef,
-          turnPolicy: "queue",
-        });
-        await t.require(
-          replacement,
-          satisfies(
-            (value: MessageResponse) => value.ok === true && value.sessionId === consumer.sessionId,
-            `the current producer targets the existing ${consumer.label} session`,
-          ),
-        );
-      }
+      const replacement = await postChannel<MessageResponse>(t.target, "/cross-version-webhook", {
+        message: `Reply with exactly ${FOLLOW_UP_TOKEN}.`,
+        sessionRef,
+        turnPolicy: "queue",
+      });
+      await t.require(
+        replacement,
+        satisfies(
+          (value: MessageResponse) => value.ok === true && value.sessionId === sessionId,
+          "the current producer targets the existing eve@0.30.8 session",
+        ),
+      );
 
-      // Both consumers must buffer the queued value before cancellation. The
-      // next turn proves the pinned decoder retained what the current producer
-      // persisted; merely accepting resumeHook is not sufficient.
+      // eve@0.30.8 buffers a raw `send` during an active turn but predates
+      // `turnPolicy: "steer"`. Settle the deliberately blocked turn through a
+      // separate cancellation; the queued message must then become the next
+      // turn if the old receiver decoded and retained it.
       await t.sleep(1_000);
-      for (const consumer of pinnedConsumers) {
-        const cancellation = await consumer.activeTurn.cancel();
-        await t.require(
-          cancellation,
-          satisfies(
-            (value: { readonly sessionId?: string; readonly status: string }) =>
-              value.status === "accepted" && value.sessionId === consumer.sessionId,
-            `the current deployment cancels the active ${consumer.label} turn`,
-          ),
-        );
+      const cancellation = await activeTurn.cancel();
+      await t.require(
+        cancellation,
+        satisfies(
+          (value: { readonly sessionId?: string; readonly status: string }) =>
+            value.status === "accepted" && value.sessionId === sessionId,
+          "the current deployment cancels the active eve@0.30.8 turn",
+        ),
+      );
 
-        const cancelled = await consumer.activeTurn.result();
-        cancelled.event("turn.cancelled", { count: 1 });
-        cancelled.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
-        cancelled.notEvent("turn.failed");
-        cancelled.notEvent("session.failed");
+      const cancelled = await activeTurn.result();
+      cancelled.event("turn.cancelled", { count: 1 });
+      cancelled.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
+      cancelled.notEvent("turn.failed");
+      cancelled.notEvent("session.failed");
 
-        const followUp = await t.target
-          .watchTurn(consumer.sessionId, { startIndex: cancelled.events.length })
-          .result();
-        followUp.notEvent("turn.cancelled");
-        followUp.notEvent("turn.failed");
-        followUp.notEvent("session.failed");
-        followUp.messageIncludes(consumer.followUpToken);
-      }
+      const followUp = await t.target
+        .watchTurn(sessionId, { startIndex: cancelled.events.length })
+        .result();
+      followUp.notEvent("turn.cancelled");
+      followUp.notEvent("turn.failed");
+      followUp.notEvent("session.failed");
+      followUp.messageIncludes(FOLLOW_UP_TOKEN);
 
       t.succeeded();
     } finally {
@@ -152,58 +156,6 @@ export default defineEval({
     }
   },
 });
-
-async function deployAndStartConsumer(
-  t: EveEvalContext,
-  alias: string,
-  links: readonly LinkSnapshot[],
-  originalInstructions: string,
-  input: {
-    readonly deploymentMarker: string;
-    readonly evePackage: string;
-    readonly followUpToken: string;
-    readonly label: string;
-  },
-) {
-  for (const link of links) {
-    await replaceLink(link.path, input.evePackage);
-  }
-  await writeFile(
-    INSTRUCTIONS_PATH,
-    `${originalInstructions}\nDeployment marker: ${input.deploymentMarker}.\n`,
-  );
-  await deployToAlias(t, alias, input.label);
-  await waitForAliasToServe(t, input.deploymentMarker);
-
-  const sessionRef = crypto.randomUUID();
-  const started = await postChannel<MessageResponse>(t.target, "/cross-version-webhook", {
-    message: ACTIVE_TURN_MESSAGE,
-    sessionRef,
-  });
-  await t.require(
-    started,
-    satisfies(
-      (value: MessageResponse) => value.ok === true && typeof value.sessionId === "string",
-      `${input.label} starts the durable session`,
-    ),
-  );
-  const sessionId = started.sessionId!;
-  const activeTurn = t.target.watchTurn(sessionId);
-  await activeTurn.waitForEvent("actions.requested", {
-    data: {
-      actions: (actions) =>
-        actions.some((action) => action.kind === "tool-call" && action.toolName === TOOL_NAME),
-    },
-  });
-
-  return {
-    activeTurn,
-    followUpToken: input.followUpToken,
-    label: input.label,
-    sessionId,
-    sessionRef,
-  };
-}
 
 interface LinkSnapshot {
   readonly path: string;

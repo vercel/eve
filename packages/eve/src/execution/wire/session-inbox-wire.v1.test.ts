@@ -2,14 +2,13 @@ import { describe, expect, it } from "vitest";
 import { z } from "#compiled/zod/index.js";
 
 import { sessionInboxWire as sessionInboxWireEncoder } from "#execution/wire/session-inbox-encoder.js";
-import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
+import { SESSION_INBOX_WIRE_VERSIONS } from "#execution/wire/session-inbox-contract.js";
 import {
   sessionInboxWire as sessionInboxWireDecoder,
   SessionInboxWireError,
 } from "#execution/wire/session-inbox-wire.js";
 import { sessionInboxWireV1Schema } from "#execution/wire/session-inbox-wire.v1.js";
 
-const FROZEN_SHAPES = [1] as const;
 const FROZEN_FIXTURES = {
   clear: '{"kind":"clear","version":1}',
   deliver:
@@ -17,9 +16,29 @@ const FROZEN_FIXTURES = {
 } as const;
 
 describe("session inbox wire v1", () => {
-  it("freezes exactly version 1", () => {
-    expect(FROZEN_SHAPES).toEqual([SESSION_INBOX_WIRE_VERSION]);
+  it("accepts only its own version", () => {
+    expect(sessionInboxWireV1Schema.safeParse({ kind: "clear", version: 1 }).success).toBe(true);
+    expect(sessionInboxWireV1Schema.safeParse({ kind: "clear", version: 2 }).success).toBe(false);
   });
+
+  it.each(SESSION_INBOX_WIRE_VERSIONS)(
+    "encodes and decodes declared wire version %i",
+    (version) => {
+      const wire = sessionInboxWireEncoder.encode(
+        { kind: "send", payload: { message: "registry" } },
+        { version },
+      );
+
+      expect(wire).toMatchObject({ version });
+      expect(sessionInboxWireDecoder.decode(wire)).toEqual({
+        auth: undefined,
+        caller: undefined,
+        kind: "deliver",
+        payloads: [{ message: "registry" }],
+        requestId: undefined,
+      });
+    },
+  );
 
   it("pins the complete schema byte for byte", () => {
     expect(

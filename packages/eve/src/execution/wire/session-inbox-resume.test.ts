@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { SESSION_INBOX_WIRE_VERSIONS } from "#execution/wire/session-inbox-contract.js";
 import {
   resolveSessionInboxWireTarget,
   resumeSessionInbox,
@@ -21,12 +22,17 @@ afterEach(() => {
 });
 
 describe("session inbox target resolution", () => {
-  it("uses the wire version advertised by a current hook", async () => {
-    const hook = sessionHook("session-1", "channel-1", { sessionInboxWireVersion: 1 });
+  it.each(SESSION_INBOX_WIRE_VERSIONS)(
+    "uses wire version %i advertised by a stamped hook",
+    async (version) => {
+      const hook = sessionHook("session-1", "channel-1", {
+        sessionInboxWireVersion: version,
+      });
 
-    await expect(resolveSessionInboxWireTarget(hook)).resolves.toEqual({ version: 1 });
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
-  });
+      await expect(resolveSessionInboxWireTarget(hook)).resolves.toEqual({ version });
+      expect(getHookByTokenMock).not.toHaveBeenCalled();
+    },
+  );
 
   it("selects raw send for a markerless stable hook", async () => {
     const token = sessionCommandHookToken("session-1");
@@ -61,9 +67,9 @@ describe("session inbox target resolution", () => {
   it("rejects an advertised unknown version before persistence", async () => {
     await expect(
       resolveSessionInboxWireTarget(
-        sessionHook("session-1", "continuation-1", { sessionInboxWireVersion: 2 }),
+        sessionHook("session-1", "continuation-1", { sessionInboxWireVersion: 99 }),
       ),
-    ).rejects.toThrow(/unsupported wire version 2/);
+    ).rejects.toThrow(/unsupported wire version 99/);
     expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 });
