@@ -30,4 +30,12 @@ describe("extension external dependency plugin", () => {
       ]),
     ).toEqual({ zod: expect.stringMatching(/zod[/\\].*index\.(?:c?js|mjs)$/) });
   });
+
+  it("resolves ESM-only packages without a require export", () => {
+    expect(
+      resolveExtensionExternalDependencyPaths([
+        { externalDependencies: ["emulate"], sourceRoot: process.cwd() },
+      ]),
+    ).toEqual({ emulate: expect.stringMatching(/emulate[/\\]dist[/\\]api\.js$/) });
+  });
 });

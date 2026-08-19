@@ -1,6 +1,6 @@
-import { realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 interface BundlerPluginShape {
   readonly name: string;
@@ -43,7 +43,7 @@ export function resolveExtensionExternalDependencyPaths(
   for (const [dependency, anchors] of collectDependencyAnchors(mounts)) {
     for (const anchor of anchors) {
       try {
-        resolvedPaths[dependency] = createRequire(anchor).resolve(dependency);
+        resolvedPaths[dependency] = resolveDependencyEntry(dependency, anchor);
         break;
       } catch {}
     }
@@ -54,6 +54,61 @@ export function resolveExtensionExternalDependencyPaths(
     }
   }
   return resolvedPaths;
+}
+
+function resolveDependencyEntry(dependency: string, anchor: string): string {
+  const require = createRequire(anchor);
+  try {
+    return require.resolve(dependency);
+  } catch (error) {
+    const packageJsonPath = require.resolve
+      .paths(dependency)
+      ?.map((searchPath) => join(searchPath, dependency, "package.json"))
+      .find(existsSync);
+    if (packageJsonPath === undefined) {
+      throw error;
+    }
+
+    const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
+      exports?: unknown;
+      main?: unknown;
+      module?: unknown;
+    };
+    const entry =
+      resolveImportExport(pkg.exports) ?? stringValue(pkg.module) ?? stringValue(pkg.main);
+    if (entry === undefined) {
+      throw error;
+    }
+    return resolve(dirname(packageJsonPath), entry);
+  }
+}
+
+function resolveImportExport(exports: unknown): string | undefined {
+  if (typeof exports === "string") {
+    return exports;
+  }
+  if (Array.isArray(exports)) {
+    return exports.map(resolveImportExport).find((entry) => entry !== undefined);
+  }
+  if (exports === null || typeof exports !== "object") {
+    return undefined;
+  }
+
+  const conditions = exports as Record<string, unknown>;
+  if ("." in conditions) {
+    return resolveImportExport(conditions["."]);
+  }
+  for (const condition of ["node", "import", "default"]) {
+    const entry = resolveImportExport(conditions[condition]);
+    if (entry !== undefined) {
+      return entry;
+    }
+  }
+  return undefined;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
 }
 
 function collectDependencyAnchors(
