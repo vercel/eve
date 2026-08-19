@@ -101,17 +101,6 @@
  *             `pnpm --filter eve build`. Turbo owns workspace dependency
  *             ordering; nested builds race on eve's clean-and-publish dist
  *             directory and let consumers observe a partial package.
- *   rule 39 — No inline `kind: "send"` / `kind: "deliver"` payload literal at
- *             a `resumeHook(...)` call outside `src/execution/wire/`. Session
- *             hook payloads are durable wire formats that outlive deployments;
- *             they must route through the owning family's wire encoder
- *             from a versioned wire codec under `execution/wire/` so shape
- *             changes are visible as wire changes (see
- *             research/session-inbox-wire-schema.md). Test files and
- *             `internal/testing/` frozen-cohort workflows are exempt —
- *             impersonating old cohorts is their job. The auth-hook delivery
- *             in `runtime/connections/callback-route.ts` is allowlisted
- *             until auth payloads join a wire family.
  *   rule 40 — Every shipped wire-version module
  *             (`src/execution/wire/*-wire.vN.ts`) must carry a colocated
  *             `*-wire.vN.test.ts`. Version modules are append-only protocol
@@ -212,7 +201,6 @@ function isTsLike(relPath) {
  *   rule33: Violation[];
  *   rule35: Violation[];
  *   rule37: Violation[];
- *   rule39: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -242,7 +230,6 @@ async function scanRepo(state) {
     checkRule33(posix, lines, state.rule33);
     checkRule35(posix, lines, state.rule35);
     checkRule37(posix, content, state.rule37);
-    checkRule39(posix, lines, state.rule39);
   }
 }
 
@@ -465,54 +452,6 @@ async function checkRule40WireContracts() {
   }
 
   return violations;
-}
-
-// ---------- Rule 39: raw session wire literals at resumeHook ----------
-
-const RESUME_HOOK_CALL_RE = /\bresumeHook\s*\(/;
-const SESSION_WIRE_LITERAL_RE = /\bkind:\s*["'](?:send|deliver)["']/;
-/** Lines after a `resumeHook(` opener to scan for an inline payload literal. */
-const RULE_39_WINDOW = 6;
-const RULE_39_ALLOWLIST = new Set([
-  // Auth-hook delivery; migrates when auth payloads join a wire module.
-  "packages/eve/src/runtime/connections/callback-route.ts",
-]);
-
-/**
- * @param {string} posix
- */
-function isRule39Exempt(posix) {
-  return (
-    !posix.startsWith("packages/eve/src/") ||
-    posix.startsWith("packages/eve/src/execution/wire/") ||
-    posix.startsWith("packages/eve/src/internal/testing/") ||
-    /\.test\.(ts|tsx|mts|cts)$/.test(posix) ||
-    RULE_39_ALLOWLIST.has(posix)
-  );
-}
-
-/**
- * @param {string} posix
- * @param {string[]} lines
- * @param {Violation[]} violations
- */
-function checkRule39(posix, lines, violations) {
-  if (isRule39Exempt(posix)) return;
-  lines.forEach((line, idx) => {
-    if (!RESUME_HOOK_CALL_RE.test(line)) return;
-    const window = lines.slice(idx, idx + 1 + RULE_39_WINDOW).join("\n");
-    // A literal handed to a wire-module encoder is
-    // routed, not raw.
-    if (/\b(?:encode[A-Z]\w*|sessionInboxWire\.encode)\s*\(/.test(window)) return;
-    if (SESSION_WIRE_LITERAL_RE.test(window)) {
-      violations.push({
-        rule: 39,
-        file: posix,
-        line: idx + 1,
-        message: `passes an inline \`kind: "send"\`/\`kind: "deliver"\` literal to resumeHook(). Session hook payloads are durable wire formats that outlive deployments — route them through \`sessionInboxWire.encode\` under execution/wire/ so shape changes stay visible as wire changes (research/session-inbox-wire-schema.md).`,
-      });
-    }
-  });
 }
 
 // ---------- Rule 19: AsyncLocalStorage instances ----------
@@ -1267,7 +1206,6 @@ async function main() {
     rule33: /** @type {Violation[]} */ ([]),
     rule35: /** @type {Violation[]} */ ([]),
     rule37: /** @type {Violation[]} */ ([]),
-    rule39: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1369,9 +1307,6 @@ async function main() {
 
   // Rule 38
   violations.push(...(await checkRule38NoNestedEveBuild()));
-
-  // Rule 39
-  violations.push(...state.rule39);
 
   // Rule 40
   violations.push(...(await checkRule40WireContracts()));

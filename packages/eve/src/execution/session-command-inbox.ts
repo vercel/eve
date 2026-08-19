@@ -11,7 +11,6 @@ import {
   SESSION_INBOX_WIRE_VERSION,
   SESSION_INBOX_WIRE_VERSION_METADATA_KEY,
 } from "#execution/wire/session-inbox-contract.js";
-import { bundledEveVersion } from "#internal/package-version.js";
 
 /**
  * Payloads accepted by a session driver's stable and channel aliases.
@@ -135,12 +134,11 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
 
   const createState = (token: string): SessionCommandHookState => {
     // Stamp the consumer's wire capability so producers can select an encoder
-    // pre-resume; keep eveVersion alongside it for diagnostics.
-    // Hooks created before this stamp carry no wire marker: markerless means
-    // the consumer predates the capability and accepts a legacy shape.
+    // pre-resume. Hooks created before this stamp carry no wire marker:
+    // markerless means the consumer predates the capability and accepts a
+    // legacy shape.
     const hook = createHook<SessionInboxPayload>({
       metadata: {
-        eveVersion: bundledEveVersion(),
         [SESSION_INBOX_WIRE_VERSION_METADATA_KEY]: SESSION_INBOX_WIRE_VERSION,
       },
       token,

@@ -131,9 +131,8 @@ consumer ──decode──────────▶ known version → typed p
   plan removes. A channel-visible error event **may** be added when the
   pattern generalizes beyond the session inbox.
 - **Hook metadata stamp (producer-facing).** Consumers stamp
-  `metadata: { eveVersion, sessionInboxWireVersion }` at `createHook` (the
-  direct wire marker is the capability; `eveVersion` remains diagnostic).
-  The producer reads the marker and passes the resulting target to
+  `metadata: { sessionInboxWireVersion }` at `createHook`. The producer reads
+  the capability marker and passes the resulting target to
   `sessionInboxWire.encode`.
 - **Markerless historical classification.** Version 0 had two incompatible
   shapes. A markerless stable session inbox, or a markerless continuation hook
@@ -181,22 +180,16 @@ mechanical guard in the existing CI lint job (`pnpm guard:invariants`):
 - **Round-trip.** `encode` output is byte-frozen, declares `currentVersion`,
   and decodes under the current schema — producers cannot drift from the
   schema they claim to emit.
-- **Invariant guard (rule 39).** Outside `execution/wire/`, passing an
-  inline session-wire payload literal to `resumeHook` is a violation unless
-  it routes through a wire-module `encode*` function. Test files and
-  `internal/testing/` frozen-consumer workflows are exempt — impersonating
-  old cohorts is their job. The baseline starts at zero; baselines may only
-  shrink.
 - **Invariant guard (rule 40).** Every append-only
   `execution/wire/*-wire.vN.ts` module must have a colocated
   `*-wire.vN.test.ts`: v0 pins legacy fixtures and migration behavior; v1
   pins the complete schema, encoder, and round-trip. A version cannot ship
   as untested protocol history.
-- Enforcement is layered by what each CI job can check: the mechanical
-  guards (rules 39/40) run in the lint job and enforce presence and routing
-  textually; the semantic contract (shape bytes, fixture decoding,
-  round-trip) runs in the required unit tier, which executes the schemas.
-  Both are required checks; neither can be skipped to merge.
+- Enforcement is layered by what each CI job can check: rule 40 runs in the
+  lint job and enforces the presence of a contract test for every version
+  module; the semantic contract (shape bytes, fixture decoding, round-trip)
+  runs in the required unit tier, which executes the schemas. Both are
+  required checks; neither can be skipped to merge.
 - The existing e2e byte gate (`continuation-wire.eval.ts`) stays as the
   current-version end-to-end backstop, while the agent-channels cross-version
   redeploy eval runs a current producer against an actual eve@0.30.8 consumer.

@@ -85,9 +85,8 @@ describe("session command inbox integration", () => {
 
       for (const token of [stableToken, channelToken]) {
         const hook = (await getHookByToken(token)) as {
-          metadata?: { eveVersion?: unknown; sessionInboxWireVersion?: unknown };
+          metadata?: { sessionInboxWireVersion?: unknown };
         };
-        expect(hook.metadata?.eveVersion, `hook ${token}`).toMatch(/^\d+\.\d+\.\d+/);
         expect(hook.metadata?.sessionInboxWireVersion, `hook ${token}`).toBe(1);
       }
     } finally {

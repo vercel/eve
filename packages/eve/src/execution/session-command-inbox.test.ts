@@ -120,10 +120,7 @@ describe("createSessionCommandInbox", () => {
     );
     expect(createHookMock).toHaveBeenCalledOnce();
     expect(createHookMock).toHaveBeenCalledWith({
-      metadata: {
-        eveVersion: expect.stringMatching(/^\d+\.\d+\.\d+/),
-        sessionInboxWireVersion: 1,
-      },
+      metadata: { sessionInboxWireVersion: 1 },
       token: "stable",
     });
     await inbox.dispose();
