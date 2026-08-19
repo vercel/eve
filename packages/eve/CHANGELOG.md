@@ -1,5 +1,14 @@
 # eve
 
+## 0.39.2
+
+### Patch Changes
+
+- 33db9a4: Improve non-interactive setup recovery: `eve add` now reports terminal outcomes on every path and includes non-secret answer placeholders in blocked continuation commands. `eve link` and `eve deploy` also point non-interactive callers to eve's own project commands.
+- 6e87b13: Allow extension packages to declare runtime dependencies that eve must keep external and preserve with their complete package files. Consumers receive these packaging requirements automatically without editing their agent config.
+- 2c01eab: Rebuild untransformed session-scoped dynamic tool executors and approval policies on durable continuations so dependency-created tools remain available after replay.
+- 5e5d91b: Fix `vercel.json` services detection when a Vercel Root Directory is configured. The framework integrations now read `vercel.json` from the framework app root first, so a `services` declaration next to the app wins over the linked repository root's `vercel.json` — matching where Vercel itself reads the file from.
+
 ## 0.39.1
 
 ### Patch Changes
