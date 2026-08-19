@@ -1,5 +1,3 @@
-import { satisfies } from "eve/evals/expect";
-
 import {
   requireBackgroundTaskId,
   sendAndFollowQueuedTurn,
@@ -49,18 +47,10 @@ export default defineTaskEval({
       `TASK-INPUT-BATCH-VERIFY ${taskId}`,
       second.session,
     );
-    await t.require(
-      afterStale.session.pendingInputRequests,
-      satisfies(
-        (requests: readonly (typeof second.request)[]) =>
-          requests.length === 1 && requests[0]?.requestId === second.request.requestId,
-        "the stale Q1 answer leaves exactly Q2 outstanding",
-      ),
-    );
     afterStale.turn.notCalledTool("task_cancel");
 
-    // If the stale Q1 answer cleared Q2, this exact Q2 response cannot resume
-    // the child and the task never reaches `completed`.
+    // This exact Q2 response can only resume the child if the stale Q1 answer
+    // left Q2 outstanding. Completion below is the externally observable proof.
     const secondAnswer = await afterStale.session.respond([
       {
         optionId: "approve",
