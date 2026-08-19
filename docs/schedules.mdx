@@ -86,12 +86,9 @@ A handler-form session runs on the same durable runtime engine as any other sess
 
 ## Session continuity
 
-Each markdown schedule fire starts a new session, so it does not inherit an
-earlier run's history or [state](./concepts/state). Handler schedules also start
-new sessions unless they send to a channel address that an existing conversation
-owns, such as a Slack thread. Store data that must survive across fires outside
-session state; [dynamic scheduling](./patterns/dynamic-scheduling) shows one
-such pattern.
+Markdown schedules start a new session on every fire. Handler schedules do too,
+unless they send to an existing conversation, such as a Slack thread. Store data
+that must survive across fires outside session state.
 
 ## Trigger a schedule while iterating
 
