@@ -325,7 +325,17 @@ export async function ensureEveVercelServicesConfig(input: {
 }): Promise<EnsureEveVercelServicesConfigResult> {
   const vercelDirectory = await findClosestLinkedVercelDirectory(input.hostRoot);
   const projectRoot = vercelDirectory === undefined ? input.hostRoot : dirname(vercelDirectory);
-  const rootVercelConfig = await readVercelJsonConfig(join(projectRoot, VERCEL_JSON_FILE_NAME));
+  // With a Vercel Root Directory, vercel.json lives in the root directory
+  // (the host root) while the .vercel link lives at the repository root, so
+  // the host root declaration wins over the linked project root's.
+  const hostRootVercelConfig = await readVercelJsonConfig(
+    join(input.hostRoot, VERCEL_JSON_FILE_NAME),
+  );
+  const rootVercelConfig =
+    projectRoot === input.hostRoot ||
+    Object.keys(createServiceConfigRecord(hostRootVercelConfig.services)).length > 0
+      ? hostRootVercelConfig
+      : await readVercelJsonConfig(join(projectRoot, VERCEL_JSON_FILE_NAME));
   const rootServices = createServiceConfigRecord(rootVercelConfig.services);
 
   if (Object.keys(rootServices).length > 0) {
