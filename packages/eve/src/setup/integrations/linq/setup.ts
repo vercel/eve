@@ -24,10 +24,8 @@ interface LinqSetupPlan {
 const portableTemplate = `import { linqChannel } from "eve/channels/linq";
 
 export default linqChannel({
-  credentials: {
-    apiKey: process.env.LINQ_API_KEY!,
-    signingSecret: process.env.LINQ_WEBHOOK_SECRET!,
-  },
+  apiKey: process.env.LINQ_API_KEY!,
+  signingSecret: process.env.LINQ_WEBHOOK_SECRET!,
 });
 `;
 
@@ -36,7 +34,7 @@ function connectTemplate(uid: string): string {
 import { linqChannel } from "eve/channels/linq";
 
 export default linqChannel({
-  credentials: connectLinqCredentials(${JSON.stringify(uid)}),
+  ...connectLinqCredentials(${JSON.stringify(uid)}),
 });
 `;
 }

@@ -37,7 +37,7 @@ describe("linqChannel", () => {
   });
 
   it("dispatches direct messages to eve", async () => {
-    linqChannel({ credentials: { apiKey: "linq-api-key" } });
+    linqChannel({ apiKey: "linq-api-key", signingSecret: "linq-signing-secret" });
     const handler = directMessage.mock.calls[0]?.[0];
     if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
     const thread = { id: "thread-id" };
@@ -58,17 +58,18 @@ describe("linqChannel", () => {
     );
   });
 
-  it("passes nested credentials to the Linq adapter", () => {
+  it("accepts the Connect credential fragment", () => {
     const credentials = vi.fn(async () => ({ apiKey: "rotating-token" }));
     const webhookVerifier = vi.fn();
 
-    linqChannel({ credentials: { credentials, webhookVerifier } });
+    const connectCredentials = { credentials, webhookVerifier };
+    linqChannel({ ...connectCredentials });
 
-    expect(createLinqAdapter).toHaveBeenCalledWith({ credentials, webhookVerifier });
+    expect(createLinqAdapter).toHaveBeenCalledWith(connectCredentials);
   });
 
   it("drops blank inbound messages", async () => {
-    linqChannel({ credentials: { apiKey: "linq-api-key" } });
+    linqChannel({ apiKey: "linq-api-key", signingSecret: "linq-signing-secret" });
     const handler = directMessage.mock.calls[0]?.[0];
     if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
     const thread = { id: "thread-id" };
