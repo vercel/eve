@@ -1,5 +1,8 @@
 import type { DispatchOutcome, RuntimeSession } from "#execution/agent-handle-dispatch.js";
 import { createRemoteAgentStartFailureResult } from "#execution/dispatch-action-failures.js";
+import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
+import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { mintStartOperation } from "#execution/dispatch-start-operation.js";
 import {
   resolveRemoteAgentForAction,
@@ -17,6 +20,31 @@ import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 
 const log = createLogger("execution.subagent-start-remote");
 
+export function createRootProgressCallback(
+  session: RuntimeSession,
+  callbackBaseUrl: string,
+): Parameters<typeof startRemoteAgentSession>[0]["progressCallback"] {
+  if (session.rootSessionId !== undefined) return undefined;
+  const token = sessionCommandHookToken(session.sessionId);
+  return {
+    token,
+    url: createWorkflowCallbackUrl(callbackBaseUrl, createEveCallbackRoutePath(token)),
+    version: 1,
+  };
+}
+
+export function resolveRemoteProgressCallback(input: {
+  readonly callbackBaseUrl: string;
+  readonly enabled: boolean;
+  readonly inherited?: Parameters<typeof startRemoteAgentSession>[0]["progressCallback"];
+  readonly session: RuntimeSession;
+}): Parameters<typeof startRemoteAgentSession>[0]["progressCallback"] {
+  if (input.inherited !== undefined) return input.inherited;
+  return input.enabled
+    ? createRootProgressCallback(input.session, input.callbackBaseUrl)
+    : undefined;
+}
+
 /** Starts one remote subagent after dispatch planning has selected its target. */
 export async function startRemoteSubagent(input: {
   readonly action: RuntimeRemoteAgentCallActionRequest;
@@ -24,6 +52,7 @@ export async function startRemoteSubagent(input: {
   readonly batchEvent: { readonly sequence: number; readonly turnId: string };
   readonly bundle: CompiledBundle;
   readonly callbackBaseUrl: string | undefined;
+  readonly capabilities?: import("#channel/types.js").SessionCapabilities;
   readonly currentSession: RuntimeSession;
   readonly dynamicRemoteAgent?: NonNullable<
     Parameters<typeof resolveRemoteAgentForAction>[0]["dynamicRemoteAgent"]
@@ -32,6 +61,7 @@ export async function startRemoteSubagent(input: {
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof startRemoteAgentSession>[0]["parentTraceContext"];
   readonly persistentSessions: boolean;
+  readonly progressCallback?: Parameters<typeof startRemoteAgentSession>[0]["progressCallback"];
   readonly session: RuntimeSession;
   readonly taskOwned: boolean;
 }): Promise<DispatchOutcome> {
@@ -88,6 +118,12 @@ export async function startRemoteSubagent(input: {
       operationId: operation.id,
       parentTraceContext: input.parentTraceContext,
       persistentSessions: input.persistentSessions,
+      progressCallback: resolveRemoteProgressCallback({
+        callbackBaseUrl,
+        enabled: input.capabilities?.progress === true,
+        inherited: input.progressCallback,
+        session: input.session,
+      }),
       remote: resolvedRemote,
       session: input.session,
     });

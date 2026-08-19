@@ -18,6 +18,7 @@ import type {
   TaskInboundUpdate,
 } from "#tasks/types.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-id.js";
+import { parseProgressCommandV1, type ProgressCommandV1 } from "#execution/session-progress.js";
 
 export const HTTP_SESSION_CALLBACK_CHANNEL_NAME_PREFIX = "eve/v1/callback";
 
@@ -208,6 +209,17 @@ export async function handleSessionCallbackRequest(
     return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
   }
 
+  const progress = projectProgressCallback(body);
+  if (progress instanceof Response) return progress;
+  if (progress !== undefined) {
+    try {
+      await resumeHook(token, progress.command);
+    } catch {
+      return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
+    }
+    return Response.json({ ok: true }, { status: 202 });
+  }
+
   const taskEvent = projectTaskEvent(body, token);
   if (taskEvent instanceof Response) return taskEvent;
   if (taskEvent !== undefined) {
@@ -256,6 +268,21 @@ export async function handleSessionCallbackRequest(
   }
 
   return Response.json({ ok: true }, { status: 202 });
+}
+
+function projectProgressCallback(
+  value: unknown,
+): { readonly command: ProgressCommandV1 } | Response | undefined {
+  if (callbackKind(value) !== "session.progress") return undefined;
+  if (value === null || typeof value !== "object") return undefined;
+  const command = parseProgressCommandV1(Reflect.get(value, "command"));
+  if (Reflect.get(value, "version") !== 1 || command === undefined) {
+    return Response.json(
+      { error: "Invalid progress callback version or command.", ok: false },
+      { status: 400 },
+    );
+  }
+  return { command };
 }
 
 function callbackKind(value: unknown): unknown {

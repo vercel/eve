@@ -17,6 +17,7 @@ import {
   AuthKey,
   CapabilitiesKey,
   ChannelInstrumentationKey,
+  ProgressCallbackKey,
   InitiatorAuthKey,
   SandboxKey,
 } from "#context/keys.js";
@@ -154,6 +155,7 @@ export interface PreparedRuntimeActionDispatch {
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
+  readonly progressCallback?: import("#channel/types.js").ProgressCallbackV1;
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly plan: readonly DispatchPlanEntry[];
@@ -232,6 +234,7 @@ export async function prepareRuntimeActionDispatch(input: {
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     parentTraceContext: readSessionTraceContext(input.serializedContext, session.sessionId),
     plan,
+    progressCallback: ctx.get(ProgressCallbackKey),
     sandboxSessionId,
     serializedContext: input.serializedContext,
     session,
@@ -495,6 +498,7 @@ export async function startSubagent(input: {
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly persistentSessions: boolean;
+  readonly progressCallback?: import("#channel/types.js").ProgressCallbackV1;
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly session: RuntimeSession;
@@ -525,6 +529,7 @@ export async function startSubagent(input: {
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext,
         persistentSessions: input.persistentSessions,
+        progressCallback: input.progressCallback,
         sandboxSessionId: input.sandboxSessionId,
         session: input.session,
         source: input.target.source,
@@ -537,12 +542,14 @@ export async function startSubagent(input: {
         batchEvent: input.batchEvent,
         bundle: input.bundle,
         callbackBaseUrl: input.callbackBaseUrl,
+        capabilities: input.capabilities,
         currentSession: input.currentSession,
         dynamicRemoteAgent: input.target.dynamicRemoteAgent,
         initiatorAuth: input.initiatorAuth,
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext,
         persistentSessions: input.persistentSessions,
+        progressCallback: input.progressCallback,
         session: input.session,
         taskOwned: input.taskOwned,
       });
