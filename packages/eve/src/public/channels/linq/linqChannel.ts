@@ -32,14 +32,24 @@ export type LinqInboundResult = {
 /** Sync or async {@link LinqInboundResult}. */
 export type LinqInboundResultOrPromise = LinqInboundResult | Promise<LinqInboundResult>;
 
-/** Configuration for {@link linqChannel}. */
-export interface LinqChannelConfig {
+/** Credentials used by {@link linqChannel} for outbound API calls and inbound webhooks. */
+export interface LinqChannelCredentials {
   /** Direct Linq API key. Prefer `credentials` for managed Connect credentials. */
   readonly apiKey?: string;
-  /** Optional Linq API base URL, for example a sandbox endpoint. */
-  readonly baseURL?: string;
   /** Lazy Linq API-key provider, such as `connectLinqCredentials(...)`. */
   readonly credentials?: LinqCredentialProvider;
+  /** Linq webhook signing secret for direct provider delivery. */
+  readonly signingSecret?: string;
+  /** Trusted webhook verifier. Takes precedence over `signingSecret`. */
+  readonly webhookVerifier?: LinqWebhookVerifier;
+}
+
+/** Configuration for {@link linqChannel}. */
+export interface LinqChannelConfig {
+  /** Optional Linq API base URL, for example a sandbox endpoint. */
+  readonly baseURL?: string;
+  /** Outbound Linq credentials and inbound webhook verification. */
+  readonly credentials?: LinqChannelCredentials;
   /** Per-event overrides for the underlying Chat SDK channel. */
   readonly events?: ChatSdkChannelEvents<{ linq: ReturnType<typeof createLinqAdapter> }>;
   /** Inbound message policy. Defaults to dispatching every message with no user auth. */
@@ -51,10 +61,6 @@ export interface LinqChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
-  /** Linq webhook signing secret for direct provider delivery. */
-  readonly signingSecret?: string;
-  /** Trusted webhook verifier. Takes precedence over `signingSecret`. */
-  readonly webhookVerifier?: LinqWebhookVerifier;
   /** Display name used by the Chat SDK runtime. Defaults to `"eve"`. */
   readonly userName?: string;
 }
@@ -76,14 +82,15 @@ export interface LinqChannel extends ChatSdkChannel {}
  * ```
  */
 export function linqChannel(config: LinqChannelConfig): LinqChannel {
+  const credentials = config.credentials;
   const linq = createLinqAdapter({
-    ...(config.apiKey ? { apiKey: config.apiKey } : {}),
+    ...(credentials?.apiKey ? { apiKey: credentials.apiKey } : {}),
     ...(config.baseURL ? { baseURL: config.baseURL } : {}),
-    ...(config.credentials ? { credentials: config.credentials } : {}),
-    ...(config.webhookVerifier
-      ? { webhookVerifier: config.webhookVerifier }
-      : config.signingSecret
-        ? { signingSecret: config.signingSecret }
+    ...(credentials?.credentials ? { credentials: credentials.credentials } : {}),
+    ...(credentials?.webhookVerifier
+      ? { webhookVerifier: credentials.webhookVerifier }
+      : credentials?.signingSecret
+        ? { signingSecret: credentials.signingSecret }
         : { webhookVerifier: vercelOidc() }),
   });
   const bridge = chatSdkChannel({

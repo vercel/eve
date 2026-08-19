@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { directMessage, markRead, newMessage, send } = vi.hoisted(() => ({
+const { createLinqAdapter, directMessage, markRead, newMessage, send } = vi.hoisted(() => ({
+  createLinqAdapter: vi.fn(() => ({ name: "linq" })),
   directMessage: vi.fn(),
   markRead: vi.fn(),
   newMessage: vi.fn(),
@@ -23,7 +24,7 @@ vi.mock("#compiled/@chat-adapter/state-memory/index.js", () => ({
   createMemoryState: vi.fn(),
 }));
 vi.mock("#compiled/@linqapp/chat-sdk-adapter/index.js", () => ({
-  createLinqAdapter: vi.fn(() => ({ name: "linq" })),
+  createLinqAdapter,
 }));
 vi.mock("#public/channels/auth.js", () => ({ vercelOidc: vi.fn() }));
 
@@ -36,7 +37,7 @@ describe("linqChannel", () => {
   });
 
   it("dispatches direct messages to eve", async () => {
-    linqChannel({ apiKey: "linq-api-key" });
+    linqChannel({ credentials: { apiKey: "linq-api-key" } });
     const handler = directMessage.mock.calls[0]?.[0];
     if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
     const thread = { id: "thread-id" };
@@ -57,8 +58,17 @@ describe("linqChannel", () => {
     );
   });
 
+  it("passes nested credentials to the Linq adapter", () => {
+    const credentials = vi.fn(async () => ({ apiKey: "rotating-token" }));
+    const webhookVerifier = vi.fn();
+
+    linqChannel({ credentials: { credentials, webhookVerifier } });
+
+    expect(createLinqAdapter).toHaveBeenCalledWith({ credentials, webhookVerifier });
+  });
+
   it("drops blank inbound messages", async () => {
-    linqChannel({ apiKey: "linq-api-key" });
+    linqChannel({ credentials: { apiKey: "linq-api-key" } });
     const handler = directMessage.mock.calls[0]?.[0];
     if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
     const thread = { id: "thread-id" };
