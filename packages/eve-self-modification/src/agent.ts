@@ -1,25 +1,29 @@
-import { defineAgent, defineDynamic, type AgentStaticModelDefinition } from "eve";
+import {
+  defineAgent,
+  defineDynamic,
+  type AgentStaticModelDefinition,
+  type DynamicSentinel,
+  type DynamicSubagentDefinition,
+} from "eve";
 
-/** Default model used by the self-modification subagent. */
-export const DEFAULT_SELF_MODIFICATION_MODEL = "anthropic/claude-sonnet-5";
+/** Fallback model used by the self-modification subagent when no model is configured and the parent agent model cannot be resolved. */
+export const FALLBACK_SELF_MODIFICATION_MODEL = "anthropic/claude-sonnet-5";
 
 /** Configuration for the development-only self-modification subagent. */
 export interface SelfModificationAgentOptions {
   /**
-   * Model used by the self-modification subagent.
-   *
-   * @default "anthropic/claude-sonnet-5"
+   * Model used by the self-modification subagent. When unspecified, the parent agent's model is used. If the parent agent's model is unresolved, falls back to "anthropic/claude-sonnet-5".
    */
   readonly model?: AgentStaticModelDefinition;
 }
 
 /** Defines the development-only self-modification dynamic subagent. */
-export function defineSelfModificationAgent(options: SelfModificationAgentOptions = {}) {
-  const model = options.model ?? DEFAULT_SELF_MODIFICATION_MODEL;
-
+export function defineSelfModificationAgent(
+  options: SelfModificationAgentOptions = {},
+): DynamicSentinel<DynamicSubagentDefinition | null> {
   return defineDynamic({
     events: {
-      "session.started": () =>
+      "session.started": (_event, context) =>
         process.env.EVE_DEV === "1"
           ? defineAgent({
               description:
@@ -31,7 +35,7 @@ export function defineSelfModificationAgent(options: SelfModificationAgentOption
                 "Resolve short follow-ups such as “yes” or “do it” against the preceding conversation. " +
                 "Source edits do not affect the caller’s current turn. After this subagent reports changes, do not invoke edited tools or attempt runtime verification until a new user turn. " +
                 "If whether the requested change should persist is genuinely ambiguous, ask one concise clarifying question.",
-              model,
+              model: options.model ?? context.model?.id ?? FALLBACK_SELF_MODIFICATION_MODEL,
             })
           : null,
     },
