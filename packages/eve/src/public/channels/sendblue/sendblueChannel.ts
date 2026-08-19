@@ -11,10 +11,13 @@ import { createSendblueAdapter } from "#compiled/chat-adapter-sendblue/index.js"
 import type { Message, Thread } from "#compiled/chat/index.js";
 import { sendblueInboundContent } from "#public/channels/sendblue/inboundContent.js";
 
-type SendblueCredentialsProvider = () =>
+type SendblueCredentialsProvider = (() =>
   | { apiKey: string; apiSecret: string }
   | { accessToken: string }
-  | Promise<{ apiKey: string; apiSecret: string } | { accessToken: string }>;
+  | Promise<{ apiKey: string; apiSecret: string } | { accessToken: string }>) & {
+  fromNumber?: () => Promise<string>;
+  webhookVerifier?: SendblueWebhookVerifier;
+};
 type SendblueWebhookVerifier = (request: Request, rawBody: string) => unknown | Promise<unknown>;
 type SendblueAdapter = { markRead(threadId: string): Promise<void> };
 type SendblueFromNumber = string | (() => Promise<string>);
@@ -47,7 +50,7 @@ export interface SendblueChannelConfig {
   /** Lazy Sendblue credentials, such as `connectSendblueCredentials(...)`. */
   readonly credentials: SendblueCredentialsProvider;
   /** Sendblue line used for outbound messages and accepted inbound webhooks. */
-  readonly fromNumber: SendblueFromNumber;
+  readonly fromNumber?: SendblueFromNumber;
   /** Per-event overrides for the underlying Chat SDK channel. */
   readonly events?: ChatSdkChannelEvents<{ sendblue: SendblueAdapter }>;
   /** Inbound message policy. Defaults to dispatching every Sendblue message with no user auth. */
@@ -73,17 +76,22 @@ export interface SendblueChannel extends ChatSdkChannel {}
  *
  * @example
  * ```ts
- * import { connectSendblueChannel } from "@vercel/connect/eve";
+ * import { connectSendblueCredentials } from "@vercel/connect/eve";
  * import { sendblueChannel } from "eve/channels/sendblue";
  *
  * export default sendblueChannel({
- *   ...connectSendblueChannel("sendblue/my-agent"),
+ *   credentials: connectSendblueCredentials("sendblue/my-agent"),
  * });
  * ```
  */
 export function sendblueChannel(config: SendblueChannelConfig): SendblueChannel {
   const webhookSecret = config.webhookSecret ?? process.env.SENDBLUE_WEBHOOK_SECRET;
-  const fromNumber = config.fromNumber;
+  const fromNumber = config.fromNumber ?? config.credentials.fromNumber;
+  if (fromNumber === undefined) {
+    throw new Error(
+      "Sendblue fromNumber is required. Pass it in config or return it from credentials.",
+    );
+  }
   const sendblue = createAdapter({
     allowedFromNumbers:
       typeof fromNumber === "string" ? [fromNumber] : async () => [await fromNumber()],
@@ -93,7 +101,7 @@ export function sendblueChannel(config: SendblueChannelConfig): SendblueChannel 
       ? { webhookVerifier: config.webhookVerifier }
       : webhookSecret
         ? { webhookSecret }
-        : { webhookVerifier: vercelOidc() }),
+        : { webhookVerifier: config.credentials.webhookVerifier ?? vercelOidc() }),
   });
   const bridge = chatSdkChannel({
     adapters: { sendblue },

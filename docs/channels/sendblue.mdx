@@ -13,19 +13,19 @@ verified trigger at `/eve/v1/sendblue`, and issues short-lived credentials to
 the deployed agent:
 
 ```ts title="agent/channels/sendblue.ts"
-import { connectSendblueChannel } from "@vercel/connect/eve";
+import { connectSendblueCredentials } from "@vercel/connect/eve";
 import { sendblueChannel } from "eve/channels/sendblue";
 
 export default sendblueChannel({
-  ...connectSendblueChannel("sendblue/my-agent"),
+  credentials: connectSendblueCredentials("sendblue/my-agent"),
 });
 ```
 
-The channel resolves a fresh Connect bearer token for each Sendblue API
-operation. The provisioned `fromNumber` limits inbound events to that Sendblue
-line, so unrelated account lines do not reach the agent. When no direct
-webhook secret is configured, the channel verifies Connect-forwarded webhooks
-with Vercel OIDC.
+The channel resolves a fresh Connect bearer token and its sole provisioned
+Sendblue line. That line limits inbound events, so unrelated account lines do
+not reach the agent. For a connector with multiple lines, pass `fromNumber` to
+`connectSendblueCredentials(...)` to select one. When no direct webhook secret
+is configured, the channel verifies Connect-forwarded webhooks with Vercel OIDC.
 
 ## Other hosts
 
