@@ -66,6 +66,8 @@ export interface PendingRuntimeActionBatch {
  * Outcome of resolving a pending runtime-action batch.
  */
 interface ResolvePendingRuntimeActionsResult {
+  /** True when this model step produced task receipts and no synchronous tool outcome. */
+  readonly backgroundTaskAdmissionOnly: boolean;
   readonly messages: ModelMessage[];
   readonly outcome: "continue" | "resolved" | "unresolved";
   readonly session: HarnessSession;
@@ -192,6 +194,7 @@ export async function resolvePendingRuntimeActions(input: {
 
   if (batch === undefined) {
     return {
+      backgroundTaskAdmissionOnly: false,
       messages: [...input.session.history],
       outcome: "continue",
       session: input.session,
@@ -205,6 +208,7 @@ export async function resolvePendingRuntimeActions(input: {
 
   if (readyResults === undefined) {
     return {
+      backgroundTaskAdmissionOnly: false,
       messages: [...input.session.history],
       outcome: "unresolved",
       session: input.session,
@@ -343,10 +347,27 @@ export async function resolvePendingRuntimeActions(input: {
     });
   }
   return {
+    backgroundTaskAdmissionOnly:
+      readyResults.length > 0 &&
+      readyResults.every(
+        (result) =>
+          result.kind === "subagent-result" && readBackgroundTaskReceipt(result) !== undefined,
+      ) &&
+      !containsToolResult(batch.responseMessages),
     messages,
     outcome: "resolved",
     session: nextSession,
   };
+}
+
+function containsToolResult(messages: readonly ModelMessage[]): boolean {
+  // The model step may already contain local or provider-executed sibling
+  // results that are not part of the runtime-action batch. Those results need
+  // another model call even when every deferred subagent was admitted.
+  return messages.some(
+    (message) =>
+      Array.isArray(message.content) && message.content.some((part) => part.type === "tool-result"),
+  );
 }
 
 function readBackgroundTaskReceipt(

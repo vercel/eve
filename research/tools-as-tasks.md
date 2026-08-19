@@ -9,11 +9,12 @@ last_updated: "2026-08-20"
 ## Summary
 
 Under an opt-in `experimental.tasks` mode, eve should represent long-running work as durable,
-addressable tasks. This plan applies that model only to local and remote subagents. A subagent call
-returns a task receipt after dispatch instead of keeping the parent turn blocked until the child
-finishes. The parent receives result-bearing lifecycle notifications and can cancel the task with
-a framework-owned tool. The child can intentionally report progress to its parent with one
-framework-owned tool.
+addressable tasks. This plan applies that model only to local and remote subagents. A receipt-only
+subagent step records its task receipts after dispatch and parks the parent turn instead of keeping
+it blocked until the children finish. A mixed step continues so the model can handle synchronous
+results or dispatch failures. The parent receives result-bearing lifecycle notifications and can
+cancel the task with a framework-owned tool. The child can intentionally report progress to its
+parent with one framework-owned tool.
 
 Without the flag, current subagent behavior must remain unchanged. The implementation uses a
 generic background `defineTool` execution contract so the harness does not classify subagents.
@@ -53,8 +54,9 @@ cancel paths.
 
 ## Goals
 
-- Let a parent continue its turn while delegated work runs.
-- Wake the parent through lifecycle notifications instead of model-paced task checks.
+- Yield the parent turn after delegated work starts while the task proceeds independently.
+- Wake the parent through result-bearing lifecycle notifications instead of model-paced task
+  checks.
 - Let a child intentionally report progress to its parent instead of leaving progress to
   channel-layer guesswork.
 - Carry progress, input requests, authorization events, results, failures, and cancellation over
@@ -264,7 +266,9 @@ the AI SDK executes subagent definitions through the generic background-tool pat
 1. The harness creates a durable `working` task for the subagent call.
 2. It dispatches the child with the task binding.
 3. The child acknowledges its private address, which is persisted on the agent record immediately.
-4. The originating call receives its receipt and the turn continues.
+4. Each originating call receives its receipt in durable history. The parent parks when the step
+   contains only admitted task receipts; synchronous sibling results or dispatch failures continue
+   the model loop.
 
 Everything after acknowledgement — progress, input requests, authorization, terminal outcome —
 arrives over the task wire instead of resolving the dispatch. Task creation, parent indexing, the
@@ -340,8 +344,8 @@ sequenceDiagram
     H->>T: create working task
     H->>C: dispatch with TaskBinding
     C-->>H: acknowledge private child address
-    H-->>M: task receipt
-    M->>H: continue turn
+    H->>H: persist task receipt
+    H->>H: park parent turn
 
     C->>T: task.update or authorization
     T->>H: full task snapshot
@@ -409,8 +413,9 @@ than MCP compatibility.
 
 - With `experimental.tasks` absent or false, existing tool results, events, cancellation, and
   subagent blocking behavior do not change.
-- With it enabled, a slow subagent returns a task receipt and the parent can take another model
-  step before the child completes.
+- With it enabled, a receipt-only slow-subagent step records its task receipts and the parent parks
+  before the children complete. A later session delivery starts the next parent model step. Mixed
+  steps continue immediately so the model can handle synchronous results and dispatch failures.
 - With it enabled, the workflow tool is not advertised to the root session until graduation adds
   background-tool execution to the workflow host.
 - The original tool call has exactly one result in durable history. Later task output cannot be

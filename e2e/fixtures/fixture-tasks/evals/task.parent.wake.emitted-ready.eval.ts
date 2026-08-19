@@ -19,12 +19,11 @@ export default defineTaskEval({
       "task.input.answer.accepted-complete",
       "task.lifecycle.complete.accepted-nonterminal",
     ],
-    dimensions: { transport: "local", parentPhase: "active" },
+    dimensions: { transport: "local", parentPhase: "parked" },
   },
   async test(t) {
     const started = await t.send("TASK-PARENT-WAKE-UPDATES");
     started.expectOk();
-    started.messageIncludes("TASK-FANOUT-STARTED");
     started.calledSubagent("fanout-worker", { count: FANOUT_SIZE });
 
     const taskIds = backgroundTaskIds(started);

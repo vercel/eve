@@ -834,6 +834,21 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     session = resolvedRuntimeActions.session;
 
+    if (config.mode === "conversation" && resolvedRuntimeActions.backgroundTaskAdmissionOnly) {
+      // A receipt-only task admission yields the conversation turn. Persist
+      // the receipts for provider-valid history, but do not spend another model
+      // call presenting framework-owned admission state back to its creator.
+      let parkedSession = {
+        ...session,
+        history: [...resolvedRuntimeActions.messages],
+      };
+      if (emit) {
+        emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
+        parkedSession = setHarnessEmissionState(parkedSession, emissionState);
+      }
+      return { next: null, session: parkedSession };
+    }
+
     // Stale-response handling is two passes: drop what must never reach the
     // model (session-limit continuation answers), then convert what should
     // reach it as plain text.

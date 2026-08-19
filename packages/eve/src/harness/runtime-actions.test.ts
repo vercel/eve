@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   createRuntimeActionRequestFromToolCall,
   getPendingRuntimeActionBatch,
+  type PendingRuntimeActionBatch,
   resolvePendingRuntimeActions,
   resolveToolCallInputObject,
   setPendingRuntimeActionBatch,
@@ -23,9 +24,11 @@ import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-
 import { getSessionTokenUsage, setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { RuntimeActionResult } from "#runtime/actions/types.js";
 
 const CHILD_SESSION_ID = "local-child-123456789012";
 const CHILD_CONTINUATION_TOKEN = "subagent:private-token";
+const TASK_ID = "task_0123456789abcdef";
 const ZERO_USAGE = {
   cacheReadTokens: 0,
   cacheWriteTokens: 0,
@@ -37,6 +40,29 @@ const OPERATION_ID = deriveAgentOperationId({
   parentSessionId: "test-session",
   parentTurnId: "turn_0",
 });
+
+function createBackgroundTaskReceipt(): Extract<
+  RuntimeActionResult,
+  { kind: "subagent-result"; origin: "child" }
+> {
+  return {
+    backgroundTask: { status: "working", taskId: TASK_ID },
+    callId: "call-1",
+    kind: "subagent-result",
+    origin: "child",
+    outcome: {
+      kind: "parked",
+      result: { kind: "succeeded", output: "delegated" },
+      usageDelta: ZERO_USAGE,
+    },
+    output: {
+      agentId: deriveAgentId("researcher", OPERATION_ID),
+      status: "working",
+      taskId: TASK_ID,
+    },
+    subagentName: "researcher",
+  };
+}
 
 describe("createRuntimeActionRequestFromToolCall", () => {
   const loadSkillCall = {
@@ -84,7 +110,10 @@ describe("createRuntimeActionRequestFromToolCall", () => {
   });
 });
 
-function createParkedSession(): HarnessSession {
+function createParkedSession(input?: {
+  readonly actions?: PendingRuntimeActionBatch["actions"];
+  readonly responseMessages?: readonly HarnessSession["history"][number][];
+}): HarnessSession {
   const base: HarnessSession = {
     agent: { modelReference: { id: "test-model" }, system: "", tools: [] },
     compaction: { recentWindowSize: 10, threshold: 100_000 },
@@ -108,7 +137,7 @@ function createParkedSession(): HarnessSession {
   });
 
   return setPendingRuntimeActionBatch({
-    actions: [
+    actions: input?.actions ?? [
       {
         callId: "call-1",
         description: "research subagent",
@@ -120,7 +149,7 @@ function createParkedSession(): HarnessSession {
       },
     ],
     event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
-    responseMessages: [],
+    responseMessages: input?.responseMessages ?? [],
     session: withUsage,
   });
 }
@@ -174,8 +203,11 @@ function createSessionWithRunningChild(): HarnessSession {
   });
 }
 
-function createSessionWithTaskAddress(): HarnessSession {
-  const prepared = prepareAgentStart(createParkedSession(), {
+function createSessionWithTaskAddress(input?: {
+  readonly actions?: PendingRuntimeActionBatch["actions"];
+  readonly responseMessages?: readonly HarnessSession["history"][number][];
+}): HarnessSession {
+  const prepared = prepareAgentStart(createParkedSession(input), {
     identity: {
       id: deriveAgentId("researcher", OPERATION_ID),
       name: "researcher",
@@ -202,7 +234,6 @@ function createSessionWithTaskAddress(): HarnessSession {
 describe("resolvePendingRuntimeActions", () => {
   it("marks a working task receipt as backgrounded on subagent.completed", async () => {
     const events: UnstampedMessageStreamEvent[] = [];
-    const taskId = "task_0123456789abcdef";
 
     const resolved = await resolvePendingRuntimeActions({
       emit: async (event) => {
@@ -210,34 +241,84 @@ describe("resolvePendingRuntimeActions", () => {
       },
       session: createSessionWithTaskAddress(),
       stepInput: {
-        runtimeActionResults: [
+        runtimeActionResults: [createBackgroundTaskReceipt()],
+      },
+    });
+
+    expect(events.find((event) => event.type === "subagent.completed")).toMatchObject({
+      data: { backgroundTask: { status: "working", taskId: TASK_ID } },
+    });
+    expect(resolved.backgroundTaskAdmissionOnly).toBe(true);
+    expect(getAgentHandleStore(resolved.session.state)?.handles).toEqual([
+      expect.objectContaining({ phase: "addressed" }),
+    ]);
+  });
+
+  it("does not classify a task receipt plus an executed tool result as admission-only", async () => {
+    const resolved = await resolvePendingRuntimeActions({
+      session: createSessionWithTaskAddress({
+        responseMessages: [
           {
-            backgroundTask: { status: "working", taskId },
+            content: [
+              {
+                output: { type: "text", value: "42" },
+                toolCallId: "add-1",
+                toolName: "add",
+                type: "tool-result",
+              },
+            ],
+            role: "tool",
+          },
+        ],
+      }),
+      stepInput: {
+        runtimeActionResults: [createBackgroundTaskReceipt()],
+      },
+    });
+
+    expect(resolved.backgroundTaskAdmissionOnly).toBe(false);
+  });
+
+  it("does not classify partial task admission as admission-only", async () => {
+    const resolved = await resolvePendingRuntimeActions({
+      session: createSessionWithTaskAddress({
+        actions: [
+          {
             callId: "call-1",
-            kind: "subagent-result",
-            origin: "child",
-            outcome: {
-              kind: "parked",
-              result: { kind: "succeeded", output: "delegated" },
-              usageDelta: ZERO_USAGE,
-            },
-            output: {
-              agentId: deriveAgentId("researcher", OPERATION_ID),
-              status: "working",
-              taskId,
-            },
+            description: "research subagent",
+            input: { message: "go" },
+            kind: "subagent-call",
+            name: "researcher",
+            nodeId: "subagents/researcher",
             subagentName: "researcher",
+          },
+          {
+            callId: "call-2",
+            description: "unavailable subagent",
+            input: { message: "go" },
+            kind: "subagent-call",
+            name: "unavailable",
+            nodeId: "subagents/unavailable",
+            subagentName: "unavailable",
+          },
+        ],
+      }),
+      stepInput: {
+        runtimeActionResults: [
+          createBackgroundTaskReceipt(),
+          {
+            callId: "call-2",
+            isError: true,
+            kind: "subagent-result",
+            origin: "dispatch",
+            output: { code: "SUBAGENT_UNAVAILABLE", message: "unavailable" },
+            subagentName: "unavailable",
           },
         ],
       },
     });
 
-    expect(events.find((event) => event.type === "subagent.completed")).toMatchObject({
-      data: { backgroundTask: { status: "working", taskId } },
-    });
-    expect(getAgentHandleStore(resolved.session.state)?.handles).toEqual([
-      expect.objectContaining({ phase: "addressed" }),
-    ]);
+    expect(resolved.backgroundTaskAdmissionOnly).toBe(false);
   });
 
   it("settles the running handle terminally and deletes it with the batch", async () => {

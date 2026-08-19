@@ -21,7 +21,6 @@ export default defineTaskEval({
   async test(t) {
     const started = await t.send("TASK-FANOUT-PARENT-UPDATES");
     started.expectOk();
-    started.messageIncludes("TASK-FANOUT-STARTED");
     started.calledSubagent("fanout-worker", { count: FANOUT_SIZE });
 
     const taskIds = backgroundTaskIds(started);

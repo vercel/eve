@@ -21,7 +21,6 @@ export default defineTaskEval({
   async test(t) {
     const started = await t.send("TASK-C8-REMOTE-HITL");
     started.expectOk();
-    started.messageIncludes("TASK-C8-STARTED");
     started.event("subagent.completed", {
       count: 1,
       data: {

@@ -15,7 +15,6 @@ export default defineTaskEval({
   async test(t) {
     const started = await t.send("TASK-UPDATE-SETUP");
     started.expectOk();
-    started.messageIncludes("TASK-UPDATE-STARTED");
     const taskId = requireBackgroundTaskId(started);
 
     const sessionId = t.sessionId;

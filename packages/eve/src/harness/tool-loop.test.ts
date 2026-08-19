@@ -1580,6 +1580,90 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
+  it("parks a conversation parent immediately after background task admission", async () => {
+    const delegateToolCall = {
+      input: { message: "investigate" },
+      toolCallId: "delegate-1",
+      toolName: "delegate",
+      type: "tool-call" as const,
+    };
+    setupMockAgent({
+      finishReason: "tool-calls",
+      response: { messages: [{ content: [delegateToolCall], role: "assistant" }] },
+      text: "",
+      toolCalls: [delegateToolCall],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, { tools: createDelegationToolMap() }),
+    );
+    const dispatched = await runStep(createTestSession(), { message: "Delegate this." });
+    const taskId = "task_0123456789abcdef";
+    const admitted = {
+      ...dispatched.session,
+      state: {
+        ...dispatched.session.state,
+        [AGENT_HANDLES_STATE_KEY]: {
+          handles: [
+            {
+              address: {
+                continuationToken: "delegate-token",
+                kind: "agent/local",
+                sessionId: "delegate-session",
+              },
+              identity: {
+                id: "ag_worker:delegate",
+                name: "worker",
+                nodeId: "workers",
+              },
+              operation: {
+                callId: "delegate-1",
+                id: "delegate-operation",
+                kind: "start",
+                parentTurnId: "turn_0",
+              },
+              phase: "running",
+            },
+          ],
+        },
+      },
+    } satisfies HarnessSession;
+
+    const parked = await runStep(admitted, {
+      runtimeActionResults: [
+        {
+          backgroundTask: { status: "working", taskId },
+          callId: "delegate-1",
+          kind: "subagent-result",
+          origin: "child",
+          outcome: {
+            kind: "parked",
+            result: { kind: "succeeded", output: "delegated" },
+            usageDelta: {
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              inputTokens: 0,
+              outputTokens: 0,
+            },
+          },
+          output: { agentId: "ag_worker:delegate", status: "working", taskId },
+          subagentName: "worker",
+        },
+      ],
+    });
+
+    expect(ToolLoopAgent).toHaveBeenCalledTimes(1);
+    expect(parked.next).toBeNull();
+    expect(parked.settledTurn).toBeUndefined();
+    expect(getPendingRuntimeActionBatch(parked.session.state)).toBeUndefined();
+    expect(JSON.stringify(parked.session.history)).toContain(taskId);
+    expect(events.filter((event) => event.type === "step.started")).toHaveLength(1);
+    expect(events.at(-2)?.type).toBe("turn.completed");
+    expect(events.at(-1)?.type).toBe("session.waiting");
+  });
+
   it("parks on both batches when one step carries a runtime action and an approval", async () => {
     const gateToolCall = {
       input: { action: "run" },

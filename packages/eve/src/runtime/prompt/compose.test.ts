@@ -22,7 +22,7 @@ describe("composeRuntimeBasePrompt", () => {
     expect(prompt).not.toContainEqual(expect.stringContaining("<agents>"));
   });
 
-  it("instructs task-mode parents to rely on notifications instead of polling", () => {
+  it("describes task-mode background work and notifications", () => {
     const prompt = composeRuntimeBasePrompt({
       persistentSubagentSessions: true,
       subagentsAvailable: true,
@@ -30,14 +30,13 @@ describe("composeRuntimeBasePrompt", () => {
     });
 
     expect(prompt).toContainEqual(
-      expect.stringContaining("return immediately with a task receipt"),
+      expect.stringContaining(
+        "Subagent calls start durable background tasks and proceed independently.\nEach task will notify you",
+      ),
     );
-    expect(prompt).toContainEqual(
-      expect.stringContaining("notifications include the task's result"),
-    );
+    expect(prompt).toContainEqual(expect.stringContaining("task's result"));
     expect(prompt).not.toContainEqual(expect.stringContaining("task_peek"));
     expect(prompt).not.toContainEqual(expect.stringContaining("task_sleep"));
-    expect(prompt).toContainEqual(expect.stringContaining("notify you"));
   });
 
   it("omits agent messaging instructions when subagents are unavailable", () => {

@@ -22,7 +22,6 @@ export default defineTaskEval({
   async test(t) {
     const setup = await t.send("CHILD-TASK-EXCLUSIVITY-SETUP");
     setup.expectOk();
-    setup.messageIncludes("CHILD-TASK-EXCLUSIVITY-READY");
     const initialTaskId = requireBackgroundTaskId(setup);
     const initial = await waitForCompletedTask(
       t,

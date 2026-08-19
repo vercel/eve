@@ -266,7 +266,12 @@ export const TASK_TRANSITIONS = {
     guards: ["child-acknowledges-private-address"],
     expected: {
       outcome: "accepted",
-      postState: { lifecycle: "working", dispatch: "acknowledged", ownership: "owned" },
+      postState: {
+        lifecycle: "working",
+        dispatch: "acknowledged",
+        ownership: "owned",
+        parent: "parked",
+      },
       events: { emitted: ["background-receipt"] },
       sideEffects: { executed: ["child-dispatch", "task-index-write"] },
     },
