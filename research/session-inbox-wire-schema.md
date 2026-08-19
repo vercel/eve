@@ -190,9 +190,10 @@ mechanical guard in the existing CI lint job (`pnpm guard:invariants`):
   module; the semantic contract (shape bytes, fixture decoding, round-trip)
   runs in the required unit tier, which executes the schemas. Both are
   required checks; neither can be skipped to merge.
-- The existing e2e byte gate (`continuation-wire.eval.ts`) stays as the
-  current-version end-to-end backstop, while the agent-channels cross-version
-  redeploy eval runs a current producer against an actual eve@0.30.8 consumer.
+- Exact current-version bytes stay in the unit contract, where the encoded
+  object can be asserted without decoding workflow-owned serde. The
+  agent-channels cross-version redeploy eval is the end-to-end backstop: it
+  runs a current producer against an actual eve@0.30.8 consumer.
 
 ## Alternatives considered
 
