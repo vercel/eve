@@ -58,16 +58,11 @@ describe("linqChannel", () => {
     );
   });
 
-  it("uses the credential provider's trusted webhook verifier", () => {
+  it("uses the managed credential verifier", () => {
     const webhookVerifier = vi.fn();
-    const credentials = Object.assign(
-      vi.fn(async () => ({ apiKey: "rotating-token" })),
-      {
-        webhookVerifier,
-      },
-    );
+    const credentials = vi.fn(async () => ({ apiKey: "rotating-token" }));
 
-    linqChannel({ credentials });
+    linqChannel({ credentials: { credentials, webhookVerifier } });
 
     expect(createLinqAdapter).toHaveBeenCalledWith({ credentials, webhookVerifier });
   });

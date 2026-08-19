@@ -2,8 +2,9 @@ export {
   linqChannel,
   type LinqChannel,
   type LinqChannelConfig,
-  type LinqChannelCredentialProvider,
+  type LinqChannelCredentials,
   type LinqInboundMessageContext,
+  type LinqManagedCredentials,
   type LinqInboundResult,
   type LinqInboundResultOrPromise,
 } from "#public/channels/linq/linqChannel.js";
