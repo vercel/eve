@@ -346,9 +346,7 @@ const session = await ctx.resolveSession({ target });
 
 ### Slack API calls outside a handler
 
-Inside webhook-side handlers (`onAppMention`, `onEvent`, `onInteraction`, `onInputResponse`, `events`),
-`ctx.slack.request(operation, body)` is the raw-API escape hatch. Outside
-those contexts there is no handle — a schedule resolving reactions on old
+Inside inbound webhook handlers such as `onAppMention`, `onEvent`, `onInteraction`, and `onInputResponse`, `ctx.slack.request(operation, body)` is the raw-API escape hatch. Inside an `events` handler, use `channel.slack.request(...)` instead. Outside those contexts there is no handle — a schedule resolving reactions on old
 messages, for example, has no inbound Slack request. For that, call the
 same primitive the handle uses directly:
 
@@ -416,7 +414,9 @@ events: {
 
 ### Proactive sessions
 
-Start a session without an inbound message through `ctx.to(slack, target).send(message, { auth })` from another channel, or `to(slack, target).send(message, { auth })` from a schedule `run` handler. The proactive target shape is `{ channelId, threadTs?, initialMessage? }`.
+Start a session without an inbound message through `ctx.to(slack, target).send(message, { auth })` from another channel, or `to(slack, target).send(message, { auth })` from a schedule `run` handler. The proactive target shape is `{ channelId, threadTs?, initialMessage? }`. This sends turn input to the agent; it is not a direct Slack post.
+
+To post without invoking the model, use `ctx.thread.post(...)` in an inbound Slack handler or `channel.thread.post(...)` in an `events` handler. Use `callSlackApi(...)` where no Slack channel context exists. For application-managed retries and deduplication, see [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications).
 
 ### Attachments
 

@@ -28,6 +28,30 @@ The slug is the path-relative basename. `agent/hooks/audit.ts` becomes `"audit"`
 
 A hook file declares stream-event subscribers under the `events` map, keyed by event type, with `*` matching every event. Subscribe to any event in the runtime stream vocabulary documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), including the lifecycle events `session.started`, `turn.completed`, `message.completed`, `action.partial`, and `action.result`. Handlers are observe-only. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
 
+## Scope side effects to a channel
+
+A hook under `agent/hooks/` observes matching events from every channel on the root agent. `defineHook` has no channel filter. Use a channel's `events` configuration when a handler assumes a specific platform or should run only for sessions owned by that channel:
+
+```ts title="agent/channels/github.ts"
+import { githubChannel } from "eve/channels/github";
+
+export default githubChannel({
+  events: {
+    async "turn.completed"(event, channel, ctx) {
+      console.info("GitHub turn completed", {
+        repository: channel.repository.fullName,
+        sessionId: ctx.session.id,
+        turnId: event.turnId,
+      });
+    },
+  },
+});
+```
+
+A GitHub channel event handler cannot fire for a Slack-owned session, so platform-specific side effects do not depend on an early-return guard. On a built-in channel, an authored handler replaces that channel's default handler for the same event key. Check the channel page before overriding events that deliver replies, progress, errors, or human-input prompts.
+
+Use `ctx.channel.kind` inside a global hook only when the operation is otherwise agent-wide and conditional handling is intentional. For typed channel metadata in dynamic resolvers or instrumentation, import the channel definition and narrow with `isChannel`; see [Instrumentation](./instrumentation#runtime-context).
+
 ## Hook structure and context
 
 Every handler receives the same `HookContext`, including the shared session

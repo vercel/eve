@@ -210,7 +210,9 @@ The bridge server does not listen on its own port. It receives only upgrade even
 
 ## Cross-channel hand-off
 
-Route handlers can start a session on a different channel via `ctx.to(channel, target).send(message, options)`. Use this when an inbound request on one channel should pivot the conversation onto another, such as an incident webhook that opens an investigation thread in Slack.
+Route handlers can start or resume an agent session on a different channel via `ctx.to(channel, target).send(message, options)`. This is an agent hand-off: the message becomes turn input and invokes the model on the destination channel. Use it when an inbound request should pivot the conversation, such as an incident webhook that opens an investigation thread in Slack.
+
+To post a provider notification without starting an agent turn, call the destination provider's API instead. If that notification must survive process failures, use an application-owned outbox; see [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications).
 
 ```ts
 import { defineChannel, POST } from "eve/channels";
@@ -245,6 +247,7 @@ Semantics:
 - The target channel's authored `receive(input, { from })` hook owns the continuation-token format and initial state. Callers supply the target to `to(...)`, then the message and auth to `send(...)`.
 - `auth` flows through to `session.auth.initiator` so the target's event handlers and the agent's tools can read who started the session.
 - Calling `ctx.to(...).send(...)` does not also start a session on the current channel. The inbound channel's response is whatever the route handler returns explicitly.
+- `send(...)` is not a direct provider-message API. It supplies input to the agent on the destination channel.
 - The first argument is the target channel module's default export. Import it directly from `agent/channels/<name>.ts`. Identity is matched by reference.
 
 ## Channel metadata
@@ -395,4 +398,5 @@ The framework handles staging bytes to the sandbox, enforcing upload policy, hyd
 - [Channels overview](./overview)
 - [Dynamic capabilities](../guides/dynamic-capabilities)
 - [Auth & route protection](../guides/auth-and-route-protection)
+- [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications): deliver a provider message without starting an agent turn
 - [Universal Commerce Protocol (UCP)](../protocols/ucp): serve a UCP profile from a custom channel

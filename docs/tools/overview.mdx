@@ -71,6 +71,20 @@ Running in the app runtime is what lets a tool import shared code from `lib/`, r
 
 eve never runs authored tools during discovery. The model sees descriptors first, and only what it actually calls gets executed. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval.
 
+## When a tool throws
+
+If an authored tool's `execute` function throws, eve records a failed `action.result` and gives the error to the model as a tool error. The model can respond, choose another action, or call the tool again. eve does not automatically call the tool again based on the exception type, an upstream HTTP status, or a `retryable` property.
+
+Authored tools have no public terminal-error class or retry policy for thrown exceptions. Handle retry policy inside the tool when the operation is safe to retry, and return or throw an actionable error when it is not. Do not rely on that distinction to protect a write: an interruption before the durable step completes can re-run the step and execute the tool again even if the first request reached the upstream service.
+
+Protect non-idempotent operations with the strongest mechanism the service supports:
+
+1. Pass a stable idempotency key to the upstream API.
+2. Otherwise, record a unique application operation before writing and check it on every attempt.
+3. Use human approval when a person must authorize each execution, not as a substitute for deduplication after an ambiguous network result.
+
+See [Execution model and durability](/docs/concepts/execution-model-and-durability#resuming-after-a-crash) for step replay semantics. For one-way provider notifications, see [Durable cross-channel notifications](/docs/patterns/durable-cross-channel-notifications).
+
 ## Gate a tool on human approval
 
 A tool can require a person to sign off before it runs. Set `approval` with the helpers from `eve/tools/approval`:
