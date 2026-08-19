@@ -25,6 +25,7 @@ import {
   ModeKey,
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicToolRuntimeRevisionKey,
+  TurnTaskDeliveryKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { runStep } from "#context/run-step.js";
@@ -175,6 +176,9 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
 
   let durableSession = await readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
+  if (rawInput.input?.kind === "deliver") {
+    ctx.set(TurnTaskDeliveryKey, rawInput.input.taskDeliveryId !== undefined);
+  }
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
   const tasksEnabled = bundle.resolvedAgent.config?.experimental?.tasks === true;
@@ -308,16 +312,13 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     resolved = { runtimeActionResults: input.input.results };
   }
 
-  // Pin adapter-state mutations back onto ctx so they survive the
-  // step boundary.
+  // Persist adapter-state mutations across the step boundary.
   if (input.input?.kind === "deliver") {
     const updatedAdapter = { ...adapter, state: { ...adapterCtx.state } };
     setChannelContext(ctx, updatedAdapter);
   }
 
-  // Adapter handled the delivery inline (e.g. a Slack interaction
-  // that only edits a message). Re-park without a model turn; skip
-  // the snapshot write when the session itself is unchanged.
+  // Adapter handled the delivery inline; re-park and skip unchanged snapshot writes.
   if (input.input?.kind === "deliver" && resolved === undefined) {
     await contextStorage.run(ctx, () =>
       instrumentChannelDelivery({
@@ -575,8 +576,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     };
   }
 
-  // Re-stamp the in-memory session's continuation token in case a
-  // handler called `session.continuation.rekey(...)` (eg. Slack auto-anchor).
+  // Re-stamp if a handler called `session.continuation.rekey(...)` (eg. Slack auto-anchor).
   const rekeyed = reconcileSessionContinuationToken(ctx, stepResult.session);
   const nextSerializedContext = serializeContext(ctx);
   stepResult = { ...stepResult, session: rekeyed };

@@ -37,7 +37,7 @@ interface BaseChannelAddressDeliveryOptions {
 /** Delivery options for a channel address whose continuation token is already bound. */
 export type ChannelAddressDeliveryOptions<TState = undefined> = [TState] extends [undefined]
   ? BaseChannelAddressDeliveryOptions
-  : BaseChannelAddressDeliveryOptions & { readonly state?: TState };
+  : BaseChannelAddressDeliveryOptions & { readonly state?: Partial<TState> };
 
 /**
  * Dynamic handle for whichever durable session currently owns one channel-local address.

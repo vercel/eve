@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MockScreen } from "#cli/dev/tui/test/mock-terminal.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
+import { packageInstallResult, packageProcessResult } from "#internal/testing/package-process.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { detectPackageManager } from "#setup/package-manager.js";
 import {
@@ -111,10 +112,10 @@ function dependencies(
         ...options,
         webPackageVersions: { ...WEB_VERSIONS, ...options.webPackageVersions },
       }),
-    runPackageManagerInstall: vi.fn(async () => true),
+    runPackageManagerInstall: vi.fn(async () => packageInstallResult()),
     selectInitHandoff: vi.fn(async () => "eve-dev"),
     spawnCodingAgentRepl: vi.fn(async () => true),
-    spawnPackageManager: vi.fn(async () => true),
+    spawnPackageManager: vi.fn(async () => packageProcessResult()),
     tryInitializeGit: vi.fn(async () => gitResult),
     validateModelSlug: vi.fn(async () => null),
   };
@@ -195,12 +196,14 @@ describe("runInitCommand", () => {
     expect(output.messages[2]).toContain("Installed dependencies");
     expect(output.messages[2]).toContain("in 13.2s");
     expect(output.messages[3]).toContain("$ eve dev");
+    expect(output.messages.join("\n")).not.toContain("Instructions ");
   });
 
   it("creates a new agent with model settings selected by init options", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-model-"));
     const output = logger();
     const deps = dependencies();
+    deps.isCodingAgentLaunch.mockResolvedValue(true);
 
     await runInitCommand(
       output,
@@ -213,6 +216,10 @@ describe("runInitCommand", () => {
     const projectPath = join(parentDirectory, "my-agent");
     const agentSource = await readFile(join(projectPath, "agent/agent.ts"), "utf8");
     expect(agentSource).toContain('model: "openai/gpt-5.5"');
+    const messages = stripAnsi(output.messages.join("\n"));
+    expect(messages).toContain("✓ Model openai/gpt-5.5");
+    expect(messages).not.toContain("openai/gpt-5.5 (eve default)");
+    expect(messages).toContain(`✓ Instructions ${join(projectPath, "agent/instructions.md")}`);
     expect(agentSource).toContain('reasoning: "high"');
     expect(deps.validateModelSlug).toHaveBeenCalledWith(
       expect.stringContaining(".eve-init-"),
@@ -854,8 +861,15 @@ describe("runInitCommand", () => {
       "eve",
       "dev",
     ]);
-    expect(output.messages.join("\n")).toContain("Added an eve agent to ");
-    expect(output.messages.join("\n")).not.toContain("Overrode package.json engines.node");
+    const printed = output.messages.join("\n");
+    expect(printed).toContain("Added an eve agent to ");
+    expect(printed).toContain("Updated existing project:");
+    expect(printed).toContain("Created agent/agent.ts");
+    expect(printed).toContain("Created agent/instructions.md");
+    expect(printed).toContain("Added dependencies: @vercel/connect, ai, eve");
+    expect(printed).toContain(`Updated ${join(projectRoot, "package.json")}`);
+    expect(printed).toContain(`Updated ${join(projectRoot, "pnpm-workspace.yaml")}`);
+    expect(printed).not.toContain("Overrode package.json engines.node");
   });
 
   it("adds an agent to an existing project with model settings selected by init options", async () => {
@@ -953,7 +967,7 @@ describe("runInitCommand", () => {
     await mkdir(projectRoot, { recursive: true });
     const output = logger();
     const deps = dependencies();
-    deps.runPackageManagerInstall.mockResolvedValue(false);
+    deps.runPackageManagerInstall.mockResolvedValue(packageInstallResult(1));
 
     await expect(runInitCommand(output, projectRoot, ".", {}, deps)).rejects.toThrow("restored");
 
@@ -1156,9 +1170,10 @@ describe("runInitCommand", () => {
     expect(deps.selectInitHandoff).not.toHaveBeenCalled();
     expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
-    expect(output.messages.join("\n")).toContain(
-      "pnpm --config.minimum-release-age=0 exec eve dev --no-ui",
-    );
+    const messages = stripAnsi(output.messages.join("\n"));
+    expect(messages).toContain(`✓ Model ${DEFAULT_AGENT_MODEL_ID} (eve default)`);
+    expect(messages).toContain(`✓ Instructions ${join(projectPath, "agent/instructions.md")}`);
+    expect(messages).toContain("pnpm --config.minimum-release-age=0 exec eve dev --no-ui");
   });
 
   it("derives the agent dev handoff command from the existing project's own manager", async () => {
@@ -1184,7 +1199,7 @@ describe("runInitCommand", () => {
     deps.runPackageManagerInstall.mockImplementation(async (_kind, _projectPath, options) => {
       options?.onOutput?.({ stream: "stdout", text: "Packages: +12" });
       options?.onOutput?.({ stream: "stderr", text: "ERR_PNPM_FETCH_404 not found" });
-      return false;
+      return packageInstallResult(1);
     });
 
     await expect(runInitCommand(output, parentDirectory, "my-agent", {}, deps)).rejects.toThrow(
@@ -1213,12 +1228,32 @@ describe("runInitCommand", () => {
     );
   });
 
+  it("prints a spawn failure when installation produces no child output", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-spawn-fail-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.runPackageManagerInstall.mockResolvedValue({
+      kind: "installed",
+      result: {
+        command: { executable: "pnpm", args: ["install"], cwd: parentDirectory },
+        termination: { kind: "spawn-error", code: "ENOENT", message: "spawn pnpm ENOENT" },
+        stdout: "",
+      },
+    });
+
+    await expect(runInitCommand(output, parentDirectory, "my-agent", {}, deps)).rejects.toThrow(
+      "Failed to install dependencies",
+    );
+
+    expect(output.errors).toEqual(["pnpm was not found. Install it before running this step."]);
+  });
+
   it("preserves an existing host after install failure and prints the retry command", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-host-install-fail-"));
     const projectRoot = await createHostProject(parentDirectory);
     const output = logger();
     const deps = dependencies();
-    deps.runPackageManagerInstall.mockResolvedValue(false);
+    deps.runPackageManagerInstall.mockResolvedValue(packageInstallResult(1));
 
     await expect(runInitCommand(output, projectRoot, ".", {}, deps)).rejects.toThrow(
       `install dependencies with pnpm in "${projectRoot}"`,
@@ -1228,6 +1263,11 @@ describe("runInitCommand", () => {
     expect(JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"))).toMatchObject({
       dependencies: { eve: "^0.6.0" },
     });
+    expect(output.messages.join("\n")).toContain("Updated existing project:");
+    expect(output.messages.join("\n")).toContain("Created agent/agent.ts");
+    expect(output.messages.join("\n")).toContain(
+      "Added dependencies: @vercel/connect, ai, eve, zod",
+    );
   });
 
   it("replays only the actionable npm error, dropping silly/verbose/http/timing noise", async () => {
@@ -1247,7 +1287,7 @@ describe("runInitCommand", () => {
         stream: "stderr",
         text: "npm error ERESOLVE unable to resolve dependency tree",
       });
-      return false;
+      return packageInstallResult(1);
     });
 
     await expect(runInitCommand(output, parentDirectory, "my-agent", {}, deps)).rejects.toThrow(
@@ -1270,7 +1310,7 @@ describe("runInitCommand", () => {
         options?.onOutput?.({ stream: "stderr", text: `npm silly step ${index}` });
       }
       options?.onOutput?.({ stream: "stderr", text: "" });
-      return false;
+      return packageInstallResult(1);
     });
 
     await expect(runInitCommand(output, parentDirectory, "my-agent", {}, deps)).rejects.toThrow(
@@ -1288,7 +1328,7 @@ describe("runInitCommand", () => {
     const deps = dependencies();
     deps.runPackageManagerInstall.mockImplementation(async (_kind, _projectPath, options) => {
       options?.onOutput?.({ stream: "stdout", text: "Progress: resolved 62, reused 62, done" });
-      return true;
+      return packageInstallResult();
     });
 
     const previous = process.env.EVE_LOG_LEVEL;
@@ -1322,7 +1362,7 @@ describe("runInitCommand", () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-debug-failure-"));
     const output = logger();
     const deps = dependencies();
-    deps.runPackageManagerInstall.mockResolvedValue(false);
+    deps.runPackageManagerInstall.mockResolvedValue(packageInstallResult(1));
 
     const previous = process.env.EVE_LOG_LEVEL;
     process.env.EVE_LOG_LEVEL = "debug";
@@ -1374,7 +1414,7 @@ describe("runInitCommand", () => {
         text: "npm http fetch GET https://registry.npmjs.org/@vercel%2fconnect attempt 1 failed with ENOTFOUND",
       });
       options?.onOutput?.({ stream: "stdout", text: `Downloading ${"package".repeat(20)}` });
-      return true;
+      return packageInstallResult();
     });
 
     try {

@@ -1,14 +1,30 @@
+import type { SessionAuthContext } from "#channel/types.js";
 import { createLogger } from "#internal/logging.js";
 import { buildSlackBinding } from "#public/channels/slack/api.js";
 import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
+import { deriveHitlResponse } from "#public/channels/slack/hitl.js";
 import type {
   SlackChannelConfig,
   SlackInputResponseContext,
   SlackInputResponseResult,
   SlackInputResponseSubmission,
+  SlackChannelState,
 } from "#public/channels/slack/slackChannel.js";
 
 const log = createLogger("slack.interactions");
+
+export function approvalResponderStatePatch(
+  submission: Extract<SlackInputResponseSubmission, { type: "block_actions" }>,
+  auth: SessionAuthContext | null,
+): Partial<SlackChannelState> | undefined {
+  if (
+    auth?.principalId === undefined ||
+    !submission.actions.some((action) => deriveHitlResponse(action)?.kind === "tool-approval")
+  ) {
+    return undefined;
+  }
+  return { approvalResponderUsers: { [auth.principalId]: submission.user.id } };
+}
 
 export async function authorizeInputResponse(input: {
   readonly channelId: string;

@@ -18,7 +18,7 @@ test("serves the deterministic iMessage registry item", async () => {
   const writes = new Map();
   const commands = [];
   const context = {
-    artifactsRoot: "__authoring_eval__",
+    artifactsRoot: "/tmp/photon-test",
     run: async (command) => commands.push(command),
     write: async (path, content) => writes.set(path, content),
   };
@@ -26,8 +26,8 @@ test("serves the deterministic iMessage registry item", async () => {
   await imessageSetup.onBootstrap(context);
   await imessageSetup.onSession(context);
 
-  const registry = JSON.parse(writes.get("__authoring_eval__/registry/registry.json"));
-  const item = JSON.parse(writes.get("__authoring_eval__/registry/channel/photon-imessage.json"));
+  const registry = JSON.parse(writes.get("/tmp/photon-test/registry/registry.json"));
+  const item = JSON.parse(writes.get("/tmp/photon-test/registry/channel/photon-imessage.json"));
   assert.deepEqual(registry.items, [
     {
       name: "channel/photon-imessage",
@@ -38,10 +38,10 @@ test("serves the deterministic iMessage registry item", async () => {
     },
   ]);
   assert.equal(item.meta.eve.setup.command, "mock-imessage-setup");
+  // The absolute path must reach pnpm unprefixed; `./` in front of it would
+  // normalize to a relative path and link a directory that does not exist.
   assert.ok(
-    commands.some((command) =>
-      command.includes("pnpm add ./__authoring_eval__/mock-imessage-setup"),
-    ),
+    commands.some((command) => command === "pnpm add /tmp/photon-test/mock-imessage-setup"),
   );
   assert.ok(commands.some((command) => command.includes("python3 -m http.server 4173")));
 });

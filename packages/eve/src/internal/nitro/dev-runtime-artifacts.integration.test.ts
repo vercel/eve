@@ -16,7 +16,6 @@ import { describe, expect, it } from "vitest";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { createCompiledAgentManifest, ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
-import { loadAuthoredModuleNamespace } from "#internal/authored-module-loader.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -32,10 +31,25 @@ import {
   readDevelopmentRuntimeArtifactsRevision,
   resolveDevelopmentRuntimeArtifactsPointerPath,
   stageDevelopmentRuntimeArtifactsSnapshot,
+  type DevelopmentRuntimeArtifactsSnapshot,
 } from "#internal/nitro/dev-runtime-artifacts.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 
 const createScratchDirectory = useTemporaryDirectories();
+
+async function markSnapshotMaterialized(
+  snapshot: DevelopmentRuntimeArtifactsSnapshot,
+): Promise<DevelopmentRuntimeArtifactsSnapshot> {
+  const compileRoot = join(snapshot.runtimeAppRoot, ".eve", "compile");
+  const moduleMap = "authored-modules/test-module-map.mjs";
+  await mkdir(join(compileRoot, "authored-modules"), { recursive: true });
+  await writeFile(join(compileRoot, moduleMap), "export const moduleMap = { nodes: {} };\n");
+  await writeFile(
+    join(compileRoot, "authored-modules.json"),
+    `${JSON.stringify({ fingerprint: "test", moduleMap, version: 3 })}\n`,
+  );
+  return snapshot;
+}
 
 async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoot: string }> {
   const appRoot = await createScratchDirectory("eve-dev-runtime-next-imports-");
@@ -127,7 +141,8 @@ async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoo
   );
 
   await publishDevelopmentGeneration({
-    paths: { compileDirectoryPath },
+    manifest,
+    paths: { compileDirectoryPath, moduleMapPath },
     project: { appRoot },
   } as CompileAgentResult);
 
@@ -165,7 +180,10 @@ describe("development runtime artifact snapshots", () => {
       JSON.parse(await readFile(join(snapshot.snapshotRoot, "generation.json"), "utf8")),
     ).toEqual({ runtimeAppRoot: snapshot.runtimeAppRoot });
 
-    await activateDevelopmentRuntimeArtifactsSnapshot({ appRoot, snapshot });
+    await activateDevelopmentRuntimeArtifactsSnapshot({
+      appRoot,
+      snapshot: await markSnapshotMaterialized(snapshot),
+    });
 
     expect(readDevelopmentRuntimeArtifactsRevision(appRoot)).toEqual({
       revision: snapshot.runtimeAppRoot,
@@ -189,11 +207,14 @@ describe("development runtime artifact snapshots", () => {
     } as CompileAgentResult;
     const first = await stageDevelopmentRuntimeArtifactsSnapshot(compileResult);
     const second = await stageDevelopmentRuntimeArtifactsSnapshot(compileResult);
-    await activateDevelopmentRuntimeArtifactsSnapshot({ appRoot, snapshot: first });
+    await activateDevelopmentRuntimeArtifactsSnapshot({
+      appRoot,
+      snapshot: await markSnapshotMaterialized(first),
+    });
 
     const activation = await activateDevelopmentRuntimeArtifactsSnapshotTransaction({
       appRoot,
-      snapshot: second,
+      snapshot: await markSnapshotMaterialized(second),
     });
     expect(readDevelopmentRuntimeArtifactsRevision(appRoot).revision).toBe(second.runtimeAppRoot);
     await activation.rollback();
@@ -218,9 +239,7 @@ describe("development runtime artifact snapshots", () => {
       project: { appRoot },
     } as CompileAgentResult);
 
-    await expect(readFile(join(snapshot.runtimeAppRoot, "instructions.md"), "utf8")).resolves.toBe(
-      "You are a precise assistant.\n",
-    );
+    expect(existsSync(join(snapshot.runtimeAppRoot, "instructions.md"))).toBe(false);
     await expect(
       readFile(join(snapshot.runtimeAppRoot, "package.json"), "utf8").then(
         (source) => JSON.parse(source) as Record<string, unknown>,
@@ -231,7 +250,7 @@ describe("development runtime artifact snapshots", () => {
     });
   });
 
-  it("excludes generated output and dependency directories from source snapshots", async () => {
+  it("copies package metadata without retaining the app source tree", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-generated-output-");
     const agentRoot = join(appRoot, "agent");
     const compileDirectoryPath = join(appRoot, ".eve", "compile");
@@ -267,7 +286,10 @@ describe("development runtime artifact snapshots", () => {
       project: { appRoot },
     } as CompileAgentResult);
 
-    expect(existsSync(join(snapshot.runtimeAppRoot, "agent", "agent.ts"))).toBe(true);
+    await expect(readFile(join(snapshot.runtimeAppRoot, "package.json"), "utf8")).resolves.toBe(
+      '{"type":"module"}\n',
+    );
+    expect(existsSync(join(snapshot.runtimeAppRoot, "agent"))).toBe(false);
     expect(existsSync(join(snapshot.runtimeAppRoot, ".devtools"))).toBe(false);
     expect(existsSync(join(snapshot.runtimeAppRoot, "node_modules"))).toBe(false);
     expect(existsSync(join(snapshot.runtimeAppRoot, ".env"))).toBe(false);
@@ -420,45 +442,6 @@ describe("development runtime artifact snapshots", () => {
     expect(acceptableMountLocations.some((location) => existsSync(location))).toBe(true);
   });
 
-  it("stops copying at nested git repository boundaries", async () => {
-    const appRoot = await createScratchDirectory("eve-dev-runtime-nested-git-");
-    const agentRoot = join(appRoot, "agent");
-    const compileDirectoryPath = join(appRoot, ".eve", "compile");
-    const worktreeRoot = join(appRoot, ".claude", "worktrees", "review");
-    const nestedRepositoryRoot = join(appRoot, "vendor", "nested-repository");
-    const regularDirectoryRoot = join(appRoot, "vendor", "regular-directory");
-
-    await mkdir(agentRoot, { recursive: true });
-    await mkdir(worktreeRoot, { recursive: true });
-    await mkdir(join(nestedRepositoryRoot, ".git"), { recursive: true });
-    await mkdir(regularDirectoryRoot, { recursive: true });
-    await mkdir(compileDirectoryPath, { recursive: true });
-    await writeFile(join(appRoot, "package.json"), '{"type":"module"}\n');
-    await writeFile(join(agentRoot, "agent.ts"), "export const answer = 42;\n");
-    await writeFile(join(appRoot, ".claude", "notes.md"), "keep this file\n");
-    await writeFile(join(worktreeRoot, ".git"), "gitdir: ../../../../.git/worktrees/review\n");
-    await writeFile(join(worktreeRoot, "duplicate.ts"), "export const duplicate = true;\n");
-    await writeFile(join(nestedRepositoryRoot, "duplicate.ts"), "export const duplicate = true;\n");
-    await writeFile(join(regularDirectoryRoot, "source.ts"), "export const copied = true;\n");
-    await writeFile(
-      join(compileDirectoryPath, "compiled-agent-manifest.json"),
-      `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`,
-    );
-
-    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
-      paths: { compileDirectoryPath },
-      project: { appRoot },
-    } as CompileAgentResult);
-
-    expect(existsSync(join(snapshot.runtimeAppRoot, "agent", "agent.ts"))).toBe(true);
-    expect(existsSync(join(snapshot.runtimeAppRoot, ".claude", "notes.md"))).toBe(true);
-    expect(existsSync(join(snapshot.runtimeAppRoot, ".claude", "worktrees", "review"))).toBe(false);
-    expect(existsSync(join(snapshot.runtimeAppRoot, "vendor", "nested-repository"))).toBe(false);
-    expect(
-      existsSync(join(snapshot.runtimeAppRoot, "vendor", "regular-directory", "source.ts")),
-    ).toBe(true);
-  });
-
   it("prunes stale snapshots while preserving the active and recent snapshots", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-prune-");
     const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
@@ -485,12 +468,12 @@ describe("development runtime artifact snapshots", () => {
 
     await activateDevelopmentRuntimeArtifactsSnapshot({
       appRoot,
-      snapshot: {
+      snapshot: await markSnapshotMaterialized({
         runtimeAppRoot: join(activeSnapshotRoot, "source", "app"),
         snapshotRoot: activeSnapshotRoot,
         snapshotSourceRoot: join(activeSnapshotRoot, "source"),
         sourceRoot: appRoot,
-      },
+      }),
     });
     await utimes(activeSnapshotRoot, oldActiveTime, oldActiveTime);
 
@@ -524,12 +507,12 @@ describe("development runtime artifact snapshots", () => {
     });
     await activateDevelopmentRuntimeArtifactsSnapshot({
       appRoot,
-      snapshot: createSnapshot(firstSnapshotRoot),
+      snapshot: await markSnapshotMaterialized(createSnapshot(firstSnapshotRoot)),
     });
     const beforeRetirement = Date.now();
     await activateDevelopmentRuntimeArtifactsSnapshot({
       appRoot,
-      snapshot: createSnapshot(nextSnapshotRoot),
+      snapshot: await markSnapshotMaterialized(createSnapshot(nextSnapshotRoot)),
     });
     const afterRetirement = Date.now();
 
@@ -572,12 +555,12 @@ describe("development runtime artifact snapshots", () => {
     }
     await activateDevelopmentRuntimeArtifactsSnapshot({
       appRoot,
-      snapshot: {
+      snapshot: await markSnapshotMaterialized({
         runtimeAppRoot: join(activeSnapshotRoot, "source"),
         snapshotRoot: activeSnapshotRoot,
         snapshotSourceRoot: join(activeSnapshotRoot, "source"),
         sourceRoot: appRoot,
-      },
+      }),
     });
 
     await pruneDevelopmentRuntimeArtifactsSnapshots({
@@ -608,12 +591,12 @@ describe("development runtime artifact snapshots", () => {
     }
     await activateDevelopmentRuntimeArtifactsSnapshot({
       appRoot,
-      snapshot: {
+      snapshot: await markSnapshotMaterialized({
         runtimeAppRoot: join(activeSnapshotRoot, "source", "app"),
         snapshotRoot: activeSnapshotRoot,
         snapshotSourceRoot: join(activeSnapshotRoot, "source"),
         sourceRoot: appRoot,
-      },
+      }),
     });
     await pruneDevelopmentRuntimeArtifactsSnapshots({
       appRoot,
@@ -653,12 +636,12 @@ describe("development runtime artifact snapshots", () => {
     );
     await activateDevelopmentRuntimeArtifactsSnapshot({
       appRoot,
-      snapshot: {
+      snapshot: await markSnapshotMaterialized({
         runtimeAppRoot: join(activeSnapshotRoot, "source"),
         snapshotRoot: activeSnapshotRoot,
         snapshotSourceRoot: join(activeSnapshotRoot, "source"),
         sourceRoot: appRoot,
-      },
+      }),
     });
     const runsDirectory = join(resolveLocalWorkflowWorldDataDirectory(appRoot), "default", "runs");
     await mkdir(runsDirectory, { recursive: true });
@@ -702,7 +685,7 @@ describe("development runtime artifact snapshots", () => {
     await expect(readdir(join(appRoot, ".eve", "dev-runtime", "snapshots"))).resolves.toEqual([]);
   });
 
-  it("freezes authored source and rewrites runtime manifest roots for new sessions", async () => {
+  it("rewrites runtime manifest roots without retaining authored source", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-");
     const agentRoot = join(appRoot, "agent");
     const compileDirectoryPath = join(appRoot, ".eve", "compile");
@@ -737,7 +720,13 @@ describe("development runtime artifact snapshots", () => {
       paths: { compileDirectoryPath },
       project: { appRoot },
     } as CompileAgentResult);
-    await activateDevelopmentRuntimeArtifactsSnapshot({ appRoot, snapshot });
+    await expect(
+      activateDevelopmentRuntimeArtifactsSnapshot({ appRoot, snapshot }),
+    ).rejects.toThrow("before its authored modules are materialized");
+    await activateDevelopmentRuntimeArtifactsSnapshot({
+      appRoot,
+      snapshot: await markSnapshotMaterialized(snapshot),
+    });
 
     await writeFile(toolPath, "export const temperature = 73;\n");
 
@@ -768,9 +757,9 @@ describe("development runtime artifact snapshots", () => {
       appRoot: snapshot.runtimeAppRoot,
       kind: "disk",
     });
-    await expect(
-      readFile(join(snapshot.runtimeAppRoot, "agent", "tools", "get_weather.ts"), "utf8"),
-    ).resolves.toBe("export const temperature = 72;\n");
+    expect(existsSync(join(snapshot.runtimeAppRoot, "agent", "tools", "get_weather.ts"))).toBe(
+      false,
+    );
     await expect(
       readFile(
         join(snapshot.runtimeAppRoot, ".eve", "compile", "compiled-agent-manifest.json"),
@@ -838,7 +827,7 @@ describe("development runtime artifact snapshots", () => {
     expect(readDevelopmentRuntimeArtifactsSnapshotRoot(pointerPath)).toBe(runtimeAppRoot);
   });
 
-  it("preserves workspace-relative tsconfig extends in runtime snapshots", async () => {
+  it("uses workspace tsconfig topology without retaining it in runtime snapshots", async () => {
     const workspaceRoot = await createScratchDirectory("eve-dev-runtime-workspace-");
     const appRoot = join(workspaceRoot, "agents", "d0");
     const agentRoot = join(appRoot, "agent");
@@ -869,16 +858,9 @@ describe("development runtime artifact snapshots", () => {
     } as CompileAgentResult);
 
     expect(snapshot.runtimeAppRoot).toBe(join(snapshot.snapshotSourceRoot, "agents", "d0"));
-    await expect(
-      readFile(join(snapshot.snapshotSourceRoot, "tsconfig.base.json"), "utf8"),
-    ).resolves.toContain('"module"');
+    expect(existsSync(join(snapshot.snapshotSourceRoot, "tsconfig.base.json"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "tsconfig.json"))).toBe(false);
     expect(existsSync(join(snapshot.snapshotSourceRoot, "agents", "unused"))).toBe(false);
-
-    const moduleNamespace = await loadAuthoredModuleNamespace(
-      join(snapshot.runtimeAppRoot, "agent", "agent.ts"),
-    );
-
-    expect(moduleNamespace.answer).toBe(42);
   });
 
   it("mounts local workspace packages resolved through app node_modules symlinks in place", async () => {
@@ -960,14 +942,10 @@ describe("development runtime artifact snapshots", () => {
     );
     await expect(realpath(snapshotMountPath)).resolves.toBe(await realpath(packageRoot));
 
-    const moduleNamespace = await loadAuthoredModuleNamespace(
-      join(snapshot.runtimeAppRoot, "agent", "agent.ts"),
-    );
-
-    expect(moduleNamespace.result).toBe("live");
+    expect(existsSync(join(snapshot.runtimeAppRoot, "agent"))).toBe(false);
   });
 
-  it("freezes workspace packages that host extension mount roots", async () => {
+  it("mounts workspace extension packages without retaining their source trees", async () => {
     const workspaceRoot = await createScratchDirectory("eve-dev-runtime-extension-package-");
     const appRoot = join(workspaceRoot, "apps", "agent-app");
     const agentRoot = join(appRoot, "agent");
@@ -1034,30 +1012,12 @@ describe("development runtime artifact snapshots", () => {
       'export default { execute: () => "live" };\n',
     );
 
-    // Extension mount roots host runtime-hydrated authored source, so the
-    // package stays a real copy and the mount links into the snapshot.
-    expect(existsSync(join(snapshot.snapshotSourceRoot, "packages", "acme-extension"))).toBe(true);
-    await expect(
-      readFile(
-        join(
-          snapshot.snapshotSourceRoot,
-          "packages",
-          "acme-extension",
-          "extension",
-          "tools",
-          "read_label.mjs",
-        ),
-        "utf8",
-      ),
-    ).resolves.toContain("original");
+    expect(existsSync(join(snapshot.snapshotSourceRoot, "packages", "acme-extension"))).toBe(false);
     const snapshotMountPath = join(snapshot.runtimeAppRoot, "node_modules", "@acme", "extension");
-    const canonicalSnapshotSourceRoot = await realpath(snapshot.snapshotSourceRoot);
-    await expect(realpath(snapshotMountPath)).resolves.toBe(
-      join(canonicalSnapshotSourceRoot, "packages", "acme-extension"),
-    );
+    await expect(realpath(snapshotMountPath)).resolves.toBe(await realpath(packageRoot));
   });
 
-  it("mounts dependencies of workspace packages nested inside the app root", async () => {
+  it("mounts workspace packages nested inside the app root without copying them", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-nested-workspace-");
     const agentRoot = join(appRoot, "agent");
     const packageRoot = join(appRoot, "packages", "nested");
@@ -1070,8 +1030,6 @@ describe("development runtime artifact snapshots", () => {
     await mkdir(installedPackageRoot, { recursive: true });
     await mkdir(join(appRoot, "node_modules", "@repo"), { recursive: true });
     await mkdir(compileDirectoryPath, { recursive: true });
-    // The app root is also the workspace root, so workspace packages live
-    // inside the copied app tree.
     await writeFile(join(appRoot, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n");
     await writeFile(
       join(appRoot, "package.json"),
@@ -1120,29 +1078,10 @@ describe("development runtime artifact snapshots", () => {
       project: { appRoot },
     } as CompileAgentResult);
 
-    // A copied workspace package keeps the dependency mounts its snapshot
-    // copy resolves through.
     expect(
       existsSync(join(snapshot.snapshotSourceRoot, "packages", "nested", "dist", "index.js")),
-    ).toBe(true);
-    const nestedDependencyMount = join(
-      snapshot.snapshotSourceRoot,
-      "packages",
-      "nested",
-      "node_modules",
-      "external-value",
-    );
-    await expect(
-      lstat(nestedDependencyMount).then((stats) => stats.isSymbolicLink()),
-    ).resolves.toBe(true);
-    await expect(realpath(nestedDependencyMount)).resolves.toBe(
-      await realpath(installedPackageRoot),
-    );
-
-    const moduleNamespace = await loadAuthoredModuleNamespace(
-      join(snapshot.snapshotSourceRoot, "packages", "nested", "dist", "index.js"),
-    );
-
-    expect(moduleNamespace.message).toBe("nested");
+    ).toBe(false);
+    const snapshotMountPath = join(snapshot.runtimeAppRoot, "node_modules", "@repo", "nested");
+    await expect(realpath(snapshotMountPath)).resolves.toBe(await realpath(packageRoot));
   });
 });

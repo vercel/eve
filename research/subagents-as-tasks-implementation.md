@@ -175,7 +175,9 @@ deliberately; they get their own plans if anything nontrivial surfaces.
    nonterminal tasks, with at most one such task per child session; busy agents remain visible in
    `<agents>` with their active task id and status.
 2. **Wake policy.** Terminal and `input_required` transitions wake a parked parent through the
-   session delivery path; they are the only wake triggers.
+   session delivery path; they are the only wake triggers. The resulting parent turn is
+   conditionally delivered: the model sees the framework notification, but it may intentionally
+   produce no channel message.
 3. **Continuation to a busy child.** An `agentId` continuation to a `working` task surfaces `AGENT_BUSY` as a tool
    error, matching handle-continuation semantics. Queuing on the task run is deferred; it is
    the reversible follow-up if busy errors prove noisy in practice.

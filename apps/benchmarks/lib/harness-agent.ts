@@ -4,6 +4,7 @@ import type { HarnessAgentSession } from "@ai-sdk/harness/agent";
 import { HarnessAgent } from "@ai-sdk/harness/agent";
 import { createOpenCode } from "@ai-sdk/harness-opencode";
 import type { Agent, AgentRunResult } from "@vercel/agent-eval";
+import { z } from "zod";
 
 import type {
   AuthoringCase,
@@ -23,12 +24,49 @@ import {
   WORKSPACE,
 } from "./paths.js";
 import type { AuthoringTokenUsage, AuthoringTranscriptEntry } from "./protocol.js";
+import { BenchmarkTimings } from "./timing.js";
 
 const HARNESS_BRIDGE_PORT = 4172;
-const BOOTSTRAP_VERSION = "v5";
+const POST_RUN_GRADER_DIRECTORY = ".eve-grader";
+const BOOTSTRAP_VERSION = "v8";
+// A turn that stops producing output should end the turn, not the eval: the
+// remaining turns still run and the graders still see what the agent did.
+const TURN_TIMEOUT_SECONDS = Number(process.env.EVE_BENCHMARK_TURN_TIMEOUT ?? 480);
+// A turn that has produced no chunk for this long is waiting on the runtime, not
+// working. The bound is one slow tool call: the bridge reports a call and its
+// result together once the call returns, so an install that takes minutes looks
+// from here like silence rather than work in flight.
+const TURN_STALL_SECONDS = Number(process.env.EVE_BENCHMARK_TURN_STALL ?? 240);
+// The runtime frequently never closes a turn whose last act was the model
+// talking, so silence after a closing message has to end the turn on its own.
+// Long enough that a pause before the next tool call is not mistaken for one.
+const CLOSING_IDLE_MILLIS = 45_000;
+// How long to let an aborted turn settle before starting the next one.
+const TURN_SETTLE_MILLIS = 15_000;
+
+// The coding agent's own question tool is the one place it can ask the user
+// mid-turn. Left unanswered it waits for a human and the runtime stops driving
+// the turn, so the harness answers it immediately and points the agent at the
+// channel this benchmark can answer on: its reply, which the case's next `send`
+// responds to.
+type AuthoringHarnessAgent = HarnessAgent<
+  ReturnType<typeof createOpenCode>,
+  typeof INTERACTIVE_QUESTION_TOOL
+>;
+
+const INTERACTIVE_QUESTION_TOOL = {
+  question: {
+    description: "Ask the user a question and wait for their answer.",
+    inputSchema: z.looseObject({}),
+    execute: async () =>
+      "The user cannot answer an interactive prompt in this environment. Ask the question in your reply instead and end your turn; the user answers in their next message.",
+  },
+};
+
 export function createAuthoringAgent(subject: {
   readonly model: string;
   readonly archive: Uint8Array;
+  readonly dependencyArchive: Uint8Array;
   readonly digest: string;
   readonly dependencyDigest: string;
 }): Agent {
@@ -57,8 +95,18 @@ export function createAuthoringAgent(subject: {
       const setups = [authoringCase.startingPoint.setup, authoringCase.setup].filter(
         (setup): setup is AuthoringSetup => setup !== undefined,
       );
+      const timings = new BenchmarkTimings();
+      timings.record("run.context", 0, "success", {
+        sourceArchiveBytes: subject.archive.length,
+        dependencyArchiveBytes: subject.dependencyArchive.length,
+        sourceDigest: subject.digest,
+        dependencyDigest: subject.dependencyDigest,
+        startingPoint: authoringCase.startingPoint.id,
+        setupCount: setups.length,
+      });
       const sandbox = createDependencyCachedSandbox({
         archive: subject.archive,
+        dependencyArchive: subject.dependencyArchive,
         dependencyDigest: subject.dependencyDigest,
         ports: [HARNESS_BRIDGE_PORT, ...new Set(setups.flatMap((setup) => setup.ports ?? []))],
         env: {
@@ -67,6 +115,7 @@ export function createAuthoringAgent(subject: {
           ...Object.assign({}, ...setups.map((setup) => setup.environment ?? {})),
         },
         log,
+        timings,
       });
       const startedAt = Date.now();
       const commands: string[] = [];
@@ -83,28 +132,38 @@ export function createAuthoringAgent(subject: {
           port: HARNESS_BRIDGE_PORT,
         }),
         sandbox,
+        tools: INTERACTIVE_QUESTION_TOOL,
         sandboxConfig: {
           workDir: WORKSPACE,
           bootstrapHash: bootstrapHash(authoringCase, subject),
           onBootstrap: async ({ session: bootstrap, workDir }) => {
             const bootstrapSandbox = bootstrap as HarnessV1NetworkSandboxSession;
             const context = setupContext(bootstrapSandbox, workDir);
-            for (const setup of setups) await setup.onBootstrap?.(context);
             log("[setup] building the selected eve source");
             await bootstrapSubject(
               bootstrapSandbox,
               workDir,
               authoringCase.startingPoint.workspace,
               subject.archive,
+              timings,
             );
+            // Case setup runs against the finished starting point. A setup that
+            // installs a fixture dependency would otherwise create the project's
+            // `package.json` itself, and `eve init` would then treat the
+            // workspace as an existing package and skip its own scaffold.
+            await timings.measure("subject.case-bootstrap", async () => {
+              for (const setup of setups) await setup.onBootstrap?.(context);
+            });
           },
           onSession: async ({ session: current, sessionWorkDir }) => {
             activeSandbox = current as HarnessV1NetworkSandboxSession;
             workspace = sessionWorkDir;
             const context = setupContext(activeSandbox, workspace);
-            for (const setup of setups) await setup.onSession?.(context);
+            await timings.measure("session.setup", async () => {
+              for (const setup of setups) await setup.onSession?.(context);
+              if (options.agentOptions?.agentsMd !== true) await installBaselineEveWrapper(context);
+            });
             if (options.agentOptions?.agentsMd !== true) {
-              await installBaselineEveWrapper(context);
               await context.run("rm -f AGENTS.md CLAUDE.md GEMINI.md");
             }
           },
@@ -113,7 +172,7 @@ export function createAuthoringAgent(subject: {
       });
 
       try {
-        session = await withBootstrapInitialization(bootstrapHash(authoringCase, subject), () =>
+        session = await timings.measure("session.create", () =>
           agent.createSession({ abortSignal: options.signal }),
         );
         if (activeSandbox === undefined || workspace === undefined) {
@@ -126,26 +185,48 @@ export function createAuthoringAgent(subject: {
           send: async (prompt) => {
             transcript.push({ role: "user", content: prompt });
             if (verbose) console.log(`[user] ${prompt}`);
-            const result = verbose
-              ? await streamTurn(agent, session!, prompt, options.timeout, options.signal)
-              : await agent.generate({
-                  session: session!,
-                  prompt,
-                  timeout: options.timeout,
-                  abortSignal: options.signal,
-                });
-            transcript.push({
-              role: "assistant",
-              content: result.text,
-              toolCalls: authoringToolCalls(result.toolCalls),
-              usage: normalizeUsage(result.usage),
-            });
+            const turn = transcript.filter((entry) => entry.role === "user").length;
+            const result = await timings.measure(`agent.turn.${turn}`, () =>
+              runTurn({
+                agent,
+                session: session!,
+                prompt,
+                timeout: options.timeout,
+                verbose,
+                abortSignal: options.signal,
+              }),
+            );
+            const toolCalls = result.toolCalls;
+            const usage = result.usage;
+            transcript.push({ role: "assistant", content: result.text, toolCalls, usage });
+            const details: Record<string, string | number | boolean> = {
+              promptCharacters: prompt.length,
+              responseCharacters: result.text.length,
+              toolCalls: toolCalls.length,
+              inputTokens: usage.inputTokens,
+              outputTokens: usage.outputTokens,
+              reasoningTokens: usage.reasoningTokens,
+            };
+            if (result.stall !== undefined) details.stall = result.stall;
+            timings.record(
+              `agent.turn.${turn}.summary`,
+              0,
+              result.stall === undefined ? "success" : "failure",
+              details,
+            );
+            if (result.stall !== undefined) log(`[turn ${turn}] ${result.stall}`);
             commands.push(...shellCommands(result.toolCalls));
-            return { text: result.text, toolCalls: authoringToolCalls(result.toolCalls) };
+            return { text: result.text, toolCalls };
           },
         });
 
+        const projectWorkspace =
+          authoringCase.projectDirectory === undefined
+            ? workspace
+            : `${workspace}/${authoringCase.projectDirectory}`;
         const context = setupContext(activeSandbox, workspace);
+        const graderContext = setupContext(activeSandbox, projectWorkspace);
+        await prepareGraderDirectory(context);
         await context.write(
           `${AGENT_EVAL_DIRECTORY}/results.json`,
           JSON.stringify({ o11y: { shellCommands: commands.map((command) => ({ command })) } }),
@@ -155,38 +236,38 @@ export function createAuthoringAgent(subject: {
           JSON.stringify(transcript),
         );
         await Promise.all([
-          context.write(
-            `${AGENT_EVAL_DIRECTORY}/EVAL.test.ts`,
+          graderContext.write(
+            `${POST_RUN_GRADER_DIRECTORY}/EVAL.test.ts`,
             readFileSync(`${fixturePath}/EVAL.ts`, "utf8"),
           ),
-          context.write(
-            `${AGENT_EVAL_DIRECTORY}/grader.ts`,
+          graderContext.write(
+            `${POST_RUN_GRADER_DIRECTORY}/grader.ts`,
             readFileSync(new URL("./grader.ts", import.meta.url), "utf8"),
           ),
-          context.write(
-            `${AGENT_EVAL_DIRECTORY}/paths.ts`,
+          graderContext.write(
+            `${POST_RUN_GRADER_DIRECTORY}/paths.ts`,
             readFileSync(new URL("./paths.ts", import.meta.url), "utf8"),
           ),
-          context.write(
-            `${AGENT_EVAL_DIRECTORY}/protocol.ts`,
+          graderContext.write(
+            `${POST_RUN_GRADER_DIRECTORY}/protocol.ts`,
             readFileSync(new URL("./protocol.ts", import.meta.url), "utf8"),
           ),
         ]);
 
         log("[grade] running deterministic assertions");
-        const test = await resultOf(
-          activeSandbox,
-          `vitest run ${workspace}/${AGENT_EVAL_DIRECTORY}/EVAL.test.ts`,
-          workspace,
+        const test = await timings.measure("validation.grader", () =>
+          resultOf(
+            activeSandbox!,
+            `vitest run ${POST_RUN_GRADER_DIRECTORY}/EVAL.test.ts`,
+            projectWorkspace,
+          ),
         );
         const scriptsResults = Object.fromEntries(
           await Promise.all(
             (options.scripts ?? []).map(async (script) => {
               log(`[${script}] running`);
-              const result = await resultOf(
-                activeSandbox!,
-                `npm run ${shellQuote(script)}`,
-                workspace,
+              const result = await timings.measure(`validation.${script}`, () =>
+                resultOf(activeSandbox!, `npm run ${shellQuote(script)}`, projectWorkspace),
               );
               return [
                 script,
@@ -196,6 +277,12 @@ export function createAuthoringAgent(subject: {
           ),
         );
         const scriptsPassed = Object.values(scriptsResults).every((result) => result.success);
+        timings.record("run.total", Date.now() - startedAt);
+        await context.write(
+          `${AGENT_EVAL_DIRECTORY}/timings.json`,
+          JSON.stringify(timings.entries),
+        );
+        logTimingSummary(log, timings);
         log(`[result] ${test.exitCode === 0 && scriptsPassed ? "passed" : "failed"}`);
         return {
           success: test.exitCode === 0 && scriptsPassed,
@@ -207,12 +294,24 @@ export function createAuthoringAgent(subject: {
           transcript: harnessTranscript(transcript),
           scriptsResults,
           sandboxId: activeSandbox.id,
+          generatedFiles: timingArtifact(timings),
         };
       } catch (error) {
+        timings.record("run.total", Date.now() - startedAt, "failure");
         if (activeSandbox !== undefined && workspace !== undefined) {
-          await setupContext(activeSandbox, workspace)
-            .write(`${AGENT_EVAL_DIRECTORY}/harness-transcript.json`, JSON.stringify(transcript))
-            .catch(() => undefined);
+          await prepareGraderDirectory(setupContext(activeSandbox, workspace)).catch(
+            () => undefined,
+          );
+          await Promise.all([
+            setupContext(activeSandbox, workspace).write(
+              `${AGENT_EVAL_DIRECTORY}/harness-transcript.json`,
+              JSON.stringify(transcript),
+            ),
+            setupContext(activeSandbox, workspace).write(
+              `${AGENT_EVAL_DIRECTORY}/timings.json`,
+              JSON.stringify(timings.entries),
+            ),
+          ]).catch(() => undefined);
         }
         const result: AgentRunResult = {
           success: false,
@@ -221,6 +320,7 @@ export function createAuthoringAgent(subject: {
           duration: Date.now() - startedAt,
           transcript: harnessTranscript(transcript),
           scriptsResults: {},
+          generatedFiles: timingArtifact(timings),
         };
         if (activeSandbox !== undefined) result.sandboxId = activeSandbox.id;
         return result;
@@ -231,34 +331,175 @@ export function createAuthoringAgent(subject: {
   };
 }
 
-async function streamTurn(
-  agent: HarnessAgent,
-  session: HarnessAgentSession,
-  prompt: string,
-  timeout: number,
-  abortSignal?: AbortSignal,
-): Promise<AuthoringTurn & { usage: AuthoringTokenUsage }> {
-  const result = await agent.stream({ session, prompt, timeout, abortSignal });
+interface AuthoringTurnResult extends AuthoringTurn {
+  readonly usage: AuthoringTokenUsage;
+  /** Set when the turn did not finish on its own and was cut short. */
+  readonly stall?: string;
+}
+
+// One streaming path for every turn, so a turn that never finishes still yields
+// the text and tool calls it produced. The underlying runtime can leave a turn
+// open indefinitely after the model's last message, and a turn that consumed the
+// whole eval budget used to discard the transcript along with it.
+async function runTurn(input: {
+  readonly agent: AuthoringHarnessAgent;
+  readonly session: HarnessAgentSession;
+  readonly prompt: string;
+  readonly timeout: number;
+  readonly verbose: boolean;
+  readonly abortSignal?: AbortSignal;
+}): Promise<AuthoringTurnResult> {
+  const { agent, session, prompt, timeout, verbose } = input;
+  const steps: string[] = [];
+  const toolCalls: Array<{ name: string; input: unknown }> = [];
+  const usage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    cachedInputTokens: 0,
+    cacheWriteTokens: 0,
+  };
+  let current = "";
   let lineOpen = false;
-  for await (const part of result.fullStream) {
-    if (part.type === "text-delta") {
-      if (!lineOpen) {
-        process.stdout.write("[assistant] ");
-        lineOpen = true;
+  const turnTimeout = Math.min(timeout, TURN_TIMEOUT_SECONDS);
+  let stall: string | undefined;
+
+  // The runtime routinely leaves a turn open after the model's last message and
+  // honors neither the total nor the per-chunk budget the SDK passes down, so
+  // the harness has to decide when a turn is over. Text the model never follows
+  // with a tool call is its closing message, so silence after it ends the turn;
+  // silence anywhere else can still be work in flight.
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  input.abortSignal?.addEventListener("abort", abort, { once: true });
+  const deadline = Date.now() + turnTimeout * 1000;
+
+  try {
+    const result = await agent.stream({
+      session,
+      prompt,
+      timeout: { totalMs: turnTimeout * 1000, chunkMs: TURN_STALL_SECONDS * 1000 },
+      abortSignal: controller.signal,
+    });
+    const stream = result.fullStream[Symbol.asyncIterator]();
+    const tracing = process.env.EVE_BENCHMARK_TRACE_PARTS === "1";
+    let lastPartAt = Date.now();
+    let pendingTools = 0;
+    let stepCalledTool = false;
+    let turnLooksDone = false;
+    for (;;) {
+      const idle = pendingTools > 0 ? Number.POSITIVE_INFINITY : idleBudget(turnLooksDone);
+      const budget = Math.min(idle, deadline - Date.now());
+      const next = await withDeadline(stream.next(), budget);
+      if (next === "expired") {
+        if (Date.now() >= deadline) stall = `turn exceeded its ${turnTimeout}s budget`;
+        else if (!turnLooksDone) stall = `turn produced no output for ${TURN_STALL_SECONDS}s`;
+        await settleStalledTurn(stream, controller, stall ?? "turn ended on its closing message");
+        break;
       }
-      process.stdout.write(part.text);
-    } else if (part.type === "tool-call") {
-      if (lineOpen) process.stdout.write("\n");
+      if (next.done === true) break;
+      const part = next.value;
+      if (tracing) {
+        const now = Date.now();
+        console.log(`[part] +${((now - lastPartAt) / 1000).toFixed(1)}s ${part.type}`);
+        lastPartAt = now;
+      }
+      if (part.type === "text-delta") {
+        current += part.text;
+        // Text the model is not following with a tool call is it signing off.
+        // The runtime often emits nothing after that closing message, not even
+        // the step boundary, so the text itself has to be the signal.
+        turnLooksDone = true;
+        if (verbose) {
+          if (!lineOpen) process.stdout.write("[assistant] ");
+          lineOpen = true;
+          process.stdout.write(part.text);
+        }
+        continue;
+      }
+      if (verbose && lineOpen) process.stdout.write("\n");
       lineOpen = false;
-      console.log(`[tool] ${formatToolCall(part.toolName, part.input)}`);
+      if (part.type === "tool-call") {
+        // Only a tool call reopens the turn. The parts that bracket a message
+        // (`text-start`, `text-end`) are not work, and treating them as work is
+        // what used to hide a closing message behind the full stall budget.
+        turnLooksDone = false;
+        pendingTools += 1;
+        stepCalledTool = true;
+        toolCalls.push({ name: part.toolName, input: part.input });
+        if (verbose) console.log(`[tool] ${formatToolCall(part.toolName, part.input)}`);
+      } else if (part.type === "tool-result" || part.type === "tool-error") {
+        pendingTools = Math.max(0, pendingTools - 1);
+      } else if (part.type === "finish-step") {
+        if (current.trim().length > 0) steps.push(current.trim());
+        current = "";
+        addUsage(usage, (part as { usage?: unknown }).usage);
+        turnLooksDone = !stepCalledTool;
+        stepCalledTool = false;
+      } else if (part.type === "finish") {
+        turnLooksDone = true;
+      }
+    }
+  } catch (error) {
+    stall = `turn did not finish: ${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    input.abortSignal?.removeEventListener("abort", abort);
+    if (verbose && lineOpen) process.stdout.write("\n");
+  }
+
+  if (current.trim().length > 0) steps.push(current.trim());
+  const turn: AuthoringTurnResult = { text: steps.join("\n\n"), toolCalls, usage };
+  return stall === undefined ? turn : { ...turn, stall };
+}
+
+function idleBudget(turnLooksDone: boolean): number {
+  return turnLooksDone ? CLOSING_IDLE_MILLIS : TURN_STALL_SECONDS * 1000;
+}
+
+// Aborting is what marks the turn finished. Walking away from the stream is not
+// enough: the session keeps the turn open and rejects the next prompt as one
+// already in progress, which loses every remaining turn of the case. Draining
+// afterwards gives that settlement time to land before the next prompt.
+async function settleStalledTurn(
+  stream: AsyncIterator<unknown>,
+  controller: AbortController,
+  reason: string,
+): Promise<void> {
+  controller.abort(new Error(reason));
+  await withDeadline(
+    (async () => {
+      try {
+        while ((await stream.next()).done !== true);
+      } catch {
+        // The abort surfaces here as a rejection, which is the settlement.
+      }
+    })(),
+    TURN_SETTLE_MILLIS,
+  );
+}
+
+async function withDeadline<T>(promise: Promise<T>, millis: number): Promise<T | "expired"> {
+  if (millis <= 0) return "expired";
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<"expired">((resolve) => {
+        timer = setTimeout(() => resolve("expired"), millis);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+function addUsage(total: Record<string, number>, value: unknown): void {
+  if (typeof value !== "object" || value === null) return;
+  for (const [field, amount] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof amount === "number" && Number.isFinite(amount) && total[field] !== undefined) {
+      total[field] += amount;
     }
   }
-  if (lineOpen) process.stdout.write("\n");
-  return {
-    text: await result.text,
-    toolCalls: authoringToolCalls(await result.toolCalls),
-    usage: normalizeUsage(await result.usage),
-  };
 }
 
 function openCodeModel(model: string): string {
@@ -266,30 +507,6 @@ function openCodeModel(model: string): string {
   // OpenCode's Moonshot provider supplies the OpenAI-compatible transport; the
   // canonical model ID still makes AI Gateway select the requested provider.
   return `moonshotai/${gatewayModel}`;
-}
-
-function normalizeUsage(value: unknown): AuthoringTokenUsage {
-  const usage = value as Record<string, unknown>;
-  const number = (field: string) => {
-    const value = usage[field];
-    return typeof value === "number" && Number.isFinite(value) ? value : 0;
-  };
-  return {
-    inputTokens: number("inputTokens"),
-    outputTokens: number("outputTokens"),
-    reasoningTokens: number("reasoningTokens"),
-    cachedInputTokens: number("cachedInputTokens"),
-    cacheWriteTokens: number("cacheWriteTokens"),
-  };
-}
-
-function authoringToolCalls(
-  toolCalls: ReadonlyArray<{ name?: string; toolName?: string; input: unknown }>,
-): ReadonlyArray<{ name: string; input: unknown }> {
-  return toolCalls.flatMap((call) => {
-    const name = call.toolName ?? call.name;
-    return name === undefined ? [] : [{ name, input: call.input }];
-  });
 }
 
 function formatToolCall(name: string, input: unknown): string {
@@ -305,37 +522,42 @@ async function bootstrapSubject(
   workspace: string,
   workspaceKind: "scaffolded" | "empty",
   archive: Uint8Array,
+  timings: BenchmarkTimings,
 ): Promise<void> {
-  await sandbox.writeBinaryFile({ path: SOURCE_ARCHIVE_PATH, content: archive });
-  await run(
-    sandbox,
-    [
-      `rm -rf ${SOURCE_ROOT} && mkdir -p ${SOURCE_ROOT}`,
-      `tar -xzf ${SOURCE_ARCHIVE_PATH} -C ${SOURCE_ROOT}`,
-      `pnpm --dir ${SOURCE_ROOT} install --frozen-lockfile --offline`,
-      `pnpm --dir ${SOURCE_ROOT} --filter eve build`,
-      "mkdir -p /tmp/eve-package",
-      `pnpm --dir ${SOURCE_ROOT}/packages/eve pack --pack-destination /tmp/eve-package`,
-      `mv $(find /tmp/eve-package -name '*.tgz' -print -quit) ${EVE_PACKAGE_PATH}`,
-      `npm install --global --package-lock=false ${EVE_PACKAGE_PATH}`,
-      'ln -sf "$(npm prefix --global)/bin/eve" /usr/local/bin/eve',
-      "command -v eve",
-    ].join(" && "),
+  await timings.measure("subject.source-upload", async () => {
+    await sandbox.writeBinaryFile({ path: SOURCE_ARCHIVE_PATH, content: archive });
+  });
+  await timings.measure("subject.source-install", () =>
+    run(
+      sandbox,
+      `rm -rf ${SOURCE_ROOT} && mkdir -p ${SOURCE_ROOT} && tar -xzf ${SOURCE_ARCHIVE_PATH} -C ${SOURCE_ROOT} && pnpm --dir ${SOURCE_ROOT} install --frozen-lockfile --offline`,
+    ),
   );
-  const artifactsRoot = `${workspace}/${AGENT_EVAL_DIRECTORY}`;
+  await timings.measure("subject.eve-build", () =>
+    run(sandbox, `pnpm --dir ${SOURCE_ROOT} --filter eve build`),
+  );
+  await timings.measure("subject.eve-pack-and-cli", () =>
+    run(
+      sandbox,
+      `mkdir -p /tmp/eve-package && pnpm --dir ${SOURCE_ROOT}/packages/eve pack --pack-destination /tmp/eve-package && mv $(find /tmp/eve-package -name '*.tgz' -print -quit) ${EVE_PACKAGE_PATH} && ln -sf ${SOURCE_ROOT}/packages/eve/bin/eve.js /usr/local/bin/eve && command -v eve`,
+    ),
+  );
   const workspaceCommands: string[] = [];
   if (workspaceKind === "scaffolded") {
     workspaceCommands.push(`cd ${shellQuote(workspace)} && AI_AGENT=benchmark eve init .`);
   }
+  // Grader files must not change what subject commands observe in the project directory.
   workspaceCommands.push(
-    `mkdir -p ${artifactsRoot}`,
-    `printf '{"private":true,"type":"module"}\\n' >${artifactsRoot}/package.json`,
+    `rm -rf ${AGENT_EVAL_DIRECTORY} && mkdir -p ${AGENT_EVAL_DIRECTORY}`,
+    `printf '{"private":true,"type":"module"}\\n' >${AGENT_EVAL_DIRECTORY}/package.json`,
     "command -v vitest >/dev/null",
   );
   if (workspaceKind === "scaffolded") {
     workspaceCommands.push(`test -f ${workspace}/package.json`);
   }
-  await run(sandbox, workspaceCommands.join(" && "));
+  await timings.measure("subject.workspace-bootstrap", () =>
+    run(sandbox, workspaceCommands.join(" && ")),
+  );
 }
 
 function setupContext(
@@ -358,9 +580,18 @@ function setupContext(
   };
 }
 
+// Created only after the agent's turns finish: an `empty` starting point has to
+// look empty to `eve init .`, which refuses to scaffold into a directory that
+// already holds entries it does not recognize.
+async function prepareGraderDirectory(context: AuthoringSetupContext): Promise<void> {
+  await context.run(
+    `mkdir -p ${AGENT_EVAL_DIRECTORY} && printf '{"private":true,"type":"module"}\\n' >${AGENT_EVAL_DIRECTORY}/package.json`,
+  );
+}
+
 async function installBaselineEveWrapper(context: AuthoringSetupContext): Promise<void> {
   await context.run(`
-cli_path="$(npm prefix --global)/bin/eve"
+cli_path="/usr/local/bin/eve"
 test -x "$cli_path"
 real_cli="$cli_path.guided"
 if [ ! -e "$real_cli" ]; then mv "$cli_path" "$real_cli"; fi
@@ -373,6 +604,16 @@ exit "$status"
 EOF
 chmod +x "$cli_path"
 `);
+}
+
+function timingArtifact(timings: BenchmarkTimings): Record<string, string> {
+  return { "benchmark/timings.json": `${JSON.stringify(timings.entries, null, 2)}\n` };
+}
+
+function logTimingSummary(log: (message: string) => void, timings: BenchmarkTimings): void {
+  for (const timing of timings.entries) {
+    log(`[timing] ${timing.phase}: ${timing.durationMs}ms (${timing.outcome})`);
+  }
 }
 
 function harnessTranscript(transcript: ReadonlyArray<AuthoringTranscriptEntry>): string {
@@ -416,43 +657,6 @@ function bootstrapHash(authoringCase: AuthoringCase, subject: { readonly digest:
     .map((setup) => setup.id)
     .join("-");
   return `eve-authoring-${BOOTSTRAP_VERSION}-${subject.digest}-${authoringCase.startingPoint.id}-${setupIds}`;
-}
-
-const bootstrapCoordination = globalThis as typeof globalThis & {
-  __eveAuthoringBootstrapLocks?: Map<string, Promise<void>>;
-  __eveAuthoringBootstrapsReady?: Set<string>;
-};
-
-async function withBootstrapInitialization<T>(
-  key: string,
-  operation: () => Promise<T>,
-): Promise<T> {
-  const ready = (bootstrapCoordination.__eveAuthoringBootstrapsReady ??= new Set());
-  if (ready.has(key)) return operation();
-
-  const locks = (bootstrapCoordination.__eveAuthoringBootstrapLocks ??= new Map());
-  const previous = locks.get(key) ?? Promise.resolve();
-  let release = () => {};
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const tail = previous.then(() => current);
-  locks.set(key, tail);
-
-  await previous;
-  if (ready.has(key)) {
-    release();
-    if (locks.get(key) === tail) locks.delete(key);
-    return operation();
-  }
-  try {
-    const result = await operation();
-    ready.add(key);
-    return result;
-  } finally {
-    release();
-    if (locks.get(key) === tail) locks.delete(key);
-  }
 }
 
 async function resultOf(

@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
 status: draft
-last_updated: "2026-08-01"
+last_updated: "2026-08-17"
 ---
 
 # Subagents as tasks
@@ -295,7 +295,9 @@ local and remote children alike:
 
 The proposed routing policy makes terminal updates and `input_required` wake a parked parent
 session. During an active turn, inbound task events wait for the next safe step boundary. They
-never interrupt an active model call.
+never interrupt an active model call. A task notification starts a conditionally delivered parent
+turn: the model sees the notification and may act on it, but eve does not require a user-visible
+channel message. A human message or input response remains required delivery.
 
 ```mermaid
 sequenceDiagram
@@ -404,7 +406,7 @@ than MCP compatibility.
    run's stream index remain internal?
 2. What retention and TTL apply to terminal records and unanswered `input_required` tasks?
 3. What is the cross-deployment version negotiation for task callbacks during rolling deploys?
-4. Which task events enter model context, and how are repeated progress messages coalesced?
+4. How are repeated progress messages coalesced before they start parent model turns?
 5. How are child token usage and remaining parent budgets accounted after a background child
    completes on a later turn?
 

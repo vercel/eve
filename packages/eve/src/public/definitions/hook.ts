@@ -26,6 +26,7 @@ export interface HookEventMap {
   readonly "compaction.requested": ProtocolEvent<"compaction.requested">;
   readonly "context.cleared": ProtocolEvent<"context.cleared">;
   readonly "input.requested": ProtocolEvent<"input.requested">;
+  readonly "input.resolved": ProtocolEvent<"input.resolved">;
   readonly "message.appended": ProtocolEvent<"message.appended">;
   readonly "message.completed": ProtocolEvent<"message.completed">;
   readonly "message.received": ProtocolEvent<"message.received">;

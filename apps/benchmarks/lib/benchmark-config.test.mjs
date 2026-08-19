@@ -27,6 +27,7 @@ test("publishes only compatibility-validated models", () => {
     "author-004-packaged-skill",
     "author-005-conditional-approval",
     "author-006-custom-channel",
+    "author-007-digest-schedule",
   ]);
   assert.throws(
     () => findPublishedBenchmarkModel("grok-4-6"),

@@ -36,6 +36,7 @@ import {
   ParentSessionKey,
   ParentTraceContextKey,
   SessionCallbackKey,
+  TurnTaskDeliveryKey,
 } from "#context/keys.js";
 import {
   buildDynamicInstructionMessages,
@@ -60,6 +61,7 @@ import {
   createCompactionCompletedEvent,
   createCompactionRequestedEvent,
   createContextClearedEvent,
+  createInputResolvedEvent,
   createInputRequestedEvent,
   createResultCompletedEvent,
   createSessionWaitingEvent,
@@ -124,6 +126,7 @@ import {
   extractQuestionInputRequests,
   extractToolApprovalInputRequests,
 } from "#harness/input-extraction.js";
+import { renderPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
 import { createToolResultMessagePartFromToolError } from "#harness/action-result-helpers.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import {
@@ -1034,13 +1037,33 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       return { next: null, session: pending.session };
     }
 
-    if (config.instrumentation?.hooks !== undefined && pending.resolvedInputs !== undefined) {
+    if (pending.resolvedInputs !== undefined) {
       for (const batch of pending.resolvedInputs) {
-        await publishInputResolutions({
-          batch,
-          hooks: config.instrumentation.hooks,
-          sessionId: session.sessionId,
-        });
+        if (config.instrumentation?.hooks !== undefined) {
+          await publishInputResolutions({
+            batch,
+            hooks: config.instrumentation.hooks,
+            sessionId: session.sessionId,
+          });
+        }
+        if (emit) {
+          await emit(
+            createInputResolvedEvent({
+              resolutions: batch.inputs.map((resolved) => {
+                const resolution = {
+                  kind: resolved.request.kind,
+                  outcome: resolved.outcome,
+                  requestId: resolved.request.requestId,
+                };
+                if (resolved.response === undefined) return resolution;
+                return { ...resolution, response: resolved.response };
+              }),
+              sequence: batch.event.sequence,
+              stepIndex: batch.event.stepIndex,
+              turnId: batch.event.turnId,
+            }),
+          );
+        }
       }
     }
 
@@ -1226,10 +1249,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const approvedTools = getApprovedTools(session);
 
     const emptyDeliveryEnabled =
+      // A structured-output run must always produce its declared result.
       session.outputSchema === undefined &&
+      // Eligibility requires durable framework provenance from the active context.
       ctx !== undefined &&
-      isScheduleAppAuth(ctx.get(AuthKey)) &&
-      ctx.get(ParentSessionKey) === undefined;
+      // A child must always return its result to its parent, even when framework-triggered.
+      ctx.get(ParentSessionKey) === undefined &&
+      // A schedule-initiated root turn may have nothing worth delivering.
+      (isScheduleAppAuth(ctx.get(AuthKey)) ||
+        // A task-notification root turn may act on the wake without messaging the user.
+        ctx.get(TurnTaskDeliveryKey) === true);
 
     // --- Execute via ToolLoopAgent ------------------------------------------
 
@@ -1472,6 +1501,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           bridgeIntegration,
         ),
         toolApproval: buildToolApproval(modelTools),
+        toolChoice: hasPendingApprovalBatch(session) ? ("none" as const) : undefined,
         tools: effectiveTools,
       };
       const agent = new ToolLoopAgent(agentSettings);
@@ -2486,6 +2516,13 @@ async function handleStepResult(input: {
     excludedCallIds: new Set([...invalidInputToolCallIds, ...approvalRequestCallIds]),
   });
   const inputRequests: InputRequest[] = [...approvalRequests, ...questionRequests];
+  const pendingApprovals = renderPendingApprovalsSnippet(approvalRequests);
+  const parkedInputHistory: ModelMessage[] = [
+    ...promptMessages,
+    ...(pendingApprovals === undefined
+      ? []
+      : [{ content: pendingApprovals, role: "user" as const }]),
+  ];
   const advertisedRuntimeActionTools = getAdvertisedTools({
     delegatedCaller: input.delegatedCaller,
     session: baseSession,
@@ -2548,7 +2585,7 @@ async function handleStepResult(input: {
         turnId: emissionState.turnId,
       },
       responseMessages,
-      session: { ...baseSession, history: [...promptMessages] },
+      session: { ...baseSession, history: parkedInputHistory },
     });
 
     // The runtime-action batch already owns the shared assistant response.
@@ -2605,7 +2642,7 @@ async function handleStepResult(input: {
         })
         .map((request) => request.requestId),
       responseMessages,
-      session: { ...baseSession, history: [...promptMessages] },
+      session: { ...baseSession, history: parkedInputHistory },
     });
 
     if (emit) {

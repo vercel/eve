@@ -149,6 +149,9 @@ importers:
       jiti:
         specifier: 2.7.0
         version: 2.7.0
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

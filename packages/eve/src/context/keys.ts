@@ -70,6 +70,8 @@ export const SessionIdKey = new ContextKey<string>("eve.sessionId");
 export const ContinuationTokenKey = new ContextKey<string>("eve.continuationToken");
 export const ChannelRequestIdKey = new ContextKey<string>("eve.channelRequestId");
 export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.channelDelivery");
+/** Whether the active turn began from a task-addressed durable delivery. */
+export const TurnTaskDeliveryKey = new ContextKey<boolean>("eve.turnTaskDelivery");
 export interface ActiveChannelDelivery {
   readonly agentName?: string;
   readonly delivery: InstrumentationChannelDeliveryRef;

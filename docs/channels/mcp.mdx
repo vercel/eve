@@ -1,6 +1,6 @@
 ---
-title: "MCP"
-description: "Publish an eve agent as a durable MCP invocation service with route authentication and OAuth discovery."
+title: "MCP Channel"
+description: "Publish an eve agent as an MCP server with auth support."
 ---
 
 The MCP channel lets clients such as Claude Code delegate durable work to an eve agent through four tools: `agent_start`, `agent_get`, `agent_update`, and `agent_cancel`.
@@ -12,31 +12,31 @@ Use an [MCP connection](../connections/mcp) instead when your eve agent needs to
 Create `agent/channels/mcp.ts`. Authentication is required explicitly, even during development.
 
 ```ts title="agent/channels/mcp.ts"
-import { localDev, vercelOidc } from "eve/channels/auth";
+import { localDev } from "eve/channels/auth";
 import { mcpChannel } from "eve/channels/mcp";
 
 export default mcpChannel({
-  auth: [vercelOidc(), localDev()],
+  auth: localDev(),
 });
 ```
 
-This accepts Vercel-issued bearer tokens in a deployment and admits a synthetic local principal under `eve dev` or `vercel dev`. `localDev()` checks the running environment, not the request hostname: accessing an `eve start` production process through localhost does not activate it.
+This accepts a synthetic local principal under `eve dev` or `vercel dev` and rejects all requests in production. Before deploying, replace it with one of the production authentication modes below. `localDev()` checks the running environment, not the request hostname: accessing an `eve start` production process through localhost does not activate it.
 
 ### Routes
 
 The default Streamable HTTP endpoint is `/eve/v1/mcp`. Set `route` when the application should publish it somewhere else:
 
 ```ts title="agent/channels/mcp.ts"
-import { none } from "eve/channels/auth";
+import { localDev } from "eve/channels/auth";
 import { mcpChannel } from "eve/channels/mcp";
 
 export default mcpChannel({
-  auth: none(),
+  auth: localDev(),
   route: "/mcp",
 });
 ```
 
-`none()` makes the endpoint public; use it only when anonymous access is intentional. The channel registers `GET`, `POST`, and `DELETE` at the selected route.
+The channel registers `GET`, `POST`, and `DELETE` at the selected route.
 
 ## Interactive OAuth
 
@@ -49,18 +49,17 @@ import { mcpChannel } from "eve/channels/mcp";
 const issuer = "https://auth.example.com";
 const resource = "https://agent.example.com/eve/v1/mcp";
 
+const authenticateRequest = oidc({
+  issuer,
+  audiences: [resource],
+});
+
 export default mcpChannel({
-  auth: oauthResource(
-    oidc({
-      audiences: [resource],
-      issuer,
-    }),
-    {
-      issuer,
-      resource,
-      scopes: ["agent:invoke"],
-    },
-  ),
+  auth: oauthResource(authenticateRequest, {
+    issuer,
+    resource,
+    scopes: ["agent:invoke"],
+  }),
 });
 ```
 
@@ -131,6 +130,21 @@ The metadata endpoint serves cross-origin `GET`, `HEAD`, and `OPTIONS` requests 
 When a protected request has no accepted credentials, eve returns a Bearer challenge. A supplied Bearer token rejected by every strategy gets `error="invalid_token"`. To report a verified caller that lacks the necessary scopes, throw `ForbiddenError` with an `error="insufficient_scope"` Bearer challenge. The MCP channel preserves that challenge and adds the protected-resource metadata URL.
 
 For the complete strategy and auth-walk model, see [Authentication](../guides/auth-and-route-protection).
+
+### Public access
+
+To intentionally expose the MCP endpoint without authentication, use `none()`:
+
+```ts title="agent/channels/mcp.ts"
+import { none } from "eve/channels/auth";
+import { mcpChannel } from "eve/channels/mcp";
+
+export default mcpChannel({
+  auth: none(),
+});
+```
+
+This allows anyone to invoke the agent. Every caller shares the anonymous principal, so invocation IDs become bearer capabilities until workflow retention expires. Use public access only when anonymous invocation is intentional.
 
 ## HTTP security
 

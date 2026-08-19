@@ -30,7 +30,50 @@ export interface MaterializedAuthoredModuleIndex {
   readonly version: 3;
 }
 
-export async function materializeAuthoredModules(input: {
+type PreparedMaterializedInstrumentation =
+  | { readonly kind: "file"; readonly moduleCode: string }
+  | {
+      readonly kind: "directory";
+      readonly moduleCodeBySlot: Readonly<Record<string, string>>;
+    };
+
+export interface PreparedMaterializedAuthoredModules {
+  readonly instrumentation?: PreparedMaterializedInstrumentation;
+  readonly moduleMapCode: string;
+}
+
+export async function prepareMaterializedAuthoredModules(input: {
+  readonly manifest: CompiledAgentManifest;
+  readonly moduleMapPath: string;
+}): Promise<PreparedMaterializedAuthoredModules> {
+  const moduleMapCode = await bundleAuthoredModuleMapForGeneration(input);
+  const layout = resolveInstrumentationLayout({
+    agentRoot: input.manifest.agentRoot,
+    providersEnabled: input.manifest.config.experimental?.instrumentationProviders ?? false,
+  });
+  const externalDependencies = input.manifest.config.build?.externalDependencies ?? [];
+  const bundleInstrumentationModule = async (sourcePath: string): Promise<string> =>
+    await bundleAuthoredModuleForGeneration(sourcePath, { externalDependencies });
+  let instrumentation: PreparedMaterializedInstrumentation | undefined;
+
+  if (layout?.kind === "file") {
+    instrumentation = {
+      kind: "file",
+      moduleCode: await bundleInstrumentationModule(layout.modulePath),
+    };
+  } else if (layout?.kind === "directory") {
+    const moduleCodeBySlot: Record<string, string> = {};
+    for (const [slot, sourcePath] of Object.entries(layout.modulePathsBySlot)) {
+      moduleCodeBySlot[slot] = await bundleInstrumentationModule(sourcePath);
+    }
+    instrumentation = { kind: "directory", moduleCodeBySlot };
+  }
+
+  return instrumentation === undefined ? { moduleMapCode } : { instrumentation, moduleMapCode };
+}
+
+export async function writeMaterializedAuthoredModules(input: {
+  readonly prepared: PreparedMaterializedAuthoredModules;
   readonly runtimeAppRoot: string;
 }): Promise<MaterializedAuthoredModuleIndex> {
   const compileRoot = join(input.runtimeAppRoot, ".eve", "compile");
@@ -48,30 +91,20 @@ export async function materializeAuthoredModules(input: {
       }),
     )
     .update("\0");
-  const moduleMapCode = await bundleAuthoredModuleMapForGeneration({
-    manifest,
-    moduleMapPath: join(compileRoot, "module-map.mjs"),
-  });
   const moduleMapFileName = createMaterializedModuleFileName(
     ROOT_COMPILED_AGENT_NODE_ID,
     "module-map",
-    moduleMapCode,
+    input.prepared.moduleMapCode,
   );
   const moduleMapPath = join(MATERIALIZED_MODULES_DIRECTORY, moduleMapFileName);
 
-  await writeFile(join(modulesRoot, moduleMapFileName), moduleMapCode);
-  fingerprint.update("module-map\0").update(moduleMapCode).update("\0");
+  await writeFile(join(modulesRoot, moduleMapFileName), input.prepared.moduleMapCode);
+  fingerprint.update("module-map\0").update(input.prepared.moduleMapCode).update("\0");
 
-  const layout = resolveInstrumentationLayout({
-    agentRoot: manifest.agentRoot,
-    providersEnabled: manifest.config.experimental?.instrumentationProviders ?? false,
-  });
-  const externalDependencies = manifest.config.build?.externalDependencies ?? [];
   const materializeInstrumentationModule = async (
     sourceId: string,
-    sourcePath: string,
+    code: string,
   ): Promise<string> => {
-    const code = await bundleAuthoredModuleForGeneration(sourcePath, { externalDependencies });
     const fileName = createMaterializedModuleFileName(
       ROOT_COMPILED_AGENT_NODE_ID,
       `instrumentation:${sourceId}`,
@@ -85,15 +118,18 @@ export async function materializeAuthoredModules(input: {
 
   let instrumentation: MaterializedInstrumentation | undefined;
 
-  if (layout?.kind === "file") {
+  if (input.prepared.instrumentation?.kind === "file") {
     instrumentation = {
       kind: "file",
-      modulePath: await materializeInstrumentationModule("file", layout.modulePath),
+      modulePath: await materializeInstrumentationModule(
+        "file",
+        input.prepared.instrumentation.moduleCode,
+      ),
     };
-  } else if (layout?.kind === "directory") {
+  } else if (input.prepared.instrumentation?.kind === "directory") {
     const modulePathsBySlot: Record<string, string> = {};
-    for (const [slot, sourcePath] of Object.entries(layout.modulePathsBySlot)) {
-      modulePathsBySlot[slot] = await materializeInstrumentationModule(slot, sourcePath);
+    for (const [slot, code] of Object.entries(input.prepared.instrumentation.moduleCodeBySlot)) {
+      modulePathsBySlot[slot] = await materializeInstrumentationModule(slot, code);
     }
     instrumentation = { kind: "directory", modulePathsBySlot };
   }

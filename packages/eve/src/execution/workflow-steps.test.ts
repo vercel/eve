@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
 import type { DeliverPayload, SubagentInputRequestHookPayload } from "#channel/types.js";
-import { ContextContainer, loadContext } from "#context/container.js";
+import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import {
   AuthKey,
@@ -15,6 +15,7 @@ import {
   SessionDynamicToolMetadataKey,
   SessionDynamicToolRuntimeRevisionKey,
   SessionIdKey,
+  TurnTaskDeliveryKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
@@ -2011,6 +2012,37 @@ describe("turnStep", () => {
     expect(createDurableSessionState).toHaveBeenLastCalledWith({
       session: expect.objectContaining({ sessionId: "turn-step-session" }),
     });
+  });
+
+  it("sets and resets task-delivery provenance from durable deliveries", async () => {
+    const observedTaskDeliveries: unknown[] = [];
+    const session = createStubSession();
+    installSessionStoreMocks([session, session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => {
+        observedTaskDeliveries.push(contextStorage.getStore()?.get(TurnTaskDeliveryKey));
+        return { next: { done: true, output: "ok" }, session: stepSession };
+      };
+    });
+
+    const first = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "Background task task_1 is completed." }],
+        taskDeliveryId: "task_1:ready:completed",
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+    await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "What happened?" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: first.serializedContext,
+      sessionState: first.sessionState,
+    });
+
+    expect(observedTaskDeliveries).toEqual([true, false]);
   });
 
   it("projects a requested sleep onto the durable step result", async () => {

@@ -11,7 +11,7 @@ import type { InputResponse } from "#runtime/input/types.js";
 
 export type ObservedChannelDelivery<TState> =
   | (ChannelSendOptions<TState> & { readonly message: string | UserContent })
-  | (ChannelRespondOptions & { readonly inputResponses: readonly InputResponse[] });
+  | (ChannelRespondOptions<TState> & { readonly inputResponses: readonly InputResponse[] });
 
 type DeliveryObserver<TState> = (
   continuationToken: string,

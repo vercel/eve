@@ -48,6 +48,34 @@ describe("createChannelOperations", () => {
     });
   });
 
+  it("carries an input-response state patch through the durable delivery", async () => {
+    const runtime = createRuntime();
+    const { from } = createChannelOperations<{ responder: string }>({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      runtime,
+    });
+
+    await from("C1:T1").respond([{ optionId: "approve", requestId: "approval-1" }], {
+      auth: null,
+      state: { responder: "U_APPROVER" },
+    });
+
+    expect(runtime.dispatchContinuation).toHaveBeenCalledWith({
+      command: {
+        auth: null,
+        kind: "send",
+        payload: {
+          inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+          state: { responder: "U_APPROVER" },
+        },
+        requestId: undefined,
+        turnPolicy: undefined,
+      },
+      continuationToken: "slack:C1:T1",
+    });
+  });
+
   it("targets every control operation by raw channel-local address", async () => {
     const runtime = createRuntime();
     const { from } = createChannelOperations({
