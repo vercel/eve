@@ -66,6 +66,24 @@ describe("Slack status progress", () => {
       })),
     ]);
     expect(selectSlackProgressStatus(active)).toBe("Running tests (+1)");
+    const reported = reduceProgressCommand(active, {
+      commandId: "report",
+      events: [
+        {
+          eventId: "report",
+          kind: "report",
+          report: {
+            id: "report-call",
+            message: "Checking integration coverage",
+            reportedAt: "2026-08-19T12:00:01.000Z",
+          },
+          turn: active.turns["turn:root:t1"]!,
+        },
+      ],
+      kind: "progress",
+      version: 1,
+    });
+    expect(selectSlackProgressStatus(reported)).toBe("Checking integration coverage");
 
     const blocked = reduceProgressCommand(active, {
       commandId: "blocked",

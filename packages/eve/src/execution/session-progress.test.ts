@@ -59,6 +59,57 @@ describe("reduceProgressCommand", () => {
     expect(reduceProgressCommand(once, command(first.events, "command_2")).revision).toBe(1);
   });
 
+  it("replaces one report per turn and clears it at terminal settlement", () => {
+    const initial = reduceProgressCommand(
+      createProgressSnapshot(),
+      command([
+        {
+          eventId: "report-one",
+          kind: "report",
+          report: { id: "one", message: "Searching", reportedAt: turn.startedAt },
+          turn,
+        },
+        {
+          eventId: "report-two",
+          kind: "report",
+          report: { id: "two", message: "Testing", reportedAt: turn.startedAt },
+          turn,
+        },
+      ]),
+    );
+    expect(initial.turns[turn.id]?.report?.message).toBe("Testing");
+
+    const settled = reduceProgressCommand(
+      initial,
+      command(
+        [
+          {
+            eventId: "settled",
+            kind: "turn",
+            turn: { ...turn, phase: "completed", settledAt: turn.startedAt },
+          },
+        ],
+        "settled",
+      ),
+    );
+    expect(settled.turns[turn.id]?.report).toBeUndefined();
+    const late = reduceProgressCommand(
+      settled,
+      command(
+        [
+          {
+            eventId: "late-report",
+            kind: "report",
+            report: { id: "late", message: "Too late", reportedAt: turn.startedAt },
+            turn,
+          },
+        ],
+        "late",
+      ),
+    );
+    expect(late.turns[turn.id]?.report).toBeUndefined();
+  });
+
   it("does not reopen terminal lifecycle", () => {
     const settled = reduceProgressCommand(
       createProgressSnapshot(),

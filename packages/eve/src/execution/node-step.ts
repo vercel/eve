@@ -18,6 +18,7 @@ import {
   type RuntimeModelResolutionScope,
 } from "#runtime/agent/resolve-model.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { REPORT_PROGRESS_TOOL } from "#runtime/framework-tools/progress.js";
 import {
   AGENT_TOOL_DESCRIPTION,
   AGENT_TOOL_NAME,
@@ -98,7 +99,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
           input.modelResolutionScope,
           input.node.turnAgent.dynamicModel,
         );
-  const tools = createNodeHarnessTools({ node: input.node });
+  const tools = createNodeHarnessTools({ capabilities: input.capabilities, node: input.node });
   const instrumentation = getInstrumentationRuntime();
   const step = createToolLoopHarness({
     abortSignal: input.abortSignal,
@@ -190,6 +191,7 @@ function createRuntimeDynamicModelEventDispatcher(
  * Tools without `execute` (provider-managed) get entries with schema but no execute.
  */
 export function createNodeHarnessTools(input: {
+  readonly capabilities?: SessionCapabilities;
   readonly node: ResolvedRuntimeAgentNode;
 }): HarnessToolMap {
   const tools = new Map<string, HarnessToolDefinition>();
@@ -203,6 +205,10 @@ export function createNodeHarnessTools(input: {
     if (definition !== null) {
       tools.set(tool.name, definition);
     }
+  }
+
+  if (input.capabilities?.progress === true && !tools.has(REPORT_PROGRESS_TOOL.name)) {
+    tools.set(REPORT_PROGRESS_TOOL.name, REPORT_PROGRESS_TOOL);
   }
 
   if (

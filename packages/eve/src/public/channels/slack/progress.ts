@@ -81,6 +81,10 @@ function createSlackStatusRenderer(botToken: SlackBotToken | undefined): Channel
 }
 
 export function selectSlackProgressStatus(snapshot: ProgressSnapshotV1): string {
+  const turns = Object.values(snapshot.turns);
+  const newestReport = turns.findLast(
+    (turn) => (turn.phase === "queued" || turn.phase === "running") && turn.report !== undefined,
+  )?.report;
   const entities = Object.values(snapshot.entities);
   const active = entities.filter(
     (entity) =>
@@ -100,6 +104,7 @@ export function selectSlackProgressStatus(snapshot: ProgressSnapshotV1): string 
 
   const failed = newestEntity(relevant, (entity) => entity.phase === "failed");
   if (failed !== undefined) return truncateTypingStatus(`Failed: ${failed.label}`);
+  if (newestReport !== undefined) return truncateTypingStatus(newestReport.message);
 
   const running = active.filter((entity) => entity.phase !== "blocked");
   const selected = running.at(-1);

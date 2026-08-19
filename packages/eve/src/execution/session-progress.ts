@@ -10,12 +10,19 @@ export type ProgressPhase = "queued" | "running" | "blocked" | "completed" | "fa
 
 type TerminalProgressPhase = Extract<ProgressPhase, "completed" | "failed" | "cancelled">;
 
+export interface ProgressReportV1 {
+  readonly id: string;
+  readonly message: string;
+  readonly reportedAt: string;
+}
+
 export interface ProgressTurnV1 {
   readonly id: string;
   readonly sequence: number;
   readonly phase: ProgressPhase;
   readonly startedAt: string;
   readonly settledAt?: string;
+  readonly report?: ProgressReportV1;
 }
 
 export interface ProgressEntityV1 {
@@ -58,6 +65,12 @@ export type ProgressEventV1 =
       readonly kind: "entity";
       readonly eventId: string;
       readonly entity: ProgressEntityV1;
+    }
+  | {
+      readonly kind: "report";
+      readonly eventId: string;
+      readonly turn: ProgressTurnV1;
+      readonly report: ProgressReportV1;
     };
 
 const progressPhaseSchema = z.enum([
@@ -68,10 +81,14 @@ const progressPhaseSchema = z.enum([
   "failed",
   "cancelled",
 ]);
+const progressReportSchema = z
+  .object({ id: z.string().min(1), message: z.string(), reportedAt: z.string().min(1) })
+  .strict();
 const progressTurnSchema = z
   .object({
     id: z.string().min(1),
     phase: progressPhaseSchema,
+    report: progressReportSchema.optional(),
     sequence: z.number().int().nonnegative(),
     settledAt: z.string().optional(),
     startedAt: z.string().min(1),
@@ -104,6 +121,14 @@ export const progressCommandV1Schema = z
               entity: progressEntitySchema,
               eventId: z.string().min(1),
               kind: z.literal("entity"),
+            })
+            .strict(),
+          z
+            .object({
+              eventId: z.string().min(1),
+              kind: z.literal("report"),
+              report: progressReportSchema,
+              turn: progressTurnSchema,
             })
             .strict(),
         ]),
@@ -160,11 +185,16 @@ export function reduceProgressCommand(
 }
 
 function reduceEvent(snapshot: ProgressSnapshotV1, event: ProgressEventV1): ProgressSnapshotV1 {
-  if (event.kind === "turn") {
-    const current = snapshot.turns[event.turn.id];
+  if (event.kind === "turn" || event.kind === "report") {
+    const incoming = event.kind === "report" ? { ...event.turn, report: event.report } : event.turn;
+    const current = snapshot.turns[incoming.id];
     if (current !== undefined && isTerminal(current.phase)) return snapshot;
     const turn =
-      current === undefined ? event.turn : { ...event.turn, startedAt: current.startedAt };
+      current === undefined
+        ? incoming
+        : isTerminal(incoming.phase)
+          ? { ...incoming, startedAt: current.startedAt }
+          : { ...current, ...incoming, startedAt: current.startedAt };
     return {
       ...snapshot,
       turns: appendBoundedRecord(snapshot.turns, turn.id, turn, MAX_PROGRESS_TURNS),

@@ -275,6 +275,15 @@ describe("createNodeHarnessTools", () => {
     expect(tools.has("agent")).toBe(false);
   });
 
+  it("injects report_progress only for progress-enabled sessions", () => {
+    expect(createNodeHarnessTools({ node: createTestNode() }).has("report_progress")).toBe(false);
+    expect(
+      createNodeHarnessTools({ capabilities: { progress: true }, node: createTestNode() }).get(
+        "report_progress",
+      )?.execute,
+    ).toBeDefined();
+  });
+
   it("does not inject task tools without experimental.tasks", () => {
     const tools = createNodeHarnessTools({ node: createTestNode() });
 
