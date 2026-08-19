@@ -1,5 +1,25 @@
 # eve
 
+## 0.39.1
+
+### Patch Changes
+
+- 9965cfc: Use `@vercel/otel`'s automatic context propagators when no custom propagators are configured.
+- 1d857ca: Report agent files, dependencies, and configuration files changed when `eve init` adds an agent to an existing project, including when dependency installation later fails.
+- c9d3e25: Wait for tool approval settlement before marking Slack approval cards as answered, so rejected approval responses leave the shared card open.
+- 075dc1f: Tell coding agents that content-only instruction edits do not require reading the framework docs, while preserving docs-first guidance for eve framework changes.
+- c6d6b3e: Add non-interactive `eve link` and `eve deploy` options for linking a named Vercel project and deploying from CI or coding agents without terminal prompts.
+- e739c28: Coding-agent `eve init` runs now report the selected model and generated instructions file without changing the interactive human flow.
+- 8a3288d: Parent `agent.action` OpenTelemetry spans to their replay-stable `agent.step` boundary instead of directly to the turn.
+- 69c6f12: Let parent agents process background-task notifications without requiring a user-visible channel message. Human messages and input responses remain required delivery.
+- 7995d57: Add `ctx.isDMOrPrivateChannel()` to Slack message handlers so agents can detect DMs, group DMs, and private channels without parsing raw events or implementing their own Slack API fallback.
+- 8180633: Use `Private message` as the Slack run title for DMs and private channels so sensitive message text never appears in run titles.
+- 822dbff: Dev runtime generations now retain the compiled authored module graph instead of recursively copying the app and workspace source trees. Local rebuilds keep immutable runtime behavior while using substantially less disk space.
+- 1473e2a: Capture package-manager command identity, termination, bounded in-memory output, and workspace probes as structured process results for consistent setup diagnostics.
+- 97d166a: New eve projects now give coding agents direct documentation routes and a bounded authoring loop, including a local recipe for routine typed tools. This reduces redundant project and package discovery while preserving deeper guidance for approvals and other advanced behavior.
+- e1ebb53: Emit durable `input.resolved` stream events with server-accepted human-input outcomes and responses so clients can persist and replay HITL state.
+- f02bc3d: Keep pending tool approvals visible across follow-up turns and prevent those turns from issuing duplicate tool calls.
+
 ## 0.39.0
 
 ### Minor Changes
