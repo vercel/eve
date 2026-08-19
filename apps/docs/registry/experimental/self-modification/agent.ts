@@ -1,5 +1,5 @@
 import { defineSelfModificationAgent } from "@eve/self-modification/agent";
 
 export default defineSelfModificationAgent({
-  model: "anthropic/claude-sonnet-5",
+  model: "openai/gpt-5.6-terra",
 });
