@@ -3,6 +3,7 @@ import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { TurnControlReceiver } from "#execution/turn-control-receiver.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
+import type { SessionProgressHandler } from "#execution/session-progress.js";
 import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
@@ -32,6 +33,7 @@ export async function dispatchAndAwaitTurn(input: {
   readonly commandInbox: SessionCommandInbox;
   readonly mode: RunMode;
   readonly parentWritable: WritableStream<Uint8Array>;
+  readonly progressHandler?: SessionProgressHandler;
   readonly serializedContext: Record<string, unknown>;
   readonly seenTaskDeliveries?: Set<string>;
   readonly sessionState: DurableSessionState;
@@ -42,6 +44,7 @@ export async function dispatchAndAwaitTurn(input: {
     cancelledTaskIds: input.cancelledTaskIds,
     commandInbox: input.commandInbox,
     expectedTurnId: activeTurnId(input.sessionState.emissionState),
+    progressHandler: input.progressHandler,
     seenTaskDeliveries: input.seenTaskDeliveries ?? new Set(),
     token: input.controlToken,
   });

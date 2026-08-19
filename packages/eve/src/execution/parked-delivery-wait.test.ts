@@ -166,6 +166,30 @@ describe("nextTurnDelivery", () => {
     ]);
   });
 
+  it("handles progress while parked without routing or starting a turn", async () => {
+    const handleProgress = vi.fn().mockResolvedValue(undefined);
+    const inbox = createMockInbox([
+      {
+        result: {
+          done: false,
+          value: { commandId: "progress_1", events: [], kind: "progress", version: 1 },
+        },
+        source: "session",
+      },
+      { result: { done: true, value: undefined }, source: "session" },
+    ]);
+
+    const next = await nextTurnDelivery({
+      ...waitInput(inbox),
+      awaitAuthorizationCallbacks: false,
+      progressHandler: { handleProgress },
+    });
+
+    expect(next).toEqual({ kind: "closed" });
+    expect(handleProgress).toHaveBeenCalledOnce();
+    expect(routeDeliverToChildren).not.toHaveBeenCalled();
+  });
+
   it("reports a closed authorization hook", async () => {
     const inbox = createMockInbox([
       { result: { done: true, value: undefined }, source: "authorization" },

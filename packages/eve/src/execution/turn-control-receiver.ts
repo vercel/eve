@@ -8,6 +8,7 @@ import { closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
 import { sendCommandToDelivery } from "#execution/session-command-wire.js";
+import type { SessionProgressHandler } from "#execution/session-progress.js";
 import { turnCancellationHookToken } from "#execution/turn-cancellation-token.js";
 import { rebuildSerializableError } from "#execution/workflow-errors.js";
 
@@ -25,6 +26,7 @@ export class TurnControlReceiver {
   private readonly expectedTurnId: string;
   private readonly cancelledTaskIds: Set<string>;
   private readonly seenTaskDeliveries: Set<string>;
+  private readonly progressHandler: SessionProgressHandler | undefined;
   private pendingControl: Promise<IteratorResult<TurnControlPayload>> | null = null;
 
   constructor(input: {
@@ -33,6 +35,7 @@ export class TurnControlReceiver {
     readonly cancelledTaskIds?: Set<string>;
     readonly commandInbox: SessionCommandInbox;
     readonly expectedTurnId: string;
+    readonly progressHandler?: SessionProgressHandler;
     readonly seenTaskDeliveries?: Set<string>;
     readonly token: string;
   }) {
@@ -40,6 +43,7 @@ export class TurnControlReceiver {
     this.bufferedSessionControls = input.bufferedSessionControls;
     this.cancelledTaskIds = input.cancelledTaskIds ?? new Set();
     this.commandInbox = input.commandInbox;
+    this.progressHandler = input.progressHandler;
     this.seenTaskDeliveries = input.seenTaskDeliveries ?? new Set();
     this.control = createHook<TurnControlPayload>({ token: input.token });
     this.controlIterator = this.control[Symbol.asyncIterator]();
@@ -100,6 +104,10 @@ export class TurnControlReceiver {
       return undefined;
     }
     if (command.kind === "runtime-action-result") {
+      return undefined;
+    }
+    if (command.kind === "progress") {
+      await this.progressHandler?.handleProgress(command);
       return undefined;
     }
     if (command.kind === "cancel") {
