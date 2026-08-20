@@ -810,50 +810,27 @@ export default channel;
 See the [Liveblocks adapter documentation](https://chat-sdk.dev/adapters/vendor-official/liveblocks) for supported events, capabilities, and credentials.`,
     configure: `Create a Liveblocks webhook, set \`LIVEBLOCKS_SECRET_KEY\` and \`LIVEBLOCKS_WEBHOOK_SECRET\`, and send comment events to \`/eve/v1/liveblocks\`. The adapter maps rooms to channels, comment threads to threads, and comments to messages. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
-  "chat-sdk-linq": {
+  linq: {
     logo: "linq",
-    docsHref: "/docs/channels/chat-sdk",
-    badge: "Provider official",
-    keywords: ["chat sdk", "linq", "imessage", "sms", "apple messages", "tapbacks", "phone"],
-    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/linq.ts\` and installs Chat SDK and its adapter dependencies:
+    docsHref: "/docs/channels/linq",
+    badge: "First-party",
+    keywords: ["linq", "imessage", "sms", "apple messages", "tapbacks", "phone"],
+    install: `Add Linq from eve's registry, then follow the guided Connect or portable credential setup:
 
 \`\`\`bash
-eve add channel/chat-sdk-linq
+eve add channel/linq
 \`\`\``,
     quickStart: `Create \`agent/channels/linq.ts\`:
 
 \`\`\`ts
-// agent/channels/linq.ts
-import { createLinqAdapter } from "@linqapp/chat-sdk-adapter";
-import { createMemoryState } from "@chat-adapter/state-memory";
-import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { connectLinqCredentials } from "@vercel/connect/eve";
+import { linqChannel } from "eve/channels/linq";
 
-export const { bot, channel, send } = chatSdkChannel({
-  userName: "My Agent",
-  adapters: {
-    linq: createLinqAdapter({
-      apiKey: process.env.LINQ_API_KEY!,
-      signingSecret: process.env.LINQ_WEBHOOK_SECRET!,
-    }),
-  },
-  state: createMemoryState(),
+export default linqChannel({
+  credentials: connectLinqCredentials("linq/my-agent"),
 });
-
-bot.onNewMention(async (thread: Thread, message: Message) => {
-  await thread.subscribe();
-  await send(message.text, { thread });
-});
-
-bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
-});
-
-export default channel;
-\`\`\`
-
-See the [Linq adapter documentation](https://chat-sdk.dev/adapters/vendor-official/linq) for supported events, capabilities, and credentials.`,
-    configure: `Create a Linq account, set \`LINQ_API_KEY\` and \`LINQ_WEBHOOK_SECRET\`, then point its signed webhook at \`/eve/v1/linq\`. Linq supports iMessage and SMS DMs and group chats, media, buffered streaming, and tapbacks. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+\`\`\``,
+    configure: `The guided setup can provision a managed Linq line with Vercel Connect or collect portable credentials. Connect-backed setup creates a native Linq connector and routes verified triggers to \`/eve/v1/linq\`; with portable credentials, deploy first, then create a signed Linq webhook for that route.`,
   },
   "chat-sdk-kapso": {
     logo: "kapso",

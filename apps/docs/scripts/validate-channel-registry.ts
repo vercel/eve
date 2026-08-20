@@ -37,6 +37,7 @@ interface Registry {
 
 const registrySlugsByCatalogSlug: Readonly<Record<string, string>> = {
   eve: "web",
+  linq: "linq",
   photon: "photon-imessage",
 };
 
@@ -45,6 +46,7 @@ const setupKindsByCatalogSlug: Readonly<Record<string, string>> = {
   github: "github",
   "linear-agent": "linear",
   eve: "web",
+  linq: "linq",
   photon: "photon",
 };
 
@@ -58,7 +60,6 @@ const adapterDependenciesByCatalogSlug: Readonly<Record<string, string>> = {
   "chat-sdk-sendblue": "chat-adapter-sendblue",
   "chat-sdk-novu": "@novu/chat-sdk-adapter",
   "chat-sdk-liveblocks": "@liveblocks/chat-sdk-adapter",
-  "chat-sdk-linq": "@linqapp/chat-sdk-adapter",
   "chat-sdk-kapso": "@kapso/chat-adapter",
   "chat-sdk-dial": "@getdial/chat-sdk-adapter",
   "chat-sdk-agentphone": "@agentphone/chat-sdk-adapter",
@@ -78,7 +79,6 @@ const targetSlugsByCatalogSlug: Readonly<Record<string, string>> = {
   "chat-sdk-sendblue": "sendblue",
   "chat-sdk-novu": "novu",
   "chat-sdk-liveblocks": "liveblocks",
-  "chat-sdk-linq": "linq",
   "chat-sdk-kapso": "kapso",
   "chat-sdk-dial": "dial",
   "chat-sdk-agentphone": "agentphone",
@@ -136,6 +136,7 @@ for (const [index, item] of items.entries()) {
     entry.slug === "github" ||
     entry.slug === "linear-agent" ||
     entry.slug === "eve" ||
+    entry.slug === "linq" ||
     entry.slug === "photon"
   ) {
     const expectedArgs = [
