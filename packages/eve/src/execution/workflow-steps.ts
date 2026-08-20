@@ -1,6 +1,6 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, defaultDeliverResult } from "#channel/adapter.js";
-import type { DeliverHookPayload } from "#channel/types.js";
+import type { DeliverHookPayload, SubagentInputRequestEvent } from "#channel/types.js";
 import { contextStorage } from "#context/container.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import {
@@ -57,11 +57,9 @@ import {
   isWorkflowRuntimeActionInterrupt,
 } from "#harness/workflow-runtime-action-state.js";
 import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
-import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import type { HarnessSession, SettledTurn, StepInput, StepResult } from "#harness/types.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
 import {
   createAuthorizationCompletedEvent,
   createSessionStartedEvent,
@@ -93,6 +91,10 @@ import {
 } from "#execution/tasks/child/instructions.js";
 import { prepareWorkflowPreambleTrace } from "#execution/workflow-trace-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
+import {
+  deriveCurrentTurnInputRequest,
+  derivePendingState,
+} from "#execution/turn-pending-state.js";
 import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
@@ -139,6 +141,8 @@ export type DurableStepResult =
       readonly authorizationNames?: readonly string[];
       readonly hasPendingAuthorization: boolean;
       readonly hasPendingInputBatch: boolean;
+      /** Input batch minted by this turn; older pending batches are intentionally omitted. */
+      readonly inputRequested?: SubagentInputRequestEvent;
       readonly pendingRuntimeActionKeys?: readonly string[];
       /**
        * Selects the dispatch step for `pendingRuntimeActionKeys`:
@@ -650,6 +654,10 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       action: "park",
       ...pending,
       ...sleepTransition,
+      inputRequested: deriveCurrentTurnInputRequest(
+        stepResult.session,
+        activeTurnId(initialEmissionState),
+      ),
       serializedContext: nextSerializedContext,
       sessionState: nextState,
       tasksEnabled,
@@ -663,34 +671,4 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     serializedContext: nextSerializedContext,
     sessionState: nextState,
   };
-}
-
-/**
- * Derives the pending-state fields the turn workflow needs to choose
- * the right `NextDriverAction` arm at the park boundary.
- */
-function derivePendingState(session: HarnessSession): {
-  readonly authorizationAttemptIds?: readonly string[];
-  readonly authorizationNames?: readonly string[];
-  readonly hasPendingAuthorization: boolean;
-  readonly hasPendingInputBatch: boolean;
-  readonly pendingRuntimeActionKeys?: readonly string[];
-} {
-  const batch = getPendingRuntimeActionBatch(session.state);
-  const pendingAuth = getPendingAuthorization(session.state);
-  const base = {
-    authorizationAttemptIds: pendingAuth?.challenges.flatMap((challenge) =>
-      challenge.attemptId === undefined ? [] : [challenge.attemptId],
-    ),
-    authorizationNames: pendingAuth?.challenges.map((c) => c.name),
-    hasPendingAuthorization: pendingAuth !== undefined,
-    hasPendingInputBatch: hasPendingInputBatch(session.state),
-  };
-  if (batch !== undefined) {
-    return {
-      ...base,
-      pendingRuntimeActionKeys: batch.actions.map((action) => getRuntimeActionRequestKey(action)),
-    };
-  }
-  return base;
 }

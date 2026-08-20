@@ -111,6 +111,14 @@ const taskEventCallbackSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+const turnInputRequestedCallbackSchema = z.object({
+  callId: z.string().min(1),
+  event: taskInputEventSchema,
+  kind: z.literal("turn.input-requested"),
+  sessionId: z.string().min(1).optional(),
+  subagentName: z.string().min(1),
+});
+
 const taskTurnStartedCallbackSchema = z.object({
   kind: z.literal("turn.started"),
   sessionId: z.string().min(1),
@@ -241,6 +249,9 @@ export async function handleSessionCallbackRequest(
     return Response.json({ ok: true }, { status: 202 });
   }
 
+  const inputRequested = acceptTurnInputRequested(body);
+  if (inputRequested !== undefined) return inputRequested;
+
   const result = projectSessionCallbackResult(body);
   if (result instanceof Response) {
     return result;
@@ -261,6 +272,21 @@ export async function handleSessionCallbackRequest(
 function callbackKind(value: unknown): unknown {
   if (value === null || typeof value !== "object") return undefined;
   return Reflect.get(value, "kind");
+}
+
+/**
+ * Acknowledges conversation input events without consuming the terminal callback hook.
+ * Remote answer routing needs a child-owned capability that this wire event does not carry.
+ */
+function acceptTurnInputRequested(value: unknown): Response | undefined {
+  if (callbackKind(value) !== "turn.input-requested") return undefined;
+  if (!turnInputRequestedCallbackSchema.safeParse(value).success) {
+    return Response.json(
+      { error: "Invalid turn input-requested callback.", ok: false },
+      { status: 400 },
+    );
+  }
+  return Response.json({ ok: true }, { status: 202 });
 }
 
 function projectTaskEvent(

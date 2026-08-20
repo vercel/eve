@@ -7,6 +7,7 @@ import { ChannelRequestIdKey, SubagentDepthKey } from "#context/keys.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import {
   notifyDelegatedParentStep,
+  notifyTurnCallerInputRequestedStep,
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
 } from "#execution/delegated-parent-notification.js";
@@ -75,6 +76,7 @@ vi.mock("./delegated-parent-notification.js", () => ({
   notifyCancelledTaskCallerStep: vi.fn().mockResolvedValue(undefined),
   notifyDelegatedParentStep: vi.fn().mockResolvedValue(undefined),
   notifyTaskTurnStartedStep: vi.fn().mockResolvedValue(undefined),
+  notifyTurnCallerInputRequestedStep: vi.fn().mockResolvedValue(undefined),
   notifyTurnCallerStep: vi.fn().mockResolvedValue(undefined),
   resolveInitialTurnCallerStep: vi.fn().mockResolvedValue(undefined),
 }));
@@ -814,6 +816,77 @@ describe("workflowEntry", () => {
     });
   });
 
+  it("notifies and retains a callback caller when its turn parks on input", async () => {
+    const sessionState = createBaseSessionState();
+    const caller = {
+      callId: "call-1",
+      replyTo: {
+        kind: "callback" as const,
+        token: "parent-turn",
+        url: "https://parent.example.com/eve/v1/callback/parent-turn",
+      },
+      subagentName: "researcher",
+    };
+    const inputRequested = {
+      requests: [
+        {
+          action: {
+            callId: "req-1",
+            input: { allowFreeform: true, prompt: "Which environment?" },
+            kind: "tool-call" as const,
+            toolName: "ask_question",
+          },
+          allowFreeform: true,
+          display: "text" as const,
+          kind: "question" as const,
+          prompt: "Which environment?",
+          requestId: "req-1",
+        },
+      ],
+      sequence: 4,
+      stepIndex: 0,
+      turnId: "turn_4",
+    };
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    vi.mocked(resolveInitialTurnCallerStep).mockResolvedValueOnce(caller);
+    installHookMocks({
+      deliveryHooks: [
+        {
+          token: "http:test",
+          values: [
+            {
+              kind: "send",
+              payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
+            },
+          ],
+        },
+      ],
+      turnControls: [
+        turnResult({ action: "park", inputRequested, sessionState }),
+        turnResult({ action: "park", sessionState, settled: { output: "approved answer" } }),
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "delegate" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).resolves.toEqual({ output: "" });
+
+    expect(notifyTurnCallerInputRequestedStep).toHaveBeenCalledExactlyOnceWith({
+      caller,
+      event: inputRequested,
+      sessionId: "wrun_test_123",
+    });
+    expect(notifyTurnCallerStep).toHaveBeenCalledExactlyOnceWith({
+      caller,
+      lifecycle: "parked",
+      sessionId: "wrun_test_123",
+      settled: { output: "approved answer" },
+    });
+  });
+
   it("passes the resumed channel request id to the next turn", async () => {
     const sessionState = createBaseSessionState();
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
@@ -1510,6 +1583,12 @@ function createBaseSessionState(overrides: Partial<DurableSessionState> = {}): D
 
 function turnResult(input: {
   readonly action: "done" | "park";
+  readonly inputRequested?: {
+    readonly requests: readonly import("#runtime/input/types.js").InputRequest[];
+    readonly sequence: number;
+    readonly stepIndex: number;
+    readonly turnId: string;
+  };
   readonly output?: string;
   readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -1531,6 +1610,7 @@ function turnResult(input: {
     };
   }
   const park = {
+    inputRequested: input.inputRequested,
     kind: "park" as const,
     serializedContext,
     sessionState: input.sessionState,

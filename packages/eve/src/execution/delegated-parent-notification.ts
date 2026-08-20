@@ -6,7 +6,7 @@
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
-import type { TurnCaller } from "#channel/types.js";
+import type { SubagentInputRequestEvent, TurnCaller } from "#channel/types.js";
 import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
 import { SessionCallbackKey } from "#context/keys.js";
 import {
@@ -130,6 +130,45 @@ export async function notifyTurnCallerStep(input: {
   }
 
   await resumeSettledTurnHook(input.caller.replyTo.token, result);
+}
+
+/** Notifies a remote conversation caller that its accepted turn needs input. */
+export async function notifyTurnCallerInputRequestedStep(input: {
+  readonly caller: TurnCaller | undefined;
+  readonly event: SubagentInputRequestEvent;
+  readonly sessionId: string;
+}): Promise<void> {
+  "use step";
+
+  const caller = input.caller;
+  if (caller === undefined || caller.taskId !== undefined || caller.replyTo.kind !== "callback") {
+    return;
+  }
+  try {
+    const response = await postSessionCallbackRequest({
+      body: {
+        callId: caller.callId,
+        event: input.event,
+        kind: "turn.input-requested",
+        sessionId: input.sessionId,
+        subagentName: caller.subagentName,
+      },
+      url: caller.replyTo.url,
+    });
+    if (!response.ok) {
+      log.warn("interim turn callback was not delivered", {
+        callId: caller.callId,
+        sessionId: input.sessionId,
+        status: response.status,
+      });
+    }
+  } catch (error) {
+    log.warn("interim turn callback was not delivered", {
+      callId: caller.callId,
+      error: toErrorMessage(error),
+      sessionId: input.sessionId,
+    });
+  }
 }
 
 /** Settles a task-owned caller after the child turn is cooperatively cancelled. */

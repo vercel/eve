@@ -16,6 +16,7 @@ import {
   notifyCancelledTaskCallerStep,
   notifyDelegatedParentStep,
   notifyTaskTurnStartedStep,
+  notifyTurnCallerInputRequestedStep,
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
 } from "#execution/delegated-parent-notification.js";
@@ -515,6 +516,19 @@ async function runDriverLoop(input: {
       // `settled` rides the typed park arm exclusively; `run-step` preserves
       // the full StepResult so no state-key fallback exists anymore.
       const settled = action.settled;
+      const caller = input.crashCleanupState.caller;
+      if (
+        action.cancelled !== true &&
+        action.inputRequested !== undefined &&
+        caller?.taskId === undefined &&
+        caller?.replyTo.kind === "callback"
+      ) {
+        await notifyTurnCallerInputRequestedStep({
+          caller,
+          event: action.inputRequested,
+          sessionId: stateCursor.sessionState.sessionId,
+        });
+      }
       if (action.cancelled !== true && settled !== undefined) {
         await notifyTurnCallerStep({
           caller: input.crashCleanupState.caller,
@@ -582,10 +596,9 @@ async function runDriverLoop(input: {
           sessionState: stateCursor.sessionState,
         });
         stateCursor.adoptState(cancelled);
-        // Re-enter with `settled` cleared: the parked answer was already
-        // delivered to its caller before this wait, so the next iteration
-        // must not treat it as a fresh settlement.
-        action = { ...action, settled: undefined };
+        // Re-enter with caller notifications cleared: they were already
+        // delivered before this wait, so the next iteration must not resend.
+        action = { ...action, inputRequested: undefined, settled: undefined };
         input.crashCleanupState.caller = undefined;
         input.crashCleanupState.lastSessionState = stateCursor.sessionState;
         continue;

@@ -9,6 +9,7 @@ import {
   bindTurnCallerContextStep,
   notifyDelegatedParentStep,
   notifyTaskTurnStartedStep,
+  notifyTurnCallerInputRequestedStep,
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
 } from "#execution/delegated-parent-notification.js";
@@ -399,6 +400,112 @@ describe("turn caller notification", () => {
       subagentName: "remote",
     });
     expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
+  it("posts an interim input request without settling a remote conversation caller", async () => {
+    const event = {
+      requests: [
+        {
+          action: {
+            callId: "request-1",
+            input: { allowFreeform: true, prompt: "Which environment?" },
+            kind: "tool-call" as const,
+            toolName: "ask_question",
+          },
+          allowFreeform: true,
+          display: "text" as const,
+          kind: "question" as const,
+          prompt: "Which environment?",
+          requestId: "request-1",
+        },
+      ],
+      sequence: 4,
+      stepIndex: 0,
+      turnId: "turn_4",
+    };
+
+    await notifyTurnCallerInputRequestedStep({
+      caller: {
+        callId: "call-remote",
+        replyTo: {
+          kind: "callback",
+          token: "parent-turn",
+          url: "https://caller.example/eve/v1/callback/parent-turn",
+        },
+        subagentName: "remote",
+      },
+      event,
+      sessionId: "remote-session",
+    });
+
+    const body: unknown = JSON.parse((fetchMock.mock.calls[0]![1] as { body: string }).body);
+    expect(body).toEqual({
+      callId: "call-remote",
+      event,
+      kind: "turn.input-requested",
+      sessionId: "remote-session",
+      subagentName: "remote",
+    });
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps an input-parked turn alive when the interim callback is rejected", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 400 }));
+
+    await expect(
+      notifyTurnCallerInputRequestedStep({
+        caller: {
+          callId: "call-remote",
+          replyTo: {
+            kind: "callback",
+            token: "parent-turn",
+            url: "https://caller.example/eve/v1/callback/parent-turn",
+          },
+          subagentName: "remote",
+        },
+        event: { requests: [], sequence: 4, stepIndex: 0, turnId: "turn_4" },
+        sessionId: "remote-session",
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("keeps an input-parked turn alive when the interim callback is unreachable", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("callback unavailable"));
+
+    await expect(
+      notifyTurnCallerInputRequestedStep({
+        caller: {
+          callId: "call-remote",
+          replyTo: {
+            kind: "callback",
+            token: "parent-turn",
+            url: "https://caller.example/eve/v1/callback/parent-turn",
+          },
+          subagentName: "remote",
+        },
+        event: { requests: [], sequence: 4, stepIndex: 0, turnId: "turn_4" },
+        sessionId: "remote-session",
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not duplicate task-owned input callbacks", async () => {
+    await notifyTurnCallerInputRequestedStep({
+      caller: {
+        callId: "call-task",
+        replyTo: {
+          kind: "callback",
+          token: "task-token",
+          url: "https://caller.example/eve/v1/callback/task-token",
+        },
+        subagentName: "remote",
+        taskId: "task-1",
+      },
+      event: { requests: [], sequence: 4, stepIndex: 0, turnId: "turn_4" },
+      sessionId: "remote-session",
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("posts a failed turn with its outcome to a remote callback", async () => {

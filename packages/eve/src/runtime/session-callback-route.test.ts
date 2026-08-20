@@ -38,6 +38,61 @@ describe("session callback route", () => {
     expect([...names].some((name) => name.startsWith(".well-known/"))).toBe(false);
   });
 
+  it("acknowledges a conversation input request without settling its callback hook", async () => {
+    const response = await handleSessionCallbackRequest(
+      new Request("https://app.example.com/eve/v1/callback/turn-inbox", {
+        body: JSON.stringify({
+          callId: "call-remote",
+          event: {
+            requests: [
+              {
+                action: {
+                  callId: "request-1",
+                  input: { prompt: "Which environment?" },
+                  kind: "tool-call",
+                  toolName: "ask_question",
+                },
+                kind: "question",
+                prompt: "Which environment?",
+                requestId: "request-1",
+              },
+            ],
+            sequence: 4,
+            stepIndex: 0,
+            turnId: "turn_4",
+          },
+          kind: "turn.input-requested",
+          sessionId: "remote-session",
+          subagentName: "research",
+        }),
+        method: "POST",
+      }),
+      createRouteContext({ token: "turn-inbox" }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a malformed conversation input request", async () => {
+    const response = await handleSessionCallbackRequest(
+      new Request("https://app.example.com/eve/v1/callback/turn-inbox", {
+        body: JSON.stringify({
+          callId: "call-remote",
+          event: { requests: [], sequence: 4, stepIndex: 0, turnId: "turn_4" },
+          kind: "turn.input-requested",
+          subagentName: "research",
+        }),
+        method: "POST",
+      }),
+      createRouteContext({ token: "turn-inbox" }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
   it("forwards remote task turn-start identity to the task hook", async () => {
     resumeHookMock.mockResolvedValue(undefined);
     const response = await handleSessionCallbackRequest(

@@ -14,6 +14,7 @@
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { SettledTurn } from "#harness/types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import type { SubagentInputRequestEvent } from "#channel/types.js";
 
 /** Discriminated union the driver workflow body dispatches on. */
 export type NextDriverAction =
@@ -45,6 +46,8 @@ export type NextDriverAction =
        * working.
        */
       readonly cancelled?: true;
+      /** Input batch minted by this turn; forwarded without settling its caller. */
+      readonly inputRequested?: SubagentInputRequestEvent;
       /**
        * Settled user-facing answer forwarded through the same pinned-driver-safe
        * optional-field pattern as `cancelled`.

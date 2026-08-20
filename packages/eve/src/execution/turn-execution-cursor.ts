@@ -1,4 +1,4 @@
-import type { DeliverHookPayload } from "#channel/types.js";
+import type { DeliverHookPayload, SubagentInputRequestEvent } from "#channel/types.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { sendTurnControlStep } from "#execution/turn-control-protocol.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
@@ -27,6 +27,7 @@ type TurnTerminalAction =
       readonly authorizationAttemptIds?: readonly string[];
       readonly authorizationNames?: readonly string[];
       readonly cancelled?: true;
+      readonly inputRequested?: SubagentInputRequestEvent;
       readonly kind: "park";
       readonly settled?: SettledTurn;
     };

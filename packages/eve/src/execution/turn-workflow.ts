@@ -228,6 +228,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           {
             authorizationAttemptIds: result.authorizationAttemptIds,
             authorizationNames: result.authorizationNames,
+            inputRequested: result.inputRequested,
             kind: "park",
             settled: result.settled,
           },
@@ -496,6 +497,7 @@ async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
                 sessionState: result.sessionState,
                 authorizationAttemptIds: result.authorizationAttemptIds,
                 authorizationNames: result.authorizationNames,
+                inputRequested: result.inputRequested,
                 settled: result.settled,
               };
 

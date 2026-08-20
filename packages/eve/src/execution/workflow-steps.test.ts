@@ -1990,6 +1990,63 @@ describe("turnStep", () => {
     }
   });
 
+  it("projects only the pending input batch minted by the active turn", async () => {
+    const stale = appendPendingInputBatch({
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_stale" },
+      requests: [
+        {
+          action: { callId: "stale", input: {}, kind: "tool-call", toolName: "ask_question" },
+          kind: "question",
+          prompt: "Stale?",
+          requestId: "stale",
+        },
+      ],
+      responseMessages: [],
+      session: createStubSession(),
+    });
+    installSessionStoreMocks([stale]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: null,
+        session: appendPendingInputBatch({
+          event: { sequence: 0, stepIndex: 1, turnId: "turn_0" },
+          requests: [
+            {
+              action: {
+                callId: "current",
+                input: {},
+                kind: "tool-call",
+                toolName: "ask_question",
+              },
+              kind: "question",
+              prompt: "Current?",
+              requestId: "current",
+            },
+          ],
+          responseMessages: [],
+          session: stepSession,
+        }),
+      });
+    });
+
+    const result = await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "hello" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result).toMatchObject({
+      action: "park",
+      inputRequested: {
+        requests: [expect.objectContaining({ requestId: "current" })],
+        sequence: 0,
+        stepIndex: 1,
+        turnId: "turn_0",
+      },
+    });
+  });
+
   it("reads the durable session from normalized turn-step input", async () => {
     const session = createStubSession({
       continuationToken: "http:turn-step",

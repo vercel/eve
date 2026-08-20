@@ -269,10 +269,17 @@ describe("turnWorkflow", () => {
 
   it("parks for pending input when the channel supports input requests", async () => {
     const sessionState = createSessionState();
+    const inputRequested = {
+      requests: [],
+      sequence: 2,
+      stepIndex: 1,
+      turnId: "turn_2",
+    };
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "park",
       hasPendingAuthorization: false,
       hasPendingInputBatch: true,
+      inputRequested,
       serializedContext: { state: "pending-input" },
       sessionState,
     });
@@ -288,6 +295,7 @@ describe("turnWorkflow", () => {
       "turn-token",
       expect.objectContaining({
         action: expect.objectContaining({
+          inputRequested,
           kind: "park",
           serializedContext: { state: "pending-input" },
         }),
