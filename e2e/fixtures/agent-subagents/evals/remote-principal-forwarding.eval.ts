@@ -1,42 +1,64 @@
 import { defineEval } from "eve/evals";
 
-/**
- * Principal forwarding across a real remote-agent hop, end to end. The
- * fixture deployment plays both sides: `remote-loopback` dynamically selects
- * a `defineRemoteAgent({ forwardPrincipal: true })` pointing back at this
- * deployment, whose authored eve channel trusts principals only from the
- * hop's `router-app` bearer (`trustedForwarders`).
- *
- * Two turns give the parent session *distinct* principals: turn one starts
- * the session as the fixed `user:e2e-user` (pinning it as the initiator),
- * turn two continues it as `user:e2e-user-2` via the second fixture bearer
- * and dispatches the hop. The child session's `whoami` marker can therefore
- * only show `current=e2e-user-2 initiator=e2e-user` — with
- * `forwarded-by=router-app`, the receiver-stamped audit attribute — if both
- * principals crossed the wire independently, the gate accepted the
- * forwarder, and the replacement reached the child runtime. Without
- * forwarding the child would report the transport caller,
- * `service:router-app`, for both.
- */
-const FORWARDED_MARKER =
-  "WHOAMI current=user:e2e-user-2 initiator=user:e2e-user forwarded-by=router-app";
+const ALICE_PRIVATE_DATA = "ALICE_PRIVATE_DM_7K4M";
+const BOB_PRIVATE_DATA = "BOB_PRIVATE_DM_9P2R";
+const CHILD_MESSAGE =
+  "[forward-auth:child] Call read-private-data exactly once and reply with only its privateData value.";
 
+/** Alice and Bob resume one remote child; each tool call must resolve only its caller's grant. */
 export default defineEval({
-  tags: ["real-model"],
+  tags: ["principal-forwarding", "real-model"],
   description:
-    "Dynamic remote-agent selection and principal forwarding: the child session runs as the parent's end user, with the distinct initiator preserved and the forwarder stamped.",
+    "A persistent remote child resolves credentials only for the caller of the current turn.",
   async test(t) {
-    await t.send("Reply with the single word: ready.");
+    const alice = await t.send(
+      [
+        "[forward-auth:create] Use remote-loopback exactly once with this message:",
+        JSON.stringify(CHILD_MESSAGE),
+        "Reply with only the child's output.",
+      ].join(" "),
+    );
+    const called = alice.events.find(
+      (event) => event.type === "subagent.called" && event.data.name === "remote-loopback",
+    );
+    if (called?.type !== "subagent.called") {
+      throw new Error("The first turn did not create a remote-loopback child.");
+    }
+    const childSessionId = called.data.childSessionId;
+    const aliceChild = await t.target.watchTurn(childSessionId).result();
 
-    await t.send(
-      "Use the remote-loopback agent with this exact message and nothing else (no outputSchema): 'Run the whoami tool and reply with only its marker string, verbatim.' When it returns, reply with the agent's exact output included verbatim.",
+    const bob = await t.send(
+      [
+        "[forward-auth:continue] Continue that same remote-loopback agent using its agentId with this message:",
+        JSON.stringify(CHILD_MESSAGE),
+        "Reply with only the child's output.",
+      ].join(" "),
       { headers: { authorization: "Bearer e2e-principal-forwarding-second-user" } },
     );
+    const continued = bob.events.find(
+      (event) => event.type === "subagent.called" && event.data.name === "remote-loopback",
+    );
+    if (continued?.type !== "subagent.called" || continued.data.childSessionId !== childSessionId) {
+      throw new Error("Bob did not continue Alice's remote child.");
+    }
+    const bobChild = await t.target
+      .watchTurn(childSessionId, { startIndex: aliceChild.events.length })
+      .result();
 
-    t.succeeded();
-    t.calledSubagent("remote-loopback", {
-      output: /WHOAMI current=user:e2e-user-2 initiator=user:e2e-user forwarded-by=router-app/,
+    aliceChild.calledTool("read-private-data", {
+      count: 1,
+      output: { privateData: ALICE_PRIVATE_DATA },
+      status: "completed",
     });
-    t.messageIncludes(FORWARDED_MARKER);
+    bobChild.calledTool("read-private-data", { count: 1 });
+    bobChild.calledTool("read-private-data", {
+      count: 1,
+      output: { privateData: BOB_PRIVATE_DATA },
+      status: "completed",
+    });
+
+    t.calledSubagent("remote-loopback", { count: 2 });
+    t.succeeded();
+    t.noFailedActions();
   },
 });

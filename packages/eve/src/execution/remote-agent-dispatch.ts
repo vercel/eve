@@ -165,6 +165,8 @@ export async function startRemoteAgentSession(input: {
 
 /** Continues one remote-agent session by its immutable session ID. */
 export async function continueRemoteAgentSession(input: {
+  /** The dispatching turn's session principal, forwarded when `remote.forwardPrincipal` is set. */
+  readonly auth: SessionAuthContext | null;
   readonly callback: {
     readonly callId: string;
     readonly subagentName: string;
@@ -177,12 +179,23 @@ export async function continueRemoteAgentSession(input: {
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly sessionId: string;
 }): Promise<void> {
+  const forwardedPrincipal = buildForwardedPrincipalField(input);
+  const requestBody: {
+    callback: typeof input.callback;
+    forwardedPrincipal?: ForwardedPrincipal;
+    message: string;
+    outputSchema?: JsonObject;
+  } = {
+    callback: input.callback,
+    message: input.message,
+    outputSchema: input.outputSchema,
+  };
+  if (forwardedPrincipal !== undefined) {
+    requestBody.forwardedPrincipal = forwardedPrincipal;
+  }
+
   const response = await fetch(createRemoteAgentContinueUrl(input.remote, input.sessionId), {
-    body: JSON.stringify({
-      callback: input.callback,
-      message: input.message,
-      outputSchema: input.outputSchema,
-    }),
+    body: JSON.stringify(requestBody),
     headers: {
       "content-type": "application/json",
       ...(await resolveRemoteAgentRequestHeaders(input.remote)),

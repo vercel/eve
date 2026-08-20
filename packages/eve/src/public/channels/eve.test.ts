@@ -2165,11 +2165,48 @@ describe("eveChannel — forwarded principal", () => {
     expect(options.initiatorAuth).toBeUndefined();
   });
 
-  it("rejects forwarded principal on the continue route", async () => {
+  it("replaces only the current principal on a trusted continuation", async () => {
+    const onMessage = vi.fn((ctx: Parameters<typeof defaultEveAuth>[0]) => ({
+      auth: defaultEveAuth(ctx),
+    }));
     const handler = createEveContinueHandler({
-      trustedForwarders: () => true,
       auth: () => ROUTER_CALLER,
+      onMessage,
+      trustedForwarders: (forwarder) => forwarder.principalId === ROUTER_CALLER.principalId,
     });
+
+    const response = await handler.fetch(
+      new Request("https://example.com/eve/v1/session/test-session-id", {
+        body: JSON.stringify({
+          forwardedPrincipal: {
+            current: FORWARDED_CURRENT,
+            initiator: FORWARDED_INITIATOR,
+          },
+          message: "hi",
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
+    expect(options.auth).toEqual({
+      ...FORWARDED_CURRENT,
+      attributes: {
+        ...FORWARDED_CURRENT.attributes,
+        "eve:forwarded-by": ROUTER_CALLER.principalId,
+      },
+    });
+    expect(options.initiatorAuth).toBeUndefined();
+    expect(onMessage).toHaveBeenCalledOnce();
+    expect(onMessage.mock.calls[0]?.[0].eve.caller?.principalId).toBe(
+      FORWARDED_CURRENT.principalId,
+    );
+  });
+
+  it("rejects a forwarded continuation when the channel has no trustedForwarders", async () => {
+    const handler = createEveContinueHandler({ auth: () => ROUTER_CALLER });
 
     const response = await handler.fetch(
       new Request("https://example.com/eve/v1/session/test-session-id", {
@@ -2182,11 +2219,7 @@ describe("eveChannel — forwarded principal", () => {
       }),
     );
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(403);
     expect(handler.send).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toMatchObject({
-      error: "A forwarded principal is only accepted on session creation.",
-      ok: false,
-    });
   });
 });
