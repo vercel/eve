@@ -70,6 +70,7 @@ import {
 import {
   CONDITIONAL_DELIVERY_INSTRUCTION,
   EMPTY_DELIVERY_SENTINEL,
+  TASK_DELIVERY_INSTRUCTION,
 } from "#shared/empty-delivery.js";
 
 vi.mock("ai", () => ({
@@ -11281,7 +11282,7 @@ describe("createToolLoopHarness", () => {
       const { instructions } = getLastAgentSettings();
       expect(instructions).toEqual({
         role: "system",
-        content: `You are a test assistant.\n\n${CONDITIONAL_DELIVERY_INSTRUCTION}`,
+        content: `You are a test assistant.\n\n${TASK_DELIVERY_INSTRUCTION}`,
       });
     });
 

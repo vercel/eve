@@ -2301,10 +2301,31 @@ describe("turnStep", () => {
     });
   });
 
-  it("sets and resets task-delivery provenance from durable deliveries", async () => {
+  it("sets task-delivery provenance only when the runtime supplies owned task state", async () => {
     const observedTaskDeliveries: unknown[] = [];
-    const session = createStubSession();
-    installSessionStoreMocks([session, session]);
+    const metadata = { kind: "report-probe", name: "report_probe" } as const;
+    const session = createStubSession({
+      state: {
+        "eve.tasks": {
+          tasks: [
+            {
+              taskInboxToken: "task-token",
+              createdByTurnId: "turn-parent",
+              metadata,
+              taskId: "task_1",
+              taskRunId: "run_1",
+              terminalView: {
+                lastOutput: { data: { result: "done" }, type: "result" },
+                metadata,
+                status: "completed",
+                taskId: "task_1",
+              },
+            },
+          ],
+        },
+      },
+    });
+    installSessionStoreMocks([session, session, session]);
     vi.mocked(createExecutionNodeStep).mockImplementation(() => {
       return async (stepSession): Promise<StepResult> => {
         observedTaskDeliveries.push(contextStorage.getStore()?.get(TurnTaskDeliveryKey));
@@ -2322,14 +2343,24 @@ describe("turnStep", () => {
       serializedContext: createSerializedContext(),
       sessionState: createStubSessionState(),
     });
-    await turnStep({
-      input: { kind: "deliver", payloads: [{ message: "What happened?" }] },
+    const second = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "Background task task_unknown is completed." }],
+        taskDeliveryId: "task_unknown:ready:completed",
+      },
       parentWritable: createTestWritable(),
       serializedContext: first.serializedContext,
       sessionState: first.sessionState,
     });
+    await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "What happened?" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: second.serializedContext,
+      sessionState: second.sessionState,
+    });
 
-    expect(observedTaskDeliveries).toEqual([true, false]);
+    expect(observedTaskDeliveries).toEqual([true, false, false]);
   });
 
   it("projects a requested sleep onto the durable step result", async () => {

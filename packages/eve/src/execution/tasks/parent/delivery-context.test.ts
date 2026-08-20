@@ -1,0 +1,79 @@
+import { describe, expect, it } from "vitest";
+
+import { resolveTaskDeliveryContext } from "#execution/tasks/parent/delivery-context.js";
+import type { SessionStateMap } from "#harness/types.js";
+import { SESSION_TASKS_STATE_KEY } from "#tasks/session-index.js";
+import type { TaskView } from "#tasks/types.js";
+
+const metadata = { kind: "report-probe", name: "report_probe" } as const;
+
+describe("resolveTaskDeliveryContext", () => {
+  it("projects terminal and pending siblings from the delivered task's parent turn", () => {
+    const completed = {
+      lastOutput: { data: { result: "first" }, type: "result" },
+      metadata,
+      status: "completed",
+      taskId: "task_1",
+    } satisfies TaskView;
+    const state = taskState([
+      taskEntry("task_1", "turn_1", completed),
+      taskEntry("task_2", "turn_1"),
+      taskEntry("task_3", "turn_2"),
+    ]);
+
+    expect(resolveTaskDeliveryContext({ state, taskDeliveryId: "task_1:ready:completed" })).toBe(
+      '[Task state]\n{"tasks":[{"name":"report_probe","status":"completed","taskId":"task_1"},{"name":"report_probe","status":"pending","taskId":"task_2"}]}',
+    );
+  });
+
+  it("includes every output once the parent has received the whole terminal cohort", () => {
+    const first = {
+      lastOutput: { data: { result: "first" }, type: "result" },
+      metadata,
+      status: "completed",
+      taskId: "task_1",
+    } satisfies TaskView;
+    const second = {
+      lastOutput: { data: { result: "second" }, type: "result" },
+      metadata,
+      status: "completed",
+      taskId: "task_2",
+    } satisfies TaskView;
+
+    expect(
+      resolveTaskDeliveryContext({
+        state: taskState([
+          taskEntry("task_1", "turn_1", first),
+          taskEntry("task_2", "turn_1", second),
+        ]),
+        taskDeliveryId: "task_2:ready:completed",
+      }),
+    ).toBe(
+      '[Task state]\n{"tasks":[{"name":"report_probe","output":{"data":{"result":"first"},"type":"result"},"status":"completed","taskId":"task_1"},{"name":"report_probe","output":{"data":{"result":"second"},"type":"result"},"status":"completed","taskId":"task_2"}]}',
+    );
+  });
+
+  it("returns no context when the delivery is not owned by the session task index", () => {
+    expect(
+      resolveTaskDeliveryContext({
+        state: taskState([taskEntry("task_1", "turn_1")]),
+        taskDeliveryId: "task_unknown:ready:completed",
+      }),
+    ).toBeUndefined();
+  });
+});
+
+function taskEntry(taskId: string, createdByTurnId: string, terminalView?: TaskView) {
+  return {
+    createdByTurnId,
+    metadata,
+    taskId,
+    taskInboxToken: `inbox-${taskId}`,
+    taskRunId: `run-${taskId}`,
+    terminalView,
+  };
+}
+
+function taskState(tasks: readonly ReturnType<typeof taskEntry>[]): SessionStateMap {
+  return { [SESSION_TASKS_STATE_KEY]: { tasks } } as SessionStateMap;
+}

@@ -202,6 +202,7 @@ import {
   CONDITIONAL_DELIVERY_INSTRUCTION,
   EMPTY_DELIVERY_SENTINEL,
   hasEmptyDeliverySentinel,
+  TASK_DELIVERY_INSTRUCTION,
 } from "#shared/empty-delivery.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import {
@@ -1321,7 +1322,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }
     }
     if (emptyDeliveryEnabled) {
-      systemMessages.push({ role: "system", content: CONDITIONAL_DELIVERY_INSTRUCTION });
+      systemMessages.push({
+        role: "system",
+        content:
+          ctx?.get(TurnTaskDeliveryKey) === true
+            ? TASK_DELIVERY_INSTRUCTION
+            : CONDITIONAL_DELIVERY_INSTRUCTION,
+      });
     }
 
     const modelMessages = nonSystemMessages;

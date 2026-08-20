@@ -83,6 +83,7 @@ import { createDurableSessionState, readDurableSession } from "#execution/durabl
 import type { TurnStepInput } from "#execution/durable-session-migrations/turn-workflow.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { appendTaskAgentAnnouncement } from "#execution/tasks/parent/agent-views.js";
+import { resolveTaskDeliveryContext } from "#execution/tasks/parent/delivery-context.js";
 import {
   readRetainedBackgroundToolResult,
   runBackgroundStep,
@@ -117,7 +118,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   let durableSession = await readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   if (rawInput.input?.kind === "deliver") {
-    ctx.set(TurnTaskDeliveryKey, rawInput.input.taskDeliveryId !== undefined);
+    ctx.set(TurnTaskDeliveryKey, false);
   }
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
@@ -247,6 +248,24 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       ctx.set(RuntimeActionSettlementTimesKey, input.input.acceptedAtMsByCallId);
     }
     resolved = { runtimeActionResults: input.input.results };
+  }
+
+  if (
+    resolved !== undefined &&
+    rawInput.input?.kind === "deliver" &&
+    rawInput.input.taskDeliveryId !== undefined
+  ) {
+    const taskContext = resolveTaskDeliveryContext({
+      state: durableSession.state,
+      taskDeliveryId: rawInput.input.taskDeliveryId,
+    });
+    if (taskContext !== undefined) {
+      ctx.set(TurnTaskDeliveryKey, true);
+      resolved = {
+        ...resolved,
+        context: [...(resolved.context ?? []), taskContext],
+      };
+    }
   }
 
   // Persist adapter-state mutations across the step boundary.
