@@ -40,6 +40,8 @@ export interface TurnStepInput {
   readonly abortSignal?: AbortSignal;
   readonly input: TurnStepPayload | undefined;
   readonly parentWritable: WritableStream<Uint8Array>;
+  /** Session-owned latest work projection stream. */
+  readonly workWritable?: WritableStream<unknown>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
@@ -66,6 +68,8 @@ export interface TurnWorkflowDispatchInput {
   readonly delivery: HookPayload;
   readonly mode: RunMode;
   readonly parentWritable: WritableStream<Uint8Array>;
+  /** Session-owned latest work projection stream. */
+  readonly workWritable?: WritableStream<unknown>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
@@ -82,6 +86,7 @@ export function createTurnWorkflowInput(input: TurnWorkflowDispatchInput): TurnW
       input: input.delivery,
       parentWritable: input.parentWritable,
       serializedContext: input.serializedContext,
+      workWritable: input.workWritable,
       sessionState: input.sessionState,
     },
     version: TURN_WORKFLOW_INPUT_VERSION,

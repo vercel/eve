@@ -150,6 +150,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
   input.serializedContext["eve.sessionId"] = sessionId;
 
   const driverWritable = getWritable<Uint8Array>();
+  const workWritable = getWritable<unknown>({ namespace: "eve.work" });
   const crashCleanupState: CrashCleanupState = {
     caller: undefined,
     callerResolved: false,
@@ -214,6 +215,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       crashCleanupState,
       mode,
       serializedContext: input.serializedContext,
+      workWritable,
       sessionState,
       sessionTimeoutDeadline:
         input.sessionTimeoutMs === false
@@ -309,6 +311,7 @@ async function runDriverLoop(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly sessionTimeoutDeadline?: Date;
+  readonly workWritable: WritableStream<unknown>;
 }): Promise<DriverLoopOutcome> {
   // One payload per exact authorization attempt accumulates across
   // intervening turns. Replaced attempts are pruned at each park.
@@ -443,6 +446,7 @@ async function runDriverLoop(input: {
       serializedContext,
       seenTaskDeliveries,
       sessionState: stateCursor.sessionState,
+      workWritable: input.workWritable,
     });
     await disposeSettledTurnControl?.();
     disposeSettledTurnControl = turn.dispose;

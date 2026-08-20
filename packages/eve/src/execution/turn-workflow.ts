@@ -31,6 +31,8 @@ import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { turnStep } from "#execution/workflow-steps.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
+import { deserializeContext } from "#context/serialize.js";
+import { WorkGraphKey } from "#context/keys.js";
 import { getRuntimeActionResultKey } from "#runtime/actions/keys.js";
 import { resolveRuntimeActionResultsForKeys } from "#runtime/actions/results.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
@@ -137,6 +139,8 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
         return;
       }
+
+      await writeCommittedWorkSnapshot(result, input.stepInput.workWritable);
 
       if (result.sleepDurationMs !== undefined) {
         const outcome = await waitForTurnSleep(result.sleepDurationMs, cancellation);
@@ -250,6 +254,22 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
     // run's teardown; this backstop covers the error path.
     if (cancellation !== undefined) await cancellation.dispose();
     if (ownsInbox) await disposeHook(inbox);
+  }
+}
+
+async function writeCommittedWorkSnapshot(
+  result: { readonly serializedContext: Record<string, unknown> },
+  workWritable: WritableStream<unknown> | undefined,
+): Promise<void> {
+  if (workWritable === undefined) return;
+  const ctx = await deserializeContext(result.serializedContext);
+  const work = ctx.get(WorkGraphKey);
+  if (work === undefined || work.revision === 0) return;
+  const writer = workWritable.getWriter();
+  try {
+    await writer.write(work);
+  } finally {
+    writer.releaseLock();
   }
 }
 

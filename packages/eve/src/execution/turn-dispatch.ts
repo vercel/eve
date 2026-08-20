@@ -32,6 +32,7 @@ export async function dispatchAndAwaitTurn(input: {
   readonly commandInbox: SessionCommandInbox;
   readonly mode: RunMode;
   readonly parentWritable: WritableStream<Uint8Array>;
+  readonly workWritable?: WritableStream<unknown>;
   readonly serializedContext: Record<string, unknown>;
   readonly seenTaskDeliveries?: Set<string>;
   readonly sessionState: DurableSessionState;
@@ -54,6 +55,7 @@ export async function dispatchAndAwaitTurn(input: {
       mode: input.mode,
       parentWritable: input.parentWritable,
       serializedContext: input.serializedContext,
+      workWritable: input.workWritable,
       sessionState: input.sessionState,
     });
     const action = await control.waitForAction();
