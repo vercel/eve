@@ -6,6 +6,7 @@ import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-st
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { startLocalSubagentWorkMonitorStep } from "#execution/local-subagent-work-monitor-steps.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import { turnWorkflow } from "#execution/turn-workflow.js";
 import {
@@ -54,6 +55,10 @@ vi.mock("./cancel-descendant-turns-step.js", () => ({
   cancelDescendantTurnsStep: vi.fn(),
 }));
 
+vi.mock("./local-subagent-work-monitor-steps.js", () => ({
+  startLocalSubagentWorkMonitorStep: vi.fn(),
+}));
+
 vi.mock("./workflow-callback-url.js", () => ({
   resolveWorkflowCallbackBaseUrl: vi.fn((metadataUrl: string) => metadataUrl),
 }));
@@ -64,6 +69,8 @@ describe("turnWorkflow", () => {
     resumeHookMock.mockReset();
     createHookMock.mockReset();
     sleepMock.mockClear();
+    vi.mocked(startLocalSubagentWorkMonitorStep).mockReset();
+    vi.mocked(startLocalSubagentWorkMonitorStep).mockResolvedValue({ runId: "monitor-run" });
   });
 
   it("notifies the driver when a turn completes", async () => {

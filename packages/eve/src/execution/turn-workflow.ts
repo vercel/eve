@@ -22,7 +22,8 @@ import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
-import { refreshLocalSubagentWorkStep } from "#execution/refresh-local-subagent-work-step.js";
+import { startLocalSubagentWorkMonitorStep } from "#execution/local-subagent-work-monitor-steps.js";
+import { writeLocalSubagentWorkStep } from "#execution/write-local-subagent-work-step.js";
 import {
   createTurnCancellationControl,
   type TurnCancellationControl,
@@ -32,8 +33,6 @@ import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { turnStep } from "#execution/workflow-steps.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
-import { deserializeContext } from "#context/serialize.js";
-import { WorkGraphKey } from "#context/keys.js";
 import { getRuntimeActionResultKey } from "#runtime/actions/keys.js";
 import { resolveRuntimeActionResultsForKeys } from "#runtime/actions/results.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
@@ -193,6 +192,10 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         const initialAcceptedAtMs = dispatchResult.results.length === 0 ? undefined : Date.now();
         await cursor.adopt(dispatchResult);
         await acknowledgeDelegatedTasksStep({ tasks: dispatchResult.pendingTasks });
+        await startLocalSubagentWorkMonitorStep({
+          serializedContext: cursor.serializedContext,
+          sessionState: dispatchResult.sessionState,
+        });
 
         const results = await waitForRuntimeActionResults({
           bufferedDeliveries,
@@ -263,15 +266,10 @@ async function writeCommittedWorkSnapshot(
   workWritable: WritableStream<unknown> | undefined,
 ): Promise<void> {
   if (workWritable === undefined) return;
-  const ctx = await deserializeContext(result.serializedContext);
-  const work = ctx.get(WorkGraphKey);
-  if (work === undefined || work.revision === 0) return;
-  const writer = workWritable.getWriter();
-  try {
-    await writer.write(work);
-  } finally {
-    writer.releaseLock();
-  }
+  await writeLocalSubagentWorkStep({
+    serializedContext: result.serializedContext,
+    workWritable,
+  });
 }
 
 async function finishCancelledTurn(input: {
@@ -308,8 +306,6 @@ interface AcceptedRuntimeActionBatch {
   readonly results: readonly RuntimeActionResult[];
 }
 
-const LOCAL_SUBAGENT_WORK_REFRESH_MS = 15_000;
-
 async function waitForRuntimeActionResults(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly cancellation: TurnCancellationControl | undefined;
@@ -329,14 +325,19 @@ async function waitForRuntimeActionResults(input: {
       acceptedAtMsByKey.set(getRuntimeActionResultKey(result), input.initialAcceptedAtMs);
     }
   }
-  let nextWorkRefresh = workflowSleep(LOCAL_SUBAGENT_WORK_REFRESH_MS).then(
-    () => "work-refresh" as const,
-  );
+  let nextPromise = input.iterator.next();
+  nextPromise.catch(() => {});
 
   while (true) {
     const ready = resolveRuntimeActionResultsForKeys({
       pendingKeys: input.pendingActionKeys,
       results,
+    });
+    console.error("[eve.work] parent action-result wait state", {
+      pendingActionKeys: input.pendingActionKeys,
+      ready: ready !== undefined,
+      resultCallIds: results.map((result) => result.callId),
+      sessionId: input.cursor.sessionState.sessionId,
     });
     if (ready !== undefined) {
       if (pendingDeliveryRequest !== undefined) {
@@ -368,14 +369,10 @@ async function waitForRuntimeActionResults(input: {
       });
     }
 
-    const nextPromise = input.iterator.next();
-    // When a cancel wins the race, the dangling inbox `next()` is dropped
-    // by disposal in teardown; pre-attach a handler so a late rejection
-    // never surfaces as unhandled.
-    nextPromise.catch(() => {});
+    const inbox = nextPromise.then((next) => ({ kind: "inbox" as const, next }));
     const next = await (input.cancellation === undefined
-      ? Promise.race([nextPromise, nextWorkRefresh])
-      : Promise.race([nextPromise, nextWorkRefresh, input.cancellation.requested]));
+      ? inbox
+      : Promise.race([inbox, input.cancellation.requested]));
     if (next === "cancel") {
       if (pendingDeliveryRequest !== undefined) {
         // Release the raced public input back to the driver so it stays
@@ -387,21 +384,16 @@ async function waitForRuntimeActionResults(input: {
       }
       return "cancelled";
     }
-    if (next === "work-refresh") {
-      const refreshed = await refreshLocalSubagentWorkStep({
-        serializedContext: input.cursor.serializedContext,
-        sessionState: input.cursor.sessionState,
-      });
-      await input.cursor.adopt({ ...refreshed, sessionState: input.cursor.sessionState });
-      nextWorkRefresh = workflowSleep(LOCAL_SUBAGENT_WORK_REFRESH_MS).then(
-        () => "work-refresh" as const,
-      );
-      continue;
-    }
-    if (next.done) throw new Error("Turn inbox closed before runtime actions completed.");
+    if (next.next.done) throw new Error("Turn inbox closed before runtime actions completed.");
 
-    const value = next.value;
+    const value = next.next.value;
+    nextPromise = input.iterator.next();
+    nextPromise.catch(() => {});
     if (value.kind === "runtime-action-result") {
+      console.error("[eve.work] parent received child result", {
+        callIds: value.results.map((result) => result.callId),
+        sessionId: input.cursor.sessionState.sessionId,
+      });
       // The inbox token is shared by every callee in the batch, so an inbox
       // subagent result must bind to a running agent handle in the adopted
       // session snapshot: its callId on the handle's operation and, when it
@@ -414,6 +406,11 @@ async function waitForRuntimeActionResults(input: {
       const accepted = value.results.filter((result) =>
         isInboxSubagentResultFromRunningHandle(sessionSnapshotState, result),
       );
+      console.error("[eve.work] parent child result binding", {
+        acceptedCallIds: accepted.map((result) => result.callId),
+        receivedCallIds: value.results.map((result) => result.callId),
+        sessionId: input.cursor.sessionState.sessionId,
+      });
       if (accepted.length > 0) {
         const acceptedAtMs = Date.now();
         results.push(...accepted);
@@ -421,6 +418,10 @@ async function waitForRuntimeActionResults(input: {
           acceptedAtMsByKey.set(getRuntimeActionResultKey(result), acceptedAtMs);
         }
       }
+      console.error("[eve.work] parent child results accumulated", {
+        resultCallIds: results.map((result) => result.callId),
+        sessionId: input.cursor.sessionState.sessionId,
+      });
       continue;
     }
 

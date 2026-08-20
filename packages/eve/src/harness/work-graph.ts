@@ -23,6 +23,7 @@ export interface WorkAction {
   readonly kind: RuntimeActionRequest["kind"];
   readonly name: string;
   readonly phase: WorkPhase;
+  readonly detail?: string;
   readonly child?: {
     readonly sessionId: string;
     readonly work?: WorkGraph;
@@ -298,7 +299,13 @@ function toWorkAction(action: RuntimeActionRequest): WorkAction {
         phase: "running",
       };
     case "tool-call":
-      return { callId: action.callId, kind: action.kind, name: action.toolName, phase: "running" };
+      return {
+        callId: action.callId,
+        detail: typeof action.input.stage === "string" ? action.input.stage : undefined,
+        kind: action.kind,
+        name: action.toolName,
+        phase: "running",
+      };
   }
 }
 

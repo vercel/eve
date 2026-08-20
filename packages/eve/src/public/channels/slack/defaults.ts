@@ -31,6 +31,10 @@ import type {
   SlackContext,
   SlackMentionResult,
 } from "#public/channels/slack/slackChannel.js";
+import {
+  renderSlackWorkActivity,
+  settleSlackWorkActivity,
+} from "#public/channels/slack/work-activity.js";
 import type { InputRequest } from "#runtime/input/types.js";
 
 const log = createLogger("slack.defaults");
@@ -275,6 +279,10 @@ export const defaultEvents: SlackChannelInternalEvents = {
   },
 
   async "actions.requested"(event, channel, _ctx) {
+    await renderSlackWorkActivity({
+      channel,
+      work: workGraphFromChannelContext(channel),
+    });
     const buffered = channel.state.pendingToolCallMessage;
     channel.state.pendingToolCallMessage = null;
     if (buffered) {
@@ -302,7 +310,16 @@ export const defaultEvents: SlackChannelInternalEvents = {
     await channel.thread.post(event.message);
   },
 
+  async "turn.completed"(_event, channel, _ctx) {
+    await settleSlackWorkActivity(channel);
+  },
+
+  async "turn.cancelled"(_event, channel, _ctx) {
+    await settleSlackWorkActivity(channel);
+  },
+
   async "turn.failed"(event, channel, _ctx) {
+    await settleSlackWorkActivity(channel);
     const hint = formatErrorHint(event);
     const errorId = extractErrorId(event.details);
     await channel.thread.post(

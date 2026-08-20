@@ -1,6 +1,7 @@
 import { type ChannelCors } from "#channel/cors.js";
 import type { UserContent } from "ai";
 import type { ChannelReceiveContext } from "#channel/channel-operations.js";
+import type { ContextAccessor } from "#context/key.js";
 import type { RouteDefinition } from "#channel/routes.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
@@ -99,6 +100,14 @@ export interface GenericChannelDefinition<
    * values such as `Date` or `Map`.
    */
   readonly metadata?: (state: NonNullable<TState>) => TMetadata;
+
+  /** @internal Renders framework-owned active work after a bounded refresh. */
+  readonly work?: (
+    state: NonNullable<TState>,
+    session: SessionHandle,
+    ctx: ContextAccessor,
+    options?: { readonly allowPost?: boolean },
+  ) => void | Promise<void>;
 
   /**
    * Identifier of the adapter family this channel belongs to. Set by

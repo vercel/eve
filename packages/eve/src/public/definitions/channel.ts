@@ -326,7 +326,8 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
   const hasFetchFile = definition.fetchFile !== undefined;
   const metadata = definition.metadata;
   const hasMetadata = metadata !== undefined;
-  const hasBehavior = hasState || hasContext || hasMetadata;
+  const work = definition.work;
+  const hasBehavior = hasState || hasContext || hasMetadata || work !== undefined;
 
   const eventHandlers: Record<string, unknown> = {};
   let hasEventHandlers = false;
@@ -398,6 +399,14 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
       if (definition.deliver === undefined) return defaultDeliverResult(payload);
       return definition.deliver(payload, adapterCtx as TCtx);
     },
+
+    work:
+      work === undefined
+        ? undefined
+        : {
+            render: (adapterCtx: any, options) =>
+              work(adapterCtx.state, adapterCtx.session, adapterCtx.ctx, options),
+          },
 
     ...eventHandlers,
   } as ChannelAdapter<any>;

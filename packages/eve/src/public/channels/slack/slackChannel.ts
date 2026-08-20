@@ -56,6 +56,8 @@ import {
   type LoadThreadContextMessagesOptions,
 } from "#public/channels/slack/thread.js";
 import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
+import { renderSlackWorkActivity } from "#public/channels/slack/work-activity.js";
+import { WorkGraphKey } from "#context/keys.js";
 import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#public/channels/slack/constants.js";
 import { handleInteractionPost } from "#public/channels/slack/interactions.js";
 import {
@@ -224,6 +226,9 @@ export interface SlackChannelState {
   pendingApprovalCards?: Record<string, SlackPendingApprovalCard>;
   pendingApprovalCandidateUsers?: Record<string, string>;
   approvalResponderUsers?: Record<string, string>;
+  /** Replaceable internal activity message for the active work graph. */
+  workActivityMessageTs?: string | null;
+  workActivityTurnId?: string | null;
 }
 
 /**
@@ -762,8 +767,16 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       pendingApprovalCards: {},
       pendingApprovalCandidateUsers: {},
       approvalResponderUsers: {},
+      workActivityMessageTs: null,
+      workActivityTurnId: null,
     },
     fetchFile: slackFetchFile,
+    work: (state, _session, ctx, options) =>
+      renderSlackWorkActivity({
+        allowPost: options?.allowPost,
+        channel: rebuildSlackContext(state, _session, config.credentials),
+        work: ctx.get(WorkGraphKey),
+      }),
     metadata(state): SlackInstrumentationMetadata {
       return {
         channelId: state.channelId,
