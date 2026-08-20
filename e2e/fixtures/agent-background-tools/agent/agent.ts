@@ -9,14 +9,18 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   const message = [...request.userMessages].reverse().find((entry) => entry.trim() !== "") ?? "";
 
   if (message.includes("BACKGROUND-EXPORT-START")) {
-    return {
-      toolCalls: [
-        {
-          name: "export",
-          input: { query: "ship-it" },
-        },
-      ],
-    };
+    const roles = request.messages.map((entry) => entry.role);
+    if (roles.lastIndexOf("tool") <= roles.lastIndexOf("user")) {
+      return {
+        toolCalls: [
+          {
+            name: "export",
+            input: { query: "ship-it" },
+          },
+        ],
+      };
+    }
+    return "BACKGROUND-EXPORT-STARTED";
   }
 
   if (message.includes(`update: ${PROGRESS}`)) {
