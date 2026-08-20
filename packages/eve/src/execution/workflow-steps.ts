@@ -27,6 +27,7 @@ import {
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicToolRuntimeRevisionKey,
   TurnTaskDeliveryKey,
+  WorkGraphKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { runStep } from "#context/run-step.js";
@@ -60,6 +61,7 @@ import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.j
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import type { HarnessSession, SettledTurn, StepInput, StepResult } from "#harness/types.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
+import { reduceWorkGraph } from "#harness/work-graph.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
 import {
@@ -392,6 +394,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
 
   // Stamp once: the persisted chunk and the hooks below must agree on the id.
   const emit = async (event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent> => {
+    ctx.set(WorkGraphKey, reduceWorkGraph(ctx.get(WorkGraphKey), event));
     const toEmit = await callAdapterEventHandler(adapter, event, adapterCtx);
     setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
     const stamped = stampMessageStreamEvent(toEmit);
