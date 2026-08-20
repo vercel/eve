@@ -171,7 +171,11 @@ import {
 import { getInstrumentationConfig } from "#harness/instrumentation/config.js";
 import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 import type { OtelHarnessSettings } from "#tracing/otel-declaration.js";
-import { normalizeUserContent, resolveAssistantStepText } from "#harness/messages.js";
+import {
+  normalizeModelMessages,
+  normalizeUserContent,
+  resolveAssistantStepText,
+} from "#harness/messages.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import {
   type AuthorizationSignal,
@@ -1265,7 +1269,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (compaction.compacted) {
       messages = compaction.messages;
     }
-    projectedMessages = projectHistory(messages, session.state);
+    projectedMessages = normalizeModelMessages(projectHistory(messages, session.state));
 
     if (emit) {
       await emitStepStarted(
@@ -1275,7 +1279,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         projectedMessages,
       );
     }
-
     const approvedTools = getApprovedTools(session);
 
     const emptyDeliveryEnabled =

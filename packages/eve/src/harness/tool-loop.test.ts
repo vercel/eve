@@ -823,6 +823,41 @@ describe("createToolLoopHarness", () => {
     }
   });
 
+  it("removes blank text blocks from persisted history before the provider call", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const runStep = createToolLoopHarness(createTestConfig("conversation"));
+    await runStep(
+      createTestSession({
+        history: [
+          { content: " ", role: "assistant" },
+          {
+            content: [
+              { text: "", type: "text" },
+              { text: "Previous reply", type: "text" },
+            ],
+            role: "assistant",
+          },
+        ],
+      }),
+      { message: "Continue" },
+    );
+
+    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
+      generate: ReturnType<typeof vi.fn>;
+    };
+    expect(agent.generate.mock.calls[0]?.[0].messages).toEqual([
+      { content: [{ text: "Previous reply", type: "text" }], role: "assistant" },
+      { content: "Continue", role: "user" },
+    ]);
+  });
+
   it.each([
     ["literal", EMPTY_DELIVERY_SENTINEL],
     ["HTML-escaped", "&lt;eve-empty-delivery/&gt;"],

@@ -6,6 +6,7 @@ const EMPTY_DELIVERY_SENTINEL = "<eve-empty-delivery/>";
 const SCENARIO = "TASK-REPORTING-PROBE";
 const TASK_STATE_LABEL = "[Task state]\n";
 const RESULTS = ["WAKE-MECHANISM", "CHANNEL-DELIVERY", "REPORTING-POLICY"] as const;
+const DELAYS_MS = [10_000, 40_000, 70_000] as const;
 
 interface TaskState {
   readonly tasks: readonly {
@@ -46,7 +47,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   return {
     toolCalls: RESULTS.map((result, index) => ({
       id: `report-probe-${String(index + 1)}`,
-      input: { delayMs: (index + 1) * 1_000, result },
+      input: { delayMs: DELAYS_MS[index], result },
       name: "report_probe",
     })),
   };
