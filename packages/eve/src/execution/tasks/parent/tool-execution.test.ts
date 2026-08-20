@@ -194,7 +194,7 @@ describe("background tool execution", () => {
     expect(mocks.rejectDelegatedDispatch).not.toHaveBeenCalled();
   });
 
-  it("rolls back generic executor effects when the parent step fails", async () => {
+  it("send delivers terminal commands after delegation and rejects once the task is terminal", async () => {
     const task = {
       createdByStepIndex: 0,
       createdByTurnId: "turn-1",
@@ -205,16 +205,102 @@ describe("background tool execution", () => {
     } as const;
     mocks.beginBackgroundTask.mockResolvedValue(task);
     mocks.sendTaskCommand.mockResolvedValue("delivered");
-    const rollback = vi.fn();
+    let background: TaskExec | undefined;
+    const definition = defineTool({
+      description: "Start an external export.",
+      execution: "background",
+      inputSchema: z.strictObject({ query: z.string() }),
+      execute(input: { readonly query: string }, _ctx: ToolContext, taskExec: TaskExec) {
+        background = taskExec;
+        return taskExec.delegated({
+          executor: { data: { exportId: input.query }, kind: "export" },
+          receipt: { exportId: input.query },
+        });
+      },
+    });
+    const tool: HarnessToolDefinition = {
+      description: definition.description,
+      execute: createToolExecuteWithAuth({
+        execute: definition.execute,
+        execution: definition.execution,
+        scope: "export",
+      }),
+      execution: definition.execution,
+      inputSchema: toInputSchema(definition.inputSchema),
+      name: "export",
+    };
+    const model = new MockLanguageModelV4({
+      doGenerate: {
+        content: [
+          {
+            input: JSON.stringify({ query: "customers" }),
+            toolCallId: "call-export",
+            toolName: "export",
+            type: "tool-call",
+          },
+        ],
+        finishReason: { raw: undefined, unified: "tool-calls" },
+        usage,
+        warnings: [],
+      },
+    });
+    const session: HarnessSession = setHarnessEmissionState(
+      {
+        agent: { modelReference: { id: "mock" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100_000 },
+        continuationToken: "parent-token",
+        history: [],
+        sessionId: "parent-session",
+      },
+      { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "turn-1" },
+    );
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(SessionIdKey, session.sessionId);
+
+    await runStep(
+      ctx,
+      session,
+      async (current) => {
+        await generateText({
+          model,
+          prompt: "Start the export.",
+          tools: buildToolSet({ tools: new Map([[tool.name, tool]]) }),
+        });
+        return { next: null, session: current };
+      },
+      [backgroundToolExecutionProvider],
+    );
+
+    expect(background).toBeDefined();
+    await background!.send({ data: { rows: 10 }, kind: "complete" });
+    expect(mocks.sendTaskCommand).toHaveBeenLastCalledWith({
+      command: { data: { rows: 10 }, kind: "complete" },
+      taskInboxToken: "inbox-export",
+    });
+
+    mocks.sendTaskCommand.mockResolvedValue("unreachable");
+    await expect(background!.send({ kind: "cancel" })).rejects.toThrow(
+      'Task run "task-export" did not accept "cancel".',
+    );
+  });
+
+  it("compensates a delegated task when the parent step fails", async () => {
+    const task = {
+      createdByStepIndex: 0,
+      createdByTurnId: "turn-1",
+      metadata: { kind: "tool", name: "export" },
+      taskId: "task-export",
+      taskInboxToken: "inbox-export",
+      taskRunId: "run-export",
+    } as const;
+    mocks.beginBackgroundTask.mockResolvedValue(task);
+    mocks.sendTaskCommand.mockResolvedValue("delivered");
     const definition = defineTool({
       description: "Start an external export.",
       execution: "background",
       inputSchema: z.strictObject({ query: z.string() }),
       execute(input: { readonly query: string }, _ctx: ToolContext, background: TaskExec) {
-        background.stageEffect({
-          apply: (session) => ({ ...session, state: { ...session.state, export: input.query } }),
-          rollback,
-        });
         return background.delegated({
           executor: { data: { exportId: input.query }, kind: "export" },
           receipt: { exportId: input.query },
@@ -277,9 +363,6 @@ describe("background tool execution", () => {
       ),
     ).rejects.toThrow("parent step failed");
 
-    expect(rollback).toHaveBeenCalledWith(
-      expect.objectContaining({ message: "parent step failed" }),
-    );
     expect(mocks.rejectDelegatedDispatch).toHaveBeenCalledWith({
       error: { code: "PARENT_STEP_FAILED", message: "parent step failed" },
       task: {

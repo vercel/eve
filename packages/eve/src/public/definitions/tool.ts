@@ -42,6 +42,7 @@ export type {
   TaskExec,
   TaskExecutorBinding,
   TaskReceipt,
+  TaskSendCommand,
 } from "#shared/tool-task.js";
 
 /**

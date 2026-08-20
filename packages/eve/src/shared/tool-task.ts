@@ -1,18 +1,9 @@
 import type { BackgroundTask } from "#execution/tasks/parent/delegate.js";
 import type { BackgroundToolCall } from "#harness/background-tools.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { JsonObject } from "#shared/json.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 
 const TASK_DELEGATED_KIND = "eve:task-delegated";
-
-/**
- * A session mutation staged during background tool execution. `apply` runs on
- * step commit; `rollback` compensates it when the step fails.
- */
-export interface BackgroundToolEffect {
-  readonly apply: (session: HarnessSession) => HarnessSession;
-  readonly rollback?: (cause: unknown) => Promise<void>;
-}
 
 /** Private address an executor uses to report lifecycle changes to its owning task. */
 export interface TaskBinding {
@@ -53,6 +44,16 @@ export interface TaskDelegated<TData extends JsonObject = JsonObject> {
   readonly receipt: TaskReceipt<TData>;
 }
 
+/**
+ * Terminal commands an in-process executor may report to its task via
+ * {@link TaskExec.send}. Deliberately narrower than the task run's full
+ * command surface — bind, ready, and input routing stay runtime-owned.
+ */
+export type TaskSendCommand =
+  | { readonly kind: "complete"; readonly data: JsonValue }
+  | { readonly kind: "fail"; readonly data: JsonValue }
+  | { readonly kind: "cancel" };
+
 /** Task capability passed only to tools declared with `execution: "background"`. */
 export interface TaskExec {
   /**
@@ -68,17 +69,20 @@ export interface TaskExec {
    */
   readonly binding: TaskBinding;
   /**
-   * Snapshot of the harness session at step start, for reading context. The
-   * committed session is this snapshot plus staged effects — mutating it
-   * directly changes nothing durable; use `stageEffect`.
+   * Reports this task's terminal result from in-process code (e.g. a callback
+   * that outlives `execute`). Call it only after `execute` returned
+   * `delegated(...)` — the runtime settles non-delegated returns itself, and
+   * a second terminal command is refused. Throws once the task is terminal.
+   * Not restart-safe: an in-memory callback dies with the process; the
+   * persisted executor binding remains the durable cancellation path.
+   */
+  readonly send: (command: TaskSendCommand) => Promise<void>;
+  /**
+   * Snapshot of the harness session at step start, for reading context.
+   * Mutating it changes nothing durable — session writes at commit are
+   * provider-owned (the task index entry for this call).
    */
   readonly session: HarnessSession;
-  /**
-   * Stages a session mutation that commits with the step and rolls back if
-   * the step fails. The only transactional way to mutate the session from a
-   * background tool.
-   */
-  readonly stageEffect: (effect: BackgroundToolEffect) => void;
   /** The durable task backing this call; its identity outlives `execute`. */
   readonly task: BackgroundTask;
 

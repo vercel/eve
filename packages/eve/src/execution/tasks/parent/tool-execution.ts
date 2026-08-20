@@ -18,12 +18,7 @@ import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { parseJsonValue } from "#shared/json.js";
 import type { ToolExecuteOptions } from "#shared/tool-definition.js";
-import {
-  createTaskDelegated,
-  isTaskDelegated,
-  type BackgroundToolEffect,
-  type TaskExec,
-} from "#shared/tool-task.js";
+import { createTaskDelegated, isTaskDelegated, type TaskExec } from "#shared/tool-task.js";
 import { recordSessionTask } from "#tasks/session-index.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import {
@@ -34,7 +29,6 @@ import {
 import { sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
 
 interface BackgroundToolExecutionRecord {
-  readonly effects: BackgroundToolEffect[];
   settled: boolean;
   task?: BackgroundTask;
 }
@@ -67,8 +61,8 @@ export function runBackgroundStep(
  * successful commit. Nothing survives the step except retained tasks (below).
  *
  * - `commit` — step succeeded. Compensates executions that never settled
- *   (the tool neither delegated nor completed its task), then applies the
- *   staged effects and task handles onto the session being persisted.
+ *   (the tool neither delegated nor completed its task), then records the
+ *   spawned task handles onto the session being persisted.
  * - `rollback` — step failed. Compensates incomplete executions, and settled
  *   ones too — unless the cause is turn cancellation: those tasks are already
  *   running, so they are retained for {@link readRetainedBackgroundToolResult}
@@ -94,8 +88,8 @@ export const backgroundToolExecutionProvider: FrameworkContextProvider<Backgroun
 };
 
 /**
- * Returns what a successful commit would have produced (session with staged
- * effects applied plus spawned task handles) when turn cancellation raced a
+ * Returns what a successful commit would have produced (session with spawned
+ * task handles recorded) when turn cancellation raced a
  * successfully delegated task. `rollback` deliberately does not compensate
  * settled records on cancellation — that would kill already-running tasks —
  * so the cancellation epilogue reads this instead to keep those tasks tracked
@@ -177,7 +171,6 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     let next = session;
     for (const record of this.records) {
       if (!record.settled || record.task === undefined) continue;
-      for (const effect of record.effects) next = effect.apply(next);
       next = recordSessionTask(next, record.task);
     }
     return next;
@@ -204,10 +197,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     readonly options: ToolExecuteOptions;
     readonly toolInput: unknown;
   }): Promise<unknown> {
-    const record: BackgroundToolExecutionRecord = {
-      effects: [],
-      settled: false,
-    };
+    const record: BackgroundToolExecutionRecord = { settled: false };
     this.records.push(record);
     const emission = getHarnessEmissionState(this.initialSession.state);
     const task = await beginBackgroundTask({
@@ -237,8 +227,8 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       batch: input.batch.calls,
       binding,
       delegated: ({ executor, receipt }) => createTaskDelegated({ binding, executor, receipt }),
+      send: (command) => deliverTaskCommand(task, command),
       session: this.initialSession,
-      stageEffect: (effect) => record.effects.push(effect),
       task,
     };
 
@@ -287,14 +277,6 @@ async function compensateBackgroundToolExecution(
 ): Promise<void> {
   const failures: unknown[] = [];
   for (const record of records.toReversed()) {
-    for (const effect of record.effects.toReversed()) {
-      if (effect.rollback === undefined) continue;
-      try {
-        await effect.rollback(cause);
-      } catch (error) {
-        failures.push(error);
-      }
-    }
     if (record.task === undefined) continue;
     try {
       await rejectDelegatedDispatch({
@@ -311,7 +293,7 @@ async function compensateBackgroundToolExecution(
   if (failures.length > 0) {
     throw new AggregateError(
       [cause, ...failures],
-      "Background tool execution failed and its effects could not all be rolled back.",
+      "Background tool execution failed and its tasks could not all be compensated.",
       { cause },
     );
   }

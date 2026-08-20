@@ -63,9 +63,10 @@ value completes the durable task with that value. Returning `task.delegated({ ex
 returns a `working` receipt immediately while an external executor continues the task.
 
 This contract currently supports framework-owned task executors, including local and remote
-subagents when `experimental.tasks` is enabled. The external executor wire is not yet a stable
-authored-tool API; do not use background execution for application tools that need to report later
-lifecycle updates.
+subagents when `experimental.tasks` is enabled. After delegating, an in-process executor reports
+the terminal result with `task.send({ kind: "complete", data })` (or `"fail"` / `"cancel"`). Note
+that `task.send` is not restart-safe — an in-memory callback dies with the process — so the
+cross-process executor wire remains framework-owned.
 
 ### The `ctx` parameter
 
