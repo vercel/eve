@@ -47,6 +47,7 @@ import type {
 } from "#public/channels/slack/slackChannel.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import { bindSlackSessionOperations } from "#public/channels/slack/session-operations.js";
+import { defineInputResponse } from "#runtime/input/types.js";
 
 const log = createLogger("slack.interactions");
 
@@ -569,7 +570,7 @@ async function handleViewSubmission(
   const teamId = user?.teamId ?? payload.teamId ?? null;
   const submission: SlackInputResponseSubmission = {
     type: "view_submission",
-    inputResponses: [{ requestId: metadata.requestId, text }],
+    inputResponses: [defineInputResponse({ requestId: metadata.requestId, text })],
     messageTs: metadata.messageTs,
     user: {
       id: triggeringUserId,

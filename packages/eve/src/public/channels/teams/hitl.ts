@@ -2,7 +2,11 @@
  * Teams Adaptive Card rendering and decode helpers for eve HITL prompts.
  */
 
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import {
+  defineInputResponse,
+  type InputRequest,
+  type InputResponse,
+} from "#runtime/input/types.js";
 import type {
   TeamsActivity,
   TeamsInvokeActivity,
@@ -173,9 +177,9 @@ export function deriveTeamsInputResponses(activity: TeamsActivity): readonly Inp
       ? value[TEAMS_HITL_FREEFORM_INPUT_ID]
       : undefined;
 
-  if (optionId !== undefined) return [{ optionId, requestId }];
-  if (text !== undefined) return [{ requestId, text }];
-  return [{ requestId }];
+  if (optionId !== undefined) return [defineInputResponse({ optionId, requestId })];
+  if (text !== undefined) return [defineInputResponse({ requestId, text })];
+  return [defineInputResponse({ requestId })];
 }
 
 /**

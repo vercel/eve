@@ -19,7 +19,11 @@ import {
   truncatePlainText,
   truncateSectionText,
 } from "#public/channels/slack/limits.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import {
+  defineInputResponse,
+  type InputRequest,
+  type InputResponse,
+} from "#runtime/input/types.js";
 
 /**
  * Wire-format prefix every framework HITL widget mints onto its
@@ -106,8 +110,13 @@ export function deriveHitlResponse(action: SlackHitlAction): DerivedHitlResponse
     const { kind, requestId } = splitEncodedRequest(encodedRequest);
     if (!requestId) return null;
     return kind === "tool-approval"
-      ? { kind, response: { optionId: action.selectedOptionValue, requestId } }
-      : { response: { optionId: action.selectedOptionValue, requestId } };
+      ? {
+          kind,
+          response: defineInputResponse({ optionId: action.selectedOptionValue, requestId }),
+        }
+      : {
+          response: defineInputResponse({ optionId: action.selectedOptionValue, requestId }),
+        };
   }
 
   if (action.value !== undefined) {
@@ -115,8 +124,11 @@ export function deriveHitlResponse(action: SlackHitlAction): DerivedHitlResponse
     const requestId = match?.groups?.requestId;
     if (!requestId) return null;
     return match.groups?.kind === "tool-approval"
-      ? { kind: "tool-approval", response: { optionId: action.value, requestId } }
-      : { response: { optionId: action.value, requestId } };
+      ? {
+          kind: "tool-approval",
+          response: defineInputResponse({ optionId: action.value, requestId }),
+        }
+      : { response: defineInputResponse({ optionId: action.value, requestId }) };
   }
 
   return null;

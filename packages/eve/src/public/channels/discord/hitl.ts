@@ -10,7 +10,12 @@ import {
   type DiscordComponentInteraction,
   type DiscordModalSubmitInteraction,
 } from "#public/channels/discord/inbound.js";
-import type { InputOption, InputRequest, InputResponse } from "#runtime/input/types.js";
+import {
+  defineInputResponse,
+  type InputOption,
+  type InputRequest,
+  type InputResponse,
+} from "#runtime/input/types.js";
 
 /** Maps Discord component kinds (ACTION_ROW, BUTTON, STRING_SELECT, TEXT_INPUT) to their wire `type` integers used in component payloads. */
 export const DISCORD_COMPONENT_TYPE = {
@@ -176,12 +181,12 @@ export function deriveComponentInputResponses(
   if (!payload) return [];
 
   if (payload.optionId !== undefined) {
-    return [{ optionId: payload.optionId, requestId: payload.requestId }];
+    return [defineInputResponse({ optionId: payload.optionId, requestId: payload.requestId })];
   }
 
   const selected = interaction.values[0];
   if (selected !== undefined) {
-    return [{ optionId: selected, requestId: payload.requestId }];
+    return [defineInputResponse({ optionId: selected, requestId: payload.requestId })];
   }
 
   return [];
@@ -198,7 +203,7 @@ export function deriveModalInputResponses(
   const payload = decodeHitlCustomId(interaction.customId, DISCORD_HITL_FREEFORM_CUSTOM_ID_PREFIX);
   const text = interaction.textInputs[DISCORD_HITL_FREEFORM_TEXT_INPUT_ID];
   if (!payload || text === undefined) return [];
-  return [{ requestId: payload.requestId, text }];
+  return [defineInputResponse({ requestId: payload.requestId, text })];
 }
 
 function encodeHitlCustomId(prefix: string, payload: HitlCustomIdPayload): string {

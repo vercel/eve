@@ -84,6 +84,18 @@ export const inputResponseSchema = z
   .strict();
 
 /**
+ * Defines a channel-produced input response without allowing channel-local
+ * metadata to be widened into the durable response contract.
+ */
+export function defineInputResponse<const TResponse extends InputResponse>(
+  response: TResponse & {
+    readonly [TKey in Exclude<keyof TResponse, keyof InputResponse>]: never;
+  },
+): TResponse {
+  return response;
+}
+
+/**
  * Returns true when a value matches the input request contract.
  */
 export function isInputRequest(value: unknown): value is InputRequest {
