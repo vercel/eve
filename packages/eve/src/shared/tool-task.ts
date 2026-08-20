@@ -69,20 +69,22 @@ export interface TaskExec {
    */
   readonly binding: TaskBinding;
   /**
-   * Reports this task's terminal result from in-process code (e.g. a callback
-   * that outlives `execute`). Call it only after `execute` returned
-   * `delegated(...)` — the runtime settles non-delegated returns itself, and
-   * a second terminal command is refused. Throws once the task is terminal.
-   * Not restart-safe: an in-memory callback dies with the process; the
-   * persisted executor binding remains the durable cancellation path.
-   */
-  readonly send: (command: TaskSendCommand) => Promise<void>;
-  /**
    * Snapshot of the harness session at step start, for reading context.
-   * Mutating it changes nothing durable — session writes at commit are
-   * provider-owned (the task index entry for this call).
+   * Mutating it changes nothing durable: session writes belong to the
+   * runtime, keyed off the executor binding at step commit.
    */
   readonly session: HarnessSession;
+  /**
+   * Delivers a terminal command to this task's inbox from the same process,
+   * for executors that outlive `execute` in-memory (e.g. a callback firing
+   * after delegation). Call it only after `execute` returned `delegated(...)`
+   * — the runtime settles non-delegated returns itself, and a second terminal
+   * command is refused. Not restart-safe: an in-process callback dies with
+   * the process; the persisted executor binding remains the durable
+   * cancellation path. Throws when the task no longer accepts commands
+   * (already terminal).
+   */
+  readonly send: (command: TaskSendCommand) => Promise<void>;
   /** The durable task backing this call; its identity outlives `execute`. */
   readonly task: BackgroundTask;
 

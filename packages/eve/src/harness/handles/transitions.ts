@@ -201,6 +201,36 @@ export function confirmTaskAgentAddress(
   );
 }
 
+/**
+ * Records a task-mode child's persistent address from its durable executor
+ * binding, applied when the parent step that delegated the task commits.
+ *
+ * Replay-idempotent: a record identical to the stored handle is a no-op
+ * (a resumed child, or a replayed commit). A different record under the
+ * same id throws — ids derive from unique operations, so a collision
+ * means corrupted derivation, not a replay.
+ */
+export function recordTaskAgentAddress(
+  session: HarnessSession,
+  input: {
+    readonly address: AgentAddress;
+    readonly identity: AgentIdentity;
+  },
+): HarnessSession {
+  const handles = getAgentHandleStore(session.state)?.handles ?? [];
+  const record: AgentHandle = {
+    address: input.address,
+    identity: input.identity,
+    phase: "addressed",
+  };
+  const existing = handles.find((handle) => handle.identity.id === input.identity.id);
+  if (existing !== undefined) {
+    if (jsonValuesEqual(existing, record)) return session;
+    throw new Error(`Agent handle "${input.identity.id}" already exists with different content.`);
+  }
+  return writeHandles(session, [...handles, record]);
+}
+
 /** Removes a task-mode address after permanent delivery failure. */
 export function removeTaskAgentAddress(session: HarnessSession, agentId: string): HarnessSession {
   return { ...session, state: removeTaskAgentAddressFromState(session.state, agentId) };

@@ -13,12 +13,19 @@ import { isAuthorizationPendingModelOutput, requestAuthorization } from "#harnes
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { buildToolSet } from "#harness/tools.js";
 import type { HarnessSession } from "#harness/types.js";
+import {
+  getAgentHandleStore,
+  type AgentAddress,
+  type AgentIdentity,
+} from "#harness/handles/store.js";
 import { defineTool, type TaskExec, type ToolContext } from "#public/definitions/tool.js";
 import { toInputSchema } from "#shared/tool-schema.js";
 import { getSessionTaskIndex } from "#tasks/session-index.js";
+import { createSubagentExecutorBinding } from "#tasks/types.js";
 
 const mocks = vi.hoisted(() => ({
   beginBackgroundTask: vi.fn(),
+  propagateSubagentExecutorCancel: vi.fn(),
   rejectDelegatedDispatch: vi.fn(),
   sendTaskCommand: vi.fn(),
 }));
@@ -27,6 +34,10 @@ vi.mock("#execution/tasks/parent/delegate.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#execution/tasks/parent/delegate.js")>()),
   beginBackgroundTask: mocks.beginBackgroundTask,
   rejectDelegatedDispatch: mocks.rejectDelegatedDispatch,
+}));
+vi.mock("#execution/tasks/parent/dispatch.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#execution/tasks/parent/dispatch.js")>()),
+  propagateSubagentExecutorCancel: mocks.propagateSubagentExecutorCancel,
 }));
 vi.mock("#execution/tasks/parent/run-parent.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#execution/tasks/parent/run-parent.js")>()),
@@ -38,9 +49,79 @@ const usage = {
   outputTokens: { reasoning: undefined, text: 1, total: 1 },
 };
 
+const childIdentity: AgentIdentity = {
+  id: "ag_research:operation1",
+  name: "research",
+  nodeId: "node_research",
+};
+const childAddress: AgentAddress = {
+  continuationToken: "continuation_child",
+  kind: "agent/local",
+  sessionId: "session_child",
+};
+
+function createParentSession(): HarnessSession {
+  return setHarnessEmissionState(
+    {
+      agent: { modelReference: { id: "mock" }, system: "", tools: [] },
+      compaction: { recentWindowSize: 10, threshold: 100_000 },
+      continuationToken: "parent-token",
+      history: [],
+      sessionId: "parent-session",
+    },
+    { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "turn-1" },
+  );
+}
+
+function createSubagentTool(): HarnessToolDefinition {
+  const definition = defineTool({
+    description: "Spawn a research subagent.",
+    execution: "background",
+    inputSchema: z.strictObject({}),
+    execute(_input: Record<string, never>, _ctx: ToolContext, background: TaskExec) {
+      return background.delegated({
+        executor: createSubagentExecutorBinding({
+          address: childAddress,
+          identity: childIdentity,
+        }),
+        receipt: { agentId: childIdentity.id },
+      });
+    },
+  });
+  return {
+    description: definition.description,
+    execute: createToolExecuteWithAuth({
+      execute: definition.execute,
+      execution: definition.execution,
+      scope: "research",
+    }),
+    execution: definition.execution,
+    inputSchema: toInputSchema(definition.inputSchema),
+    name: "research",
+  };
+}
+
+const subagentToolCallModel = () =>
+  new MockLanguageModelV4({
+    doGenerate: {
+      content: [
+        {
+          input: "{}",
+          toolCallId: "call-research",
+          toolName: "research",
+          type: "tool-call",
+        },
+      ],
+      finishReason: { raw: undefined, unified: "tool-calls" },
+      usage,
+      warnings: [],
+    },
+  });
+
 describe("background tool execution", () => {
   beforeEach(() => {
     mocks.beginBackgroundTask.mockReset();
+    mocks.propagateSubagentExecutorCancel.mockReset();
     mocks.rejectDelegatedDispatch.mockReset();
     mocks.sendTaskCommand.mockReset();
   });
@@ -285,7 +366,7 @@ describe("background tool execution", () => {
     );
   });
 
-  it("compensates a delegated task when the parent step fails", async () => {
+  it("rejects a delegated generic executor without cancel propagation when the parent step fails", async () => {
     const task = {
       createdByStepIndex: 0,
       createdByTurnId: "turn-1",
@@ -333,16 +414,7 @@ describe("background tool execution", () => {
         warnings: [],
       },
     });
-    const session: HarnessSession = setHarnessEmissionState(
-      {
-        agent: { modelReference: { id: "mock" }, system: "", tools: [] },
-        compaction: { recentWindowSize: 10, threshold: 100_000 },
-        continuationToken: "parent-token",
-        history: [],
-        sessionId: "parent-session",
-      },
-      { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "turn-1" },
-    );
+    const session = createParentSession();
     const ctx = new ContextContainer();
     ctx.set(AuthKey, null);
     ctx.set(SessionIdKey, session.sessionId);
@@ -370,6 +442,110 @@ describe("background tool execution", () => {
         executor: { data: { exportId: "customers" }, kind: "export" },
       },
     });
+    expect(mocks.propagateSubagentExecutorCancel).not.toHaveBeenCalled();
+    expect(getSessionTaskIndex(session.state)).toEqual([]);
+  });
+
+  it("commits the subagent executor's addressed handle with the step", async () => {
+    const task = {
+      createdByStepIndex: 0,
+      createdByTurnId: "turn-1",
+      metadata: { kind: "tool", name: "research" },
+      taskId: "task-research",
+      taskInboxToken: "inbox-research",
+      taskRunId: "run-research",
+    } as const;
+    mocks.beginBackgroundTask.mockResolvedValue(task);
+    mocks.sendTaskCommand.mockResolvedValue("delivered");
+    const tool = createSubagentTool();
+    const session = createParentSession();
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(SessionIdKey, session.sessionId);
+
+    const result = await runStep(
+      ctx,
+      session,
+      async (current) => {
+        await generateText({
+          model: subagentToolCallModel(),
+          prompt: "Spawn the researcher.",
+          tools: buildToolSet({ tools: new Map([[tool.name, tool]]) }),
+        });
+        return { next: null, session: current };
+      },
+      [backgroundToolExecutionProvider],
+    );
+
+    expect(getAgentHandleStore(result.session.state)?.handles).toEqual([
+      { address: childAddress, identity: childIdentity, phase: "addressed" },
+    ]);
+    expect(getSessionTaskIndex(result.session.state)).toEqual([
+      expect.objectContaining({
+        executor: createSubagentExecutorBinding({
+          address: childAddress,
+          identity: childIdentity,
+        }),
+        taskId: task.taskId,
+      }),
+    ]);
+    expect(mocks.rejectDelegatedDispatch).not.toHaveBeenCalled();
+    expect(mocks.propagateSubagentExecutorCancel).not.toHaveBeenCalled();
+  });
+
+  it("rejects the task first and then cancels the dispatched subagent child when the parent step fails", async () => {
+    const task = {
+      createdByStepIndex: 0,
+      createdByTurnId: "turn-1",
+      metadata: { kind: "tool", name: "research" },
+      taskId: "task-research",
+      taskInboxToken: "inbox-research",
+      taskRunId: "run-research",
+    } as const;
+    mocks.beginBackgroundTask.mockResolvedValue(task);
+    mocks.sendTaskCommand.mockResolvedValue("delivered");
+    mocks.rejectDelegatedDispatch.mockResolvedValue(undefined);
+    mocks.propagateSubagentExecutorCancel.mockResolvedValue(undefined);
+    const tool = createSubagentTool();
+    const session = createParentSession();
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(SessionIdKey, session.sessionId);
+
+    await expect(
+      runStep(
+        ctx,
+        session,
+        async () => {
+          await generateText({
+            model: subagentToolCallModel(),
+            prompt: "Spawn the researcher.",
+            tools: buildToolSet({ tools: new Map([[tool.name, tool]]) }),
+          });
+          throw new Error("parent step failed");
+        },
+        [backgroundToolExecutionProvider],
+      ),
+    ).rejects.toThrow("parent step failed");
+
+    const executor = createSubagentExecutorBinding({
+      address: childAddress,
+      identity: childIdentity,
+    });
+    expect(mocks.rejectDelegatedDispatch).toHaveBeenCalledWith({
+      error: { code: "PARENT_STEP_FAILED", message: "parent step failed" },
+      task: { ...task, executor },
+    });
+    expect(mocks.propagateSubagentExecutorCancel).toHaveBeenCalledWith({
+      bundle: undefined,
+      executor: { address: childAddress, identity: childIdentity },
+      taskId: task.taskId,
+    });
+    // The task must be terminal before the child learns anything: a late
+    // child result then bounces instead of reviving the rejected task.
+    expect(mocks.rejectDelegatedDispatch.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.propagateSubagentExecutorCancel.mock.invocationCallOrder[0] ?? 0,
+    );
     expect(getSessionTaskIndex(session.state)).toEqual([]);
   });
 

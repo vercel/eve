@@ -18,6 +18,7 @@ import {
   prepareAgentContinuation,
   prepareAgentStart,
   rebaseAgentHandles,
+  recordTaskAgentAddress,
   rejectAgentEffect,
   removeTaskAgentAddress,
   settleAgentTurn,
@@ -164,6 +165,28 @@ describe("task agent addresses", () => {
     });
 
     expect(handlesOf(removeTaskAgentAddress(addressed, identity.id))).toEqual([]);
+  });
+});
+
+describe("recordTaskAgentAddress", () => {
+  it("appends an addressed handle from a delegated task's executor binding", () => {
+    const recorded = recordTaskAgentAddress(createSession(), { address, identity });
+    expect(handlesOf(recorded)).toEqual([{ address, identity, phase: "addressed" }]);
+  });
+
+  it("is a replay no-op when the identical handle is already stored", () => {
+    const recorded = recordTaskAgentAddress(createSession(), { address, identity });
+    expect(recordTaskAgentAddress(recorded, { address, identity })).toBe(recorded);
+  });
+
+  it("throws when the id already exists with different content", () => {
+    const recorded = recordTaskAgentAddress(createSession(), { address, identity });
+    expect(() =>
+      recordTaskAgentAddress(recorded, {
+        address: { ...address, continuationToken: "continuation_divergent" },
+        identity,
+      }),
+    ).toThrow(identity.id);
   });
 });
 

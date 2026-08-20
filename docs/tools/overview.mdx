@@ -65,9 +65,9 @@ The root agent must enable `experimental.tasks`; eve rejects background tools at
 
 This contract currently supports framework-owned task executors, including local and remote
 subagents when `experimental.tasks` is enabled. After delegating, an in-process executor reports
-the terminal result with `task.send({ kind: "complete", data })` (or `"fail"` / `"cancel"`). Note
-that `task.send` is not restart-safe — an in-memory callback dies with the process — so the
-cross-process executor wire remains framework-owned.
+the terminal result with `task.send({ kind: "complete", data })` (or `fail` / `cancel`). `send` is
+not restart-safe — an in-memory callback dies with the process — so the cross-process executor
+wire remains framework-owned and is not yet a stable authored-tool API.
 
 ### The `ctx` parameter
 

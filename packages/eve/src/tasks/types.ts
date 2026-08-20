@@ -1,3 +1,4 @@
+import type { AgentAddress, AgentIdentity } from "#harness/handles/store.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#shared/tool-task.js";
 import type { SubagentAuthorizationEvent } from "#channel/types.js";
@@ -61,17 +62,73 @@ export function readSubagentTaskMetadata(task: {
   if (task.metadata.kind === "subagent" && "agentId" in task.metadata) {
     return task.metadata;
   }
-  const executor = task.executor;
+  const executor = readSubagentExecutor(task.executor);
+  if (executor === undefined) return undefined;
+  return {
+    agentId: executor.identity.id,
+    kind: "subagent",
+    mode: executor.address.kind === "agent/remote" ? "remote" : "local",
+    name: executor.identity.name,
+  };
+}
+
+/**
+ * Durable subagent executor binding payload: the child's stable identity and
+ * private delivery address, copied from the parent's agent handle store at
+ * delegation time. Every field derives deterministically from the
+ * originating call (operation-hashed id, dispatch-chosen continuation
+ * token), so a replayed delegation produces a deep-equal binding — the
+ * equality the task run's `bind` replay check compares.
+ */
+export interface SubagentExecutorData {
+  readonly address: AgentAddress;
+  readonly identity: AgentIdentity;
+}
+
+export function createSubagentExecutorBinding(executor: SubagentExecutorData): TaskExecutorBinding {
+  const { address, identity } = executor;
+  return {
+    data: {
+      address: { ...address },
+      identity: { id: identity.id, name: identity.name, nodeId: identity.nodeId },
+    },
+    kind: "subagent",
+  };
+}
+
+export function readSubagentExecutor(
+  executor: TaskExecutorBinding | TaskExecutorState | undefined,
+): SubagentExecutorData | undefined {
   const binding = executor !== undefined && "kind" in executor ? executor : executor?.binding;
   if (binding?.kind !== "subagent") return undefined;
-  const agentId = binding.data.agentId;
-  const mode = binding.data.mode;
-  const name = binding.data.name;
-  return typeof agentId === "string" &&
-    (mode === "local" || mode === "remote") &&
-    typeof name === "string"
-    ? { agentId, kind: "subagent", mode, name }
+  const identity = readAgentIdentity(binding.data.identity);
+  const address = readAgentAddress(binding.data.address);
+  return identity === undefined || address === undefined ? undefined : { address, identity };
+}
+
+function readAgentIdentity(value: JsonValue | undefined): AgentIdentity | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const { id, name, nodeId } = value;
+  return typeof id === "string" && typeof name === "string" && typeof nodeId === "string"
+    ? { id, name, nodeId }
     : undefined;
+}
+
+function readAgentAddress(value: JsonValue | undefined): AgentAddress | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const { callbackBaseUrl, continuationToken, kind, sessionId, url } = value;
+  if (typeof sessionId !== "string") return undefined;
+  if (kind === "agent/local" || kind === "agent/self") {
+    return typeof continuationToken === "string"
+      ? { continuationToken, kind, sessionId }
+      : undefined;
+  }
+  if (kind === "agent/remote") {
+    return typeof url === "string" && typeof callbackBaseUrl === "string"
+      ? { callbackBaseUrl, kind, sessionId, url }
+      : undefined;
+  }
+  return undefined;
 }
 
 export function sameTaskMetadata(left: DurableTaskMetadata, right: DurableTaskMetadata): boolean {

@@ -16,11 +16,10 @@ import {
   checkTaskContinuationAvailability,
   describeTaskDispatch,
 } from "#execution/tasks/parent/continuation-dispatch.js";
-import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";
+import { findTaskAgentAddress } from "#execution/tasks/parent/control-shared.js";
 import type { BackgroundTask } from "#execution/tasks/parent/delegate.js";
 import { CallbackBaseUrlKey } from "#harness/authorization.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
-import { rebaseAgentHandles } from "#harness/handles/transitions.js";
 import { defineTool, type TaskExec, type ToolContext } from "#public/definitions/tool.js";
 import type {
   RuntimeRemoteAgentCallActionRequest,
@@ -28,8 +27,8 @@ import type {
 } from "#runtime/actions/types.js";
 import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#runtime/framework-tools/tasks.js";
 import { PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA } from "#runtime/subagents/registry.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { parseJsonObject } from "#shared/json.js";
+import { createSubagentExecutorBinding } from "#tasks/types.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { createSubagentCalledEvent } from "#protocol/message.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
@@ -99,7 +98,7 @@ export async function executeSubagentTool(input: {
   readonly toolInput: unknown;
 }) {
   const ctx = loadContext();
-  const { batch, session, stageEffect, task } = input.task;
+  const { batch, session, task } = input.task;
   const emission = getHarnessEmissionState(session.state);
   const commonAction = {
     callId: input.toolContext.callId,
@@ -129,50 +128,22 @@ export async function executeSubagentTool(input: {
     sessionState: createDurableSessionState({ session }),
     task,
   });
-  const executor = {
-    data: {
-      agentId: dispatched.agentId,
-      childSessionId: dispatched.address.sessionId,
-      mode: dispatched.mode,
-      name: dispatched.name,
-    },
-    kind: "subagent",
-  } as const;
-  const bundle = ctx.require(BundleKey);
-
-  // Why stage these hooks here instead of carrying them on the executor:
-  // the two channels have incompatible lifetimes.
-  //
-  // - `executor` is durable JSON. It is persisted into session state and must
-  //   survive replay and process restarts, so a later turn can cancel or
-  //   reconcile the child. Closures cannot live there.
-  // - `apply`/`rollback` are one-shot, in-process closures. They capture
-  //   `session.state` and `dispatched` — snapshots that exist only in this
-  //   stack frame — and are only meaningful at this batch's commit/rollback
-  //   boundary, which runs moments later in the same process.
-  //
-  // `stageEffect` pushes them onto the same execution record as the
-  // delegation, so commit applies and rollback unwinds them atomically with
-  // the executor. After commit, the durable executor binding takes over as
-  // the restart-safe cancellation path.
-  stageEffect({
-    apply: (current) =>
-      rebaseAgentHandles(
-        {
-          ...current,
-          sandboxState: current.sandboxState ?? dispatched.session.sandboxState,
-        },
-        { base: session.state, next: dispatched.session.state },
-      ),
-    rollback: async () => {
-      // The task entry commit would have persisted, built directly; the
-      // child handle cancel propagation needs lives in `dispatched.session`.
-      await cancelOwnedTask({
-        bundle,
-        entry: { ...task, executor },
-        session: dispatched.session,
-      });
-    },
+  // The executor binding is the durable copy of the child's addressed
+  // handle, read back from the post-dispatch session so it is exactly what
+  // the handle store recorded (fresh start) or already held (resume). It is
+  // deep-equal on replay — identity and address derive from the originating
+  // call — and it is the only channel the task layer needs: commit writes
+  // the address into the parent handle store, and compensation or a later
+  // turn cancels the child through it.
+  const record = findTaskAgentAddress(dispatched.session, dispatched.agentId);
+  if (record === undefined) {
+    throw new Error(
+      `Subagent dispatch for "${dispatched.agentId}" recorded no task agent address.`,
+    );
+  }
+  const executor = createSubagentExecutorBinding({
+    address: record.address,
+    identity: record.identity,
   });
   await emitSubagentCalled({
     callId: input.toolContext.callId,
