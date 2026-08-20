@@ -2,11 +2,14 @@ import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { vercelOidc } from "#public/channels/auth.js";
 import {
   chatSdkChannel,
-  type ChatSdkChannel,
   type ChatSdkChannelBridge,
   type ChatSdkChannelEvents,
+  type ChatSdkChannelState,
+  type ChatSdkInstrumentationMetadata,
+  type ChatSdkReceiveTarget,
 } from "#public/channels/chat-sdk/index.js";
 import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js";
+import type { Channel } from "#public/definitions/channel.js";
 import {
   createLinqAdapter,
   type LinqAdapterConfig,
@@ -68,7 +71,11 @@ export interface LinqChannelConfig {
 }
 
 /** First-class eve channel backed by Linq iMessage and SMS. */
-export interface LinqChannel extends ChatSdkChannel {}
+export interface LinqChannel extends Channel<
+  ChatSdkChannelState,
+  ChatSdkReceiveTarget,
+  ChatSdkInstrumentationMetadata
+> {}
 
 /**
  * Creates an eve channel for Linq-powered iMessage and SMS conversations.
