@@ -1,6 +1,6 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
-import { type MockModelRequest, type MockModelResponse } from "eve/evals";
+import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
 const EMPTY_DELIVERY_SENTINEL = "<eve-empty-delivery/>";
 const SCENARIO = "TASK-REPORTING-PROBE";
@@ -18,45 +18,38 @@ interface TaskState {
 }
 
 function respond(request: MockModelRequest): MockModelResponse | string {
-  if (request.tools.length === 0) {
-    return "Background report probe remains in progress.";
+  const taskState = latestTaskState(request.userMessages);
+  if (taskState !== undefined) {
+    const alreadyReported = request.messages.some(
+      (message) => message.role === "assistant" && message.text.startsWith("Consolidated report:"),
+    );
+    if (alreadyReported || taskState.tasks.some((task) => task.status === "pending")) {
+      return EMPTY_DELIVERY_SENTINEL;
+    }
+    const results = taskState.tasks.flatMap((task) => {
+      if (task.output?.type !== "result") return [];
+      const result =
+        task.output.data !== null && typeof task.output.data === "object"
+          ? Reflect.get(task.output.data, "result")
+          : undefined;
+      return typeof result === "string" ? [result] : [];
+    });
+    return `Consolidated report: ${results.join(", ")}`;
   }
 
-  const taskState = latestTaskState(request.userMessages);
-  if (
-    taskState === undefined &&
-    !request.userMessages.some((message) => message.includes(SCENARIO))
-  ) {
+  if (!request.userMessages.some((message) => message.includes(SCENARIO))) {
     return `Mock reply: ${request.lastUserMessage ?? ""}`;
   }
 
   const probeResults = request.toolResults.filter((result) => result.name === "report_probe");
-  if (probeResults.length === 0) {
-    return {
-      toolCalls: RESULTS.map((result, index) => ({
-        id: `report-probe-${String(index + 1)}`,
-        input: { delayMs: (index + 1) * 1_000, result },
-        name: "report_probe",
-      })),
-    };
-  }
-
-  if (taskState === undefined) return "investigation started";
-  const alreadyReported = request.messages.some(
-    (message) => message.role === "assistant" && message.text.startsWith("Consolidated report:"),
-  );
-  if (alreadyReported || taskState.tasks.some((task) => task.status === "pending")) {
-    return EMPTY_DELIVERY_SENTINEL;
-  }
-  const results = taskState.tasks.flatMap((task) => {
-    if (task.output?.type !== "result") return [];
-    const result =
-      task.output.data !== null && typeof task.output.data === "object"
-        ? Reflect.get(task.output.data, "result")
-        : undefined;
-    return typeof result === "string" ? [result] : [];
-  });
-  return `Consolidated report: ${results.join(", ")}`;
+  if (probeResults.length > 0) return "investigation started";
+  return {
+    toolCalls: RESULTS.map((result, index) => ({
+      id: `report-probe-${String(index + 1)}`,
+      input: { delayMs: (index + 1) * 1_000, result },
+      name: "report_probe",
+    })),
+  };
 }
 
 function latestTaskState(messages: readonly string[]): TaskState | undefined {
@@ -84,6 +77,11 @@ const base = e2eAgentConfig({ mock: respond });
 
 export default defineAgent({
   ...base,
+  // Compaction must erase history without introducing another model variable.
+  compaction: {
+    model: mockModel("Background report probe remains in progress."),
+    modelContextWindowTokens: 1_000_000,
+  },
   experimental: {
     ...base.experimental,
     tasks: true,

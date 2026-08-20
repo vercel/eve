@@ -823,37 +823,43 @@ describe("createToolLoopHarness", () => {
     }
   });
 
-  it("parks without delivery when a terminal response contains the empty-delivery sentinel", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: {
-        messages: [
-          {
-            content: `internal ${EMPTY_DELIVERY_SENTINEL} trailing`,
-            role: "assistant",
-          },
-        ],
-      },
-      text: `internal ${EMPTY_DELIVERY_SENTINEL} trailing`,
-      toolCalls: [],
-      toolResults: [],
-    });
+  it.each([
+    ["literal", EMPTY_DELIVERY_SENTINEL],
+    ["HTML-escaped", "&lt;eve-empty-delivery/&gt;"],
+  ])(
+    "parks without delivery when a terminal response contains the %s sentinel",
+    async (_, sentinel) => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: {
+          messages: [
+            {
+              content: `internal ${sentinel} trailing`,
+              role: "assistant",
+            },
+          ],
+        },
+        text: `internal ${sentinel} trailing`,
+        toolCalls: [],
+        toolResults: [],
+      });
 
-    const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const { emit, events } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
 
-    const result = await runStep(createTestSession(), { message: "Hi" });
+      const result = await runStep(createTestSession(), { message: "Hi" });
 
-    expect(result.next).toBeNull();
-    expect(result.session.history).toEqual([{ content: "Hi", role: "user" }]);
-    expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(1);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({ message: null }),
-        type: "message.completed",
-      }),
-    );
-  });
+      expect(result.next).toBeNull();
+      expect(result.session.history).toEqual([{ content: "Hi", role: "user" }]);
+      expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(1);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          data: expect.objectContaining({ message: null }),
+          type: "message.completed",
+        }),
+      );
+    },
+  );
 
   it("keeps executable tools directly available to the model", async () => {
     setupMockAgent({
