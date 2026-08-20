@@ -1,7 +1,11 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
-import { describeActionRequests } from "#public/channels/slack/action-status.js";
+import {
+  describeActionRequests,
+  describeWorkGraph,
+  workGraphFromChannelContext,
+} from "#public/channels/slack/action-status.js";
 import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
 import {
   buildAuthCompletedText,
@@ -242,7 +246,9 @@ export const defaultEvents: SlackChannelInternalEvents = {
     channel.state.pendingToolCallMessage = null;
     channel.state.lastReasoningTypingAtMs = null;
     channel.state.lastReasoningTypingStatus = null;
-    await channel.thread.startTyping("Working...");
+    await channel.thread.startTyping(
+      describeWorkGraph(workGraphFromChannelContext(channel)) ?? "Working...",
+    );
   },
 
   async "reasoning.appended"(event, channel, _ctx) {
@@ -275,7 +281,10 @@ export const defaultEvents: SlackChannelInternalEvents = {
       await channel.thread.startTyping(truncateTypingStatus(buffered));
       return;
     }
-    await channel.thread.startTyping(truncateTypingStatus(describeActionRequests(event.actions)));
+    const status = describeWorkGraph(workGraphFromChannelContext(channel));
+    await channel.thread.startTyping(
+      truncateTypingStatus(status ?? describeActionRequests(event.actions)),
+    );
   },
 
   async "message.completed"(event, channel, _ctx) {

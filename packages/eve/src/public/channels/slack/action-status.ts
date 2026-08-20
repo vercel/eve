@@ -4,6 +4,9 @@
  * label is the action's name plus its most telling argument — `grep useEve`
  * or `read_file agent/agent.ts` instead of `Running grep...`.
  */
+import type { ContextAccessor } from "#context/key.js";
+import { WorkGraphKey } from "#context/keys.js";
+import type { WorkGraph } from "#harness/work-graph.js";
 import type { RuntimeActionRequest } from "#runtime/actions/types.js";
 
 /** Argument keys worth surfacing, most telling first, per tool. */
@@ -88,4 +91,29 @@ export function describeActionRequests(actions: readonly RuntimeActionRequest[])
   if (first === undefined) return "Working...";
   const label = describeActionRequest(first);
   return actions.length === 1 ? label : `${label} +${actions.length - 1} more`;
+}
+
+/** Selects one deterministic Slack status from framework-owned active work. */
+export function describeWorkGraph(work: WorkGraph | undefined): string | undefined {
+  const turn = work?.turn;
+  if (turn === undefined) return undefined;
+  const blocker = turn.blockers.find((entry) => entry.phase === "blocked");
+  if (blocker !== undefined)
+    return blocker.kind === "authorization" ? "Waiting for sign-in..." : "Waiting for input...";
+
+  for (const step of [...turn.steps].reverse()) {
+    const running = step.actions.filter((action) => action.phase === "running");
+    if (running.length === 0) continue;
+    const [first] = running;
+    if (first === undefined) continue;
+    const label = first.name;
+    return running.length === 1 ? label : `${label} +${running.length - 1} more`;
+  }
+  return undefined;
+}
+
+/** Reads the internal work graph when this handler runs through an adapter context. */
+export function workGraphFromChannelContext(channel: unknown): WorkGraph | undefined {
+  const ctx = (channel as { readonly ctx?: ContextAccessor }).ctx;
+  return ctx?.get(WorkGraphKey);
 }
