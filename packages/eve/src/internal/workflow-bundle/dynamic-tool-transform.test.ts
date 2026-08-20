@@ -154,6 +154,59 @@ export default defineDynamic({
     }
   });
 
+  it("preserves top-level function-form approval properties", async () => {
+    const source = `
+import { defineDynamic, defineTool } from "eve/tools";
+
+function referencedApproval() {
+  return "user-approval";
+}
+
+export default defineDynamic({
+  events: {
+    "session.started": async () => ({
+      arrow: defineTool({
+        description: "Arrow approval",
+        inputSchema: { type: "object" },
+        approval: () => "user-approval",
+        execute: async () => "ok",
+      }),
+      method: defineTool({
+        description: "Method approval",
+        inputSchema: { type: "object" },
+        approval() {
+          return "user-approval";
+        },
+        execute: async () => "ok",
+      }),
+      referenced: defineTool({
+        description: "Referenced approval",
+        inputSchema: { type: "object" },
+        approval: referencedApproval,
+        execute: async () => "ok",
+      }),
+    }),
+  },
+});
+`;
+
+    const { callHandler } = await transformAndEval("tools/function-approval.ts", source);
+    const tools = await callHandler();
+
+    for (const entry of Object.values(tools)) {
+      const tool = entry as Record<string | symbol, unknown>;
+      expect(tool.request).toBeUndefined();
+      expect(tool.approval).toBeTypeOf("function");
+      expect(await (tool.approval as Function)({})).toBe("user-approval");
+      expect(tool[Symbol.for("eve:durable-dynamic-tool-callbacks")]).toMatchObject({
+        approvalRequest: {
+          closure: {},
+          stepId: expect.stringContaining("/approvalRequest/"),
+        },
+      });
+    }
+  });
+
   it("wrapper calls hoisted function with correct closure vars", async () => {
     const source = `
 import { defineDynamic, defineTool } from "eve/tools";

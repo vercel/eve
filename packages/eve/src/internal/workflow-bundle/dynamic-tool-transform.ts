@@ -16,6 +16,7 @@ import {
 } from "#internal/workflow-bundle/dynamic-tool-ast-references.js";
 
 type CallbackPhase = "approvalRequest" | "approvalResponse" | "execute" | "toModelOutput";
+type CallbackPropertyName = "approval" | "execute" | "request" | "response" | "toModelOutput";
 
 interface CallbackInfo {
   readonly body: string;
@@ -26,6 +27,7 @@ interface CallbackInfo {
   readonly nestedScopes: readonly ScopeEntry[];
   readonly params: string;
   readonly phase: CallbackPhase;
+  readonly propertyName: CallbackPropertyName;
   readonly propEnd: number;
   readonly propStart: number;
   readonly sourceEnd: number;
@@ -136,10 +138,18 @@ function collectToolCallbacks(
   results: CallbackInfo[],
   nestedScopes: readonly ScopeEntry[],
 ): void {
-  collectCallbackProperty(source, findProperty(tool, "execute"), "execute", results, nestedScopes);
+  collectCallbackProperty(
+    source,
+    findProperty(tool, "execute"),
+    "execute",
+    "execute",
+    results,
+    nestedScopes,
+  );
   collectCallbackProperty(
     source,
     findProperty(tool, "toModelOutput"),
+    "toModelOutput",
     "toModelOutput",
     results,
     nestedScopes,
@@ -152,6 +162,7 @@ function collectToolCallbacks(
       source,
       findProperty(approvalValue, "request"),
       "approvalRequest",
+      "request",
       results,
       nestedScopes,
     );
@@ -159,11 +170,12 @@ function collectToolCallbacks(
       source,
       findProperty(approvalValue, "response"),
       "approvalResponse",
+      "response",
       results,
       nestedScopes,
     );
   } else {
-    collectCallbackProperty(source, approval, "approvalRequest", results, nestedScopes);
+    collectCallbackProperty(source, approval, "approvalRequest", "approval", results, nestedScopes);
   }
 }
 
@@ -171,6 +183,7 @@ function collectCallbackProperty(
   source: string,
   property: AstNode | undefined,
   phase: CallbackPhase,
+  propertyName: CallbackPropertyName,
   results: CallbackInfo[],
   nestedScopes: readonly ScopeEntry[],
 ): void {
@@ -192,6 +205,7 @@ function collectCallbackProperty(
       nestedScopes,
       params: extractFnParams(source, value),
       phase,
+      propertyName,
       propEnd: property.end,
       propStart: property.start,
       sourceEnd: value.end,
@@ -210,6 +224,7 @@ function collectCallbackProperty(
       nestedScopes,
       params: "...__args",
       phase,
+      propertyName,
       propEnd: property.end,
       propStart: property.start,
       sourceEnd: value.end,
@@ -263,13 +278,7 @@ function applyTransform(
 
     const wrapper = createLiveWrapper(callback, hoistedName, closure);
     const stamped = `__eveStampDynamicCallback(${wrapper}, ${JSON.stringify(stepId)}, ${closure})`;
-    const propertyName =
-      callback.phase === "approvalRequest"
-        ? "request"
-        : callback.phase === "approvalResponse"
-          ? "response"
-          : callback.phase;
-    const replacement = [`${propertyName}: ${stamped}`];
+    const replacement = [`${callback.propertyName}: ${stamped}`];
     if (callback.phase === "execute") {
       // Retained for generated-output compatibility while durable runtime
       // metadata uses the phase-specific descriptor above.
