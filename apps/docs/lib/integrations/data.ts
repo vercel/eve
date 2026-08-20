@@ -830,7 +830,7 @@ export default linqChannel({
   credentials: connectLinqCredentials("linq/my-agent"),
 });
 \`\`\``,
-    configure: `The guided setup can provision a managed Linq line with Vercel Connect or collect portable credentials. Connect-backed setup creates a native Linq connector and routes verified triggers to \`/eve/v1/linq\`; portable setup registers a signed Linq webhook directly.`,
+    configure: `The guided setup can provision a managed Linq line with Vercel Connect or collect portable credentials. Connect-backed setup creates a native Linq connector and routes verified triggers to \`/eve/v1/linq\`; with portable credentials, deploy first, then create a signed Linq webhook for that route.`,
   },
   "chat-sdk-kapso": {
     logo: "kapso",
