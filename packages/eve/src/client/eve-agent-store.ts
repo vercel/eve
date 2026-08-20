@@ -3,7 +3,7 @@ import type { MessageResponse } from "#client/message-response.js";
 import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
+import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
 import { toError } from "#shared/errors.js";
 import type {
   CancelSessionResult,
@@ -216,6 +216,7 @@ export class EveAgentStore<TData> {
       turn.resolveResponse(response);
 
       let sawEvent = false;
+      let pendingAuthorizationCount = 0;
       for await (const event of response) {
         if (!this.#isActiveTurn(turn)) {
           return;
@@ -226,15 +227,36 @@ export class EveAgentStore<TData> {
           this.#status = "streaming";
         }
 
-        if (!this.#seenEvents.admit(event)) {
-          continue;
+        if (this.#acceptServerEvent(event)) {
+          pendingAuthorizationCount = updatePendingAuthorizationCount(
+            pendingAuthorizationCount,
+            event,
+          );
         }
+      }
 
-        this.#events = [...this.#events, event];
-        this.#applyServerEvent(event);
-        this.#callbacks.onEvent?.(event);
-        this.#applyTerminalStreamFailure(event);
-        this.#publish();
+      const session = this.#session;
+      if (pendingAuthorizationCount > 0 && session !== undefined) {
+        for await (const event of session.stream({
+          signal: turnInput.signal,
+          streamReconnectPolicy: preparedInput.streamReconnectPolicy,
+        })) {
+          if (!this.#isActiveTurn(turn)) return;
+
+          if (this.#acceptServerEvent(event)) {
+            pendingAuthorizationCount = updatePendingAuthorizationCount(
+              pendingAuthorizationCount,
+              event,
+            );
+          }
+
+          if (
+            isCurrentTurnBoundaryEvent(event) &&
+            (event.type !== "session.waiting" || pendingAuthorizationCount === 0)
+          ) {
+            break;
+          }
+        }
       }
 
       if (!this.#isActiveTurn(turn)) {
@@ -386,6 +408,17 @@ export class EveAgentStore<TData> {
     this.#appendProjectionEvent(event);
   }
 
+  #acceptServerEvent(event: MessageStreamEvent): boolean {
+    if (!this.#seenEvents.admit(event)) return false;
+
+    this.#events = [...this.#events, event];
+    this.#applyServerEvent(event);
+    this.#callbacks.onEvent?.(event);
+    this.#applyTerminalStreamFailure(event);
+    this.#publish();
+    return true;
+  }
+
   #applyTerminalStreamFailure(event: MessageStreamEvent): void {
     const error = toTerminalStreamFailureError(event);
     if (error === undefined) {
@@ -527,6 +560,12 @@ function summarizeUserContent(message: string | UserContent): string {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
+}
+
+function updatePendingAuthorizationCount(count: number, event: MessageStreamEvent): number {
+  if (event.type === "authorization.required") return count + 1;
+  if (event.type === "authorization.completed") return Math.max(0, count - 1);
+  return count;
 }
 
 function toTerminalStreamFailureError(event: MessageStreamEvent): Error | undefined {

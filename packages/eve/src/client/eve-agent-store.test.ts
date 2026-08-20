@@ -4,10 +4,13 @@ import { detachEveAgentStore, EveAgentStore } from "#client/eve-agent-store.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import {
+  createAuthorizationCompletedEvent,
+  createAuthorizationRequiredEvent,
   createMessageCompletedEvent,
   createMessageReceivedEvent,
   createSessionWaitingEvent,
   createTurnCancelledEvent,
+  createTurnCompletedEvent,
   createTurnStartedEvent,
   EVE_SESSION_ID_HEADER,
   type UnstampedMessageStreamEvent,
@@ -96,6 +99,66 @@ afterEach(() => {
 });
 
 describe("EveAgentStore stream overlap", () => {
+  it("keeps a send attached through a pending authorization callback", async () => {
+    const events = stampTestEvents([
+      createMessageReceivedEvent({ message: "Use Linear", sequence: 0, turnId: "turn_1" }),
+      createAuthorizationRequiredEvent({
+        description: "Sign in to Linear",
+        name: "linear",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createTurnCompletedEvent({ sequence: 2, turnId: "turn_1" }),
+      createSessionWaitingEvent(),
+      createTurnStartedEvent({ sequence: 0, turnId: "turn_2" }),
+      createAuthorizationCompletedEvent({
+        name: "linear",
+        outcome: "authorized",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_2",
+      }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Linear is connected.",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn_2",
+      }),
+      createTurnCompletedEvent({ sequence: 3, turnId: "turn_2" }),
+      createSessionWaitingEvent(),
+    ]);
+    const callbackResponse = Promise.withResolvers<Response>();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(streamResponse(events.slice(0, 4)))
+      .mockReturnValueOnce(callbackResponse.promise);
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+
+    let settled = false;
+    const sending = store.send({ message: "Use Linear" }).finally(() => {
+      settled = true;
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+
+    expect(settled).toBe(false);
+    expect(store.snapshot.status).toBe("streaming");
+    await expect(store.send({ message: "While we wait" })).rejects.toThrow(
+      "eve session is already processing a turn.",
+    );
+
+    callbackResponse.resolve(streamResponse(events.slice(4)));
+    await sending;
+
+    expect(store.snapshot.events.map((event) => event.type)).toEqual(
+      events.map((event) => event.type),
+    );
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.session).toEqual({ sessionId: "session_1", streamIndex: events.length });
+  });
+
   it("rejects a prepared turn containing both a message and input responses", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     const store = new EveAgentStore({ reducer: defaultMessageReducer() });

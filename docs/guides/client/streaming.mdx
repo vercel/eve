@@ -122,13 +122,15 @@ client-resolvable `http(s)` and `data:` URLs.
 
 ## Authorization pauses
 
-`authorization.required` is different from the normal `session.waiting` boundary. It means a connection needs OAuth or another authorization challenge before the parked turn can continue. Chat UIs should render the authorization prompt, disable ordinary text input for that session, and persist the event with the rest of the chat history.
+`authorization.required` is different from the normal `session.waiting` boundary. It means a connection needs OAuth or another authorization challenge before the parked operation can continue. Chat UIs should render the authorization prompt, disable ordinary text input for that session, and persist the event with the rest of the chat history.
 
-If you support refresh while an authorization prompt is pending, keep the session cursor from the started session and rehydrate the saved events on load. Do not treat a missing `session.waiting` after `authorization.required` as a finished conversation; the callback or a structured decline should resume the same eve session.
+While the page remains mounted, the frontend bindings keep the submitted `send()` attached after `session.waiting`. The callback starts another turn on the same session; its `authorization.completed` event and resumed output reach the binding before `send()` settles. The binding remains `streaming` and rejects another `send()` until that happens.
+
+This is a serialized mitigation, not general session reattachment. A page loaded from a saved cursor does not automatically follow later events; applications that support refresh while authorization is pending must own that recovery until the frontend bindings expose a session-level subscription.
 
 ## Reconnection
 
-HTTP connections can end before a run does. The client reconnects from the number of events already consumed, so long turns continue without replaying events. By default, a turn response keeps reconnecting until it reaches a turn boundary or is aborted, including while the turn is paused for authorization. A manually opened `session.stream()` eventually stops after repeated empty streams when it can no longer make progress.
+HTTP connections can end before a run does. The client reconnects from the number of events already consumed, so long turns continue without replaying events. By default, a turn response keeps reconnecting until it reaches a turn boundary or is aborted. When a frontend binding reaches that boundary with authorization still pending, its serialized follow uses the same bounded session-stream reconnection policy. General reattachment after that policy is exhausted remains application-owned. A manually opened `session.stream()` has the same bounded behavior.
 
 If your consumer persists events, key on `event.meta.id`. It is stable across reconnects and rewinds, so an overlapping replay is safe to ingest twice. See [the event envelope](../../concepts/sessions-runs-and-streaming#the-event-envelope).
 
