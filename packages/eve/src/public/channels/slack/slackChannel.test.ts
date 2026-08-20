@@ -9,6 +9,7 @@ import type { ChannelFrom, ChannelSource } from "#channel/channel-operations.js"
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
+import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
 import {
   mockChannelContext,
   type ObservedChannelDelivery,
@@ -2556,6 +2557,16 @@ describe("slackChannel() HITL interaction pipeline", () => {
       state: {
         approvalResponderUsers: { "slack:T01:U_APPROVER": "U_APPROVER" },
       },
+    });
+    expect(
+      sessionInboxWire.encode(
+        { kind: "send", payload: { inputResponses: input.inputResponses } },
+        { version: 1 },
+      ),
+    ).toMatchObject({
+      kind: "deliver",
+      payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval_abc123" }] }],
+      version: 1,
     });
   });
 

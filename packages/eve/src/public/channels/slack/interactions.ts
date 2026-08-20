@@ -362,8 +362,8 @@ export async function handleInteractionPost(
 
   const continuationToken = slackContinuationToken(interaction.channelId, interaction.threadTs);
   const hitlActions = interaction.actions.flatMap((action) => {
-    const response = deriveHitlResponse(action);
-    return response === null ? [] : [{ action, response }];
+    const derived = deriveHitlResponse(action);
+    return derived === null ? [] : [{ action, derived }];
   });
 
   if (hitlActions.length > 0) {
@@ -376,7 +376,7 @@ export async function handleInteractionPost(
         submission: {
           type: "block_actions",
           actions: hitlActions.map(({ action }) => action),
-          inputResponses: hitlActions.map(({ response }) => response),
+          inputResponses: hitlActions.map(({ derived }) => derived.response),
           messageTs: hitlActions[0]!.action.messageTs,
           user,
         },
