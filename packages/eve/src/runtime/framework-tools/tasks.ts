@@ -1,6 +1,5 @@
 import { z } from "#compiled/zod/index.js";
 
-import { requestTurnSleep } from "#harness/turn-sleep.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 
@@ -9,20 +8,17 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
  *
  * With the flag on, subagent calls return a task receipt instead of
  * blocking the parent turn; these tools coordinate that delegated work.
- * `task_cancel` and `task_update` are
- * execute-less runtime actions — they need durable session state and
- * world access, so the runtime-action dispatch step executes them.
- * `task_sleep` only records a durable pause and executes in-loop.
+ * `task_cancel` and `task_update` are execute-less runtime actions —
+ * they need durable session state and world access, so the runtime-action
+ * dispatch step executes them.
  */
 
 export const TASK_CANCEL_TOOL_NAME = "task_cancel";
-export const TASK_SLEEP_TOOL_NAME = "task_sleep";
 export const TASK_UPDATE_TOOL_NAME = "task_update";
 
 /** Every model-visible task tool name, for gating and dispatch matching. */
 export const TASK_TOOL_NAMES: ReadonlySet<string> = new Set([
   TASK_CANCEL_TOOL_NAME,
-  TASK_SLEEP_TOOL_NAME,
   TASK_UPDATE_TOOL_NAME,
 ]);
 
@@ -41,12 +37,6 @@ export const TASK_CANCEL_INPUT_SCHEMA = z.strictObject({ taskIds: TASK_IDS_SCHEM
 
 export const TASK_UPDATE_INPUT_SCHEMA = z.strictObject({
   message: z.string().min(1).describe("Brief description of what this task is currently doing."),
-});
-
-const MAX_SLEEP_SECONDS = Math.floor(Number.MAX_SAFE_INTEGER / 1_000);
-
-export const TASK_SLEEP_INPUT_SCHEMA = z.strictObject({
-  seconds: z.number().positive().max(MAX_SLEEP_SECONDS).describe("How long to wait, in seconds."),
 });
 
 const TASK_VIEW_SCHEMA = z.object({
@@ -71,17 +61,9 @@ export const TASK_VIEWS_OUTPUT_SCHEMA = z.object({
   tasks: z.array(TASK_VIEW_SCHEMA),
 });
 
-export const TASK_SLEEP_OUTPUT_SCHEMA = z.strictObject({
-  waitedSeconds: z.number().positive(),
-});
-
 const TASK_CANCEL_DESCRIPTION =
   "Request cooperative cancellation of one or more background tasks. " +
   "Cancellation is final: a task that finishes after you cancel it stays cancelled. Cancelling an already-finished task changes nothing.";
-
-const TASK_SLEEP_DESCRIPTION =
-  "Pause durably before continuing while waiting for a background-task notification. " +
-  "Does not read or change any task.";
 
 const TASK_UPDATE_DESCRIPTION =
   "Briefly tell the parent agent what this background task is currently doing. " +
@@ -101,16 +83,6 @@ export function createTaskToolHarnessDefinitions(): readonly HarnessToolDefiniti
       name: TASK_CANCEL_TOOL_NAME,
       outputSchema: TASK_VIEWS_OUTPUT_SCHEMA,
       runtimeAction: { kind: "task-control" },
-    },
-    {
-      description: TASK_SLEEP_DESCRIPTION,
-      execute: async (input: { readonly seconds: number }) => {
-        requestTurnSleep(Math.ceil(input.seconds * 1_000));
-        return { waitedSeconds: input.seconds };
-      },
-      inputSchema: TASK_SLEEP_INPUT_SCHEMA,
-      name: TASK_SLEEP_TOOL_NAME,
-      outputSchema: TASK_SLEEP_OUTPUT_SCHEMA,
     },
     {
       description: TASK_UPDATE_DESCRIPTION,
@@ -165,6 +137,5 @@ function createResolvedTaskToolStub(input: {
  */
 export const TASK_TOOL_DEFINITIONS: readonly ResolvedToolDefinition[] = [
   createResolvedTaskToolStub({ description: TASK_CANCEL_DESCRIPTION, name: TASK_CANCEL_TOOL_NAME }),
-  createResolvedTaskToolStub({ description: TASK_SLEEP_DESCRIPTION, name: TASK_SLEEP_TOOL_NAME }),
   createResolvedTaskToolStub({ description: TASK_UPDATE_DESCRIPTION, name: TASK_UPDATE_TOOL_NAME }),
 ];

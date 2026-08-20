@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
 status: draft
-last_updated: "2026-08-19"
+last_updated: "2026-08-20"
 ---
 
 # Subagents as tasks: additive delivery plan
@@ -102,11 +102,10 @@ lifecycle path.
 
 ### Stage 2 — task tools, undiscoverable
 
-Register the task tools (`task_cancel`, `task_sleep`, `task_update`)
+Register the task tools (`task_cancel`, `task_update`)
 as framework tools, filtered out of the tool set unless the flag is on. The first implementation
 has no child-facing task tool.
 
-- `task_sleep` reuses the existing durable turn-sleep request.
 - `task_cancel` reads the session task index; an `agentId` continuation resolves a
   terminal task's child address through the agent handle store and starts a new task.
 

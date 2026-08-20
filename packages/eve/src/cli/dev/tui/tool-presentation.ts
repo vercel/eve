@@ -131,14 +131,6 @@ const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
     singularNoun: "task",
     pluralNoun: "tasks",
   },
-  task_sleep: {
-    verb: "Pause",
-    pastVerb: "Paused",
-    argKey: "seconds",
-    extractItem: sleepSecondsArg,
-    singularNoun: "pause",
-    pluralNoun: "pauses",
-  },
   task_update: {
     verb: "Update",
     pastVerb: "Updated",
@@ -390,14 +382,6 @@ function taskIdsArg(input: unknown): string | undefined {
   const ids = value.filter((id): id is string => typeof id === "string");
   if (ids.length === 0) return undefined;
   return salientLine(ids.join(", "));
-}
-
-/** Formats a `seconds: number` argument as a duration. */
-function sleepSecondsArg(input: unknown): string | undefined {
-  if (input === null || typeof input !== "object" || Array.isArray(input)) return undefined;
-  const value = (input as Record<string, unknown>).seconds;
-  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
-  return `${String(value)}s`;
 }
 
 function salientArg(input: unknown, key: string): string | undefined {

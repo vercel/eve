@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
 status: draft
-last_updated: "2026-08-19"
+last_updated: "2026-08-20"
 ---
 
 # Subagents as tasks
@@ -11,9 +11,9 @@ last_updated: "2026-08-19"
 Under an opt-in `experimental.tasks` mode, eve should represent long-running work as durable,
 addressable tasks. This plan applies that model only to local and remote subagents. A subagent call
 returns a task receipt after dispatch instead of keeping the parent turn blocked until the child
-finishes. The parent receives result-bearing lifecycle notifications and can wait for or cancel
-the task with framework-owned tools. The child can intentionally report progress to its parent
-with one framework-owned tool.
+finishes. The parent receives result-bearing lifecycle notifications and can cancel the task with
+a framework-owned tool. The child can intentionally report progress to its parent with one
+framework-owned tool.
 
 Without the flag, current tool and subagent behavior must remain unchanged.
 
@@ -53,7 +53,7 @@ cancel paths.
 ## Goals
 
 - Let a parent continue its turn while delegated work runs.
-- Give the model explicit task controls instead of making every wait implicit.
+- Wake the parent through lifecycle notifications instead of model-paced task checks.
 - Let a child intentionally report progress to its parent instead of leaving progress to
   channel-layer guesswork.
 - Carry progress, input requests, authorization events, results, failures, and cancellation over
@@ -127,7 +127,6 @@ The parent receives these framework-owned tools:
 interface TaskParentTools {
   task_cancel(input: { taskIds: string[] }): Promise<TaskToolResult<boolean>>;
   task_update(input: { message: string }): Promise<{ status: "sent"; taskId: string }>;
-  task_sleep(input: { seconds: number }): Promise<TaskToolResult<boolean>>;
 }
 ```
 
@@ -140,7 +139,6 @@ The controls have distinct behavior:
   bound to the same child session. It never reopens a terminal task or answers HITL.
 - `task_cancel` requests cooperative cancellation. A committed terminal state is final, so a late
   child result cannot revive a cancelled task.
-- `task_sleep` durably pauses the current turn for paced checks. It does not poll or mutate a task.
 
 There is no child-facing task tool in the first implementation. Child-to-parent lifecycle and
 HITL communication is framework-owned; progress reporting remains a separate follow-up.
@@ -347,8 +345,8 @@ The current [MCP Tasks extension] provides the closest standard vocabulary:
 
 eve's `task_cancel` maps to cancellation. Result-bearing notifications replace a model-facing
 `tasks/get` operation: the model receives ready state at the transition that wakes it instead of
-performing a second read that can race the queued notification. `task_sleep` is an eve control,
-not an MCP method. eve is not implementing the MCP wire protocol in this work.
+performing a second read that can race the queued notification. eve is not implementing the MCP
+wire protocol in this work.
 
 One semantic difference is decided. MCP treats a tool-level `isError: true` result as
 `completed`; `failed` is reserved for JSON-RPC execution failure. eve diverges: child failure

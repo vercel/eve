@@ -278,7 +278,7 @@ describe("createNodeHarnessTools", () => {
   it("does not inject task tools without experimental.tasks", () => {
     const tools = createNodeHarnessTools({ node: createTestNode() });
 
-    for (const name of ["task_cancel", "task_sleep", "task_update"]) {
+    for (const name of ["task_cancel", "task_update"]) {
       expect(tools.has(name)).toBe(false);
     }
   });
@@ -299,8 +299,7 @@ describe("createNodeHarnessTools", () => {
       expect(tools.get(name)?.runtimeAction).toEqual({ kind: "task-control" });
       expect(tools.get(name)?.execute).toBeUndefined();
     }
-    expect(tools.get("task_sleep")?.execute).toBeDefined();
-    expect(tools.get("task_sleep")?.runtimeAction).toBeUndefined();
+    expect(tools.has("task_sleep")).toBe(false);
   });
 
   it("respects disableTool for individual task tools", () => {
@@ -316,7 +315,7 @@ describe("createNodeHarnessTools", () => {
       },
     });
 
-    expect(tools.has("task_sleep")).toBe(true);
+    expect(tools.has("task_update")).toBe(true);
     expect(tools.has("task_cancel")).toBe(false);
   });
 });

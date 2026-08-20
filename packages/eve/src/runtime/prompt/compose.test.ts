@@ -36,6 +36,7 @@ describe("composeRuntimeBasePrompt", () => {
       expect.stringContaining("notifications include the task's result"),
     );
     expect(prompt).not.toContainEqual(expect.stringContaining("task_peek"));
+    expect(prompt).not.toContainEqual(expect.stringContaining("task_sleep"));
     expect(prompt).toContainEqual(expect.stringContaining("notify you"));
   });
 
