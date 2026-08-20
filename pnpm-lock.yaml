@@ -175,8 +175,8 @@ importers:
         specifier: 2.0.1
         version: 2.0.1(@sveltejs/kit@2.63.0(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.1.2(svelte@5.56.1(@typescript-eslint/types@8.59.4))(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)))(svelte@5.56.1(@typescript-eslint/types@8.59.4))(typescript@6.0.3)(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)))(next@16.3.0-preview.6(@babel/core@7.29.0(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(nuxt@4.4.6(eddae254238b412d8a46133f9d7579b6))(react@19.2.6)(svelte@5.56.1(@typescript-eslint/types@8.59.4))(vue@3.5.35(typescript@6.0.3))
       '@vercel/geistdocs':
-        specifier: 1.20.2
-        version: 1.20.2(d893428d03ae3b7d30829ca960a66077)
+        specifier: 1.20.4
+        version: 1.20.4(d893428d03ae3b7d30829ca960a66077)
       '@vercel/speed-insights':
         specifier: 2.0.0
         version: 2.0.0(@sveltejs/kit@2.63.0(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.1.2(svelte@5.56.1(@typescript-eslint/types@8.59.4))(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)))(svelte@5.56.1(@typescript-eslint/types@8.59.4))(typescript@6.0.3)(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)))(next@16.3.0-preview.6(@babel/core@7.29.0(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(nuxt@4.4.6(eddae254238b412d8a46133f9d7579b6))(react@19.2.6)(svelte@5.56.1(@typescript-eslint/types@8.59.4))(vue@3.5.35(typescript@6.0.3))
@@ -7484,8 +7484,8 @@ packages:
     engines: {node: '>=18.0.0'}
     hasBin: true
 
-  '@vercel/agent-readability@0.5.0':
-    resolution: {integrity: sha512-ZY2i+p2/YCu4kAMGeGCq7Dn22XFWmLwQ1+sa2PrvWdeGCKqcx+CNp+4RF022QI+/e8RgPRjwQurjpmafiZlhTA==}
+  '@vercel/agent-readability@0.5.1':
+    resolution: {integrity: sha512-iQih444RJMoAREej/ccTmAUc+PiSogRffqQZMvGdcfF/5GN/4VilXrMHYQWRIq75c70D2AIOxX5sh9EG23ZT3w==}
     engines: {node: '>=20.0.0'}
     hasBin: true
     peerDependencies:
@@ -7645,8 +7645,8 @@ packages:
   '@vercel/gatsby-plugin-vercel-builder@2.2.35':
     resolution: {integrity: sha512-H1qNhnvyRIhek/esVnVK+RoFsxrSOLl4qiM4iyV2IcjDoqY4H0Ped65tc5ZgZEP/P2KGNYfEDSBEukdBZa+kCg==}
 
-  '@vercel/geistdocs@1.20.2':
-    resolution: {integrity: sha512-GiQBdl/bS1jI7/qZS8cNmiebP/bC1Saca8Fvq9pzSfT6IcOTlhvAExtgeRbdb3WqDygs9+qH9OaZi0NGBoKEaQ==}
+  '@vercel/geistdocs@1.20.4':
+    resolution: {integrity: sha512-W+4jWaH+9bgI9dJ5U6A7dkhhTzUURuiLjMzv8hKDre++fSZpDmsBNOkZowz4kFZBFgZgr4w3N8OWhXUIzGnVDA==}
     hasBin: true
     peerDependencies:
       next: ^16.2.11
@@ -9080,6 +9080,7 @@ packages:
   d3-dsv@3.0.1:
     resolution: {integrity: sha512-UG6OvdI5afDIFP9w4G0mNq50dSOsXHJaRE8arAS5o9ApWnIElp8GZw1Dun8vP8OyHOZ/QJUKUJwxiiCCnUwm+Q==}
     engines: {node: '>=12'}
+    hasBin: true
 
   d3-ease@3.0.1:
     resolution: {integrity: sha512-wR/XK3D3XcLIZwpbvQwQ5fK+8Ykds1ip7A2Txe0yxncXSdq1L9skcG7blcedkOX+ZcgxGAmLX1FrRGbADwzi0w==}
@@ -10864,6 +10865,7 @@ packages:
   image-size@2.0.2:
     resolution: {integrity: sha512-IRqXKlaXwgSMAMtpNzZa1ZAe8m+Sa1770Dhk8VkSsP9LS+iHD62Zd8FQKs8fbPiagBE7BzoFX23cxFnwshpV6w==}
     engines: {node: '>=16.x'}
+    hasBin: true
 
   immediate@3.0.6:
     resolution: {integrity: sha512-XXOFtyqDjNDAQxVfYxuF7g9Il/IbWmmlQg2MYKOH8ExIT1qg6xc4zyS3HaEEATgs1btfzxq15ciUiY7gjSXRGQ==}
@@ -11348,6 +11350,7 @@ packages:
 
   katex@0.16.47:
     resolution: {integrity: sha512-Eeo8Ys1doU1z+x8AZsPpQu+p/QcZBI5PeOo7QGQdy2x2m0MU/hYagBbGOmXwr5KVbEfVuWv9LpnQWeehogurjg==}
+    hasBin: true
 
   keyv@4.5.4:
     resolution: {integrity: sha512-oxVHkHR/EJf2CNXnWxRLW6mg7JyCCUcG0DtEGmL2ctUo1PNTin1PUil+r/+4r5MpVgC/fn1kjsx7mjSujKqIpw==}
@@ -11666,6 +11669,7 @@ packages:
   marked@16.4.2:
     resolution: {integrity: sha512-TI3V8YYWvkVf3KJe1dRkpnjs68JUPyEa5vjKrp1XEEJUAOaQc+Qj+L1qWbPd0SJuAdQkFU0h73sXXqwDYxsiDA==}
     engines: {node: '>= 20'}
+    hasBin: true
 
   marked@17.0.6:
     resolution: {integrity: sha512-gB0gkNafnonOw0obSTEGZTT86IuhILt2Wfx0mWH/1Au83kybTayroZ/V6nS25mN7u8ASy+5fMhgB3XPNrOZdmA==}
@@ -14542,6 +14546,7 @@ packages:
 
   ua-parser-js@1.0.41:
     resolution: {integrity: sha512-LbBDqdIC5s8iROCUjMbW1f5dJQTEFB1+KO9ogbvlb3nm9n4YHa5p4KTvFPWvh2Hs8gZMBuiB1/8+pdfe/tDPug==}
+    hasBin: true
 
   ufo@1.6.4:
     resolution: {integrity: sha512-JFNbkD1Svwe0KvGi8GOeLcP4kAWQ609twvCdcHxq1oSL8svv39ZuSvajcD8B+5D0eL4+s1Is2D/O6KN3qcTeRA==}
@@ -14931,6 +14936,7 @@ packages:
 
   uuid@14.0.0:
     resolution: {integrity: sha512-Qo+uWgilfSmAhXCMav1uYFynlQO7fMFiMVZsQqZRMIXp0O7rR7qjkj+cPvBHLgBqi960QCoo/PH2/6ZtVqKvrg==}
+    hasBin: true
 
   validate-npm-package-name@7.0.2:
     resolution: {integrity: sha512-hVDIBwsRruT73PbK7uP5ebUt+ezEtCmzZz3F59BSr2F6OVFnJ/6h8liuvdLrQ88Xmnk6/+xGGuq+pG9WwTuy3A==}
@@ -21804,7 +21810,7 @@ snapshots:
       - react-native-b4a
       - supports-color
 
-  '@vercel/agent-readability@0.5.0(@sveltejs/kit@2.63.0(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.1.2(svelte@5.56.1(@typescript-eslint/types@8.59.4))(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)))(svelte@5.56.1(@typescript-eslint/types@8.59.4))(typescript@6.0.3)(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)))(@vercel/functions@3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0)))(h3@1.15.11)(next@16.3.0-preview.6(@babel/core@7.29.0(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))':
+  '@vercel/agent-readability@0.5.1(@sveltejs/kit@2.63.0(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.1.2(svelte@5.56.1(@typescript-eslint/types@8.59.4))(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)))(svelte@5.56.1(@typescript-eslint/types@8.59.4))(typescript@6.0.3)(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)))(@vercel/functions@3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0)))(h3@1.15.11)(next@16.3.0-preview.6(@babel/core@7.29.0(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))':
     optionalDependencies:
       '@sveltejs/kit': 2.63.0(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.1.2(svelte@5.56.1(@typescript-eslint/types@8.59.4))(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)))(svelte@5.56.1(@typescript-eslint/types@8.59.4))(typescript@6.0.3)(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
       '@vercel/functions': 3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0))
@@ -22013,7 +22019,7 @@ snapshots:
       etag: 1.8.1
       fs-extra: 11.1.0
 
-  '@vercel/geistdocs@1.20.2(d893428d03ae3b7d30829ca960a66077)':
+  '@vercel/geistdocs@1.20.4(d893428d03ae3b7d30829ca960a66077)':
     dependencies:
       '@ai-sdk/react': 3.0.193(react@19.2.6)(zod@4.4.3)
       '@clack/prompts': 0.11.0
@@ -22021,7 +22027,7 @@ snapshots:
       '@orama/tokenizers': 3.1.18
       '@streamdown/cjk': 1.0.3(@types/mdast@4.0.4)(micromark-util-types@2.0.2)(micromark@4.0.2(supports-color@10.2.2))(react@19.2.6)(unified@11.0.5)
       '@streamdown/code': 1.1.1(react@19.2.6)
-      '@vercel/agent-readability': 0.5.0(@sveltejs/kit@2.63.0(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.1.2(svelte@5.56.1(@typescript-eslint/types@8.59.4))(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)))(svelte@5.56.1(@typescript-eslint/types@8.59.4))(typescript@6.0.3)(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)))(@vercel/functions@3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0)))(h3@1.15.11)(next@16.3.0-preview.6(@babel/core@7.29.0(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))
+      '@vercel/agent-readability': 0.5.1(@sveltejs/kit@2.63.0(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.1.2(svelte@5.56.1(@typescript-eslint/types@8.59.4))(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)))(svelte@5.56.1(@typescript-eslint/types@8.59.4))(typescript@6.0.3)(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)))(@vercel/functions@3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0)))(h3@1.15.11)(next@16.3.0-preview.6(@babel/core@7.29.0(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))
       '@vercel/oidc': 3.8.0
       ai: 6.0.191(zod@4.4.3)
       class-variance-authority: 0.7.1
