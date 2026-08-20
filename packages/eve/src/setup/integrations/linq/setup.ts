@@ -6,15 +6,19 @@ import type { VercelProjectReference } from "#setup/project-resolution.js";
 import { deriveSlackConnectorSlug } from "#setup/scaffold/index.js";
 import { writeTextFile } from "#setup/scaffold/files.js";
 
-import {
-  provisionLinqConnector,
-  type LinqExistingAccountCredentials,
-} from "./connect.js";
+import { provisionLinqConnector, type LinqExistingAccountCredentials } from "./connect.js";
+import { listLinqPhoneNumbers } from "./management.js";
 import {
   defineSetupIntegration,
   type SetupApplyContext,
   type SetupPrepareContext,
 } from "../types.js";
+
+export interface LinqSetupDeps {
+  listPhoneNumbers: typeof listLinqPhoneNumbers;
+}
+
+const defaultDeps: LinqSetupDeps = { listPhoneNumbers: listLinqPhoneNumbers };
 
 interface LinqSetupPlan {
   credentials: "connect" | "portable";
@@ -35,17 +39,6 @@ export default linqChannel({
 });
 `;
 
-function validatePhoneNumbers(value: string): string | null {
-  const phoneNumbers = value
-    .split(",")
-    .map((phoneNumber) => phoneNumber.trim())
-    .filter(Boolean);
-  if (phoneNumbers.length === 0) return "Enter at least one phone number.";
-  return phoneNumbers.every((phoneNumber) => /^\+[1-9]\d{1,14}$/.test(phoneNumber))
-    ? null
-    : "Use comma-separated E.164 numbers, for example +14155550123.";
-}
-
 function connectTemplate(uid: string): string {
   return `import { connectLinqCredentials } from "@vercel/connect/eve";
 import { linqChannel } from "eve/channels/linq";
@@ -56,7 +49,10 @@ export default linqChannel({
 `;
 }
 
-export async function prepareLinqSetup(context: SetupPrepareContext): Promise<LinqSetupPlan> {
+export async function prepareLinqSetup(
+  context: SetupPrepareContext,
+  deps: LinqSetupDeps = defaultDeps,
+): Promise<LinqSetupPlan> {
   const credentials = await context.asker.ask(
     select({
       key: "linq-credentials",
@@ -112,7 +108,7 @@ export async function prepareLinqSetup(context: SetupPrepareContext): Promise<Li
             id: "existing",
             value: "existing" as const,
             label: "Use an existing Linq account",
-            hint: "Connect a Linq partner API token and phone numbers",
+            hint: "Connect a Linq partner API token and select agent phone numbers",
           },
         ],
         recommended: "new" as const,
@@ -129,24 +125,25 @@ export async function prepareLinqSetup(context: SetupPrepareContext): Promise<Li
         environment: "LINQ_API_KEY",
       }),
     );
-    const phoneNumbers = await context.asker.ask(
-      text({
-        key: "linq-existing-phone-numbers",
-        message: "Linq phone numbers",
-        placeholder: "+14155550123, +14155550124",
-        required: true,
-        validate: validatePhoneNumbers,
-      }),
-    );
+    const agentPhoneNumbers = await deps.listPhoneNumbers(apiToken.trim(), context.signal);
+    const phoneNumbers = await context.asker.askMany({
+      key: "linq-existing-phone-numbers",
+      message: "Choose your agent's phone numbers",
+      options: agentPhoneNumbers.map((phoneNumber) => ({
+        id: phoneNumber,
+        value: phoneNumber,
+        label: phoneNumber,
+      })),
+      detected: agentPhoneNumbers,
+      requireSelection: true,
+      required: true,
+    });
     return {
       credentials,
       connectorSlug: connectorSlug.trim(),
       existingAccount: {
         apiToken: apiToken.trim(),
-        phoneNumbers: phoneNumbers
-          .split(",")
-          .map((phoneNumber) => phoneNumber.trim())
-          .filter(Boolean),
+        phoneNumbers,
       },
       project,
     };

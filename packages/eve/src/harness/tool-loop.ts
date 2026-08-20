@@ -242,6 +242,7 @@ import {
 } from "#runtime/framework-tools/final-output.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { RunMode } from "#shared/run-mode.js";
+import { createHistoryViewPreparer } from "#shared/history-view.js";
 import {
   type CompactionConfig,
   type HarnessSession,
@@ -619,6 +620,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     turnSpan?: Span,
   ): Promise<StepResult> {
     let session = initialSession;
+    const prepareHistory = createHistoryViewPreparer({
+      previous: config.historyView,
+      projector: config.historyProjector,
+    });
+    prepareHistory(session.history, session.state);
+    const projectHistory = (
+      messages: readonly ModelMessage[],
+      state: HarnessSession["state"],
+    ): readonly ModelMessage[] => prepareHistory(messages, state).messages;
 
     // Store the turn span context on the session so continuation steps
     // can restore the parent trace across step boundaries.
@@ -746,7 +756,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
               turnId: activeTurnId(emissionState),
             },
             force: true,
-            messages: [...session.history],
+            messages: [...projectHistory(session.history, session.state)],
             model: resolvedModel.model,
             onCompaction: config.onCompaction,
             resolveModel: config.resolveModel,
@@ -828,7 +838,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           stepIndex: emissionState.stepIndex,
           turnId: emissionState.turnId,
         }),
-        messages: resolvedRuntimeActions.messages,
+        messages: projectHistory(resolvedRuntimeActions.messages, session.state),
       });
     }
     const coordinated = await coordinateApprovalDelivery({
@@ -986,7 +996,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         hasStepInput(input)
       ) {
         if (store !== undefined) {
-          prepareDynamicInstructionPreamble(store, parkedSession.history);
+          prepareDynamicInstructionPreamble(
+            store,
+            projectHistory(parkedSession.history, parkedSession.state),
+          );
         }
         let instructionMessages: ModelMessage[] = [];
         try {
@@ -1092,7 +1105,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     let instructionMessages: ModelMessage[] = [];
     if (emit && hasStepInput(input)) {
       if (store !== undefined) {
-        prepareDynamicInstructionPreamble(store, pending.session.history);
+        prepareDynamicInstructionPreamble(
+          store,
+          projectHistory(pending.session.history, pending.session.state),
+        );
       }
       try {
         const traceContext = await preparePreambleTrace();
@@ -1161,7 +1177,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (config.persistentSubagentSessions === true) {
       const store = getAgentHandleStore(session.state);
       if (store?.handles.some((handle) => handle.phase === "addressed") !== true) {
-        const announcement = resolveAgentsAnnouncement({ messages, store });
+        const announcement = resolveAgentsAnnouncement({
+          messages: projectHistory(messages, session.state),
+          store,
+        });
         if (announcement !== undefined) {
           messages.push({ content: announcement, role: "user" });
         }
@@ -1185,6 +1204,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       messages.push({ content, role: "user" });
     }
 
+    let projectedMessages = projectHistory(messages, session.state);
+
     // --- Model + tools ------------------------------------------------------
 
     // Direct harness unit tests may run without an ambient context.
@@ -1202,7 +1223,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             },
             type: "step.started",
           } as UnstampedMessageStreamEvent,
-          messages,
+          messages: projectedMessages,
         });
       }
       resolvedModel = await resolveActiveRuntimeModel({
@@ -1216,14 +1237,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     session = resolvedModel.session;
     const model = resolvedModel.model;
 
-    if (emit) {
-      await emitStepStarted(
-        emit,
-        emissionState,
-        requireSessionModelReference(session).id,
-        messages,
-      );
-    }
     const cachePath = detectPromptCachePath(model);
     const marker = cachePath.kind === "anthropic-direct" ? getAnthropicCacheMarker() : undefined;
 
@@ -1233,18 +1246,32 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // `messages` (which the harness uses to rebuild session history).
     const attributionHeaders = buildGatewayAttributionHeaders(model, config.runtimeIdentity);
 
-    ({ messages, session } = await maybeCompact({
+    const compaction = await maybeCompact({
       abortSignal: config.abortSignal,
       emit,
       emissionState,
-      messages,
+      messages: [...projectedMessages],
       model,
       onCompaction: config.onCompaction,
       resolveModel: config.resolveModel,
       runtimeIdentity: config.runtimeIdentity,
       session,
       telemetry: enrichTelemetry(otelSettings, agentName) ?? undefined,
-    }));
+    });
+    session = compaction.session;
+    if (compaction.compacted) {
+      messages = compaction.messages;
+    }
+    projectedMessages = projectHistory(messages, session.state);
+
+    if (emit) {
+      await emitStepStarted(
+        emit,
+        emissionState,
+        requireSessionModelReference(session).id,
+        projectedMessages,
+      );
+    }
 
     const approvedTools = getApprovedTools(session);
 
@@ -1271,7 +1298,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // model call only. The result is transient — `messages` itself
     // remains ref-only so it can flow into `session.history` without
     // bloating every future step boundary.
-    const hydratedMessages = await hydrateSandboxAttachments(messages);
+    const hydratedMessages = await hydrateSandboxAttachments(projectedMessages);
 
     // AI SDK rejects role:"system" in `messages` — route system entries
     // from durable history to `instructions` instead.
@@ -1651,7 +1678,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       config,
       emit,
       emissionState,
-      messages,
+      messages: projectedMessages,
       session,
     });
     if (limitResult !== null) {
@@ -1910,6 +1937,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       emit,
       emissionState,
       delegatedCaller: taskUpdatesEnabled,
+      modelPromptMessageCount: projectedMessages.length,
       promptMessages: messages,
       result,
       runStep,
@@ -2429,6 +2457,7 @@ async function handleStepResult(input: {
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly delegatedCaller: boolean;
+  readonly modelPromptMessageCount: number;
   readonly promptMessages: readonly ModelMessage[];
   readonly result: HarnessStepResult;
   readonly runStep: StepFn;
@@ -2481,7 +2510,11 @@ async function handleStepResult(input: {
 
   const baseSession: HarnessSession = {
     ...session,
-    compaction: createNextCompactionConfig(session.compaction, promptMessages, result),
+    compaction: createNextCompactionConfig(
+      session.compaction,
+      input.modelPromptMessageCount,
+      result,
+    ),
   };
 
   const workflowContinuationSecurity =
@@ -3092,7 +3125,7 @@ function parkOnWorkflowInterrupt(input: {
 
 function createNextCompactionConfig(
   current: CompactionConfig,
-  promptMessages: readonly ModelMessage[],
+  promptMessageCount: number,
   result: HarnessStepResult,
 ): CompactionConfig {
   const next: {
@@ -3109,7 +3142,7 @@ function createNextCompactionConfig(
 
   if (result.usage?.inputTokens !== undefined) {
     next.lastKnownInputTokens = result.usage.inputTokens;
-    next.lastKnownPromptMessageCount = promptMessages.length;
+    next.lastKnownPromptMessageCount = promptMessageCount;
   }
 
   return next;
@@ -3136,13 +3169,17 @@ async function maybeCompact(input: {
   readonly runtimeIdentity?: ToolLoopHarnessConfig["runtimeIdentity"];
   readonly session: HarnessSession;
   readonly telemetry?: TelemetryOptions;
-}): Promise<{ readonly messages: ModelMessage[]; readonly session: HarnessSession }> {
+}): Promise<{
+  readonly compacted: boolean;
+  readonly messages: ModelMessage[];
+  readonly session: HarnessSession;
+}> {
   const { emit, emissionState } = input;
   let messages = input.messages;
   const session = input.session;
 
   if (input.force !== true && !shouldCompact(messages, session.compaction)) {
-    return { messages, session };
+    return { compacted: false, messages, session };
   }
 
   const compaction = await resolveCompactionModel({
@@ -3192,7 +3229,7 @@ async function maybeCompact(input: {
     );
   }
 
-  return { messages, session };
+  return { compacted: true, messages, session };
 }
 
 /**

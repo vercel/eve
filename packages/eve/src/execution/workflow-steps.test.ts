@@ -1,3 +1,4 @@
+import type { ModelMessage } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
@@ -10,6 +11,7 @@ import {
   DynamicSubagentAgentConfigKey,
   ModeKey,
   SessionCallbackKey,
+  SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicSubagentSelectionsKey,
   SessionDynamicModelReferenceKey,
   SessionDynamicToolMetadataKey,
@@ -76,6 +78,18 @@ vi.mock("./tasks/parent/run-parent.js", () => ({
 vi.mock("./tasks/parent/agent-views.js", () => ({
   appendTaskAgentAnnouncement: vi.fn(async (session) => session),
 }));
+
+const mockIdentityHistoryViewProjector = vi.hoisted(() =>
+  vi.fn(({ messages }: { readonly messages: readonly ModelMessage[] }) => messages),
+);
+vi.mock("#shared/history-view.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("#shared/history-view.js")>();
+  return {
+    ...actual,
+    identityHistoryViewProjector: (input: { readonly messages: readonly ModelMessage[] }) =>
+      mockIdentityHistoryViewProjector(input),
+  };
+});
 
 function installSessionStoreMocks(
   sessions: Awaited<ReturnType<typeof readDurableSession>>[],
@@ -230,6 +244,8 @@ afterEach(() => {
   vi.mocked(sendTaskInboundPayload).mockResolvedValue("delivered");
   vi.mocked(appendTaskAgentAnnouncement).mockReset();
   vi.mocked(appendTaskAgentAnnouncement).mockImplementation(async (session) => session);
+  mockIdentityHistoryViewProjector.mockReset();
+  mockIdentityHistoryViewProjector.mockImplementation(({ messages }) => messages);
 });
 
 describe("routeProxiedDeliverStep", () => {
@@ -1381,6 +1397,176 @@ describe("dispatchRuntimeActionsStep", () => {
 });
 
 describe("turnStep", () => {
+  it("prepares resumed-session history before dynamic runtime refresh", async () => {
+    const hidden = { content: "HIDE_FROM_RUNTIME_REFRESH", role: "user" as const };
+    mockIdentityHistoryViewProjector.mockImplementation(({ messages }) =>
+      messages.filter((message) => message !== hidden),
+    );
+    const toolHandler = vi.fn(
+      (_event: unknown, _context: { readonly messages: readonly ModelMessage[] }) => null,
+    );
+    const subagentHandler = vi.fn(
+      (_event: unknown, _context: { readonly messages: readonly ModelMessage[] }) => null,
+    );
+    const dynamicToolResolver = {
+      eventNames: ["session.started"],
+      events: { "session.started": toolHandler },
+      logicalPath: "agent/tools/runtime.ts",
+      slug: "runtime",
+      sourceId: "test:runtime",
+      sourceKind: "module",
+    } as never;
+    const dynamicSubagentResolver = {
+      eventNames: ["session.started"],
+      events: { "session.started": subagentHandler },
+      logicalPath: "agent/subagents/runtime/agent.ts",
+      name: "runtime-agent",
+      nodeId: "subagents/runtime-agent",
+      sourceId: "test:runtime-agent",
+      sourceKind: "module",
+    } as never;
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {}, dynamicToolResolvers: [dynamicToolResolver] },
+      subagentRegistry: { dynamicResolvers: [dynamicSubagentResolver] },
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    const session = createStubSession({
+      history: [
+        { content: "first", role: "user" },
+        hidden,
+        { content: "second", role: "assistant" },
+      ],
+      state: {
+        "eve.harness.emission": {
+          sequence: 1,
+          sessionStarted: true,
+          stepIndex: 0,
+          turnId: "",
+        },
+      },
+    });
+    installSessionStoreMocks([session]);
+
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, compiledBundle);
+    ctx.set(ChannelKey, threadContextAdapter);
+    ctx.set(ContinuationTokenKey, "http:thread-context");
+    ctx.set(ModeKey, "conversation");
+    ctx.set(SessionIdKey, "session-1");
+    ctx.set(SessionDynamicSubagentRuntimeRevisionKey, "deployment:dpl_old");
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_old");
+
+    let harnessHistory: readonly ModelMessage[] = [];
+    let rawHistory: readonly ModelMessage[] = [];
+    vi.mocked(createExecutionNodeStep).mockImplementation((input) => {
+      harnessHistory = input.historyView?.messages ?? [];
+      return async (stepSession): Promise<StepResult> => {
+        rawHistory = stepSession.history;
+        return { next: { done: true, output: "ok" }, session: stepSession };
+      };
+    });
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_new");
+
+    await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "follow up" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState({
+        emissionState: {
+          sequence: 1,
+          sessionStarted: true,
+          stepIndex: 0,
+          turnId: "",
+        },
+      }),
+    });
+
+    const expectedView = [
+      { content: "first", role: "user" },
+      { content: "second", role: "assistant" },
+    ];
+    expect(toolHandler.mock.calls[0]?.[1]).toMatchObject({ messages: expectedView });
+    expect(subagentHandler.mock.calls[0]?.[1]).toMatchObject({ messages: expectedView });
+    expect(harnessHistory).toEqual(expectedView);
+    expect(rawHistory).toEqual(session.history);
+    expect(rawHistory).toContain(hidden);
+  });
+
+  it("fails history projection before authored delivery or runtime callbacks run", async () => {
+    const deliver = vi.fn(() => ({ message: "delivered" }));
+    const adapter: ChannelAdapter = { kind: "projection-failure", deliver };
+    const dynamicToolHandler = vi.fn(() => null);
+    const compiledBundle = {
+      adapterRegistry: { adaptersByKind: new Map([[adapter.kind, adapter]]) },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: {
+        config: {},
+        dynamicToolResolvers: [
+          {
+            eventNames: ["session.started"],
+            events: { "session.started": dynamicToolHandler },
+            logicalPath: "agent/tools/failure.ts",
+            slug: "failure",
+            sourceId: "test:failure",
+            sourceKind: "module",
+          },
+        ],
+      },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    installSessionStoreMocks([createStubSession({ history: [{ content: "raw", role: "user" }] })]);
+    mockIdentityHistoryViewProjector.mockImplementation(() => {
+      throw new Error("projection failed");
+    });
+    vi.mocked(createExecutionNodeStep).mockClear();
+
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, compiledBundle);
+    ctx.set(ChannelKey, adapter);
+    ctx.set(ContinuationTokenKey, "projection-failure");
+    ctx.set(ModeKey, "conversation");
+    ctx.set(SessionIdKey, "session-1");
+
+    await expect(
+      turnStep({
+        input: { kind: "deliver", payloads: [{ message: "hello" }] },
+        parentWritable: createTestWritable(),
+        serializedContext: serializeContext(ctx),
+        sessionState: createStubSessionState(),
+      }),
+    ).rejects.toThrow("projection failed");
+    expect(deliver).not.toHaveBeenCalled();
+    expect(dynamicToolHandler).not.toHaveBeenCalled();
+    expect(createExecutionNodeStep).not.toHaveBeenCalled();
+    expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? []).toEqual([]);
+  });
+
   it("routes remote task HITL only to the parent callback", async () => {
     const inputRequested = vi.fn();
     const remoteTaskAdapter: ChannelAdapter = {
@@ -2529,7 +2715,15 @@ describe("turnStep", () => {
       principal: { type: "app" } as const,
       resume: { nonce: "n1" },
     };
+    const hidden = { content: "HIDE_FROM_AUTH_CONTINUATION", role: "user" as const };
+    mockIdentityHistoryViewProjector.mockImplementation(({ messages }) =>
+      messages.filter((message) => message !== hidden),
+    );
+    const instructionHandler = vi.fn(
+      (_event: unknown, _context: { readonly messages: readonly ModelMessage[] }) => null,
+    );
     const session = createStubSession({
+      history: [{ content: "visible", role: "user" }, hidden],
       state: setPendingAuthorization({ retained: "yes" }, { challenges: [challenge] }),
     });
     installSessionStoreMocks([session]);
@@ -2547,7 +2741,22 @@ describe("turnStep", () => {
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
+      resolvedAgent: {
+        config: {},
+        dynamicInstructionsResolvers: [
+          {
+            eventNames: ["session.started", "turn.started"],
+            events: {
+              "session.started": instructionHandler,
+              "turn.started": instructionHandler,
+            },
+            logicalPath: "agent/instructions/auth.ts",
+            slug: "auth",
+            sourceId: "test:auth",
+            sourceKind: "module",
+          },
+        ],
+      },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,
@@ -2593,6 +2802,13 @@ describe("turnStep", () => {
     const persistedSession = vi.mocked(createDurableSessionState).mock.calls.at(-1)?.[0].session;
     expect(persistedSession?.state?.retained).toBe("yes");
     expect(getPendingAuthorization(persistedSession?.state)).toBeUndefined();
+    expect(instructionHandler).toHaveBeenCalledTimes(2);
+    for (const call of instructionHandler.mock.calls) {
+      expect(call[1]).toMatchObject({
+        messages: [{ content: "visible", role: "user" }],
+      });
+    }
+    expect(persistedSession?.history).toContain(hidden);
   });
 });
 

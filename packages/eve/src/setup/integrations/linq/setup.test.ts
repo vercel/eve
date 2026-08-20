@@ -7,9 +7,13 @@ vi.mock("#setup/scaffold/index.js", () => ({
   deriveSlackConnectorSlug: vi.fn(async () => "agent"),
 }));
 
-import { prepareLinqSetup } from "./setup.js";
+import { prepareLinqSetup, type LinqSetupDeps } from "./setup.js";
 import { integrationSetupEnvironment } from "../shared/environment.js";
 import { createSetupContexts } from "../shared/ui.js";
+
+function deps(): LinqSetupDeps {
+  return { listPhoneNumbers: vi.fn(async () => ["+14155550123", "+14155550124"]) };
+}
 
 function contexts(answers: Record<string, unknown> = {}) {
   return createSetupContexts({
@@ -30,18 +34,20 @@ describe("Linq setup", () => {
     });
   });
 
-  it("collects an existing Linq account's token and phone numbers", async () => {
+  it("fetches an existing Linq account's agent phone numbers", async () => {
     const context = contexts({
       "linq-account": "existing",
       "linq-existing-api-token": "linq-token",
-      "linq-existing-phone-numbers": " +14155550123, +14155550124 ",
+      "linq-existing-phone-numbers": ["+14155550124"],
     });
+    const setupDeps = deps();
 
-    await expect(prepareLinqSetup(context.prepare)).resolves.toMatchObject({
+    await expect(prepareLinqSetup(context.prepare, setupDeps)).resolves.toMatchObject({
       existingAccount: {
         apiToken: "linq-token",
-        phoneNumbers: ["+14155550123", "+14155550124"],
+        phoneNumbers: ["+14155550124"],
       },
     });
+    expect(setupDeps.listPhoneNumbers).toHaveBeenCalledWith("linq-token", undefined);
   });
 });

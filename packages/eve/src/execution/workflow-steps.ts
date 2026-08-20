@@ -95,6 +95,7 @@ import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.
 import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
+import { createExecutionHistoryView } from "#execution/history-view.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { isTaskToolAvailable, TASK_UPDATE_TOOL_NAME } from "#runtime/framework-tools/tasks.js";
@@ -240,6 +241,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     durable: durableSession,
     turnAgent: effectiveAgent.turnAgent,
   });
+  const history = createExecutionHistoryView(initialSession);
   const instrumentation = getInstrumentationRuntime();
   const initialEmissionState = getHarnessEmissionState(initialSession.state);
 
@@ -363,7 +365,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           ctx,
           resolvers: dynamicSubagentResolvers,
           event: refreshEvent,
-          messages: initialSession.history,
+          messages: history.initial.messages,
           persistentSessions: persistentSubagentSessions,
           runtimeRevision: dynamicRuntimeRevision,
         }),
@@ -371,7 +373,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           ctx,
           resolvers: dynamicToolResolvers,
           event: refreshEvent,
-          messages: initialSession.history,
+          messages: history.initial.messages,
           runtimeRevision: dynamicRuntimeRevision,
         }),
       ]);
@@ -459,7 +461,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       if (completedAuths) {
         let emissionState = getHarnessEmissionState(schemaSession.state);
         if (isHarnessBetweenTurns(schemaSession)) {
-          prepareDynamicInstructionPreamble(ctx, schemaSession.history);
+          prepareDynamicInstructionPreamble(ctx, history.messages(schemaSession));
           let instructionMessages: readonly import("ai").ModelMessage[] = [];
           const traceContext = await prepareWorkflowPreambleTrace({
             ctx,
@@ -518,7 +520,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           turnAgent: effectiveAgent.turnAgent,
         });
         const modelSession = tasksEnabled
-          ? await appendTaskAgentAnnouncement(refreshedSession)
+          ? await appendTaskAgentAnnouncement(refreshedSession, history.messages(refreshedSession))
           : refreshedSession;
 
         const step = createExecutionNodeStep({
@@ -528,6 +530,8 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           compactOnly: input.input?.kind === "compact",
           createRuntime: createWorkflowRuntime,
           handleEvent,
+          historyProjector: history.projector,
+          historyView: history.prepare(modelSession),
           mode,
           modelResolutionScope: {
             moduleMap: bundle.moduleMap,
