@@ -18,7 +18,6 @@ import {
   ChannelInstrumentationKey,
   InitiatorAuthKey,
   LiveStepDynamicModelSelectionKey,
-  LiveStepToolsKey,
   ParentSessionKey,
   SandboxKey,
   SessionKey,
@@ -26,6 +25,7 @@ import {
   SessionDynamicInstructionsKey,
   SessionDynamicModelReferenceKey,
   SessionDynamicSubagentSelectionsKey,
+  StepDynamicToolMetadataKey,
   TurnTaskDeliveryKey,
 } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
@@ -1954,7 +1954,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const approval = vi.fn(() => "user-approval" as const);
+    const approval = vi.fn((_context: unknown) => "user-approval" as const);
     const ctx = new ContextContainer();
     ctx.set(SessionKey, {
       auth: {
@@ -1969,13 +1969,25 @@ describe("createToolLoopHarness", () => {
       sessionId: "test-session",
       turn: { id: "turn-test", sequence: 0 },
     });
-    ctx.setVirtualContext(LiveStepToolsKey, [
+    const registryKey = Symbol.for("@workflow/core//registeredSteps");
+    const globals = globalThis as Record<symbol, Map<string, Function> | undefined>;
+    const registry = globals[registryKey] ?? new Map<string, Function>();
+    globals[registryKey] = registry;
+    registry.set("test-step-execute", () => ({ ok: true }));
+    registry.set("test-step-approval", (_closure: unknown, approvalContext: unknown) =>
+      approval(approvalContext as never),
+    );
+    ctx.set(StepDynamicToolMetadataKey, [
       {
+        callbacks: {
+          approvalRequest: { closure: {}, stepId: "test-step-approval" },
+          execute: { closure: {}, stepId: "test-step-execute" },
+        },
         description: "Get TfL line status.",
-        execute: vi.fn().mockResolvedValue({ ok: true }),
-        inputSchema: jsonSchema({ type: "object" }),
+        entryKey: "tfl__getLineStatus",
+        inputSchema: { type: "object" },
         name: "tfl__getLineStatus",
-        approval,
+        resolverSlug: "tfl",
       },
     ]);
 

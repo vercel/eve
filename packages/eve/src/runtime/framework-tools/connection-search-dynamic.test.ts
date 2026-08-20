@@ -19,6 +19,7 @@ import {
   type DynamicResolveContext,
   type DynamicToolSet,
 } from "#shared/dynamic-tool-definition.js";
+import { readDurableDynamicToolCallbacks } from "#shared/durable-dynamic-tool-callbacks.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Msg = any;
@@ -391,6 +392,61 @@ describe("connection_search", () => {
         challenge: { url: "https://idp.example.com/authorize" },
       },
     ]);
+  });
+
+  it("replays authorization from the step-scoped durable execute descriptor", async () => {
+    const salesforce: ResolvedConnectionDefinition = {
+      ...connection("salesforce"),
+      authorization: {
+        completeAuthorization: async () => ({ token: "unused" }),
+        getToken: async () => {
+          throw new ConnectionAuthorizationRequiredError("salesforce");
+        },
+        principalType: "user",
+        startAuthorization: async () => ({
+          challenge: { url: "https://idp.example.com/authorize" },
+        }),
+      },
+    };
+    const connectionRegistry = registry({
+      connections: [salesforce],
+      loadTools: {
+        salesforce: async () => {
+          throw new ConnectionAuthorizationRequiredError("salesforce");
+        },
+      },
+    });
+    const ctx = new ContextContainer();
+    ctx.set(ConnectionRegistryKey, connectionRegistry);
+    ctx.set(SessionIdKey, "session-auth-replay");
+    ctx.set(CallbackBaseUrlKey, "https://agent.example.com");
+    ctx.set(AuthKey, {
+      attributes: {},
+      authenticator: "test-idp",
+      issuer: "test-idp",
+      principalId: "user-1",
+      principalType: "user",
+    });
+
+    const result = await contextStorage.run(ctx, async () => {
+      const resolve = getConnectionSearchResolver().events["step.started"]!;
+      const tools = (await resolve({}, {
+        channel: {},
+        messages: [],
+        session: { auth: { current: null, initiator: null }, id: "session-auth-replay" },
+      } satisfies DynamicResolveContext)) as DynamicToolSet;
+      const reference = readDurableDynamicToolCallbacks(tools["connection_search"]!)!.execute!;
+      const registry = (globalThis as Record<symbol, Map<string, Function> | undefined>)[
+        Symbol.for("@workflow/core//registeredSteps")
+      ]!;
+
+      return await registry.get(reference.stepId)!(reference.closure, {
+        connection: "salesforce",
+        keywords: "accounts",
+      });
+    });
+
+    expect(isAuthorizationSignal(result)).toBe(true);
   });
 });
 

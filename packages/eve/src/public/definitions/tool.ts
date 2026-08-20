@@ -20,6 +20,10 @@ import {
   type DynamicEvents,
   type DynamicSentinel,
 } from "#shared/dynamic-tool-definition.js";
+import {
+  collectDurableDynamicToolCallbacks,
+  stampDurableDynamicToolCallbacks,
+} from "#shared/durable-dynamic-tool-callbacks.js";
 
 type ApprovalContextInput<TInput> = unknown extends TInput ? Record<string, unknown> : TInput;
 type DynamicEventMapHandler<TEvents extends DynamicEvents> = Extract<
@@ -245,6 +249,14 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
     );
   }
   Object.assign(definition, { [TOOL_BRAND]: true });
+  stampDurableDynamicToolCallbacks(
+    definition,
+    collectDurableDynamicToolCallbacks({
+      approval: definition.approval as Approval<never> | undefined,
+      execute: definition.execute,
+      toModelOutput: definition.toModelOutput,
+    }),
+  );
   stampDefinitionKey(definition, `tool:${definition.description}`);
   return definition;
 }

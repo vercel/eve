@@ -13,19 +13,25 @@ export type DynamicToolAstNode = {
   declarations?: DynamicToolAstNode[];
   end?: number;
   expression?: DynamicToolAstNode | null;
+  generator?: boolean;
   id?: { name?: string; start?: number; end?: number } | null;
   init?: DynamicToolAstNode | null;
+  imported?: { name?: string; value?: unknown } | null;
   key?: DynamicToolAstNode | null;
   kind?: string;
   left?: DynamicToolAstNode | null;
+  local?: { name?: string } | null;
   method?: boolean;
   name?: string;
   params?: DynamicToolAstNode[];
   properties?: DynamicToolAstNode[];
   right?: DynamicToolAstNode | null;
+  source?: { value?: unknown } | null;
+  specifiers?: DynamicToolAstNode[];
   start?: number;
   type?: string;
   value?: DynamicToolAstNode | unknown;
+  elements?: Array<DynamicToolAstNode | null>;
 };
 
 type IdentifierContext = "binding" | "reference";

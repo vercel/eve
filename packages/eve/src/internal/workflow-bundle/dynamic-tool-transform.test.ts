@@ -1,6 +1,10 @@
 import { describe, expect, it, beforeEach } from "vitest";
 
 import { transformDynamicToolExecute } from "./dynamic-tool-transform.js";
+import {
+  collectDurableDynamicToolCallbacks,
+  stampDurableDynamicToolCallbacks,
+} from "#shared/durable-dynamic-tool-callbacks.js";
 
 // ---------------------------------------------------------------------------
 // Helpers for evaluating transformed code
@@ -44,8 +48,17 @@ async function transformAndEval(
     return def;
   };
 
-  const defineTool = (entry: Record<string, unknown>) =>
-    Object.assign(entry, { [Symbol.for("eve:tool-brand")]: true });
+  const defineTool = (entry: Record<string, unknown>) => {
+    stampDurableDynamicToolCallbacks(
+      entry,
+      collectDurableDynamicToolCallbacks({
+        approval: entry.approval as never,
+        execute: entry.execute as never,
+        toModelOutput: entry.toModelOutput as never,
+      }),
+    );
+    return Object.assign(entry, { [Symbol.for("eve:tool-brand")]: true });
+  };
 
   // Evaluate in a function scope to provide our stubs. The transform
   // prepends its own __eveStepRegistry setup, so we don't need to add it.
@@ -67,7 +80,7 @@ async function transformAndEval(
   };
 }
 
-// Clear step registry between tests so counter-based names don't collide
+// Clear step registrations between tests so each assertion observes only its module.
 beforeEach(() => {
   const sym = Symbol.for("@workflow/core//registeredSteps");
   const reg = (globalThis as Record<symbol, Map<string, Function> | undefined>)[sym];
@@ -79,6 +92,68 @@ beforeEach(() => {
 // ===========================================================================
 
 describe("transformDynamicToolExecute — evaluation", () => {
+  it("stamps independent durable descriptors for every callback phase", async () => {
+    const source = `
+import { defineDynamic, defineTool } from "eve/tools";
+
+export default defineDynamic({
+  events: {
+    "session.started": async () => {
+      const executePrefix = "execute";
+      const requestReason = "confirm";
+      const allowedResponder = "user-123";
+      const projectionPrefix = "visible";
+      return {
+        guarded: defineTool({
+          description: "Guarded",
+          inputSchema: { type: "object" },
+          approval: {
+            request(ctx) {
+              return ctx.toolInput.force ? { type: "user-approval", reason: requestReason } : "not-applicable";
+            },
+            response(ctx) {
+              return ctx.responder.principalId === allowedResponder
+                ? { status: "allowed" }
+                : { status: "rejected", reason: "wrong responder" };
+            },
+          },
+          execute(input) {
+            return executePrefix + ":" + input.value;
+          },
+          toModelOutput(output) {
+            return { type: "text", value: projectionPrefix + ":" + output };
+          },
+        }),
+      };
+    },
+  },
+});
+`;
+
+    const { callHandler, registry } = await transformAndEval("tools/all-phases.ts", source);
+    const tools = await callHandler();
+    const guarded = tools.guarded as Record<string | symbol, unknown>;
+    const callbacks = guarded[Symbol.for("eve:durable-dynamic-tool-callbacks")] as Record<
+      string,
+      { stepId: string; closure: Record<string, unknown> }
+    >;
+
+    expect(Object.keys(callbacks)).toEqual([
+      "execute",
+      "approvalRequest",
+      "approvalResponse",
+      "toModelOutput",
+    ]);
+    expect(callbacks.execute!.closure).toEqual({ executePrefix: "execute" });
+    expect(callbacks.approvalRequest!.closure).toEqual({ requestReason: "confirm" });
+    expect(callbacks.approvalResponse!.closure).toEqual({ allowedResponder: "user-123" });
+    expect(callbacks.toModelOutput!.closure).toEqual({ projectionPrefix: "visible" });
+    expect(new Set(Object.values(callbacks).map((callback) => callback.stepId)).size).toBe(4);
+    for (const callback of Object.values(callbacks)) {
+      expect(registry.has(callback.stepId)).toBe(true);
+    }
+  });
+
   it("wrapper calls hoisted function with correct closure vars", async () => {
     const source = `
 import { defineDynamic, defineTool } from "eve/tools";
@@ -139,7 +214,7 @@ export default defineDynamic({
 
     const { callHandler } = await transformAndEval("tools/snapshot.ts", source);
     const tools = await callHandler();
-    const tool = tools.tool as Record<string, unknown>;
+    const tool = tools.tool as Record<string | symbol, unknown>;
 
     // __closureVars should have a snapshot of the config
     const closureVars = tool.__closureVars as Record<string, unknown>;
@@ -1026,7 +1101,7 @@ export default defineDynamic({
     expect(tools.feature_a).toBeUndefined();
   });
 
-  it("closure vars with non-serializable values: functions are dropped on replay", async () => {
+  it("preserves non-serializable captures for strict lifecycle validation", async () => {
     const source = `
 import { defineDynamic, defineTool } from "eve/tools";
 
@@ -1049,16 +1124,18 @@ export default defineDynamic({
 
     const { callHandler } = await transformAndEval("tools/non-serial.ts", source);
     const tools = await callHandler();
-    const tool = tools.tool as Record<string, unknown>;
+    const tool = tools.tool as Record<string | symbol, unknown>;
 
     // Live call works because helper is a real closure
     const liveResult = (tool.execute as Function)({ n: 5 });
     expect(liveResult).toBe("test:10");
 
-    // But __closureVars loses the function on JSON round-trip
-    const serialized = JSON.parse(JSON.stringify(tool.__closureVars));
-    expect(serialized.label).toBe("test");
-    expect(serialized.helper).toBeUndefined();
+    const callbacks = tool[Symbol.for("eve:durable-dynamic-tool-callbacks")] as Record<
+      string,
+      { closure: Record<string, unknown> }
+    >;
+    expect(callbacks.execute!.closure.label).toBe("test");
+    expect(callbacks.execute!.closure.helper).toBeTypeOf("function");
   });
 
   it("execute param named same as handler param does not collide", async () => {
@@ -1711,7 +1788,7 @@ export default defineDynamic({
     expect(result).toBeNull();
   });
 
-  it("returns null for static defineTool without events", async () => {
+  it("stamps defineTool callbacks independently of the containing module shape", async () => {
     const source = `
 import { defineTool } from "eve/tools";
 
@@ -1723,7 +1800,82 @@ export default defineTool({
   },
 });
 `;
-    expect(await transformDynamicToolExecute("tools/weather.ts", source)).toBeNull();
+    const result = await transformDynamicToolExecute("tools/weather.ts", source);
+    expect(result?.code).toContain("eve:durable-dynamic-callback");
+  });
+
+  it("transforms aliased defineTool imports", async () => {
+    const source = `
+import { defineDynamic, defineTool as tool } from "eve/tools";
+
+export default defineDynamic({
+  events: {
+    "session.started": () => ({
+      aliased: tool({
+        description: "Aliased",
+        inputSchema: { type: "object" },
+        execute(input) { return input.value; },
+      }),
+    }),
+  },
+});
+`;
+
+    const result = await transformDynamicToolExecute("lib/aliased-factory.ts", source);
+    expect(result?.code).toContain("aliased: tool({");
+    expect(result?.code).toContain("execute: __eveStampDynamicCallback");
+  });
+
+  it("supports module-level function references", async () => {
+    const source = `
+import { defineDynamic, defineTool } from "eve/tools";
+
+function executeMarker(input) {
+  return "module:" + input.value;
+}
+
+export default defineDynamic({
+  events: {
+    "session.started": () => ({
+      marker: defineTool({
+        description: "Marker",
+        inputSchema: { type: "object" },
+        execute: executeMarker,
+      }),
+    }),
+  },
+});
+`;
+
+    const { callHandler, registry } = await transformAndEval("lib/module-reference.ts", source);
+    const tools = await callHandler();
+    const marker = tools.marker as Record<string | symbol, unknown>;
+    const callbacks = marker[Symbol.for("eve:durable-dynamic-tool-callbacks")] as Record<
+      string,
+      { closure: Record<string, unknown>; stepId: string }
+    >;
+    const execute = callbacks.execute!;
+
+    expect(execute.closure).toEqual({});
+    expect(registry.get(execute.stepId)!(execute.closure, { value: "ok" })).toBe("module:ok");
+  });
+
+  it("preserves async generator callbacks", async () => {
+    const source = `
+import { defineTool } from "eve/tools";
+export default defineTool({
+  description: "Stream markers",
+  inputSchema: {},
+  async *execute() {
+    yield { phase: "started" };
+    yield { phase: "finished" };
+  },
+});
+`;
+
+    const result = await transformDynamicToolExecute("agent/tools/stream.ts", source);
+    expect(result?.code).toContain("execute: __eveStampDynamicCallback(async function*");
+    expect(result?.code).toContain("async function* __eve_dynamic_exec_");
   });
 
   it("returns null for files without defineDynamic", async () => {
@@ -1752,6 +1904,32 @@ export default defineDynamic({
 // ===========================================================================
 
 describe("transformDynamicToolExecute — structural invariants", () => {
+  it("keeps callback ids stable when an unrelated module is transformed", async () => {
+    const target = `
+import { defineTool } from "eve/tools";
+export default defineTool({
+  description: "Target",
+  inputSchema: {},
+  execute() { return "target"; },
+});
+`;
+    const unrelated = `
+import { defineTool } from "eve/tools";
+export default defineTool({
+  description: "Unrelated",
+  inputSchema: {},
+  execute() { return "unrelated"; },
+});
+`;
+
+    const before = await transformDynamicToolExecute("agent/lib/target.ts", target);
+    await transformDynamicToolExecute("agent/lib/unrelated.ts", unrelated);
+    const after = await transformDynamicToolExecute("agent/lib/target.ts", target);
+    const ids = (code: string) => [...new Set(code.match(/eve:dynamic-tool\/\/[^"\s]+/g) ?? [])];
+
+    expect(ids(after!.code)).toEqual(ids(before!.code));
+  });
+
   it("every hoisted function has balanced braces", async () => {
     const source = `
 import { defineDynamic, defineTool } from "eve/tools";

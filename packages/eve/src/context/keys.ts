@@ -19,7 +19,7 @@ import type {
 } from "#channel/types.js";
 import { ContextKey } from "#context/key.js";
 import type { InstrumentationChannelDeliveryRef } from "#harness/instrumentation/lifecycle.js";
-import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { DurableDynamicToolCallbacks } from "#shared/durable-dynamic-tool-callbacks.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { SandboxAccess } from "#sandbox/state.js";
@@ -153,16 +153,13 @@ export const LiveStepDynamicModelSelectionKey = new ContextKey<LiveDynamicModelS
 // ---------------------------------------------------------------------------
 
 export interface DurableDynamicToolMetadata {
+  readonly callbacks: DurableDynamicToolCallbacks;
   readonly name: string;
   readonly description: string;
   readonly inputSchema: JsonObject;
   readonly outputSchema?: JsonObject;
   readonly resolverSlug: string;
   readonly entryKey: string;
-  readonly executeStepFnName?: string;
-  readonly approvalStepFnName?: string;
-  readonly approvalResponseStepFnName?: string;
-  readonly closureVars?: Record<string, unknown>;
 }
 
 /**
@@ -189,13 +186,10 @@ export const TurnDynamicToolMetadataKey = new ContextKey<readonly DurableDynamic
   "eve.turnDynamicToolMetadata",
 );
 
-/**
- * Virtual (non-serialized) live step-scoped tool definitions from
- * `step.started` resolvers. Carries original execute closures so
- * framework tools (which lack bundler step-function metadata) work.
- * Re-resolved every step — no cross-step persistence needed.
- */
-export const LiveStepToolsKey = new ContextKey<HarnessToolDefinition[]>("eve.liveStepTools");
+/** Step-scoped dynamic tool metadata, replaced before each model step. */
+export const StepDynamicToolMetadataKey = new ContextKey<readonly DurableDynamicToolMetadata[]>(
+  "eve.stepDynamicToolMetadata",
+);
 
 export type DurableDynamicSubagentSelection =
   | {
