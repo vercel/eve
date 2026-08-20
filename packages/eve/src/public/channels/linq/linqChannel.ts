@@ -14,6 +14,7 @@ import {
   createLinqAdapter,
   type LinqAdapterConfig,
   type LinqCredentialProvider,
+  type LinqCredentials,
   type LinqWebhookVerifier,
 } from "#compiled/@linqapp/chat-sdk-adapter/index.js";
 import type { Message, Thread } from "#compiled/chat/index.js";
@@ -91,10 +92,9 @@ export interface LinqChannel extends Channel<
  * ```
  */
 export function linqChannel(config: LinqChannelConfig): LinqChannel {
-  const linq = createLinqAdapter({
-    ...(config.baseURL === undefined ? {} : { baseURL: config.baseURL }),
-    ...normalizeCredentials(config.credentials),
-  });
+  const adapterConfig: LinqAdapterConfig = normalizeCredentials(config.credentials);
+  if (config.baseURL !== undefined) adapterConfig.baseURL = config.baseURL;
+  const linq = createLinqAdapter(adapterConfig);
   const bridge = chatSdkChannel({
     adapters: { linq },
     concurrency: "concurrent",
@@ -121,30 +121,29 @@ function normalizeCredentials(
   credentials: LinqChannelConfig["credentials"],
 ): Partial<Pick<LinqAdapterConfig, "credentials" | "webhookVerifier">> {
   const { apiKey, signingSecret, webhookVerifier } = credentials ?? {};
-  return {
-    ...(apiKey === undefined
-      ? {}
-      : {
-          credentials: createCredentialProvider(apiKey, signingSecret),
-        }),
-    ...(webhookVerifier !== undefined
-      ? { webhookVerifier }
-      : signingSecret === undefined
-        ? { webhookVerifier: vercelOidc() }
-        : {}),
-  };
+  const config: Partial<Pick<LinqAdapterConfig, "credentials" | "webhookVerifier">> = {};
+  if (apiKey !== undefined) {
+    config.credentials = createCredentialProvider(apiKey, signingSecret);
+  }
+  if (webhookVerifier !== undefined) {
+    config.webhookVerifier = webhookVerifier;
+  } else if (signingSecret === undefined) {
+    config.webhookVerifier = vercelOidc();
+  }
+  return config;
 }
 
 function createCredentialProvider(
   apiKey: LinqCredentialValue,
   signingSecret: LinqCredentialValue | undefined,
 ): LinqCredentialProvider {
-  return async () => ({
-    apiKey: await resolveCredentialValue(apiKey),
-    ...(signingSecret === undefined
-      ? {}
-      : { signingSecret: await resolveCredentialValue(signingSecret) }),
-  });
+  return async () => {
+    const credentials: LinqCredentials = { apiKey: await resolveCredentialValue(apiKey) };
+    if (signingSecret !== undefined) {
+      credentials.signingSecret = await resolveCredentialValue(signingSecret);
+    }
+    return credentials;
+  };
 }
 
 async function resolveCredentialValue(value: LinqCredentialValue): Promise<string> {

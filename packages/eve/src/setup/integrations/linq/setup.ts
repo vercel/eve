@@ -6,7 +6,10 @@ import type { VercelProjectReference } from "#setup/project-resolution.js";
 import { deriveSlackConnectorSlug } from "#setup/scaffold/index.js";
 import { writeTextFile } from "#setup/scaffold/files.js";
 
-import { provisionLinqConnector, type LinqExistingAccountCredentials } from "./connect.js";
+import {
+  provisionLinqConnector,
+  type LinqExistingAccountCredentials,
+} from "./connect.js";
 import {
   defineSetupIntegration,
   type SetupApplyContext,
@@ -173,14 +176,17 @@ export async function applyLinqSetup(plan: LinqSetupPlan, context: SetupApplyCon
   const path = join(context.appRoot, "agent/channels/linq.ts");
   let phoneNumber: string | undefined;
   if (plan.credentials === "connect") {
-    const connector = await provisionLinqConnector({
+    const connectorInput: Parameters<typeof provisionLinqConnector>[0] = {
       log: context.presenter.log,
       project: plan.project!,
       projectRoot: context.appRoot,
       slug: plan.connectorSlug!,
-      ...(plan.existingAccount === undefined ? {} : { existingAccount: plan.existingAccount }),
       signal: context.signal,
-    });
+    };
+    if (plan.existingAccount !== undefined) {
+      connectorInput.existingAccount = plan.existingAccount;
+    }
+    const connector = await provisionLinqConnector(connectorInput);
     phoneNumber = connector.phoneNumber;
     await writeTextFile(path, connectTemplate(connector.uid), { force: context.force });
     if (phoneNumber !== undefined) {

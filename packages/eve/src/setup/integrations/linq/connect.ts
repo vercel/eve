@@ -43,11 +43,9 @@ export function parseCreatedLinqConnector(stdout: string): LinqConnectorRef | un
     const result = ConnectorSchema.safeParse(JSON.parse(stdout));
     if (!result.success) return undefined;
     const phoneNumber = result.data.data?.phoneNumbers?.[0];
-    return {
-      id: result.data.id,
-      uid: result.data.uid,
-      ...(phoneNumber === undefined ? {} : { phoneNumber }),
-    };
+    const connector: LinqConnectorRef = { id: result.data.id, uid: result.data.uid };
+    if (phoneNumber !== undefined) connector.phoneNumber = phoneNumber;
+    return connector;
   } catch {
     return undefined;
   }
@@ -86,39 +84,31 @@ export async function provisionLinqConnector(input: {
     if (URL.parse(line.text) !== null) return;
     commandOutput(line);
   };
+  const command = ["connect", "create", "linq", "--name", input.slug];
+  const stdin =
+    input.existingAccount === undefined
+      ? undefined
+      : JSON.stringify({
+          apiToken: input.existingAccount.apiToken,
+          phoneNumbers: input.existingAccount.phoneNumbers,
+        });
+  if (stdin !== undefined) command.push("--connector-type", "linq", "--data", "@-");
+  command.push(
+    "--triggers",
+    ...LINQ_TRIGGER_EVENTS.flatMap((event) => ["--trigger-event", event]),
+    "-F",
+    "json",
+    "--scope",
+    input.project.orgId,
+  );
   const result = await withPhase(input.log, "Creating Linq connector...", () =>
-    deps.runVercelCaptureStdout(
-      [
-        "connect",
-        "create",
-        "linq",
-        "--name",
-        input.slug,
-        ...(input.existingAccount === undefined
-          ? []
-          : ["--connector-type", "linq", "--data", "@-"]),
-        "--triggers",
-        ...LINQ_TRIGGER_EVENTS.flatMap((event) => ["--trigger-event", event]),
-        "-F",
-        "json",
-        "--scope",
-        input.project.orgId,
-      ],
-      {
-        cwd: input.projectRoot,
-        nonInteractive: true,
-        onOutput,
-        signal: input.signal,
-        ...(input.existingAccount === undefined
-          ? {}
-          : {
-              stdin: JSON.stringify({
-                apiToken: input.existingAccount.apiToken,
-                phoneNumbers: input.existingAccount.phoneNumbers,
-              }),
-            }),
-      },
-    ),
+    deps.runVercelCaptureStdout(command, {
+      cwd: input.projectRoot,
+      nonInteractive: true,
+      onOutput,
+      signal: input.signal,
+      stdin,
+    }),
   );
   input.signal?.throwIfAborted();
   const created = requireCreatedConnector(result);
@@ -169,10 +159,6 @@ async function readLinqConnector(input: {
   );
   if (!result.ok) return input.connector;
   const connector = parseCreatedLinqConnector(result.stdout);
-  return connector === undefined
-    ? input.connector
-    : {
-        ...input.connector,
-        ...(connector.phoneNumber === undefined ? {} : { phoneNumber: connector.phoneNumber }),
-      };
+  if (connector?.phoneNumber === undefined) return input.connector;
+  return { ...input.connector, phoneNumber: connector.phoneNumber };
 }
