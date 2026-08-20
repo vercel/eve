@@ -10,4 +10,27 @@ export interface ParseOptions {
   readonly disallowComments?: boolean | undefined;
 }
 
+export interface Edit {
+  readonly offset: number;
+  readonly length: number;
+  readonly content: string;
+}
+
+export interface FormattingOptions {
+  readonly insertSpaces?: boolean;
+  readonly tabSize?: number;
+  readonly eol?: string;
+}
+
+export interface ModificationOptions {
+  readonly formattingOptions?: FormattingOptions;
+}
+
 export declare function parse(text: string, errors?: ParseError[], options?: ParseOptions): unknown;
+export declare function modify(
+  text: string,
+  path: (string | number)[],
+  value: unknown,
+  options: ModificationOptions,
+): Edit[];
+export declare function applyEdits(text: string, edits: Edit[]): string;

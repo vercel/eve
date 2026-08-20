@@ -26,6 +26,7 @@ import {
   type WebAuthentication,
   type WebPackageVersions,
 } from "./web-options.js";
+import { reconcileWebTsConfig } from "./web-tsconfig.js";
 
 export type { WebAuthentication, WebPackageVersions } from "./web-options.js";
 
@@ -558,6 +559,11 @@ async function ensureWebChannel(
         filesOverwritten.push(filePath);
       }
     }
+  }
+
+  const webTsConfigPath = join(options.projectRoot, "tsconfig.json");
+  if (await reconcileWebTsConfig(webTsConfigPath)) {
+    filesWritten.push(webTsConfigPath);
   }
 
   competingNextConfigFiles.push(...(await findCompetingNextConfigFiles(options.projectRoot)));

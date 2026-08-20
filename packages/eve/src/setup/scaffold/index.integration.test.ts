@@ -718,6 +718,7 @@ describe("ensureChannel", () => {
     const projectRoot = await createTempDir();
     const pagePath = join(projectRoot, "app/page.tsx");
     const packageJsonPath = join(projectRoot, "package.json");
+    const tsconfigPath = join(projectRoot, "tsconfig.json");
     await mkdir(join(projectRoot, "app"), { recursive: true });
     await writeFile(pagePath, "registry-installed\n", "utf8");
     await writeFile(
@@ -734,6 +735,25 @@ describe("ensureChannel", () => {
       )}\n`,
       "utf8",
     );
+    await writeFile(
+      tsconfigPath,
+      `${JSON.stringify(
+        {
+          compilerOptions: {
+            module: "esnext",
+            moduleResolution: "bundler",
+            paths: { "#/*": ["./agent/*"] },
+            strict: true,
+            target: "ES2022",
+            types: ["node"],
+          },
+          include: ["agent/**/*.ts", "evals/**/*.ts"],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
 
     const result = await ensureChannel({
       projectRoot,
@@ -744,6 +764,7 @@ describe("ensureChannel", () => {
     });
 
     expect(result.action).toBe("overwritten");
+    expect(result.filesWritten).toContain(tsconfigPath);
     await expect(readFile(pagePath, "utf8")).resolves.toBe("registry-installed\n");
     const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
       dependencies: Record<string, string>;
@@ -759,6 +780,33 @@ describe("ensureChannel", () => {
         test: "vitest",
       },
     });
+    const tsconfig = JSON.parse(await readFile(tsconfigPath, "utf8")) as {
+      compilerOptions: {
+        paths: Record<string, string[]>;
+        plugins: { name: string }[];
+        target: string;
+        types: string[];
+      };
+      include: string[];
+    };
+    expect(tsconfig.compilerOptions).toMatchObject({
+      paths: {
+        "#/*": ["./agent/*"],
+        "@/*": ["./*"],
+      },
+      target: "ES2022",
+      types: ["node"],
+    });
+    expect(tsconfig.compilerOptions.plugins).toContainEqual({ name: "next" });
+    expect(tsconfig.include).toEqual(
+      expect.arrayContaining([
+        "agent/**/*.ts",
+        "evals/**/*.ts",
+        "next-env.d.ts",
+        "**/*.ts",
+        "**/*.tsx",
+      ]),
+    );
   });
 });
 
