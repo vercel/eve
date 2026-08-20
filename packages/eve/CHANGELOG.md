@@ -1,5 +1,18 @@
 # eve
 
+## 0.41.0
+
+### Minor Changes
+
+- 0569638: Add a first-class Linq iMessage and SMS channel with managed Vercel Connect and portable credential setup paths. Connect setup can provision a new Linq account and line or connect an existing account with its partner API token.
+
+### Patch Changes
+
+- bdf5f63: Improve the generated web chat experience with immediate thinking feedback, a disabled composer while responses stream, clearer cancellation controls, and visible turn failures.
+- c47350f: Rebuild untransformed session-scoped dynamic tool executors and approval policies on durable continuations so dependency-created tools remain available after replay.
+- c47350f: Update Teams tool-approval cards only after approval settlement, with the outcome and the Teams responder who acted.
+- 9e19fa4: Keep active client streams attached across authorization parking boundaries so connection callbacks resume browser chats automatically.
+
 ## 0.40.0
 
 ### Minor Changes
