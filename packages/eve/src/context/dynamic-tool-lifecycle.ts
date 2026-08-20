@@ -51,6 +51,7 @@ function toHarnessToolDefinition(name: string, entry: DynamicToolEntry): Harness
     inputSchema: toInputSchema(entry.inputSchema),
     name,
     approval: entry.approval,
+    approvalKey: entry.approvalKey,
     outputSchema: toOutputSchema(entry.outputSchema),
     ...(entry.toModelOutput !== undefined
       ? { toModelOutput: entry.toModelOutput as (output: unknown) => unknown }

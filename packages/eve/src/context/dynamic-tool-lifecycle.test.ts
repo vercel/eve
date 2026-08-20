@@ -1477,6 +1477,36 @@ describe("framework dynamic tools (no bundler transform)", () => {
     expect(testRegistry.has("eve:dynamic-tool-approval:connection:risky")).toBe(false);
   });
 
+  it("propagates approvalKey from a step-scoped entry into the harness tool", async () => {
+    const ctx = createCtx();
+    const approvalKey = vi.fn(
+      (input: Readonly<Record<string, unknown>>) => `risky:${String(input.scope)}`,
+    );
+    const entry: DynamicToolEntry = Object.assign(
+      defineTool({
+        description: "scoped destructive op",
+        inputSchema: { type: "object" },
+        approval: () => "user-approval" as const,
+        execute: async (): Promise<unknown> => ({ ok: true }),
+      }),
+      { approvalKey },
+    );
+    const resolver = createResolver("connection", ["step.started"], () => ({ risky: entry }));
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("step.started"),
+    });
+
+    const tools = buildDynamicTools(ctx);
+    expect(tools).toHaveLength(1);
+    expect(tools[0]!.approvalKey).toBe(approvalKey);
+    expect(tools[0]!.approvalKey?.({ scope: "repo" })).toBe("risky:repo");
+    expect(approvalKey).toHaveBeenCalledExactlyOnceWith({ scope: "repo" });
+  });
+
   it("replays approval from session-scoped dynamic tools", async () => {
     const ctx = createCtx();
     const approvalFn = vi.fn(async () => "user-approval" as const);

@@ -84,6 +84,11 @@ export interface DynamicToolEntry<TInput = Record<string, unknown>, TOutput = an
   execute(input: TInput, ctx: ToolContext): TOutput | Promise<TOutput>;
   readonly toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
   /**
+   * Optional function that derives the key recorded after approval. Only
+   * step-scoped tools can retain this live callback across the harness boundary.
+   */
+  readonly approvalKey?: (toolInput: Readonly<Record<string, unknown>>) => string;
+  /**
    * Optional per-call approval gate, mirroring the authored-tool
    * `approval` contract: return `"user-approval"` to require user approval
    * before the call executes. Only honored for step-scoped dynamic
