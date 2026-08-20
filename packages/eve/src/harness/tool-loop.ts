@@ -6,6 +6,7 @@ import {
 } from "#compiled/@opentelemetry/api/index.js";
 import {
   isStepCount,
+  type LanguageModelCallEndEvent,
   type LanguageModel,
   type ModelMessage,
   type ProviderMetadata,
@@ -1508,6 +1509,22 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         headers: attributionHeaders,
         instructions,
         model,
+        onLanguageModelCallEnd(event: LanguageModelCallEndEvent) {
+          for (const part of event.content) {
+            if (
+              part.type !== "tool-call" ||
+              part.providerExecuted === true ||
+              isInvalidToolCall(part)
+            ) {
+              continue;
+            }
+            backgroundBatch.register({
+              callId: part.toolCallId,
+              input: part.input,
+              toolName: part.toolName,
+            });
+          }
+        },
         onToolExecutionEnd: logToolExecutionError,
         // Replaces the AI SDK's default `console.error`; the harness still
         // emits stream events, this just keeps the raw error from being silent.

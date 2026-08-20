@@ -91,6 +91,18 @@ describe("session inbox wire v1", () => {
           status: "working" as const,
           taskId: "task-1",
         },
+        {
+          executor: {
+            binding: {
+              data: { agentId: "agent-2", mode: "local", name: "worker" },
+              kind: "subagent",
+            },
+          },
+          lastOutput: { data: "done", type: "result" as const },
+          metadata: { kind: "tool", name: "worker" },
+          status: "completed" as const,
+          taskId: "task-2",
+        },
       ],
     };
     const wire = sessionInboxWireEncoder.encode(

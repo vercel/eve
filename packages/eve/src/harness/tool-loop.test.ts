@@ -2,6 +2,7 @@ import { context as otelContext, trace } from "#compiled/@opentelemetry/api/inde
 import {
   type FilePart,
   jsonSchema,
+  type LanguageModelCallEndEvent,
   type LanguageModel,
   type ModelMessage,
   ToolLoopAgent,
@@ -52,6 +53,7 @@ import {
 } from "#harness/input-requests.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
+import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { appendMissingToolResultMessages, createToolLoopHarness } from "#harness/tool-loop.js";
 import { isSessionLimitDecline, TurnCancelledError } from "#harness/turn-cancellation.js";
@@ -871,6 +873,81 @@ describe("createToolLoopHarness", () => {
     expect(agentCall).toBeDefined();
     expect(agentCall!.tools).toHaveProperty("add");
     expect(agentCall!.tools).not.toHaveProperty("Workflow");
+  });
+
+  it("registers atomic background tool calls before AI SDK execution", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, {
+        tools: new Map([
+          [
+            "background_work",
+            {
+              description: "Start background work.",
+              execute: vi.fn(),
+              execution: "background" as const,
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "background_work",
+            },
+          ],
+        ]),
+      }),
+    );
+    await runStep(createTestSession(), { message: "Hi" });
+
+    const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as
+      | (ConstructorParameters<typeof ToolLoopAgent>[0] & {
+          onLanguageModelCallEnd?: (event: LanguageModelCallEndEvent) => Promise<void> | void;
+        })
+      | undefined;
+    const backgroundTool = agentCall?.tools?.background_work as
+      | {
+          execute?: (input: unknown, options: { toolCallId: string }) => Promise<unknown>;
+          onInputAvailable?: (input: {
+            input: unknown;
+            toolCallId: string;
+          }) => Promise<void> | void;
+        }
+      | undefined;
+    expect(agentCall?.onLanguageModelCallEnd).toBeTypeOf("function");
+    expect(backgroundTool?.onInputAvailable).toBeTypeOf("function");
+
+    await backgroundTool!.onInputAvailable!({ input: { value: 1 }, toolCallId: "call-a" });
+    await agentCall!.onLanguageModelCallEnd!({
+      content: [
+        {
+          input: { value: 1 },
+          toolCallId: "call-a",
+          toolName: "background_work",
+          type: "tool-call",
+        },
+        {
+          input: { value: 2 },
+          toolCallId: "call-b",
+          toolName: "background_work",
+          type: "tool-call",
+        },
+      ],
+    } as never);
+
+    let registeredCallIds: string[] = [];
+    const ctx = new ContextContainer();
+    ctx.set(BackgroundToolExecutorKey, {
+      async execute({ batch }) {
+        registeredCallIds = batch.calls.map((call) => call.callId);
+        return { ok: true };
+      },
+    });
+    await contextStorage.run(ctx, () => backgroundTool!.execute!({}, { toolCallId: "call-a" }));
+
+    expect(registeredCallIds).toEqual(["call-a", "call-b"]);
   });
 
   it("announces parked agents as user-role content before the user message, outside the system prompt", async () => {

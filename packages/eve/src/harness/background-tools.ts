@@ -16,7 +16,12 @@ export interface BackgroundToolCall {
 
 export interface BackgroundToolCallBatch {
   readonly calls: readonly BackgroundToolCall[];
-  register(call: BackgroundToolCall): void;
+  register(call: {
+    readonly callId: string;
+    readonly input: unknown;
+    readonly toolName: string;
+  }): void;
+  setTool(name: string, definition?: BackgroundExecutableTool): void;
 }
 
 export interface BackgroundToolExecutor {
@@ -44,15 +49,30 @@ export const BackgroundToolExecutorKey = new ContextKey<BackgroundToolExecutor>(
 
 export function createBackgroundToolCallBatch(): BackgroundToolCallBatch {
   const calls: BackgroundToolCall[] = [];
-  const callIds = new Set<string>();
+  const callsById = new Map<string, BackgroundToolCall>();
+  const tools = new Map<string, BackgroundExecutableTool>();
   return {
     calls,
     register(call) {
-      if (callIds.has(call.callId)) {
+      const definition = tools.get(call.toolName);
+      if (definition === undefined) return;
+
+      const existing = callsById.get(call.callId);
+      if (existing?.definition === definition) return;
+      if (existing !== undefined) {
         throw new Error(`Background tool call "${call.callId}" was registered more than once.`);
       }
-      callIds.add(call.callId);
-      calls.push(call);
+
+      const registeredCall = { callId: call.callId, definition, input: call.input };
+      callsById.set(call.callId, registeredCall);
+      calls.push(registeredCall);
+    },
+    setTool(name, definition) {
+      if (definition === undefined) {
+        tools.delete(name);
+      } else {
+        tools.set(name, definition);
+      }
     },
   };
 }

@@ -73,6 +73,12 @@ export function buildToolSet(input: {
       continue;
     }
 
+    backgroundBatch.setTool(
+      definition.name,
+      definition.execution === "background" && definition.execute !== undefined
+        ? (definition as BackgroundExecutableTool)
+        : undefined,
+    );
     const authorToModelOutput = definition.toModelOutput;
     const approval = buildApprovalFn(definition, input);
     const aiTool = tool({
@@ -93,8 +99,8 @@ export function buildToolSet(input: {
               }
               backgroundBatch.register({
                 callId: toolCallId,
-                definition: definition as BackgroundExecutableTool,
                 input: toolInput,
+                toolName: definition.name,
               });
             },
           }
