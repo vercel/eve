@@ -46,7 +46,7 @@ import {
   createEveSessionStreamRoutePath,
   createEveSubagentStreamRoutePath,
 } from "#protocol/routes.js";
-import { type InputResponse, isInputResponse } from "#runtime/input/types.js";
+import { isInputResponse, type ValidatedInputResponse } from "#runtime/input/types.js";
 import { type AuthFn, routeAuth } from "#public/channels/auth.js";
 import {
   collectUploadPolicyViolations,
@@ -898,7 +898,7 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
 interface ParsedSessionMessageBody {
   callback?: SessionCallback;
   message?: string | UserContent;
-  inputResponses?: readonly InputResponse[];
+  inputResponses?: readonly ValidatedInputResponse[];
   context?: readonly string[];
   outputSchema?: JsonObject;
   turnPolicy?: TurnPolicy;
@@ -1255,7 +1255,9 @@ function checkUploadPolicy(
   );
 }
 
-function parseInputResponses(value: unknown): readonly InputResponse[] | Response | undefined {
+function parseInputResponses(
+  value: unknown,
+): readonly ValidatedInputResponse[] | Response | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value) || value.length === 0) {
     return Response.json(

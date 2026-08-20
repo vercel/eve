@@ -19,7 +19,11 @@ import {
   truncatePlainText,
   truncateSectionText,
 } from "#public/channels/slack/limits.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import {
+  type InputRequest,
+  parseInputResponse,
+  type ValidatedInputResponse,
+} from "#runtime/input/types.js";
 
 /**
  * Wire-format prefix every framework HITL widget mints onto its
@@ -89,7 +93,7 @@ interface SlackHitlAction {
  */
 interface DerivedHitlResponse {
   readonly kind?: "tool-approval";
-  readonly response: InputResponse;
+  readonly response: ValidatedInputResponse;
 }
 
 /**
@@ -108,10 +112,10 @@ export function deriveHitlResponse(action: SlackHitlAction): DerivedHitlResponse
     return kind === "tool-approval"
       ? {
           kind,
-          response: { optionId: action.selectedOptionValue, requestId },
+          response: parseInputResponse({ optionId: action.selectedOptionValue, requestId }),
         }
       : {
-          response: { optionId: action.selectedOptionValue, requestId },
+          response: parseInputResponse({ optionId: action.selectedOptionValue, requestId }),
         };
   }
 
@@ -122,9 +126,9 @@ export function deriveHitlResponse(action: SlackHitlAction): DerivedHitlResponse
     return match.groups?.kind === "tool-approval"
       ? {
           kind: "tool-approval",
-          response: { optionId: action.value, requestId },
+          response: parseInputResponse({ optionId: action.value, requestId }),
         }
-      : { response: { optionId: action.value, requestId } };
+      : { response: parseInputResponse({ optionId: action.value, requestId }) };
   }
 
   return null;

@@ -9,6 +9,7 @@ import {
 import type { Runtime } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
 import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
+import { type InputResponse, parseInputResponses } from "#runtime/input/types.js";
 
 function fixedSessionRespondTypeChecks(session: Session): void {
   const responsesWithMetadata = [
@@ -17,6 +18,15 @@ function fixedSessionRespondTypeChecks(session: Session): void {
 
   // @ts-expect-error fixed sessions enforce the same exact input-response contract.
   void session.respond(responsesWithMetadata, { auth: null });
+
+  const widenedResponses: readonly InputResponse[] = responsesWithMetadata;
+  // @ts-expect-error widened responses must be schema-validated before delivery.
+  void session.respond(widenedResponses, { auth: null });
+
+  const validatedResponses = parseInputResponses([
+    { optionId: "approve", requestId: "approval-1" },
+  ]);
+  void session.respond(validatedResponses, { auth: null });
 }
 
 void fixedSessionRespondTypeChecks;

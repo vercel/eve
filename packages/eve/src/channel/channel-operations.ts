@@ -18,7 +18,11 @@ import type {
   SessionCallback,
   TurnPolicy,
 } from "#channel/types.js";
-import type { InputResponse, StrictInputResponses } from "#runtime/input/types.js";
+import {
+  type InputResponse,
+  parseInputResponses,
+  type StrictInputResponses,
+} from "#runtime/input/types.js";
 import type { JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
 
@@ -117,10 +121,11 @@ export function createChannelOperations<TState = undefined>(input: {
           if (inputResponses.length === 0) {
             throw new Error("respond() requires at least one input response.");
           }
+          const validatedInputResponses = parseInputResponses(inputResponses);
           return await bound.deliver(
             {
               context: options.context,
-              inputResponses,
+              inputResponses: validatedInputResponses,
               outputSchema: options.outputSchema,
               state: options.state,
             },

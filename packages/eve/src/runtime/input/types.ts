@@ -72,6 +72,13 @@ export const inputRequestSchema = z
  */
 export type InputResponse = z.infer<typeof inputResponseSchema>;
 
+declare const validatedInputResponseBrand: unique symbol;
+
+/** Input response proven to match the strict durable wire schema. */
+export type ValidatedInputResponse = InputResponse & {
+  readonly [validatedInputResponseBrand]: true;
+};
+
 /**
  * Zod schema for one input response.
  */
@@ -83,11 +90,37 @@ export const inputResponseSchema = z
   })
   .strict();
 
-type StrictInputResponse<TResponse extends InputResponse> = TResponse & {
-  readonly [TKey in Exclude<keyof TResponse, keyof InputResponse>]: never;
-};
+/** Parses one response and preserves schema validation in its static type. */
+export function parseInputResponse(value: unknown): ValidatedInputResponse {
+  return inputResponseSchema.parse(value) as ValidatedInputResponse;
+}
 
-/** Rejects response keys outside the durable input-response contract. */
+/** Parses response arrays whose element types were widened before delivery. */
+export function parseInputResponses(value: unknown): readonly ValidatedInputResponse[] {
+  return inputResponseSchema
+    .array()
+    .parse(value)
+    .map((response) => response as ValidatedInputResponse);
+}
+
+type IsWidenedInputResponse<TResponse extends InputResponse> =
+  keyof TResponse extends keyof InputResponse
+    ? keyof InputResponse extends keyof TResponse
+      ? InputResponse extends TResponse
+        ? true
+        : false
+      : false
+    : false;
+
+type StrictInputResponse<TResponse extends InputResponse> = TResponse extends ValidatedInputResponse
+  ? TResponse
+  : IsWidenedInputResponse<TResponse> extends true
+    ? never
+    : TResponse & {
+        readonly [TKey in Exclude<keyof TResponse, keyof InputResponse>]: never;
+      };
+
+/** Rejects extra response keys and imprecise arrays not proven by the strict schema. */
 export type StrictInputResponses<TResponses extends readonly InputResponse[]> = TResponses & {
   readonly [TIndex in keyof TResponses]: TResponses[TIndex] extends InputResponse
     ? StrictInputResponse<TResponses[TIndex]>
@@ -104,6 +137,6 @@ export function isInputRequest(value: unknown): value is InputRequest {
 /**
  * Returns true when a value matches the input response contract.
  */
-export function isInputResponse(value: unknown): value is InputResponse {
+export function isInputResponse(value: unknown): value is ValidatedInputResponse {
   return inputResponseSchema.safeParse(value).success;
 }

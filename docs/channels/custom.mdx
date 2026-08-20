@@ -111,6 +111,18 @@ await session.reset({ reason: "Retire this session" });
 await session.getEventStream({ startIndex: 12 });
 ```
 
+`respond()` accepts exact response literals directly. If responses have already
+been widened to `InputResponse[]`—for example, after decoding a platform
+payload—validate them with eve's strict schema before delivery. The validated
+type preserves that proof across channel wrappers:
+
+```ts
+import { parseInputResponses } from "eve/client";
+
+const inputResponses = parseInputResponses(decodedResponses);
+await source.respond(inputResponses, { auth });
+```
+
 Message sends use the channel's `turnPolicy`, which defaults to `"steer"`. An accepted message arriving during an active turn is durably buffered before eve cancels that turn and starts the message as a replacement turn. Configure `turnPolicy: "queue"` on `defineChannel(...)` when active turns should finish in order, or override one send:
 
 ```ts

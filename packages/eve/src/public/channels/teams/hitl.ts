@@ -2,7 +2,11 @@
  * Teams Adaptive Card rendering and decode helpers for eve HITL prompts.
  */
 
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import {
+  type InputRequest,
+  parseInputResponse,
+  type ValidatedInputResponse,
+} from "#runtime/input/types.js";
 import type {
   TeamsActivity,
   TeamsInvokeActivity,
@@ -153,7 +157,9 @@ export function readTeamsToolApprovalPrompt(activity: TeamsActivity): string | u
  * acknowledgement), or an empty array when the activity has no recognizable
  * HITL payload or requestId.
  */
-export function deriveTeamsInputResponses(activity: TeamsActivity): readonly InputResponse[] {
+export function deriveTeamsInputResponses(
+  activity: TeamsActivity,
+): readonly ValidatedInputResponse[] {
   const value = readActivityValue(activity);
   if (!value) return [];
   const payload = readHitlPayload(value);
@@ -173,9 +179,9 @@ export function deriveTeamsInputResponses(activity: TeamsActivity): readonly Inp
       ? value[TEAMS_HITL_FREEFORM_INPUT_ID]
       : undefined;
 
-  if (optionId !== undefined) return [{ optionId, requestId }];
-  if (text !== undefined) return [{ requestId, text }];
-  return [{ requestId }];
+  if (optionId !== undefined) return [parseInputResponse({ optionId, requestId })];
+  if (text !== undefined) return [parseInputResponse({ requestId, text })];
+  return [parseInputResponse({ requestId })];
 }
 
 /**

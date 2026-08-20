@@ -15,7 +15,11 @@ import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import type {
+  InputResponse,
+  StrictInputResponses,
+  ValidatedInputResponse,
+} from "#runtime/input/types.js";
 import {
   buildSlackBinding,
   buildSlackWorkspaceHandle,
@@ -314,8 +318,8 @@ export type SlackEventSendFn = (
 ) => Promise<Session>;
 
 /** Answers pending input requests on one Slack thread. */
-export type SlackEventRespondFn = (
-  inputResponses: Parameters<SlackSessionOperations["respond"]>[0],
+export type SlackEventRespondFn = <const TResponses extends readonly InputResponse[]>(
+  inputResponses: StrictInputResponses<TResponses>,
   options: SlackEventRespondOptions,
 ) => ReturnType<SlackSessionOperations["respond"]>;
 
@@ -435,14 +439,14 @@ export interface SlackInteractionUser {
 export type SlackInputResponseSubmission =
   | {
       readonly type: "block_actions";
-      readonly inputResponses: readonly InputResponse[];
+      readonly inputResponses: readonly ValidatedInputResponse[];
       readonly actions: readonly SlackInteractionAction[];
       readonly messageTs?: string;
       readonly user: SlackInteractionUser;
     }
   | {
       readonly type: "view_submission";
-      readonly inputResponses: readonly InputResponse[];
+      readonly inputResponses: readonly ValidatedInputResponse[];
       readonly messageTs: string;
       readonly user: SlackInteractionUser;
     };

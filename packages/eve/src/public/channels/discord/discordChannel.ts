@@ -51,6 +51,7 @@ import { verifyDiscordInbound } from "#public/channels/discord/verifyInbound.js"
 import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
+import type { ValidatedInputResponse } from "#runtime/input/types.js";
 
 const log = createLogger("discord.channel");
 
@@ -615,7 +616,7 @@ async function dispatchCommand(input: {
 
 async function dispatchInputResponses(input: {
   readonly conversationId: string;
-  readonly inputResponses: readonly { requestId: string; optionId?: string; text?: string }[];
+  readonly inputResponses: readonly ValidatedInputResponse[];
   readonly interaction: DiscordComponentInteraction | DiscordModalSubmitInteraction;
   readonly from: ChannelFrom<DiscordChannelState>;
 }): Promise<void> {

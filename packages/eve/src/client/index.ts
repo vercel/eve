@@ -150,6 +150,8 @@ export {
   inputResponseSchema,
   isInputRequest,
   isInputResponse,
+  parseInputResponse,
+  parseInputResponses,
 } from "#runtime/input/types.js";
 
 export { resolveTextToResponse, resolveTextToResponses } from "#channel/resolve-text.js";

@@ -2,7 +2,7 @@
   "kind": "eve-extension-capability-contract",
   "capability": "schedule",
   "epoch": 3,
-  "sha256": "4e926d96425f48e6fb4a25c07ded4954660eb6b419fab43c7bb407184c172a12",
+  "sha256": "c7828af3a7864655e45b9797428d76db54bef76542553262bbc91e24cf548988",
   "exports": [
     "ScheduleDefinition",
     "ScheduleHandlerArgs",
