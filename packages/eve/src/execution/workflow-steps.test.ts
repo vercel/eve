@@ -564,10 +564,12 @@ describe("recordTaskInputRequestStep", () => {
               createdByTurnId: "turn-parent",
               executor: {
                 data: {
-                  agentId: "agent-1",
-                  childSessionId: "child-session",
-                  mode: "local",
-                  name: "research",
+                  address: {
+                    continuationToken: "child-token",
+                    kind: "agent/local",
+                    sessionId: "child-session",
+                  },
+                  identity: { id: "agent-1", name: "research", nodeId: "node-1" },
                 },
                 kind: "subagent",
               },
@@ -586,10 +588,12 @@ describe("recordTaskInputRequestStep", () => {
       executor: {
         binding: {
           data: {
-            agentId: "agent-1",
-            childSessionId: "child-session",
-            mode: "local",
-            name: "research",
+            address: {
+              continuationToken: "child-token",
+              kind: "agent/local",
+              sessionId: "child-session",
+            },
+            identity: { id: "agent-1", name: "research", nodeId: "node-1" },
           },
           kind: "subagent",
         },
