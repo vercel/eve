@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   propagateSubagentExecutorCancel: vi.fn(),
   rejectDelegatedDispatch: vi.fn(),
   sendTaskCommand: vi.fn(),
+  sendTaskInboundPayload: vi.fn(),
 }));
 
 vi.mock("#execution/tasks/parent/delegate.js", async (importOriginal) => ({
@@ -42,6 +43,7 @@ vi.mock("#execution/tasks/parent/dispatch.js", async (importOriginal) => ({
 vi.mock("#execution/tasks/parent/run-parent.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#execution/tasks/parent/run-parent.js")>()),
   sendTaskCommand: mocks.sendTaskCommand,
+  sendTaskInboundPayload: mocks.sendTaskInboundPayload,
 }));
 
 const usage = {
@@ -124,6 +126,7 @@ describe("background tool execution", () => {
     mocks.propagateSubagentExecutorCancel.mockReset();
     mocks.rejectDelegatedDispatch.mockReset();
     mocks.sendTaskCommand.mockReset();
+    mocks.sendTaskInboundPayload.mockReset();
   });
 
   it("runs a non-subagent defineTool through the generic durable task lifecycle", async () => {
@@ -275,7 +278,7 @@ describe("background tool execution", () => {
     expect(mocks.rejectDelegatedDispatch).not.toHaveBeenCalled();
   });
 
-  it("send delivers terminal commands after delegation and rejects once the task is terminal", async () => {
+  it("send delivers progress and terminal commands after delegation", async () => {
     const task = {
       createdByStepIndex: 0,
       createdByTurnId: "turn-1",
@@ -286,6 +289,7 @@ describe("background tool execution", () => {
     } as const;
     mocks.beginBackgroundTask.mockResolvedValue(task);
     mocks.sendTaskCommand.mockResolvedValue("delivered");
+    mocks.sendTaskInboundPayload.mockResolvedValue("delivered");
     let background: TaskExec | undefined;
     const definition = defineTool({
       description: "Start an external export.",
@@ -354,6 +358,35 @@ describe("background tool execution", () => {
     );
 
     expect(background).toBeDefined();
+    await background!.send({
+      kind: "update",
+      message: "Exported 10 rows.",
+    });
+    await background!.send({
+      kind: "update",
+      message: "Exported 20 rows.",
+    });
+    expect(mocks.sendTaskInboundPayload).toHaveBeenNthCalledWith(1, {
+      payload: {
+        callId: "call-export",
+        kind: "task-update",
+        message: "Exported 10 rows.",
+        updateEpoch: "task-export",
+        updateIndex: 0,
+      },
+      taskInboxToken: "inbox-export",
+    });
+    expect(mocks.sendTaskInboundPayload).toHaveBeenNthCalledWith(2, {
+      payload: {
+        callId: "call-export",
+        kind: "task-update",
+        message: "Exported 20 rows.",
+        updateEpoch: "task-export",
+        updateIndex: 1,
+      },
+      taskInboxToken: "inbox-export",
+    });
+
     await background!.send({ data: { rows: 10 }, kind: "complete" });
     expect(mocks.sendTaskCommand).toHaveBeenLastCalledWith({
       command: { data: { rows: 10 }, kind: "complete" },

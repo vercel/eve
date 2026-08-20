@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Rename task-update progress coordinates to executor-neutral `updateEpoch`/`updateIndex`, and export background task types from `eve/tools`.
+Allow in-process background tool executors to report progress and terminal results through `task.send`. Progress updates now use executor-neutral coordinates internally, and background task types are exported from `eve/tools`.

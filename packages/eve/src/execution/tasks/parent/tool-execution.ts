@@ -18,11 +18,16 @@ import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { parseJsonValue } from "#shared/json.js";
 import type { ToolExecuteOptions } from "#shared/tool-definition.js";
-import { createTaskDelegated, isTaskDelegated, type TaskExec } from "#shared/tool-task.js";
+import {
+  createTaskDelegated,
+  isTaskDelegated,
+  type TaskExec,
+  type TaskSendCommand,
+} from "#shared/tool-task.js";
 import { recordTaskAgentAddress } from "#harness/handles/transitions.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { recordSessionTask } from "#tasks/session-index.js";
-import { readSubagentExecutor } from "#tasks/types.js";
+import { readSubagentExecutor, type TaskInboundUpdate } from "#tasks/types.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import {
   beginBackgroundTask,
@@ -30,7 +35,7 @@ import {
   type BackgroundTask,
 } from "#execution/tasks/parent/delegate.js";
 import { propagateSubagentExecutorCancel } from "#execution/tasks/parent/dispatch.js";
-import { sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
+import { sendTaskCommand, sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 
 interface BackgroundToolExecutionRecord {
   settled: boolean;
@@ -241,7 +246,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       batch: input.batch.calls,
       binding,
       delegated: ({ executor, receipt }) => createTaskDelegated({ binding, executor, receipt }),
-      send: (command) => deliverTaskCommand(task, command),
+      send: createTaskSender(task, input.options.toolCallId),
       session: this.initialSession,
       task,
     };
@@ -283,6 +288,34 @@ async function deliverTaskCommand(
   if (outcome !== "delivered") {
     throw new Error(`Task run "${task.taskId}" did not accept "${command.kind}".`);
   }
+}
+
+function createTaskSender(
+  task: BackgroundTask,
+  callId: string,
+): (command: TaskSendCommand) => Promise<void> {
+  let nextUpdateIndex = 0;
+  return async (command) => {
+    if (command.kind !== "update") {
+      await deliverTaskCommand(task, command);
+      return;
+    }
+
+    const payload: TaskInboundUpdate = {
+      callId,
+      kind: "task-update",
+      message: command.message,
+      updateEpoch: task.taskId,
+      updateIndex: nextUpdateIndex++,
+    };
+    const outcome = await sendTaskInboundPayload({
+      payload,
+      taskInboxToken: task.taskInboxToken,
+    });
+    if (outcome !== "delivered") {
+      throw new Error(`Task run "${task.taskId}" did not accept "${command.kind}".`);
+    }
+  };
 }
 
 async function compensateBackgroundToolExecution(

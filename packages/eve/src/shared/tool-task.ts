@@ -45,11 +45,15 @@ export interface TaskDelegated<TData extends JsonObject = JsonObject> {
 }
 
 /**
- * Terminal commands an in-process executor may report to its task via
+ * Commands an in-process executor may report to its task via
  * {@link TaskExec.send}. Deliberately narrower than the task run's full
  * command surface — bind, ready, and input routing stay runtime-owned.
  */
 export type TaskSendCommand =
+  | {
+      readonly kind: "update";
+      readonly message: string;
+    }
   | { readonly kind: "complete"; readonly data: JsonValue }
   | { readonly kind: "fail"; readonly data: JsonValue }
   | { readonly kind: "cancel" };
@@ -75,8 +79,8 @@ export interface TaskExec {
    */
   readonly session: HarnessSession;
   /**
-   * Delivers a terminal command to this task's inbox from the same process,
-   * for executors that outlive `execute` in-memory (e.g. a callback firing
+   * Delivers progress or a terminal command to this task's inbox from the same
+   * process, for executors that outlive `execute` in-memory (e.g. a callback firing
    * after delegation). Call it only after `execute` returned `delegated(...)`
    * — the runtime settles non-delegated returns itself, and a second terminal
    * command is refused. Not restart-safe: an in-process callback dies with
