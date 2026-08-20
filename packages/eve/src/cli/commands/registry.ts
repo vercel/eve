@@ -356,34 +356,20 @@ async function searchRegistryCatalog(
   return { config, result, resultsBySource, sources, metadataByAddress };
 }
 
-function registryManifestTitle(manifest: unknown): string | undefined {
-  if (typeof manifest !== "object" || manifest === null || Array.isArray(manifest))
-    return undefined;
-  const title = (manifest as { title?: unknown }).title;
-  return typeof title === "string" ? title : undefined;
-}
-
 /** Browses all configured catalogs, or one namespace or URL source. */
 export async function browseRegistryCatalog(
   appRoot: string,
   options: { query?: string; source?: string } = {},
 ): Promise<RegistryCatalogResult> {
-  const { config, result } = await searchRegistryCatalog(appRoot, options);
-  const manifests = await Promise.all(
-    result.items.map(async (item) => {
-      const [manifest] = await getRegistryItems([item.addCommandArgument], { config });
-      return manifest;
-    }),
-  );
+  const { result } = await searchRegistryCatalog(appRoot, options);
   return {
-    items: result.items.map((item: RegistrySearchItem, index) => {
+    items: result.items.map((item: RegistrySearchItem) => {
       const catalogItem: RegistryCatalogItem = {
         address: item.registry === OFFICIAL_CATALOG ? item.name : item.addCommandArgument,
         name: item.name,
         source: item.registry === OFFICIAL_CATALOG ? "Vercel" : item.registry,
       };
-      const title = registryManifestTitle(manifests[index]);
-      if (title !== undefined) catalogItem.title = title;
+      if (item.title !== undefined) catalogItem.title = item.title;
       if (item.type !== undefined) catalogItem.type = item.type;
       if (item.description !== undefined) catalogItem.description = item.description;
       return catalogItem;

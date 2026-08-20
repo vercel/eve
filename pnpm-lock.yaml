@@ -1397,8 +1397,8 @@ importers:
         specifier: 7.8.4
         version: 7.8.4
       shadcn:
-        specifier: 4.16.1
-        version: 4.16.1(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(typescript@7.0.2)
+        specifier: 4.18.0
+        version: 4.18.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(typescript@7.0.2)
       svelte:
         specifier: ^5.0.0
         version: 5.56.1(@typescript-eslint/types@8.59.4)
@@ -13911,8 +13911,8 @@ packages:
     engines: {node: '>=20.18.1'}
     hasBin: true
 
-  shadcn@4.16.1:
-    resolution: {integrity: sha512-XLFzfNNIUPlUlyheFEzj0H4Vnhi9nI0nl3Nfgg8HYXW1FkUVhVT1X+mgmOUW8aWL5SeG0A+yJIV5fm3Hr9MVkQ==}
+  shadcn@4.18.0:
+    resolution: {integrity: sha512-tUFZgkYmfVNQVm3xX7lhSzOvDsp+O14ac5dwgXIr5mIsr79ISueb/Mu+ZtWMz0DH6v77u4eYyvbQ9TTMpSn3aw==}
     engines: {node: '>=20.18.1'}
     hasBin: true
 
@@ -16600,7 +16600,7 @@ snapshots:
       open: 8.4.2
       picomatch: 4.0.5
       systeminformation: 5.33.0
-      undici: 7.28.0
+      undici: 7.29.0
       which: 4.0.0
       yocto-spinner: 1.2.2
 
@@ -22330,7 +22330,7 @@ snapshots:
       ms: 2.1.3
       picocolors: 1.1.1
       tar-stream: 3.1.7
-      undici: 7.28.0
+      undici: 7.29.0
       xdg-app-paths: 5.1.0
       zod: 4.4.3
     transitivePeerDependencies:
@@ -23517,7 +23517,7 @@ snapshots:
       parse5: 7.3.0
       parse5-htmlparser2-tree-adapter: 7.1.0
       parse5-parser-stream: 7.1.2
-      undici: 7.28.0
+      undici: 7.29.0
       whatwg-mimetype: 4.0.0
 
   cheminfo-types@1.15.0: {}
@@ -28764,7 +28764,7 @@ snapshots:
       chardet: 2.2.0
       cheerio: 1.2.0
       iconv-lite: 0.7.2
-      undici: 7.28.0
+      undici: 7.29.0
 
   open@11.0.0:
     dependencies:
@@ -30585,7 +30585,7 @@ snapshots:
       - supports-color
       - typescript
 
-  shadcn@4.16.1(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(typescript@7.0.2):
+  shadcn@4.18.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(typescript@7.0.2):
     dependencies:
       '@babel/core': 7.29.0(supports-color@10.2.2)
       '@babel/parser': 7.29.7
@@ -30611,11 +30611,12 @@ snapshots:
       postcss-selector-parser: 7.1.4
       prompts: 2.4.2
       recast: 0.23.12
+      socks: 2.8.9
       stringify-object: 5.0.0
       tailwind-merge: 3.6.0
       ts-morph: 26.0.0
       tsconfig-paths: 4.2.0
-      undici: 7.28.0
+      undici: 7.29.0
       validate-npm-package-name: 7.0.2
       zod: 3.25.76
       zod-to-json-schema: 3.25.2(zod@3.25.76)
