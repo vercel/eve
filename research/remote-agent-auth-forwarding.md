@@ -136,10 +136,14 @@ export default eveChannel({
 - **Rejections fail loud.** A body carrying `forwardedPrincipal` when the channel has no
   `trustedForwarders` option → 403 ("this deployment does not accept a forwarded
   principal"). Predicate returns `false` → 403. Malformed `forwardedPrincipal` payload → 400. Each
-  fails the sender's dispatch inline. The one case that does not fail at the hop is a receiver on
-  an eve version that predates forwarding: it drops the unknown field and runs the session as the
-  transport principal, surfacing as `principal_required` at per-user Connect (see the
-  acknowledgment note under Out of scope).
+  fails the sender's dispatch inline.
+- **Mixed versions fail closed.** A receiver that supports forwarding only on session creation
+  rejects a forwarded continuation with HTTP 400. The sender must not retry without the field:
+  doing so would run the turn as the transport principal and silently change authority. The parent
+  preserves the child handle, so the same session can be retried after the receiver is upgraded. A
+  receiver that predates all principal forwarding may instead drop the unknown field and run as
+  the transport principal, surfacing as `principal_required` at per-user Connect. Deploy both
+  sides before resuming persistent remote sessions.
 - **What never crosses the wire:** tokens, credentials, claims. Only the `SessionAuthContext`
   shape (`attributes`, `authenticator`, `issuer`, `principalId`, `principalType`, `subject`).
   Per-user provider credentials always live on the receiving deployment via its own Connect
@@ -157,7 +161,7 @@ export default eveChannel({
 | `execution/tasks/parent/dispatch-task-step.ts`, `execution/agent-handle-dispatch.ts` | pass active `auth` through persistent local and remote continuation                                                     |
 | `execution/remote-agent-dispatch.ts`                                                 | build `forwardedPrincipal` body field                                                                                   |
 | `channel/forwarded-principal.ts` (new)                                               | strict wire schema for `{ current, initiator? }` (open `authenticator` / `principalType`), beside `session-callback.ts` |
-| `public/channels/eve.ts`                                                             | `trustedForwarders` option; forwarded-principal gate + principal replacement on the create route                        |
+| `public/channels/eve.ts`                                                             | `trustedForwarders` option; forwarded-principal gate + principal replacement on create and continuation routes          |
 | `docs/guides/remote-agents.md`, `docs/guides/auth-and-route-protection.md`           | forwarding section on each side + trust-model warning                                                                   |
 
 Docs must carry the security guidance explicitly: match the transport principal precisely (e.g.
@@ -183,12 +187,10 @@ channel has no `trustedForwarders`, so a receiving deployment must author its ow
   forwarding selects the active turn's credential authority; applications that require private
   history must key child sessions by principal or enforce a same-principal ownership policy.
 - A response acknowledgment (`forwardedPrincipal: "accepted"` on the 202) letting the sender
-  detect a pre-forwarding receiver that silently drops the unknown body field. Considered and
-  dropped: forwarding only ever works after the receiver's author adds
-  `trustedForwarders` — which requires a forwarding-aware eve — so a stale receiver is
-  always an incomplete setup, caught during enablement when per-user Connect fails
-  `principal_required`. Permanent wire surface (plus best-effort orphan-session cancellation on a
-  missing ack) was not justified by a transitional, pre-1.0 skew window.
+  detect a receiver that cannot apply the assertion. Considered and dropped: create-only receivers
+  already reject forwarded continuations, the sender preserves the child handle for a retry after
+  upgrade, and deployment docs make the coordinated-upgrade requirement explicit. Permanent wire
+  surface was not justified by a transitional, pre-1.0 skew window.
 
 ## Delivery and verification
 

@@ -207,10 +207,14 @@ export async function continueRemoteAgentSession(input: {
     const responseCode = await readRemoteAgentErrorCode(response);
     const permanent =
       response.status === 404 || responseCode === AgentHandleError.SessionNotResumable.code;
+    const compatibilityHint =
+      response.status === 400 && forwardedPrincipal !== undefined
+        ? " The receiver may support forwarded principals only on session creation; upgrade it before retrying."
+        : "";
     throw new RemoteAgentContinueRequestError(
       `Remote agent "${input.remote.name}" continue-session request failed${
         permanent ? " permanently" : ""
-      } with HTTP ${response.status}.`,
+      } with HTTP ${response.status}.${compatibilityHint}`,
       {
         deliveryAmbiguous: isAmbiguousRemoteContinueStatus(response.status),
         retryable: !permanent,
