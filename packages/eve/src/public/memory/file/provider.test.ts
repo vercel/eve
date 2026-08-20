@@ -18,7 +18,7 @@ describe("fileMemory", () => {
     const backend = inMemory();
     const created = fileMemory({ backend, maxEntries: 100 });
     await expect(created.recall(recallContext("turn.started"))).resolves.toBeNull();
-    expect(created.save).toBeUndefined();
+    expect(created.capture).toBeUndefined();
     const stored = await backend.write({
       content: "0: Likes concise answers.\n3: Prefers dark mode.\n",
       expectedVersion: null,
@@ -63,7 +63,8 @@ describe("fileMemory", () => {
     const provider = fileMemory({ backend });
     const first = await provider.recall(recallContext("turn.started"));
     if (first === null || first === undefined) throw new Error("expected recalled memory");
-    const attributed = attributeMemoryMessage(first, {
+    const firstMessage = { content: first.content, role: "user" as const };
+    const attributed = attributeMemoryMessage(firstMessage, {
       scope: { key: "mem_scope", namespace: "test", value: "scope-1" },
       slot: "facts",
     });
@@ -71,13 +72,13 @@ describe("fileMemory", () => {
     await expect(
       provider.recall(recallContext("turn.started", [attributed])),
     ).resolves.toBeUndefined();
-    await expect(provider.recall(recallContext("turn.started", [{ ...first }]))).resolves.toEqual(
-      first,
-    );
+    await expect(
+      provider.recall(recallContext("turn.started", [{ ...firstMessage }])),
+    ).resolves.toEqual(first);
     await expect(
       provider.recall(
         recallContext("turn.started", [
-          attributeMemoryMessage(first, {
+          attributeMemoryMessage(firstMessage, {
             scope: { key: "mem_other", namespace: "test", value: "scope-2" },
             slot: "facts",
           }),
@@ -86,14 +87,14 @@ describe("fileMemory", () => {
     ).resolves.toEqual(first);
   });
 
-  it("saves one normalized memory and returns its allocated index", async () => {
+  it("saves one normalized memory without returning output", async () => {
     const backend = inMemory();
     const provider = fileMemory({ backend });
     const firstTools = await resolveTools(provider);
 
     await expect(
       firstTools.save_memory.execute({ text: "  Prefers\n dark mode.  " }, toolContext),
-    ).resolves.toEqual({ index: 0 });
+    ).resolves.toBeUndefined();
     await expect(backend.read({ key: "mem_scope", signal })).resolves.toMatchObject({
       content: "0: Prefers dark mode.\n",
     });
@@ -101,7 +102,7 @@ describe("fileMemory", () => {
     const secondTools = await resolveTools(provider);
     await expect(
       secondTools.save_memory.execute({ text: "Likes concise answers." }, toolContext),
-    ).resolves.toEqual({ index: 1 });
+    ).resolves.toBeUndefined();
     await expect(backend.read({ key: "mem_scope", signal })).resolves.toMatchObject({
       content: "0: Prefers dark mode.\n1: Likes concise answers.\n",
     });
@@ -109,7 +110,10 @@ describe("fileMemory", () => {
     const duplicateTools = await resolveTools(provider);
     await expect(
       duplicateTools.save_memory.execute({ text: "Likes concise answers." }, toolContext),
-    ).resolves.toEqual({ index: 1 });
+    ).resolves.toBeUndefined();
+    await expect(backend.read({ key: "mem_scope", signal })).resolves.toMatchObject({
+      content: "0: Prefers dark mode.\n1: Likes concise answers.\n",
+    });
   });
 
   it("removes one index without renumbering the remaining memories", async () => {
@@ -138,7 +142,7 @@ describe("fileMemory", () => {
     const saveTools = await resolveTools(provider);
     await expect(
       saveTools.save_memory.execute({ text: "Replacement." }, toolContext),
-    ).resolves.toEqual({ index: 3 });
+    ).resolves.toBeUndefined();
     await expect(backend.read({ key: "mem_scope", signal })).resolves.toMatchObject({
       content: "0: First.\n2: Third.\n3: Replacement.\n",
     });
@@ -161,9 +165,9 @@ describe("fileMemory", () => {
       signal,
     });
 
-    await expect(tools.save_memory.execute({ text: "Mine." }, toolContext)).resolves.toEqual({
-      index: 2,
-    });
+    await expect(
+      tools.save_memory.execute({ text: "Mine." }, toolContext),
+    ).resolves.toBeUndefined();
 
     const beforeRemove = await backend.read({ key: "mem_scope", signal });
     if (beforeRemove === null) throw new Error("expected memory document");
@@ -193,15 +197,15 @@ describe("fileMemory", () => {
     await expect(tools.save_memory.execute({ text: "Third." }, toolContext)).rejects.toThrow(
       "configured limit of 2 memories. Remove an outdated memory by index, then retry this save.",
     );
-    await expect(tools.save_memory.execute({ text: "Second." }, toolContext)).resolves.toEqual({
-      index: 1,
-    });
+    await expect(
+      tools.save_memory.execute({ text: "Second." }, toolContext),
+    ).resolves.toBeUndefined();
 
     await expect(tools.remove_memory.execute({ index: 0 }, toolContext)).resolves.toBeUndefined();
     const nextTools = await resolveTools(provider);
-    await expect(nextTools.save_memory.execute({ text: "Third." }, toolContext)).resolves.toEqual({
-      index: 2,
-    });
+    await expect(
+      nextTools.save_memory.execute({ text: "Third." }, toolContext),
+    ).resolves.toBeUndefined();
     await expect(backend.read({ key: "mem_scope", signal })).resolves.toMatchObject({
       content: "1: Second.\n2: Third.\n",
     });
@@ -292,9 +296,9 @@ describe("fileMemory", () => {
     });
     const tools = await resolveTools(provider);
 
-    await expect(tools.save_memory.execute({ text: "Mine." }, toolContext)).resolves.toEqual({
-      index: 1,
-    });
+    await expect(
+      tools.save_memory.execute({ text: "Mine." }, toolContext),
+    ).resolves.toBeUndefined();
   });
 
   it("registers tools without reading the backend", async () => {
@@ -311,9 +315,9 @@ describe("fileMemory", () => {
     const tools = await resolveTools(fileMemory({ backend }));
 
     expect(reads).toBe(0);
-    await expect(tools.save_memory.execute({ text: "Remembered." }, toolContext)).resolves.toEqual({
-      index: 0,
-    });
+    await expect(
+      tools.save_memory.execute({ text: "Remembered." }, toolContext),
+    ).resolves.toBeUndefined();
     expect(reads).toBe(1);
   });
 });
@@ -339,13 +343,13 @@ function recallContext(
     ? {
         ...operation,
         phase,
-        turn: { input: [], sequence: 1, turnId: "turn-1" },
+        turn: { id: "turn-1", input: [], sequence: 1 },
       }
     : {
         ...operation,
         compaction: { modelId: "mock/model" },
         phase,
-        turn: { input: [], sequence: 1, turnId: "turn-1" },
+        turn: { id: "turn-1", input: [], sequence: 1 },
       };
 }
 
@@ -358,7 +362,7 @@ function toolsContext(): MemoryToolsContext {
       auth: { current: null, initiator: null },
       id: "session-1",
     },
-    turn: { input: [], sequence: 1, turnId: "turn-1" },
+    turn: { id: "turn-1", input: [], sequence: 1 },
   };
 }
 

@@ -37,7 +37,7 @@ describe("file memory integration", () => {
       ],
     });
 
-    expect(provider.save).toBeUndefined();
+    expect(provider.capture).toBeUndefined();
 
     await runtime.run(async () => {
       const first = await runTurn({

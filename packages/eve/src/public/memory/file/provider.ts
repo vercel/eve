@@ -26,12 +26,6 @@ export interface FileMemoryOptions {
   readonly maxEntries?: number;
 }
 
-/** Result returned after saving one memory. */
-interface FileMemorySaveResult {
-  /** Stable index used to recall or remove the memory. */
-  readonly index: number;
-}
-
 interface FileMemoryEntry {
   readonly index: number;
   readonly text: string;
@@ -82,7 +76,7 @@ function createFileMemoryTools(input: {
       description:
         "Save one concise, stable fact or preference for future conversations. Omit secrets, instructions, and current-task details.",
       async execute(toolInput, toolContext) {
-        return await saveMemory({
+        await saveMemory({
           backend: input.backend,
           key: input.key,
           maxEntries: input.maxEntries,
@@ -92,9 +86,6 @@ function createFileMemoryTools(input: {
       },
       inputSchema: z.object({
         text: z.string().min(1),
-      }),
-      outputSchema: z.object({
-        index: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
       }),
     }),
   };
@@ -129,15 +120,15 @@ async function saveMemory(input: {
   readonly maxEntries: number;
   readonly signal: AbortSignal;
   readonly text: string;
-}): Promise<FileMemorySaveResult> {
+}): Promise<void> {
   const text = normalizeMemoryText(input.text);
   let document = await readDocument(input);
   let conflicts = 0;
 
   for (;;) {
     const entries = parseMemoryDocument(document?.content ?? "");
-    const existing = entries.find((entry) => entry.text === text);
-    if (existing !== undefined) return { index: existing.index };
+    // Duplicate text is a successful no-op.
+    if (entries.some((entry) => entry.text === text)) return;
     if (entries.length >= input.maxEntries) {
       throw new RangeError(
         `Memory has reached the configured limit of ${input.maxEntries} memories. Remove an outdated memory by index, then retry this save.`,
@@ -154,7 +145,7 @@ async function saveMemory(input: {
         key: input.key,
         signal: input.signal,
       });
-      return { index };
+      return;
     } catch (error) {
       if (!MemoryDocumentConflictError.is(error)) throw error;
       if (conflicts >= MAX_CONFLICT_RETRIES) throw error;
