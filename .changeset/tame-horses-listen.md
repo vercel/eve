@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Prevent channel HITL responses from carrying channel-local metadata into strict session-inbox payloads. Built-in channel producers now define exact input responses so this drift fails typechecking before release.
+Prevent channel HITL responses from carrying channel-local metadata into strict session-inbox payloads. Channel and session `respond()` calls now reject extra response keys during typechecking, including in user-authored channels.

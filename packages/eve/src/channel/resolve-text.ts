@@ -1,9 +1,4 @@
-import {
-  defineInputResponse,
-  type InputOption,
-  type InputRequest,
-  type InputResponse,
-} from "#runtime/input/types.js";
+import type { InputOption, InputRequest, InputResponse } from "#runtime/input/types.js";
 
 /**
  * Maps freeform text to an {@link InputResponse} for a single request.
@@ -31,7 +26,7 @@ export function resolveTextToResponse(
   if (request.options !== undefined && request.options.length > 0) {
     const matched = matchOption(normalized, request.options);
     if (matched !== undefined) {
-      return defineInputResponse({ requestId: request.requestId, optionId: matched.id });
+      return { requestId: request.requestId, optionId: matched.id };
     }
   }
 
@@ -39,7 +34,7 @@ export function resolveTextToResponse(
     request.allowFreeform === true || request.options === undefined || request.options.length === 0;
 
   if (acceptsFreeform && trimmed.length > 0) {
-    return defineInputResponse({ requestId: request.requestId, text: trimmed });
+    return { requestId: request.requestId, text: trimmed };
   }
 
   return undefined;

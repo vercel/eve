@@ -1,7 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createChannelOperations } from "#channel/channel-operations.js";
+import { createChannelOperations, type ChannelSource } from "#channel/channel-operations.js";
 import type { Runtime } from "#channel/types.js";
+
+function authoredChannelRespondTypeChecks(source: ChannelSource): void {
+  const responseWithMetadata = {
+    kind: "tool-approval",
+    optionId: "approve",
+    requestId: "approval-1",
+  } as const;
+  const responsesWithMetadata = [responseWithMetadata] as const;
+
+  // @ts-expect-error channel-local metadata is not part of the input-response contract.
+  void source.respond([responseWithMetadata], { auth: null });
+  // @ts-expect-error exactness must survive a preassembled response array.
+  void source.respond(responsesWithMetadata, { auth: null });
+}
+
+void authoredChannelRespondTypeChecks;
 
 function createRuntime(): Runtime {
   return {

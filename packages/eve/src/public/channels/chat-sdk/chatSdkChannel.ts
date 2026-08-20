@@ -13,7 +13,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { defineInputResponse, type InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#runtime/input/types.js";
 import type {
   ActionEvent,
   Adapter,
@@ -686,7 +686,7 @@ function decodeInputAction(
   try {
     const requestId = decodeURIComponent(encoded.slice(0, separator));
     const optionId = value ?? decodeURIComponent(encoded.slice(separator + 1));
-    return defineInputResponse({ optionId, requestId });
+    return { optionId, requestId };
   } catch {
     return null;
   }

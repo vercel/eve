@@ -83,17 +83,16 @@ export const inputResponseSchema = z
   })
   .strict();
 
-/**
- * Defines a channel-produced input response without allowing channel-local
- * metadata to be widened into the durable response contract.
- */
-export function defineInputResponse<const TResponse extends InputResponse>(
-  response: TResponse & {
-    readonly [TKey in Exclude<keyof TResponse, keyof InputResponse>]: never;
-  },
-): TResponse {
-  return response;
-}
+type StrictInputResponse<TResponse extends InputResponse> = TResponse & {
+  readonly [TKey in Exclude<keyof TResponse, keyof InputResponse>]: never;
+};
+
+/** Rejects response keys outside the durable input-response contract. */
+export type StrictInputResponses<TResponses extends readonly InputResponse[]> = TResponses & {
+  readonly [TIndex in keyof TResponses]: TResponses[TIndex] extends InputResponse
+    ? StrictInputResponse<TResponses[TIndex]>
+    : TResponses[TIndex];
+};
 
 /**
  * Returns true when a value matches the input request contract.

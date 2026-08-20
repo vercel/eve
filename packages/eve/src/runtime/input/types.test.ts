@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  defineInputResponse,
   inputRequestSchema,
   inputResponseSchema,
   isInputRequest,
@@ -125,22 +124,6 @@ describe("inputRequestSchema", () => {
 });
 
 describe("inputResponseSchema", () => {
-  it("rejects producer metadata outside the response contract at typecheck", () => {
-    const response = defineInputResponse({
-      optionId: "approve",
-      requestId: "req-1",
-    });
-    const responseWithMetadata = {
-      kind: "tool-approval",
-      optionId: "approve",
-      requestId: "req-1",
-    } as const;
-
-    // @ts-expect-error Producer metadata is not part of InputResponse.
-    defineInputResponse(responseWithMetadata);
-    expect(response).toEqual({ optionId: "approve", requestId: "req-1" });
-  });
-
   it("accepts an option response", () => {
     const value = {
       optionId: "approve",
