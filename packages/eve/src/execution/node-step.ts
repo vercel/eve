@@ -2,7 +2,10 @@ import type { LanguageModel } from "ai";
 
 import type { Runtime, SessionCapabilities } from "#channel/types.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
-import { createHarnessDelegationToolDefinition } from "#execution/delegation-tool.js";
+import {
+  createBackgroundSubagentHarnessDefinition,
+  createHarnessDelegationToolDefinition,
+} from "#execution/delegation-tool.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
@@ -190,18 +193,20 @@ function createRuntimeDynamicModelEventDispatcher(
  * Resolves unified {@link HarnessToolDefinition}s from the node's registries.
  *
  * For authored tools: copies all lifecycle fields from the resolved definition.
- * For subagent tools: surfaces runtime-owned subagent-call metadata and leaves
- * execution to the runtime layer.
+ * For subagent tools: selects the existing runtime-action definition or the
+ * background `defineTool` definition from the node's task-mode setting.
  * Tools without `execute` (provider-managed) get entries with schema but no execute.
  */
 export function createNodeHarnessTools(input: {
   readonly node: ResolvedRuntimeAgentNode;
 }): HarnessToolMap {
   const tools = new Map<string, HarnessToolDefinition>();
+  const tasksEnabled = input.node.agent.config?.experimental?.tasks === true;
 
   for (const tool of input.node.turnAgent.tools) {
     const definition = resolveHarnessToolDefinition({
       node: input.node,
+      tasksEnabled,
       tool,
     });
 
@@ -217,24 +222,25 @@ export function createNodeHarnessTools(input: {
       nodeId: input.node.nodeId,
     })
   ) {
+    const implicitAgent = {
+      description: AGENT_TOOL_DESCRIPTION,
+      inputSchema:
+        tasksEnabled || input.node.agent.config?.experimental?.subagentPersistentSessions === true
+          ? PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA
+          : SUBAGENT_TOOL_INPUT_SCHEMA,
+      kind: "subagent" as const,
+      name: AGENT_TOOL_NAME,
+      nodeId: input.node.nodeId,
+      rootOnly: true,
+    };
     tools.set(
       AGENT_TOOL_NAME,
-      createHarnessDelegationToolDefinition({
-        description: AGENT_TOOL_DESCRIPTION,
-        inputSchema:
-          input.node.agent.config?.experimental?.tasks === true ||
-          input.node.agent.config?.experimental?.subagentPersistentSessions === true
-            ? PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA
-            : SUBAGENT_TOOL_INPUT_SCHEMA,
-        kind: "subagent",
-        name: AGENT_TOOL_NAME,
-        nodeId: input.node.nodeId,
-        rootOnly: true,
-      }),
+      tasksEnabled
+        ? createBackgroundSubagentHarnessDefinition(implicitAgent)
+        : createHarnessDelegationToolDefinition(implicitAgent),
     );
   }
 
-  const tasksEnabled = input.node.agent.config?.experimental?.tasks === true;
   for (const definition of createTaskToolHarnessDefinitions()) {
     if (
       isTaskToolAvailable({
@@ -253,10 +259,13 @@ export function createNodeHarnessTools(input: {
 
 function resolveHarnessToolDefinition(input: {
   readonly node: ResolvedRuntimeAgentNode;
+  readonly tasksEnabled: boolean;
   readonly tool: PreparedRuntimeTool;
 }): HarnessToolDefinition | null {
   if (input.tool.kind === "subagent" || input.tool.kind === "remote") {
-    return createHarnessDelegationToolDefinition(input.tool);
+    return input.tasksEnabled
+      ? createBackgroundSubagentHarnessDefinition(input.tool)
+      : createHarnessDelegationToolDefinition(input.tool);
   }
 
   const registeredTool = findRegisteredRuntimeTool(input.node.toolRegistry, input.tool.name);

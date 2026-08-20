@@ -68,6 +68,12 @@ export const TASK_VIEWS_OUTPUT_SCHEMA = z.object({
   tasks: z.array(TASK_VIEW_SCHEMA),
 });
 
+export const SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA = z.strictObject({
+  agentId: z.string(),
+  status: z.literal("working"),
+  taskId: z.string(),
+});
+
 const TASK_CANCEL_DESCRIPTION =
   "Request cooperative cancellation of one or more background tasks. " +
   "Cancellation is final: a task that finishes after you cancel it stays cancelled. Cancelling an already-finished task changes nothing.";
