@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1510
 status: proposed
-last_updated: "2026-08-19"
+last_updated: "2026-08-20"
 ---
 
 # First-class memory
@@ -17,21 +17,22 @@ scope, and a recall visibility policy. It may also describe the slot's
 purpose to the model through provider tool descriptions. The provider contract
 has three methods:
 
-- `recall` appends provider context to durable history as a user-role message.
-- `save` observes history before compaction and after a completed turn.
+- `recall` appends provider context to durable history as a user- or
+  system-role message.
+- `capture` observes history before compaction and after a completed turn.
 - `tools` contributes model tools bound to the active memory scope.
 
-eve calls each method at fixed boundaries. Recall and save receive a
+eve calls each method at fixed boundaries. Recall and capture receive a
 discriminated `phase`, current turn coordinates, a stable operation ID, and the
-address resolved for the slot. Tools are resolved once after turn-start recall
+locked memory scope resolved for the slot. Tools are resolved once after turn-start recall
 through the same durable dynamic-capability machinery as a `turn.started`
 `defineDynamic` tool resolver.
 
 ```text
 turn.started          ---> recall(phase: "turn.started") ---> tools
-compaction.requested  ---> save(phase: "compaction.requested")
+compaction.requested  ---> capture(phase: "compaction.requested")
 compaction.completed  ---> recall(phase: "compaction.completed")
-turn.completed        ---> save(phase: "turn.completed")
+turn.completed        ---> capture(phase: "turn.completed")
 ```
 
 eve owns namespace and scope resolution, invocation order, recall-message
@@ -43,12 +44,12 @@ record or storage model.
 
 ## Public API at a glance
 
-| Import path              | Public surface                                                                                                    |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| `eve/memory`             | `defineMemory`, `defineMemoryProvider`, `defaultNamespace`, provider contexts, addressing types, and recall types |
-| `eve/memory/scope`       | `byPrincipal`                                                                                                     |
-| `eve/memory/file`        | `fileMemory`, `inMemory`, and the portable document backend contract                                              |
-| `eve/memory/file/vercel` | `vercelBlob`                                                                                                      |
+| Import path              | Public surface                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `eve/memory`             | `defineMemory`, `defineMemoryProvider`, `defaultNamespace`, provider contexts, scope types, and recall types |
+| `eve/memory/scope`       | `byPrincipal`                                                                                                |
+| `eve/memory/file`        | `fileMemory`, `inMemory`, and the portable document backend contract                                         |
+| `eve/memory/file/vercel` | `vercelBlob`                                                                                                 |
 
 The smallest complete memory slot uses the built-in file provider:
 
@@ -98,9 +99,9 @@ export default defineMemory({
 
 The same provider instance may back several slots. Their recalled messages,
 tools, and provider invocations remain independent. The default namespace
-includes the slot identity, so each slot receives a distinct provider address.
-Definitions that resolve the same custom namespace and scope intentionally
-share an address.
+includes the slot identity, so each slot receives a distinct provider scope
+key. Definitions that resolve the same custom namespace and scope intentionally
+share a scope key.
 
 ## Model-facing description
 
@@ -147,7 +148,7 @@ export default defineMemory({
 When the provider returns tools, eve prepends the slot description and two
 newline characters to every provider-authored tool description. For example,
 the first slot's `save_memory` description begins with its personal-memory
-purpose before the provider's generic save guidance. eve performs this
+purpose before the provider's generic save-tool guidance. eve performs this
 composition after the `tools` resolver returns and before the dynamic tool
 metadata is captured, so every model step and parked continuation sees the same
 description. Omitting `description` preserves each provider tool description
@@ -164,21 +165,34 @@ enforce authorization or replace scope isolation.
 ## Namespace
 
 Namespace identifies the application-owned memory domain. It may be a string,
-`null`, a promise, or a zero-argument resolver:
+`null`, or a resolver:
 
 ```ts
-type MemoryNamespaceDefinition =
-  string | null | Promise<string | null> | (() => string | null | Promise<string | null>);
+interface MemoryNamespaceContext {
+  /** Graph node that owns the slot. */
+  readonly node: string;
+  /** Path-derived slot identity, such as "memory" or "user". */
+  readonly slot: string;
+}
 
-function defaultNamespace(): string;
+type MemoryNamespaceDefinition =
+  string | null | ((context: MemoryNamespaceContext) => string | null | Promise<string | null>);
+
+function defaultNamespace(context: MemoryNamespaceContext): string;
 ```
 
-After resolving a non-null scope, eve awaits or invokes the namespace when it
+After resolving a non-null scope, eve invokes the namespace resolver when it
 locks memory for a lifecycle operation. A resolved `null` disables the slot for
 that operation. If `namespace` is omitted, eve uses the exported
 `defaultNamespace` function as the resolver. Its value includes the Vercel
 project when available, otherwise a hash of the local application root, plus
-the deployment environment, graph node, and path-derived memory slot.
+the deployment environment and the node and slot from the supplied context.
+`defaultNamespace` is a pure function of its context and the deployment
+environment, so a custom resolver composes with it:
+
+```ts
+namespace: (ctx) => `${defaultNamespace(ctx)}:${process.env.DEPLOYMENT_REGION ?? "local"}`,
+```
 
 Set `namespace` to define a custom application domain:
 
@@ -223,7 +237,6 @@ interface MemoryScopeContext {
 type MemoryScopeDefinition =
   | string
   | null
-  | Promise<string | null>
   | ((
       context: MemoryScopeContext,
     ) => MemoryScopeResolverResult | Promise<MemoryScopeResolverResult>);
@@ -262,7 +275,7 @@ audiences or containers inside that domain. The resolved pair is the only
 variable input to the provider key. eve canonically encodes the pair before
 hashing, so values cannot collide through string concatenation.
 
-Every `recall`, `save`, and `tools` call receives this scope. Tools close over
+Every `recall`, `capture`, and `tools` call receives this scope. Tools close over
 the same locked scope, so the model never selects a different user, tenant, or
 container. A conforming provider must apply `scope.key` or the namespace and
 value to every downstream read and write. eve cannot prevent faulty provider
@@ -277,8 +290,12 @@ key under which it was appended.
 Passing `byPrincipal` as the scope resolver identifies the authenticated caller
 from principal type, authenticator, optional issuer, and principal ID. It is a
 pure consumer of the supplied `MemoryScopeContext`; it does not read ambient or
-private runtime state. The function returns `null` for an unauthenticated
-caller. Anonymous callers never share a memory scope.
+private runtime state. The function returns `null` — disabling the slot — when
+`auth.current` is `null`, for anonymous principals such as `none()` traffic,
+and for runtime principals such as scheduled turns. Anonymous callers never
+receive a memory scope, shared or otherwise. Local development authenticates
+every request as the shared `local-dev` principal, so one development machine
+resolves one scope.
 
 Principal scope follows the same authenticated caller across channels. Memory
 that is safe only within one channel or conversation must include the trusted
@@ -356,7 +373,7 @@ scope:   ... -> participant A turn -> assistant -> participant B memory -> parti
 session: ... -> participant A memory -> participant A turn -> assistant -> participant B memory -> participant B turn
 ```
 
-This option never changes provider scope. `recall`, `save`, and `tools` still
+This option never changes provider scope. `recall`, `capture`, and `tools` still
 receive only the active turn's locked scope. The provider cannot select the
 visibility mode. A `null` scope suppresses all recalled messages belonging to
 the slot in both modes.
@@ -372,7 +389,7 @@ shared-session risk.
 ## Provider contract
 
 `MemoryProvider` defines the operations available at memory lifecycle
-boundaries. `recall` is required. `save` and `tools` are optional.
+boundaries. `recall` is required. `capture` and `tools` are optional.
 
 ```ts
 import type { ModelMessage } from "ai";
@@ -382,7 +399,8 @@ import type { DynamicResolveContext, ToolDefinition } from "eve/tools";
 interface MemoryRecallMessage {
   /** Provider context appended to durable model history. */
   readonly content: string;
-  readonly role: "user";
+  /** Defaults to "user". */
+  readonly role?: "system" | "user";
 }
 
 interface MemoryMessageAttribution {
@@ -392,8 +410,10 @@ interface MemoryMessageAttribution {
 
 function getMemoryMessageAttribution(message: ModelMessage): MemoryMessageAttribution | null;
 
+/** Mirrors the ambient `ctx.session.turn` coordinates plus the turn input. */
 interface MemoryTurnContext {
-  readonly turnId: string;
+  /** Stable turn ID, matching `ctx.session.turn.id`. */
+  readonly id: string;
   /** Zero-based durable turn sequence. The first turn is sequence 0. */
   readonly sequence: number;
   /** Normalized model messages accepted as input for this turn. */
@@ -404,7 +424,7 @@ interface MemoryOperationContext extends SessionContext {
   readonly abortSignal: AbortSignal;
   /** Durable model history at this lifecycle boundary, including prior recalls. */
   readonly messages: readonly ModelMessage[];
-  /** Identifies one logical recall or save operation across workflow replay. */
+  /** Identifies one logical recall or capture operation across workflow replay. */
   readonly operationId: string;
   readonly memory: {
     readonly scope: MemoryScope;
@@ -430,7 +450,7 @@ type MemoryRecallContext = MemoryOperationContext &
       }
   );
 
-type MemorySaveContext = MemoryOperationContext &
+type MemoryCaptureContext = MemoryOperationContext &
   (
     | {
         readonly phase: "compaction.requested";
@@ -463,7 +483,7 @@ type MemoryToolSet = Readonly<Record<string, ToolDefinition>>;
 interface MemoryProvider {
   recall(context: MemoryRecallContext): MemoryRecallResult | Promise<MemoryRecallResult>;
 
-  save?(context: MemorySaveContext): void | Promise<void>;
+  capture?(context: MemoryCaptureContext): void | Promise<void>;
 
   tools?(context: MemoryToolsContext): MemoryToolSet | null | Promise<MemoryToolSet | null>;
 }
@@ -497,12 +517,12 @@ const customMemory = defineMemoryProvider({
 
 The result of `recall` is append-only:
 
-| Result                              | Effect                                         |
-| ----------------------------------- | ---------------------------------------------- |
-| `{ content: string, role: "user" }` | Append one scope-attributed user-role message. |
-| `null`, `undefined`, or no return   | Append nothing at this boundary.               |
+| Result                                           | Effect                                                                                   |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `{ content: string, role?: "system" \| "user" }` | Append one scope-attributed message with the resolved role. `role` defaults to `"user"`. |
+| `null`, `undefined`, or no return                | Append nothing at this boundary.                                                         |
 
-eve applies the same content normalization as user-role instructions. It trims
+eve applies the same content normalization as instructions. It trims
 the returned content and appends nothing when the result is empty after
 trimming. A recall result never replaces, clears, or mutates an earlier message.
 
@@ -511,21 +531,24 @@ storage behavior or impose a record model.
 
 ## Recalled messages
 
-Every non-empty recall result becomes one durable user-role message, using the
-same message shape and append behavior as user-role instructions. Turn-start
-recalls are appended immediately before the admitted turn input. Post-compaction
-recalls are appended after the rewritten checkpoint and retained tail. Multiple
-slots append in stable slot-path order.
+Every non-empty recall result becomes one durable message with the resolved
+role, using the same message shape and append behavior as instructions.
+Turn-start recalls are appended immediately before the admitted turn input.
+Post-compaction recalls are appended after the rewritten checkpoint and
+retained tail. Multiple slots append in stable slot-path order. A user-role
+recall enters model context in its durable history position. A system-role
+recall keeps the same durable position and attribution but follows the same
+model-request routing as system-role instructions.
 
 eve records internal slot and scope attribution on each recalled message. The
 attribution is not sent to the model or exposed as tool input. It exists so eve
 can apply `visibility` at model assembly and so provider code can distinguish
 recalled context from ordinary conversation messages. The message itself remains
-part of `ctx.messages`, completed-turn saves, and later compaction input.
+part of `ctx.messages`, completed-turn captures, and later compaction input.
 
 Recalled messages are not emitted as `message.received`; they are framework
 context rather than new channel input. Compaction may summarize or discard them
-like other durable user-role context. Before compaction, eve applies the active
+like other durable context. Before compaction, eve applies the active
 visibility policy, so a scope-hidden recall cannot enter the checkpoint and is
 removed with the rewritten history. The post-compaction recall boundary lets a
 provider append fresh context when the rewritten history no longer contains it.
@@ -534,7 +557,9 @@ Append-only recall preserves the existing prompt prefix in the normal case. It
 also means a provider owns repetition and correction policy. Returning the same
 snapshot at every turn appends duplicates, while a later correction does not
 delete an earlier claim. A provider returns `null` or `undefined` when it has no
-new context to append.
+new context to append. Because system-role recalls join the system prompt,
+changed system-role content invalidates the cached prompt prefix; a provider
+that recalls frequently changing context should prefer the default user role.
 
 ## Lifecycle
 
@@ -557,17 +582,17 @@ automatic compaction runs at the same opening boundary, the new messages enter
 compaction input. Post-compaction recall may append fresh context after the
 rewritten checkpoint before the model runs.
 
-### Compaction save and recall
+### Compaction capture and recall
 
 Before automatic or manual compaction rewrites history, eve calls an implemented
-`save` method with `phase: "compaction.requested"`. The provider receives the
+`capture` method with `phase: "compaction.requested"`. The provider receives the
 complete durable history about to be compacted and the compaction model and
 usage metadata. A provider may persist a checkpoint, extract facts the summary
 could omit, or do nothing.
 
 After a checkpoint is durably appended, eve calls `recall` with
 `phase: "compaction.completed"`. The provider receives the settled
-post-compaction history and may append one fresh user-role message. The call
+post-compaction history and may append one fresh recall message. The call
 occurs after every successful automatic or manual compaction, even when the
 provider skipped ordinary turn-start recall.
 
@@ -614,45 +639,46 @@ returns the recorded result. Provider mutations belong in the returned tool's
 `execute` function. eve never substitutes the current turn's definition or
 scope for a parked call's captured definition.
 
-### Completed-turn save
+### Completed-turn capture
 
-After a turn reaches `turn.completed`, eve calls an implemented `save` method
+After a turn reaches `turn.completed`, eve calls an implemented `capture` method
 with `phase: "turn.completed"`. The provider receives the completed turn input
 and the settled durable history, including the assistant response and tool
 results. The method does not run for failed, cancelled, input-deferred, or
 adapter-consumed turns.
 
-Completed-turn save is a semantic memory boundary, not an instrumentation
+Completed-turn capture is a semantic memory boundary, not an instrumentation
 export. It does not receive token usage, provider cost, latency, trace
 identifiers, or unsuccessful outcomes. A provider that also consumes
 instrumentation can correlate the two surfaces with `ctx.session.id` and
-`ctx.turn.turnId`. The `usageInputTokens` field on `compaction.requested` is
+`ctx.turn.id`. The `usageInputTokens` field on `compaction.requested` is
 specific to that boundary because it describes the context about to be
 compacted.
 
-eve awaits completed-turn saves before emitting `session.waiting` in
+eve awaits completed-turn captures before emitting `session.waiting` in
 conversation mode or `session.completed` in task mode. A provider may capture
 the turn, update a remote profile, enqueue its own work, or do nothing.
 
 ## Replay and failures
 
-Every recall and save invocation receives an `operationId` for one logical slot
-operation. eve reuses the ID across workflow replay, so it is not a unique
+Every recall and capture invocation receives an `operationId` for one logical
+slot operation. eve reuses the ID across workflow replay, so it is not a unique
 callback-attempt identifier. A provider must use it as the idempotency key for
-externally visible `save` side effects. eve records recalled messages with their
-scope attribution and keeps turn-scoped dynamic tool metadata in durable session
-state.
+externally visible `capture` side effects. eve records recalled messages with
+their scope attribution and keeps turn-scoped dynamic tool metadata in durable
+session state.
 
 Failure behavior follows the point at which the method runs:
 
 - A turn-start `recall` failure fails the active turn before the model runs.
-- A `compaction.requested` save failure aborts compaction before history changes.
+- A `compaction.requested` capture failure aborts compaction before history
+  changes.
 - A post-compaction `recall` failure cannot undo the checkpoint. It fails the
   active turn when compaction was automatic; standalone compaction emits a
   diagnostic and returns the session to waiting.
 - A throwing or invalid `tools` result is diagnosed and omitted for the turn,
   matching `defineDynamic` tool resolution.
-- A completed-turn `save` failure cannot rewrite the completed response. eve
+- A completed-turn `capture` failure cannot rewrite the completed response. eve
   emits a content-free diagnostic and continues to the ready boundary.
 
 ## Built-in file memory
@@ -675,11 +701,11 @@ every successful compaction. It appends the formatted document when the active
 slot and scope do not already have an identical latest recall in durable
 history. An empty or unchanged document appends nothing. Its `tools` method
 exposes `save_memory({ text })` and `remove_memory({ index })`. Each tool completes after
-its conditional write, and the next recall reflects the updated document.
-`save_memory` normalizes whitespace, returns the existing index for duplicate
-text, and fails when the document reaches `maxEntries`. `remove_memory` is a
-no-op when its index is absent. The provider omits `save`: it does not run a
-capture model or persist whole conversations.
+its conditional write and returns no output; the next recall reflects the
+updated document. `save_memory` normalizes whitespace, treats duplicate text as
+a successful no-op, and fails when the document reaches `maxEntries`.
+`remove_memory` is a no-op when its index is absent. The provider omits
+`capture`: it does not run an extraction model or persist whole conversations.
 
 The provider uses one portable conditional-document backend:
 
@@ -712,12 +738,12 @@ The same lifecycle also supports a hosted semantic provider:
 | ---------------------- | --------------------------- | ------------------------------------------- |
 | `turn.started` recall  | Append a changed document   | Retrieve against the current turn input     |
 | Post-compaction recall | Append if context is absent | Refresh against the compacted history       |
-| Pre-compaction save    | Omit                        | Preserve facts or checkpoint provider state |
-| Completed-turn save    | Omit                        | Capture the completed interaction           |
+| Pre-compaction capture | Omit                        | Preserve facts or checkpoint provider state |
+| Completed-turn capture | Omit                        | Capture the completed interaction           |
 | Turn tools             | Save and remove entries     | Provider-defined search, save, or forget    |
 
 At each boundary, a provider may return `undefined` from `recall`, omit or do
-nothing in `save`, or return `null` from `tools`.
+nothing in `capture`, or return `null` from `tools`.
 
 ## Provider packaging
 
@@ -735,11 +761,12 @@ Mounted extensions cannot contribute memory slots.
   key. Custom namespaces receive no path or deployment suffixes.
 - One scope lock applies to every provider call, recalled message, model step, and
   durable tool continuation in an operation.
-- Recall and save phases identify their exact lifecycle boundary. Every provider
-  context includes durable history and a replay-stable operation ID.
-- A non-empty recall result appends one scope-attributed user-role message to
-  durable history. `null`, `undefined`, and empty normalized content append
-  nothing; recall never mutates an earlier message.
+- Recall and capture phases identify their exact lifecycle boundary. Every
+  provider context includes durable history and a replay-stable operation ID.
+- A non-empty recall result appends one scope-attributed message with the
+  resolved role, defaulting to user, to durable history. `null`, `undefined`,
+  and empty normalized content append nothing; recall never mutates an earlier
+  message.
 - `visibility` controls which attributed recall messages enter a model request
   after a scope change. Session visibility preserves append-only prompt order;
   scope visibility may filter an earlier prefix.
@@ -747,9 +774,9 @@ Mounted extensions cannot contribute memory slots.
   Each turn resolves one complete tool set, every model step uses it, and a
   durable call keeps its originating definition until settlement.
 - An optional static slot description is prepended to every provider tool
-  description before durable capture. It never derives from or exposes the
-  namespace or scope, and it guides model routing without granting access.
-- Completed-turn save settles before the next ready boundary.
+  description before durable metadata capture. It never derives from or exposes
+  the namespace or scope, and it guides model routing without granting access.
+- Completed-turn capture settles before the next ready boundary.
 
 ## Non-goals
 
@@ -788,11 +815,11 @@ Mounted extensions cannot contribute memory slots.
       coordinates for private memory. This resolves the [scope and Slack privacy
       thread](https://github.com/vercel/eve/pull/1581#discussion_r3807248748).
 
-- [x] **Keep settled-turn telemetry out of memory.** `save` with
+- [x] **Keep settled-turn telemetry out of memory.** `capture` with
       `phase: "turn.completed"` receives completed input and durable history,
       but not usage, cost, latency, trace identifiers, or unsuccessful
       outcomes. Instrumentation owns that data and can be correlated through
-      `session.id` plus `turnId`. `compaction.requested` retains its input-token
+      `session.id` plus `turn.id`. `compaction.requested` retains its input-token
       count because that value describes the context being compacted. This
       resolves the
       [usage and trace
@@ -813,8 +840,8 @@ Mounted extensions cannot contribute memory slots.
       thread](https://github.com/vercel/eve/pull/1581#discussion_r3807269437).
 
 - [x] **Define recall placement and tool invocation semantics.** Every non-empty
-      recall result appends one scope-attributed user-role message to durable
-      history at its lifecycle boundary. `null`, `undefined`, and normalized
+      recall result appends one scope-attributed message with its resolved role
+      to durable history at its lifecycle boundary. `null`, `undefined`, and normalized
       empty content append nothing and never clear earlier history. Session
       visibility preserves append-only prompt order; scope visibility may
       filter earlier recalled messages after a scope change. eve invokes
