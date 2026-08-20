@@ -181,6 +181,43 @@ export async function prepareRuntimeActionDispatch(input: {
   const batch = getPendingRuntimeActionBatch(durableSession.state);
 
   if (batch === undefined || batch.actions.length === 0) return undefined;
+  return await prepareActionDispatch({
+    batch,
+    durableSession,
+    serializedContext: input.serializedContext,
+    taskControls: input.taskControls,
+  });
+}
+
+export async function prepareAgentActionDispatch(input: {
+  readonly action: RuntimeActionRequest;
+  readonly event: {
+    readonly sequence: number;
+    readonly stepIndex: number;
+    readonly turnId: string;
+  };
+  readonly localFanoutSize: number;
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}): Promise<PreparedRuntimeActionDispatch> {
+  const durableSession = await readDurableSession(input.sessionState);
+  return await prepareActionDispatch({
+    batch: { actions: [input.action], event: input.event, responseMessages: [] },
+    durableSession,
+    fanoutSize: input.localFanoutSize,
+    serializedContext: input.serializedContext,
+    taskControls: false,
+  });
+}
+
+async function prepareActionDispatch(input: {
+  readonly batch: NonNullable<ReturnType<typeof getPendingRuntimeActionBatch>>;
+  readonly durableSession: Awaited<ReturnType<typeof readDurableSession>>;
+  readonly fanoutSize?: number;
+  readonly serializedContext: Record<string, unknown>;
+  readonly taskControls: boolean;
+}): Promise<PreparedRuntimeActionDispatch> {
+  const { batch, durableSession } = input;
   assertUniqueRuntimeActionCallIds(batch.actions);
 
   const ctx = await deserializeContext(input.serializedContext);
@@ -227,8 +264,9 @@ export async function prepareRuntimeActionDispatch(input: {
     bundle,
     capabilities: ctx.get(CapabilitiesKey),
     channelMetadata: ctx.get(ChannelInstrumentationKey),
-    fanoutSize: plan.filter((entry) => entry.kind === "start" && entry.target.kind === "local")
-      .length,
+    fanoutSize:
+      input.fanoutSize ??
+      plan.filter((entry) => entry.kind === "start" && entry.target.kind === "local").length,
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     parentTraceContext: readSessionTraceContext(input.serializedContext, session.sessionId),
     plan,

@@ -212,6 +212,14 @@ export interface SettledTurn {
  * Result returned by one harness step invocation.
  */
 export interface StepResult {
+  /** Background-tool effects projected onto the session that entered this step. */
+  readonly backgroundTaskSession?: HarnessSession;
+  /** Durable tasks started by background tools and awaiting the parent commit barrier. */
+  readonly backgroundTasks?: readonly {
+    readonly taskInboxToken: string;
+    readonly taskId: string;
+    readonly taskRunId: string;
+  }[];
   readonly next: StepNext;
   readonly session: HarnessSession;
   /**

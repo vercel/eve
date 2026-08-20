@@ -14,7 +14,7 @@ import { removeTaskAgentAddressFromState } from "#harness/handles/transitions.js
 import { isInputRequest } from "#runtime/input/types.js";
 import { cacheTerminalTaskView, findSessionTaskEntry } from "#tasks/session-index.js";
 import { createEveTaskInputRoutePath } from "#protocol/routes.js";
-import { isTerminalTaskStatus, type TaskView } from "#tasks/types.js";
+import { isTerminalTaskStatus, readSubagentTaskMetadata, type TaskView } from "#tasks/types.js";
 
 /** Validates and durably records one task-owned child HITL route batch. */
 export async function recordTaskInputRequestStep(input: {
@@ -34,9 +34,10 @@ export async function recordTaskInputRequestStep(input: {
 
   const durableSession = await readDurableSession(input.sessionState);
   const entry = findSessionTaskEntry(durableSession.state, input.taskId);
+  const entryMetadata = entry === undefined ? undefined : readSubagentTaskMetadata(entry);
   const handle = (getAgentHandleStore(durableSession.state)?.handles ?? []).find(
     (candidate) =>
-      candidate.phase === "addressed" && candidate.identity.id === entry?.metadata.agentId,
+      candidate.phase === "addressed" && candidate.identity.id === entryMetadata?.agentId,
   );
   if (
     entry === undefined ||
@@ -50,6 +51,7 @@ export async function recordTaskInputRequestStep(input: {
   // checks below; the child-advertised token is only used as the answer
   // route, never as an identity anchor.
   const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
+  const viewMetadata = view === undefined ? undefined : readSubagentTaskMetadata(view);
   const eventRequestIds = input.hookPayload.event.requests.map((request) => request.requestId);
   const viewRequestIds =
     view?.inputRequests?.map((request) =>
@@ -60,8 +62,8 @@ export async function recordTaskInputRequestStep(input: {
   if (
     view?.status !== "input_required" ||
     !input.hookPayload.event.requests.every(isInputRequest) ||
-    view.metadata.mode !== (handle.address.kind === "agent/remote" ? "remote" : "local") ||
-    view.metadata.agentId !== entry.metadata.agentId ||
+    viewMetadata?.mode !== (handle.address.kind === "agent/remote" ? "remote" : "local") ||
+    viewMetadata.agentId !== entryMetadata?.agentId ||
     view.executor?.childSessionId !== input.hookPayload.childSessionId ||
     new Set(eventRequestIds).size !== eventRequestIds.length ||
     eventRequestIds.length !== viewRequestIds.length ||
@@ -140,9 +142,11 @@ export async function acceptTaskAuthorizationEventStep(input: {
   const durableSession = await readDurableSession(input.sessionState);
   const entry = findSessionTaskEntry(durableSession.state, input.taskId);
   if (entry === undefined) return false;
+  const entryMetadata = readSubagentTaskMetadata(entry);
+  if (entryMetadata === undefined) return false;
   const handle = (getAgentHandleStore(durableSession.state)?.handles ?? []).find(
     (candidate) =>
-      candidate.phase === "addressed" && candidate.identity.id === entry.metadata.agentId,
+      candidate.phase === "addressed" && candidate.identity.id === entryMetadata.agentId,
   );
   if (
     handle?.phase !== "addressed" ||
@@ -151,11 +155,12 @@ export async function acceptTaskAuthorizationEventStep(input: {
     return false;
   }
   const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
+  const viewMetadata = view === undefined ? undefined : readSubagentTaskMetadata(view);
   return (
     view !== undefined &&
     !isTerminalTaskStatus(view.status) &&
     view.executor?.childSessionId === input.hookPayload.childSessionId &&
-    view.metadata.agentId === entry.metadata.agentId
+    viewMetadata?.agentId === entryMetadata.agentId
   );
 }
 
@@ -171,7 +176,10 @@ export async function recordTerminalTaskViewsStep(input: {
   for (const view of input.views) {
     state = cacheTerminalTaskView(state, view);
     if (view.executor?.lifecycle === "terminal") {
-      state = removeTaskAgentAddressFromState(state, view.metadata.agentId);
+      const metadata = readSubagentTaskMetadata(view);
+      if (metadata !== undefined) {
+        state = removeTaskAgentAddressFromState(state, metadata.agentId);
+      }
     }
   }
   if (state === durableSession.state) return input.sessionState;

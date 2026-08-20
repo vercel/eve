@@ -47,12 +47,19 @@ const TASK_VIEW_SCHEMA = z.object({
       type: z.enum(["result", "error"]),
     })
     .optional(),
-  metadata: z.object({
-    agentId: z.string(),
-    kind: z.literal("subagent"),
-    mode: z.enum(["local", "remote"]),
-    name: z.string(),
-  }),
+  metadata: z.union([
+    z.object({
+      agentId: z.string(),
+      kind: z.literal("subagent"),
+      mode: z.enum(["local", "remote"]),
+      name: z.string(),
+    }),
+    z.object({
+      data: z.record(z.string(), z.unknown()).optional(),
+      kind: z.string(),
+      name: z.string(),
+    }),
+  ]),
   status: z.enum(["working", "input_required", "completed", "failed", "cancelled"]),
   taskId: z.string(),
 });

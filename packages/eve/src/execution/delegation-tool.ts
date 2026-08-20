@@ -1,9 +1,23 @@
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
-import { UNSPECIFIED_INPUT_SCHEMA, toInputSchema, toOutputSchema } from "#shared/tool-schema.js";
+import {
+  UNSPECIFIED_INPUT_SCHEMA,
+  toInputSchema,
+  toOutputSchema,
+  type ToolSchemaSource,
+} from "#shared/tool-schema.js";
+
+type HarnessDelegationTool = Pick<
+  PreparedRuntimeDelegationTool,
+  "description" | "kind" | "name" | "nodeId"
+> & {
+  readonly inputSchema?: ToolSchemaSource | null;
+  readonly outputSchema?: ToolSchemaSource | null;
+  readonly rootOnly?: boolean;
+};
 
 export function createHarnessDelegationToolDefinition(
-  tool: PreparedRuntimeDelegationTool,
+  tool: HarnessDelegationTool,
 ): HarnessToolDefinition {
   const runtimeAction: HarnessToolDefinition["runtimeAction"] =
     tool.kind === "remote"
@@ -23,7 +37,9 @@ export function createHarnessDelegationToolDefinition(
     description: tool.description ?? "",
     inputSchema: toInputSchema(tool.inputSchema) ?? UNSPECIFIED_INPUT_SCHEMA,
     name: tool.name,
-    outputSchema: toOutputSchema(tool.outputSchema),
+    outputSchema: toOutputSchema(tool.outputSchema) ?? undefined,
+    rootOnly: tool.rootOnly,
     runtimeAction,
+    workflowCallable: true,
   };
 }

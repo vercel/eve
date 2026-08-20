@@ -217,20 +217,21 @@ export function createNodeHarnessTools(input: {
       nodeId: input.node.nodeId,
     })
   ) {
-    tools.set(AGENT_TOOL_NAME, {
-      description: AGENT_TOOL_DESCRIPTION,
-      inputSchema:
-        input.node.agent.config?.experimental?.tasks === true ||
-        input.node.agent.config?.experimental?.subagentPersistentSessions === true
-          ? PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA
-          : SUBAGENT_TOOL_INPUT_SCHEMA,
-      name: AGENT_TOOL_NAME,
-      runtimeAction: {
-        kind: "subagent-call",
+    tools.set(
+      AGENT_TOOL_NAME,
+      createHarnessDelegationToolDefinition({
+        description: AGENT_TOOL_DESCRIPTION,
+        inputSchema:
+          input.node.agent.config?.experimental?.tasks === true ||
+          input.node.agent.config?.experimental?.subagentPersistentSessions === true
+            ? PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA
+            : SUBAGENT_TOOL_INPUT_SCHEMA,
+        kind: "subagent",
+        name: AGENT_TOOL_NAME,
         nodeId: input.node.nodeId,
-        subagentName: AGENT_TOOL_NAME,
-      },
-    });
+        rootOnly: true,
+      }),
+    );
   }
 
   const tasksEnabled = input.node.agent.config?.experimental?.tasks === true;
@@ -276,6 +277,7 @@ function resolveHarnessToolDefinition(input: {
   return {
     approvalKey: def.approvalKey,
     description: def.description,
+    execution: def.execution,
     execute: resolveAuthoredExecute({
       isFrameworkTool,
       rawExecute,
@@ -314,6 +316,10 @@ function resolveAuthoredExecute(input: {
   if (isFrameworkTool) {
     return rawExecute;
   }
-  const authored = rawExecute as (toolInput: unknown, ctx: unknown) => unknown;
+  const authored = rawExecute as (
+    toolInput: unknown,
+    ctx: unknown,
+    task?: Parameters<NonNullable<HarnessToolDefinition["execute"]>>[2],
+  ) => unknown;
   return createToolExecuteWithAuth({ execute: authored, scope });
 }

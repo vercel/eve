@@ -1,4 +1,5 @@
 import type { JsonValue } from "#shared/json.js";
+import type { TaskExecutorBinding } from "#shared/tool-task.js";
 import type { SubagentAuthorizationEvent } from "#channel/types.js";
 
 /**
@@ -37,10 +38,64 @@ export interface TaskMetadata {
   readonly name: string;
 }
 
+export type SubagentTaskMetadata = TaskMetadata;
+
+/** Executor-neutral metadata retained by a non-subagent durable task. */
+export interface BackgroundTaskMetadata {
+  readonly kind: string;
+  readonly name: string;
+}
+
+export type DurableTaskMetadata = BackgroundTaskMetadata | TaskMetadata;
+
+export function createSubagentTaskMetadata(
+  metadata: Omit<SubagentTaskMetadata, "kind" | "name"> & { readonly name: string },
+): SubagentTaskMetadata {
+  return { ...metadata, kind: "subagent" };
+}
+
+export function readSubagentTaskMetadata(task: {
+  readonly executor?: TaskExecutorBinding | TaskExecutorState;
+  readonly metadata: DurableTaskMetadata;
+}): SubagentTaskMetadata | undefined {
+  if (task.metadata.kind === "subagent" && "agentId" in task.metadata) {
+    return task.metadata;
+  }
+  const executor = task.executor;
+  const binding = executor !== undefined && "kind" in executor ? executor : executor?.binding;
+  if (binding?.kind !== "subagent") return undefined;
+  const agentId = binding.data.agentId;
+  const mode = binding.data.mode;
+  const name = binding.data.name;
+  return typeof agentId === "string" &&
+    (mode === "local" || mode === "remote") &&
+    typeof name === "string"
+    ? { agentId, kind: "subagent", mode, name }
+    : undefined;
+}
+
+export function sameTaskMetadata(left: DurableTaskMetadata, right: DurableTaskMetadata): boolean {
+  if (left.kind !== right.kind || left.name !== right.name) return false;
+  const leftSubagent = "agentId" in left;
+  const rightSubagent = "agentId" in right;
+  return (
+    leftSubagent === rightSubagent &&
+    (!leftSubagent ||
+      !rightSubagent ||
+      (left.agentId === right.agentId && left.mode === right.mode))
+  );
+}
+
 /** Private executor state retained for cancellation and address reconciliation. */
 export interface TaskExecutorState {
+  /** Write-once executor address recorded by the `bind` command. */
+  readonly binding?: TaskExecutorBinding;
   readonly childSessionId?: string;
   readonly childTurnId?: string;
+  /**
+   * Child-session verdict from the last settled turn: `parked` survived
+   * and can take another delivery, `terminal` ended with the turn.
+   */
   readonly lifecycle?: "parked" | "terminal";
 }
 
@@ -137,7 +192,7 @@ export function readTaskInputRequestId(request: TaskInputRequest): string | unde
 /** Fields shared by every durable task view. */
 interface TaskViewBase {
   readonly taskId: string;
-  readonly metadata: TaskMetadata;
+  readonly metadata: DurableTaskMetadata;
   /** Private executor state; deliberately excluded from model-visible JSON. */
   readonly executor?: TaskExecutorState;
   /**
@@ -190,6 +245,10 @@ export type TaskView = TaskViewBase &
 
 /** Commands accepted by the durable task run's transition function. */
 export type TaskCommand =
+  | {
+      readonly executor: TaskExecutorBinding;
+      readonly kind: "bind";
+    }
   | {
       readonly kind: "complete";
       readonly data: JsonValue;

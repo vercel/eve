@@ -191,6 +191,7 @@ function createSubagentTool(name: string): HarnessToolDefinition {
       nodeId: "workers",
       subagentName: name,
     },
+    workflowCallable: true,
   };
 }
 

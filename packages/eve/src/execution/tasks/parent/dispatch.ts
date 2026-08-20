@@ -29,7 +29,7 @@ import {
   TASK_UPDATE_TOOL_NAME,
 } from "#runtime/framework-tools/tasks.js";
 import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
-import { isTerminalTaskStatus, type TaskView } from "#tasks/types.js";
+import { isTerminalTaskStatus, readSubagentTaskMetadata, type TaskView } from "#tasks/types.js";
 
 const log = createLogger("execution.tasks.dispatch");
 
@@ -150,7 +150,9 @@ async function propagateTaskCancel(input: {
   readonly session: RuntimeSession;
   readonly view: TaskView;
 }): Promise<void> {
-  const handle = findTaskAgentAddress(input.session, input.view.metadata.agentId);
+  const metadata = readSubagentTaskMetadata(input.view);
+  if (metadata === undefined) return;
+  const handle = findTaskAgentAddress(input.session, metadata.agentId);
   if (handle === undefined) return;
   const childSessionId = handle.address.sessionId;
   const childTurnId = input.view.executor?.childTurnId;

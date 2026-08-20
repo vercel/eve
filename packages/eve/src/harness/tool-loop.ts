@@ -208,6 +208,7 @@ import {
   getRegisteredTelemetryIntegrations,
 } from "#harness/ai-sdk-telemetry.js";
 import { getAdvertisedTools } from "#harness/advertised-tools.js";
+import { createBackgroundToolCallBatch } from "#harness/background-tools.js";
 import {
   applyLastToolCacheBreakpoint,
   applySystemCacheBreakpoint,
@@ -1399,6 +1400,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         ? [...modelMessages, { role: "user" as const, content: opts.trailingUserNote }]
         : modelMessages;
       const harnessTools = buildHarnessToolsWithDynamicSubagents(config.tools, ctx);
+      const backgroundBatch = createBackgroundToolCallBatch();
       const advertisedHarnessTools = getAdvertisedTools({
         delegatedCaller: taskUpdatesEnabled,
         session,
@@ -1408,6 +1410,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       const flatTools = await buildToolSetWithProviderTools({
         approvedTools,
+        backgroundBatch,
         capabilities: config.capabilities,
         disabledProviderTools: opts.disabledProviderTools,
         modelReference: requireSessionModelReference(session),
@@ -1423,6 +1426,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         });
         const dynamicToolSet = buildToolSetFromDefinitions({
           approvedTools,
+          backgroundBatch,
           capabilities: config.capabilities,
           disabledProviderTools: opts.disabledProviderTools,
           tools: dynamicTools,

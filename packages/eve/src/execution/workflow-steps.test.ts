@@ -562,12 +562,16 @@ describe("recordTaskInputRequestStep", () => {
             {
               taskInboxToken: "task-token",
               createdByTurnId: "turn-parent",
-              metadata: {
-                agentId: "agent-1",
+              executor: {
+                data: {
+                  agentId: "agent-1",
+                  childSessionId: "child-session",
+                  mode: "local",
+                  name: "research",
+                },
                 kind: "subagent",
-                mode: "local",
-                name: "research",
               },
+              metadata: { kind: "tool", name: "research" },
               operationId: "operation-1",
               taskId: "task-1",
               taskRunId: "run-1",
@@ -578,13 +582,19 @@ describe("recordTaskInputRequestStep", () => {
     });
     installSessionStoreMocks([session]);
     vi.mocked(readLatestTaskView).mockResolvedValue({
-      metadata: {
-        agentId: "agent-1",
-        kind: "subagent",
-        mode: "local",
-        name: "research",
+      metadata: { kind: "tool", name: "research" },
+      executor: {
+        binding: {
+          data: {
+            agentId: "agent-1",
+            childSessionId: "child-session",
+            mode: "local",
+            name: "research",
+          },
+          kind: "subagent",
+        },
+        childSessionId: "child-session",
       },
-      executor: { childSessionId: "child-session" },
       inputRequests: hookPayload.event.requests,
       status: "input_required",
       taskId: "task-1",

@@ -369,6 +369,105 @@ export function settleAgentTurn(
 }
 
 /**
+ * Rebases the handle delta one dispatch produced (`base` → `next`) onto a
+ * working session that other concurrently staged effects may have advanced
+ * past `base`.
+ *
+ * Per handle id:
+ *
+ * - deleted by the dispatch → deleted from the working session.
+ * - added by the dispatch → appended. If the working session already holds
+ *   the id with different content, throws: ids derive from unique
+ *   operations, so a collision means corrupted derivation.
+ * - changed in place by the dispatch → the dispatched copy replaces the
+ *   working copy while that copy still matches `base`. A working copy that
+ *   diverged from both throws instead of silently dropping either change.
+ * - untouched by the dispatch → the working copy is kept.
+ *
+ * A delta the working session already contains is a no-op, so replaying an
+ * effect is safe.
+ */
+export function rebaseAgentHandles(
+  session: HarnessSession,
+  input: {
+    readonly base: SessionStateMap | undefined;
+    readonly next: SessionStateMap | undefined;
+  },
+): HarnessSession {
+  const baseById = handlesById(input.base);
+  const nextById = handlesById(input.next);
+  const currentHandles = getAgentHandleStore(session.state)?.handles ?? [];
+  const currentIds = new Set(currentHandles.map((handle) => handle.identity.id));
+
+  let changed = false;
+  const rebased: AgentHandle[] = [];
+  for (const current of currentHandles) {
+    const id = current.identity.id;
+    const base = baseById.get(id);
+    const next = nextById.get(id);
+    if (base !== undefined && next === undefined) {
+      changed = true;
+      continue;
+    }
+    if (base === undefined && next !== undefined && !jsonStructureEqual(current, next)) {
+      throw new Error(
+        `Agent handle "${id}" added by a dispatch already exists with different content.`,
+      );
+    }
+    if (base !== undefined && next !== undefined && !jsonStructureEqual(base, next)) {
+      if (jsonStructureEqual(current, base)) {
+        rebased.push(next);
+        changed = true;
+        continue;
+      }
+      if (!jsonStructureEqual(current, next)) {
+        throw new Error(
+          `Agent handle "${id}" was changed by a dispatch and concurrently by another effect.`,
+        );
+      }
+    }
+    rebased.push(current);
+  }
+  const added = [...nextById.values()].filter(
+    (handle) => !baseById.has(handle.identity.id) && !currentIds.has(handle.identity.id),
+  );
+  if (!changed && added.length === 0) {
+    return session;
+  }
+  return writeHandles(session, [...rebased, ...added]);
+}
+
+function handlesById(state: SessionStateMap | undefined): ReadonlyMap<string, AgentHandle> {
+  const handles = getAgentHandleStore(state)?.handles ?? [];
+  return new Map(handles.map((handle) => [handle.identity.id, handle]));
+}
+
+// Handles are strict-schema JSON values, so entry-wise structural comparison
+// is exact: no undefined properties or non-JSON values survive the store schema.
+function jsonStructureEqual(a: unknown, b: unknown): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((item, index) => jsonStructureEqual(item, b[index]))
+    );
+  }
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) {
+    return false;
+  }
+  const aEntries = Object.entries(a);
+  const bRecord = b as Record<string, unknown>;
+  return (
+    aEntries.length === Object.keys(bRecord).length &&
+    aEntries.every(([key, value]) => key in bRecord && jsonStructureEqual(value, bRecord[key]))
+  );
+}
+
+/**
  * Persists the handle store, validating it against the strict store schema
  * first. This write-time check is what lets the schema-free driver-side
  * reader (`query.ts`) trust any stored value without revalidating: a

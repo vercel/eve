@@ -56,6 +56,17 @@ history or `toModelOutput`; only the final yield does. Treat snapshots as
 last-write-wins by tool call id, not append-only progress. The durable runtime
 can retry a step and replay overlapping snapshots.
 
+### Experimental background execution
+
+`defineTool({ execution: "background" })` receives a third `task` argument. Returning a normal
+value completes the durable task with that value. Returning `task.delegated({ executor, receipt })`
+returns a `working` receipt immediately while an external executor continues the task.
+
+This contract currently supports framework-owned task executors, including local and remote
+subagents when `experimental.tasks` is enabled. The external executor wire is not yet a stable
+authored-tool API; do not use background execution for application tools that need to report later
+lifecycle updates.
+
 ### The `ctx` parameter
 
 `execute` gets a `ctx` carrying the runtime accessors:
