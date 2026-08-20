@@ -9,6 +9,7 @@ import {
 import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js";
 import {
   createLinqAdapter,
+  type LinqAdapterConfig,
   type LinqCredentialProvider,
   type LinqWebhookVerifier,
 } from "#compiled/@linqapp/chat-sdk-adapter/index.js";
@@ -83,17 +84,9 @@ export interface LinqChannel extends ChatSdkChannel {}
  * ```
  */
 export function linqChannel(config: LinqChannelConfig): LinqChannel {
-  const credentials = normalizeCredentials(config.credentials);
   const linq = createLinqAdapter({
     ...(config.baseURL === undefined ? {} : { baseURL: config.baseURL }),
-    ...(credentials.provider === undefined ? {} : { credentials: credentials.provider }),
-    ...(credentials.webhookVerifier !== undefined
-      ? { webhookVerifier: credentials.webhookVerifier }
-      : credentials.signingSecret === undefined
-        ? { webhookVerifier: vercelOidc() }
-        : typeof credentials.signingSecret === "string"
-          ? { signingSecret: credentials.signingSecret }
-          : {}),
+    ...normalizeCredentials(config.credentials),
   });
   const bridge = chatSdkChannel({
     adapters: { linq },
@@ -117,30 +110,38 @@ export function linqChannel(config: LinqChannelConfig): LinqChannel {
   return bridge.channel;
 }
 
-function normalizeCredentials(credentials: LinqChannelConfig["credentials"]): {
-  readonly provider?: LinqCredentialProvider;
-  readonly signingSecret?: LinqCredentialValue;
-  readonly webhookVerifier?: LinqWebhookVerifier;
-} {
-  if (credentials === undefined) return {};
-  const { apiKey, signingSecret, webhookVerifier } = credentials;
+function normalizeCredentials(
+  credentials: LinqChannelConfig["credentials"],
+): Pick<LinqAdapterConfig, "credentials" | "webhookVerifier"> {
+  const { apiKey, signingSecret, webhookVerifier } = credentials ?? {};
   return {
     ...(apiKey === undefined
       ? {}
       : {
-          provider: async () => ({
-            apiKey: typeof apiKey === "function" ? await apiKey() : apiKey,
-            ...(signingSecret === undefined
-              ? {}
-              : {
-                  signingSecret:
-                    typeof signingSecret === "function" ? await signingSecret() : signingSecret,
-                }),
-          }),
+          credentials: createCredentialProvider(apiKey, signingSecret),
         }),
-    ...(signingSecret === undefined ? {} : { signingSecret }),
-    ...(webhookVerifier === undefined ? {} : { webhookVerifier }),
+    ...(webhookVerifier !== undefined
+      ? { webhookVerifier }
+      : signingSecret === undefined
+        ? { webhookVerifier: vercelOidc() }
+        : {}),
   };
+}
+
+function createCredentialProvider(
+  apiKey: LinqCredentialValue,
+  signingSecret: LinqCredentialValue | undefined,
+): LinqCredentialProvider {
+  return async () => ({
+    apiKey: await resolveCredentialValue(apiKey),
+    ...(signingSecret === undefined
+      ? {}
+      : { signingSecret: await resolveCredentialValue(signingSecret) }),
+  });
+}
+
+async function resolveCredentialValue(value: LinqCredentialValue): Promise<string> {
+  return typeof value === "function" ? await value() : value;
 }
 
 async function defaultOnMessage(): Promise<LinqInboundResult> {

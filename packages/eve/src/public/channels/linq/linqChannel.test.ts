@@ -62,13 +62,18 @@ describe("linqChannel", () => {
 
   it("uses lazy credentials and the managed credential verifier", async () => {
     const apiKey = vi.fn(async () => "rotating-token");
+    const signingSecret = vi.fn(async () => "rotating-secret");
     const webhookVerifier = vi.fn();
 
-    linqChannel({ credentials: { apiKey, webhookVerifier } });
+    linqChannel({ credentials: { apiKey, signingSecret, webhookVerifier } });
 
     const config = createLinqAdapter.mock.calls[0]?.[0];
     expect(config).toMatchObject({ webhookVerifier });
-    await expect(config?.credentials?.()).resolves.toEqual({ apiKey: "rotating-token" });
+    expect(config).not.toHaveProperty("signingSecret");
+    await expect(config?.credentials?.()).resolves.toEqual({
+      apiKey: "rotating-token",
+      signingSecret: "rotating-secret",
+    });
   });
 
   it("drops blank inbound messages", async () => {
