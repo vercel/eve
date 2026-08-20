@@ -21,7 +21,12 @@ import { getAgentHandleStore } from "#harness/handles/store.js";
 import { buildToolSet } from "#harness/tools.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
+import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { getRun } from "#internal/workflow/runtime.js";
+import type {
+  SandboxBackend,
+  SandboxBackendCreateInput,
+} from "#public/definitions/sandbox-backend.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
@@ -72,6 +77,27 @@ describe("background subagent tool execution", () => {
       const bundle = await getCompiledRuntimeAgentBundle({
         compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       });
+      const sandbox = mockSandbox({ id: "background-subagent-sandbox" });
+      const backend: SandboxBackend = {
+        create: async (input: SandboxBackendCreateInput) => ({
+          captureState: async () => ({
+            backendName: "test",
+            metadata: {},
+            sessionKey: input.sessionKey,
+          }),
+          session: sandbox.session,
+          shutdown: async () => {},
+          stop: async () => {},
+          useSessionFn: async () => sandbox.session,
+        }),
+        name: "test",
+        prewarm: async () => ({ reused: false }),
+      };
+      (
+        bundle.graph.root.sandboxRegistry.sandbox.definition as {
+          backend: SandboxBackend;
+        }
+      ).backend = backend;
       const fetchMock = vi
         .fn()
         .mockResolvedValue(
@@ -198,9 +224,17 @@ describe("background subagent tool execution", () => {
               }),
               type: "subagent.called",
             }),
+            ...pendingTasks.map((task) =>
+              expect.objectContaining({
+                data: expect.objectContaining({
+                  backgroundTask: { status: "working", taskId: task.taskId },
+                }),
+                type: "subagent.completed",
+              }),
+            ),
           ]),
         );
-        expect(calledEvents).toHaveLength(3);
+        expect(calledEvents).toHaveLength(6);
         expect(handles).toContainEqual(
           expect.objectContaining({
             address: expect.objectContaining({ kind: "agent/remote", sessionId: "remote-child" }),

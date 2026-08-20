@@ -194,7 +194,7 @@ function createRuntimeDynamicModelEventDispatcher(
  *
  * For authored tools: copies all lifecycle fields from the resolved definition.
  * For subagent tools: selects the existing runtime-action definition or the
- * background `defineTool` definition from the node's task-mode setting.
+ * background `defineTool` definition from the node's `experimental.tasks` setting.
  * Tools without `execute` (provider-managed) get entries with schema but no execute.
  */
 export function createNodeHarnessTools(input: {

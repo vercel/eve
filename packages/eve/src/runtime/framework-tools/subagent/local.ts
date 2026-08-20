@@ -1,4 +1,4 @@
-import { loadContext } from "#context/container.js";
+import { type AlsContext, loadContext } from "#context/container.js";
 import { HandleEventKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
 import {
@@ -14,6 +14,7 @@ import {
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import {
   checkTaskContinuationAvailability,
+  createTaskContinuationBusyResult,
   describeTaskDispatch,
 } from "#execution/tasks/parent/continuation-dispatch.js";
 import { findTaskAgentAddress } from "#execution/tasks/parent/control-shared.js";
@@ -44,7 +45,9 @@ interface SubagentDefinitionInput {
 
 interface SubagentDispatchInput {
   readonly action: SubagentCallAction;
+  readonly batch: TaskExec["batch"];
   readonly callbackBaseUrl?: string;
+  readonly ctx: AlsContext;
   readonly event: {
     readonly sequence: number;
     readonly stepIndex: number;
@@ -66,6 +69,7 @@ interface SubagentDispatchResult {
 }
 
 const localSubagentExecutors = new WeakSet<object>();
+const batchAgentClaims = new WeakMap<TaskExec["batch"], Map<string, string>>();
 const log = createLogger("runtime.framework-tools.subagent");
 
 export function defineSubagent(input: SubagentDefinitionInput) {
@@ -121,7 +125,9 @@ export async function executeSubagentTool(input: {
         };
   const dispatched = await dispatchSubagent({
     action,
+    batch,
     callbackBaseUrl: ctx.get(CallbackBaseUrlKey),
+    ctx,
     event: { ...emission, turnId: activeTurnId(emission) },
     localFanoutSize: countLocalSubagentCalls(batch),
     serializedContext: serializeContext(ctx),
@@ -155,15 +161,23 @@ export async function executeSubagentTool(input: {
     toolName: input.definition.name,
   });
 
-  return input.task.delegated({
+  const delegated = input.task.delegated({
     executor,
     receipt: { agentId: dispatched.agentId },
   });
+  await emitSubagentCompleted({
+    callId: input.toolContext.callId,
+    output: JSON.stringify(delegated.receipt),
+    subagentName: dispatched.name,
+    taskId: delegated.receipt.taskId,
+  });
+  return delegated;
 }
 
 async function dispatchSubagent(input: SubagentDispatchInput): Promise<SubagentDispatchResult> {
   const prepared = await prepareAgentActionDispatch({
     action: input.action,
+    ctx: input.ctx,
     event: input.event,
     localFanoutSize: input.localFanoutSize,
     serializedContext: input.serializedContext,
@@ -186,6 +200,17 @@ async function dispatchSubagent(input: SubagentDispatchInput): Promise<SubagentD
       session: prepared.session,
     });
     if (busy !== undefined) throw new Error(JSON.stringify(busy.output));
+
+    const claimedTaskId = claimBatchAgent(input.batch, entry.agentId, input.task.taskId);
+    if (claimedTaskId !== undefined) {
+      const busy = createTaskContinuationBusyResult({
+        action: entry.action,
+        agentId: entry.agentId,
+        status: "working",
+        taskId: claimedTaskId,
+      });
+      throw new Error(JSON.stringify(busy.output));
+    }
   }
 
   const outcome =
@@ -253,6 +278,22 @@ async function dispatchSubagent(input: SubagentDispatchInput): Promise<SubagentD
   };
 }
 
+function claimBatchAgent(
+  batch: TaskExec["batch"],
+  agentId: string,
+  taskId: string,
+): string | undefined {
+  let claims = batchAgentClaims.get(batch);
+  if (claims === undefined) {
+    claims = new Map();
+    batchAgentClaims.set(batch, claims);
+  }
+  const claimedTaskId = claims.get(agentId);
+  if (claimedTaskId !== undefined) return claimedTaskId;
+  claims.set(agentId, taskId);
+  return undefined;
+}
+
 async function emitSubagentCalled(input: {
   readonly callId: string;
   readonly childSessionId: string;
@@ -283,6 +324,32 @@ async function emitSubagentCalled(input: {
       callId: input.callId,
       childSessionId: input.childSessionId,
       toolName: input.toolName,
+    });
+  }
+}
+
+async function emitSubagentCompleted(input: {
+  readonly callId: string;
+  readonly output: string;
+  readonly subagentName: string;
+  readonly taskId: string;
+}): Promise<void> {
+  const handleEvent = loadContext().get(HandleEventKey);
+  if (handleEvent === undefined) return;
+  try {
+    await handleEvent({
+      data: {
+        backgroundTask: { status: "working", taskId: input.taskId },
+        callId: input.callId,
+        output: input.output,
+        subagentName: input.subagentName,
+      },
+      type: "subagent.completed",
+    });
+  } catch (error) {
+    logError(log, "subagent.completed emission failed", error, {
+      callId: input.callId,
+      taskId: input.taskId,
     });
   }
 }

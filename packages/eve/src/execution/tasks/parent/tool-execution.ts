@@ -20,7 +20,7 @@ import { parseJsonValue } from "#shared/json.js";
 import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 import { createTaskDelegated, isTaskDelegated, type TaskExec } from "#shared/tool-task.js";
 import { recordTaskAgentAddress } from "#harness/handles/transitions.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { recordSessionTask } from "#tasks/session-index.js";
 import { readSubagentExecutor } from "#tasks/types.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
@@ -78,8 +78,8 @@ export function runBackgroundStep(
  */
 export const backgroundToolExecutionProvider: FrameworkContextProvider<BackgroundToolExecutor> = {
   key: BackgroundToolExecutorKey,
-  create(_ctx, session) {
-    return { value: new BackgroundToolExecutionScope(session) };
+  create(ctx, session) {
+    return { value: new BackgroundToolExecutionScope(session, ctx.get(BundleKey)) };
   },
   async commit(executor, session) {
     return await requireExecutionScope(executor).commit(session);
@@ -108,13 +108,15 @@ export function readRetainedBackgroundToolResult(
 }
 
 class BackgroundToolExecutionScope implements BackgroundToolExecutor {
+  private readonly bundle: CompiledBundle | undefined;
   private readonly executions = new Map<string, Promise<unknown>>();
   private readonly records: BackgroundToolExecutionRecord[] = [];
   private retained = false;
 
   private readonly initialSession: HarnessSession;
 
-  constructor(initialSession: HarnessSession) {
+  constructor(initialSession: HarnessSession, bundle: CompiledBundle | undefined) {
+    this.bundle = bundle;
     this.initialSession = initialSession;
   }
 
@@ -142,6 +144,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       await compensateBackgroundToolExecution(
         incomplete,
         new Error("Background tool execution did not delegate or complete its task."),
+        this.bundle,
       );
     }
     return this.apply(session);
@@ -156,7 +159,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     const settled = this.records.filter((record) => record.settled);
     const incomplete = this.records.filter((record) => !record.settled);
     if (incomplete.length > 0) {
-      await compensateBackgroundToolExecution(incomplete, cause);
+      await compensateBackgroundToolExecution(incomplete, cause, this.bundle);
     }
     if (settled.length === 0) return;
     // Cancellation must not compensate settled records: their tasks are
@@ -165,7 +168,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       this.retained = true;
       return;
     }
-    await compensateBackgroundToolExecution(settled, cause);
+    await compensateBackgroundToolExecution(settled, cause, this.bundle);
   }
 
   retainedResult(): BackgroundToolStepResult | undefined {
@@ -285,6 +288,7 @@ async function deliverTaskCommand(
 async function compensateBackgroundToolExecution(
   records: readonly BackgroundToolExecutionRecord[],
   cause: unknown,
+  bundle: CompiledBundle | undefined,
 ): Promise<void> {
   const failures: unknown[] = [];
   for (const record of records.toReversed()) {
@@ -306,7 +310,7 @@ async function compensateBackgroundToolExecution(
     const subagent = readSubagentExecutor(record.task.executor);
     if (subagent !== undefined) {
       await propagateSubagentExecutorCancel({
-        bundle: loadContext().get(BundleKey),
+        bundle,
         executor: subagent,
         taskId: record.task.taskId,
       });

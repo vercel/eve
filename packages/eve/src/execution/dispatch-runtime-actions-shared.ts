@@ -20,6 +20,7 @@ import {
   InitiatorAuthKey,
   SandboxKey,
 } from "#context/keys.js";
+import { type AlsContext, ContextContainer } from "#context/container.js";
 import { withContextScope } from "#context/run-step.js";
 import {
   BundleKey,
@@ -181,8 +182,10 @@ export async function prepareRuntimeActionDispatch(input: {
   const batch = getPendingRuntimeActionBatch(durableSession.state);
 
   if (batch === undefined || batch.actions.length === 0) return undefined;
+  const ctx = await deserializeContext(input.serializedContext);
   return await prepareActionDispatch({
     batch,
+    ctx,
     durableSession,
     serializedContext: input.serializedContext,
     taskControls: input.taskControls,
@@ -191,6 +194,7 @@ export async function prepareRuntimeActionDispatch(input: {
 
 export async function prepareAgentActionDispatch(input: {
   readonly action: RuntimeActionRequest;
+  readonly ctx: AlsContext;
   readonly event: {
     readonly sequence: number;
     readonly stepIndex: number;
@@ -203,6 +207,7 @@ export async function prepareAgentActionDispatch(input: {
   const durableSession = await readDurableSession(input.sessionState);
   return await prepareActionDispatch({
     batch: { actions: [input.action], event: input.event, responseMessages: [] },
+    ctx: copyDurableContext(input.ctx),
     durableSession,
     fanoutSize: input.localFanoutSize,
     serializedContext: input.serializedContext,
@@ -210,8 +215,15 @@ export async function prepareAgentActionDispatch(input: {
   });
 }
 
+function copyDurableContext(ctx: AlsContext): ContextContainer {
+  const copy = new ContextContainer();
+  for (const [key, value] of ctx.entries()) copy.set(key, value);
+  return copy;
+}
+
 async function prepareActionDispatch(input: {
   readonly batch: NonNullable<ReturnType<typeof getPendingRuntimeActionBatch>>;
+  readonly ctx: ContextContainer;
   readonly durableSession: Awaited<ReturnType<typeof readDurableSession>>;
   readonly fanoutSize?: number;
   readonly serializedContext: Record<string, unknown>;
@@ -220,7 +232,7 @@ async function prepareActionDispatch(input: {
   const { batch, durableSession } = input;
   assertUniqueRuntimeActionCallIds(batch.actions);
 
-  const ctx = await deserializeContext(input.serializedContext);
+  const ctx = input.ctx;
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
   let session = hydrateDurableSession({

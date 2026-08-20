@@ -7,6 +7,7 @@ import { RemoteAgentContinueRequestError } from "#execution/remote-agent-dispatc
 import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
+import { prepareAgentActionDispatch } from "#execution/dispatch-runtime-actions-shared.js";
 import { dispatchTaskStep } from "#execution/tasks/parent/dispatch-task-step.js";
 import {
   resolvePendingRuntimeActions,
@@ -181,6 +182,56 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     callId: "call-1",
     parentSessionId: "parent-session",
     parentTurnId: "turn-1",
+  });
+
+  it("plans an in-step agent call from the live context", async () => {
+    const session = createBaseSession();
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(ChannelKey, ADAPTER);
+    ctx.set(BundleKey, {
+      compiledArtifactsSource: {},
+      resolvedAgent: { config: { experimental: { tasks: true } } },
+      subagentRegistry: {
+        subagentsByNodeId: new Map([
+          ["remote/research", { definition: REMOTE_REGISTRY_DEFINITION }],
+        ]),
+      },
+      turnAgent: session.agent,
+    } as never);
+    mocks.readDurableSession.mockResolvedValue(session);
+    mocks.deserializeContext.mockRejectedValue(
+      new Error(
+        "A development Workflow generation selector was resumed outside a generation-bound delivery.",
+      ),
+    );
+
+    const prepared = await prepareAgentActionDispatch({
+      action: {
+        callId: "call-1",
+        description: "Research",
+        input: { message: "research this" },
+        kind: "remote-agent-call",
+        name: "research",
+        nodeId: "remote/research",
+        remoteAgentName: "research",
+      },
+      ctx,
+      event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
+      localFanoutSize: 0,
+      serializedContext: {
+        [BundleKey.name]: { source: { kind: "development" } },
+      },
+      sessionState: BASE_STATE,
+    });
+
+    expect(prepared.plan).toEqual([
+      expect.objectContaining({
+        kind: "start",
+        target: expect.objectContaining({ kind: "remote" }),
+      }),
+    ]);
+    expect(mocks.deserializeContext).not.toHaveBeenCalled();
   });
 
   it("owns a local child before the start effect and confirms its running address", async () => {

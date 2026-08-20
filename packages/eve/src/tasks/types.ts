@@ -1,5 +1,5 @@
 import type { AgentAddress, AgentIdentity } from "#harness/handles/store.js";
-import type { JsonValue } from "#shared/json.js";
+import { isJsonObjectValue, type JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#shared/tool-task.js";
 import type { SubagentAuthorizationEvent } from "#channel/types.js";
 
@@ -107,7 +107,7 @@ export function readSubagentExecutor(
 }
 
 function readAgentIdentity(value: JsonValue | undefined): AgentIdentity | undefined {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  if (value === undefined || !isJsonObjectValue(value)) return undefined;
   const { id, name, nodeId } = value;
   return typeof id === "string" && typeof name === "string" && typeof nodeId === "string"
     ? { id, name, nodeId }
@@ -115,7 +115,7 @@ function readAgentIdentity(value: JsonValue | undefined): AgentIdentity | undefi
 }
 
 function readAgentAddress(value: JsonValue | undefined): AgentAddress | undefined {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  if (value === undefined || !isJsonObjectValue(value)) return undefined;
   const { callbackBaseUrl, continuationToken, kind, sessionId, url } = value;
   if (typeof sessionId !== "string") return undefined;
   if (kind === "agent/local" || kind === "agent/self") {
