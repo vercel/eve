@@ -11,17 +11,18 @@ last_updated: "2026-08-20"
 Memory is a path-authored capability for scoped context that outlives one
 session. A memory provider owns how it stores, retrieves, and updates memory.
 eve owns when the provider participates in the agent lifecycle, and eve owns a
-small projection record model — item identity, supersede, hide — so recalled
-context can be updated and deleted deterministically without a stale copy
-surviving in the prompt.
+small projection record model — item identity and supersession — so recalled
+context can be updated deterministically without a stale copy surviving in the
+prompt.
 
 Each memory definition binds a provider to an application namespace, a trusted
 scope, and a recall visibility policy. It may also describe the slot's
 purpose to the model through provider tool descriptions. The provider contract
 has three methods:
 
-- `recall` returns changes — append, upsert, or retract — that eve applies to
-  the slot's recalled context in durable history as user-role messages.
+- `recall` returns messages that eve applies to the slot's recalled context in
+  durable history as user-role context. A message with an `id` inserts or
+  replaces that item; a message without one appends immutably.
 - `capture` observes history before compaction and after a completed turn.
 - `tools` contributes model tools bound to the active memory scope.
 
@@ -38,7 +39,7 @@ compaction.completed  ---> recall(phase: "compaction.completed")
 turn.completed        ---> capture(phase: "turn.completed")
 ```
 
-eve owns namespace and scope resolution, invocation order, change validation
+eve owns namespace and scope resolution, invocation order, recall validation
 and application, recall-record attribution and visibility, projection, tool
 qualification, and replay behavior. The provider owns storage, retrieval,
 ranking, extraction, formatting, retention, and its model-facing operations. A
@@ -47,12 +48,12 @@ contract without sharing a storage model.
 
 ## Public API at a glance
 
-| Import path              | Public surface                                                                                                      |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| `eve/memory`             | `defineMemory`, `defineMemoryProvider`, `defaultNamespace`, provider contexts, scope types, and recall change types |
-| `eve/memory/scope`       | `byPrincipal`                                                                                                       |
-| `eve/memory/file`        | `fileMemory`, `inMemory`, and the portable document backend contract                                                |
-| `eve/memory/file/vercel` | `vercelBlob`                                                                                                        |
+| Import path              | Public surface                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `eve/memory`             | `defineMemory`, `defineMemoryProvider`, `defaultNamespace`, provider contexts, scope types, and recall types |
+| `eve/memory/scope`       | `byPrincipal`                                                                                                |
+| `eve/memory/file`        | `fileMemory`, `inMemory`, and the portable document backend contract                                         |
+| `eve/memory/file/vercel` | `vercelBlob`                                                                                                 |
 
 The smallest complete memory slot uses the built-in file provider:
 
@@ -459,25 +460,15 @@ import type { DynamicResolveContext, ToolDefinition } from "eve/tools";
 interface MemoryRecallMessage {
   /** Provider context recalled into durable model history as a user-role message. */
   readonly content: string;
+  /**
+   * Optional provider-owned item identity, unique within the slot, namespace,
+   * and scope. A keyed message inserts or replaces its item; an unkeyed
+   * message appends immutably.
+   */
+  readonly id?: string;
 }
 
-type MemoryRecallChange =
-  | {
-      readonly type: "append";
-      readonly message: MemoryRecallMessage;
-    }
-  | {
-      readonly type: "upsert";
-      /** Provider-owned opaque item identity, unique within the slot, namespace, and scope. */
-      readonly id: string;
-      readonly message: MemoryRecallMessage;
-    }
-  | {
-      readonly type: "retract";
-      readonly id: string;
-    };
-
-type MemoryRecallResult = MemoryRecallMessage | readonly MemoryRecallChange[] | null | undefined;
+type MemoryRecallResult = { readonly messages: readonly MemoryRecallMessage[] } | null | undefined;
 
 /** Mirrors the ambient `ctx.session.turn` coordinates plus the turn input. */
 interface MemoryTurnContext {
@@ -560,48 +551,45 @@ interface MemoryProvider {
 Recalled context is always user-role. Recall is framework context appended
 after the durable prefix and before the admitted turn input, so it preserves
 the prompt-cache prefix in the normal case. eve does not offer a system-role
-recall option: system-role content is position-independent, so upsert and
-retract semantics cannot compose with it, and any change to it invalidates the
+recall option: system-role content is position-independent, so keyed
+supersession cannot compose with it, and any change to it invalidates the
 prompt cache from message zero. Standing system-role guidance derived from
 runtime state belongs in `defineDynamic` instructions.
 
 `defineMemoryProvider(...)` is an identity-with-types helper. It does not add
 storage behavior.
 
-## Recall changes
+## Recall messages
 
-A recall result is a set of changes to the slot's recalled context, not a
-replacement snapshot. The result is a bare ordered array; a bare
-`MemoryRecallMessage` is shorthand for one append.
+A recall result is a set of messages applied to the slot's recalled context,
+not a replacement snapshot. The optional `id` on each message selects the
+semantics:
 
-| Change                            | Effect                                                                                                                                 |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `{ type: "append", message }`     | Add one immutable, unkeyed record. It cannot be updated or retracted later.                                                            |
-| `{ type: "upsert", id, message }` | Insert or replace the one item identified by `id`. An identical upsert is a no-op; a changed upsert supersedes only the older version. |
-| `{ type: "retract", id }`         | Hide the item identified by `id`. Idempotent; retracting an unknown or never-active ID is a valid no-op.                               |
-| `MemoryRecallMessage`             | Shorthand for one append.                                                                                                              |
-| `null`, `undefined`, `[]`         | Change nothing at this boundary.                                                                                                       |
+| Message           | Effect                                                                                                                                                     |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{ content, id }` | Insert or replace the one item identified by `id`. Identical content is a no-op; changed content supersedes the older version, which leaves model context. |
+| `{ content }`     | Append one immutable, unkeyed record. It cannot be updated later.                                                                                          |
 
-The semantics that hold at every boundary:
+A result of `{ messages: [] }`, `null`, or `undefined` changes nothing at this
+boundary. The semantics that hold at every boundary:
 
 - **Recall is observational.** Providers must not use it for external
-  mutations. eve makes the durable change commit atomic, but it cannot roll
-  back provider side effects.
+  mutations. eve makes the durable commit atomic, but it cannot roll back
+  provider side effects.
 - **Accumulation is the only mode.** An item missing from a later result
-  remains active. Missing top-k retrieval results never imply deletion. A
-  provider that wants something gone returns an explicit retract or a
-  superseding upsert.
+  remains visible. Missing top-k retrieval results never imply removal. A
+  provider that wants content replaced returns the same `id` with new content.
 - **Item identity is `(slot, namespaceKey, scopeKey, idKey)`**, where each key
   is an eve-owned opaque digest. The same provider `id` under two slots,
-  namespaces, or scopes identifies two independent items; neither can update,
-  retract, or reveal the other.
-- **Appends are never content-deduplicated.** A repeated identical bare append
-  adds a second copy. Content a provider might return again must be keyed.
-- **A retracted item can be reactivated** by a later upsert of the same ID.
-- **Batches validate completely before applying.** Empty or blank append and
-  upsert content, empty or oversized item IDs, duplicate upsert or retract IDs
-  within one batch, and unknown change keys are rejected, and a rejected batch
-  applies nothing. Change order within a batch is preserved.
+  namespaces, or scopes identifies two independent items; neither can update
+  or reveal the other.
+- **Unkeyed messages are never content-deduplicated.** A repeated identical
+  unkeyed message adds a second copy. Content a provider might return again
+  must be keyed.
+- **Batches validate completely before applying.** Empty or blank content,
+  empty or oversized IDs, duplicate IDs within one batch, and unknown message
+  keys are rejected, and a rejected batch applies nothing. Message order
+  within a batch is preserved.
 
 For example, keyed retrieval results `[A, B]` followed by `[B, C]` leave `A`,
 `B`, and `C` visible, with `B` present once.
@@ -609,7 +597,7 @@ For example, keyed retrieval results `[A, B]` followed by `[B, C]` leave `A`,
 ### Example: append-only event log
 
 A principal-scoped provider that surfaces each new observation exactly once
-uses the bare-message shorthand and never needs identity. Because appends are
+uses unkeyed messages and never needs identity. Because unkeyed messages are
 never deduplicated, the provider consumes each note rather than re-reading the
 latest state:
 
@@ -620,7 +608,7 @@ const auditMemory = defineMemoryProvider({
   async recall(ctx) {
     if (ctx.phase !== "turn.started") return null;
     const note = await takeUnreadNote(ctx.memory.scope.key);
-    return note === null ? null : { content: note };
+    return note === null ? null : { messages: [{ content: note }] };
   },
 });
 ```
@@ -630,7 +618,7 @@ const auditMemory = defineMemoryProvider({
 A vector-retrieval provider returns a different top-k subset each turn.
 Because accumulation is monotonic, an unbounded stream of new IDs would grow
 context forever. Keying results by window position bounds the visible set by
-construction: each recall re-upserts the same `k` identities, superseding the
+construction: each recall reuses the same `k` identities, superseding the
 previous occupant of each position:
 
 ```ts
@@ -640,34 +628,42 @@ const retrievalMemory = defineMemoryProvider({
   async recall(ctx) {
     if (ctx.phase !== "turn.started") return null;
     const hits = await search(ctx.memory.scope.key, ctx.turn.input, { limit: 3 });
-    return hits.map((hit, rank) => ({
-      type: "upsert" as const,
-      id: `rank:${rank}`,
-      message: { content: hit.text },
-    }));
+    return {
+      messages: hits.map((hit, rank) => ({ id: `rank:${rank}`, content: hit.text })),
+    };
   },
 });
 ```
 
 A provider that keys by document identity instead (`id: hit.documentId`) keeps
-every previously recalled document visible until it explicitly retracts one.
+every previously recalled document visible until it overwrites that identity.
 Both are valid; the provider chooses its window policy.
 
-### Rejected alternative: inventory coverage
+### Rejected and deferred alternatives
 
-An earlier revision included a `coverage: "complete"` flag: a keyed result
-asserting a full inventory, from which eve synthesized retractions for omitted
-IDs. It was cut because no first-party provider consumes it — `fileMemory()`
-returns one whole-document upsert — and because omission-means-deletion
-semantics are the sharpest foot-gun in a sparse-retrieval API. If a real
-enumerable provider needs framework diffing later, an inventory result shape is
-an additive union arm, not a breaking change.
+Two richer recall shapes were considered and cut:
+
+- **A tagged change union with an explicit `retract`.** No current provider
+  needs a keyed item to disappear rather than be replaced: `fileMemory()`
+  supersedes its whole document, including an empty-state rendering when the
+  last entry is removed, and bounded retrieval reuses window identities. If a
+  provider later needs true keyed removal, a retract form is an additive
+  extension, and dropping it now also drops the private tombstone
+  representation that projection would otherwise have to hide.
+- **A `coverage: "complete"` inventory flag**, from which eve synthesized
+  retractions for omitted IDs. No first-party provider consumes it, and
+  omission-means-deletion is the sharpest foot-gun in a sparse-retrieval API.
+  An inventory result shape remains an additive extension if a real enumerable
+  provider needs framework diffing.
+
+The `{ messages }` wrapper leaves room for future result-level metadata
+without a breaking change.
 
 ## Durable records and projection
 
-Every accepted change becomes an internal durable record attributed with the
-slot, opaque namespace key, opaque scope key, change kind, opaque item key for
-keyed changes, operation ID, and batch position. Raw durable history is
+Every accepted recall message becomes an internal durable record attributed
+with the slot, opaque namespace key, opaque scope key, opaque item key for
+keyed messages, operation ID, and batch position. Raw durable history is
 storage-only. Every message-bearing consumer — providers, dynamic resolvers,
 approval and tool contexts, token accounting, compaction, instrumentation
 callbacks, and the model request — receives a view derived from one canonical
@@ -675,11 +671,9 @@ scope projection, never raw durable history.
 
 Projection folds records per slot and identity:
 
-- visible unkeyed appends always remain, in position;
-- only the latest active upsert of each identity is visible, in the position of
-  its accepted batch;
-- a superseded version and a retracted item are hidden, along with the retract
-  itself;
+- visible unkeyed records always remain, in position;
+- only the latest version of each keyed identity is visible, in the position of
+  its accepted batch; superseded versions are hidden;
 - attribution is stripped before any authored callback, tool, or model
   boundary. There is no public accessor for recall attribution; providers use
   stable item IDs instead of scanning history.
@@ -690,22 +684,21 @@ rather than new channel input.
 ### Cache consequences
 
 New items append at the tail and preserve the existing prompt prefix. Repeated
-identical keyed items change nothing. An explicit update or retraction must
-stop the model from seeing the prior value, and filtering that older occurrence
-necessarily invalidates the prompt cache from that point forward. This is a
-deliberate trade: pure append-only recall is strictly better for prompt cache
-on updates, because the old copy would keep its position — but it leaves the
-contradicted copy model-visible, which makes update and deletion
-nondeterministic after compaction. The change model spends a mutation-driven
-cache invalidation to buy deterministic visibility; it is not cache-neutral,
-and it never substitutes a natural-language correction while leaving the
-contradicted content visible.
+identical keyed items change nothing. An explicit update must stop the model
+from seeing the prior value, and filtering that older occurrence necessarily
+invalidates the prompt cache from that point forward. This is a deliberate
+trade: pure append-only recall is strictly better for prompt cache on updates,
+because the old copy would keep its position — but it leaves the contradicted
+copy model-visible, which makes updates and removals nondeterministic after
+compaction. Keyed supersession spends a mutation-driven cache invalidation to
+buy deterministic visibility; it is not cache-neutral, and it never substitutes
+a natural-language correction while leaving the contradicted content visible.
 
 Within one session, the model also sees the mutation narrative — the old
-recalled copy, then the tool calls that changed storage. The change model earns
-its complexity at the boundaries where that narrative dies: compaction drops
-tool results first, so a stale recalled copy can outlive the story of its own
-deletion and be summarized as fact. Deterministic deletion, not model
+recalled copy, then the tool calls that changed storage. Keyed supersession
+earns its complexity at the boundaries where that narrative dies: compaction
+drops tool results first, so a stale recalled copy can outlive the story of its
+own removal and be summarized as fact. Deterministic supersession, not model
 competence, is the design driver.
 
 ## Lifecycle
@@ -721,15 +714,15 @@ history before the turn, including prior visible recalled context.
 Every active slot resolves independently against that same pre-recall view.
 Each result is normalized and validated, and the whole turn-wide batch commits
 atomically: one failing slot or one invalid batch applies nothing for any slot.
-Accepted changes are applied in stable slot-path order, after the durable
+Accepted messages are applied in stable slot-path order, after the durable
 prefix and before the admitted turn input, and the projected view is recomputed
 before tools resolve and the model runs.
 
 The first turn has `ctx.turn.sequence === 0`. A provider does not need to
-deduplicate its own recall: returning the current state as keyed upserts every
-turn is the intended pattern, because identical upserts are no-ops. A provider
-may still use the turn coordinates to recall only on the first turn, or use the
-current input as a retrieval query on every turn.
+deduplicate its own recall: returning the current state as keyed messages every
+turn is the intended pattern, because identical keyed messages are no-ops. A
+provider may still use the turn coordinates to recall only on the first turn,
+or use the current input as a retrieval query on every turn.
 
 ### Compaction capture, canonicalization, and recall
 
@@ -750,19 +743,19 @@ is reattached to the rewritten history, so items hidden from the currently
 active scope survive another scope's compaction, and sparse retrieval stays
 accumulative across compaction.
 
-Because superseded versions, hidden scopes, and tombstones can grow while the
-visible prompt stays constant, eve triggers canonicalization on raw
-attributed-record growth independently of visible prompt size. If canonical
-memory state alone exceeds its configured bound, compaction fails with an
-actionable error — and the failure is recoverable by design: the next recall
-boundary still runs, so providers can retract items, and the bound is
-application-configurable. eve never silently summarizes, evicts, or truncates
-provider items.
+Because superseded versions and hidden scopes can grow while the visible
+prompt stays constant, eve triggers canonicalization on raw attributed-record
+growth independently of visible prompt size. If canonical memory state alone
+exceeds its configured bound, compaction fails with an actionable error — and
+the failure is recoverable by design: the next recall boundary still runs, so
+providers can supersede their keyed items with smaller content, and the bound
+is application-configurable. eve never silently summarizes, evicts, or
+truncates provider items.
 
 After a checkpoint is durably appended, eve calls `recall` with
 `phase: "compaction.completed"`. The provider receives the settled
-post-compaction projected history and may return fresh changes, applied through
-the same atomic path. Identical retained items are no-ops. The call occurs
+post-compaction projected history and may return fresh messages, applied
+through the same atomic path. Identical retained items are no-ops. The call occurs
 after every successful automatic or manual compaction, even when the provider
 skipped ordinary turn-start recall.
 
@@ -801,9 +794,10 @@ contribution seam ([#2347](https://github.com/vercel/eve/issues/2347)). Memory
 adds no tool machinery of its own: no memory-specific approval methods, no
 separate callback registry, and no `defineMemoryTool` wrapper.
 
-Tools never emit recall changes. A tool executor mutates provider storage and
-returns ordinary tool output; recall is the single writer of recalled context,
-and the consistency contract is that the next recall boundary reflects storage.
+Tools never write recalled context. A tool executor mutates provider storage
+and returns ordinary tool output; recall is the single writer of recalled
+context, and the consistency contract is that the next recall boundary reflects
+storage.
 Within the turn that mutated storage, the stale recalled item remains visible
 and the model's own tool-call narrative covers the gap; the next turn-start or
 post-compaction recall trues it up.
@@ -865,7 +859,7 @@ externally visible `capture` side effects.
 
 Recall operations for one session are serialized by construction: turn steps
 serialize through workflow hook-ownership claims, so two recall operations for
-the same slot, namespace, and scope cannot complete out of order. The change
+the same slot, namespace, and scope cannot complete out of order. The message
 shape is therefore revision-free. eve persists each operation's accepted
 normalized batch, or its canonical digest, and a cold replay must reuse the
 stored batch or match its digest exactly; a replay that returns a reordered or
@@ -900,7 +894,7 @@ implementation uses exactly the reviewed constants.
 | Scope component             | 1,024 UTF-8 bytes                    | each scalar or tuple component                           |
 | Scope tuple                 | 16 components                        | resolver array results                                   |
 | Canonical key input         | 4,096 UTF-8 bytes                    | total namespace-plus-scope encoding                      |
-| Provider item ID            | non-empty, 1,024 UTF-8 bytes         | upsert and retract `id`                                  |
+| Provider item ID            | non-empty, 1,024 UTF-8 bytes         | keyed message `id`                                       |
 | Key prefixes                | `memns1_`, `memscope1_`, `memitem1_` | SHA-256 digests, base64url                               |
 | Raw-record canonicalization | 512 records or 262,144 bytes         | superseded/hidden attributed records between compactions |
 | Canonical private state     | 131,072 bytes, configurable          | folded memory state that must survive compaction         |
@@ -923,24 +917,27 @@ interface FileMemoryOptions {
 function fileMemory(options?: FileMemoryOptions): MemoryProvider;
 ```
 
-### Recall: one whole-document upsert
+### Recall: one whole-document keyed message
 
 `recall` loads the current document at every turn start and after every
 successful compaction, renders it — a heading that names the slot, explains the
 indexed entries, and states the exact qualified removal tool name, followed by
-each live `index: text` line — and returns exactly one upsert under a single
-stable provider ID. An unchanged document is an identical upsert and therefore
-a no-op; the provider never scans history. A mutated document supersedes the
-previous copy, so a removed or edited entry deterministically leaves model
-context at the next recall boundary, with no stale copy left visible. A missing
-document or one with zero live entries returns a retract of the document ID,
-which is a no-op when nothing was ever recalled.
+each live `index: text` line — and returns exactly one keyed message under a
+single stable provider ID. An unchanged document is an identical keyed message
+and therefore a no-op; the provider never scans history. A mutated document
+supersedes the previous copy, so a removed or edited entry deterministically
+leaves model context at the next recall boundary, with no stale copy left
+visible. A document whose last entry was removed renders an empty state — the
+heading plus a line stating no memories are saved — so removal of the final
+entry supersedes the old content the same way. A missing document, one never
+created for this scope key, recalls nothing, so sessions that never save
+memories carry no recalled context.
 
 Whole-document granularity is a provider choice, not an API requirement: each
 mutation re-sends the document and invalidates the cache from the document's
-previous position, while non-mutation turns cost nothing. Per-entry upserts
-remain a legal finer-grained alternative for providers that can enumerate their
-own deletions.
+previous position, while non-mutation turns cost nothing. Per-entry keyed
+messages remain a legal finer-grained alternative for providers whose removals
+can supersede per item.
 
 ### Tools
 
@@ -960,10 +957,10 @@ monotonically and never renumbered or reused, including after the highest live
 index is removed, so a model-facing index from earlier context can never alias
 a different, later fact. `maxEntries` counts live entries, so removal frees
 capacity without resetting the high-water mark. When `lastAllocatedIndex`
-reaches `Number.MAX_SAFE_INTEGER`, the next save fails explicitly. Deletion
-visibility comes from the changed document upsert superseding the previous
-copy, so the document needs no deletion tombstones. Header bytes count toward
-the document limit.
+reaches `Number.MAX_SAFE_INTEGER`, the next save fails explicitly. Removal
+visibility comes from the changed document superseding the previous copy, so
+the document needs no deletion tombstones. Header bytes count toward the
+document limit.
 
 ### Backend contract and selection
 
@@ -1004,13 +1001,13 @@ environment. Tests pass `inMemory()` explicitly.
 
 The same lifecycle also supports a hosted semantic provider:
 
-| Boundary               | Bounded file provider       | Hosted semantic provider                    |
-| ---------------------- | --------------------------- | ------------------------------------------- |
-| `turn.started` recall  | Upsert the current document | Upsert retrieval results for the turn input |
-| Post-compaction recall | Upsert if context is absent | Refresh against the compacted history       |
-| Pre-compaction capture | Omit                        | Preserve facts or checkpoint provider state |
-| Completed-turn capture | Omit                        | Capture the completed interaction           |
-| Turn tools             | Save and remove entries     | Provider-defined search, save, or forget    |
+| Boundary               | Bounded file provider       | Hosted semantic provider                     |
+| ---------------------- | --------------------------- | -------------------------------------------- |
+| `turn.started` recall  | Recall the current document | Recall keyed retrieval results for the input |
+| Post-compaction recall | Recall if context is absent | Refresh against the compacted history        |
+| Pre-compaction capture | Omit                        | Preserve facts or checkpoint provider state  |
+| Completed-turn capture | Omit                        | Capture the completed interaction            |
+| Turn tools             | Save and remove entries     | Provider-defined search, save, or forget     |
 
 At each boundary, a provider may return `undefined` from `recall`, omit or do
 nothing in `capture`, or return `null` from `tools`.
@@ -1038,10 +1035,10 @@ recall visibility. Mounted extensions cannot contribute memory slots.
 - Raw durable history is storage-only. Every message-bearing consumer receives
   one canonical scope projection with attribution stripped; no authored
   callback or model boundary sees hidden items or eve-owned metadata.
-- A recall result is a validated batch of append/upsert/retract changes,
-  committed atomically per turn across all active slots. Omission never
-  retracts; appends are immutable; identical upserts are no-ops; retracts are
-  idempotent.
+- A recall result is a validated batch of recalled messages, committed
+  atomically per turn across all active slots. Omission never removes; unkeyed
+  messages are immutable; an identical keyed message is a no-op; a changed
+  keyed message supersedes only its own prior version.
 - Item identity is `(slot, namespaceKey, scopeKey, idKey)`. The same provider
   ID under different locks is a different item.
 - `visibility` controls which attributed records enter a model request after a
@@ -1050,11 +1047,11 @@ recall visibility. Mounted extensions cannot contribute memory slots.
 - Compaction canonicalizes memory records without laundering any attributed
   record into a free-form summary and without dropping items hidden from the
   active scope. Canonical-state overflow fails recoverably: recall still runs
-  so providers can retract.
+  so providers can supersede keyed items with smaller content.
 - Provider tools are slot-qualified, scope-bound ordinary dynamic tools built
   entirely on the generic dynamic-tool engine. Each turn resolves one complete
   tool set, every model step uses it, and a durable call keeps its originating
-  definition until settlement. Tools never emit recall changes.
+  definition until settlement. Tools never write recalled context.
 - An optional static slot description is prepended to every provider tool
   description before durable metadata capture. It never derives from or exposes
   the namespace or scope, and it guides model routing without granting access.
@@ -1063,15 +1060,15 @@ recall visibility. Mounted extensions cannot contribute memory slots.
 ## Non-goals
 
 One earlier non-goal is explicitly reversed: this proposal gives eve a
-projection record model — item identity, supersede, and hide semantics for
-recalled context. eve owns how recalled items appear, update, and disappear in
-model context. eve still owns no storage model: what a provider persists, how
-it ranks, embeds, extracts, or retains data remains entirely provider-defined.
+projection record model — item identity and supersession semantics for
+recalled context. eve owns how recalled items appear and update in model
+context. eve still owns no storage model: what a provider persists, how it
+ranks, embeds, extracts, or retains data remains entirely provider-defined.
 
 Still out of scope:
 
 - Framework-provided remember, forget, purge, export, or administrative APIs.
-  A retract changes model-visible context; it is not a storage-erasure
+  Supersession changes model-visible context; it is not a storage-erasure
   guarantee, and storage erasure remains a provider operation.
 - A built-in capture model, extractor, formatter, retention policy, or erasure
   guarantee.
@@ -1132,10 +1129,11 @@ Still out of scope:
       thread](https://github.com/vercel/eve/pull/1581#discussion_r3807269437).
 
 - [x] **Define recall placement and tool invocation semantics.** A recall
-      result is a validated batch of append/upsert/retract changes applied
-      atomically at its lifecycle boundary as user-role context. `null`,
-      `undefined`, empty batches, and normalized empty content change nothing
-      and never clear earlier history; omission never retracts. Session
+      result is a validated batch of recalled messages applied atomically at
+      its lifecycle boundary as user-role context; a keyed message supersedes
+      its prior version. `null`, `undefined`, empty batches, and normalized
+      empty content change nothing and never clear earlier history; omission
+      never removes. Session
       visibility retains records across scope-key changes within one namespace;
       scope visibility filters earlier scopes. eve invokes `recall`
       deterministically and resolves one tool set per turn, while the model
