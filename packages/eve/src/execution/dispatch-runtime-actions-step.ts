@@ -20,6 +20,7 @@ import { createAgentContinuationBundle } from "#execution/agent-continuation-bun
 import {
   emitSubagentCalled,
   prepareRuntimeActionDispatch,
+  serializeRuntimeActionDispatchContext,
   type RuntimeActionDispatchInput,
   type RuntimeActionDispatchResult,
   startSubagent,
@@ -123,6 +124,7 @@ export async function dispatchRuntimeActionsStep(
 
   return {
     results,
+    serializedContext: serializeRuntimeActionDispatchContext(prepared),
     sessionState:
       nextSession === session
         ? input.sessionState

@@ -35,6 +35,7 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
   readonly sessionState: DurableSessionState;
 }): Promise<{
   readonly results: readonly RuntimeActionResult[];
+  readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly pendingTasks: readonly {
     readonly taskInboxToken: string;
@@ -116,6 +117,7 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
 
   return {
     results: [...dispatched.results, ...blockedResults],
+    serializedContext: dispatched.serializedContext,
     sessionState: dispatched.sessionState,
     pendingTasks: dispatched.pendingTasks,
   };

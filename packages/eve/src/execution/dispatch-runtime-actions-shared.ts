@@ -8,6 +8,7 @@
  */
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
+import type { ContextContainer } from "#context/container.js";
 import {
   callAdapterEventHandler,
   type ChannelAdapter,
@@ -19,6 +20,7 @@ import {
   ChannelInstrumentationKey,
   InitiatorAuthKey,
   SandboxKey,
+  WorkGraphKey,
 } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import {
@@ -26,7 +28,7 @@ import {
   ChannelKey,
   type CompiledBundle,
 } from "#runtime/sessions/runtime-context-keys.js";
-import { deserializeContext } from "#context/serialize.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
   type DispatchOutcome,
   isAgentHandleAction,
@@ -66,6 +68,7 @@ import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { readSessionTraceContext } from "#tracing/agent-trace-context-store.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
+import { reduceWorkGraph } from "#harness/work-graph.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { isTaskControlAction } from "#execution/tasks/parent/dispatch.js";
@@ -127,6 +130,7 @@ export interface RuntimeActionDispatchInput {
  */
 export interface RuntimeActionDispatchResult {
   readonly results: readonly RuntimeActionResult[];
+  readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly pendingTasks: readonly {
     readonly taskInboxToken: string;
@@ -138,6 +142,7 @@ export interface RuntimeActionDispatchResult {
 /** Everything preflight produces before either step's dispatch loop runs. */
 export interface PreparedRuntimeActionDispatch {
   readonly adapter: ChannelAdapter;
+  readonly context: ContextContainer;
   readonly adapterCtx: ChannelAdapterContext;
   readonly auth: Parameters<typeof buildSubagentRunInput>[0]["auth"];
   readonly batch: NonNullable<ReturnType<typeof getPendingRuntimeActionBatch>>;
@@ -226,6 +231,7 @@ export async function prepareRuntimeActionDispatch(input: {
     batch,
     bundle,
     capabilities: ctx.get(CapabilitiesKey),
+    context: ctx,
     channelMetadata: ctx.get(ChannelInstrumentationKey),
     fanoutSize: plan.filter((entry) => entry.kind === "start" && entry.target.kind === "local")
       .length,
@@ -287,36 +293,37 @@ export async function emitSubagentCalled(input: {
         : entry.target.kind === "remote"
           ? entry.target.dynamicRemoteAgent
           : undefined;
-    const parentEvent = await callAdapterEventHandler(
-      input.adapter,
-      createSubagentCalledEvent({
-        callId: outcome.callId,
-        childSessionId: outcome.address.sessionId,
-        name: outcome.name,
-        remote:
-          outcome.address.kind === "agent/remote"
-            ? {
-                // The proxy route re-resolves outbound auth from this key via
-                // resolveRemoteAgentStreamHeaders: a node id lands in
-                // subagentRegistry.subagentsByNodeId (static definition), a
-                // credentialsStepId lands in the step registry (dynamic
-                // definition). Both sides of this ternary must stay in sync
-                // with that lookup order.
-                resolverId:
-                  dynamicRemoteAgent === undefined
-                    ? action.nodeId
-                    : dynamicRemoteAgent.credentialsStepId,
-                url: outcome.address.url,
-              }
-            : undefined,
-        sequence: input.batchEvent.sequence,
-        sessionId: input.sessionId,
-        toolName: outcome.toolName,
-        turnId: input.batchEvent.turnId,
-        workflowId: workflowEntryReference.workflowId,
-      }),
-      input.adapterCtx,
+    const childCalled = createSubagentCalledEvent({
+      callId: outcome.callId,
+      childSessionId: outcome.address.sessionId,
+      name: outcome.name,
+      remote:
+        outcome.address.kind === "agent/remote"
+          ? {
+              // The proxy route re-resolves outbound auth from this key via
+              // resolveRemoteAgentStreamHeaders: a node id lands in
+              // subagentRegistry.subagentsByNodeId (static definition), a
+              // credentialsStepId lands in the step registry (dynamic
+              // definition). Both sides of this ternary must stay in sync
+              // with that lookup order.
+              resolverId:
+                dynamicRemoteAgent === undefined
+                  ? action.nodeId
+                  : dynamicRemoteAgent.credentialsStepId,
+              url: outcome.address.url,
+            }
+          : undefined,
+      sequence: input.batchEvent.sequence,
+      sessionId: input.sessionId,
+      toolName: outcome.toolName,
+      turnId: input.batchEvent.turnId,
+      workflowId: workflowEntryReference.workflowId,
+    });
+    input.adapterCtx.ctx.set(
+      WorkGraphKey,
+      reduceWorkGraph(input.adapterCtx.ctx.get(WorkGraphKey), childCalled),
     );
+    const parentEvent = await callAdapterEventHandler(input.adapter, childCalled, input.adapterCtx);
     await input.writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(parentEvent)));
   } catch (error) {
     logError(log, "subagent.called emission failed", error, {
@@ -325,6 +332,14 @@ export async function emitSubagentCalled(input: {
       toolName: outcome.toolName,
     });
   }
+}
+
+/** Serializes dispatch-time context only when a work graph is present. */
+export function serializeRuntimeActionDispatchContext(
+  prepared: PreparedRuntimeActionDispatch,
+): Record<string, unknown> | undefined {
+  const work = prepared.context.get(WorkGraphKey);
+  return work !== undefined && work.revision > 0 ? serializeContext(prepared.context) : undefined;
 }
 
 /**
