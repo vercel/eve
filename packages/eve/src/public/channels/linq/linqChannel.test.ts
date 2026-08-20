@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { createLinqAdapter, directMessage, markRead, newMessage, send } = vi.hoisted(() => ({
-  createLinqAdapter: vi.fn(() => ({ name: "linq" })),
+  createLinqAdapter: vi.fn((_config: { credentials?: () => unknown | Promise<unknown> }) => ({
+    name: "linq",
+  })),
   directMessage: vi.fn(),
   markRead: vi.fn(),
   newMessage: vi.fn(),

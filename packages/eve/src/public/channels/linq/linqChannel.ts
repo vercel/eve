@@ -119,7 +119,7 @@ export function linqChannel(config: LinqChannelConfig): LinqChannel {
 
 function normalizeCredentials(
   credentials: LinqChannelConfig["credentials"],
-): Pick<LinqAdapterConfig, "credentials" | "webhookVerifier"> {
+): Partial<Pick<LinqAdapterConfig, "credentials" | "webhookVerifier">> {
   const { apiKey, signingSecret, webhookVerifier } = credentials ?? {};
   return {
     ...(apiKey === undefined
