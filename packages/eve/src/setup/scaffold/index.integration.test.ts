@@ -242,8 +242,9 @@ describe("ensureChannel", () => {
       join(projectRoot, "app/_components/agent-chat.tsx"),
       "utf8",
     );
-    expect(agentChatSource).toContain("rounded-full transition-colors");
-    expect(agentChatSource).not.toContain("rounded - full transition - colors");
+    expect(agentChatSource).toContain("<PromptInputTextarea disabled={isBusy}");
+    expect(agentChatSource).toContain("{showPendingThinking ? <PendingThinking /> : null}");
+    expect(agentChatSource).not.toContain("StatusDot");
     await expect(readFile(join(projectRoot, "next.config.ts"), "utf8")).resolves.toContain(
       "withEve",
     );
