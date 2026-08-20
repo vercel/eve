@@ -1,5 +1,13 @@
 # @eve/self-modification
 
+## 3.0.0
+
+### Patch Changes
+
+- Updated dependencies [f2169fa]
+- Updated dependencies [a43e14f]
+  - eve@0.42.0
+
 ## 2.0.0
 
 ### Patch Changes

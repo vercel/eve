@@ -1,5 +1,15 @@
 # eve
 
+## 0.42.0
+
+### Minor Changes
+
+- a43e14f: Prevent channel HITL responses from carrying channel-local metadata into strict session-inbox payloads. Channel and session `respond()` calls now accept exact response literals or values proven by `parseInputResponses()`, rejecting imprecise `InputResponse[]` values that could have erased extra keys.
+
+### Patch Changes
+
+- f2169fa: Remove the `task_sleep` framework tool. Task-mode parents now rely on lifecycle notifications instead of model-paced waits.
+
 ## 0.41.0
 
 ### Minor Changes
