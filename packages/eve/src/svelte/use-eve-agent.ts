@@ -4,10 +4,10 @@ import type { UserContent } from "ai";
 import {
   detachEveAgentStore,
   EveAgentStore,
+  type EveAgentPendingSubmission,
   type EveAgentStoreCallbacks,
   type EveAgentStoreSnapshot,
   type EveAgentStoreStatus,
-  type PrepareSend,
 } from "#client/eve-agent-store.js";
 import { resolveEveAgentHost } from "#client/agent-host.js";
 import { defaultMessageReducer, type EveMessageData } from "#client/message-reducer.js";
@@ -23,7 +23,11 @@ import type {
 } from "#client/types.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 
-export type { PrepareSend };
+export type {
+  EveAgentPendingSubmission,
+  EveAgentPendingSubmissionStatus,
+  PrepareSend,
+} from "#client/eve-agent-store.js";
 
 /**
  * Session lifecycle phase: `"ready"` (idle), `"submitted"` (request sent,
@@ -34,8 +38,9 @@ export type UseEveAgentStatus = EveAgentStoreStatus;
 
 /**
  * Immutable point-in-time view of an eve agent session: projected `data`, the
- * last `error`, the raw `events` stream, the `session` cursor, and `status`.
- * `useEveAgent` passes this snapshot to the `onFinish` callback.
+ * last `error`, the raw `events` stream, browser-local `pendingSubmissions`,
+ * the `session` cursor, and `status`. `useEveAgent` passes this snapshot to the
+ * `onFinish` callback.
  */
 export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
 
@@ -47,7 +52,7 @@ export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
  * new events.
  */
 export interface UseEveAgentReturn<TData> {
-  /** Request durable cancellation of the active turn while continuing to receive its events. */
+  /** Requests durable cancellation of the active turn while continuing to receive its events. */
   readonly cancel: () => Promise<CancelSessionResult>;
   /** Projected state built by reducing every stream event through the reducer. */
   readonly data: TData;
@@ -55,6 +60,8 @@ export interface UseEveAgentReturn<TData> {
   readonly error: Error | undefined;
   /** Raw server events received during this session (authoritative stream). */
   readonly events: readonly MessageStreamEvent[];
+  /** Browser-local messages submitted while another turn is active. */
+  readonly pendingSubmissions: readonly EveAgentPendingSubmission[];
   /** Clear all state and start a new session. */
   readonly reset: () => void;
   /** Send a message with optional turn settings. */
@@ -168,6 +175,11 @@ class SvelteEveAgent<TData> implements UseEveAgentReturn<TData> {
   get events(): readonly MessageStreamEvent[] {
     this.#subscribe();
     return this.#snapshot.events;
+  }
+
+  get pendingSubmissions(): readonly EveAgentPendingSubmission[] {
+    this.#subscribe();
+    return this.#snapshot.pendingSubmissions;
   }
 
   get session(): ClientSessionState | undefined {

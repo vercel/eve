@@ -6,7 +6,6 @@ import {
   type EveAgentStoreCallbacks,
   type EveAgentStoreSnapshot,
   type EveAgentStoreStatus,
-  type PrepareSend,
 } from "#client/eve-agent-store.js";
 import { resolveEveAgentHost } from "#client/agent-host.js";
 import type { EveAgentReducer } from "#client/reducer.js";
@@ -23,7 +22,11 @@ import type {
   ClientSessionState,
 } from "#client/types.js";
 
-export type { PrepareSend };
+export type {
+  EveAgentPendingSubmission,
+  EveAgentPendingSubmissionStatus,
+  PrepareSend,
+} from "#client/eve-agent-store.js";
 
 /**
  * Lifecycle status of an eve agent session.
@@ -37,8 +40,8 @@ export type UseEveAgentStatus = EveAgentStoreStatus;
 
 /**
  * Snapshot of an eve agent session: `data` (the reducer projection), `events`
- * (the authoritative server stream), `session` (resumable cursor), `status`,
- * and `error`.
+ * (the authoritative server stream), `pendingSubmissions` (browser-local
+ * overlapping sends), `session` (resumable cursor), `status`, and `error`.
  */
 export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
 
@@ -50,7 +53,10 @@ export interface UseEveAgentHelpers<TData> extends UseEveAgentSnapshot<TData> {
   readonly cancel: () => Promise<CancelSessionResult>;
   /** Resets the session: detaches any local stream, recreates the owned session, and clears events and projected data. */
   readonly reset: () => void;
-  /** Sends a message. Rejects if a turn is already in flight. */
+  /**
+   * Submits a message. An overlapping send requires an explicit `turnPolicy`
+   * and resolves when eve accepts the durable delivery.
+   */
   readonly send: <TOutput = unknown>(
     message: string | UserContent,
     options?: SendTurnOptions<TOutput>,
@@ -120,7 +126,8 @@ export function useEveAgent<TData>(
 /**
  * React hook that drives an eve session and projects its event stream into UI data.
  *
- * Returns the current snapshot (`data`, `events`, `session`, `status`, `error`)
+ * Returns the current snapshot (`data`, `events`, `pendingSubmissions`,
+ * `session`, `status`, `error`)
  * plus the commands `send`, `respond`, `cancel`, and `reset`. With no reducer, `data` is the
  * built-in `UIMessage` projection from {@link defaultMessageReducer} (`TData`
  * is {@link EveMessageData}); pass a reducer to project into your own shape and

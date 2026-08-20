@@ -4,10 +4,10 @@ import type { UserContent } from "ai";
 import {
   detachEveAgentStore,
   EveAgentStore,
+  type EveAgentPendingSubmission,
   type EveAgentStoreCallbacks,
   type EveAgentStoreSnapshot,
   type EveAgentStoreStatus,
-  type PrepareSend,
 } from "#client/eve-agent-store.js";
 import { resolveEveAgentHost } from "#client/agent-host.js";
 import type { EveAgentReducer } from "#client/reducer.js";
@@ -23,7 +23,11 @@ import type {
   ClientSessionState,
 } from "#client/types.js";
 
-export type { PrepareSend };
+export type {
+  EveAgentPendingSubmission,
+  EveAgentPendingSubmissionStatus,
+  PrepareSend,
+} from "#client/eve-agent-store.js";
 
 /**
  * Lifecycle phase of a `useEveAgent` session: `"ready"` (idle), `"submitted"`
@@ -34,7 +38,7 @@ export type UseEveAgentStatus = EveAgentStoreStatus;
 
 /**
  * Point-in-time projected state for an eve agent session (`data`, `error`,
- * `events`, `session`, `status`).
+ * `events`, `pendingSubmissions`, `session`, `status`).
  *
  * `useEveAgent` passes this shape to callbacks such as `onFinish`, but exposes
  * the same fields as individual reactive refs on its return value.
@@ -45,7 +49,7 @@ export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
  * Reactive return value from `useEveAgent`.
  */
 export interface UseEveAgentReturn<TData> {
-  /** Request durable cancellation of the active turn while continuing to receive its events. */
+  /** Requests durable cancellation of the active turn while continuing to receive its events. */
   readonly cancel: () => Promise<CancelSessionResult>;
   /** Projected state: the reducer folds every stream event into this value. */
   readonly data: ComputedRef<TData>;
@@ -53,6 +57,8 @@ export interface UseEveAgentReturn<TData> {
   readonly error: ComputedRef<Error | undefined>;
   /** Raw server events from this session (authoritative stream). */
   readonly events: ComputedRef<readonly MessageStreamEvent[]>;
+  /** Browser-local messages submitted while another turn is active. */
+  readonly pendingSubmissions: ComputedRef<readonly EveAgentPendingSubmission[]>;
   /** Clear all state and start a new session. */
   readonly reset: () => void;
   /** Send a message with optional turn settings. */
@@ -149,7 +155,7 @@ export function useEveAgent<TData>(
  * `defaultMessageReducer()`; pass `reducer` to project into a custom `TData`.
  * Returns reactive refs (`data`, `error`, `events`, `session`, `status`) plus
  * `send`, `respond`, `cancel`, and `reset`. Configuration is read once on store creation;
- * remount to change it. On scope dispose, the in-flight request is detached and
+ * remount to change it. On scope dispose, the in-flight request is aborted and
  * the store unsubscribed.
  */
 export function useEveAgent<TData>(
@@ -194,6 +200,7 @@ export function useEveAgent<TData>(
     data: computed(() => snapshot.value.data),
     error: computed(() => snapshot.value.error),
     events: computed(() => snapshot.value.events),
+    pendingSubmissions: computed(() => snapshot.value.pendingSubmissions),
     reset: () => store.reset(),
     respond: <TOutput = unknown>(
       inputResponses: Parameters<ClientSession["respond"]>[0],

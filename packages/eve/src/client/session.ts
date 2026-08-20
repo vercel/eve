@@ -204,23 +204,20 @@ export class ClientSession {
   async *#streamAndAdvance(options?: StreamOptions): AsyncGenerator<MessageStreamEvent> {
     const startIndex = options?.startIndex ?? this.#state.streamIndex;
     let eventCount = 0;
-    try {
-      for await (const event of this.#readStream({
-        follow: options?.follow,
-        signal: options?.signal,
-        startIndex,
-        streamReconnectPolicy: options?.streamReconnectPolicy,
-      })) {
-        eventCount += 1;
-        yield event;
-      }
-    } finally {
+    for await (const event of this.#readStream({
+      follow: options?.follow,
+      signal: options?.signal,
+      startIndex,
+      streamReconnectPolicy: options?.streamReconnectPolicy,
+    })) {
+      eventCount += 1;
       if (startIndex >= 0) {
         this.#state = {
           sessionId: this.#state.sessionId,
           streamIndex: startIndex + eventCount,
         };
       }
+      yield event;
     }
   }
 

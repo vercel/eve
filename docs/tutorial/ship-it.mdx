@@ -24,6 +24,10 @@ const nextConfig: NextConfig = {};
 export default withEve(nextConfig);
 ```
 
+The generated composer remains available during a turn. Queue is the default
+for a follow-up, Steer replaces the active turn, and an **Up next** panel shows
+the browser's pending submissions. Stop remains a separate action.
+
 ## A dashboard with `useEveAgent`
 
 The dashboard talks to the built-in eve HTTP channel (`agent/channels/eve.ts`). On the browser side, `useEveAgent` handles session creation, streaming, and HITL. The scaffold renders its chat from `app/_components/agent-chat.tsx`, mounted by `app/page.tsx`. That component is fuller than you need to start, so replace its contents with this minimal version:

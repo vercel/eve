@@ -17,6 +17,8 @@ export { ClientSessions, type CreatedClientSession } from "#client/sessions.js";
 // ---------------------------------------------------------------------------
 
 export type {
+  EveAgentPendingSubmission,
+  EveAgentPendingSubmissionStatus,
   EveAgentStoreCallbacks,
   EveAgentStoreInit,
   EveAgentStoreSnapshot,

@@ -134,6 +134,7 @@ describe("useEveAgent", () => {
     });
 
     const firstHelpers = seenHelpers.at(-1);
+    expect(firstHelpers?.pendingSubmissions).toEqual([]);
 
     await act(async () => {
       root?.update(createElement(TestComponent, { label: "second" }));
@@ -248,6 +249,7 @@ describe("useEveAgent", () => {
     await act(async () => {
       startResponse.resolve(createStartedMessageResponse("session_1", "http:session_1"));
       await sendPromise;
+      await vi.waitFor(() => expect(helpers?.status).toBe("ready"));
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -368,6 +370,7 @@ describe("useEveAgent", () => {
     await act(async () => {
       startResponse.resolve(createStartedMessageResponse("session_1", "http:session_1"));
       await sendPromise;
+      await vi.waitFor(() => expect(helpers?.status).toBe("ready"));
     });
   });
 
@@ -685,6 +688,7 @@ describe("useEveAgent", () => {
     await act(async () => {
       startResponse.resolve(createStartedMessageResponse("session_1", "http:session_1"));
       await sendPromise;
+      await vi.waitFor(() => expect(helpers?.status).toBe("ready"));
     });
 
     expect(helpers?.status).toBe("ready");

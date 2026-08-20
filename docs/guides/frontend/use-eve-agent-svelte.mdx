@@ -44,20 +44,21 @@ Call the binding once for a conversation and read its reactive getters directly.
 
 The state fields are reactive getters; the commands are ordinary methods:
 
-| Property                             | Svelte shape                      |
-| ------------------------------------ | --------------------------------- |
-| `data`                               | `TData`                           |
-| `status`                             | `UseEveAgentStatus`               |
-| `error`                              | `Error \| undefined`              |
-| `events`                             | `readonly MessageStreamEvent[]`   |
-| `session`                            | `ClientSessionState \| undefined` |
-| `send`, `respond`, `cancel`, `reset` | Methods                           |
+| Property                             | Svelte shape                           |
+| ------------------------------------ | -------------------------------------- |
+| `data`                               | `TData`                                |
+| `status`                             | `UseEveAgentStatus`                    |
+| `error`                              | `Error \| undefined`                   |
+| `events`                             | `readonly MessageStreamEvent[]`        |
+| `pendingSubmissions`                 | `readonly EveAgentPendingSubmission[]` |
+| `session`                            | `ClientSessionState \| undefined`      |
+| `send`, `respond`, `cancel`, `reset` | Methods                                |
 
 Read the getters directly in templates, `$derived`, or `$effect`. The [shared returned-state reference](./overview#returned-state) describes what each value and command does.
 
 ## Send a message
 
-Call `agent.send(text)` for text or pass content parts for attachments. The API and transport behavior match the [shared sending guide](./overview#sending-and-streaming); only reactive access differs in Svelte.
+Call `agent.send(text)` for text or pass content parts for attachments. The API and transport behavior match the [shared sending guide](./overview#sending-and-streaming); only reactive access differs in Svelte. Read `agent.pendingSubmissions` to render messages queued or steering during an active turn.
 
 ## Human-in-the-loop prompts
 

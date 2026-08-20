@@ -69,17 +69,18 @@ export function Chat() {
 
 `useEveAgent()` returns the current UI state plus commands:
 
-| Field     | What it is                                                                  |
-| --------- | --------------------------------------------------------------------------- |
-| `data`    | Projected UI state from the reducer. Defaults to `{ messages }`.            |
-| `status`  | `"ready"`, `"submitted"`, `"streaming"`, or `"error"`. Drives the composer. |
-| `error`   | The last `Error` thrown, if any.                                            |
-| `events`  | Raw eve stream events for this session.                                     |
-| `session` | Serializable fixed session cursor (`sessionId`, `streamIndex`).             |
-| `send`    | Send text or a multi-part message, with per-turn options.                   |
-| `respond` | Answer pending HITL input requests, with per-turn options.                  |
-| `cancel`  | Request durable cancellation of the active turn.                            |
-| `reset`   | Clear local events, data, errors, and the local session cursor.             |
+| Field                | What it is                                                                  |
+| -------------------- | --------------------------------------------------------------------------- |
+| `data`               | Projected UI state from the reducer. Defaults to `{ messages }`.            |
+| `status`             | `"ready"`, `"submitted"`, `"streaming"`, or `"error"`. Drives the composer. |
+| `error`              | The last `Error` thrown, if any.                                            |
+| `events`             | Raw eve stream events for this session.                                     |
+| `pendingSubmissions` | Browser-local messages submitted while another turn is active.              |
+| `session`            | Serializable fixed session cursor (`sessionId`, `streamIndex`).             |
+| `send`               | Send text or a multi-part message, with per-turn options.                   |
+| `respond`            | Answer pending HITL input requests, with per-turn options.                  |
+| `cancel`             | Request durable cancellation of the active turn.                            |
+| `reset`              | Clear local events, data, errors, and the local session cursor.             |
 
 Most chat UIs only need `data.messages` and `status`. Drop down to `events` when you need the authoritative wire events directly, for example to persist an audit log or build a custom projection.
 
@@ -107,15 +108,62 @@ await agent.send([
 
 Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and `status` moves from `ready` to `submitted` to `streaming` and back. Call `cancel()` to stop the durable server-side turn, and `reset()` to clear local state so the next send starts a fresh durable session.
 
-`cancel()` can be called as soon as `status` is `"submitted"`; the hook waits for the active response to identify its turn when necessary, sends one guarded cancellation request, and keeps the event stream attached. The promise resolves when eve accepts the request or reports that no turn is active, and rejects if the cancellation request fails. The turn then settles on the same stream as `turn.cancelled` followed by `session.waiting`, so the session is safe to continue.
+After a successful delivery, `send()` resolves as soon as eve accepts it. It
+does not wait for the resulting turn to finish. Transport failures surface
+through `error` and `onError`. Use `status`, `onFinish`, or the session events
+when later work depends on turn completion.
+
+### Queue or steer during an active turn
+
+The hook guards against accidental double submission. While `status` is
+`"submitted"` or `"streaming"`, pass an explicit policy with each message:
+
+```tsx
+await agent.send("Use this after the current response.", {
+  turnPolicy: "queue",
+});
+
+await agent.send("Stop and respond to this instead.", {
+  turnPolicy: "steer",
+});
+```
+
+`"queue"` lets the current turn finish before eve processes the message.
+`"steer"` durably buffers the message, then cooperatively cancels the active
+turn and starts a replacement. Output already streamed and completed side
+effects are not rolled back. Calling `send()` while busy without a
+`turnPolicy` rejects.
+
+Render `pendingSubmissions` when the composer remains available during a turn:
+
+```tsx
+{
+  agent.pendingSubmissions.map((submission) => (
+    <p key={submission.id}>
+      {submission.message} — {submission.status}
+    </p>
+  ));
+}
+```
+
+Each item reports its requested `turnPolicy` and a `status` of `"submitting"`,
+`"queued"`, `"steering"`, or `"failed"`. The list is a projection for the
+browser that submitted those messages, not an authoritative server-side queue.
+eve may combine adjacent accepted messages into one later turn.
+
+`cancel()` can be called as soon as `status` is `"submitted"`; the hook waits
+for the shared session stream to identify the active turn when necessary, sends
+one guarded cancellation request, and stays attached. The promise resolves
+when eve accepts the request or reports that no turn is active, and rejects if
+the request fails. The turn then settles on the same stream as `turn.cancelled`
+followed by `session.waiting`, so the session is safe to continue. Accepted
+queued messages remain buffered and run after the cancelled turn.
 
 ```tsx
 if (agent.status === "submitted" || agent.status === "streaming") {
   await agent.cancel();
 }
 ```
-
-Unmounting the component or closing the page disconnects the local stream but does not cancel server execution. Call `cancel()` before detaching when the user intends to stop the durable turn.
 
 After eve confirms an attachment turn with `message.received`, the default reducer projects each
 received attachment as a `file` part on the user message. The part includes `mediaType`, optional
@@ -219,7 +267,7 @@ The hook accepts these lifecycle callbacks:
 - `onEvent(event)`: fires for each eve stream event as it arrives.
 - `onError(error)`: fires with the last `Error` when a turn fails.
 - `onFinish(snapshot)`: fires with the final `{ data, status, session, ... }` snapshot once a turn settles.
-- `onSessionChange(session)`: fires when the session cursor advances. Persist it to resume across reloads.
+- `onSessionChange(session)`: fires when a session is created and when a turn boundary publishes its latest cursor. Persist it to resume across reloads.
 
 ```tsx
 const agent = useEveAgent({
@@ -230,6 +278,10 @@ const agent = useEveAgent({
 ```
 
 The `optimistic` option (default `true`) projects submitted user messages into `data` before eve confirms them with a `message.received` event. These are reducer-facing projection events only. `events` stays the authoritative eve stream.
+
+Messages submitted during an active turn remain in `pendingSubmissions` until
+eve emits `message.received`; they are not added to the optimistic transcript
+as separate messages because the runtime may combine adjacent deliveries.
 
 ## Custom reducer
 
@@ -292,6 +344,11 @@ lets eve continue the exact durable conversation; the event log lets your UI
 render historical messages without replaying the whole stream. A database-backed
 chat app should usually persist stream events as they arrive with `onEvent` and
 then save a final snapshot in `onFinish`.
+
+`pendingSubmissions` is not restored from `initialEvents` or `initialSession`.
+If a queued or steering message must remain visible across reloads, persist that
+application-level UI state before calling `send()` and reconcile it when the
+session emits `message.received`.
 
 `initialEvents` must be an ordered prefix of the same session's stream, but its endpoint does not have to line up exactly with where the stream resumes. Every event carries a stable [`meta.id`](/docs/concepts/sessions-runs-and-streaming#the-event-envelope), and the store drops any event whose id it has already applied — so a saved log that overlaps the replayed prefix renders once, and `onEvent` only fires for events your UI has not seen.
 

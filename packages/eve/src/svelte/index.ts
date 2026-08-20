@@ -1,5 +1,7 @@
 export {
   useEveAgent,
+  type EveAgentPendingSubmission,
+  type EveAgentPendingSubmissionStatus,
   type PrepareSend,
   type UseEveAgentOptions,
   type UseEveAgentReturn,

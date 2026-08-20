@@ -106,6 +106,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
     expect(store.snapshot.data.messages).toEqual([]);
     expect(store.snapshot.error).toBeUndefined();
     expect(store.snapshot.events).toEqual([]);
+    expect(store.snapshot.pendingSubmissions).toEqual([]);
   });
 
   it("notifies subscribers on state changes", async () => {
@@ -179,6 +180,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
 
     startResponse.resolve(createStartedMessageResponse("session_1", "http:session_1"));
     await sendPromise;
+    await vi.waitFor(() => expect(store.snapshot.status).toBe("ready"));
 
     expect(seenEvents).toEqual(stampTestEvents(events));
     expect(store.snapshot.status).toBe("ready");
@@ -255,6 +257,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
     const sendPromise = store.send({ message: "Hello" });
     startResponse.resolve(createStartedMessageResponse("session_1", "http:session_1"));
     await sendPromise;
+    await vi.waitFor(() => expect(store.snapshot.status).toBe("error"));
 
     expect(seenErrors.map((e) => e.message)).toEqual(["Bad Request"]);
     expect(store.snapshot.status).toBe("error");
@@ -327,6 +330,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
 
     startResponse.resolve(createStartedMessageResponse("session_1", "http:session_1"));
     await sendPromise;
+    await vi.waitFor(() => expect(store.snapshot.status).toBe("ready"));
 
     expect(store.snapshot.status).toBe("ready");
     expect(store.snapshot.data).toEqual(["client.input.responded", "session.waiting"]);
@@ -365,6 +369,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
 
     startResponse.resolve(createStartedMessageResponse("session_1", "http:session_1"));
     await sendPromise;
+    await vi.waitFor(() => expect(agent.status.value).toBe("ready"));
 
     expect(agent.status.value).toBe("ready");
     expect(agent.data.value).toEqual(

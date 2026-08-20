@@ -43,20 +43,21 @@ async function handleSubmit() {
 
 The state fields are computed refs; the commands are ordinary methods:
 
-| Property                             | Vue shape                                      |
-| ------------------------------------ | ---------------------------------------------- |
-| `data`                               | `ComputedRef<TData>`                           |
-| `status`                             | `ComputedRef<UseEveAgentStatus>`               |
-| `error`                              | `ComputedRef<Error \| undefined>`              |
-| `events`                             | `ComputedRef<readonly MessageStreamEvent[]>`   |
-| `session`                            | `ComputedRef<ClientSessionState \| undefined>` |
-| `send`, `respond`, `cancel`, `reset` | Methods                                        |
+| Property                             | Vue shape                                           |
+| ------------------------------------ | --------------------------------------------------- |
+| `data`                               | `ComputedRef<TData>`                                |
+| `status`                             | `ComputedRef<UseEveAgentStatus>`                    |
+| `error`                              | `ComputedRef<Error \| undefined>`                   |
+| `events`                             | `ComputedRef<readonly MessageStreamEvent[]>`        |
+| `pendingSubmissions`                 | `ComputedRef<readonly EveAgentPendingSubmission[]>` |
+| `session`                            | `ComputedRef<ClientSessionState \| undefined>`      |
+| `send`, `respond`, `cancel`, `reset` | Methods                                             |
 
 Destructuring preserves reactivity because each state value remains a ref. Read refs with `.value` in `<script>` and without `.value` in a template. The [shared returned-state reference](./overview#returned-state) describes what each value and command does.
 
 ## Send a message
 
-Call `send(text)` for text or pass content parts for attachments. The API and transport behavior match the [shared sending guide](./overview#sending-and-streaming); only reactive access differs in Vue.
+Call `send(text)` for text or pass content parts for attachments. The API and transport behavior match the [shared sending guide](./overview#sending-and-streaming); only reactive access differs in Vue. Read `pendingSubmissions.value` to render messages queued or steering during an active turn.
 
 ## Human-in-the-loop prompts
 

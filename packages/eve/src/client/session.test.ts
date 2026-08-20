@@ -676,6 +676,28 @@ describe("ClientSession", () => {
     expect(session.state.streamIndex).toBe(1);
   });
 
+  it("advances a manually opened stream cursor before yielding each event", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      createStreamResponse([
+        { type: "turn.started", data: {} },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
+      ]),
+    );
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+    const observedIndices: number[] = [];
+    for await (const _event of session.stream({
+      streamReconnectPolicy: { reconnect: false },
+    })) {
+      observedIndices.push(session.state.streamIndex);
+    }
+
+    expect(observedIndices).toEqual([1, 2]);
+  });
+
   it("does not reconnect a sent turn's response stream when disabled", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
       if ((init?.method ?? "GET") === "POST") {

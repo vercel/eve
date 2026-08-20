@@ -58,6 +58,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
     });
 
     expect(agent.status).toBe("ready");
+    expect(agent.pendingSubmissions).toEqual([]);
     expect(agent.data.messages).toHaveLength(2);
     expect(agent.session).toEqual({
       sessionId: "session_1",
@@ -99,6 +100,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
     });
 
     await agent.send("Hello");
+    await vi.waitFor(() => expect(seenEvents).toHaveLength(events.length));
 
     expect(seenEvents).toEqual(stampTestEvents(events));
   });

@@ -435,7 +435,7 @@ describe("ensureChannel", () => {
     expect(normalizeEol(channelSource)).toBe(normalizeEol(sourceChannel));
   });
 
-  test("scaffolds a Web Chat Stop button with the agent cancellation API", async () => {
+  test("scaffolds Web Chat controls for cancellation, queueing, and steering", async () => {
     const projectRoot = await createTempDir();
     await mkdir(join(projectRoot, "agent"), { recursive: true });
     await writeFile(
@@ -454,9 +454,16 @@ describe("ensureChannel", () => {
       join(projectRoot, "app/_components/agent-chat.tsx"),
       "utf8",
     );
-    expect(agentChatSource).toContain("agent.cancel()");
+    expect(agentChatSource).toContain(".cancel()");
     expect(agentChatSource).not.toContain(".attach(sessionId)");
     expect(agentChatSource).not.toContain('event.type !== "turn.started"');
+    expect(agentChatSource).toContain('useState<ActiveTurnPolicy>("queue")');
+    expect(agentChatSource).toContain("turnPolicy: activeTurnPolicy");
+    expect(agentChatSource).toContain("agent.pendingSubmissions");
+    expect(agentChatSource).toContain(
+      '<PromptInputSelectItem value="steer">Steer</PromptInputSelectItem>',
+    );
+    expect(agentChatSource).not.toContain("agent.stop");
   });
 
   test("writes npm dist-tags for Web Chat without semver range decoration", async () => {
