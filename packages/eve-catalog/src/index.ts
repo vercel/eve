@@ -218,7 +218,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Linq",
     kind: "channel",
     tagline: "iMessage and SMS conversations through Linq, with guided Connect or portable setup.",
-    surfaces: { scaffoldable: true, registry: true, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "chat-sdk-kapso",

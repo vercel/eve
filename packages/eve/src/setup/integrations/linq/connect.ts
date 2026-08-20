@@ -24,6 +24,12 @@ export interface ProvisionLinqConnectorDeps {
   runVercelCaptureStdout: typeof runVercelCaptureStdout;
 }
 
+/** Credentials for a connector backed by an existing Linq account. */
+export interface LinqExistingAccountCredentials {
+  apiToken: string;
+  phoneNumbers: string[];
+}
+
 const ConnectorSchema = z.object({
   id: z.string().min(1),
   uid: z.string().min(1),
@@ -63,6 +69,8 @@ function requireCreatedConnector(result: RunVercelCaptureResult): LinqConnectorR
 
 /** Creates a managed Linq connector and routes verified events to eve. */
 export async function provisionLinqConnector(input: {
+  /** When omitted, Connect opens Linq's managed browser flow to provision a line. */
+  existingAccount?: LinqExistingAccountCredentials;
   log: ChannelSetupLog;
   project: VercelProjectReference;
   projectRoot: string;
@@ -86,6 +94,9 @@ export async function provisionLinqConnector(input: {
         "linq",
         "--name",
         input.slug,
+        ...(input.existingAccount === undefined
+          ? []
+          : ["--connector-type", "linq", "--data", "@-"]),
         "--triggers",
         ...LINQ_TRIGGER_EVENTS.flatMap((event) => ["--trigger-event", event]),
         "-F",
@@ -93,7 +104,20 @@ export async function provisionLinqConnector(input: {
         "--scope",
         input.project.orgId,
       ],
-      { cwd: input.projectRoot, nonInteractive: true, onOutput, signal: input.signal },
+      {
+        cwd: input.projectRoot,
+        nonInteractive: true,
+        onOutput,
+        signal: input.signal,
+        ...(input.existingAccount === undefined
+          ? {}
+          : {
+              stdin: JSON.stringify({
+                apiToken: input.existingAccount.apiToken,
+                phoneNumbers: input.existingAccount.phoneNumbers,
+              }),
+            }),
+      },
     ),
   );
   input.signal?.throwIfAborted();

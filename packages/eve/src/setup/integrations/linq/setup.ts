@@ -6,7 +6,7 @@ import type { VercelProjectReference } from "#setup/project-resolution.js";
 import { deriveSlackConnectorSlug } from "#setup/scaffold/index.js";
 import { writeTextFile } from "#setup/scaffold/files.js";
 
-import { provisionLinqConnector } from "./connect.js";
+import { provisionLinqConnector, type LinqExistingAccountCredentials } from "./connect.js";
 import {
   defineSetupIntegration,
   type SetupApplyContext,
@@ -16,6 +16,7 @@ import {
 interface LinqSetupPlan {
   credentials: "connect" | "portable";
   connectorSlug?: string;
+  existingAccount?: LinqExistingAccountCredentials;
   project?: VercelProjectReference;
   apiKey?: string;
   signingSecret?: string;
@@ -30,6 +31,17 @@ export default linqChannel({
   },
 });
 `;
+
+function validatePhoneNumbers(value: string): string | null {
+  const phoneNumbers = value
+    .split(",")
+    .map((phoneNumber) => phoneNumber.trim())
+    .filter(Boolean);
+  if (phoneNumbers.length === 0) return "Enter at least one phone number.";
+  return phoneNumbers.every((phoneNumber) => /^\+[1-9]\d{1,14}$/.test(phoneNumber))
+    ? null
+    : "Use comma-separated E.164 numbers, for example +14155550123.";
+}
 
 function connectTemplate(uid: string): string {
   return `import { connectLinqCredentials } from "@vercel/connect/eve";
@@ -82,7 +94,59 @@ export async function prepareLinqSetup(context: SetupPrepareContext): Promise<Li
         required: true,
       }),
     );
-    return { credentials, connectorSlug: connectorSlug.trim(), project };
+    const account = await context.asker.ask(
+      select({
+        key: "linq-account",
+        message: "Which Linq account would you like to use?",
+        options: [
+          {
+            id: "new",
+            value: "new" as const,
+            label: "Create a new Linq account",
+            hint: "Provision a new managed Linq line",
+          },
+          {
+            id: "existing",
+            value: "existing" as const,
+            label: "Use an existing Linq account",
+            hint: "Connect a Linq partner API token and phone numbers",
+          },
+        ],
+        recommended: "new" as const,
+        required: true,
+      }),
+    );
+    if (account === "new") return { credentials, connectorSlug: connectorSlug.trim(), project };
+    const apiToken = await context.asker.ask(
+      text({
+        key: "linq-existing-api-token",
+        message: "Linq partner API token",
+        required: true,
+        sensitive: true,
+        environment: "LINQ_API_KEY",
+      }),
+    );
+    const phoneNumbers = await context.asker.ask(
+      text({
+        key: "linq-existing-phone-numbers",
+        message: "Linq phone numbers",
+        placeholder: "+14155550123, +14155550124",
+        required: true,
+        validate: validatePhoneNumbers,
+      }),
+    );
+    return {
+      credentials,
+      connectorSlug: connectorSlug.trim(),
+      existingAccount: {
+        apiToken: apiToken.trim(),
+        phoneNumbers: phoneNumbers
+          .split(",")
+          .map((phoneNumber) => phoneNumber.trim())
+          .filter(Boolean),
+      },
+      project,
+    };
   }
   const apiKey = await context.asker.ask(
     text({
@@ -114,6 +178,7 @@ export async function applyLinqSetup(plan: LinqSetupPlan, context: SetupApplyCon
       project: plan.project!,
       projectRoot: context.appRoot,
       slug: plan.connectorSlug!,
+      ...(plan.existingAccount === undefined ? {} : { existingAccount: plan.existingAccount }),
       signal: context.signal,
     });
     phoneNumber = connector.phoneNumber;

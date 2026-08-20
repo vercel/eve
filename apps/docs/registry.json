@@ -1843,7 +1843,7 @@
       "type": "registry:item",
       "title": "Linq",
       "description": "Connect an eve agent to iMessage and SMS through Linq with guided Connect or portable setup.",
-      "dependencies": ["@vercel/connect@>=0.5.0"],
+      "dependencies": ["@vercel/connect@>=0.9.0"],
       "meta": {
         "eve": {
           "setup": {

@@ -5,7 +5,7 @@ description: Connect an eve agent to iMessage and SMS through Linq.
 
 Use `linqChannel` to receive and reply to iMessage and SMS conversations through Linq.
 
-Run `eve add channel/linq` to choose Vercel Connect or portable credentials. With Vercel Connect, eve signs you in and creates or links a Vercel project when needed, then provisions the Linq connector and configures its webhook through Connect:
+Run `eve add channel/linq` to choose Vercel Connect or portable credentials. With Vercel Connect, eve signs you in and creates or links a Vercel project when needed. Then choose whether to create a managed Linq account and line or connect an existing Linq account with its partner API token and phone numbers. eve configures the connector and webhook through Connect:
 
 ```ts title="agent/channels/linq.ts"
 import { connectLinqCredentials } from "@vercel/connect/eve";
@@ -52,8 +52,10 @@ To configure the channel by hand, pass the API key and webhook signing secret:
 import { linqChannel } from "eve/channels/linq";
 
 export default linqChannel({
-  apiKey: process.env.LINQ_API_KEY!,
-  signingSecret: process.env.LINQ_WEBHOOK_SECRET!,
+  credentials: {
+    apiKey: process.env.LINQ_API_KEY!,
+    signingSecret: process.env.LINQ_WEBHOOK_SECRET!,
+  },
 });
 ```
 
