@@ -76,8 +76,8 @@ export async function executeTaskControlAction(input: {
       result: await executeTaskUpdate({
         action,
         adapter: input.adapter,
-        childStepIndex: input.parentStepIndex ?? 0,
-        childTurnId: input.parentTurnId,
+        updateIndex: input.parentStepIndex ?? 0,
+        updateEpoch: input.parentTurnId,
         serializedContext: input.serializedContext,
       }),
       session,

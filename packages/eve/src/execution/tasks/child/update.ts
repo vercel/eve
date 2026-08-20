@@ -15,8 +15,8 @@ import type { TaskInboundUpdate } from "#tasks/types.js";
 export async function executeTaskUpdate(input: {
   readonly action: RuntimeToolCallActionRequest;
   readonly adapter: ChannelAdapter | undefined;
-  readonly childStepIndex: number;
-  readonly childTurnId: string;
+  readonly updateIndex: number;
+  readonly updateEpoch: string;
   readonly serializedContext: Record<string, unknown> | undefined;
 }): Promise<RuntimeActionResult> {
   const message = readUpdateMessage(input.action.input);
@@ -29,8 +29,8 @@ export async function executeTaskUpdate(input: {
     const taskId = await fireTaskUpdateCallbackStep({
       callback,
       callId: input.action.callId,
-      childStepIndex: input.childStepIndex,
-      childTurnId: input.childTurnId,
+      updateIndex: input.updateIndex,
+      updateEpoch: input.updateEpoch,
       message,
     });
     if (taskId === undefined) {
@@ -50,8 +50,8 @@ export async function executeTaskUpdate(input: {
   }
   const update: TaskInboundUpdate = {
     callId: input.action.callId,
-    childStepIndex: input.childStepIndex,
-    childTurnId: input.childTurnId,
+    updateIndex: input.updateIndex,
+    updateEpoch: input.updateEpoch,
     kind: "task-update",
     message,
   };

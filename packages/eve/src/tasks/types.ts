@@ -419,8 +419,10 @@ export interface TaskInboundTurnStarted {
 /** Intermediate progress sent by a running child to its parent agent. */
 export interface TaskInboundUpdate {
   readonly callId: string;
-  readonly childStepIndex: number;
-  readonly childTurnId: string;
+  /** Executor-neutral monotonic index within {@link updateEpoch}. */
+  readonly updateIndex: number;
+  /** Executor-neutral epoch id used with {@link updateIndex} for update dedupe. */
+  readonly updateEpoch: string;
   readonly kind: "task-update";
   readonly message: string;
 }
