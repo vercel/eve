@@ -128,7 +128,7 @@ export async function prepareLinqSetup(
     const agentPhoneNumbers = await deps.listPhoneNumbers(apiToken.trim(), context.signal);
     const phoneNumbers = await context.asker.askMany({
       key: "linq-existing-phone-numbers",
-      message: "Choose the phone numbers for your agent (not your personal phone number)",
+      message: "Choose your agent phone numbers",
       options: agentPhoneNumbers.map((phoneNumber) => ({
         id: phoneNumber,
         value: phoneNumber,
