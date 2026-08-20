@@ -28,6 +28,7 @@ import {
   isTaskToolAvailable,
 } from "#runtime/framework-tools/tasks.js";
 import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
+import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
 
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import {
@@ -75,6 +76,8 @@ export interface CreateExecutionNodeStepInput {
    */
   readonly createRuntime: CreateRuntime;
   readonly handleEvent?: HandleEventFn;
+  readonly historyProjector?: HistoryViewProjector;
+  readonly historyView?: PreparedHistoryView;
   readonly mode: RunMode;
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
@@ -109,6 +112,8 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     workflowMaxSubagents: input.workflowMaxSubagents,
     webSearchProvider: input.node.agent.webSearchProvider,
     handleEvent: input.handleEvent,
+    historyProjector: input.historyProjector,
+    historyView: input.historyView,
     instrumentation,
     mode: input.mode,
     onCompaction: preserveFrameworkStateOnCompaction,

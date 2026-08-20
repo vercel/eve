@@ -1,3 +1,5 @@
+import type { ModelMessage } from "ai";
+
 import type { HarnessSession } from "#harness/types.js";
 import { resolveAgentsAnnouncement, type AgentView } from "#harness/handles/prompt.js";
 import { formatAgentStatus, getAgentHandleStore } from "#harness/handles/store.js";
@@ -53,11 +55,12 @@ export async function readTaskAgentViews(session: HarnessSession): Promise<reado
 /** Appends the changed task-agent projection before the next model call. */
 export async function appendTaskAgentAnnouncement(
   session: HarnessSession,
+  messages: readonly ModelMessage[] = session.history,
 ): Promise<HarnessSession> {
   const agentViews = await readTaskAgentViews(session);
   const announcement = resolveAgentsAnnouncement({
     agentViews,
-    messages: session.history,
+    messages,
     store: getAgentHandleStore(session.state),
   });
   return announcement === undefined
