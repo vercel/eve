@@ -23,7 +23,7 @@ console.log(JSON.stringify({
   blob: typeof blob.read === "function" && typeof blob.write === "function",
   provider: typeof provider.recall === "function" &&
     typeof provider.tools === "function" &&
-    provider.save === undefined,
+    provider.capture === undefined,
 }));
 `,
   },
