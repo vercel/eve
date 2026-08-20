@@ -165,49 +165,52 @@ Also add the extension identity to [`packages/eve-catalog/src/index.ts`](./packa
 
 User-facing docs live in [`docs/`](./docs) and are published with the `eve` npm package and rendered by the docs site in [`apps/docs`](./apps/docs). If your change alters public behavior, update the relevant doc in the same PR and run `pnpm docs:check`.
 
-## Before opening a pull request
+## Proposing a change
 
-Every pull request must be tied to an issue. Before opening a PR, search the
-existing issues, discussions, and pull requests so you do not duplicate active
-work. If there is no existing issue, open one with the relevant template and
-describe the problem, use case, or bug reproduction.
+If you are an external contributor and have not been invited to implement a
+change, open an issue instead of a pull request. Search the existing issues,
+discussions, and pull requests first so you do not duplicate active work. Use
+the relevant issue template to describe the problem, use case, or bug
+reproduction. You may also include a suggested implementation prompt that a
+maintainer or coding agent could use after the proposal is accepted.
 
 For changes to public APIs, agent behavior, compiler/runtime internals,
 dependencies, generated artifacts, fixture contracts, or any non-trivial
-implementation detail, wait for discussion on the issue before investing in the
+implementation detail, wait for maintainer agreement before investing in an
 implementation. The goal is to agree that the problem is real and that the
-proposed direction fits eve before review shifts to code. Bug fixes should link
-to an issue with a reproduction or failing test case so the problem remains
-tracked even if a specific fix is not accepted.
+proposed direction fits eve before review shifts to code.
 
-To avoid PRs that are unlikely to be reviewed or merged:
+To make a proposal easier to evaluate:
 
-- Do not send broad rewrites, style-only churn, formatting-only changes, or
+- Do not propose broad rewrites, style-only churn, formatting-only changes, or
   generated-output refreshes unless a maintainer asked for them.
-- Do not bundle unrelated fixes or refactors into one PR. Split them so each PR
-  has one reviewable purpose.
-- Do not add runtime dependencies without prior agreement. Prefer eve-owned
+- Keep each issue focused on one problem.
+- Do not propose runtime dependencies without a concrete need. Prefer eve-owned
   wrappers, vendored code, or generated artifacts, and remember that the `eve`
   package should keep runtime dependencies minimal.
-- Do not change public behavior based only on a hypothetical use case. Include a
-  concrete user story, reproduction, fixture, or test that shows the need.
-- Do not claim an issue silently. Comment before starting work, and check the
-  thread first in case someone else is already working on it.
+- Do not propose public behavior based only on a hypothetical use case. Include
+  a concrete user story or, for bugs, a reproduction.
+- Do not claim an issue silently. Wait for a maintainer to invite an
+  implementation, and check the thread first in case someone else is already
+  working on it.
 
 ## Submitting a pull request
 
+Team members and contributors explicitly invited to implement a change may
+open a pull request. Link the issue or discussion where the change was agreed
+on when one exists. Do not create an issue solely to accompany a pull request.
+
 1. Fork the repo and create a branch from `main`.
-2. Link the issue where the change was discussed and agreed on.
-3. Make your change, including tests and docs where relevant.
-4. Sign off every commit with `git commit -s`.
-5. If the change affects the published `eve` package, add a changeset:
+2. Make your change, including tests and docs where relevant.
+3. Sign off every commit with `git commit -s`.
+4. If the change affects the published `eve` package, add a changeset:
 
    ```bash
    pnpm changeset
    ```
 
-6. Make sure `pnpm lint`, `pnpm typecheck`, and `pnpm test` pass.
-7. Open the PR with a clear description of the problem and solution.
+5. Make sure `pnpm lint`, `pnpm typecheck`, and `pnpm test` pass.
+6. Open the PR with a clear description of the problem and solution.
 
 Releases are managed with [Changesets](https://github.com/changesets/changesets) by the maintainers.
 

@@ -33,8 +33,9 @@ before pushing.
 
 PR descriptions are reviewer-oriented explanations of the problem, solution,
 meaningful behavior changes, and validation—not file lists or commit logs. Keep
-them proportional to the change, link the prior issue, call out important scope
-boundaries or preserved behavior, and report only checks actually run. Use the
+them proportional to the change, link a prior issue or discussion when one
+exists, call out important scope boundaries or preserved behavior, and report
+only checks actually run. Never create an issue solely to accompany a PR. Use the
 [`gh-pr-description`](./.agents/skills/gh-pr-description/SKILL.md) skill when
 drafting or updating one.
 

@@ -17,6 +17,21 @@ body:
     validations:
       required: true
   - type: textarea
+    id: implementation-prompt
+    attributes:
+      label: Suggested implementation prompt
+      description: Optionally provide a prompt a maintainer or coding agent could use to implement this proposal after it is accepted. Include the intended behavior, constraints, and acceptance criteria rather than prescribing unnecessary implementation details.
+      placeholder: |
+        Implement ...
+
+        Requirements:
+        - ...
+
+        Acceptance criteria:
+        - ...
+    validations:
+      required: false
+  - type: textarea
     id: alternatives
     attributes:
       label: Alternatives considered
