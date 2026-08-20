@@ -42,14 +42,12 @@ const defaultDeps: SendblueSetupDeps = {
 const PORTABLE_TEMPLATE = `import { sendblueChannel } from "eve/channels/sendblue";
 
 export default sendblueChannel({
-  async credentials() {
-    const apiKey = process.env.SENDBLUE_API_KEY;
-    const apiSecret = process.env.SENDBLUE_API_SECRET;
-    if (!apiKey || !apiSecret) throw new Error("Sendblue API credentials are required.");
-    return { apiKey, apiSecret };
+  credentials: {
+    apiKey: process.env.SENDBLUE_API_KEY!,
+    apiSecret: process.env.SENDBLUE_API_SECRET!,
+    fromNumber: process.env.SENDBLUE_FROM_NUMBER!,
+    webhookSecret: process.env.SENDBLUE_WEBHOOK_SECRET,
   },
-  fromNumber: process.env.SENDBLUE_FROM_NUMBER!,
-  webhookSecret: process.env.SENDBLUE_WEBHOOK_SECRET,
 });
 `;
 

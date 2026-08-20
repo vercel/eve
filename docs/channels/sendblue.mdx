@@ -32,7 +32,20 @@ is configured, the channel verifies Connect-forwarded webhooks with Vercel OIDC.
 Choose **Use portable credentials** during `eve add channel/sendblue` when the
 agent is not deployed through Vercel Connect. eve writes the API key, secret,
 and sending number to `.env.local`, then scaffolds a channel that reads them
-from the environment.
+from the environment:
+
+```ts title="agent/channels/sendblue.ts"
+import { sendblueChannel } from "eve/channels/sendblue";
+
+export default sendblueChannel({
+  credentials: {
+    apiKey: process.env.SENDBLUE_API_KEY!,
+    apiSecret: process.env.SENDBLUE_API_SECRET!,
+    fromNumber: process.env.SENDBLUE_FROM_NUMBER!,
+    webhookSecret: process.env.SENDBLUE_WEBHOOK_SECRET,
+  },
+});
+```
 
 After deploying the agent:
 

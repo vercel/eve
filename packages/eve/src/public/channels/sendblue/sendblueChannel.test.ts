@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { markRead, mention, send } = vi.hoisted(() => ({
+const { createAdapter, markRead, mention, send, vercelOidc } = vi.hoisted(() => ({
+  createAdapter: vi.fn(),
   markRead: vi.fn(),
   mention: vi.fn(),
   send: vi.fn(),
+  vercelOidc: vi.fn(() => vi.fn()),
 }));
 
 vi.mock("#public/channels/chat-sdk/index.js", () => ({
@@ -16,9 +18,9 @@ vi.mock("#public/channels/chat-sdk/index.js", () => ({
 }));
 vi.mock("#compiled/@chat-adapter/state-memory/index.js", () => ({ createMemoryState: vi.fn() }));
 vi.mock("#compiled/chat-adapter-sendblue/index.js", () => ({
-  createSendblueAdapter: vi.fn(() => ({ markRead })),
+  createSendblueAdapter: createAdapter.mockReturnValue({ markRead }),
 }));
-vi.mock("#public/channels/auth.js", () => ({ vercelOidc: vi.fn() }));
+vi.mock("#public/channels/auth.js", () => ({ vercelOidc }));
 
 import { Message } from "#compiled/chat/index.js";
 import { sendblueChannel } from "#public/channels/sendblue/sendblueChannel.js";
@@ -28,8 +30,7 @@ describe("sendblueChannel", () => {
 
   it("dispatches Sendblue mentions without subscribing the thread", async () => {
     sendblueChannel({
-      credentials: async () => ({ accessToken: "token" }),
-      fromNumber: "+15551234567",
+      credentials: { accessToken: "token", fromNumber: "+15551234567" },
     });
     const handler = mention.mock.calls[0]?.[0];
     if (handler === undefined) throw new Error("Expected an inbound mention handler.");
@@ -49,5 +50,43 @@ describe("sendblueChannel", () => {
       { context: [], message: "Hello Sendblue" },
       { auth: null, thread, turnPolicy: "experimental-steer" },
     );
+  });
+
+  it("passes direct credentials and webhook configuration to the adapter", async () => {
+    sendblueChannel({
+      credentials: {
+        apiKey: "api-key",
+        apiSecret: "api-secret",
+        fromNumber: "+15551234567",
+        webhookSecret: "webhook-secret",
+      },
+    });
+
+    const adapterConfig = createAdapter.mock.calls[0]?.[0];
+    await expect(adapterConfig.defaultFromNumber()).resolves.toBe("+15551234567");
+    await expect(adapterConfig.credentials()).resolves.toEqual({
+      apiKey: "api-key",
+      apiSecret: "api-secret",
+    });
+    expect(adapterConfig.webhookSecret).toBe("webhook-secret");
+  });
+
+  it("uses managed credentials for its line and webhook verification", async () => {
+    const webhookVerifier = vi.fn();
+    const credentials = vi.fn(async () => ({
+      accessToken: "token",
+      fromNumber: "+15551234567",
+      webhookVerifier,
+    }));
+
+    sendblueChannel({ credentials });
+
+    const adapterConfig = createAdapter.mock.calls[0]?.[0];
+    expect(adapterConfig.defaultFromNumber).toEqual(expect.any(Function));
+    await expect(adapterConfig.defaultFromNumber()).resolves.toBe("+15551234567");
+    await expect(adapterConfig.credentials()).resolves.toEqual({ accessToken: "token" });
+    expect(adapterConfig.webhookVerifier).toEqual(expect.any(Function));
+    await adapterConfig.webhookVerifier(new Request("https://example.com"), "body");
+    expect(webhookVerifier).toHaveBeenCalledWith(expect.any(Request), "body");
   });
 });
