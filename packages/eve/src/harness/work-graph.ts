@@ -25,6 +25,7 @@ export interface WorkAction {
   readonly phase: WorkPhase;
   readonly child?: {
     readonly sessionId: string;
+    readonly work?: WorkGraph;
   };
 }
 
@@ -53,6 +54,12 @@ export interface WorkGraph {
   readonly turn?: WorkTurn;
 }
 
+export interface ChildWorkSnapshot {
+  readonly callId: string;
+  readonly sessionId: string;
+  readonly snapshot: WorkGraph;
+}
+
 const EMPTY_WORK_GRAPH: WorkGraph = { revision: 0 };
 
 /** Reduces authoritative stream lifecycle facts into the live work graph. */
@@ -62,6 +69,29 @@ export function reduceWorkGraph(
 ): WorkGraph {
   const next = reduce(graph, event);
   return next === graph ? graph : { ...next, revision: graph.revision + 1 };
+}
+
+/** Adopts a newer snapshot from one direct running local subagent. */
+export function adoptChildWorkSnapshot(graph: WorkGraph, child: ChildWorkSnapshot): WorkGraph {
+  const turn = graph.turn;
+  if (turn === undefined || isTerminal(turn.phase)) return graph;
+  const stepIndex = turn.steps.findIndex((step) =>
+    step.actions.some((action) => action.callId === child.callId),
+  );
+  if (stepIndex === -1) return graph;
+  const step = turn.steps[stepIndex]!;
+  let changed = false;
+  const actions = step.actions.map((action) => {
+    if (action.callId !== child.callId || isTerminal(action.phase)) return action;
+    if (action.child?.sessionId !== child.sessionId) return action;
+    if ((action.child.work?.revision ?? -1) >= child.snapshot.revision) return action;
+    changed = true;
+    return { ...action, child: { ...action.child, work: child.snapshot } };
+  });
+  if (!changed) return graph;
+  const steps = [...turn.steps];
+  steps[stepIndex] = { ...step, actions };
+  return { ...graph, revision: graph.revision + 1, turn: { ...turn, steps } };
 }
 
 function reduce(graph: WorkGraph, event: UnstampedMessageStreamEvent): WorkGraph {

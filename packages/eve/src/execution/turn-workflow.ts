@@ -22,6 +22,7 @@ import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
+import { refreshLocalSubagentWorkStep } from "#execution/refresh-local-subagent-work-step.js";
 import {
   createTurnCancellationControl,
   type TurnCancellationControl,
@@ -307,6 +308,8 @@ interface AcceptedRuntimeActionBatch {
   readonly results: readonly RuntimeActionResult[];
 }
 
+const LOCAL_SUBAGENT_WORK_REFRESH_MS = 15_000;
+
 async function waitForRuntimeActionResults(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly cancellation: TurnCancellationControl | undefined;
@@ -326,6 +329,9 @@ async function waitForRuntimeActionResults(input: {
       acceptedAtMsByKey.set(getRuntimeActionResultKey(result), input.initialAcceptedAtMs);
     }
   }
+  let nextWorkRefresh = workflowSleep(LOCAL_SUBAGENT_WORK_REFRESH_MS).then(
+    () => "work-refresh" as const,
+  );
 
   while (true) {
     const ready = resolveRuntimeActionResultsForKeys({
@@ -368,8 +374,8 @@ async function waitForRuntimeActionResults(input: {
     // never surfaces as unhandled.
     nextPromise.catch(() => {});
     const next = await (input.cancellation === undefined
-      ? nextPromise
-      : Promise.race([nextPromise, input.cancellation.requested]));
+      ? Promise.race([nextPromise, nextWorkRefresh])
+      : Promise.race([nextPromise, nextWorkRefresh, input.cancellation.requested]));
     if (next === "cancel") {
       if (pendingDeliveryRequest !== undefined) {
         // Release the raced public input back to the driver so it stays
@@ -380,6 +386,17 @@ async function waitForRuntimeActionResults(input: {
         });
       }
       return "cancelled";
+    }
+    if (next === "work-refresh") {
+      const refreshed = await refreshLocalSubagentWorkStep({
+        serializedContext: input.cursor.serializedContext,
+        sessionState: input.cursor.sessionState,
+      });
+      await input.cursor.adopt({ ...refreshed, sessionState: input.cursor.sessionState });
+      nextWorkRefresh = workflowSleep(LOCAL_SUBAGENT_WORK_REFRESH_MS).then(
+        () => "work-refresh" as const,
+      );
+      continue;
     }
     if (next.done) throw new Error("Turn inbox closed before runtime actions completed.");
 

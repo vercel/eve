@@ -47,6 +47,16 @@ export function findRunningAgentHandle(
   );
 }
 
+/** Returns direct running local subagents owned by this session. */
+export function findRunningLocalAgentHandles(
+  state: SessionStateMap | undefined,
+): readonly RunningAgentHandle[] {
+  return readAgentHandles(state).filter(
+    (handle): handle is RunningAgentHandle =>
+      handle.phase === "running" && handle.address.kind === "agent/local",
+  );
+}
+
 /**
  * A subagent result may settle a call only when a running handle records
  * its callId: a late or duplicate result for an already-settled call finds
