@@ -1,8 +1,8 @@
 import type { SessionAuthContext } from "#channel/types.js";
 import { vercelOidc } from "#public/channels/auth.js";
+import type { Channel } from "#public/definitions/channel.js";
 import {
   chatSdkChannel,
-  type ChatSdkChannel,
   type ChatSdkChannelBridge,
   type ChatSdkChannelEvents,
 } from "#public/channels/chat-sdk/index.js";
@@ -64,7 +64,7 @@ export interface SendblueChannelConfig {
 }
 
 /** First-class eve channel backed by Sendblue iMessage, SMS, and RCS. */
-export interface SendblueChannel extends ChatSdkChannel {}
+export interface SendblueChannel extends Channel {}
 
 /**
  * Creates an eve channel for Sendblue conversations.
