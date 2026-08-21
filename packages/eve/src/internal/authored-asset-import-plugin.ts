@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { dirname, extname, isAbsolute, resolve } from "node:path";
 
 const AUTHORED_ASSET_CODE_EXTENSIONS = [
@@ -20,13 +20,21 @@ const AUTHORED_ASSET_CODE_EXTENSIONS = [
 export function createAuthoredAssetImportPlugin(): Record<string, unknown> {
   return {
     name: "eve-authored-asset-import",
-    resolveId(source: string, importer: string | undefined) {
+    async resolveId(source: string, importer: string | undefined) {
       if (!isPotentialAuthoredAssetImport(source) || importer === undefined) {
         return undefined;
       }
 
       const { path, suffix } = splitImportSuffix(source);
       const resolvedPath = isAbsolute(path) ? path : resolve(dirname(importer), path);
+
+      if (suffix === "" && !(await pathExists(resolvedPath))) {
+        const codePath = await resolveExistingCodeImportPath(resolvedPath);
+
+        if (codePath !== undefined) {
+          return codePath;
+        }
+      }
 
       return `${resolvedPath}${suffix}`;
     },
@@ -70,6 +78,31 @@ async function readAssetText(path: string): Promise<string | undefined> {
   } catch (error) {
     if (isPathNotFoundError(error)) {
       return undefined;
+    }
+
+    throw error;
+  }
+}
+
+async function resolveExistingCodeImportPath(path: string): Promise<string | undefined> {
+  for (const extension of AUTHORED_ASSET_CODE_EXTENSIONS) {
+    const candidatePath = `${path}${extension}`;
+
+    if (await pathExists(candidatePath)) {
+      return candidatePath;
+    }
+  }
+
+  return undefined;
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch (error) {
+    if (isPathNotFoundError(error)) {
+      return false;
     }
 
     throw error;
