@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeDevServerRegistry } from "./dev-server.js";
+import { normalizeDevServerRegistry } from "./shared-frontend-dev-server.js";
 
 describe("normalizeDevServerRegistry", () => {
   it("normalizes a well-formed record and canonicalizes the origin", () => {

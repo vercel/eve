@@ -20,4 +20,17 @@ describe("isEveServerHealthy", () => {
       expect.objectContaining({ redirect: "error", signal: expect.any(AbortSignal) }),
     );
   });
+
+  it("allows callers to preserve redirect-following behavior", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      isEveServerHealthy("http://127.0.0.1:2000", { redirect: "follow" }),
+    ).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:2000/eve/v1/health",
+      expect.objectContaining({ redirect: "follow", signal: expect.any(AbortSignal) }),
+    );
+  });
 });
