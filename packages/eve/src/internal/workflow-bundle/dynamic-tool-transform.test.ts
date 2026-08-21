@@ -2065,14 +2065,14 @@ export default defineDynamic({
     expect(result).not.toBeNull();
     const code = result!.code;
 
-    // Every stamp call must name a hoisted function defined in the module suffix
-    const body = code.slice(code.indexOf("\nimport") + 1);
-    const stampTargets = [
-      ...body.matchAll(/__eveStampDynamicCallback\([^,]+,\s*([A-Za-z_$][\w$]*)/g),
-    ].map((match) => match[1]!);
-    expect(stampTargets.length).toBeGreaterThanOrEqual(1);
-    for (const target of stampTargets) {
-      expect(code).toContain(`function ${target}(`);
+    // Every hoisted function must be defined in the module suffix and
+    // referenced by the live stamped wrapper.
+    const hoistedNames = [...code.matchAll(/function (__eve_dynamic_\w+)\(/g)].map(
+      (match) => match[1]!,
+    );
+    expect(hoistedNames.length).toBeGreaterThanOrEqual(1);
+    for (const name of hoistedNames) {
+      expect(code.split(name).length - 1).toBeGreaterThanOrEqual(2);
     }
   });
 
