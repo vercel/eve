@@ -23,7 +23,13 @@ import { AgentMessage } from "./agent-message";
 
 const AGENT_NAME = "eve-agent";
 
-export function AgentChat({ sessionId }: { readonly sessionId?: string }) {
+export function AgentChat({
+  sessionId,
+  sessionless = false,
+}: {
+  readonly sessionId?: string;
+  readonly sessionless?: boolean;
+}) {
   const [cancellationError, setCancellationError] = useState<string>();
   const [isRestoring, setIsRestoring] = useState(sessionId !== undefined);
   const agent = useEveAgent({
@@ -69,7 +75,7 @@ export function AgentChat({ sessionId }: { readonly sessionId?: string }) {
     (agent.status === "submitted" || lastMessage?.role !== "assistant" || isPendingAssistantShell);
   const turnFailure = isBusy ? undefined : getLatestTurnFailure(agent.events);
   const errorMessage = cancellationError ?? agent.error?.message ?? turnFailure;
-  const hasConversationContent = !isEmpty || errorMessage !== undefined;
+  const hasConversationContent = sessionless || !isEmpty || errorMessage !== undefined;
 
   const requestCancellation = () => {
     setCancellationError(undefined);
@@ -119,7 +125,7 @@ export function AgentChat({ sessionId }: { readonly sessionId?: string }) {
   if (isRestoring && agent.events.length === 0) {
     return (
       <main className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-        <ChatHeader />
+        <ChatHeader canStartNewChat={!sessionless} />
         <div className="min-h-0 flex-1" />
         <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-6 sm:px-6">{composer}</div>
       </main>
@@ -128,7 +134,7 @@ export function AgentChat({ sessionId }: { readonly sessionId?: string }) {
 
   return (
     <main className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-      {hasConversationContent ? <ChatHeader /> : null}
+      {hasConversationContent ? <ChatHeader canStartNewChat={!sessionless} /> : null}
 
       {hasConversationContent ? (
         <Conversation className="min-h-0 flex-1" initial="instant">
@@ -196,21 +202,23 @@ function ErrorMessage({ message }: { readonly message: string }) {
   );
 }
 
-function ChatHeader() {
+function ChatHeader({ canStartNewChat }: { readonly canStartNewChat: boolean }) {
   return (
     <header className="relative flex h-14 shrink-0 items-center justify-center px-24">
       <span className="truncate text-muted-foreground text-sm">{AGENT_NAME}</span>
-      <Button
-        aria-label="Start a new chat"
-        className="absolute right-2"
-        onClick={() => window.location.assign("/")}
-        size="sm"
-        type="button"
-        variant="ghost"
-      >
-        <PlusIcon className="size-4" />
-        <span className="hidden sm:inline">New chat</span>
-      </Button>
+      {canStartNewChat ? (
+        <Button
+          aria-label="Start a new chat"
+          className="absolute right-2"
+          onClick={() => window.location.assign("/s")}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          <PlusIcon className="size-4" />
+          <span className="hidden sm:inline">New chat</span>
+        </Button>
+      ) : null}
     </header>
   );
 }
