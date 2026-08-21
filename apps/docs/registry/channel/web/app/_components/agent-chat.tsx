@@ -69,6 +69,7 @@ export function AgentChat({ sessionId }: { readonly sessionId?: string }) {
     (agent.status === "submitted" || lastMessage?.role !== "assistant" || isPendingAssistantShell);
   const turnFailure = isBusy ? undefined : getLatestTurnFailure(agent.events);
   const errorMessage = cancellationError ?? agent.error?.message ?? turnFailure;
+  const hasConversationContent = !isEmpty || errorMessage !== undefined;
 
   const requestCancellation = () => {
     setCancellationError(undefined);
@@ -127,24 +128,9 @@ export function AgentChat({ sessionId }: { readonly sessionId?: string }) {
 
   return (
     <main className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-      {isEmpty ? null : <ChatHeader />}
+      {hasConversationContent ? <ChatHeader /> : null}
 
-      {errorMessage ? (
-        <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-2 sm:px-6">
-          <div
-            className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm"
-            role="alert"
-          >
-            <AlertCircleIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
-            <div>
-              <p className="font-medium">Request failed</p>
-              <p className="mt-0.5 text-muted-foreground">{errorMessage}</p>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {isEmpty ? null : (
+      {hasConversationContent ? (
         <Conversation className="min-h-0 flex-1" initial="instant">
           <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 py-6 sm:px-6">
             {agent.data.messages.map((message, index) =>
@@ -166,27 +152,47 @@ export function AgentChat({ sessionId }: { readonly sessionId?: string }) {
               ),
             )}
             {showPendingThinking ? <PendingThinking /> : null}
+            {errorMessage ? <ErrorMessage message={errorMessage} /> : null}
           </ConversationContent>
           <ConversationScrollButton />
         </Conversation>
-      )}
+      ) : null}
 
       <div
         className={cn(
           "mx-auto w-full px-4 sm:px-6",
-          isEmpty
-            ? "flex max-w-xl flex-1 flex-col items-center justify-center gap-8 pb-[10vh]"
-            : "max-w-3xl shrink-0 pb-6",
+          hasConversationContent
+            ? "max-w-3xl shrink-0 pb-6"
+            : "flex max-w-xl flex-1 flex-col items-center justify-center gap-8 pb-[10vh]",
         )}
       >
-        {isEmpty ? (
+        {hasConversationContent ? null : (
           <div className="flex flex-col items-center gap-3 text-center">
             <h1 className="font-medium text-5xl tracking-tighter">{AGENT_NAME}</h1>
           </div>
-        ) : null}
+        )}
         <div className="w-full">{composer}</div>
       </div>
     </main>
+  );
+}
+
+function ErrorMessage({ message }: { readonly message: string }) {
+  return (
+    <Message from="assistant">
+      <MessageContent>
+        <div
+          className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm"
+          role="alert"
+        >
+          <AlertCircleIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
+          <div>
+            <p className="font-medium">Request failed</p>
+            <p className="mt-0.5 text-muted-foreground">{message}</p>
+          </div>
+        </div>
+      </MessageContent>
+    </Message>
   );
 }
 
