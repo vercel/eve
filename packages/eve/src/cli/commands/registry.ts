@@ -35,7 +35,11 @@ import {
 } from "./registry-presentation.js";
 import type { runRegistrySetupCommand } from "./registry-setup-command.js";
 import { reportHeadlessSetupCompletion, serializeHeadlessSetupEvent } from "./setup-headless.js";
-import { addRegistryMappings, readRegistryConfig } from "./registry-project.js";
+import {
+  addRegistryMappings,
+  prepareWebRegistryProject,
+  readRegistryConfig,
+} from "./registry-project.js";
 export type { RegistryCommandLogger } from "./registry-recovery.js";
 export interface AddCommandOptions {
   skipInstall?: boolean;
@@ -67,6 +71,7 @@ export interface RegistrySetupDependencies {
 export interface AddCommandDependencies extends RegistrySetupDependencies {
   createPrompter?: () => Prompter;
   hasInteractiveTerminal?: () => boolean;
+  prepareWebRegistryProject?: typeof prepareWebRegistryProject;
 }
 
 type RunAddCommandOptions = AddCommandOptions & {
@@ -97,6 +102,7 @@ const defaultAddCommandDependencies: AddCommandDependencies = {
   hasInteractiveTerminal,
   loadSetupCommandRunner: async () =>
     (await import("./registry-setup-command.js")).runRegistrySetupCommand,
+  prepareWebRegistryProject,
 };
 
 const DEFAULT_OFFICIAL_REGISTRY_URL = "https://eve.dev/r";
@@ -534,6 +540,9 @@ export async function runAddCommand(
       return reportCompletion(logger, item, completion, options);
     }
 
+    if (address === itemAddress("channel/web")) {
+      await (dependencies.prepareWebRegistryProject ?? prepareWebRegistryProject)(appRoot);
+    }
     await addRegistryItems([address], {
       config,
       cwd: appRoot,
