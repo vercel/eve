@@ -1,6 +1,7 @@
 import { type FilePart, type TextPart, type UserContent } from "ai";
 
 import type {
+  ProgressContextV1,
   SessionAuthContext,
   SessionCallback,
   SessionCapabilities,
@@ -13,6 +14,8 @@ import type { ResetResponse } from "#protocol/reset-session.js";
 import type { Session } from "#channel/session.js";
 import { resolveForwardedPrincipal, type TrustedForwarders } from "#channel/forwarded-principal.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
+import { parseProgressCallback } from "#channel/progress-callback.js";
+import { parseProgressWorkIdentityV1 } from "#protocol/progress.js";
 import { isRuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -310,13 +313,17 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           );
         }
 
+        const capabilities = {
+          ...(body.capabilities ?? (body.mode === "task" ? {} : { requestInput: true })),
+        };
+
         let handle: Awaited<ReturnType<typeof createSession>>;
         try {
           handle = await createSession({
             auth: messageResult.auth,
-            capabilities:
-              body.capabilities ?? (body.mode === "task" ? undefined : { requestInput: true }),
+            capabilities,
             callback: body.callback,
+            progress: body.progress,
             continuationToken: operationToken,
             initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
             input: {
@@ -822,6 +829,7 @@ function defaultOnMessage(ctx: EveMessageContext): EveMessageResult {
 interface ParsedCreateBody {
   callback?: SessionCallback;
   capabilities?: SessionCapabilities;
+  progress?: ProgressContextV1;
   message: string | UserContent;
   mode?: RunMode;
   context?: readonly string[];
@@ -868,6 +876,27 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
   const capabilities = parseCapabilitiesField(payload.capabilities);
   if (capabilities instanceof Response) return capabilities;
 
+  let progress: ProgressContextV1 | undefined;
+  const progressValue = payload.progress;
+  if (progressValue !== undefined) {
+    if (progressValue === null || typeof progressValue !== "object") {
+      return Response.json({ error: "Invalid progress context.", ok: false }, { status: 400 });
+    }
+    try {
+      const callback = parseProgressCallback(Reflect.get(progressValue, "callback"));
+      const workIdentity = parseProgressWorkIdentityV1(Reflect.get(progressValue, "workIdentity"));
+      if (callback === undefined || workIdentity === undefined) {
+        return Response.json({ error: "Invalid progress context.", ok: false }, { status: 400 });
+      }
+      progress = { callback, workIdentity };
+    } catch (error) {
+      return Response.json(
+        { error: error instanceof Error ? error.message : "Invalid progress context.", ok: false },
+        { status: 400 },
+      );
+    }
+  }
+
   const mode = parseModeField(payload.mode);
   if (mode instanceof Response) return mode;
 
@@ -896,6 +925,7 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
     mode,
     context,
     outputSchema,
+    progress,
   };
   if (typeof rawOperationId === "string") result.operationId = rawOperationId;
   return result;

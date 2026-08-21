@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 import {
   EntityConflictError,
   HookNotFoundError,
@@ -5,6 +7,7 @@ import {
   WorkflowRunNotFoundError,
 } from "#compiled/@workflow/errors/index.js";
 
+import { getChannelProgressPresentation } from "#channel/progress-renderer.js";
 import type {
   CancelTurnInput,
   CancelTurnResult,
@@ -18,6 +21,7 @@ import type {
   SessionCommandResult,
 } from "#channel/types.js";
 import { serializeContext } from "#context/serialize.js";
+import { ProgressKey } from "#context/keys.js";
 import {
   buildSessionAttributes,
   buildSubagentRootAttributes,
@@ -27,8 +31,10 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
+  cancelRun,
   getHookByToken,
   getRun,
+  getWorld,
   start,
   type Run,
   type StartOptionsWithoutDeploymentId,
@@ -45,6 +51,12 @@ import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
+import type { ProgressCollectorInput } from "#execution/progress-collector.js";
+import { createEveProgressRoutePath } from "#protocol/routes.js";
+import {
+  createWorkflowCallbackUrl,
+  resolveWorkflowCallbackBaseUrl,
+} from "#execution/workflow-callback-url.js";
 import { walkCauseChain } from "#shared/errors.js";
 import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
@@ -55,6 +67,7 @@ const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
 const SESSION_TIMEOUT_WORKFLOW_NAME = "sessionTimeoutWorkflow";
 const TASK_RUN_WORKFLOW_NAME = "taskRunWorkflow";
+const PROGRESS_COLLECTOR_WORKFLOW_NAME = "progressCollectorWorkflow";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const COMMAND_HOOK_READY_TIMEOUT_MS = 30_000;
 
@@ -76,6 +89,7 @@ export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
   TURN_WORKFLOW_NAME,
   SESSION_TIMEOUT_WORKFLOW_NAME,
   TASK_RUN_WORKFLOW_NAME,
+  PROGRESS_COLLECTOR_WORKFLOW_NAME,
 ]);
 
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
@@ -117,6 +131,11 @@ export const taskRunWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${TASK_RUN_WORKFLOW_NAME}`,
 };
 
+/** Stable workflow reference for root-session progress collectors. */
+export const progressCollectorWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${PROGRESS_COLLECTOR_WORKFLOW_NAME}`,
+};
+
 /**
  * Creates a workflow-backed runtime whose long-lived driver owns the
  * event stream and dispatches each turn as a child workflow run.
@@ -138,9 +157,46 @@ export function createWorkflowRuntime(config: {
         run: input,
       });
       const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
+      const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
+      let collectorRunId: string | undefined;
+      if (
+        input.parent === undefined &&
+        input.progress === undefined &&
+        sessionTimeoutMs !== false &&
+        (getChannelProgressPresentation(input.adapter)?.renderers.length ?? 0) > 0
+      ) {
+        const collectorContext = serializeContext(ctx);
+        const token = randomBytes(32).toString("base64url");
+        const collectorInput: ProgressCollectorInput = {
+          expiresAt: new Date(
+            Date.now() + (sessionTimeoutMs ?? 24 * 60 * 60 * 1_000),
+          ).toISOString(),
+          serializedContext: collectorContext,
+          token,
+        };
+        try {
+          const collector = await startWorkflowPreferLatest(progressCollectorWorkflowReference, [
+            collectorInput,
+          ]);
+          collectorRunId = collector.runId;
+          const fallbackOrigin = process.env.VERCEL_URL
+            ? `https://${process.env.VERCEL_URL}`
+            : "http://localhost:3000";
+          const baseUrl = resolveWorkflowCallbackBaseUrl(fallbackOrigin);
+          ctx.set(ProgressKey, {
+            callback: {
+              url: createWorkflowCallbackUrl(baseUrl, createEveProgressRoutePath(token)),
+              version: 1,
+            },
+          });
+        } catch {
+          await cancelProgressCollector(collectorRunId);
+          collectorRunId = undefined;
+          log.warn("failed to start progress collector");
+        }
+      }
       const serializedContext = serializeContext(ctx);
       const parentLineage = readParentLineage(serializedContext);
-      const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
       const workflowInput: {
         -readonly [K in keyof WorkflowEntryInput]: WorkflowEntryInput[K];
       } = {
@@ -179,23 +235,29 @@ export function createWorkflowRuntime(config: {
           attributes: normalizeEveAttributes(attributes),
         });
       } catch (error) {
+        await cancelProgressCollector(collectorRunId);
         logError(log, "failed to start workflow run", error, {
           continuationToken: input.continuationToken,
         });
         throw error;
       }
 
-      if (input.continuationToken) {
-        const owner = await waitForCommandHookOwner(input.continuationToken);
-        if (owner.runId !== run.runId) {
-          throw new RuntimeSessionOwnershipConflictError({
-            continuationToken: input.continuationToken,
-            ownerSessionId: owner.runId,
-            sessionId: run.runId,
-          });
+      try {
+        if (input.continuationToken) {
+          const owner = await waitForCommandHookOwner(input.continuationToken);
+          if (owner.runId !== run.runId) {
+            throw new RuntimeSessionOwnershipConflictError({
+              continuationToken: input.continuationToken,
+              ownerSessionId: owner.runId,
+              sessionId: run.runId,
+            });
+          }
         }
+        await waitForOwnedCommandHook(sessionCommandHookToken(run.runId), run.runId);
+      } catch (error) {
+        await cancelProgressCollector(collectorRunId);
+        throw error;
       }
-      await waitForOwnedCommandHook(sessionCommandHookToken(run.runId), run.runId);
 
       let events: ReadableStream<MessageStreamEvent> | undefined;
       const getEvents = () => {
@@ -259,6 +321,17 @@ export function createWorkflowRuntime(config: {
       }
     },
   };
+}
+
+async function cancelProgressCollector(runId: string | undefined): Promise<void> {
+  if (runId === undefined) return;
+  try {
+    await cancelRun(await getWorld(), runId, {
+      cancelReason: "Root session creation did not complete",
+    });
+  } catch {
+    log.warn("failed to cancel unowned progress collector");
+  }
 }
 
 async function dispatchWorkflowCommand<TCommand extends SessionCommand>(

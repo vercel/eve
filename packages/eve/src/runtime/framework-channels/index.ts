@@ -10,6 +10,7 @@ import {
   getSessionCallbackChannelDefinitions,
   getSessionCallbackChannelNames,
 } from "#runtime/session-callback-route.js";
+import { getProgressChannelDefinitions, getProgressChannelNames } from "#runtime/progress-route.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import {
   getTaskInputResponseChannelDefinitions,
@@ -49,6 +50,7 @@ export function getFrameworkChannelDefinitions(): readonly ResolvedChannelDefini
 
   result.push(
     ...getConnectionCallbackChannelDefinitions(),
+    ...getProgressChannelDefinitions(),
     ...getSessionCallbackChannelDefinitions(),
     ...getTaskInputResponseChannelDefinitions(),
   );
@@ -60,6 +62,7 @@ export function getAllFrameworkChannelNames(): ReadonlySet<string> {
   return new Set([
     EVE_CHANNEL_NAME,
     ...getConnectionCallbackChannelNames(),
+    ...getProgressChannelNames(),
     ...getSessionCallbackChannelNames(),
     ...getTaskInputResponseChannelNames(),
   ]);

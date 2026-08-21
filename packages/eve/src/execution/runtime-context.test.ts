@@ -6,6 +6,7 @@ import {
   ContinuationTokenKey,
   type Session,
   type SessionAuthContext,
+  ProgressKey,
   SessionIdKey,
   SessionKey,
 } from "#context/keys.js";
@@ -220,6 +221,32 @@ describe("buildRunContext", () => {
     });
 
     expect(ctx.get(SessionIdKey)).toBeUndefined();
+  });
+
+  it("seeds inherited private progress context", () => {
+    const callback = {
+      url: "https://root.example.com/eve/v1/progress/abcdefghijklmnopqrstuvwxyz123456",
+      version: 1 as const,
+    };
+    const workIdentity = {
+      id: "work:root:turn:call",
+      kind: "subagent" as const,
+      parentId: "work:root:turn",
+      rootSessionId: "root",
+      rootTurnId: "turn",
+    };
+    const ctx = buildRunContext({
+      bundle: createMinimalBundle(),
+      run: {
+        auth: null,
+        adapter: { kind: "subagent" },
+        input: { message: "hi" },
+        mode: "task",
+        progress: { callback, workIdentity },
+      },
+    });
+
+    expect(ctx.get(ProgressKey)).toEqual({ callback, workIdentity });
   });
 
   it("grafts parent metadata onto the child's own kind", () => {
