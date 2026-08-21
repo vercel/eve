@@ -41,28 +41,12 @@ export function useTemporaryAppRoots(): (
   prefix: string,
   options?: CreateTemporaryAppRootOptions,
 ) => Promise<TemporaryAppRoot> {
-  const temporaryRoots: string[] = [];
-
-  afterEach(async () => {
-    await Promise.all(
-      temporaryRoots.splice(0).map(async (directoryPath) => {
-        try {
-          await rm(directoryPath, {
-            force: true,
-            recursive: true,
-          });
-        } catch {
-          // Best-effort cleanup; a leaked tmpdir must not fail the run.
-        }
-      }),
-    );
-  });
+  const createTemporaryDirectory = useTemporaryDirectories();
 
   return async (prefix, options = {}) => {
-    const appRoot = await mkdtemp(join(tmpdir(), prefix));
+    const appRoot = await createTemporaryDirectory(prefix);
     const agentRoot = join(appRoot, "agent");
 
-    temporaryRoots.push(appRoot);
     await mkdir(agentRoot, {
       recursive: true,
     });
@@ -110,7 +94,7 @@ export function useTemporaryDirectories(): (prefix: string) => Promise<string> {
             recursive: true,
           });
         } catch {
-          // Best-effort cleanup.
+          // A leaked temporary directory must not fail the test.
         }
       }),
     );
