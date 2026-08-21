@@ -131,6 +131,14 @@ After eve accepts the reply, the durable stream emits `input.resolved`. Its `res
 
 `send(message, options)` and `respond(inputResponses, options)` are separate operations. Put `clientContext`, `outputSchema`, headers, or stream options in the second argument to either method.
 
+For response-authorized approvals, submitting `approve` creates a responder-bound candidate; it does not immediately close the shared request. Keep consuming the durable stream:
+
+- `approval.candidate` reports safe pending, rejected, failed, timed-out, and stale outcomes. Candidate-local UI should be private to its responder.
+- candidate-correlated `authorization.required` carries a private sign-in challenge.
+- `approval.settled` is the terminal authority for removing shared controls and shows whether the request was approved or cancelled.
+
+Delivery only acknowledges ingestion. OAuth may resume the same candidate later, so reconnecting clients should replay settlement history to repair stale UI.
+
 ## Single-use responses
 
 `MessageResponse` is single-use. Either aggregate it:

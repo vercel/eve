@@ -56,6 +56,35 @@ Policies can also return `"approved"` or `"denied"` to decide automatically. Use
 
 Gating a side effect on approval is also how you make non-idempotent work safe across replays: a charge or email that sits behind `always()` can't fire from a re-run step without a fresh human decision.
 
+### Authorize who may approve
+
+Request-time approval decides whether a tool call prompts. To also authorize the person responding, use the object form:
+
+```ts
+approval: {
+  request: always(),
+  async response({ request, response, responder, session, auth }) {
+    const identity = await auth.getToken(approverAuth);
+    return await canApprove({ identity, request, response, responder, session })
+      ? { status: "allowed" }
+      : {
+          status: "rejected",
+          reason: "You are not permitted to approve this action.",
+        };
+  },
+},
+```
+
+`request` contains the stable request, call, tool name, and tool input. `response` contains the submitted `{ decision: "approve" }`. `responder` is the identity derived by the authenticated channel ingress. `session` exposes read-only identity and lineage. `auth` exposes only `getToken` and `requireAuth`; it has no sandbox, skill, model, channel, or tool-execution capability.
+
+Calling `auth.getToken()` uses the same durable `authorization.required` flow as tool execution. A cached responder token returns immediately. If sign-in is needed, eve keeps the shared approval pending, binds the private challenge to that responder, and re-runs the currently deployed response policy after callback. Return `{ status: "allowed" }` to settle; return an authored `{ status: "rejected", reason }` only when the reason is safe to show privately to the responder. Thrown errors and the ten-second response-policy timeout fail closed with generic retry feedback.
+
+The function shorthand remains unchanged: `approval: always()` is equivalent to an object with `request: always()` and no response policy.
+
+Approval controls are **Approve / Cancel**. Approve runs the response policy. Cancel means “do not run this proposed call” and uses the channel's ordinary authenticated interaction boundary without running that policy. Multiple responders may validate concurrently; the first approved candidate or Cancel settles atomically, and late candidates become stale.
+
+The stream exposes `approval.candidate` progress and terminal `approval.settled` events. Candidate submission acknowledges ingestion only; clients keep shared controls open until settlement. Credentials, OAuth URLs, and raw provider errors are not included in candidate audit history.
+
 ### Skipping approval for schedule-dispatched turns
 
 `session.auth.current` identifies the caller of this turn. Markdown schedules use the app principal (`authenticator: "app"`, `principalId: "eve:app"`, `principalType: "runtime"`) automatically. A `run` schedule must pass its `appAuth` to `send(...)` for the child session to use that principal. Match all three fields to skip approval for automated turns while still prompting when a person calls the same tool:
