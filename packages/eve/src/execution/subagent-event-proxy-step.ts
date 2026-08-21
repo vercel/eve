@@ -1,7 +1,7 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler } from "#channel/adapter.js";
 import type {
-  SubagentAuthorizationEventHookPayload,
+  SubagentForwardedEventHookPayload,
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import type { ContextContainer } from "#context/container.js";
@@ -27,7 +27,7 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 
 type SubagentEventHookPayload =
-  | SubagentAuthorizationEventHookPayload
+  | SubagentForwardedEventHookPayload
   | SubagentInputRequestHookPayload;
 
 type ProxyInputRequestEntries = readonly (readonly [requestId: string, route: ProxyInputRequest])[];
@@ -130,7 +130,7 @@ export async function emitProxiedSubagentEvent(input: {
     };
 
     const scopeResult = await withContextScope(ctx, session, async (enrichedSession) => {
-      if (input.hookPayload.kind === "subagent-authorization-event") {
+      if (input.hookPayload.kind === "subagent-forwarded-event") {
         await emit(input.hookPayload.event);
         return { result: undefined, session: enrichedSession };
       }

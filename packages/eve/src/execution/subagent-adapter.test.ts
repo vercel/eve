@@ -5,12 +5,15 @@ import { buildSessionHandle } from "#channel/session.js";
 import { type SubagentAdapterState } from "#execution/subagent-adapter-state.js";
 import { ContextContainer } from "#context/container.js";
 import { ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
+import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import { SUBAGENT_ADAPTER } from "#execution/subagent-adapter.js";
 
 const SUBAGENT_INPUT_REQUESTED = SUBAGENT_ADAPTER["input.requested"];
 const SUBAGENT_AUTHORIZATION_REQUIRED = SUBAGENT_ADAPTER["authorization.required"];
 const SUBAGENT_AUTHORIZATION_COMPLETED = SUBAGENT_ADAPTER["authorization.completed"];
+const SUBAGENT_ACTIONS_REQUESTED = SUBAGENT_ADAPTER["actions.requested"];
+const SUBAGENT_ACTION_RESULT = SUBAGENT_ADAPTER["action.result"];
 
 if (SUBAGENT_INPUT_REQUESTED === undefined) {
   throw new Error("SUBAGENT_ADAPTER is missing its input.requested handler.");
@@ -20,6 +23,12 @@ if (SUBAGENT_AUTHORIZATION_REQUIRED === undefined) {
 }
 if (SUBAGENT_AUTHORIZATION_COMPLETED === undefined) {
   throw new Error("SUBAGENT_ADAPTER is missing its authorization.completed handler.");
+}
+if (SUBAGENT_ACTIONS_REQUESTED === undefined) {
+  throw new Error("SUBAGENT_ADAPTER is missing its actions.requested handler.");
+}
+if (SUBAGENT_ACTION_RESULT === undefined) {
+  throw new Error("SUBAGENT_ADAPTER is missing its action.result handler.");
 }
 
 const resumeHookMock = vi.fn();
@@ -69,6 +78,43 @@ const authorization = {
   url: "https://idp.example/authorize",
 };
 
+const dispatchAction: RuntimeActionRequest = {
+  callId: "call-fetch-sentry",
+  description: "Fetch recent Sentry issues",
+  input: { message: "What broke today?" },
+  kind: "subagent-call",
+  name: "fetch_sentry",
+  nodeId: "node-1",
+  subagentName: "fetch-sentry",
+};
+
+const toolCallAction: RuntimeActionRequest = {
+  callId: "call-grep",
+  input: { pattern: "TODO" },
+  kind: "tool-call",
+  toolName: "grep",
+};
+
+const subagentResult: RuntimeActionResult = {
+  callId: "call-fetch-sentry",
+  kind: "subagent-result",
+  origin: "child",
+  outcome: {
+    kind: "terminal",
+    result: { kind: "succeeded", output: "3 new issues" },
+    usageDelta: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 12, outputTokens: 8 },
+  },
+  output: "3 new issues",
+  subagentName: "fetch-sentry",
+};
+
+const toolResult: RuntimeActionResult = {
+  callId: "call-grep",
+  kind: "tool-result",
+  output: "no matches",
+  toolName: "grep",
+};
+
 describe("SUBAGENT_ADAPTER authorization handlers", () => {
   it("forwards a required event through each nested subagent adapter hop", async () => {
     resumeHookMock.mockClear();
@@ -92,7 +138,7 @@ describe("SUBAGENT_ADAPTER authorization handlers", () => {
       callId: "call-123",
       childSessionId: "child-session",
       event: { data, type: "authorization.required" },
-      kind: "subagent-authorization-event",
+      kind: "subagent-forwarded-event",
       subagentName: "linear",
     });
   });
@@ -114,7 +160,7 @@ describe("SUBAGENT_ADAPTER authorization handlers", () => {
       callId: "call-123",
       childSessionId: "child-session",
       event: { data, type: "authorization.completed" },
-      kind: "subagent-authorization-event",
+      kind: "subagent-forwarded-event",
       subagentName: "linear",
     });
   });
@@ -192,6 +238,91 @@ describe("SUBAGENT_ADAPTER input.requested handler", () => {
   });
 });
 
+describe("SUBAGENT_ADAPTER progress handlers", () => {
+  it("narrows a mixed batch to the dispatch entries through each adapter hop", async () => {
+    resumeHookMock.mockClear();
+
+    await callAdapterEventHandler(
+      SUBAGENT_ADAPTER,
+      {
+        data: {
+          actions: [toolCallAction, dispatchAction],
+          sequence: 4,
+          stepIndex: 2,
+          turnId: "child-turn",
+        },
+        type: "actions.requested",
+      },
+      makeContext(),
+    );
+
+    expect(resumeHookMock).toHaveBeenCalledWith("parent-token", {
+      callId: "call-123",
+      childSessionId: "child-session",
+      event: {
+        data: { actions: [dispatchAction], sequence: 4, stepIndex: 2, turnId: "child-turn" },
+        type: "actions.requested",
+      },
+      kind: "subagent-forwarded-event",
+      subagentName: "linear",
+    });
+  });
+
+  it("does not forward a batch of the child's own tool calls", async () => {
+    resumeHookMock.mockClear();
+
+    await SUBAGENT_ACTIONS_REQUESTED(
+      {
+        actions: [toolCallAction],
+        sequence: 4,
+        stepIndex: 2,
+        turnId: "child-turn",
+      },
+      makeContext(),
+    );
+
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
+  it("forwards a settled nested dispatch unchanged via resumeHook", async () => {
+    resumeHookMock.mockClear();
+    const data = {
+      result: subagentResult,
+      sequence: 5,
+      stepIndex: 2,
+      status: "completed" as const,
+      turnId: "child-turn",
+    };
+
+    await SUBAGENT_ACTION_RESULT(data, makeContext());
+
+    expect(resumeHookMock).toHaveBeenCalledWith("parent-token", {
+      callId: "call-123",
+      childSessionId: "child-session",
+      event: { data, type: "action.result" },
+      kind: "subagent-forwarded-event",
+      subagentName: "linear",
+    });
+  });
+
+  it("does not forward the child's own tool results", async () => {
+    resumeHookMock.mockClear();
+
+    await SUBAGENT_ACTION_RESULT(
+      {
+        result: toolResult,
+        sequence: 5,
+        stepIndex: 2,
+        status: "completed",
+        turnId: "child-turn",
+      },
+      makeContext(),
+    );
+
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("SUBAGENT_ADAPTER forward failure logging", () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
   let logSpy: ReturnType<typeof vi.spyOn>;
@@ -249,7 +380,7 @@ describe("SUBAGENT_ADAPTER forward failure logging", () => {
     });
   });
 
-  it("includes the authorization event type when auth forwarding fails", async () => {
+  it("includes the forwarded event type when event forwarding fails", async () => {
     resumeHookMock.mockClear();
     resumeHookMock.mockRejectedValueOnce(new Error("parent gone"));
 

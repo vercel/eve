@@ -2,12 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
 import type {
-  SubagentAuthorizationEvent,
-  SubagentAuthorizationEventHookPayload,
+  SubagentForwardedEvent,
+  SubagentForwardedEventHookPayload,
 } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
 import { AuthKey, ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
 import { emitProxiedSubagentEvent } from "#execution/subagent-event-proxy-step.js";
+import {
+  getSubagentDelegationName,
+  isSubagentDelegationAction,
+} from "#harness/subagent-depth.js";
 import { projectToDurableSession } from "#execution/session.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
@@ -35,6 +39,27 @@ const authorizationAdapter: ChannelAdapter<AuthorizationAdapterContext> = {
   "authorization.completed"(data, ctx) {
     delete ctx.state.pendingName;
     ctx.state.outcome = data.outcome;
+  },
+};
+
+interface ProgressAdapterState extends Record<string, unknown> {
+  settled?: readonly string[];
+  status?: string;
+}
+
+type ProgressAdapterContext = ChannelAdapterContext<ProgressAdapterState>;
+
+/** Stands in for a channel rendering a live progress card for the parent turn. */
+const progressAdapter: ChannelAdapter<ProgressAdapterContext> = {
+  kind: "progress-proxy-test",
+  "actions.requested"(data, ctx) {
+    ctx.state.status = data.actions
+      .filter(isSubagentDelegationAction)
+      .map(getSubagentDelegationName)
+      .join(", ");
+  },
+  "action.result"(data, ctx) {
+    ctx.state.settled = [...(ctx.state.settled ?? []), data.result.callId];
   },
 };
 
@@ -111,14 +136,12 @@ function createSession(sessionId: string): HarnessSession {
   };
 }
 
-function authorizationPayload(
-  event: SubagentAuthorizationEvent,
-): SubagentAuthorizationEventHookPayload {
+function forwardedPayload(event: SubagentForwardedEvent): SubagentForwardedEventHookPayload {
   return {
     callId: "call-child",
     childSessionId: "child-session",
     event,
-    kind: "subagent-authorization-event",
+    kind: "subagent-forwarded-event",
     subagentName: "researcher",
   };
 }
@@ -142,7 +165,7 @@ describe("subagent authorization proxy", () => {
     const { ctx } = buildContext({ adapter: authorizationAdapter, sessionId: parentSessionId });
     const chunks: Uint8Array[] = [];
     const parentWritable = createCapturingWritable(chunks);
-    const candidateEvent: SubagentAuthorizationEvent = {
+    const candidateEvent: SubagentForwardedEvent = {
       data: {
         candidateId: "candidate-1",
         outcome: "pending",
@@ -154,7 +177,7 @@ describe("subagent authorization proxy", () => {
       },
       type: "approval.candidate",
     };
-    const settledEvent: SubagentAuthorizationEvent = {
+    const settledEvent: SubagentForwardedEvent = {
       data: {
         outcome: "approved",
         requestId: "approval-1",
@@ -169,13 +192,13 @@ describe("subagent authorization proxy", () => {
     await emitProxiedSubagentEvent({
       ctx,
       durableSession: projectToDurableSession(session),
-      hookPayload: authorizationPayload(candidateEvent),
+      hookPayload: forwardedPayload(candidateEvent),
       parentWritable,
     });
     await emitProxiedSubagentEvent({
       ctx,
       durableSession: projectToDurableSession(session),
-      hookPayload: authorizationPayload(settledEvent),
+      hookPayload: forwardedPayload(settledEvent),
       parentWritable,
     });
 
@@ -191,7 +214,7 @@ describe("subagent authorization proxy", () => {
     });
     const chunks: Uint8Array[] = [];
     const parentWritable = createCapturingWritable(chunks);
-    const requiredEvent: SubagentAuthorizationEvent = {
+    const requiredEvent: SubagentForwardedEvent = {
       data: {
         authorization: {
           displayName: "Linear",
@@ -211,7 +234,7 @@ describe("subagent authorization proxy", () => {
     const required = await emitProxiedSubagentEvent({
       ctx,
       durableSession: projectToDurableSession(session),
-      hookPayload: authorizationPayload(requiredEvent),
+      hookPayload: forwardedPayload(requiredEvent),
       parentWritable,
     });
 
@@ -222,7 +245,7 @@ describe("subagent authorization proxy", () => {
       state: { pendingName: "linear" },
     });
 
-    const completedEvent: SubagentAuthorizationEvent = {
+    const completedEvent: SubagentForwardedEvent = {
       data: {
         authorization: requiredEvent.data.authorization,
         name: "linear",
@@ -236,7 +259,7 @@ describe("subagent authorization proxy", () => {
     const completed = await emitProxiedSubagentEvent({
       ctx: rehydrateContext({ bundle, serializedContext: required.serializedContext }),
       durableSession: required.sessionState.snapshot!.session,
-      hookPayload: authorizationPayload(completedEvent),
+      hookPayload: forwardedPayload(completedEvent),
       parentWritable,
     });
 
@@ -247,5 +270,88 @@ describe("subagent authorization proxy", () => {
     expect(chunks).toHaveLength(2);
     expect(decodeEvent(chunks[0]!)).toMatchObject(requiredEvent);
     expect(decodeEvent(chunks[1]!)).toMatchObject(completedEvent);
+  });
+});
+
+describe("subagent progress proxy", () => {
+  it("drives the parent channel's action handlers from a child's nested dispatch", async () => {
+    const parentSessionId = "parent-progress-session";
+    const session = createSession(parentSessionId);
+    const { bundle, ctx } = buildContext({ adapter: progressAdapter, sessionId: parentSessionId });
+    const chunks: Uint8Array[] = [];
+    const parentWritable = createCapturingWritable(chunks);
+    const requestedEvent: SubagentForwardedEvent = {
+      data: {
+        actions: [
+          {
+            callId: "call-fetch-sentry",
+            description: "Fetch recent Sentry issues",
+            input: { message: "What broke today?" },
+            kind: "subagent-call",
+            name: "fetch_sentry",
+            nodeId: "node-1",
+            subagentName: "fetch-sentry",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 1,
+        turnId: "child-turn",
+      },
+      type: "actions.requested",
+    };
+
+    const requested = await emitProxiedSubagentEvent({
+      ctx,
+      durableSession: projectToDurableSession(session),
+      hookPayload: forwardedPayload(requestedEvent),
+      parentWritable,
+    });
+
+    expect(requested.serializedContext[ChannelKey.name]).toEqual({
+      kind: progressAdapter.kind,
+      state: { status: "fetch-sentry" },
+    });
+
+    const resultEvent: SubagentForwardedEvent = {
+      data: {
+        result: {
+          callId: "call-fetch-sentry",
+          kind: "subagent-result",
+          origin: "child",
+          outcome: {
+            kind: "terminal",
+            result: { kind: "succeeded", output: "3 new issues" },
+            usageDelta: {
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              inputTokens: 12,
+              outputTokens: 8,
+            },
+          },
+          output: "3 new issues",
+          subagentName: "fetch-sentry",
+        },
+        sequence: 1,
+        stepIndex: 1,
+        status: "completed",
+        turnId: "child-turn",
+      },
+      type: "action.result",
+    };
+
+    const settled = await emitProxiedSubagentEvent({
+      ctx: rehydrateContext({ bundle, serializedContext: requested.serializedContext }),
+      durableSession: requested.sessionState.snapshot!.session,
+      hookPayload: forwardedPayload(resultEvent),
+      parentWritable,
+    });
+
+    expect(settled.serializedContext[ChannelKey.name]).toEqual({
+      kind: progressAdapter.kind,
+      state: { settled: ["call-fetch-sentry"], status: "fetch-sentry" },
+    });
+    expect(chunks).toHaveLength(2);
+    expect(decodeEvent(chunks[0]!)).toMatchObject(requestedEvent);
+    expect(decodeEvent(chunks[1]!)).toMatchObject(resultEvent);
   });
 });

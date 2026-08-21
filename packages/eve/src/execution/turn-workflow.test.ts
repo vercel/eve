@@ -1011,14 +1011,14 @@ describe("turnWorkflow", () => {
         callId: "call-1",
         childSessionId: "child-session",
         event: requiredEvent,
-        kind: "subagent-authorization-event",
+        kind: "subagent-forwarded-event",
         subagentName: "delegate",
       },
       {
         callId: "call-1",
         childSessionId: "child-session",
         event: completedEvent,
-        kind: "subagent-authorization-event",
+        kind: "subagent-forwarded-event",
         subagentName: "delegate",
       },
       {
