@@ -299,10 +299,11 @@ export class EveAgentStore<TData> {
       })) {
         if (!this.#isActiveTurn(turn)) return;
         replayed.push(event);
-        this.#acceptServerEvent(event, true);
+        this.#acceptServerEvent(event, true, false);
       }
 
       if (!this.#isActiveTurn(turn)) return;
+      this.#publish();
       if (!isSettledSessionTail(replayed)) {
         const pendingAuthorizations = collectPendingAuthorizations(replayed);
         for await (const event of session.stream({ signal: turn.abortController.signal })) {
@@ -445,14 +446,14 @@ export class EveAgentStore<TData> {
     });
   }
 
-  #acceptServerEvent(event: MessageStreamEvent, applyFailure: boolean): void {
+  #acceptServerEvent(event: MessageStreamEvent, applyFailure: boolean, publish = true): void {
     if (!this.#seenEvents.admit(event)) return;
     this.#events = [...this.#events, event];
     this.#applyServerEvent(event);
     this.#callbacks.onEvent?.(event);
     if (applyFailure) this.#applyTerminalStreamFailure(event);
     this.#status = "streaming";
-    this.#publish();
+    if (publish) this.#publish();
   }
 
   #applyServerEvent(event: MessageStreamEvent): void {

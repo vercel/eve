@@ -218,10 +218,14 @@ describe("EveAgentStore session resume", () => {
       initialSession: { sessionId: "session_1", streamIndex: 0 },
       reducer: defaultMessageReducer(),
     });
+    const publishedEventCounts: number[] = [];
+    store.subscribe(() => publishedEventCounts.push(store.snapshot.events.length));
 
     await store.resume();
 
     expect(fetchMock).toHaveBeenCalledOnce();
+    expect(publishedEventCounts).not.toContain(1);
+    expect(publishedEventCounts).not.toContain(2);
     expect(store.snapshot.status).toBe("ready");
     expect(store.snapshot.events).toEqual(events);
     expect(store.snapshot.session).toEqual({ sessionId: "session_1", streamIndex: events.length });

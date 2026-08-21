@@ -24,6 +24,7 @@ const AGENT_NAME = "eve-agent";
 
 export function AgentChat({ sessionId }: { readonly sessionId?: string }) {
   const [cancellationError, setCancellationError] = useState<string>();
+  const [isRestoring, setIsRestoring] = useState(sessionId !== undefined);
   const agent = useEveAgent({
     initialSession:
       sessionId === undefined
@@ -45,8 +46,16 @@ export function AgentChat({ sessionId }: { readonly sessionId?: string }) {
 
   useEffect(() => {
     if (sessionId === undefined) return;
-    const timeout = window.setTimeout(() => void agent.resume(), 0);
-    return () => window.clearTimeout(timeout);
+    let mounted = true;
+    const timeout = window.setTimeout(() => {
+      void agent.resume().finally(() => {
+        if (mounted) setIsRestoring(false);
+      });
+    }, 0);
+    return () => {
+      mounted = false;
+      window.clearTimeout(timeout);
+    };
   }, [agent.resume, sessionId]);
   const isBusy = agent.status === "submitted" || agent.status === "streaming";
   const isEmpty = agent.data.messages.length === 0;
@@ -100,6 +109,17 @@ export function AgentChat({ sessionId }: { readonly sessionId?: string }) {
       <PromptInputSubmit onStop={requestCancellation} status={agent.status} />
     </PromptInput>
   );
+
+  if (isRestoring && agent.events.length === 0) {
+    return (
+      <main className="flex h-dvh items-center justify-center bg-background text-foreground">
+        <div className="flex items-center gap-2 text-muted-foreground text-sm">
+          <BrainIcon className="size-4" />
+          <Shimmer duration={1}>Restoring conversation</Shimmer>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
