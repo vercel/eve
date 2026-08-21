@@ -4,6 +4,17 @@ import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
 import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
+import {
+  assertExclusiveTurnInput,
+  collectPendingAuthorizations,
+  createAbortSignal,
+  createSubmissionId,
+  isAbortError,
+  isSettledSessionTail,
+  summarizeUserContent,
+  toTerminalStreamFailureError,
+  updatePendingAuthorizations,
+} from "#client/eve-agent-store-helpers.js";
 import { toError } from "#shared/errors.js";
 import type {
   CancelSessionResult,
@@ -12,7 +23,6 @@ import type {
   SendTurnPayload,
   ClientSessionState,
 } from "#client/types.js";
-import type { UserContent } from "ai";
 
 /**
  * Lifecycle state of an {@link EveAgentStore}: `ready` (idle), `submitted`
@@ -656,85 +666,4 @@ export class EveAgentStore<TData> {
 /** @internal Detaches local transport without cancelling durable server work. */
 export function detachEveAgentStore<TData>(store: EveAgentStore<TData>): void {
   store[detachStore]();
-}
-
-function isSettledSessionTail(events: readonly MessageStreamEvent[]): boolean {
-  const tail = events.at(-1);
-  return (
-    tail !== undefined &&
-    isCurrentTurnBoundaryEvent(tail) &&
-    (tail.type !== "session.waiting" || collectPendingAuthorizations(events).size === 0)
-  );
-}
-
-function collectPendingAuthorizations(events: readonly MessageStreamEvent[]): Set<string> {
-  const pending = new Set<string>();
-  for (const event of events) updatePendingAuthorizations(pending, event);
-  return pending;
-}
-
-function updatePendingAuthorizations(pending: Set<string>, event: MessageStreamEvent): void {
-  if (event.type === "authorization.required" && event.data.webhookUrl !== undefined) {
-    pending.add(event.data.name);
-  } else if (event.type === "authorization.completed") {
-    pending.delete(event.data.name);
-  }
-}
-
-function assertExclusiveTurnInput(input: SendTurnPayload): void {
-  const hasMessage = input.message !== undefined;
-  const hasResponses = input.inputResponses !== undefined;
-  if (hasMessage === hasResponses) {
-    throw new Error("A turn requires exactly one of message or inputResponses.");
-  }
-}
-
-let submissionSequence = 0;
-
-function createSubmissionId(): string {
-  const randomUUID = globalThis.crypto?.randomUUID;
-  if (randomUUID !== undefined) {
-    return randomUUID.call(globalThis.crypto);
-  }
-
-  submissionSequence += 1;
-  return `submission_${submissionSequence.toString()}`;
-}
-
-function createAbortSignal(first: AbortSignal | undefined, second: AbortSignal): AbortSignal {
-  return first ? AbortSignal.any([first, second]) : second;
-}
-
-function summarizeUserContent(message: string | UserContent): string {
-  if (typeof message === "string") {
-    return message;
-  }
-
-  const parts: string[] = [];
-  for (const part of message) {
-    if (part.type === "text") {
-      parts.push(part.text);
-      continue;
-    }
-
-    if (part.type === "file") {
-      parts.push(part.filename ? `[file: ${part.filename}]` : "[file]");
-    }
-  }
-
-  return parts.join("\n");
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
-function toTerminalStreamFailureError(event: MessageStreamEvent): Error | undefined {
-  if (event.type !== "session.failed") {
-    return undefined;
-  }
-
-  const error = new Error(event.data.message);
-  error.name = event.data.code;
-  return error;
 }
