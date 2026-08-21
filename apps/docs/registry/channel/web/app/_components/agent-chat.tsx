@@ -218,21 +218,23 @@ function ErrorMessage({ message }: { readonly message: string }) {
 
 function ChatHeader({ canStartNewChat }: { readonly canStartNewChat: boolean }) {
   return (
-    <header className="relative flex h-14 shrink-0 items-center justify-center px-24">
-      <span className="truncate text-muted-foreground text-sm">{AGENT_NAME}</span>
-      {canStartNewChat ? (
-        <Button
-          aria-label="Start a new chat"
-          className="absolute right-2"
-          onClick={() => window.location.assign("/s")}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          <PlusIcon className="size-4" />
-          <span className="hidden sm:inline">New chat</span>
-        </Button>
-      ) : null}
+    <header className="h-14 shrink-0">
+      <div className="relative mx-auto flex h-full w-full max-w-3xl items-center justify-center px-24">
+        <span className="truncate text-muted-foreground text-sm">{AGENT_NAME}</span>
+        {canStartNewChat ? (
+          <Button
+            aria-label="Start a new chat"
+            className="absolute right-4 sm:right-6"
+            onClick={() => window.location.assign("/s")}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <PlusIcon className="size-4" />
+            <span className="hidden sm:inline">New chat</span>
+          </Button>
+        ) : null}
+      </div>
     </header>
   );
 }
