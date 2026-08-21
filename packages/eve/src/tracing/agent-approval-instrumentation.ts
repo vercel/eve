@@ -41,6 +41,7 @@ export function createAgentApprovalInstrumentation(input: {
     turnId: string,
     callId: string,
   ) => Promise<AgentActionContext | undefined>;
+  readonly emitVercelSessionId?: boolean;
   readonly frameworkVersion: string;
   readonly idGenerator: AgentSpanIdGenerator;
   readonly recordInputs: boolean;
@@ -50,6 +51,7 @@ export function createAgentApprovalInstrumentation(input: {
   NonNullable<InstrumentationProviderDefinition["events"]>,
   "input.requested" | "input.resolved"
 > {
+  const emitVercelSessionId = input.emitVercelSessionId ?? false;
   const onRequested = async (
     event: InstrumentationInputRequestedEvent,
     ctx: InstrumentationHandlerContext,
@@ -110,6 +112,9 @@ export function createAgentApprovalInstrumentation(input: {
               "agent.step.attempt": state.attemptIndex,
               "agent.step.index": state.stepIndex,
               "agent.turn.id": state.turnId,
+              ...(emitVercelSessionId
+                ? { "vercel.session_id": state.rootSessionId }
+                : {}),
             },
             startTime: state.startTimeMs,
           },

@@ -73,6 +73,14 @@ export interface AgentOtelInstrumentationInput {
   readonly stateStore: AgentTraceStateStore;
   readonly tracer: Tracer;
   readonly tracePolicy?: TraceCapturePolicy;
+  /**
+   * When true, every agent span also carries `vercel.session_id` set to the
+   * root session id. The VDP trace ingestion materialized view extracts this
+   * into the indexed `sessionId` column so Agent Runs can equality-lookup a
+   * session across all trace windows without scanning the attribute map.
+   * Emitted only on Vercel (not local `eve dev`).
+   */
+  readonly emitVercelSessionId?: boolean;
 }
 
 /** OTel event definition and its trusted framework context runner. */
@@ -93,6 +101,7 @@ export function createAgentOtelInstrumentation(
 ): AgentOtelInstrumentation {
   const recordInputs = input.recordInputs ?? false;
   const recordOutputs = input.recordOutputs ?? false;
+  const emitVercelSessionId = input.emitVercelSessionId ?? false;
   const executionContexts = new WeakMap<InstrumentationAttemptScope, Map<string, Context>>();
   const attemptScopes = new Map<string, InstrumentationAttemptScope>();
   // A serverless turn runs inside one `turnStep` "use step" invocation. If
@@ -101,6 +110,7 @@ export function createAgentOtelInstrumentation(
   const steps = new WeakMap<InstrumentationAttemptScope, AttemptSpanState>();
   const modelSpans = new WeakMap<InstrumentationAttemptScope, Map<string, SpanState>>();
   const actions = createAgentActionInstrumentation({
+    emitVercelSessionId,
     frameworkVersion: input.frameworkVersion,
     idGenerator: input.idGenerator,
     recordInputs,
@@ -114,6 +124,7 @@ export function createAgentOtelInstrumentation(
   });
   const approvals = createAgentApprovalInstrumentation({
     actionContextFor: actions.contextFor,
+    emitVercelSessionId,
     frameworkVersion: input.frameworkVersion,
     idGenerator: input.idGenerator,
     recordInputs,
@@ -168,6 +179,9 @@ export function createAgentOtelInstrumentation(
               "agent.step.index": event.scope.stepIndex,
               "agent.turn.id": event.scope.turnId,
               "agent.name": event.scope.functionId,
+              ...(emitVercelSessionId
+                ? { "vercel.session_id": event.scope.rootSessionId ?? event.scope.sessionId }
+                : {}),
               ...runtimeContextAttributes(event.runtimeContext),
             },
             links:
@@ -274,6 +288,9 @@ export function createAgentOtelInstrumentation(
                   "agent.session.window": session?.window,
                   "agent.turn.id": event.turnId,
                   "agent.turn.sequence": turn.sequence,
+                  ...(emitVercelSessionId
+                    ? { "vercel.session_id": turn.rootSessionId }
+                    : {}),
                 },
                 startTime: turn.startTimeMs,
               },
@@ -411,6 +428,7 @@ export function createAgentOtelInstrumentation(
   };
 
   const channelDeliveries = createAgentChannelDeliveryInstrumentation({
+    emitVercelSessionId,
     ensureSessionContext,
     frameworkVersion: input.frameworkVersion,
     idGenerator: input.idGenerator,
