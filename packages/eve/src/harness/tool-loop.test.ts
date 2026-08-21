@@ -4922,7 +4922,12 @@ describe("createToolLoopHarness", () => {
 
       const { emit, events } = createEventCollector();
       const runStep = createToolLoopHarness({ ...config, handleEvent: emit });
-      const result = await runStep(session, { message: "Hi" });
+      const ctx = new ContextContainer();
+      ctx.set(ChannelInstrumentationKey, {
+        kind: "channel:public",
+        metadata: { audience: "public" },
+      });
+      const result = await contextStorage.run(ctx, () => runStep(session, { message: "Hi" }));
 
       // The second agent was constructed for the retry.
       expect(constructedCalls.count()).toBe(2);
@@ -10787,7 +10792,12 @@ describe("createToolLoopHarness", () => {
         }),
       );
 
-      await runStep(createTestSession(), { message: "hi" });
+      const ctx = new ContextContainer();
+      ctx.set(ChannelInstrumentationKey, {
+        kind: "channel:public",
+        metadata: { audience: "public" },
+      });
+      await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "hi" }));
 
       const bridge = mockCreateAiSdkHookBridge.mock.results[0]!.value;
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
@@ -10801,6 +10811,51 @@ describe("createToolLoopHarness", () => {
         integrations: [bridge, registeredOtelIntegration, registeredAuthorIntegration],
         recordInputs: true,
         recordOutputs: false,
+      });
+    });
+
+    it("forces hosted unknown model telemetry to metadata only", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      declareTelemetry({ recordInputs: true, recordOutputs: true });
+
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      await runStep(createTestSession(), { message: "hi" });
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: { recordInputs?: boolean; recordOutputs?: boolean };
+      };
+      expect(agentCall.telemetry).toMatchObject({
+        recordInputs: false,
+        recordOutputs: false,
+      });
+    });
+
+    it("keeps unknown model telemetry content in a local development worker", async () => {
+      vi.stubEnv("EVE_DEV", "1");
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      declareTelemetry({ recordInputs: true, recordOutputs: true });
+
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      await runStep(createTestSession(), { message: "hi" });
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: { recordInputs?: boolean; recordOutputs?: boolean };
+      };
+      expect(agentCall.telemetry).toMatchObject({
+        recordInputs: true,
+        recordOutputs: true,
       });
     });
 
@@ -10845,6 +10900,7 @@ describe("createToolLoopHarness", () => {
       ctx.set(ChannelInstrumentationKey, {
         kind: "channel:support",
         metadata: {
+          audience: "public",
           triggeringUserId: "U123",
         },
       });

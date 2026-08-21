@@ -113,6 +113,8 @@ export type InstrumentationActionOutput =
  * some provider asked for it, and a provider that did not ask never receives
  * it — which is the same guarantee a destination that declines content gets,
  * one layer lower and without an OpenTelemetry pipeline to route it through.
+ * Runtime audience policy can still lower hosted private or unknown events to
+ * metadata before this provider-level projection.
  */
 export type InstrumentationCapture = "content" | "metadata";
 

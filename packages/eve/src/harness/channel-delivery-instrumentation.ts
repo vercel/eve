@@ -12,6 +12,7 @@ import type {
   InstrumentationHooks,
 } from "#harness/instrumentation/lifecycle.js";
 import { channelDeliveryIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+import { instrumentationHooksForAudience } from "#harness/instrumentation/content-policy.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 
 interface ChannelDeliveryStartInstrumentation {
@@ -49,7 +50,11 @@ export async function instrumentChannelDelivery(
     const type =
       `channel.delivery.${input.outcome}` as InstrumentationChannelDeliveryTerminalEvent["type"];
     for (const item of active) {
-      await input.hooks.publish({
+      const hooks = instrumentationHooksForAudience(
+        input.hooks,
+        normalizeChannelAudience(item.delivery.channelAudience),
+      );
+      await hooks?.publish({
         agentName: item.agentName,
         delivery: item.delivery,
         error: input.error,
@@ -73,6 +78,7 @@ export async function instrumentChannelDelivery(
   const channelAudience = normalizeChannelAudience(
     input.ctx.get(ChannelInstrumentationKey)?.metadata.audience,
   );
+  const hooks = instrumentationHooksForAudience(input.hooks, channelAudience);
   for (const metadata of input.delivery.deliveryMetadata) {
     const payload = input.delivery.payloads[metadata.payloadIndex];
     const delivery = {
@@ -84,9 +90,7 @@ export async function instrumentChannelDelivery(
       requestTraceContext: metadata.requestTraceContext,
     };
     const deliveryInput =
-      !input.hooks.capturesContent || payload === undefined
-        ? undefined
-        : projectDeliveryInput(payload);
+      !hooks?.capturesContent || payload === undefined ? undefined : projectDeliveryInput(payload);
     const item: ActiveChannelDelivery = {
       agentName: input.agentName,
       delivery,
@@ -96,7 +100,7 @@ export async function instrumentChannelDelivery(
       turnId: input.turnId,
     };
     active.push(item);
-    await input.hooks.publish({
+    await hooks?.publish({
       agentName: item.agentName,
       delivery,
       idempotencyKey: channelDeliveryIdempotencyKey(input.sessionId, delivery.deliveryId),
