@@ -47,7 +47,7 @@ export const Conversation = ({
 );
 
 function ConversationScrollRestoration({ storageKey }: { readonly storageKey: string }) {
-  const { scrollRef, scrollToBottom } = useStickToBottomContext();
+  const { scrollRef, scrollToBottom, state } = useStickToBottomContext();
   const restoredKeyRef = useRef<string | undefined>(undefined);
 
   useLayoutEffect(() => {
@@ -69,12 +69,10 @@ function ConversationScrollRestoration({ storageKey }: { readonly storageKey: st
     }
 
     const saveNow = () => {
-      const distanceFromBottom =
-        scrollElement.scrollHeight - scrollElement.clientHeight - scrollElement.scrollTop;
       sessionStorage.setItem(
         storageKey,
         JSON.stringify({
-          atBottom: distanceFromBottom <= 2,
+          atBottom: state.isAtBottom || state.isNearBottom,
           scrollTop: scrollElement.scrollTop,
         }),
       );
@@ -95,7 +93,7 @@ function ConversationScrollRestoration({ storageKey }: { readonly storageKey: st
       if (frame !== undefined) cancelAnimationFrame(frame);
       saveNow();
     };
-  }, [scrollRef, scrollToBottom, storageKey]);
+  }, [scrollRef, scrollToBottom, state, storageKey]);
 
   return null;
 }

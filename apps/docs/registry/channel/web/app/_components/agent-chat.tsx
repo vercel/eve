@@ -137,13 +137,14 @@ export function AgentChat({
         <Conversation
           className="min-h-0 flex-1"
           initial={sessionId === undefined ? undefined : false}
+          resize={activeSessionId === undefined ? "smooth" : "instant"}
           scrollRestorationKey={
             isEmpty || activeSessionId === undefined
               ? undefined
               : `eve:web-chat-scroll:${activeSessionId}`
           }
         >
-          <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-20 pb-6 sm:px-6">
+          <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-20 pb-36 sm:px-6">
             {agent.data.messages.map((message, index) =>
               showPendingThinking &&
               isPendingAssistantShell &&
@@ -173,7 +174,7 @@ export function AgentChat({
         className={cn(
           "mx-auto w-full px-4 sm:px-6",
           showConversationLayout
-            ? "max-w-3xl shrink-0 pb-6"
+            ? "fixed bottom-0 left-1/2 z-20 max-w-3xl -translate-x-1/2 bg-gradient-to-t from-background via-background to-transparent pt-4 pb-6"
             : "flex max-w-xl flex-1 flex-col items-center justify-center gap-8 pb-[10vh]",
         )}
       >
