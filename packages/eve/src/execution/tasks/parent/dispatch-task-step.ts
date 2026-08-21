@@ -134,6 +134,7 @@ export async function dispatchTaskStep(
           outcome = await dispatchToTaskAgentAddress({
             action: entry.action,
             agentId: entry.agentId,
+            auth: prepared.auth,
             bundle: createAgentContinuationBundle({
               action: entry.action,
               bundle,

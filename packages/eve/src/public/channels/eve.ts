@@ -155,7 +155,7 @@ export interface EveChannelInput {
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
   /**
    * The trusted-forwarders policy: which transport-authenticated callers may
-   * assert a forwarded principal on the create-session route (the
+   * assert a forwarded principal on the create-session or continuation route (the
    * `forwardedPrincipal` body field a `defineRemoteAgent({ forwardPrincipal:
    * true })` sender emits). The predicate receives the *verified* route-auth
    * principal of the forwarder — who is asserting, never what is asserted —
@@ -164,12 +164,12 @@ export interface EveChannelInput {
    * A permissive predicate lets any authenticated forwarder assert any
    * principal.
    *
-   * When a trusted forwarder's assertion is accepted, the forwarded
-   * principal replaces the session principal (`session.auth.current` /
-   * `session.auth.initiator`) exactly as if that user had called this
-   * deployment directly, and the forwarder is recorded on the accepted
-   * contexts as the `eve:forwarded-by` attribute. Omit the option to reject
-   * every forwarded assertion with 403.
+   * When a trusted forwarder's assertion is accepted on session creation, the
+   * forwarded principal replaces `session.auth.current` and
+   * `session.auth.initiator`. On continuation, only `session.auth.current`
+   * changes; the initiator remains pinned to the session's creator. The
+   * forwarder is recorded on accepted contexts as the `eve:forwarded-by`
+   * attribute. Omit the option to reject every forwarded assertion with 403.
    */
   readonly trustedForwarders?: TrustedForwarders;
   /**
@@ -370,6 +370,12 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (sessionId instanceof Response) return sessionId;
         const payload = await parseJsonRequest(req);
         if (payload instanceof Response) return payload;
+        const forwarded = await resolveForwardedPrincipal({
+          trustedForwarders: input.trustedForwarders,
+          forwarder: authResult,
+          payload,
+        });
+        if (forwarded instanceof Response) return forwarded;
         const body = parseSessionMessageBody(payload);
         if (body instanceof Response) return body;
 
@@ -377,10 +383,10 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (policyRejection !== null) return policyRejection;
 
         let context = body.context;
-        let dispatchAuth: SessionAuthContext | null = authResult;
+        let dispatchAuth: SessionAuthContext | null = forwarded.auth;
         if (body.message !== undefined) {
           const messageResult = await resolveOnMessage({
-            auth: authResult,
+            auth: forwarded.auth,
             config: input,
             message: body.message,
             request: req,
@@ -909,12 +915,6 @@ function parseSessionMessageBody(
 ): ParsedSessionMessageBody | Response {
   const tokenRejection = rejectSessionContinuationToken(payload);
   if (tokenRejection !== null) return tokenRejection;
-  if (payload.forwardedPrincipal !== undefined) {
-    return Response.json(
-      { error: "A forwarded principal is only accepted on session creation.", ok: false },
-      { status: 400 },
-    );
-  }
 
   const message = parseMessageField(payload.message);
   if (message instanceof Response) return message;

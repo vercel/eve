@@ -2,7 +2,11 @@ import type { ModelMessage } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
-import type { DeliverPayload, SubagentInputRequestHookPayload } from "#channel/types.js";
+import type {
+  DeliverPayload,
+  SessionAuthContext,
+  SubagentInputRequestHookPayload,
+} from "#channel/types.js";
 import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import {
@@ -1565,6 +1569,76 @@ describe("turnStep", () => {
     expect(dynamicToolHandler).not.toHaveBeenCalled();
     expect(createExecutionNodeStep).not.toHaveBeenCalled();
     expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? []).toEqual([]);
+  });
+
+  it.each([
+    {
+      expected: {
+        attributes: { user_id: "U456" },
+        authenticator: "slack-webhook",
+        issuer: "slack",
+        principalId: "slack:U456",
+        principalType: "user",
+        subject: "U456",
+      } satisfies SessionAuthContext,
+      title: "replaces the previous caller",
+    },
+    { expected: null, title: "clears the previous caller" },
+  ])("$title from deliver-time auth", async ({ expected }) => {
+    const bundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
+    installSessionStoreMocks([createStubSession()]);
+
+    const previous: SessionAuthContext = {
+      attributes: { user_id: "U123" },
+      authenticator: "slack-webhook",
+      issuer: "slack",
+      principalId: "slack:U123",
+      principalType: "user",
+      subject: "U123",
+    };
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, previous);
+    ctx.set(BundleKey, bundle);
+    ctx.set(ChannelKey, threadContextAdapter);
+    ctx.set(ContinuationTokenKey, "http:auth-replacement");
+    ctx.set(ModeKey, "conversation");
+    ctx.set(SessionIdKey, "session-1");
+
+    let observed: SessionAuthContext | null | undefined;
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (session): Promise<StepResult> => {
+        observed = loadContext().get(AuthKey);
+        return { next: null, session };
+      };
+    });
+
+    await turnStep({
+      input: { auth: expected, kind: "deliver", payloads: [{ message: "follow up" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(observed).toEqual(expected);
   });
 
   it("routes remote task HITL only to the parent callback", async () => {

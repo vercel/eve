@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/604
 status: implemented
-last_updated: "2026-07-23"
+last_updated: "2026-08-20"
 ---
 
 # Forwarding end-user identity across remote agent hops
@@ -26,6 +26,11 @@ _metadata_ (`SessionAuthContext`) crosses the wire — never tokens or credentia
 is "trusted forwarder": the route's `auth` authenticates the asserting deployment as usual, and
 the receiver authorizes forwarding with a predicate over that verified transport principal — the
 same shape as `X-Forwarded-*` behind a trusted proxy, without token-exchange machinery.
+
+Persistent remote children also accept continuation requests. Those requests must forward the
+active parent turn's principal through the same trust gate: otherwise the child sees only the
+calling deployment's service identity and per-user connections fail. A continuation replaces
+only `auth.current`; `auth.initiator` remains pinned to the principal that created the child.
 
 ```text
 Slack user U ── router deployment ──────────────► site-ops deployment
@@ -60,9 +65,9 @@ export default defineRemoteAgent({
 
 - `forwardPrincipal?: boolean`, default `false`. Forwarding identity to another deployment is an
   explicit decision, never ambient.
-- When `true`, dispatch serializes the parent turn's `AuthKey` / `InitiatorAuthKey` (already in
-  scope in `dispatch-runtime-actions-step.ts`) into a `forwardedPrincipal` field on the create-session
-  body: `{ current: SessionAuthContext, initiator?: SessionAuthContext }`.
+- When `true`, creation serializes the parent turn's `AuthKey` / `InitiatorAuthKey` into a
+  `forwardedPrincipal` field: `{ current: SessionAuthContext, initiator?: SessionAuthContext }`.
+  Continuation serializes only the active `AuthKey`: `{ current: SessionAuthContext }`.
 - The field is omitted only when `AuthKey` is `null` (the request was accepted with no
   credentials); the call then proceeds on transport trust alone. Any non-null context is forwarded as-is — including anonymous
   (`principalType: "anonymous"` from `none()`), schedule (`SCHEDULE_APP_AUTH`), and service
@@ -106,12 +111,18 @@ export default eveChannel({
 
 ## Semantics
 
-- **Accepted forwarding replaces the session principal.** `session.auth.current` = forwarded
-  `current`; `session.auth.initiator` = forwarded `initiator` ?? forwarded `current`. Both seed
-  `RunInput.auth` / `RunInput.initiatorAuth` exactly as if the user had called the deployment
-  directly. Everything downstream works unchanged: `resolveConnectionPrincipal` sees
-  `principalType: "user"` (per-user Connect resolves), local subagents inherit the principal, and
-  a further `forwardPrincipal: true` remote hop chains the same identity onward.
+- **Accepted forwarding replaces the active session principal.** On creation,
+  `session.auth.current` = forwarded `current` and `session.auth.initiator` = forwarded
+  `initiator` ?? forwarded `current`. On continuation, only `session.auth.current` changes;
+  `session.auth.initiator` remains pinned. Everything downstream works unchanged:
+  `resolveConnectionPrincipal` sees the active turn's user (per-user Connect resolves), local
+  subagents inherit that principal, and a further `forwardPrincipal: true` remote hop chains it.
+- **Caller authority is turn-scoped.** Local continuation always carries `SessionCommand.auth`,
+  including `null`, so a later unauthenticated turn clears rather than inherits the previous
+  caller. Remote continuation omits the assertion for `null` and the receiver uses its verified
+  transport principal. Connection bearer caches are keyed by principal and virtual to one step;
+  an upstream provider may retain each user's grant, but a turn can resolve only its current
+  principal's grant.
 - **Audit trail is receiver-written.** The receiver records the transport caller on the accepted
   contexts as attribute `eve:forwarded-by` = the _verified_ transport `principalId`, always
   overwriting any sender-supplied value — a forwarder must not be able to falsify the trail. On
@@ -125,10 +136,14 @@ export default eveChannel({
 - **Rejections fail loud.** A body carrying `forwardedPrincipal` when the channel has no
   `trustedForwarders` option → 403 ("this deployment does not accept a forwarded
   principal"). Predicate returns `false` → 403. Malformed `forwardedPrincipal` payload → 400. Each
-  fails the sender's dispatch inline. The one case that does not fail at the hop is a receiver on
-  an eve version that predates forwarding: it drops the unknown field and runs the session as the
-  transport principal, surfacing as `principal_required` at per-user Connect (see the
-  acknowledgment note under Out of scope).
+  fails the sender's dispatch inline.
+- **Mixed versions fail closed.** A receiver that supports forwarding only on session creation
+  rejects a forwarded continuation with HTTP 400. The sender must not retry without the field:
+  doing so would run the turn as the transport principal and silently change authority. The parent
+  preserves the child handle, so the same session can be retried after the receiver is upgraded. A
+  receiver that predates all principal forwarding may instead drop the unknown field and run as
+  the transport principal, surfacing as `principal_required` at per-user Connect. Deploy both
+  sides before resuming persistent remote sessions.
 - **What never crosses the wire:** tokens, credentials, claims. Only the `SessionAuthContext`
   shape (`attributes`, `authenticator`, `issuer`, `principalId`, `principalType`, `subject`).
   Per-user provider credentials always live on the receiving deployment via its own Connect
@@ -139,14 +154,15 @@ export default eveChannel({
 
 ## Boundaries and surfaces
 
-| Surface                                                                    | Change                                                                                                                  |
-| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `public/definitions/remote-agent.ts`                                       | `forwardPrincipal?: boolean`                                                                                            |
-| `execution/dispatch-runtime-actions-step.ts`                               | pass `auth` / `initiatorAuth` (already in scope) to remote dispatch                                                     |
-| `execution/remote-agent-dispatch.ts`                                       | build `forwardedPrincipal` body field                                                                                   |
-| `channel/forwarded-principal.ts` (new)                                     | strict wire schema for `{ current, initiator? }` (open `authenticator` / `principalType`), beside `session-callback.ts` |
-| `public/channels/eve.ts`                                                   | `trustedForwarders` option; forwarded-principal gate + principal replacement on the create route                        |
-| `docs/guides/remote-agents.md`, `docs/guides/auth-and-route-protection.md` | forwarding section on each side + trust-model warning                                                                   |
+| Surface                                                                              | Change                                                                                                                  |
+| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `public/definitions/remote-agent.ts`                                                 | `forwardPrincipal?: boolean`                                                                                            |
+| `execution/dispatch-runtime-actions-step.ts`                                         | pass `auth` / `initiatorAuth` (already in scope) to remote dispatch                                                     |
+| `execution/tasks/parent/dispatch-task-step.ts`, `execution/agent-handle-dispatch.ts` | pass active `auth` through persistent local and remote continuation                                                     |
+| `execution/remote-agent-dispatch.ts`                                                 | build `forwardedPrincipal` body field                                                                                   |
+| `channel/forwarded-principal.ts` (new)                                               | strict wire schema for `{ current, initiator? }` (open `authenticator` / `principalType`), beside `session-callback.ts` |
+| `public/channels/eve.ts`                                                             | `trustedForwarders` option; forwarded-principal gate + principal replacement on create and continuation routes          |
+| `docs/guides/remote-agents.md`, `docs/guides/auth-and-route-protection.md`           | forwarding section on each side + trust-model warning                                                                   |
 
 Docs must carry the security guidance explicitly: match the transport principal precisely (e.g.
 `subject === vercelSubject({ teamSlug, projectName })`); a permissive predicate (`() => true`)
@@ -167,16 +183,14 @@ channel has no `trustedForwarders`, so a receiving deployment must author its ow
 - Per-call forwarding decisions (the flag is per remote-agent definition).
 - Reduced-scope or transformed principals (an `onMessage` override on the receiver already covers
   reshaping).
-- Forwarding on the deliver route (`POST /eve/v1/session/:sessionId`). Remote dispatch is
-  create-only today, so nothing in eve would send it; the same field + predicate can extend to
-  deliver if external eve clients need multi-turn forwarding later.
+- Cross-principal visibility of persistent child history, tool outputs, and artifacts. Principal
+  forwarding selects the active turn's credential authority; applications that require private
+  history must key child sessions by principal or enforce a same-principal ownership policy.
 - A response acknowledgment (`forwardedPrincipal: "accepted"` on the 202) letting the sender
-  detect a pre-forwarding receiver that silently drops the unknown body field. Considered and
-  dropped: forwarding only ever works after the receiver's author adds
-  `trustedForwarders` — which requires a forwarding-aware eve — so a stale receiver is
-  always an incomplete setup, caught during enablement when per-user Connect fails
-  `principal_required`. Permanent wire surface (plus best-effort orphan-session cancellation on a
-  missing ack) was not justified by a transitional, pre-1.0 skew window.
+  detect a receiver that cannot apply the assertion. Considered and dropped: create-only receivers
+  already reject forwarded continuations, the sender preserves the child handle for a retry after
+  upgrade, and deployment docs make the coordinated-upgrade requirement explicit. Permanent wire
+  surface was not justified by a transitional, pre-1.0 skew window.
 
 ## Delivery and verification
 
@@ -188,10 +202,13 @@ Single PR with a **patch** changeset: both options are additive; no public API b
   without option → 403, predicate false → 403, predicate true → principal replaced,
   `eve:forwarded-by` stamped from the verified transport principal and sender-supplied values
   overwritten, stamping visible to `onMessage`).
+- Unit/integration: continuation sends only active `current` when forwarding is enabled; the
+  receiver applies the same trust gate, changes only `auth.current`, and local delivery replaces
+  or clears the previous turn's `AuthKey`. Cover both persistent-session and tasks dispatch.
 - Integration: create route end-to-end in memory — forwarded principal becomes
   `session.auth.current` / `.initiator` and reaches `resolveConnectionPrincipal` as a `user`
   principal.
-- Scenario: two in-process eve servers over real HTTP — router with `forwardPrincipal: true` dispatches
-  to a receiver whose `trustedForwarders` predicate accepts it, asserting the child session
-  principal; plus the 403 mismatch path. (No remote-agent e2e fixture exists today; a scenario
-  with a real HTTP boundary covers the hop without requiring a second CI deployment.)
+- E2E: the `agent-subagents` loopback remote runs through a real HTTP hop. One parent turn creates
+  the child as user A; a second, user-B-authenticated turn continues the same `childSessionId`.
+  The child reports `auth.current` as B, keeps A as `auth.initiator`, and carries the
+  receiver-written `eve:forwarded-by` attribute on both turns.
