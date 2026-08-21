@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import {
   detachEveAgentStore,
@@ -108,6 +108,13 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    */
   readonly optimistic?: boolean;
   readonly reducer?: EveAgentReducer<TData>;
+  /**
+   * Replay the attached durable session after mount and follow its in-flight
+   * turn, if any. Requires `initialSession` or `session`.
+   *
+   * @default false
+   */
+  readonly resume?: boolean;
   readonly session?: ClientSession;
 }
 
@@ -129,7 +136,7 @@ export function useEveAgent<TData>(
  * infer `TData`.
  *
  * Session-shaping options (`host`, `reducer`, `session`, `initialEvents`,
- * `initialSession`, `auth`, `headers`, `optimistic`) are
+ * `initialSession`, `auth`, `headers`, `optimistic`, `resume`) are
  * read once when the store is created; remount to change them. Lifecycle
  * callbacks (`onError`, `onEvent`, `onFinish`, `onSessionChange`, `prepareSend`)
  * refresh on every render.
@@ -138,8 +145,17 @@ export function useEveAgent<TData>(
   options: UseEveAgentOptions<TData> = {},
 ): UseEveAgentHelpers<TData> {
   const storeRef = useRef<EveAgentStore<TData> | undefined>(undefined);
+  const resumeOnMountRef = useRef(options.resume ?? false);
+  const [autoResumePending, setAutoResumePending] = useState(resumeOnMountRef.current);
 
   if (!storeRef.current) {
+    if (
+      resumeOnMountRef.current &&
+      options.initialSession === undefined &&
+      options.session === undefined
+    ) {
+      throw new Error("useEveAgent({ resume: true }) requires initialSession or session.");
+    }
     const reducer = options.reducer ?? (defaultMessageReducer() as EveAgentReducer<TData>);
     storeRef.current = new EveAgentStore({
       auth: options.auth,
@@ -173,6 +189,18 @@ export function useEveAgent<TData>(
   );
 
   useEffect(() => () => detachEveAgentStore(store), [store]);
+  useEffect(() => {
+    if (!resumeOnMountRef.current) return;
+    let active = true;
+    const finish = () => {
+      if (active) setAutoResumePending(false);
+    };
+    const timeout = setTimeout(() => void store.resume().then(finish, finish), 0);
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+    };
+  }, [store]);
 
   const cancel = useCallback(() => store.cancel(), [store]);
   const reset = useCallback(() => store.reset(), [store]);
@@ -190,15 +218,20 @@ export function useEveAgent<TData>(
     ) => store.send({ ...options, inputResponses }),
     [store],
   );
+  const visibleSnapshot =
+    autoResumePending && snapshot.status === "ready"
+      ? { ...snapshot, status: "submitted" as const }
+      : snapshot;
+
   return useMemo(
     () => ({
-      ...snapshot,
+      ...visibleSnapshot,
       cancel,
       reset,
       respond,
       resume,
       send,
     }),
-    [cancel, reset, respond, resume, send, snapshot],
+    [cancel, reset, respond, resume, send, visibleSnapshot],
   );
 }

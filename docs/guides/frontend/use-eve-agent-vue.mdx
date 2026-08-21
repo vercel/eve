@@ -108,7 +108,7 @@ See [Human-in-the-loop prompts](./overview#human-in-the-loop-prompts) for reques
 
 ## Cancel, reset, and resume
 
-Call `cancel()` to stop the durable server-side turn while the composable remains attached through settlement. Disposing the component only disconnects its local stream; it does not cancel server execution. Call `reset()` to clear local state and start a new session. Pass `initialSession` and `initialEvents` to restore a saved conversation, then call `resume()` to replay the session and follow an in-flight turn. See [Resumable sessions](./overview#resumable-sessions) for the persistence contract and [Sending and streaming](./overview#sending-and-streaming) for cancellation behavior.
+Call `cancel()` to stop the durable server-side turn while the composable remains attached through settlement. Disposing the component only disconnects its local stream; it does not cancel server execution. Call `reset()` to clear local state and start a new session. Pass `initialSession`, `initialEvents`, and `resume: true` to restore a saved conversation and follow an in-flight turn. Use `resume()` directly when restoration is controlled imperatively. See [Resumable sessions](./overview#resumable-sessions) for the persistence contract and [Sending and streaming](./overview#sending-and-streaming) for cancellation behavior.
 
 ## Custom host and credentials
 

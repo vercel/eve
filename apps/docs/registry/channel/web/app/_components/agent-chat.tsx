@@ -3,7 +3,7 @@
 import type { UserContent } from "ai";
 import { useEveAgent } from "eve/react";
 import { AlertCircleIcon, BrainIcon, PlusIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Conversation,
   ConversationContent,
@@ -31,7 +31,6 @@ export function AgentChat({
   readonly sessionless?: boolean;
 }) {
   const [cancellationError, setCancellationError] = useState<string>();
-  const [isRestoring, setIsRestoring] = useState(sessionId !== undefined);
   const agent = useEveAgent({
     initialSession:
       sessionId === undefined
@@ -40,6 +39,7 @@ export function AgentChat({
             sessionId,
             streamIndex: 0,
           },
+    resume: sessionId !== undefined,
     onSessionChange(session) {
       if (sessionId === undefined && session !== undefined) {
         // Next patches window.history to navigate, which would detach the active stream.
@@ -53,21 +53,8 @@ export function AgentChat({
     },
   });
 
-  useEffect(() => {
-    if (sessionId === undefined) return;
-    let mounted = true;
-    const finishRestoring = () => {
-      if (mounted) setIsRestoring(false);
-    };
-    const timeout = window.setTimeout(() => {
-      void agent.resume().then(finishRestoring, finishRestoring);
-    }, 0);
-    return () => {
-      mounted = false;
-      window.clearTimeout(timeout);
-    };
-  }, [agent.resume, sessionId]);
   const isBusy = agent.status === "submitted" || agent.status === "streaming";
+  const isRestoring = sessionId !== undefined && agent.events.length === 0 && isBusy;
   const isEmpty = agent.data.messages.length === 0;
   const lastMessage = agent.data.messages.at(-1);
   const isPendingAssistantShell =

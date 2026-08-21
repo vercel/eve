@@ -127,6 +127,8 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    * @default defaultMessageReducer()
    */
   readonly reducer?: EveAgentReducer<TData>;
+  /** Replay the attached durable session after mount. Requires `initialSession` or `session`. */
+  readonly resume?: boolean;
   /**
    * Externally owned {@link ClientSession} to bind instead of creating one.
    *
@@ -157,6 +159,9 @@ export function useEveAgent<TData>(
 export function useEveAgent<TData>(
   options: UseEveAgentOptions<TData> = {},
 ): UseEveAgentReturn<TData> {
+  if (options.resume && options.initialSession === undefined && options.session === undefined) {
+    throw new Error("useEveAgent({ resume: true }) requires initialSession or session.");
+  }
   const reducer = options.reducer ?? (defaultMessageReducer() as EveAgentReducer<TData>);
 
   const store = new EveAgentStore<TData>({
@@ -184,6 +189,7 @@ export function useEveAgent<TData>(
     const unsubscribe = store.subscribe(() => {
       snapshot.value = store.snapshot;
     });
+    if (options.resume) void store.resume();
 
     onScopeDispose(() => {
       unsubscribe();

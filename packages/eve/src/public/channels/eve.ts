@@ -1354,38 +1354,14 @@ function parseStartIndex(request: Request): number | undefined | Response {
 
 function serializeAsNdjson(events: ReadableStream<unknown>): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
-  const reader = events.getReader();
-  let released = false;
-  const release = () => {
-    if (released) return;
-    released = true;
-    reader.releaseLock();
-  };
-
-  return new ReadableStream({
-    start(controller) {
-      controller.enqueue(encoder.encode("\n"));
-    },
-    async pull(controller) {
-      try {
-        const result = await reader.read();
-        if (result.done) {
-          release();
-          controller.close();
-          return;
-        }
-        controller.enqueue(encoder.encode(`${JSON.stringify(result.value)}\n`));
-      } catch (error) {
-        release();
-        controller.error(error);
-      }
-    },
-    async cancel(reason) {
-      try {
-        await reader.cancel(reason);
-      } finally {
-        release();
-      }
-    },
-  });
+  return events.pipeThrough(
+    new TransformStream<unknown, Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode("\n"));
+      },
+      transform(event, controller) {
+        controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+      },
+    }),
+  );
 }
