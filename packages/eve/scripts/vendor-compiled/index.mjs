@@ -6,6 +6,14 @@
 import acpSdk from "./@agentclientprotocol/sdk.mjs";
 import anthropic from "./@ai-sdk/anthropic.mjs";
 import google from "./@ai-sdk/google.mjs";
+import harness from "./@ai-sdk/harness.mjs";
+import harnessClaudeCode from "./@ai-sdk/harness-claude-code.mjs";
+import harnessCline from "./@ai-sdk/harness-cline.mjs";
+import harnessCodex from "./@ai-sdk/harness-codex.mjs";
+import harnessDeepAgents from "./@ai-sdk/harness-deepagents.mjs";
+import harnessGrokBuild from "./@ai-sdk/harness-grok-build.mjs";
+import harnessOpenCode from "./@ai-sdk/harness-opencode.mjs";
+import harnessPi from "./@ai-sdk/harness-pi.mjs";
 import mcp from "./@ai-sdk/mcp.mjs";
 import openai from "./@ai-sdk/openai.mjs";
 import otel from "./@ai-sdk/otel.mjs";
@@ -65,6 +73,14 @@ export const MODULES = [
   eventsourceParserStream,
   envRunner,
   google,
+  harness,
+  harnessClaudeCode,
+  harnessCline,
+  harnessCodex,
+  harnessDeepAgents,
+  harnessGrokBuild,
+  harnessOpenCode,
+  harnessPi,
   grayMatter,
   jose,
   jsoncParser,
