@@ -13,8 +13,7 @@ import { TODO_TOOL_DEFINITION } from "#runtime/framework-tools/todo.js";
 import { WEB_FETCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-fetch.js";
 import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
 import { WRITE_FILE_TOOL_DEFINITION } from "#runtime/framework-tools/write-file.js";
-import connectionSearchDynamicDefinition from "#runtime/framework-tools/connection-search-dynamic.js";
-import { resolveLoadedDynamicToolDefinition } from "#runtime/resolve-dynamic-tool.js";
+import { CONNECTION_SEARCH_RUNTIME_TOOL_CONTRIBUTOR } from "#runtime/framework-tools/connection-search-dynamic.js";
 
 export { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 export type { ReadFileStamp, ReadFileState } from "#runtime/framework-tools/file-state.js";
@@ -22,26 +21,21 @@ export { ReadFileStateKey } from "#runtime/framework-tools/file-state.js";
 export type { TodoItem, TodoState } from "#runtime/framework-tools/todo.js";
 export { TodoStateKey } from "#runtime/framework-tools/todo.js";
 
-import type {
-  ResolvedDynamicToolResolver,
-  ResolvedSkillDefinition,
-  ResolvedToolDefinition,
-} from "#runtime/types.js";
-import type { DynamicSentinel } from "#shared/dynamic-tool-definition.js";
+import type { ResolvedSkillDefinition, ResolvedToolDefinition } from "#runtime/types.js";
+import type { RuntimeToolContributor } from "#context/runtime-tool-contribution.js";
 
-interface FrameworkDynamicToolDefinition {
-  readonly definition: DynamicSentinel;
+interface FrameworkRuntimeToolContributor extends RuntimeToolContributor {
   readonly logicalPath: string;
   readonly slug: string;
-  readonly sourceId: string;
+  readonly sourceKind: "module";
 }
 
-const REGISTERED_FRAMEWORK_DYNAMIC_TOOLS: readonly FrameworkDynamicToolDefinition[] = [
+const REGISTERED_FRAMEWORK_RUNTIME_TOOL_CONTRIBUTORS: readonly FrameworkRuntimeToolContributor[] = [
   {
-    definition: connectionSearchDynamicDefinition,
+    ...CONNECTION_SEARCH_RUNTIME_TOOL_CONTRIBUTOR,
     logicalPath: "eve:framework/connection-search-dynamic",
     slug: "connection",
-    sourceId: "eve:connection-search-dynamic",
+    sourceKind: "module",
   },
 ];
 
@@ -72,8 +66,8 @@ const ALL_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
  * Returns framework-owned tool definitions registered in the tool registry
  * alongside authored tools during graph resolution.
  *
- * `connection_search` is no longer in this list. The graph resolution path
- * registers it as a framework dynamic tool resolver.
+ * `connection_search` is no longer in this list. The execution lifecycle
+ * supplies it through the runtime-tool contribution seam.
  */
 export function getFrameworkToolDefinitions(config?: {
   readonly authoredSkills?: readonly ResolvedSkillDefinition[];
@@ -89,19 +83,10 @@ export function getFrameworkToolDefinitions(config?: {
 }
 
 /**
- * Returns framework-owned dynamic tool resolvers.
- * Framework definitions use the public `defineDynamic()` contract and enter
- * the same loaded-definition resolver path as authored dynamic tools.
+ * Returns framework-owned runtime-tool contributors used by execution.
  */
-export function getFrameworkDynamicToolResolvers(): readonly ResolvedDynamicToolResolver[] {
-  return REGISTERED_FRAMEWORK_DYNAMIC_TOOLS.map((entry) =>
-    resolveLoadedDynamicToolDefinition(entry.definition, {
-      logicalPath: entry.logicalPath,
-      slug: entry.slug,
-      sourceId: entry.sourceId,
-      sourceKind: "module",
-    }),
-  );
+export function getFrameworkRuntimeToolContributors(): readonly FrameworkRuntimeToolContributor[] {
+  return REGISTERED_FRAMEWORK_RUNTIME_TOOL_CONTRIBUTORS;
 }
 
 /**

@@ -11,14 +11,12 @@ import {
 import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { ConnectionRegistry, ConnectionToolMetadata } from "#runtime/connections/types.js";
-import { extractDiscoveredTools } from "#runtime/framework-tools/connection-search-dynamic.js";
-import { getFrameworkDynamicToolResolvers } from "#runtime/framework-tools/index.js";
-import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import {
-  isBrandedToolEntry,
-  type DynamicResolveContext,
-  type DynamicToolSet,
-} from "#shared/dynamic-tool-definition.js";
+  CONNECTION_SEARCH_RUNTIME_TOOL_CONTRIBUTOR,
+  extractDiscoveredTools,
+} from "#runtime/framework-tools/connection-search-dynamic.js";
+import type { ResolvedConnectionDefinition } from "#runtime/types.js";
+import { isBrandedToolEntry, type DynamicToolSet } from "#shared/dynamic-tool-definition.js";
 import { readDurableDynamicToolCallbacks } from "#shared/durable-dynamic-tool-callbacks.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -46,19 +44,21 @@ async function executeConnectionSearch(
   setupContext?.(ctx);
 
   return contextStorage.run(ctx, async () => {
-    const resolve = getConnectionSearchResolver().events["step.started"]!;
-    const resolved = (await resolve({}, {
-      channel: {},
-      messages: [],
-      session: { auth: { current: null, initiator: null }, id: "test-session" },
-    } satisfies DynamicResolveContext)) as DynamicToolSet;
+    const resolved = await resolveConnectionSearchTools(ctx);
 
-    return resolved["connection_search"]!.execute(input, {} as ToolContext);
+    return resolved!["connection_search"]!.execute(input, {} as ToolContext);
   });
 }
 
-function getConnectionSearchResolver() {
-  return getFrameworkDynamicToolResolvers()[0]!;
+async function resolveConnectionSearchTools(
+  ctx: ContextContainer,
+  messages: readonly Msg[] = [],
+): Promise<DynamicToolSet | null | undefined> {
+  return await CONNECTION_SEARCH_RUNTIME_TOOL_CONTRIBUTOR.resolve({
+    coordinate: { event: "step.started", stepIndex: 0, turnId: "turn-0" },
+    ctx,
+    messages,
+  });
 }
 
 function registry(input: {
@@ -90,18 +90,7 @@ describe("connection dynamic tools", () => {
         loadTools: {},
       }),
     );
-    const resolve = getConnectionSearchResolver().events["step.started"]!;
-
-    const tools = await contextStorage.run(ctx, () =>
-      resolve(
-        {},
-        {
-          channel: {},
-          messages: [],
-          session: { auth: { current: null, initiator: null }, id: "test-session" },
-        },
-      ),
-    );
+    const tools = await contextStorage.run(ctx, () => resolveConnectionSearchTools(ctx));
 
     expect(tools).toBeNull();
   });
@@ -135,21 +124,11 @@ describe("connection dynamic tools", () => {
     ];
     const ctx = new ContextContainer();
     ctx.set(ConnectionRegistryKey, connectionRegistry);
-    const resolver = getConnectionSearchResolver();
-    const resolve = resolver.events["step.started"]!;
+    const tools = (await contextStorage.run(ctx, () =>
+      resolveConnectionSearchTools(ctx, messages),
+    )) as DynamicToolSet;
 
-    const tools = await contextStorage.run(ctx, async () => {
-      return (await resolve(
-        {},
-        {
-          channel: {},
-          messages,
-          session: { auth: { current: null, initiator: null }, id: "test-session" },
-        },
-      )) as DynamicToolSet;
-    });
-
-    expect(resolver.eventNames).toEqual(["step.started"]);
+    expect(CONNECTION_SEARCH_RUNTIME_TOOL_CONTRIBUTOR.eventNames).toEqual(["step.started"]);
     expect(Object.keys(tools)).toEqual(["connection_search", "linear__list_issues"]);
     expect(Object.values(tools).every(isBrandedToolEntry)).toBe(true);
   });
@@ -429,12 +408,7 @@ describe("connection_search", () => {
     });
 
     const result = await contextStorage.run(ctx, async () => {
-      const resolve = getConnectionSearchResolver().events["step.started"]!;
-      const tools = (await resolve({}, {
-        channel: {},
-        messages: [],
-        session: { auth: { current: null, initiator: null }, id: "session-auth-replay" },
-      } satisfies DynamicResolveContext)) as DynamicToolSet;
+      const tools = (await resolveConnectionSearchTools(ctx)) as DynamicToolSet;
       const reference = readDurableDynamicToolCallbacks(tools["connection_search"]!)!.execute!;
 
       return await reference.callback(reference.closure, {

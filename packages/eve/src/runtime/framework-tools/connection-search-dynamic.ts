@@ -14,7 +14,7 @@ import {
   isConnectionAuthorizationFailedError,
   isConnectionAuthorizationRequiredError,
 } from "#public/connections/errors.js";
-import { defineDynamic, defineTool } from "#public/definitions/tool.js";
+import { defineTool } from "#public/definitions/tool.js";
 import type { ToolContext } from "#public/definitions/tool.js";
 import {
   resolveApprovalPolicy,
@@ -23,6 +23,7 @@ import {
 } from "#public/definitions/approval.js";
 import type { JsonValue } from "#public/types/json.js";
 import type { JsonObject } from "#shared/json.js";
+import type { DynamicToolSet } from "#shared/dynamic-tool-definition.js";
 import { stampDurableDynamicToolCallbacks } from "#shared/durable-dynamic-tool-callbacks.js";
 import { writeCachedToken } from "#runtime/connections/authorization-tokens.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
@@ -43,6 +44,7 @@ import { toError } from "#shared/errors.js";
 import type { ModelMessage } from "ai";
 
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
+import type { RuntimeToolContributor } from "#context/runtime-tool-contribution.js";
 
 const logger = createLogger("framework.connection-search-dynamic");
 
@@ -511,93 +513,87 @@ async function authorizeDiscoveredConnectionToolApproval(
     : await response(context);
 }
 
-// The step-scoped definition re-derives its tools from conversation history.
-// After compaction removes old search results, those tools naturally disappear.
-const connectionSearchDynamicDefinition = defineDynamic({
-  events: {
-    "step.started": async (_event, ctx) => {
-      const registry = loadContext().get(ConnectionRegistryKey);
-      if (!registry || registry.getConnections().length === 0) return null;
+function resolveConnectionSearchTools(messages: readonly ModelMessage[]): DynamicToolSet | null {
+  const registry = loadContext().get(ConnectionRegistryKey);
+  if (!registry || registry.getConnections().length === 0) return null;
 
-      const connections = registry.getConnections();
-      const connectionNames = connections.map((c) => c.connectionName);
-      const fromMessages = extractDiscoveredTools(ctx.messages);
-      const fromContext = loadContext().get(ConnectionSearchResultsKey) ?? [];
-      const mergedMap = new Map<string, ConnectionSearchResultItem>();
-      for (const r of fromContext) {
-        if (r.qualifiedName) mergedMap.set(r.qualifiedName, r);
-      }
-      for (const r of fromMessages) {
-        if (r.qualifiedName) mergedMap.set(r.qualifiedName, r);
-      }
-      const discovered = [...mergedMap.values()];
+  const connections = registry.getConnections();
+  const connectionNames = connections.map((connection) => connection.connectionName);
+  const fromMessages = extractDiscoveredTools(messages);
+  const fromContext = loadContext().get(ConnectionSearchResultsKey) ?? [];
+  const mergedMap = new Map<string, ConnectionSearchResultItem>();
+  for (const result of fromContext) {
+    if (result.qualifiedName) mergedMap.set(result.qualifiedName, result);
+  }
+  for (const result of fromMessages) {
+    if (result.qualifiedName) mergedMap.set(result.qualifiedName, result);
+  }
 
-      const tools: Record<string, object> = {};
-
-      const connectionSearchTool = defineTool({
-        description:
-          "Search for tools across your connections. " +
-          "Discovered tools become directly callable by their qualified name " +
-          "(e.g. `linear__list_issues`) in your next response. " +
-          `Available connections: ${connectionNames.join(", ")}.`,
-        inputSchema: CONNECTION_SEARCH_INPUT_SCHEMA,
-        async execute(input: ConnectionSearchInput) {
-          return executeConnectionSearch(input);
-        },
-        outputSchema: CONNECTION_SEARCH_OUTPUT_SCHEMA,
-      });
-      stampDurableDynamicToolCallbacks(connectionSearchTool, {
-        execute: {
-          callback: (_closure, input) => executeConnectionSearch(input as ConnectionSearchInput),
-          closure: {},
-        },
-      });
-      tools["connection_search"] = connectionSearchTool;
-
-      for (const result of discovered) {
-        const connectionName = result.connection;
-        const toolName = result.tool!;
-        const approval = registry.getConnectionApproval(connectionName);
-
-        const closure = { connectionName, toolName };
-        const discoveredTool = defineTool({
-          description: result.description,
-          inputSchema: (result.inputSchema ?? {
-            type: "object",
-          }) as JsonObject,
-          approval,
-          outputSchema: result.outputSchema as JsonObject | undefined,
-          async execute(input: Record<string, unknown>, executeCtx) {
-            return await executeDiscoveredConnectionTool(closure, input, executeCtx);
-          },
-        });
-        stampDurableDynamicToolCallbacks(discoveredTool, {
-          execute: { callback: executeDiscoveredConnectionTool, closure },
-          ...(approval === undefined
-            ? {}
-            : {
-                approvalRequest: {
-                  callback: requestDiscoveredConnectionToolApproval,
-                  closure,
-                },
-              }),
-          ...(approval === undefined ||
-          typeof approval === "function" ||
-          approval.response === undefined
-            ? {}
-            : {
-                approvalResponse: {
-                  callback: authorizeDiscoveredConnectionToolApproval,
-                  closure,
-                },
-              }),
-        });
-        tools[qualifiedConnectionToolName(connectionName, toolName)] = discoveredTool;
-      }
-
-      return tools;
+  const tools: Record<string, object> = {};
+  const connectionSearchTool = defineTool({
+    description:
+      "Search for tools across your connections. " +
+      "Discovered tools become directly callable by their qualified name " +
+      "(e.g. `linear__list_issues`) in your next response. " +
+      `Available connections: ${connectionNames.join(", ")}.`,
+    inputSchema: CONNECTION_SEARCH_INPUT_SCHEMA,
+    async execute(input: ConnectionSearchInput) {
+      return executeConnectionSearch(input);
     },
-  },
-});
+    outputSchema: CONNECTION_SEARCH_OUTPUT_SCHEMA,
+  });
+  stampDurableDynamicToolCallbacks(connectionSearchTool, {
+    execute: {
+      callback: (_closure, input) => executeConnectionSearch(input as ConnectionSearchInput),
+      closure: {},
+    },
+  });
+  tools["connection_search"] = connectionSearchTool;
 
-export default connectionSearchDynamicDefinition;
+  for (const result of mergedMap.values()) {
+    const connectionName = result.connection;
+    const toolName = result.tool!;
+    const approval = registry.getConnectionApproval(connectionName);
+    const closure = { connectionName, toolName };
+    const discoveredTool = defineTool({
+      description: result.description,
+      inputSchema: (result.inputSchema ?? { type: "object" }) as JsonObject,
+      approval,
+      outputSchema: result.outputSchema as JsonObject | undefined,
+      async execute(input: Record<string, unknown>, executeCtx) {
+        return await executeDiscoveredConnectionTool(closure, input, executeCtx);
+      },
+    });
+    stampDurableDynamicToolCallbacks(discoveredTool, {
+      execute: { callback: executeDiscoveredConnectionTool, closure },
+      ...(approval === undefined
+        ? {}
+        : {
+            approvalRequest: {
+              callback: requestDiscoveredConnectionToolApproval,
+              closure,
+            },
+          }),
+      ...(approval === undefined ||
+      typeof approval === "function" ||
+      approval.response === undefined
+        ? {}
+        : {
+            approvalResponse: {
+              callback: authorizeDiscoveredConnectionToolApproval,
+              closure,
+            },
+          }),
+    });
+    tools[qualifiedConnectionToolName(connectionName, toolName)] = discoveredTool;
+  }
+
+  return tools as DynamicToolSet;
+}
+
+export const CONNECTION_SEARCH_RUNTIME_TOOL_CONTRIBUTOR: RuntimeToolContributor = {
+  eventNames: ["step.started"],
+  ownerId: "eve:framework/connection-search",
+  resolve: ({ messages }) => resolveConnectionSearchTools(messages),
+  sourceId: "eve:connection-search-dynamic",
+};

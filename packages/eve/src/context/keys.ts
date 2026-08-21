@@ -21,6 +21,7 @@ import { ContextKey } from "#context/key.js";
 import type { InstrumentationChannelDeliveryRef } from "#harness/instrumentation/lifecycle.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { DurableDynamicToolCallbacks } from "#shared/durable-dynamic-tool-callbacks.js";
+import type { DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { SandboxAccess } from "#sandbox/state.js";
@@ -193,6 +194,37 @@ export const TurnDynamicToolMetadataKey = new ContextKey<readonly DurableDynamic
 /** Step-scoped dynamic tool metadata, replaced before each model step. */
 export const StepDynamicToolMetadataKey = new ContextKey<readonly DurableDynamicToolMetadata[]>(
   "eve.stepDynamicToolMetadata",
+);
+
+export type RuntimeToolContributionCoordinate =
+  | { readonly event: Extract<DynamicToolEventName, "session.started"> }
+  | {
+      readonly event: Extract<DynamicToolEventName, "turn.started">;
+      readonly turnId: string;
+    }
+  | {
+      readonly event: Extract<DynamicToolEventName, "step.started">;
+      readonly stepIndex: number;
+      readonly turnId: string;
+    };
+
+export interface DurableRuntimeToolContribution {
+  readonly coordinate: RuntimeToolContributionCoordinate;
+  readonly metadata: readonly DurableDynamicToolMetadata[];
+  readonly ownerId: string;
+  readonly qualificationPrefix?: string;
+  readonly runtimeRevision: string;
+  readonly sourceId: string;
+}
+
+export interface DurableRuntimeToolContributionState {
+  readonly contributions: readonly DurableRuntimeToolContribution[];
+  readonly version: 1;
+}
+
+/** Owner-scoped dynamic tools contributed by framework runtime features. */
+export const RuntimeToolContributionsKey = new ContextKey<DurableRuntimeToolContributionState>(
+  "eve.runtimeToolContributions",
 );
 
 /** Whether this turn executes subagent definitions as durable background tools. */

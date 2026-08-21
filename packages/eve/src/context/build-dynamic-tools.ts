@@ -3,6 +3,7 @@ import type { HarnessToolMap } from "#harness/types.js";
 import type { ContextReader } from "#context/key.js";
 import {
   SessionDynamicToolMetadataKey,
+  RuntimeToolContributionsKey,
   StepDynamicToolMetadataKey,
   TurnDynamicToolMetadataKey,
   type DurableDynamicToolMetadata,
@@ -145,8 +146,23 @@ export function buildResponseAuthorizationTools(input: {
 }
 
 export function buildDynamicTools(ctx: ContextReader): readonly HarnessToolDefinition[] {
+  const runtimeState = ctx.get(RuntimeToolContributionsKey);
+  if (
+    runtimeState !== undefined &&
+    (runtimeState.version !== 1 || !Array.isArray(runtimeState.contributions))
+  ) {
+    throw new Error("Runtime tool contribution state has an unsupported or malformed version.");
+  }
+  const runtimeContributions = runtimeState?.contributions ?? [];
+  const runtimeMetadata = (event: "session.started" | "turn.started" | "step.started") =>
+    runtimeContributions
+      .filter((contribution) => contribution.coordinate.event === event)
+      .flatMap((contribution) => contribution.metadata);
   const step = replayDynamicTools(ctx.get(StepDynamicToolMetadataKey) ?? []);
+  const runtimeStep = replayDynamicTools(runtimeMetadata("step.started"));
   const turn = replayDynamicTools(ctx.get(TurnDynamicToolMetadataKey) ?? []);
+  const runtimeTurn = replayDynamicTools(runtimeMetadata("turn.started"));
   const session = replayDynamicTools(ctx.get(SessionDynamicToolMetadataKey) ?? []);
-  return [...step, ...turn, ...session];
+  const runtimeSession = replayDynamicTools(runtimeMetadata("session.started"));
+  return [...step, ...runtimeStep, ...turn, ...runtimeTurn, ...session, ...runtimeSession];
 }

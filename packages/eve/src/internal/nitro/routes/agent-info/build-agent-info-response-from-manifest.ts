@@ -1,6 +1,6 @@
 import {
   getAllFrameworkToolNames,
-  getFrameworkDynamicToolResolvers,
+  getFrameworkRuntimeToolContributors,
 } from "#runtime/framework-tools/index.js";
 import {
   getAllFrameworkChannelNames,
@@ -222,7 +222,7 @@ export function buildAgentInfoResponseFromManifest(
       authored: authoredTools,
       disabledFramework: [...manifest.disabledFrameworkTools],
       dynamic: [
-        ...getFrameworkDynamicToolResolvers().map((resolver) =>
+        ...getFrameworkRuntimeToolContributors().map((resolver) =>
           renderDynamicResolver(resolver, { origin: "framework" }),
         ),
         ...manifest.dynamicTools.map((resolver) =>

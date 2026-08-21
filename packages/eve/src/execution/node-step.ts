@@ -84,6 +84,10 @@ export interface CreateExecutionNodeStepInput {
   readonly mode: RunMode;
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
+  /** Rebuilds dynamic and runtime-contributed tools before approval handling. */
+  readonly resolveStepDynamicTools?: NonNullable<
+    Parameters<typeof createToolLoopHarness>[0]["resolveStepDynamicTools"]
+  >;
   /**
    * Effective `maxSubagents` cap configured by the experimental Workflow tool
    * definition and materialized on the session at creation.
@@ -125,6 +129,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
       input.node.agent.config?.experimental?.subagentPersistentSessions === true,
     dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
+    resolveStepDynamicTools: input.resolveStepDynamicTools,
     runtimeIdentity: buildRuntimeIdentity(input.node),
     tools,
   });

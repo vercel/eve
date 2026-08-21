@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   getAllFrameworkToolDefinitions,
   getAllFrameworkToolNames,
-  getFrameworkDynamicToolResolvers,
+  getFrameworkRuntimeToolContributors,
   getFrameworkToolDefinitions,
   getOptInFrameworkToolNames,
 } from "#runtime/framework-tools/index.js";
@@ -26,7 +26,7 @@ describe("framework-tools/index", () => {
     expect(names.has("task_update")).toBe(true);
     expect(names.has("task_sleep")).toBe(false);
     expect(names.has("task_send")).toBe(false);
-    // connection_search is now a dynamic tool resolver, not a framework tool
+    // connection_search is runtime-contributed, not statically registered.
     expect(names.has("connection_search")).toBe(false);
   });
 
@@ -79,11 +79,12 @@ describe("framework-tools/index", () => {
     }
   });
 
-  it("registers connection search through the framework dynamic tool registry", () => {
-    expect(getFrameworkDynamicToolResolvers()).toMatchObject([
+  it("registers connection search through the runtime contribution registry", () => {
+    expect(getFrameworkRuntimeToolContributors()).toMatchObject([
       {
         eventNames: ["step.started"],
         logicalPath: "eve:framework/connection-search-dynamic",
+        ownerId: "eve:framework/connection-search",
         slug: "connection",
         sourceId: "eve:connection-search-dynamic",
       },

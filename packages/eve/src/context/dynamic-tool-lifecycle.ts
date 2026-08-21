@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 
 import { replayDynamicTools } from "#context/build-dynamic-tools.js";
-import type { ContextContainer } from "#context/container.js";
+import type { AlsContext } from "#context/container.js";
 import type { ContextKey } from "#context/key.js";
 import {
   SessionDynamicToolMetadataKey,
@@ -109,7 +109,12 @@ function validateReference(input: {
   readonly phase: DurableDynamicCallbackPhase;
   readonly stamped: StampedDurableDynamicCallback | undefined;
   readonly required: boolean;
-}): DurableDynamicCallbackReference | undefined {
+}):
+  | {
+      readonly callback: StampedDurableDynamicCallback["callback"];
+      readonly reference: DurableDynamicCallbackReference;
+    }
+  | undefined {
   if (input.stamped === undefined) {
     if (input.required) {
       throw new Error(
@@ -147,18 +152,27 @@ function validateReference(input: {
       `Dynamic tool "${input.name}" callback "${input.phase}" has a non-serializable capture. ${toErrorMessage(error)}`,
     );
   }
-  registerDurableDynamicCallback({
+  return {
     callback: input.stamped.callback,
-    phase: input.phase,
-    toolName: input.name,
-  });
-  return { closure };
+    reference: { closure },
+  };
 }
 
-export function validateDurableDynamicToolCallbacks(
+interface PreparedDurableDynamicCallbackRegistration {
+  readonly callback: StampedDurableDynamicCallback["callback"];
+  readonly phase: DurableDynamicCallbackPhase;
+  readonly toolName: string;
+}
+
+export interface PreparedDurableDynamicToolCallbacks {
+  readonly callbacks: DurableDynamicToolCallbacks;
+  readonly registrations: readonly PreparedDurableDynamicCallbackRegistration[];
+}
+
+export function prepareDurableDynamicToolCallbacks(
   name: string,
   entry: DynamicToolEntry,
-): DurableDynamicToolCallbacks {
+): PreparedDurableDynamicToolCallbacks {
   const raw = readDurableDynamicToolCallbacks(entry) ?? {};
   const unknownPhases = Object.keys(raw).filter(
     (key) =>
@@ -208,28 +222,87 @@ export function validateDurableDynamicToolCallbacks(
     approvalRequest?: DurableDynamicCallbackReference;
     approvalResponse?: DurableDynamicCallbackReference;
     toModelOutput?: DurableDynamicCallbackReference;
-  } = { execute };
-  if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest;
-  if (approvalResponse !== undefined) callbacks.approvalResponse = approvalResponse;
-  if (toModelOutput !== undefined) callbacks.toModelOutput = toModelOutput;
-  return callbacks;
+  } = { execute: execute.reference };
+  if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest.reference;
+  if (approvalResponse !== undefined) callbacks.approvalResponse = approvalResponse.reference;
+  if (toModelOutput !== undefined) callbacks.toModelOutput = toModelOutput.reference;
+
+  const registrations: PreparedDurableDynamicCallbackRegistration[] = [
+    { callback: execute.callback, phase: "execute", toolName: name },
+  ];
+  if (approvalRequest !== undefined) {
+    registrations.push({
+      callback: approvalRequest.callback,
+      phase: "approvalRequest",
+      toolName: name,
+    });
+  }
+  if (approvalResponse !== undefined) {
+    registrations.push({
+      callback: approvalResponse.callback,
+      phase: "approvalResponse",
+      toolName: name,
+    });
+  }
+  if (toModelOutput !== undefined) {
+    registrations.push({
+      callback: toModelOutput.callback,
+      phase: "toModelOutput",
+      toolName: name,
+    });
+  }
+  return { callbacks, registrations };
 }
 
-function createMetadata(input: {
+export function registerPreparedDurableDynamicToolCallbacks(
+  prepared: PreparedDurableDynamicToolCallbacks,
+): void {
+  for (const registration of prepared.registrations) {
+    registerDurableDynamicCallback(registration);
+  }
+}
+
+export function validateDurableDynamicToolCallbacks(
+  name: string,
+  entry: DynamicToolEntry,
+): DurableDynamicToolCallbacks {
+  const prepared = prepareDurableDynamicToolCallbacks(name, entry);
+  registerPreparedDurableDynamicToolCallbacks(prepared);
+  return prepared.callbacks;
+}
+
+export interface PreparedDynamicToolMetadata {
+  readonly callbacks: PreparedDurableDynamicToolCallbacks;
+  readonly metadata: DurableDynamicToolMetadata;
+}
+
+export function prepareDynamicToolMetadata(input: {
   readonly entry: DynamicToolEntry;
   readonly entryKey: string;
   readonly name: string;
-  readonly resolver: ResolvedDynamicToolResolver;
-}): DurableDynamicToolMetadata {
+  readonly resolverSlug: string;
+}): PreparedDynamicToolMetadata {
+  const callbacks = prepareDurableDynamicToolCallbacks(input.name, input.entry);
   return {
-    callbacks: validateDurableDynamicToolCallbacks(input.name, input.entry),
-    description: input.entry.description,
-    entryKey: input.entryKey,
-    inputSchema: serializeInputSchema(input.entry.inputSchema),
-    name: input.name,
-    outputSchema: serializeOutputSchema(input.entry.outputSchema),
-    resolverSlug: input.resolver.slug,
+    callbacks,
+    metadata: {
+      callbacks: callbacks.callbacks,
+      description: input.entry.description,
+      entryKey: input.entryKey,
+      inputSchema: serializeInputSchema(input.entry.inputSchema),
+      name: input.name,
+      outputSchema: serializeOutputSchema(input.entry.outputSchema),
+      resolverSlug: input.resolverSlug,
+    },
   };
+}
+
+export function registerPreparedDynamicToolMetadata(
+  prepared: readonly PreparedDynamicToolMetadata[],
+): void {
+  for (const entry of prepared) {
+    registerPreparedDurableDynamicToolCallbacks(entry.callbacks);
+  }
 }
 
 interface ResolvedDynamicToolEvent {
@@ -237,7 +310,7 @@ interface ResolvedDynamicToolEvent {
 }
 
 async function resolveToolsFromEvent(
-  ctx: ContextContainer,
+  ctx: AlsContext,
   resolvers: readonly ResolvedDynamicToolResolver[],
   event: UnstampedMessageStreamEvent,
   messages: readonly ModelMessage[],
@@ -251,8 +324,13 @@ async function resolveToolsFromEvent(
       const { entries, isSingle } = readDynamicToolResult(resolver, rawResult);
       const named = qualifyDynamicToolNames(resolver, isSingle, entries);
       return {
-        metadata: named.map(({ name, entryKey, entry }) =>
-          createMetadata({ entry, entryKey, name, resolver }),
+        prepared: named.map(({ name, entryKey, entry }) =>
+          prepareDynamicToolMetadata({
+            entry,
+            entryKey,
+            name,
+            resolverSlug: resolver.slug,
+          }),
         ),
         resolver,
       };
@@ -260,6 +338,7 @@ async function resolveToolsFromEvent(
   );
 
   const metadata: DurableDynamicToolMetadata[] = [];
+  const preparedMetadata: PreparedDynamicToolMetadata[] = [];
   const dynamicToolOwners = new Map<string, string>();
   for (const outcome of outcomes) {
     if (outcome.status === "rejected") {
@@ -270,7 +349,7 @@ async function resolveToolsFromEvent(
     }
     if (outcome.value === null) continue;
 
-    for (const entry of outcome.value.metadata) {
+    for (const { metadata: entry } of outcome.value.prepared) {
       const previousOwner = dynamicToolOwners.get(entry.name);
       if (previousOwner !== undefined && previousOwner !== outcome.value.resolver.slug) {
         throw new Error(
@@ -279,19 +358,21 @@ async function resolveToolsFromEvent(
       }
       dynamicToolOwners.set(entry.name, outcome.value.resolver.slug);
     }
-    metadata.push(...outcome.value.metadata);
+    preparedMetadata.push(...outcome.value.prepared);
+    metadata.push(...outcome.value.prepared.map((entry) => entry.metadata));
   }
+  registerPreparedDynamicToolMetadata(preparedMetadata);
   return { metadata };
 }
 
 const resolvedStepTools = new WeakMap<
-  ContextContainer,
+  AlsContext,
   { readonly coordinate: string; readonly metadata: readonly DurableDynamicToolMetadata[] }
 >();
 
 /** Resolves step-scoped tools once for one internal policy/model pass. */
 export async function resolveStepDynamicTools(input: {
-  readonly ctx: ContextContainer;
+  readonly ctx: AlsContext;
   readonly resolvers: readonly ResolvedDynamicToolResolver[];
   readonly event: UnstampedMessageStreamEvent;
   readonly messages: readonly ModelMessage[];
@@ -321,7 +402,7 @@ export async function resolveStepDynamicTools(input: {
 }
 
 export async function dispatchDynamicToolEvent(input: {
-  readonly ctx: ContextContainer;
+  readonly ctx: AlsContext;
   readonly resolvers: readonly ResolvedDynamicToolResolver[];
   readonly event: UnstampedMessageStreamEvent;
   readonly messages: readonly ModelMessage[];
@@ -358,7 +439,7 @@ export async function dispatchDynamicToolEvent(input: {
  * a crash, or a redeploy), so replay always resolves against current code.
  */
 export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
-  readonly ctx: ContextContainer;
+  readonly ctx: AlsContext;
   readonly resolvers: readonly ResolvedDynamicToolResolver[];
   readonly event: SessionStartedStreamEvent;
   readonly messages: readonly ModelMessage[];

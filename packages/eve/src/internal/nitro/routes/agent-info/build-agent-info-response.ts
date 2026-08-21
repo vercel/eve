@@ -2,7 +2,7 @@ import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import {
   getAllFrameworkToolDefinitions,
   getAllFrameworkToolNames,
-  getFrameworkDynamicToolResolvers,
+  getFrameworkRuntimeToolContributors,
   getOptInFrameworkToolNames,
 } from "#runtime/framework-tools/index.js";
 import {
@@ -388,7 +388,7 @@ function buildToolInfo(
   const authoredToolNames = new Set(agent.tools.map((tool) => tool.name));
   const disabledFrameworkTools = new Set(agent.disabledFrameworkTools);
   const allFrameworkToolNames = getAllFrameworkToolNames();
-  const dynamicFrameworkResolvers = getFrameworkDynamicToolResolvers();
+  const dynamicFrameworkResolvers = getFrameworkRuntimeToolContributors();
   const authored = agent.tools.map((tool) =>
     renderTool(tool, {
       origin: "authored",
