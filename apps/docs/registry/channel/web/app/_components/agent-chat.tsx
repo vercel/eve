@@ -142,14 +142,17 @@ export function AgentChat({
   return (
     <main className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
       {hasConversationContent ? (
+        <ChatHeader canStartNewChat={activeSessionId !== undefined} />
+      ) : null}
+
+      {hasConversationContent ? (
         <Conversation
           className="min-h-0 flex-1"
           scrollRestorationKey={
             activeSessionId === undefined ? undefined : `eve:web-chat-scroll:${activeSessionId}`
           }
         >
-          <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 pb-6 sm:px-6">
-            <ChatHeader canStartNewChat={activeSessionId !== undefined} sticky />
+          <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-20 pb-6 sm:px-6">
             {agent.data.messages.map((message, index) =>
               showPendingThinking &&
               isPendingAssistantShell &&
@@ -213,23 +216,15 @@ function ErrorMessage({ message }: { readonly message: string }) {
   );
 }
 
-function ChatHeader({
-  canStartNewChat,
-  sticky = false,
-}: {
-  readonly canStartNewChat: boolean;
-  readonly sticky?: boolean;
-}) {
+function ChatHeader({ canStartNewChat }: { readonly canStartNewChat: boolean }) {
   return (
-    <header
-      className={cn("h-14 shrink-0", sticky && "sticky top-0 z-10 -mx-4 bg-background sm:-mx-6")}
-    >
+    <header className="pointer-events-none fixed top-0 right-0 left-0 z-20 h-14">
       <div className="relative mx-auto flex h-full w-full max-w-3xl items-center justify-center px-24">
         <span className="truncate text-muted-foreground text-sm">{AGENT_NAME}</span>
         {canStartNewChat ? (
           <Button
             aria-label="Start a new chat"
-            className="fixed top-2 right-6 z-20"
+            className="pointer-events-auto fixed top-2 right-6"
             onClick={() => window.location.assign("/s")}
             size="sm"
             type="button"
