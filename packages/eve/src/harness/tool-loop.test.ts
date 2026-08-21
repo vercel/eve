@@ -813,10 +813,7 @@ describe("createToolLoopHarness", () => {
         message,
       });
 
-      expect(result.session.history).toEqual([
-        { content: "channel context", role: "user" },
-        { content: "Hello!", role: "assistant" },
-      ]);
+      expect(result.session.history).toEqual([{ content: "Hello!", role: "assistant" }]);
     }
   });
 
@@ -8143,6 +8140,7 @@ describe("createToolLoopHarness", () => {
       },
       role: "user",
     });
+    expect(secondResult.session.history).not.toContainEqual({ content: context, role: "user" });
   });
 
   it("follow-up message precedes a late approval denial in committed history", async () => {
@@ -8949,6 +8947,73 @@ describe("createToolLoopHarness", () => {
     expect(preCompactionModelViews).toEqual([preCompactionView]);
     expect(vi.mocked(compactMessages).mock.calls[0]?.[0]).toEqual(preCompactionView);
     expect(stepViews).toEqual([compactedHistory]);
+  });
+
+  it("keeps ephemeral context out of compaction and durable history", async () => {
+    vi.mocked(shouldCompact).mockReturnValue(true);
+    vi.mocked(compactMessages).mockImplementation(async (messages) => [
+      { content: "Summary of our conversation so far:", role: "user" },
+      { content: "summary", role: "assistant" },
+      messages.at(-1)!,
+    ]);
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "done", role: "assistant" }] },
+      text: "done",
+      toolCalls: [],
+      toolResults: [],
+      usage: { inputTokens: 321 },
+    });
+
+    const stepViews: Array<readonly ModelMessage[]> = [];
+    const emit: HarnessEmitFn = async (event, messages) => {
+      if (event.type === "step.started") stepViews.push(messages ?? []);
+    };
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        resolveModel: vi
+          .fn()
+          .mockResolvedValue({ modelId: "gpt-4", provider: "openai" } as LanguageModel),
+      }),
+    );
+    const session = createTestSession({
+      history: [
+        { content: "old", role: "user" },
+        { content: "reply", role: "assistant" },
+      ],
+    });
+
+    const result = await contextStorage.run(new ContextContainer(), () =>
+      runStep(session, { context: ["ephemeral-context"], message: "current" }),
+    );
+
+    expect(vi.mocked(shouldCompact).mock.calls[0]?.[0]).toEqual([
+      { content: "old", role: "user" },
+      { content: "reply", role: "assistant" },
+      { content: "ephemeral-context", role: "user" },
+      { content: "current", role: "user" },
+    ]);
+    expect(vi.mocked(compactMessages).mock.calls[0]?.[0]).toEqual([
+      { content: "old", role: "user" },
+      { content: "reply", role: "assistant" },
+      { content: "current", role: "user" },
+    ]);
+    expect(stepViews).toEqual([
+      [
+        { content: "Summary of our conversation so far:", role: "user" },
+        { content: "summary", role: "assistant" },
+        { content: "ephemeral-context", role: "user" },
+        { content: "current", role: "user" },
+      ],
+    ]);
+    expect(result.session.history).toEqual([
+      { content: "Summary of our conversation so far:", role: "user" },
+      { content: "summary", role: "assistant" },
+      { content: "current", role: "user" },
+      { content: "done", role: "assistant" },
+    ]);
+    expect(result.session.compaction).not.toHaveProperty("lastKnownInputTokens");
+    expect(result.session.compaction).not.toHaveProperty("lastKnownPromptMessageCount");
   });
 
   it("clears static and dynamic user instructions without rerunning lifecycle events", async () => {
@@ -11084,6 +11149,43 @@ describe("createToolLoopHarness", () => {
       };
     }
 
+    function toolCallModelResult(): Record<string, unknown> {
+      const toolCall = {
+        input: { a: 1, b: 2 },
+        toolCallId: "call-1",
+        toolName: "add",
+        type: "tool-call",
+      };
+      return {
+        finishReason: "tool-calls",
+        response: {
+          messages: [
+            { content: [toolCall], role: "assistant" },
+            {
+              content: [
+                {
+                  output: "42",
+                  toolCallId: "call-1",
+                  toolName: "add",
+                  type: "tool-result",
+                },
+              ],
+              role: "tool",
+            },
+          ],
+        },
+        text: "",
+        toolCalls: [toolCall],
+        toolResults: [
+          {
+            ...toolCall,
+            output: "42",
+            type: "tool-result",
+          },
+        ],
+      };
+    }
+
     it("appends context strings as user messages", async () => {
       setupMockAgent(defaultModelResult());
       const runStep = createToolLoopHarness(createTestConfig("conversation"));
@@ -11098,6 +11200,38 @@ describe("createToolLoopHarness", () => {
       const contextMessage = messages.find((m) => m.content === "ephemeral-context");
       expect(contextMessage).toBeDefined();
       expect(contextMessage!.role).toBe("user");
+    });
+
+    it("projects ephemeral context before the current delivery", async () => {
+      setupMockAgent(defaultModelResult());
+      const projectionInputs: Array<readonly ModelMessage[]> = [];
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          historyProjector: ({ messages }) => {
+            projectionInputs.push(messages);
+            return messages.map((message) => ({ ...message }));
+          },
+        }),
+      );
+
+      const result = await runStep(createTestSession(), {
+        context: ["ephemeral-context"],
+        message: "Hi",
+      });
+
+      expect(getLastAgentSettings().messages.slice(-2)).toEqual([
+        { content: "ephemeral-context", role: "user" },
+        { content: "Hi", role: "user" },
+      ]);
+      expect(
+        projectionInputs.some((messages) =>
+          messages.some((message) => message.content === "ephemeral-context"),
+        ),
+      ).toBe(true);
+      expect(result.session.history).not.toContainEqual({
+        content: "ephemeral-context",
+        role: "user",
+      });
     });
 
     it("routes role:system durable history into instructions, not messages", async () => {
@@ -11118,21 +11252,51 @@ describe("createToolLoopHarness", () => {
       expect(messages.at(-1)).toEqual({ role: "user", content: "Hi" });
     });
 
-    it("persists context strings in session history as user messages", async () => {
+    it("does not replay context from earlier turns or persist it", async () => {
       setupMockAgent(defaultModelResult());
       const runStep = createToolLoopHarness(createTestConfig("conversation"));
-      const session = createTestSession();
+      let session = createTestSession();
 
-      const result = await runStep(session, {
-        message: "Hi",
-        context: ["background-context"],
+      for (const turn of [1, 2, 3]) {
+        const context = `CTX-${String(turn)}`;
+        const result = await runStep(session, {
+          message: `Turn ${String(turn)}`,
+          context: [context],
+        });
+        const seenContext = getLastAgentSettings().messages.filter(
+          (message) => typeof message.content === "string" && message.content.startsWith("CTX-"),
+        );
+
+        expect(seenContext).toEqual([{ content: context, role: "user" }]);
+        expect(result.session.history).not.toContainEqual({ content: context, role: "user" });
+        session = result.session;
+      }
+    });
+
+    it("delivers context only to the first model call in a tool turn", async () => {
+      setupMockAgentSequence([toolCallModelResult(), defaultModelResult()]);
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+
+      const first = await runStep(createTestSession(), {
+        message: "Add 1 and 2",
+        context: ["ephemeral-context"],
       });
+      expect(getLastAgentSettings().messages).toContainEqual({
+        content: "ephemeral-context",
+        role: "user",
+      });
+      if (typeof first.next !== "function") throw new TypeError("Expected tool continuation.");
 
-      expect(result.session.history).toEqual([
-        { role: "user", content: "background-context" },
-        { role: "user", content: "Hi" },
-        { role: "assistant", content: "ok" },
-      ]);
+      const second = await first.next(first.session);
+
+      expect(getLastAgentSettings().messages).not.toContainEqual({
+        content: "ephemeral-context",
+        role: "user",
+      });
+      expect(second.session.history).not.toContainEqual({
+        content: "ephemeral-context",
+        role: "user",
+      });
     });
 
     it("leaves instructions unchanged when no context is provided", async () => {
