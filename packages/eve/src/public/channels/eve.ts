@@ -70,6 +70,11 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 const log = createLogger("eve.channel");
 
+// Keep a margin below the five-minute function limit used by common serverless
+// deployments. The eve client treats a clean EOF as a reconnect boundary and
+// resumes from its current event index.
+const SESSION_STREAM_MAX_LIFETIME_MS = 4 * 60 * 1000;
+
 /**
  * Event-handler channel context exposed by `eveChannel({ events })`. The default eve HTTP channel
  * has no platform-specific state, so handlers receive optional continuation routing here and the
@@ -1068,9 +1073,12 @@ async function createSessionStreamResponse(request: Request, session: Session): 
     if (tailIndex !== undefined) {
       headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
     }
-    return new Response(serializeAsNdjson(events), {
-      headers,
-    });
+    return new Response(
+      closeStreamAfter(serializeAsNdjson(events), SESSION_STREAM_MAX_LIFETIME_MS),
+      {
+        headers,
+      },
+    );
   } catch {
     return Response.json({ error: "Session not found.", ok: false }, { status: 404 });
   }
@@ -1364,4 +1372,45 @@ function serializeAsNdjson(events: ReadableStream<unknown>): ReadableStream<Uint
       },
     }),
   );
+}
+
+function closeStreamAfter<T>(stream: ReadableStream<T>, durationMs: number): ReadableStream<T> {
+  const reader = stream.getReader();
+  let finished = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  return new ReadableStream<T>({
+    start(controller) {
+      timer = setTimeout(() => {
+        if (finished) return;
+        finished = true;
+        controller.close();
+        void reader.cancel("eve session stream lifetime elapsed").catch(() => undefined);
+      }, durationMs);
+    },
+    async pull(controller) {
+      try {
+        const result = await reader.read();
+        if (finished) return;
+        if (result.done) {
+          finished = true;
+          if (timer !== undefined) clearTimeout(timer);
+          controller.close();
+          return;
+        }
+        controller.enqueue(result.value);
+      } catch (error) {
+        if (finished) return;
+        finished = true;
+        if (timer !== undefined) clearTimeout(timer);
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      if (finished) return;
+      finished = true;
+      if (timer !== undefined) clearTimeout(timer);
+      await reader.cancel(reason);
+    },
+  });
 }

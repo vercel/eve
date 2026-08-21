@@ -327,14 +327,17 @@ function createEveCompactHandler(input: EveChannelInput) {
 }
 
 /** Creates a GET handler test harness for the durable session stream route. */
-function createEveStreamHandler(input: EveChannelInput) {
+function createEveStreamHandler(
+  input: EveChannelInput,
+  options: { readonly eventStream?: ReadableStream<unknown> } = {},
+) {
   const channel = eveChannel(input);
   const streamRoute = channel.routes.find(
     (route) => route.method === "GET" && route.path === "/eve/v1/session/:sessionId/stream",
   );
   if (!streamRoute) throw new Error("No session stream GET route found");
 
-  const getEventStream = vi.fn().mockResolvedValue(new ReadableStream());
+  const getEventStream = vi.fn().mockResolvedValue(options.eventStream ?? new ReadableStream());
   const getStreamTailIndex = vi.fn().mockResolvedValue(-1);
   const session = createMockSession({
     getEventStream,
@@ -531,6 +534,30 @@ describe("eveChannel — stream cursor", () => {
     await reader.cancel();
 
     expect(new TextDecoder().decode(firstChunk.value)).toBe("\n");
+  });
+
+  it("ends a long-held response cleanly so the client can reconnect", async () => {
+    vi.useFakeTimers();
+    const cancel = vi.fn();
+    const eventStream = new ReadableStream({ cancel });
+
+    try {
+      const handler = createEveStreamHandler({ auth: none() }, { eventStream });
+      const response = await handler.fetch(
+        "https://eve.test/eve/v1/session/test-session-id/stream",
+      );
+      const reader = response.body!.getReader();
+
+      expect(new TextDecoder().decode((await reader.read()).value)).toBe("\n");
+      const nextChunk = reader.read();
+
+      await vi.advanceTimersByTimeAsync(4 * 60 * 1000);
+
+      await expect(nextChunk).resolves.toEqual({ done: true, value: undefined });
+      expect(cancel).toHaveBeenCalledWith("eve session stream lifetime elapsed");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("forwards negative tail-relative start indices", async () => {
