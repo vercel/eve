@@ -1,3 +1,4 @@
+import type { ProgressContextV1 } from "#channel/types.js";
 import type { Session } from "#context/keys.js";
 import {
   deriveChildActivityWorkId,
@@ -16,6 +17,21 @@ export function deriveRootTurnWorkIdentity(session: Session): ActivityWorkIdenti
     rootTurnId: session.turn.id,
     sessionId: session.sessionId,
     turnId: session.turn.id,
+  };
+}
+
+export function childProgressContext(input: {
+  readonly callId: string;
+  readonly kind: Exclude<ActivityWorkKind, "root-turn">;
+  readonly name: string;
+  readonly parentSessionId: string;
+  readonly parentTurnId: string;
+  readonly progress: ProgressContextV1 | undefined;
+}): ProgressContextV1 | undefined {
+  if (input.progress?.workIdentity === undefined) return undefined;
+  return {
+    callback: input.progress.callback,
+    workIdentity: deriveChildWorkIdentity({ ...input, parentWork: input.progress.workIdentity }),
   };
 }
 

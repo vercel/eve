@@ -99,6 +99,10 @@ vi.mock("./settle-cancelled-turn-step.js", () => ({
   settleCancelledTurnStep: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("./settle-progress-work-step.js", () => ({
+  settleProgressWorkStep: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("./session-timeout-control.js", () => ({
   createSessionTimeoutControl: vi.fn(),
 }));

@@ -42,7 +42,7 @@ import {
   settleTaskDispatchError,
   type PersistedContinuationTask,
 } from "#execution/tasks/parent/continuation-dispatch.js";
-import type { RuntimeActionResult } from "#shared/action-types.js";
+import type { RuntimeActionResult } from "#runtime/actions/types.js";
 
 export async function dispatchTaskStep(
   input: RuntimeActionDispatchInput,
@@ -157,6 +157,12 @@ export async function dispatchTaskStep(
             initiatorAuth: prepared.initiatorAuth,
             parentContinuationToken: delegated.taskInboxToken,
             parentTraceContext: prepared.parentTraceContext,
+            // Background tasks require resumable children, so task mode
+            // always dispatches conversation-mode (persistent) sessions;
+            // `experimental.subagentPersistentSessions` never produces a
+            // third mode here.
+            persistentSessions: true,
+            progress: prepared.progress,
             sandboxSessionId: prepared.sandboxSessionId,
             serializedContext: prepared.serializedContext,
             session,

@@ -11,9 +11,11 @@ import {
   rejectAgentEffect,
 } from "#harness/handles/transitions.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { RuntimeSubagentCallActionRequest } from "#shared/action-types.js";
+import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { childProgressContext } from "#execution/progress-work.js";
+import { reportProgress } from "#execution/submit-progress.js";
 
 const log = createLogger("execution.subagent-start-local");
 
@@ -35,12 +37,22 @@ export async function startLocalSubagent(input: {
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
+  readonly persistentSessions: boolean;
+  readonly progress?: Parameters<typeof buildSubagentRunInput>[0]["progress"];
   readonly sandboxSessionId: string;
   readonly session: RuntimeSession;
   readonly source: SubagentInputSource;
   readonly taskOwned: boolean;
 }): Promise<DispatchOutcome> {
   const { action, source } = input;
+  const progress = childProgressContext({
+    callId: action.callId,
+    kind: "subagent",
+    name: action.subagentName,
+    parentSessionId: input.session.sessionId,
+    parentTurnId: input.batchEvent.turnId,
+    progress: input.progress,
+  });
   const childRuntime = createWorkflowRuntime({
     compiledArtifactsSource: input.bundle.compiledArtifactsSource,
     dynamicSubagentAgentConfig: input.dynamicSubagentAgentConfig,
@@ -57,6 +69,8 @@ export async function startLocalSubagent(input: {
     graph: input.bundle.graph,
     parentContinuationToken: input.parentContinuationToken,
     parentTraceContext: input.parentTraceContext,
+    persistentSessions: input.persistentSessions,
+    progress,
     sandboxSessionId: input.sandboxSessionId,
     session: input.session,
     source,
@@ -116,6 +130,20 @@ export async function startLocalSubagent(input: {
     // started. Adopt it instead of failing live work and starting a second
     // child on the next attempt.
     childSessionId = error.ownerSessionId;
+  }
+
+  if (progress?.workIdentity !== undefined) {
+    await reportProgress({
+      callback: progress.callback,
+      events: [
+        {
+          eventId: `${progress.workIdentity.id}:started`,
+          kind: "work.started",
+          startedAt: new Date().toISOString(),
+          work: { ...progress.workIdentity, sessionId: childSessionId },
+        },
+      ],
+    });
   }
 
   const address = {
