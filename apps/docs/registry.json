@@ -340,7 +340,7 @@
       "name": "connection/agentcard",
       "type": "registry:item",
       "title": "Agentcard",
-      "description": "Shop at real merchants with consent-gated single-use virtual cards.",
+      "description": "let agents buy online",
       "meta": {
         "eve": {
           "setup": {
