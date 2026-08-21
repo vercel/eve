@@ -146,7 +146,7 @@ export async function* followStreamIterable(
     if (input.follow === false && tailIndex === undefined) {
       tailIndex = connection.tailIndex;
       if (tailIndex === undefined) {
-        await connection.body.cancel().catch(() => {});
+        connection.close();
         throw new Error(
           `stream({ follow: false }) requires the server to report the ${EVE_STREAM_TAIL_INDEX_HEADER} header. ` +
             "The agent may be running an older eve version.",
@@ -155,7 +155,7 @@ export async function* followStreamIterable(
     }
 
     if (tailIndex !== undefined && startIndex > tailIndex) {
-      await connection.body.cancel().catch(() => {});
+      connection.close();
       return;
     }
 
@@ -175,9 +175,9 @@ export async function* followStreamIterable(
         }
       }
     } catch (error) {
-      if (!isStreamDisconnectError(error)) {
-        throw error;
-      }
+      if (!isStreamDisconnectError(error)) throw error;
+    } finally {
+      connection.close();
     }
 
     if (input.signal?.aborted || input.startIndex < 0 || idleRetryPolicy.maxAttempts === 0) {
@@ -205,6 +205,7 @@ export async function* followStreamIterable(
 /** An opened connection: the response body plus the tail index from the response header, if any. */
 interface OpenedStream {
   readonly body: ReadableStream<Uint8Array>;
+  close(): void;
   readonly tailIndex: number | undefined;
 }
 
@@ -240,13 +241,17 @@ export async function openStreamBody(
     );
 
     const headers = await input.resolveHeaders();
+    const connectionController = new AbortController();
+    const signal = input.signal
+      ? AbortSignal.any([input.signal, connectionController.signal])
+      : connectionController.signal;
     let response: Response;
     try {
       response = await fetch(url, {
         cache: "no-store",
         headers,
         redirect: input.redirect,
-        signal: input.signal ?? null,
+        signal,
       });
     } catch (error) {
       if (
@@ -265,7 +270,11 @@ export async function openStreamBody(
       if (!response.body) {
         throw new ClientError(response.status, "Response body is null.", response.headers);
       }
-      return { body: response.body, tailIndex: parseTailIndexHeader(response.headers) };
+      return {
+        body: response.body,
+        close: () => connectionController.abort(),
+        tailIndex: parseTailIndexHeader(response.headers),
+      };
     }
 
     lastStatus = response.status;

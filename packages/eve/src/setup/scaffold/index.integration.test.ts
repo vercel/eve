@@ -239,7 +239,7 @@ describe("ensureChannel", () => {
       join(projectRoot, "app/_components/agent-chat.tsx"),
       "utf8",
     );
-    expect(agentChatSource).toContain("<PromptInputTextarea disabled={isBusy}");
+    expect(agentChatSource).toContain("disabled={isBusy || isRestoring}");
     expect(agentChatSource).toContain("{showPendingThinking ? <PendingThinking /> : null}");
     expect(agentChatSource).not.toContain("StatusDot");
     await expect(readFile(join(projectRoot, "next.config.ts"), "utf8")).resolves.toContain(
@@ -309,9 +309,14 @@ describe("ensureChannel", () => {
     expect(packageJson.dependencies.next).toBe("16.3.0");
 
     const pageSource = await readFile(join(projectRoot, "app/page.tsx"), "utf8");
-    expect(pageSource).toContain("auth.api.getSession");
-    expect(pageSource).toContain("<SignIn />");
-    expect(pageSource).toContain("<AccountControl");
+    expect(pageSource).toContain("<AuthenticatedAgentChat");
+    const authenticatedChatSource = await readFile(
+      join(projectRoot, "app/_components/authenticated-agent-chat.tsx"),
+      "utf8",
+    );
+    expect(authenticatedChatSource).toContain("auth.api.getSession");
+    expect(authenticatedChatSource).toContain("<SignIn />");
+    expect(authenticatedChatSource).toContain("<AccountControl");
 
     const authSource = await readFile(join(projectRoot, "lib/auth.ts"), "utf8");
     expect(authSource).toContain('requireEnvironmentVariable("BETTER_AUTH_SECRET")');

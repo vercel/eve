@@ -42,6 +42,7 @@ export function AgentChat({
           },
     onSessionChange(session) {
       if (sessionId === undefined && session !== undefined) {
+        // Next patches window.history to navigate, which would detach the active stream.
         History.prototype.replaceState.call(
           window.history,
           window.history.state,
@@ -55,15 +56,11 @@ export function AgentChat({
   useEffect(() => {
     if (sessionId === undefined) return;
     let mounted = true;
+    const finishRestoring = () => {
+      if (mounted) setIsRestoring(false);
+    };
     const timeout = window.setTimeout(() => {
-      void agent.resume().then(
-        () => {
-          if (mounted) setIsRestoring(false);
-        },
-        () => {
-          if (mounted) setIsRestoring(false);
-        },
-      );
+      void agent.resume().then(finishRestoring, finishRestoring);
     }, 0);
     return () => {
       mounted = false;
@@ -82,6 +79,7 @@ export function AgentChat({
   const turnFailure = isBusy ? undefined : getLatestTurnFailure(agent.events);
   const errorMessage = cancellationError ?? agent.error?.message ?? turnFailure;
   const hasConversationContent = sessionless || !isEmpty || errorMessage !== undefined;
+  const showConversationLayout = isRestoring || hasConversationContent;
   const activeSessionId = sessionId ?? agent.session?.sessionId;
 
   const requestCancellation = () => {
@@ -129,27 +127,20 @@ export function AgentChat({
     </PromptInput>
   );
 
-  if (isRestoring && agent.events.length === 0) {
-    return (
-      <main className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-        <ChatHeader canStartNewChat={activeSessionId !== undefined} />
-        <div className="min-h-0 flex-1" />
-        <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-6 sm:px-6">{composer}</div>
-      </main>
-    );
-  }
-
   return (
     <main className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-      {hasConversationContent ? (
+      {showConversationLayout ? (
         <ChatHeader canStartNewChat={activeSessionId !== undefined} />
       ) : null}
 
-      {hasConversationContent ? (
+      {showConversationLayout ? (
         <Conversation
           className="min-h-0 flex-1"
+          initial={sessionId === undefined ? undefined : false}
           scrollRestorationKey={
-            activeSessionId === undefined ? undefined : `eve:web-chat-scroll:${activeSessionId}`
+            isEmpty || activeSessionId === undefined
+              ? undefined
+              : `eve:web-chat-scroll:${activeSessionId}`
           }
         >
           <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-20 pb-6 sm:px-6">
@@ -181,12 +172,12 @@ export function AgentChat({
       <div
         className={cn(
           "mx-auto w-full px-4 sm:px-6",
-          hasConversationContent
+          showConversationLayout
             ? "max-w-3xl shrink-0 pb-6"
             : "flex max-w-xl flex-1 flex-col items-center justify-center gap-8 pb-[10vh]",
         )}
       >
-        {hasConversationContent ? null : (
+        {showConversationLayout ? null : (
           <div className="flex flex-col items-center gap-3 text-center">
             <h1 className="font-medium text-5xl tracking-tighter">{AGENT_NAME}</h1>
           </div>

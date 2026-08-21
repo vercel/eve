@@ -258,6 +258,7 @@ describe("EveAgentStore session resume", () => {
     });
 
     const resuming = store.resume();
+    expect(store.resume()).toBe(resuming);
     await vi.waitFor(() => expect(store.snapshot.status).toBe("streaming"));
     expect(store.snapshot.events.map((event) => event.type)).toEqual([
       "message.received",
