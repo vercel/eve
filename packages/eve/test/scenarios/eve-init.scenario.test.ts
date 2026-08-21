@@ -160,8 +160,15 @@ describe("eve init smoke", () => {
     const scratch = await createScratchDirectory("eve-init-release-age-");
     const env = {
       ...withoutCodingAgentMarkers(process.env),
+      // The agent path skips the interactive dev handoff, which cannot run
+      // against the real pnpm install this scenario performs.
+      AI_AGENT: "claude",
       CI: "true",
       PNPM_CONFIG_MINIMUM_RELEASE_AGE: RELEASE_AGE_MINUTES,
+      // A fresh eve release is younger than the policy window, so resolution
+      // would rightly fail. Internal testing opts the framework package out
+      // through the environment instead of any scaffold-owned bypass.
+      PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE: '["eve"]',
     };
 
     const result = await runEveBin(scratch, ["init", "policy-agent"], env);

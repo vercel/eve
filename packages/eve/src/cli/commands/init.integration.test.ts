@@ -157,7 +157,7 @@ describe("runInitCommand", () => {
       DEFAULT_AGENT_MODEL_ID,
     );
     const manifest = await readFile(join(projectPath, "package.json"), "utf8");
-    expect(manifest).toContain('"eve": "0.6.0"');
+    expect(manifest).toContain('"eve": "^0.6.0"');
     // pnpm accepts the optional prerelease peer without a manager-specific pin.
     const packageJson: unknown = JSON.parse(manifest);
     expect(packageJson).not.toHaveProperty("overrides");
