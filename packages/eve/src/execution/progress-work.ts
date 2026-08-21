@@ -1,3 +1,4 @@
+import type { ProgressContextV1 } from "#channel/types.js";
 import type { Session } from "#context/keys.js";
 import type { ProgressWorkIdentityV1, ProgressWorkKind } from "#protocol/progress.js";
 
@@ -9,6 +10,24 @@ export function rootProgressWork(session: Session): ProgressWorkIdentityV1 {
     rootTurnId: session.turn.id,
     sessionId: session.sessionId,
     turnId: session.turn.id,
+  };
+}
+
+export function childProgressContext(input: {
+  readonly callId: string;
+  readonly kind: Exclude<ProgressWorkKind, "root-turn">;
+  readonly name: string;
+  readonly parentSessionId: string;
+  readonly parentTurnId: string;
+  readonly progress: ProgressContextV1 | undefined;
+}): ProgressContextV1 | undefined {
+  if (input.progress?.workIdentity === undefined) return undefined;
+  return {
+    callback: input.progress.callback,
+    workIdentity: childProgressWork({
+      ...input,
+      parentWork: input.progress.workIdentity,
+    }),
   };
 }
 

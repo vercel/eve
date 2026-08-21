@@ -14,6 +14,8 @@ import {
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { childProgressContext } from "#execution/progress-work.js";
+import { reportProgress } from "#execution/submit-progress.js";
 
 const log = createLogger("execution.subagent-start-remote");
 
@@ -32,10 +34,19 @@ export async function startRemoteSubagent(input: {
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof startRemoteAgentSession>[0]["parentTraceContext"];
   readonly persistentSessions: boolean;
+  readonly progress?: Parameters<typeof startRemoteAgentSession>[0]["progress"];
   readonly session: RuntimeSession;
   readonly taskOwned: boolean;
 }): Promise<DispatchOutcome> {
   const { action } = input;
+  const progress = childProgressContext({
+    callId: action.callId,
+    kind: "remote-agent",
+    name: action.remoteAgentName,
+    parentSessionId: input.session.sessionId,
+    parentTurnId: input.batchEvent.turnId,
+    progress: input.progress,
+  });
 
   // Preflight resolution failures happen before ownership exists, so they
   // reject without touching the handle store.
@@ -88,9 +99,24 @@ export async function startRemoteSubagent(input: {
       operationId: operation.id,
       parentTraceContext: input.parentTraceContext,
       persistentSessions: input.persistentSessions,
+      progress,
       remote: resolvedRemote,
       session: input.session,
     });
+    if (progress?.workIdentity !== undefined) {
+      await reportProgress({
+        callback: progress.callback,
+        events: [
+          {
+            eventId: `${progress.workIdentity.id}:started`,
+            kind: "work.started",
+            startedAt: new Date().toISOString(),
+            work: { ...progress.workIdentity, sessionId: child.sessionId },
+          },
+        ],
+      });
+    }
+
     const address = {
       callbackBaseUrl,
       kind: "agent/remote",

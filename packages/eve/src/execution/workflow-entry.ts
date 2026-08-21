@@ -33,6 +33,7 @@ import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
+import { settleProgressWorkStep } from "#execution/settle-progress-work-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
 import { isHookConflictError } from "#execution/hook-ownership.js";
@@ -47,9 +48,11 @@ import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { isTaskOwnedSerializedContext } from "#execution/tasks/child/instructions.js";
-
-const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
-  "Agent workflow failed. Inspect the private session trace for details.";
+import {
+  createSafeOuterWorkflowError,
+  resolveCallerForCrash,
+  type CrashCleanupState,
+} from "#execution/workflow-entry-crash.js";
 
 // workflow-entry.ts is the durable workflow body — the bundler rejects
 // node built-ins here, so `internal/logging.ts` cannot be imported.
@@ -81,41 +84,6 @@ type DriverLoopOutcome =
       readonly kind: "result";
       readonly result: WorkflowEntryResult;
     };
-
-/**
- * Write-through cell owned by {@link workflowEntry}: written
- * unconditionally by the driver loop as turns advance, read only by the
- * outer catch. When the loop throws, its locals are unreachable, so this
- * cell is the crash path's only view of values that changed after turn 1.
- *
- * Reach for this cell only when all three hold for a value:
- * 1. it is produced or replaced inside the driver loop, so the entry
- *    function's own locals go stale;
- * 2. it travels by value inside Workflow step results — there is no
- *    store the catch could re-read it from at crash time;
- * 3. the crash path needs its latest value to discharge a cleanup
- *    obligation.
- * If any of the three fails, read the value from where it already lives
- * instead of mirroring it here.
- */
-interface CrashCleanupState {
-  // The caller whose awaited reply is still unsettled, so the catch can
-  // reject it with the error instead of leaving it parked forever.
-  // Populated for every session; only conversation-mode paths read it.
-  caller: TurnCaller | undefined;
-  // Whether `resolveInitialTurnCallerStep` has run. `caller: undefined` is
-  // ambiguous on its own: it also means "resolved and later cleared because
-  // its reply settled". This flag lets the crash path tell that apart from
-  // "crashed before the caller was ever resolved", where a delegated caller
-  // may still be parked on this session's reply.
-  callerResolved: boolean;
-  // The latest snapshot the driver has received, so the catch can
-  // terminate children adopted after turn 1. Honest staleness window: the
-  // driver only sees state at turn boundaries, so children dispatched by a
-  // turn that crashed mid-flight are absent from this snapshot and escape
-  // crash cleanup.
-  lastSessionState: DurableSessionState | undefined;
-}
 
 /**
  * Long-lived workflow entrypoint. Handles both root sessions and
@@ -249,6 +217,10 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       serializedContext: input.serializedContext,
     });
     if (mode === "task") {
+      await settleProgressWorkStep({
+        outcome: "failed",
+        serializedContext: input.serializedContext,
+      });
       await fireSessionCallbackStep({
         error: normalizeSerializableError(error),
         serializedContext: input.serializedContext,
@@ -268,36 +240,6 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     }
     throw createSafeOuterWorkflowError();
   }
-}
-
-/**
- * Caller to reject from the crash path. Normally the resolved cell value —
- * including `undefined` after a settled reply cleared it, when there is
- * nothing left to notify. When the crash happened before
- * `resolveInitialTurnCallerStep` ever ran (e.g. `createSessionStep` threw),
- * the cell is empty even though a delegated caller may be parked on this
- * session's reply, so the caller is re-resolved from the serialized context
- * — which needs nothing from the failed steps. Best-effort: when resolution
- * fails again there is no reachable caller to notify.
- */
-async function resolveCallerForCrash(
-  state: CrashCleanupState,
-  serializedContext: Record<string, unknown>,
-): Promise<TurnCaller | undefined> {
-  if (state.callerResolved) {
-    return state.caller;
-  }
-  try {
-    return await resolveInitialTurnCallerStep({ serializedContext });
-  } catch {
-    return undefined;
-  }
-}
-
-function createSafeOuterWorkflowError(): Error {
-  const error = new Error(SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE);
-  error.name = "EveWorkflowFailure";
-  return error;
 }
 
 async function runDriverLoop(input: {
@@ -516,6 +458,10 @@ async function runDriverLoop(input: {
       // the full StepResult so no state-key fallback exists anymore.
       const settled = action.settled;
       if (action.cancelled !== true && settled !== undefined) {
+        await settleProgressWorkStep({
+          outcome: settled.isError === true ? "failed" : "completed",
+          serializedContext: stateCursor.serializedContext,
+        });
         await notifyTurnCallerStep({
           caller: input.crashCleanupState.caller,
           lifecycle: "parked",
@@ -524,6 +470,10 @@ async function runDriverLoop(input: {
         });
         input.crashCleanupState.caller = undefined;
       } else if (action.cancelled === true) {
+        await settleProgressWorkStep({
+          outcome: "cancelled",
+          serializedContext: stateCursor.serializedContext,
+        });
         input.crashCleanupState.caller = undefined;
       }
 
@@ -620,6 +570,10 @@ async function finalizeExpiredSession(input: {
   });
 
   if (input.mode === "task") {
+    await settleProgressWorkStep({
+      outcome: "completed",
+      serializedContext: input.serializedContext,
+    });
     await fireSessionCallbackStep({
       output: "",
       serializedContext: input.serializedContext,
@@ -653,6 +607,10 @@ async function finalizeDone(input: {
     sessionState: input.action.sessionState,
   });
   if (input.mode === "task") {
+    await settleProgressWorkStep({
+      outcome: failed ? "failed" : "completed",
+      serializedContext,
+    });
     await fireSessionCallbackStep({
       error: failed ? output : undefined,
       output: failed ? undefined : output,

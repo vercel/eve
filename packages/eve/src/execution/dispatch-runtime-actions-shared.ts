@@ -13,11 +13,13 @@ import {
   type ChannelAdapter,
   type ChannelAdapterContext,
 } from "#channel/adapter.js";
+import type { ProgressContextV1 } from "#channel/types.js";
 import {
   AuthKey,
   CapabilitiesKey,
   ChannelInstrumentationKey,
   InitiatorAuthKey,
+  ProgressKey,
   SandboxKey,
 } from "#context/keys.js";
 import { type AlsContext, ContextContainer } from "#context/container.js";
@@ -60,6 +62,7 @@ import {
   getSubagentName,
 } from "#execution/dispatch-action-failures.js";
 import { startLocalSubagent } from "#execution/subagent-start-local.js";
+import type { ProgressWorkIdentityV1 } from "#protocol/progress.js";
 import { startRemoteSubagent } from "#execution/subagent-start-remote.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#execution/subagent-tool.js";
@@ -155,6 +158,7 @@ export interface PreparedRuntimeActionDispatch {
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
+  readonly progress?: ProgressContextV1 & { readonly workIdentity: ProgressWorkIdentityV1 };
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly plan: readonly DispatchPlanEntry[];
@@ -282,9 +286,29 @@ async function prepareActionDispatch(input: {
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     parentTraceContext: readSessionTraceContext(input.serializedContext, session.sessionId),
     plan,
+    progress: resolvePreparedProgress(ctx.get(ProgressKey), session, batch.event.turnId),
     sandboxSessionId,
     serializedContext: input.serializedContext,
     session,
+  };
+}
+
+function resolvePreparedProgress(
+  progress: ProgressContextV1 | undefined,
+  session: RuntimeSession,
+  turnId: string,
+): (ProgressContextV1 & { readonly workIdentity: ProgressWorkIdentityV1 }) | undefined {
+  if (progress === undefined) return undefined;
+  return {
+    callback: progress.callback,
+    workIdentity: progress.workIdentity ?? {
+      id: `root:${session.sessionId}:${turnId}`,
+      kind: "root-turn",
+      rootSessionId: session.rootSessionId ?? session.sessionId,
+      rootTurnId: turnId,
+      sessionId: session.sessionId,
+      turnId,
+    },
   };
 }
 
@@ -545,6 +569,7 @@ export async function startSubagent(input: {
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly persistentSessions: boolean;
+  readonly progress?: ProgressContextV1 & { readonly workIdentity: ProgressWorkIdentityV1 };
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly session: RuntimeSession;
@@ -575,6 +600,7 @@ export async function startSubagent(input: {
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext,
         persistentSessions: input.persistentSessions,
+        progress: input.progress,
         sandboxSessionId: input.sandboxSessionId,
         session: input.session,
         source: input.target.source,
@@ -593,6 +619,7 @@ export async function startSubagent(input: {
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext,
         persistentSessions: input.persistentSessions,
+        progress: input.progress,
         session: input.session,
         taskOwned: input.taskOwned,
       });

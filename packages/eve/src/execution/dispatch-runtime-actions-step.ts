@@ -93,6 +93,7 @@ export async function dispatchRuntimeActionsStep(
             parentContinuationToken: input.parentContinuationToken,
             parentTraceContext: prepared.parentTraceContext,
             persistentSessions,
+            progress: prepared.progress,
             sandboxSessionId: prepared.sandboxSessionId,
             serializedContext: prepared.serializedContext,
             session,

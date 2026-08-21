@@ -99,6 +99,7 @@ import { prepareWorkflowPreambleTrace } from "#execution/workflow-trace-context.
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
+import { createProgressEventObserver } from "#execution/progress-event-observer.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { createExecutionHistoryView } from "#execution/history-view.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
@@ -365,6 +366,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   }
 
   const writer = input.parentWritable.getWriter();
+  const progressObserver = createProgressEventObserver(ctx, initialEmissionState, initialSession);
 
   // Stamp once: the persisted chunk and the hooks below must agree on the id.
   const emit = async (event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent> => {
@@ -384,6 +386,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     // otherwise two TUIs can present and answer the same request.
     const forwardedToTaskParent = await forwardTaskEventToSessionCallback(ctx, event);
     const emitted = forwardedToTaskParent ? stampMessageStreamEvent(event) : await emit(event);
+    await progressObserver?.observe(emitted);
     await dispatchStreamEventHooks({ ctx, registry: hookRegistry, event: emitted });
     if (emitted.type !== "step.started") {
       await dispatchDynamicModelEvent({
@@ -560,6 +563,8 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       ),
       sessionState: createDurableSessionState({ session: cancelledSession }),
     };
+  } finally {
+    await progressObserver?.flush();
   }
 
   // Re-stamp if a handler called `session.continuation.rekey(...)` (eg. Slack auto-anchor).

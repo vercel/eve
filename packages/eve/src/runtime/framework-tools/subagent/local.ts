@@ -240,6 +240,7 @@ async function dispatchSubagent(input: SubagentDispatchInput): Promise<SubagentD
           parentContinuationToken: input.task.taskInboxToken,
           parentTraceContext: prepared.parentTraceContext,
           persistentSessions: true,
+          progress: prepared.progress,
           sandboxSessionId: prepared.sandboxSessionId,
           serializedContext: prepared.serializedContext,
           session: prepared.session,

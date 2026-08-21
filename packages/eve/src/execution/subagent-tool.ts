@@ -5,6 +5,7 @@ import {
 } from "#execution/subagent-invocation.js";
 import type {
   ChannelInstrumentationProjection,
+  ProgressContextV1,
   RunInput,
   RunSessionLimits,
   SessionAuthContext,
@@ -95,6 +96,7 @@ export function buildSubagentRunInput(input: {
   /** Hook token owned by the workflow currently waiting for this child. */
   readonly parentContinuationToken?: string;
   readonly parentTraceContext?: SessionTraceContext;
+  readonly progress?: ProgressContextV1;
   /**
    * Whether the parent agent opted into
    * `experimental.subagentPersistentSessions`. Persistent children run in
@@ -181,6 +183,7 @@ export function buildSubagentRunInput(input: {
       },
     },
     parentTraceContext: input.parentTraceContext,
+    progress: input.progress,
     subagentDepth: subagentDepth.nextChildDepth,
   };
 
