@@ -118,21 +118,3 @@ export async function compileInstructionsEntry(
     },
   };
 }
-
-/**
- * @deprecated Use {@link compileInstructionsEntry} instead. Kept for
- * backwards compatibility with callers that pass a single source.
- */
-export async function compileInstructions(
-  agentRoot: string,
-  source: InstructionsSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
-): Promise<CompiledInstructionsDefinition> {
-  const entry = await compileInstructionsEntry(agentRoot, source, options);
-  if (entry.kind === "dynamic-instructions") {
-    throw new Error(
-      `Expected static instructions from "${source.logicalPath}" but got a dynamic resolver. Use compileInstructionsEntry instead.`,
-    );
-  }
-  return entry.definition;
-}
