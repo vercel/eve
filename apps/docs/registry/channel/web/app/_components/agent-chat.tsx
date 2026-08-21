@@ -55,9 +55,14 @@ export function AgentChat({
     if (sessionId === undefined) return;
     let mounted = true;
     const timeout = window.setTimeout(() => {
-      void agent.resume().finally(() => {
-        if (mounted) setIsRestoring(false);
-      });
+      void agent.resume().then(
+        () => {
+          if (mounted) setIsRestoring(false);
+        },
+        () => {
+          if (mounted) setIsRestoring(false);
+        },
+      );
     }, 0);
     return () => {
       mounted = false;
