@@ -28,6 +28,19 @@ describe("Browser Use connection setup", () => {
   });
 });
 
+describe("Agentcard connection setup", () => {
+  it("uses the standard connector name for the native Vercel Connect service", () => {
+    const integration = getIntegration("agentcard")!;
+    const setup = buildConnectionSetup(integration);
+    const quickStart = setup.variants["mcp:user"];
+
+    expect(quickStart).toContain('description: "Agentcard tools and data"');
+    expect(quickStart).toContain('auth: connect("agentcard")');
+    expect(setup.configureVariants["mcp:user"]).toContain("vercel connect create agentcard");
+    expect(setup.configureVariants["mcp:user"]).not.toContain("--name");
+  });
+});
+
 describe("Kernel extension setup", () => {
   it("uses Kernel's eve extension with Vercel Connect", () => {
     const integration = getIntegration("kernel")!;

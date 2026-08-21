@@ -401,6 +401,17 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "agentcard",
+    name: "Agentcard",
+    kind: "connection",
+    tagline: "Shop at real merchants with consent-gated single-use virtual cards.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description: "Agentcard tools and data",
+      mcp: { url: "https://mcp.agentcard.sh/mcp" },
+    },
+  },
+  {
     slug: "airtable",
     name: "Airtable",
     kind: "connection",

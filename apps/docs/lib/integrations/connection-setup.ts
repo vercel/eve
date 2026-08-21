@@ -84,7 +84,6 @@ const buildSnippet = (
   if (headerLines.length > 0) {
     fields.push(`  headers: () => ({`, ...headerLines, `  }),`);
   }
-
   return [
     `// agent/connections/${integration.slug}.ts`,
     ...imports,

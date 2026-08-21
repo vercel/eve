@@ -396,6 +396,39 @@
       ]
     },
     {
+      "name": "connection/agentcard",
+      "type": "registry:item",
+      "title": "Agentcard",
+      "description": "Shop at real merchants with consent-gated single-use virtual cards.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": [
+              "integration",
+              "connect",
+              "agentcard",
+              "agentcard",
+              "agentcard"
+            ]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
+      "dependencies": [
+        "@vercel/connect"
+      ],
+      "files": [
+        {
+          "path": "registry/connections/agentcard.ts",
+          "type": "registry:file",
+          "target": "agent/connections/agentcard.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/airtable",
       "type": "registry:item",
       "title": "Airtable",
