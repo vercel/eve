@@ -533,6 +533,19 @@ describe("eveChannel — stream cursor", () => {
     expect(new TextDecoder().decode(firstChunk.value)).toBe("\n");
   });
 
+  it("cancels the durable source when the response body is cancelled", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    const cancel = vi.fn();
+    handler.getEventStream.mockResolvedValueOnce(new ReadableStream({ cancel }));
+    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
+    const reader = response.body!.getReader();
+
+    await reader.read();
+    await reader.cancel();
+
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
   it("forwards negative tail-relative start indices", async () => {
     const handler = createEveStreamHandler({ auth: none() });
 
