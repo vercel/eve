@@ -4362,6 +4362,36 @@ describe("createToolLoopHarness", () => {
     );
   });
 
+  it("logs correlation details even when the failure is unrecognized", async () => {
+    // Regression guard: log fields used to carry `details` only for recognized
+    // failures, so `generationId` and friends were dropped on exactly the
+    // failures that are hardest to diagnose.
+    const unrecognized = Object.assign(new Error("something we have no rule for"), {
+      generationId: "gen_tool_loop",
+      name: "GatewayWeirdNewError",
+      statusCode: 418,
+    });
+    setupMockAgentError(unrecognized);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const { emit } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      await runStep(createTestSession(), { message: "Hi" });
+
+      const logged = errorSpy.mock.calls.find(
+        ([, fields]) => (fields as { details?: unknown } | undefined)?.details !== undefined,
+      );
+      expect(logged).toBeDefined();
+      expect((logged![1] as { details: Record<string, unknown> }).details).toMatchObject({
+        generationId: "gen_tool_loop",
+        statusCode: 418,
+      });
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   it("emits the full terminal failure cascade on a structural 4xx model-call error", async () => {
     // 400/401/403/404 responses are classified as terminal — the
     // session is torn down because retrying would hit the same wall.

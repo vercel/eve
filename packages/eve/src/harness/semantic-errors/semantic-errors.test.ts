@@ -175,6 +175,18 @@ describe("summarizeKnownError (catalog table)", () => {
       error: new TypeError("terminated"),
       id: "network-request-failed",
     },
+    {
+      title: "gateway stream terminated before a terminal chunk",
+      error: new Error("Upstream stream ended before terminal chunk", {
+        cause: {
+          code: "gateway_stream_terminated",
+          message: "Upstream stream ended before terminal chunk",
+          origin: "gateway",
+          upstream_finish_received: false,
+        },
+      }),
+      id: "gateway-stream-terminated",
+    },
   ];
 
   for (const testCase of cases) {

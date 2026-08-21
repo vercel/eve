@@ -77,6 +77,25 @@ function gatewayModelCallError(input: {
   return error;
 }
 
+/**
+ * Mirrors the frame AI Gateway synthesizes when a provider stream ends without
+ * a terminal chunk: a plain-object `cause` keyed by `code`/`origin` with
+ * snake_case correlation fields, and no status code.
+ */
+function streamTerminatedModelCallError(): Error {
+  return new Error("Upstream stream ended before terminal chunk", {
+    cause: {
+      code: "gateway_stream_terminated",
+      generation_id: "gen_01KYWVKVSYAH1XKJ08CG9VPB4A",
+      message: "Upstream stream ended before terminal chunk",
+      model: "alibaba:glm-5.2",
+      origin: "gateway",
+      provider: "alibaba",
+      upstream_finish_received: false,
+    },
+  });
+}
+
 function directApiCallError(input: {
   readonly data?: Record<string, unknown>;
   readonly message?: string;
@@ -173,6 +192,13 @@ describe("classifyModelCallError", () => {
   it("returns retry when the AI SDK marks the error as retryable", () => {
     const err = Object.assign(new Error("upstream flaky"), { isRetryable: true });
     expect(classifyModelCallError(err)).toBe("retry");
+  });
+
+  it("returns retry for a gateway stream termination", () => {
+    // The frame carries no status code and is not marked retryable, so before
+    // the `gateway-stream-terminated` catalog rule this fell through to
+    // "recoverable" and parked the turn without a single retry.
+    expect(classifyModelCallError(streamTerminatedModelCallError())).toBe("retry");
   });
 
   it("returns retry for Anthropic overloaded stream payloads", () => {
@@ -605,6 +631,18 @@ describe("extractModelCallErrorDetails", () => {
       upstreamMessage: "AI_APICallError",
       upstreamStatusCode: 400,
       upstreamType: "invalid_request_error",
+    });
+  });
+
+  it("lifts correlation fields off a synthesized gateway stream-termination frame", () => {
+    // The frame carries `code` + `origin` and snake_case fields rather than a
+    // `Gateway*` class name, so it exercises the shape-detection path.
+    const details = extractModelCallErrorDetails(streamTerminatedModelCallError());
+
+    expect(details).toMatchObject({
+      generationId: "gen_01KYWVKVSYAH1XKJ08CG9VPB4A",
+      model: "alibaba:glm-5.2",
+      provider: "alibaba",
     });
   });
 });

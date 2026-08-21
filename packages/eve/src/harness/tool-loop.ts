@@ -2095,13 +2095,16 @@ function buildModelCallFailureDetails(input: {
 }
 
 /**
- * Builds the structured log fields for a model-call failure. When the
- * failure was recognized (catalog match or extracted upstream rejection),
- * attach the compact `details` payload and *omit* the raw `error` so the
- * logger's `util.inspect` of the cause chain (which would render
- * `[object Object]` for upstream `APICallError` shapes) is bypassed.
- * Otherwise fall back to the raw error so unrecognized failures keep
- * their full stack in logs.
+ * Builds the structured log fields for a model-call failure.
+ *
+ * `details` rides along whenever it has anything in it, recognized or not:
+ * these are the correlation fields (`generationId`, `provider`,
+ * `upstreamError`, …) an operator needs to take a failure to gateway
+ * telemetry, and they used to be dropped on exactly the unrecognized failures
+ * that are hardest to diagnose. Recognized failures still omit the raw `error`
+ * so the logger's `util.inspect` of the cause chain — which renders
+ * `[object Object]` for upstream `APICallError` shapes — is bypassed;
+ * unrecognized ones keep it for the full stack.
  */
 function buildModelCallFailureLogFields(input: {
   readonly error: unknown;
@@ -2115,9 +2118,12 @@ function buildModelCallFailureLogFields(input: {
     errorId: input.errorId,
     sessionId: input.sessionId,
     turnId: input.turnId,
+    ...(Object.keys(input.modelCallDetails).length > 0 && {
+      details: input.modelCallDetails,
+    }),
   };
   if (input.recognized) {
-    return { ...base, details: input.modelCallDetails };
+    return base;
   }
   return { ...base, error: input.error };
 }

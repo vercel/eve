@@ -35,7 +35,9 @@ export interface UpstreamRejectionSummary {
 interface ModelCallErrorSignals {
   readonly apiCallError: boolean;
   readonly apiErrorMessage?: string;
+  readonly gatewayModel?: string;
   readonly gatewayName?: string;
+  readonly gatewayProvider?: string;
   readonly gatewayType?: string;
   readonly generationId?: string;
   readonly responseBodySnippet?: string;
@@ -173,6 +175,11 @@ export function extractModelCallErrorDetails(error: unknown): JsonObject {
   appendJsonField(details, "gatewayType", signals.gatewayType);
   appendJsonField(details, "statusCode", signals.statusCode);
   appendJsonField(details, "generationId", signals.generationId);
+  // Which upstream the gateway actually routed to. A canonical slug like
+  // `zai/glm-5.2` is served by many providers, so the failing one is not
+  // inferable from the model id alone.
+  appendJsonField(details, "provider", signals.gatewayProvider);
+  appendJsonField(details, "model", signals.gatewayModel);
   appendJsonField(details, "upstreamStatusCode", signals.upstreamStatusCode);
   appendJsonField(details, "upstreamType", signals.upstreamType);
   appendJsonField(details, "upstreamMessage", signals.upstreamMessage);
@@ -341,9 +348,16 @@ function readModelCallErrorSignals(error: unknown): ModelCallErrorSignals {
     apiErrorMessage:
       upstreamBody?.apiErrorMessage ??
       firstInformativeApiMessage([readErrorMessage(upstreamError)]),
+    // Synthesized gateway stream frames use snake_case; structured gateway
+    // errors use camelCase. Read both rather than guessing which shape arrived.
+    gatewayModel: readStringField(gatewayError, "model"),
     gatewayName: readErrorName(gatewayError),
+    gatewayProvider: readStringField(gatewayError, "provider"),
     gatewayType: readStringField(gatewayError, "type"),
-    generationId: readStringField(gatewayError, "generationId") ?? upstreamBody?.generationId,
+    generationId:
+      readStringField(gatewayError, "generationId") ??
+      readStringField(gatewayError, "generation_id") ??
+      upstreamBody?.generationId,
     responseBodySnippet:
       responseBody === undefined
         ? undefined
@@ -360,7 +374,17 @@ function findGatewayError(error: unknown): unknown {
   for (const candidate of walkCauseChain(error)) {
     const name = readErrorName(candidate);
     const type = readStringField(candidate, "type");
-    if (name?.startsWith("Gateway") || type?.endsWith("_error") || type === "rate_limit_exceeded") {
+    if (
+      name?.startsWith("Gateway") ||
+      type?.endsWith("_error") ||
+      type === "rate_limit_exceeded" ||
+      // Gateway-synthesized stream frames (e.g. `gateway_stream_terminated`)
+      // carry `code` + `origin` instead of a `Gateway*` class name or a
+      // `*_error` type, so they would otherwise never be found here — and the
+      // correlation fields they carry would be dropped.
+      (readStringField(candidate, "code")?.startsWith("gateway_") === true &&
+        readStringField(candidate, "origin") === "gateway")
+    ) {
       return candidate;
     }
   }

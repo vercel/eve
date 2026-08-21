@@ -1,4 +1,12 @@
-import { allOf, anyOf, messageMatches, nameIs, typeIs, type SemanticErrorRule } from "../rule.js";
+import {
+  allOf,
+  anyOf,
+  codeIs,
+  messageMatches,
+  nameIs,
+  typeIs,
+  type SemanticErrorRule,
+} from "../rule.js";
 
 /** The summary `name` shared by the gateway-auth rule variants. */
 const GATEWAY_AUTH_FAILURE_SUMMARY_NAME = "AI Gateway authentication failed";
@@ -80,5 +88,20 @@ export const GATEWAY_RULES: readonly SemanticErrorRule[] = [
     when: anyOf(nameIs("GatewayTimeoutError"), typeIs("timeout_error", "overloaded_error")),
     message: "The model provider is overloaded or timing out upstream of AI Gateway.",
     hint: "This is transient — retry shortly, or switch models with `/model` in `eve dev`.",
+  },
+  {
+    // The gateway synthesizes this frame when a provider stream ends without a
+    // terminal chunk — a dropped connection, or a mid-stream throttle the
+    // provider raised after the response was already committed (so the gateway
+    // could no longer fail over). It is a `code`, not a `type`, and carries no
+    // status code, so without this rule it fell through `classifyModelCallError`
+    // to `recoverable` and parked the turn on first contact with zero retries.
+    // `transient` is what earns it the standard 3 attempts with backoff.
+    id: "gateway-stream-terminated",
+    name: "Model stream ended early",
+    tags: ["gateway", "transient"],
+    when: codeIs("gateway_stream_terminated"),
+    message: "The model provider's stream ended before completing.",
+    hint: "Usually a transient upstream throttle or dropped connection — retries are automatic. If it persists, take the `generationId` from the failure details to AI Gateway telemetry for the upstream cause.",
   },
 ];
