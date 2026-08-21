@@ -1,7 +1,7 @@
 import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { turnWorkflowReference, workflowEntryReference } from "#execution/workflow-runtime.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
@@ -37,11 +37,16 @@ const QUEUE_PREFIX = deriveEveWorkflowQueuePrefix(AGENT_NAME);
 
 const originalFetch = globalThis.fetch;
 
+beforeEach(() => {
+  vi.stubEnv("WORKFLOW_LOCAL_DATA_DIR", "");
+});
+
 afterEach(() => {
   globalThis.fetch = originalFetch;
   delete process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV];
   delete process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV];
   delete process.env.WORKFLOW_LOCAL_BASE_URL;
+  vi.unstubAllEnvs();
 });
 
 describe("parent development Workflow World", () => {
@@ -57,6 +62,23 @@ describe("parent development Workflow World", () => {
       await expect(access(join(appRoot, ".workflow-data"))).rejects.toMatchObject({
         code: "ENOENT",
       });
+    } finally {
+      await world.close();
+    }
+  });
+
+  it("honors the local Workflow data directory override", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-app-");
+    const dataDirectory = await createScratchDirectory("eve-parent-workflow-data-");
+    vi.stubEnv("WORKFLOW_LOCAL_DATA_DIR", dataDirectory);
+    const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+
+    try {
+      await world.start();
+      await expect(access(join(dataDirectory, "version.txt"))).resolves.toBeUndefined();
+      await expect(
+        access(join(appRoot, LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH)),
+      ).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await world.close();
     }
