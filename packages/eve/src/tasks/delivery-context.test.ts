@@ -19,8 +19,21 @@ describe("task delivery instructions", () => {
     expect(TASK_DELIVERY_PENDING_INSTRUCTION).toContain("runtime-authored");
     expect(TASK_DELIVERY_PENDING_INSTRUCTION).toContain("still pending");
     expect(TASK_DELIVERY_PENDING_INSTRUCTION).toContain(
-      `Reply with exactly ${EMPTY_DELIVERY_SENTINEL} and no other text`,
+      "overrides any earlier instruction to report, summarize, acknowledge",
     );
+    expect(TASK_DELIVERY_PENDING_INSTRUCTION).toContain(
+      "may call tools only if the newly delivered task result requires immediate action",
+    );
+    expect(TASK_DELIVERY_PENDING_INSTRUCTION).toContain(
+      "Do not provide progress, status, an acknowledgement, or a waiting message",
+    );
+    expect(TASK_DELIVERY_PENDING_INSTRUCTION).toContain(
+      `entire final text response must be exactly ${EMPTY_DELIVERY_SENTINEL} and no other text`,
+    );
+    expect(TASK_DELIVERY_PENDING_INSTRUCTION).toContain(
+      'Incorrect: "Two of three tasks have completed."',
+    );
+    expect(TASK_DELIVERY_PENDING_INSTRUCTION).toContain(`Correct: ${EMPTY_DELIVERY_SENTINEL}`);
     expect(TASK_DELIVERY_PENDING_INSTRUCTION).not.toContain("If any task");
   });
 
