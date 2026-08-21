@@ -2,7 +2,7 @@
 
 import type { UserContent } from "ai";
 import { useEveAgent } from "eve/react";
-import { AlertCircleIcon, BrainIcon, PlusIcon } from "lucide-react";
+import { AlertCircleIcon, BrainIcon, PlusIcon, SquareIcon } from "lucide-react";
 import { useState } from "react";
 import {
   Conversation,
@@ -12,6 +12,7 @@ import {
 import { Message, MessageContent } from "@/components/ai-elements/message";
 import {
   PromptInput,
+  PromptInputButton,
   type PromptInputMessage,
   PromptInputSubmit,
   PromptInputTextarea,
@@ -78,12 +79,13 @@ export function AgentChat({
 
   const handleSubmit = async (message: PromptInputMessage) => {
     const text = message.text.trim();
-    if ((text.length === 0 && message.files.length === 0) || isBusy) return;
+    if ((text.length === 0 && message.files.length === 0) || isRestoring) return;
 
     setCancellationError(undefined);
+    const options = isBusy ? { turnPolicy: "steer" as const } : undefined;
 
     if (message.files.length === 0) {
-      await agent.send(text);
+      await agent.send(text, options);
       return;
     }
 
@@ -100,17 +102,23 @@ export function AgentChat({
       });
     }
 
-    await agent.send(parts);
+    await agent.send(parts, options);
   };
 
   const composer = (
     <PromptInput onSubmit={handleSubmit}>
-      <PromptInputTextarea disabled={isBusy || isRestoring} placeholder="Send a message…" />
-      <PromptInputSubmit
-        disabled={isRestoring}
-        onStop={requestCancellation}
-        status={isRestoring ? undefined : agent.status}
-      />
+      <PromptInputTextarea disabled={isRestoring} placeholder="Send a message…" />
+      {isBusy && !isRestoring ? (
+        <PromptInputButton
+          aria-label="Stop"
+          className="absolute right-12 bottom-2.5 rounded-full"
+          onClick={requestCancellation}
+          variant="default"
+        >
+          <SquareIcon className="size-3 fill-current" />
+        </PromptInputButton>
+      ) : null}
+      <PromptInputSubmit disabled={isRestoring} status={isBusy ? undefined : agent.status} />
     </PromptInput>
   );
 

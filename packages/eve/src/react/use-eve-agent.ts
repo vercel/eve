@@ -52,7 +52,7 @@ export interface UseEveAgentHelpers<TData> extends UseEveAgentSnapshot<TData> {
   readonly resume: () => Promise<void>;
   /** Resets the session: detaches any local stream, recreates the owned session, and clears events and projected data. */
   readonly reset: () => void;
-  /** Sends a message. Rejects if a turn is already in flight. */
+  /** Sends a message. While a turn is active, pass `turnPolicy: "steer"` to replace it. */
   readonly send: <TOutput = unknown>(
     message: string | UserContent,
     options?: SendTurnOptions<TOutput>,

@@ -51,7 +51,7 @@ import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellati
 import { setChannelContext } from "#execution/channel-context.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
-import { coalesceTurnInputs } from "#harness/messages.js";
+import { coalesceTurnInputs, normalizeUserContent } from "#harness/messages.js";
 import {
   getRuntimeActionKeysFromWorkflowInterrupt,
   isWorkflowRuntimeActionInterrupt,
@@ -101,6 +101,7 @@ import { createExecutionHistoryView } from "#execution/history-view.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { isTaskToolAvailable, TASK_UPDATE_TOOL_NAME } from "#runtime/framework-tools/tasks.js";
+import { stageAttachmentsToSandbox } from "#harness/attachment-staging.js";
 
 const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
   "Task mode cannot complete while input requests remain pending.";
@@ -523,14 +524,16 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     // again after this cancellation settles.
     const interrupted = serializeContext(ctx);
     const retained = readRetainedBackgroundToolResult(ctx);
+    const cancelledSession = await preserveCancelledTurnMessage(
+      retained?.backgroundTaskSession ?? initialSession,
+      resolved,
+    );
     return {
       action: "cancelled",
       ...(retained === undefined
         ? {}
         : {
-            backgroundTaskState: createDurableSessionState({
-              session: retained.backgroundTaskSession,
-            }),
+            backgroundTaskState: createDurableSessionState({ session: cancelledSession }),
             backgroundTasks: retained.backgroundTasks,
           }),
       serializedContext: preserveSerializedInstrumentationState(
@@ -540,7 +543,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         ),
         interrupted,
       ),
-      sessionState: input.sessionState,
+      sessionState: createDurableSessionState({ session: cancelledSession }),
     };
   }
 
@@ -649,6 +652,16 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     serializedContext: nextSerializedContext,
     sessionState: nextState,
   };
+}
+
+async function preserveCancelledTurnMessage(
+  session: HarnessSession,
+  input: StepInput | undefined,
+): Promise<HarnessSession> {
+  const message = normalizeUserContent(input?.message);
+  if (message === undefined) return session;
+  const content = await stageAttachmentsToSandbox(message);
+  return { ...session, history: [...session.history, { content, role: "user" }] };
 }
 
 /**

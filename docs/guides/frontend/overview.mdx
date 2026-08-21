@@ -26,7 +26,7 @@ For a public demo, use `none()` from `eve/channels/auth` to admit anonymous requ
 
 ## Basic chat (React)
 
-The hook lives in `eve/react`. Render `data.messages`, gate the composer on `status`, and send text with `send`:
+The hook lives in `eve/react`. Render `data.messages`, use `status` to steer follow-ups during an active turn, and send text with `send`:
 
 ```tsx
 "use client";
@@ -44,7 +44,7 @@ export function Chat() {
         const form = new FormData(event.currentTarget);
         const message = String(form.get("message") ?? "").trim();
         if (message.length > 0) {
-          void agent.send(message);
+          void agent.send(message, isBusy ? { turnPolicy: "steer" } : undefined);
         }
       }}
     >
@@ -56,10 +56,8 @@ export function Chat() {
           )}
         </article>
       ))}
-      <input name="message" disabled={isBusy} />
-      <button disabled={isBusy} type="submit">
-        Send
-      </button>
+      <input name="message" />
+      <button type="submit">Send</button>
     </form>
   );
 }
@@ -106,7 +104,13 @@ await agent.send([
 ]);
 ```
 
-Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and `status` moves from `ready` to `submitted` to `streaming` and back. Call `cancel()` to stop the durable server-side turn, and `reset()` to clear local state so the next send starts a fresh durable session.
+Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and `status` moves from `ready` to `submitted` to `streaming` and back. To replace an active turn with a follow-up, send the message with `turnPolicy: "steer"`. eve accepts the message through the durable session, cancels the active turn, and keeps the hook attached through the replacement turn:
+
+```tsx
+await agent.send(message, { turnPolicy: "steer" });
+```
+
+Other message sends and HITL responses reject while the hook is processing a turn. Call `cancel()` to stop the durable server-side turn without replacing it, and `reset()` to clear local state so the next send starts a fresh durable session.
 
 `cancel()` can be called as soon as `status` is `"submitted"`; the hook waits for the active response to identify its turn when necessary, sends one guarded cancellation request, and keeps the event stream attached. The promise resolves when eve accepts the request or reports that no turn is active, and rejects if the cancellation request fails. The turn then settles on the same stream as `turn.cancelled` followed by `session.waiting`, so the session is safe to continue.
 

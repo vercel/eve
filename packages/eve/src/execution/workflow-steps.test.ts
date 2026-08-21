@@ -1798,6 +1798,9 @@ describe("turnStep", () => {
       },
     });
     expect(result.serializedContext).not.toHaveProperty(ThreadKey.name);
+    expect(result.sessionState.snapshot?.session.history).toEqual([
+      { content: "thread=unset; user=cancel this turn", role: "user" },
+    ]);
   });
 
   it("rejects task completion while input requests remain pending", async () => {

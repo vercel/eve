@@ -312,6 +312,86 @@ describe("EveAgentStore session resume", () => {
   });
 });
 
+describe("EveAgentStore steering", () => {
+  it("accepts an in-flight steer and follows its replacement turn", async () => {
+    const activeStream = controlledStreamResponse();
+    const replacementStream = controlledStreamResponse();
+    const [
+      firstReceived,
+      firstStarted,
+      firstCancelled,
+      firstWaiting,
+      secondReceived,
+      secondStarted,
+      secondCompleted,
+      secondWaiting,
+    ] = stampTestEvents([
+      createMessageReceivedEvent({ message: "First", sequence: 0, turnId: "turn_1" }),
+      createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
+      createTurnCancelledEvent({ sequence: 2, turnId: "turn_1" }),
+      createSessionWaitingEvent(),
+      createMessageReceivedEvent({ message: "Instead", sequence: 0, turnId: "turn_2" }),
+      createTurnStartedEvent({ sequence: 1, turnId: "turn_2" }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Replacement reply.",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn_2",
+      }),
+      createSessionWaitingEvent(),
+    ] as UnstampedMessageStreamEvent[]);
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(activeStream.response)
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(replacementStream.response);
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+
+    const firstSend = store.send({ message: "First" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    activeStream.emit(firstReceived!);
+    activeStream.emit(firstStarted!);
+
+    const steering = store.send({ message: "Instead", turnPolicy: "steer" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toMatchObject({
+      message: "Instead",
+      turnPolicy: "steer",
+    });
+
+    activeStream.emit(firstCancelled!);
+    activeStream.emit(firstWaiting!);
+    activeStream.close();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    replacementStream.emit(secondReceived!);
+    replacementStream.emit(secondStarted!);
+    replacementStream.emit(secondCompleted!);
+    replacementStream.emit(secondWaiting!);
+    replacementStream.close();
+
+    await Promise.all([firstSend, steering]);
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.events).toEqual([
+      firstReceived,
+      firstStarted,
+      firstCancelled,
+      firstWaiting,
+      secondReceived,
+      secondStarted,
+      secondCompleted,
+      secondWaiting,
+    ]);
+    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
+      state: "done",
+      stepIndex: 0,
+      text: "Replacement reply.",
+      type: "text",
+    });
+  });
+});
+
 describe("EveAgentStore terminal failure", () => {
   it("publishes a live terminal failure with error status", async () => {
     const failed = stampTestEvents([
