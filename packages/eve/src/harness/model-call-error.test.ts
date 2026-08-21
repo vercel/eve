@@ -476,6 +476,23 @@ describe("extractUnsupportedProviderToolTypes", () => {
     expect(extractUnsupportedProviderToolTypes(error)).toEqual(["web_search_20250305"]);
   });
 
+  it("returns the OpenAI web-search include value from an OpenAI-compatible endpoint rejection", () => {
+    // Bedrock Mantle and similar endpoints without native web search reject the
+    // injected OpenAI web-search tool by naming its Responses include value.
+    const error = directApiCallError({
+      statusCode: 400,
+      responseBody: JSON.stringify({
+        error: {
+          message:
+            "Invalid value: 'web_search_call.action.sources'. Supported values are: 'reasoning.encrypted_content'.",
+          type: "invalid_request_error",
+        },
+      }),
+    });
+
+    expect(extractUnsupportedProviderToolTypes(error)).toEqual(["web_search_call.action.sources"]);
+  });
+
   it("deduplicates when multiple providerAttempts reference the same tool type", () => {
     const error = gatewayProviderToolFailure({
       unsupportedTypes: ["web_search_20250305", "web_search_20250305"],
