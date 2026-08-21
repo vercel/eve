@@ -47,22 +47,26 @@ export const Conversation = ({
 );
 
 function ConversationScrollRestoration({ storageKey }: { readonly storageKey: string }) {
-  const { scrollRef, scrollToBottom, stopScroll } = useStickToBottomContext();
+  const { scrollRef, scrollToBottom } = useStickToBottomContext();
   const restoredKeyRef = useRef<string | undefined>(undefined);
 
   useLayoutEffect(() => {
     const scrollElement = scrollRef.current;
-    if (scrollElement === null || restoredKeyRef.current === storageKey) return;
+    if (scrollElement === null) return;
 
-    const saved = readScrollPosition(sessionStorage.getItem(storageKey));
-    if (saved?.atBottom === false) {
-      stopScroll();
-      scrollElement.scrollTop = saved.scrollTop;
-    } else {
-      scrollElement.scrollTop = scrollElement.scrollHeight;
-      scrollToBottom({ animation: "instant", ignoreEscapes: true });
+    if (restoredKeyRef.current !== storageKey) {
+      const saved = readScrollPosition(sessionStorage.getItem(storageKey));
+      if (saved?.atBottom === false) {
+        scrollElement.scrollTop = saved.scrollTop;
+        requestAnimationFrame(() => {
+          scrollElement.scrollTop = saved.scrollTop;
+        });
+      } else {
+        scrollElement.scrollTop = scrollElement.scrollHeight;
+        scrollToBottom({ animation: "instant", ignoreEscapes: true });
+      }
+      restoredKeyRef.current = storageKey;
     }
-    restoredKeyRef.current = storageKey;
 
     const saveNow = () => {
       const distanceFromBottom =
@@ -91,7 +95,7 @@ function ConversationScrollRestoration({ storageKey }: { readonly storageKey: st
       if (frame !== undefined) cancelAnimationFrame(frame);
       saveNow();
     };
-  }, [scrollRef, scrollToBottom, stopScroll, storageKey]);
+  }, [scrollRef, scrollToBottom, storageKey]);
 
   return null;
 }
