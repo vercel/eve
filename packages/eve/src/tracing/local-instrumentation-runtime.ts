@@ -4,7 +4,16 @@ import {
 } from "#harness/instrumentation/runtime.js";
 import { installInstrumentationRuntime } from "#tracing/install-instrumentation-runtime.js";
 import { createLocalTracesProcessor, resolveLocalTracesContent } from "#tracing/local-traces.js";
-import { collectOtelPipeline, otel, otelIntegration } from "#tracing/otel-declaration.js";
+import {
+  collectOtelPipeline,
+  managedOtelIntegration,
+  otel,
+  type TraceCapturePolicy,
+} from "#tracing/otel-declaration.js";
+
+/** Zero-config local tracing keeps unclassified HTTP/TUI sessions observable. @internal */
+export const localTracePolicy: TraceCapturePolicy = ({ audience }) =>
+  audience === "public" || audience === "unknown";
 
 /** Installs the zero-config local OTel runtime once in an `eve dev` worker. */
 export function installLocalInstrumentationRuntime(input: {
@@ -18,8 +27,11 @@ export function installLocalInstrumentationRuntime(input: {
   const spool = createLocalTracesProcessor({ appRoot: input.appRoot });
   return installInstrumentationRuntime({
     collected: collectOtelPipeline([
-      otel(),
-      otelIntegration({ ...resolveLocalTracesContent(), spanProcessors: [spool] }),
+      otel({ tracePolicy: localTracePolicy }),
+      managedOtelIntegration({
+        ...resolveLocalTracesContent(),
+        spanProcessors: [spool],
+      }),
     ]),
     frameworkVersion: input.frameworkVersion,
     providers: [],

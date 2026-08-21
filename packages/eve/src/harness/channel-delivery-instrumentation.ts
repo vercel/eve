@@ -2,6 +2,7 @@ import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import type { AlsContext } from "#context/container.js";
 import {
   ActiveChannelDeliveriesKey,
+  ChannelInstrumentationKey,
   ParentTraceContextKey,
   type ActiveChannelDelivery,
 } from "#context/keys.js";
@@ -11,6 +12,7 @@ import type {
   InstrumentationHooks,
 } from "#harness/instrumentation/lifecycle.js";
 import { channelDeliveryIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+import { normalizeChannelAudience } from "#shared/channel-audience.js";
 
 interface ChannelDeliveryStartInstrumentation {
   readonly agentName?: string;
@@ -68,9 +70,13 @@ export async function instrumentChannelDelivery(
   if (input.hooks === undefined || input.delivery.deliveryMetadata === undefined) return;
 
   const active: ActiveChannelDelivery[] = [];
+  const channelAudience = normalizeChannelAudience(
+    input.ctx.get(ChannelInstrumentationKey)?.metadata.audience,
+  );
   for (const metadata of input.delivery.deliveryMetadata) {
     const payload = input.delivery.payloads[metadata.payloadIndex];
     const delivery = {
+      channelAudience,
       channelKind: metadata.channelKind,
       channelName: metadata.channelName,
       deliveryId: metadata.deliveryId,

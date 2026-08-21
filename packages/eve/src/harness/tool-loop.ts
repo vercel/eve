@@ -55,6 +55,7 @@ import {
 import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.js";
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import {
   createActionResultEvent,
   createApprovalCandidateEvent,
@@ -648,6 +649,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     let emissionState = getHarnessEmissionState(session.state);
     const store = contextStorage.getStore();
+    const channelInstrumentation = store?.get(ChannelInstrumentationKey);
     const parent = store?.get(ParentSessionKey);
     const channel = store?.get(ChannelKey);
     const callback = store?.get(SessionCallbackKey);
@@ -661,7 +663,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     let activeAttemptScope: InstrumentationAttemptScope | undefined;
     const emit = createInstrumentationHandleEvent({
       agentName: config.runtimeIdentity?.agentName,
-      channelKind: store?.get(ChannelInstrumentationKey)?.kind,
+      channelAudience: normalizeChannelAudience(channelInstrumentation?.metadata.audience),
+      channelKind: channelInstrumentation?.kind,
       getAttemptScope: () => activeAttemptScope,
       handleEvent: baseEmit,
       hooks: config.instrumentation?.hooks,
@@ -718,6 +721,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           : undefined;
       return await prepareTurnTraceContext({
         agentName: config.runtimeIdentity?.agentName,
+        channelAudience: normalizeChannelAudience(channelInstrumentation?.metadata.audience),
         instrumentation: config.instrumentation,
         parentLineage,
         parentTraceContext,
@@ -1497,6 +1501,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           : {
               attemptId: `${session.sessionId}:${instrumentationTurnId}:${emissionState.stepIndex}:${opts.attemptIndex}`,
               attemptIndex: opts.attemptIndex,
+              channelAudience: normalizeChannelAudience(channelInstrumentation?.metadata.audience),
               functionId: otelSettings?.functionId ?? agentName,
               rootSessionId: parent?.rootSessionId ?? session.sessionId,
               sessionId: session.sessionId,

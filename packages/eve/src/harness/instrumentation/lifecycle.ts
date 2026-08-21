@@ -1,6 +1,7 @@
 import { createInstrumentationDispatcher } from "#harness/instrumentation/dispatch.js";
 import type { InstrumentationStateSlot } from "#harness/instrumentation/state.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 
 /**
  * Stable eve identity for one actual model attempt.
@@ -12,6 +13,7 @@ import type { RuntimeTraceContext } from "#protocol/message.js";
  * fire once per attempt.
  */
 export interface InstrumentationAttemptScope {
+  readonly channelAudience?: ChannelAudience;
   readonly attemptId: string;
   readonly attemptIndex: number;
   readonly functionId?: string;
@@ -160,6 +162,7 @@ export function channelDeliveryIdempotencyKey(sessionId: string, deliveryId: str
 }
 
 export interface InstrumentationChannelDeliveryRef {
+  readonly channelAudience?: ChannelAudience;
   readonly channelKind: string;
   readonly channelName: string;
   readonly deliveryId: string;
@@ -281,6 +284,7 @@ export interface InstrumentationSessionStartedEvent {
   readonly type: "session.started";
   readonly agentName?: string;
   readonly channelKind?: string;
+  readonly channelAudience?: ChannelAudience;
   readonly idempotencyKey: string;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId: string;

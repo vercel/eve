@@ -19,6 +19,9 @@ import { contentAttribute } from "#tracing/agent-otel-content.js";
 import { setAgentUsage } from "#tracing/agent-otel-usage.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { AgentActionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
+import { normalizeChannelAudience } from "#shared/channel-audience.js";
+import { isSampledTrace } from "#tracing/sampled-trace.js";
+import { withChannelAudience } from "#tracing/channel-audience-context.js";
 
 export interface AgentActionInstrumentation {
   readonly events: Pick<
@@ -56,12 +59,13 @@ export function createAgentActionInstrumentation(input: {
 
   const onStarted = async (event: InstrumentationActionStartedEvent): Promise<void> => {
     const traceContext = await input.resolveTraceContext(event);
-    if (traceContext === undefined) return;
+    if (traceContext === undefined || !isSampledTrace(traceContext)) return;
 
     const existing = await input.stateStore.getAction(event.idempotencyKey);
     const state: AgentActionTraceState = existing ?? {
       attemptIndex: event.scope.attemptIndex,
       callId: event.callId,
+      channelAudience: normalizeChannelAudience(event.scope.channelAudience),
       inputAttribute: input.recordInputs ? contentAttribute(event.input, false) : undefined,
       kind: event.kind,
       name: event.name,
@@ -185,13 +189,19 @@ function actionContext(state: AgentActionTraceState): AgentActionContext {
     traceId: state.parent.traceId,
   };
   return {
-    context: trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(spanContext)),
+    context: withChannelAudience(
+      trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(spanContext)),
+      state.channelAudience,
+    ),
     spanContext,
   };
 }
 
 function contextFromActionState(state: AgentActionTraceState): Context {
-  return trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext({ ...state.parent, isRemote: false }));
+  return withChannelAudience(
+    trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext({ ...state.parent, isRemote: false })),
+    state.channelAudience,
+  );
 }
 
 function recordError(span: Span, error: unknown): void {
