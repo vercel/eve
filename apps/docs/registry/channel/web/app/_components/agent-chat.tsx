@@ -132,7 +132,7 @@ export function AgentChat({
   if (isRestoring && agent.events.length === 0) {
     return (
       <main className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-        <ChatHeader canStartNewChat={!sessionless} />
+        <ChatHeader canStartNewChat={activeSessionId !== undefined} />
         <div className="min-h-0 flex-1" />
         <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-6 sm:px-6">{composer}</div>
       </main>
@@ -141,7 +141,9 @@ export function AgentChat({
 
   return (
     <main className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-      {hasConversationContent ? <ChatHeader canStartNewChat={!sessionless} /> : null}
+      {hasConversationContent ? (
+        <ChatHeader canStartNewChat={activeSessionId !== undefined} />
+      ) : null}
 
       {hasConversationContent ? (
         <Conversation
