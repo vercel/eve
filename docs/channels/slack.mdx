@@ -388,6 +388,20 @@ when you need the bearer token itself.
 
 The default handlers reply in-thread and show progress. Typing indicators post automatically: `Thinking…` on inbound, `Working…` on `turn.started`, a truncated reasoning snippet on `reasoning.appended`, and an action label on `actions.requested` — the tool name plus its most telling argument (`grep useEveAgent`, `read_file agent/agent.ts`), the subagent or remote-agent name for dispatched calls, and `+N more` when the model requests several actions at once. The model's own pre-tool narration, when present, takes precedence over the derived label. Reasoning snippets build progressively: extensions of at least four characters appear immediately, while smaller streamed deltas use the five-second refresh interval to avoid one Slack request per token. Override `events["reasoning.appended"]` if you prefer generic wording. Override an inbound handler or the `events` handlers to customize.
 
+To aggregate root and subagent activity without adding progress messages to the model conversation, opt into compact status:
+
+```ts title="agent/channels/slack.ts"
+import { slackChannel, slackStatusProgress } from "eve/channels/slack";
+
+export default slackChannel({
+  progress: {
+    renderers: [slackStatusProgress()],
+  },
+});
+```
+
+Compact status derives presentation from root turns, delegated work, tools, skills, and waits for approval, sign-in, or input. It prioritizes active waits, then the newest active action or delegated work, and falls back to `Working…` while root work remains active. The status clears when no represented work remains active and when the session's progress collector expires. Local and compatible remote lifecycle events use the same best-effort callback and do not start another parent turn. Action inputs and results are not included. Without `progress`, Slack keeps the default event-based typing behavior described above.
+
 Outbound text preserves bare `@` tokens as literal text. To mention a user, embed Slack's `<@USER_ID>` syntax directly or use `channel.thread.mentionUser(userId)`.
 
 When a session starts without a `threadTs` (say, from a schedule's `to(slack, target).send(...)`), eve gives it a unique temporary continuation token. The first agent post anchors the session to the Slack message timestamp, and later posts and mentions resume that same session. Pass `initialMessage` with a `Card` to land a structured anchor first instead. `threadTs` and `initialMessage` are mutually exclusive.
