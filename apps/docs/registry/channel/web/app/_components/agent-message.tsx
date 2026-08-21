@@ -61,6 +61,9 @@ export function AgentMessage({
     (last, part, index) => (part.type === "text" ? index : last),
     -1,
   );
+  const hasAssistantText =
+    message.role === "assistant" &&
+    message.parts.some((part) => part.type === "text" && part.text.length > 0);
 
   return (
     <Message
@@ -68,15 +71,17 @@ export function AgentMessage({
       from={message.role}
     >
       <MessageContent>
-        {message.parts.map((part, index) => (
-          <AgentMessagePart
-            canRespond={canRespond}
-            key={partKey(part, index)}
-            onInputResponses={onInputResponses}
-            part={part}
-            showCaret={isStreaming && message.role === "assistant" && index === lastTextIndex}
-          />
-        ))}
+        {message.parts.map((part, index) =>
+          hasAssistantText && part.type === "reasoning" ? null : (
+            <AgentMessagePart
+              canRespond={canRespond}
+              key={partKey(part, index)}
+              onInputResponses={onInputResponses}
+              part={part}
+              showCaret={isStreaming && message.role === "assistant" && index === lastTextIndex}
+            />
+          ),
+        )}
       </MessageContent>
     </Message>
   );
