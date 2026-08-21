@@ -229,7 +229,7 @@ function ChatHeader({
         {canStartNewChat ? (
           <Button
             aria-label="Start a new chat"
-            className="absolute right-4 sm:right-6"
+            className="fixed top-2 right-6 z-20"
             onClick={() => window.location.assign("/s")}
             size="sm"
             type="button"
