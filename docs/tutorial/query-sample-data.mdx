@@ -33,6 +33,11 @@ Restart the dev server after changing `externalDependencies`. eve reads this set
 
 Store a small in-memory dataset under `agent/lib/`. Keep it tiny. This is throwaway scaffolding, not the real warehouse (that comes in Step 4).
 
+Install the in-memory SQLite helper:
+
+```bash
+npm install sql.js
+
 ```ts title="agent/lib/sample-db.ts"
 // A toy SQLite-in-memory stand-in. Swap for your real warehouse in Step 4.
 import initSqlJs from "sql.js";
@@ -75,8 +80,9 @@ import { runReadOnlySql } from "../lib/sample-db";
 
 export default defineTool({
   description:
-    "Run a read-only SQL query against the analytics tables (orders, customers) " +
-    "and return the columns and rows.",
+    "Run a read-only SQL query against the analytics tables. " +
+    "Schema: orders(id, customer_id, amount_cents, created_at); " +
+    "customers(id, name, plan). Amounts are in cents.",
   inputSchema: z.object({
     sql: z.string().describe("A single read-only SELECT statement."),
   }),
