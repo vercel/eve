@@ -182,7 +182,7 @@ function ErrorMessage({ message }: { readonly message: string }) {
     <Message from="assistant">
       <MessageContent>
         <div
-          className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm"
+          className="flex w-fit max-w-xl items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm"
           role="alert"
         >
           <AlertCircleIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
