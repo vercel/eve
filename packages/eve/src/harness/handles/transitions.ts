@@ -11,6 +11,7 @@ import {
 } from "#harness/handles/store.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
+import { jsonValuesEqual } from "#shared/json.js";
 
 /**
  * Records intent to start a fresh child. Must be applied to the step's
@@ -409,18 +410,18 @@ export function rebaseAgentHandles(
       changed = true;
       continue;
     }
-    if (base === undefined && next !== undefined && !jsonStructureEqual(current, next)) {
+    if (base === undefined && next !== undefined && !jsonValuesEqual(current, next)) {
       throw new Error(
         `Agent handle "${id}" added by a dispatch already exists with different content.`,
       );
     }
-    if (base !== undefined && next !== undefined && !jsonStructureEqual(base, next)) {
-      if (jsonStructureEqual(current, base)) {
+    if (base !== undefined && next !== undefined && !jsonValuesEqual(base, next)) {
+      if (jsonValuesEqual(current, base)) {
         rebased.push(next);
         changed = true;
         continue;
       }
-      if (!jsonStructureEqual(current, next)) {
+      if (!jsonValuesEqual(current, next)) {
         throw new Error(
           `Agent handle "${id}" was changed by a dispatch and concurrently by another effect.`,
         );
@@ -440,31 +441,6 @@ export function rebaseAgentHandles(
 function handlesById(state: SessionStateMap | undefined): ReadonlyMap<string, AgentHandle> {
   const handles = getAgentHandleStore(state)?.handles ?? [];
   return new Map(handles.map((handle) => [handle.identity.id, handle]));
-}
-
-// Handles are strict-schema JSON values, so entry-wise structural comparison
-// is exact: no undefined properties or non-JSON values survive the store schema.
-function jsonStructureEqual(a: unknown, b: unknown): boolean {
-  if (a === b) {
-    return true;
-  }
-  if (Array.isArray(a) || Array.isArray(b)) {
-    return (
-      Array.isArray(a) &&
-      Array.isArray(b) &&
-      a.length === b.length &&
-      a.every((item, index) => jsonStructureEqual(item, b[index]))
-    );
-  }
-  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) {
-    return false;
-  }
-  const aEntries = Object.entries(a);
-  const bRecord = b as Record<string, unknown>;
-  return (
-    aEntries.length === Object.keys(bRecord).length &&
-    aEntries.every(([key, value]) => key in bRecord && jsonStructureEqual(value, bRecord[key]))
-  );
 }
 
 /**

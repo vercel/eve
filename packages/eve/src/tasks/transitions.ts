@@ -6,6 +6,7 @@ import type {
   TaskView,
 } from "#tasks/types.js";
 import { isTerminalTaskStatus, readTaskInputRequestId } from "#tasks/types.js";
+import { jsonValuesEqual } from "#shared/json.js";
 
 /**
  * Action taken on one command applied to a task view.
@@ -97,7 +98,7 @@ export function applyTaskTransition(view: TaskView, command: TaskCommand): TaskT
     if (
       binding !== undefined &&
       binding.kind === command.executor.kind &&
-      sameJsonValue(binding.data, command.executor.data)
+      jsonValuesEqual(binding.data, command.executor.data)
     ) {
       return { action: "noop", view };
     }
@@ -292,29 +293,6 @@ export function applyTaskTransition(view: TaskView, command: TaskCommand): TaskT
       };
     }
   }
-}
-
-function sameJsonValue(left: unknown, right: unknown): boolean {
-  if (left === right) return true;
-  if (Array.isArray(left) || Array.isArray(right)) {
-    return (
-      Array.isArray(left) &&
-      Array.isArray(right) &&
-      left.length === right.length &&
-      left.every((value, index) => sameJsonValue(value, right[index]))
-    );
-  }
-  if (left === null || right === null || typeof left !== "object" || typeof right !== "object") {
-    return false;
-  }
-  const leftEntries = Object.entries(left);
-  const rightRecord = right as Record<string, unknown>;
-  return (
-    leftEntries.length === Object.keys(rightRecord).length &&
-    leftEntries.every(
-      ([key, value]) => Object.hasOwn(rightRecord, key) && sameJsonValue(value, rightRecord[key]),
-    )
-  );
 }
 
 function isValidInputRequestBatch(requests: readonly TaskInputRequest[]): boolean {
