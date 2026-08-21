@@ -1,5 +1,19 @@
 # eve
 
+## 0.44.0
+
+### Minor Changes
+
+- 47e8b64: Make traces public-only by default while retaining unclassified HTTP/TUI sessions in zero-config local tracing, and add composable input/output redaction, span filtering, and attribute filtering to the export pipeline.
+
+### Patch Changes
+
+- beba1a2: Prepare the TypeScript path alias and Next.js compiler settings before `eve add channel/web` installs the Web Chat registry item, so fresh agent projects build without manual `tsconfig.json` changes.
+- 830dd40: Classify built-in messaging channel metadata by conversation audience.
+- 4da95bb: Fix dynamic tool builds when callback parameters use destructuring defaults by forwarding the original arguments through the durable callback wrapper.
+- 4ed62a7: Render `ask_question` prompts as visible, vendored AI Elements forms in generated Web Chat apps, with vertical single-choice options and freeform answers submitted through eve's structured input response API.
+- e43d9cb: Add an optional audience classification to channel instrumentation metadata.
+
 ## 0.43.0
 
 ### Minor Changes
