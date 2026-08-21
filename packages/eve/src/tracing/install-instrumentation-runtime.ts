@@ -10,6 +10,7 @@ import {
   type InstrumentationRuntime,
 } from "#harness/instrumentation/runtime.js";
 import { createLogger, formatError } from "#internal/logging.js";
+import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js";
 import { hasSessionRelease, type LocalTracesProcessor } from "#tracing/local-traces.js";
@@ -48,6 +49,7 @@ export function installInstrumentationRuntime(input: {
       serviceName: input.serviceName,
     });
     const agentOtel = createAgentOtelInstrumentation({
+      emitVercelSessionId: process.env.VERCEL_ENV !== undefined && !isEveDevEnvironment(),
       frameworkVersion: input.frameworkVersion,
       idGenerator: otelRuntime.idGenerator,
       recordInputs: input.collected.settings.recordInputs,

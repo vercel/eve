@@ -45,6 +45,7 @@ export interface AgentActionContext {
 
 /** Builds durable `agent.action` spans around eve's runtime dispatch boundary. */
 export function createAgentActionInstrumentation(input: {
+  readonly emitVercelSessionId?: boolean;
   readonly frameworkVersion: string;
   readonly idGenerator: AgentSpanIdGenerator;
   readonly recordInputs: boolean;
@@ -55,6 +56,7 @@ export function createAgentActionInstrumentation(input: {
   readonly stateStore: AgentTraceStateStore;
   readonly tracer: Tracer;
 }): AgentActionInstrumentation {
+  const emitVercelSessionId = input.emitVercelSessionId ?? false;
   const byAttempt = new Map<string, Set<string>>();
 
   const onStarted = async (event: InstrumentationActionStartedEvent): Promise<void> => {
@@ -131,6 +133,9 @@ export function createAgentActionInstrumentation(input: {
             "agent.step.attempt": state.attemptIndex,
             "agent.step.index": state.stepIndex,
             "agent.turn.id": state.turnId,
+            ...(emitVercelSessionId
+              ? { "vercel.session_id": state.rootSessionId }
+              : {}),
           },
           startTime: state.startTimeMs,
         },
