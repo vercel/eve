@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { findLocalServerOrigin } from "#shared/network-address.js";
 
 import { joinRoutePrefix, normalizeOrigin } from "./routing.js";
 
@@ -16,7 +17,6 @@ const DEV_SERVER_STALE_LOCK_MS = 30_000;
 const EVE_CACHE_DIRECTORY_NAME = ".eve";
 const EVE_SVELTEKIT_DEV_SERVER_FILE_NAME = "sveltekit-dev-server.json";
 const EVE_SVELTEKIT_DEV_SERVER_LOCK_FILE_NAME = "sveltekit-dev-server.lock";
-const LOCAL_SERVER_URL_PATTERN = /https?:\/\/(?:\[[^\]\s]+\]|[^\s/:[\]]+)(?::\d+)?/;
 
 export interface EveProcessHandle {
   readonly origin: string;
@@ -211,11 +211,11 @@ function startServerProcess(input: {
     let resolved = false;
     const handleOutput = (chunk: Buffer) => {
       if (resolved) return;
-      const match = LOCAL_SERVER_URL_PATTERN.exec(chunk.toString("utf8"));
-      if (match === null) return;
+      const origin = findLocalServerOrigin(chunk.toString("utf8"));
+      if (origin === undefined) return;
       resolved = true;
       cleanup();
-      resolvePromise({ origin: normalizeOrigin(match[0]), process: child });
+      resolvePromise({ origin, process: child });
     };
 
     child.once("error", handleError);

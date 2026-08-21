@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  findLocalServerOrigin,
   isLoopbackHostname,
   isLoopbackServerUrl,
   isPrivateOrReservedIpAddress,
@@ -48,6 +49,26 @@ describe("isLoopbackServerUrl", () => {
     ]) {
       expect(isLoopbackServerUrl(url), url).toBe(false);
     }
+  });
+});
+
+describe("findLocalServerOrigin", () => {
+  it("returns the first loopback origin with an explicit port", () => {
+    expect(
+      findLocalServerOrigin(
+        'dependency metadata: "homepage": "https://rolldown.rs/"\ndocs: open http://localhost for details\ndev server listening at http://127.0.0.1:33449\n',
+      ),
+    ).toBe("http://127.0.0.1:33449");
+  });
+
+  it("accepts localhost and IPv6 loopback with ports", () => {
+    expect(findLocalServerOrigin("ready at http://localhost:3000")).toBe("http://localhost:3000");
+    expect(findLocalServerOrigin("ready at http://[::1]:8080/")).toBe("http://[::1]:8080");
+  });
+
+  it("ignores wildcard binds and non-loopback hosts", () => {
+    expect(findLocalServerOrigin("listening at http://0.0.0.0:3000")).toBeUndefined();
+    expect(findLocalServerOrigin("see https://example.com/docs")).toBeUndefined();
   });
 });
 

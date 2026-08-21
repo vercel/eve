@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { findLocalServerOrigin } from "#shared/network-address.js";
 
 const EVE_BASE_URL_ENV = "EVE_BASE_URL";
 const DEFAULT_SERVER_READY_TIMEOUT_MS = 180_000;
@@ -16,7 +17,6 @@ const EVE_NEXT_DEV_SERVER_FILE_NAME = "next-dev-server.json";
 const EVE_NEXT_DEV_SERVER_LOCK_FILE_NAME = "next-dev-server.lock";
 const ANSI_ESCAPE = String.fromCharCode(27);
 const ANSI_ESCAPE_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`, "g");
-const SERVER_URL_CANDIDATE_PATTERN = /https?:\/\/[^\s"'<>]+/g;
 const NEXT_PHASE_PRODUCTION_BUILD = "phase-production-build";
 
 interface EveProcessHandle {
@@ -245,44 +245,6 @@ async function acquireEveDevServerLock(
 
 function createEveBinaryPath(): string {
   return join(resolvePackageRoot(), "bin", "eve.js");
-}
-
-function isLoopbackHostname(hostname: string): boolean {
-  return (
-    hostname === "localhost" ||
-    hostname === "::1" ||
-    hostname === "[::1]" ||
-    /^127(?:\.\d{1,3}){3}$/.test(hostname)
-  );
-}
-
-function parseLocalServerOrigin(urlText: string): string | undefined {
-  const url = URL.parse(urlText);
-  // Dev-server discovery reads mixed subprocess output. Build metadata and
-  // dependency warnings can print unrelated URLs before eve reports its listener,
-  // but withEve only owns the app-local loopback server it started.
-  if (
-    url === null ||
-    (url.protocol !== "http:" && url.protocol !== "https:") ||
-    !isLoopbackHostname(url.hostname) ||
-    url.port.length === 0
-  ) {
-    return undefined;
-  }
-
-  return url.origin;
-}
-
-function findLocalServerOrigin(output: string): string | undefined {
-  for (const match of output.matchAll(SERVER_URL_CANDIDATE_PATTERN)) {
-    const candidate = match[0];
-    const origin = parseLocalServerOrigin(candidate);
-    if (origin !== undefined) {
-      return origin;
-    }
-  }
-
-  return undefined;
 }
 
 function formatEveDevOutputLine(line: string, logLabel: string | undefined): string | undefined {

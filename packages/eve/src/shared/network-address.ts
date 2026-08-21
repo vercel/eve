@@ -85,6 +85,31 @@ export function isLoopbackServerUrl(urlText: string): boolean {
   return parsed.success && isLoopbackHostname(new URL(parsed.data).hostname);
 }
 
+const SERVER_URL_CANDIDATE_PATTERN = /https?:\/\/[^\s"'<>]+/g;
+
+/**
+ * Find the first http(s) loopback origin with an explicit port in mixed
+ * subprocess output. Build metadata and dependency warnings can print
+ * unrelated URLs before eve reports its listener.
+ */
+export function findLocalServerOrigin(output: string): string | undefined {
+  for (const match of output.matchAll(SERVER_URL_CANDIDATE_PATTERN)) {
+    const url = URL.parse(match[0]);
+    if (
+      url === null ||
+      (url.protocol !== "http:" && url.protocol !== "https:") ||
+      !isLoopbackHostname(url.hostname) ||
+      url.port.length === 0
+    ) {
+      continue;
+    }
+
+    return url.origin;
+  }
+
+  return undefined;
+}
+
 /**
  * Whether `host` is an IP literal in a private, link-local, or otherwise
  * reserved range that an outbound framework request must not target — an SSRF
