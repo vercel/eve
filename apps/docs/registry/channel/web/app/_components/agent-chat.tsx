@@ -111,14 +111,7 @@ export function AgentChat({ sessionId }: { readonly sessionId?: string }) {
   );
 
   if (isRestoring && agent.events.length === 0) {
-    return (
-      <main className="flex h-dvh items-center justify-center bg-background text-foreground">
-        <div className="flex items-center gap-2 text-muted-foreground text-sm">
-          <BrainIcon className="size-4" />
-          <Shimmer duration={1}>Restoring conversation</Shimmer>
-        </div>
-      </main>
-    );
+    return <ConversationSkeleton />;
   }
 
   return (
@@ -185,6 +178,41 @@ export function AgentChat({ sessionId }: { readonly sessionId?: string }) {
           </div>
         ) : null}
         <div className="w-full">{composer}</div>
+      </div>
+    </main>
+  );
+}
+
+function ConversationSkeleton() {
+  return (
+    <main
+      aria-busy="true"
+      aria-label="Loading conversation"
+      className="flex h-dvh flex-col overflow-hidden bg-background text-foreground"
+    >
+      <header className="flex h-14 shrink-0 items-center justify-center px-4">
+        <div className="h-3 w-24 animate-pulse rounded-full bg-muted" />
+      </header>
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <div className="mx-auto flex w-full max-w-3xl animate-pulse flex-col gap-8 px-4 py-6 sm:px-6">
+          <div className="ml-auto h-12 w-2/5 rounded-2xl bg-muted" />
+          <div className="space-y-3">
+            <div className="h-4 w-4/5 rounded-full bg-muted" />
+            <div className="h-4 w-3/5 rounded-full bg-muted" />
+          </div>
+          <div className="ml-auto h-12 w-1/3 rounded-2xl bg-muted" />
+          <div className="space-y-3">
+            <div className="h-4 w-5/6 rounded-full bg-muted" />
+            <div className="h-4 w-2/3 rounded-full bg-muted" />
+            <div className="h-4 w-1/2 rounded-full bg-muted" />
+          </div>
+        </div>
+      </div>
+      <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-6 sm:px-6">
+        <div className="relative h-24 animate-pulse rounded-2xl border bg-card shadow-sm">
+          <div className="absolute top-5 left-4 h-4 w-36 rounded-full bg-muted" />
+          <div className="absolute right-2.5 bottom-2.5 size-8 rounded-full bg-muted" />
+        </div>
       </div>
     </main>
   );
