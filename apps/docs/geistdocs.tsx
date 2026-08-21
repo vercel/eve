@@ -8,6 +8,7 @@ export const Logo = () => <LogoEve />;
 export const github: GeistdocsGithubConfig = {
   owner: "vercel",
   repo: "eve",
+  editPath: "docs/{path}",
 };
 
 export const nav = [
