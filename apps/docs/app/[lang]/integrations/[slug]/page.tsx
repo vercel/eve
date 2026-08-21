@@ -81,6 +81,7 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
       <Link
         className="inline-flex items-center gap-1.5 text-gray-800 text-sm transition-colors hover:text-gray-1000"
         href="/integrations"
+        prefetch={true}
       >
         <ArrowLeftIcon className="size-3.5" />
         All integrations
