@@ -131,6 +131,15 @@ for (const [index, item] of items.entries()) {
   const registrySlug = expectedSlugs[index];
 
   if (
+    entry.slug === "eve" &&
+    item.dependencies?.some((dependency) => dependency === "ai" || dependency.startsWith("ai@"))
+  ) {
+    throw new Error(
+      `Registry item "${item.name}" must preserve the agent's existing AI SDK dependency.`,
+    );
+  }
+
+  if (
     entry.slug === "slack" ||
     entry.slug === "discord" ||
     entry.slug === "github" ||

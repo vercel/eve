@@ -161,7 +161,6 @@ describe("runInitCommand", () => {
     );
     const manifest = await readFile(join(projectPath, "package.json"), "utf8");
     expect(manifest).toContain('"eve": "^0.6.0"');
-    // pnpm accepts the optional prerelease peer without a manager-specific pin.
     const packageJson: unknown = JSON.parse(manifest);
     expect(packageJson).not.toHaveProperty("overrides");
     expect(packageJson).not.toHaveProperty("resolutions");
@@ -402,12 +401,12 @@ describe("runInitCommand", () => {
   });
 
   it.each([
-    ["npm", "overrides", ["exec", "--", "eve", "dev", "--input", "/model"]],
-    ["yarn", "resolutions", ["eve", "dev", "--input", "/model"]],
-    ["bun", "overrides", ["x", "eve", "dev", "--input", "/model"]],
+    ["npm", ["exec", "--", "eve", "dev", "--input", "/model"]],
+    ["yarn", ["eve", "dev", "--input", "/model"]],
+    ["bun", ["x", "eve", "dev", "--input", "/model"]],
   ] as const)(
-    "scaffolds a fresh project owned by the invoking manager %s without pnpm policy",
-    async (kind, aiPinField, devArguments) => {
+    "scaffolds a fresh project owned by the invoking manager %s without package-manager pins",
+    async (kind, devArguments) => {
       const parentDirectory = await mkdtemp(join(tmpdir(), `eve-init-agent-${kind}-`));
       const output = logger();
       const deps = dependencies();
@@ -425,10 +424,8 @@ describe("runInitCommand", () => {
       const packageJson: unknown = JSON.parse(
         await readFile(join(projectPath, "package.json"), "utf8"),
       );
-      expect(packageJson).toHaveProperty(aiPinField);
-      expect(packageJson).not.toHaveProperty(
-        aiPinField === "overrides" ? "resolutions" : "overrides",
-      );
+      expect(packageJson).not.toHaveProperty("overrides");
+      expect(packageJson).not.toHaveProperty("resolutions");
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
         kind,
         projectPath,
@@ -649,11 +646,11 @@ describe("runInitCommand", () => {
   });
 
   it.each([
-    ["yarn", "yarn.lock", "resolutions", ["eve", "dev", "--input", "/model"]],
-    ["bun", "bun.lock", "overrides", ["x", "eve", "dev", "--input", "/model"]],
+    ["yarn", "yarn.lock", ["eve", "dev", "--input", "/model"]],
+    ["bun", "bun.lock", ["x", "eve", "dev", "--input", "/model"]],
   ] as const)(
     "scaffolds a fresh %s workspace member without nested root-only package fields",
-    async (kind, lockfile, rootAiPinField, devArguments) => {
+    async (kind, lockfile, devArguments) => {
       const workspaceRoot = await mkdtemp(join(tmpdir(), `eve-init-${kind}-workspace-member-`));
       const appsDirectory = join(workspaceRoot, "apps");
       await mkdir(appsDirectory, { recursive: true });
@@ -692,11 +689,12 @@ describe("runInitCommand", () => {
         await readFile(join(workspaceRoot, "package.json"), "utf8"),
       ) as {
         engines?: { node?: string };
-        overrides?: { ai?: string };
-        resolutions?: { ai?: string };
+        overrides?: unknown;
+        resolutions?: unknown;
       };
       expect(rootPackageJson.engines?.node).toBe("24.x");
-      expect(rootPackageJson[rootAiPinField]?.ai).toBe("7.0.0");
+      expect(rootPackageJson.overrides).toBeUndefined();
+      expect(rootPackageJson.resolutions).toBeUndefined();
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
         kind,
         projectPath,

@@ -181,38 +181,8 @@ __EVE_INIT_REASONING__  modelOptions: {
 });
 `;
 
-// `@vercel/connect`'s optional `ai` peer (`^6 || ^7`) excludes prereleases, so
-// npm, Bun, and Yarn need a manager-specific pin for the runtime's prerelease
-// `ai` version. pnpm tolerates the unmet optional peer without either field.
-function packageManagerAiPinTemplateSuffix(packageManager: PackageManagerKind): string {
-  switch (packageManager) {
-    case "bun":
-    case "npm":
-      return `,
-  "overrides": {
-    "ai": "__EVE_INIT_AI_SDK_VERSION__"
-  }`;
-    case "yarn":
-      return `,
-  "resolutions": {
-    "ai": "__EVE_INIT_AI_SDK_VERSION__"
-  }`;
-    case "pnpm":
-      return "";
-    default: {
-      const exhaustive: never = packageManager;
-      return exhaustive;
-    }
-  }
-}
-
-function packageJsonTemplate(input: {
-  includeRootOnlyFields: boolean;
-  packageManager: PackageManagerKind;
-}): string {
-  const rootOnlyFields = input.includeRootOnlyFields
-    ? `${packageManagerAiPinTemplateSuffix(input.packageManager)}${ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX}`
-    : "";
+function packageJsonTemplate(includeRootOnlyFields: boolean): string {
+  const rootOnlyFields = includeRootOnlyFields ? ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX : "";
   return `{
   "name": "__EVE_INIT_APP_NAME__",
   "version": "0.0.0",
@@ -354,15 +324,11 @@ Run the validation the task requests. When it does not establish the behavior yo
 function templateFiles(input: {
   byokProvider: boolean;
   includeRootOnlyPackageJsonFields: boolean;
-  packageManager: PackageManagerKind;
 }): Record<string, string> {
   return {
     "agent/agent.ts": input.byokProvider ? BYOK_AGENT_TEMPLATE : BASE_AGENT_TEMPLATE,
     ...SHARED_TEMPLATE_FILES,
-    "package.json": packageJsonTemplate({
-      includeRootOnlyFields: input.includeRootOnlyPackageJsonFields,
-      packageManager: input.packageManager,
-    }),
+    "package.json": packageJsonTemplate(input.includeRootOnlyPackageJsonFields),
   };
 }
 
@@ -469,7 +435,6 @@ export async function scaffoldBaseProject(options: ScaffoldBaseProjectOptions): 
     templateFiles({
       byokProvider,
       includeRootOnlyPackageJsonFields: !workspaceMember,
-      packageManager,
     }),
   )) {
     const filePath = `${targetRoot}/${relPath}`;
@@ -490,7 +455,6 @@ export async function scaffoldBaseProject(options: ScaffoldBaseProjectOptions): 
   });
 
   await patchWorkspaceRootPackageJson(packageManager, workspaceProbeRoot, {
-    aiPackageVersion: ctx.aiPackageVersion,
     nodeEngineRequirement: evePackage.nodeEngine,
     onWorkspaceRootMutation: options.onWorkspaceRootMutation,
   });

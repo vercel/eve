@@ -1016,14 +1016,9 @@ describe("scaffoldBaseProject", () => {
     }
   });
 
-  test.each([
-    ["pnpm", undefined],
-    ["npm", "overrides"],
-    ["yarn", "resolutions"],
-    ["bun", "overrides"],
-  ] as const)(
-    "scaffolds a standalone %s project with its own package-manager metadata",
-    async (packageManager, aiPinField) => {
+  test.each(["pnpm", "npm", "yarn", "bun"] as const)(
+    "scaffolds a standalone %s project without an AI package-manager pin",
+    async (packageManager) => {
       const targetDirectory = await createTempDir();
       const projectRoot = await scaffoldBaseProject({
         projectName: "demo-agent",
@@ -1045,15 +1040,8 @@ describe("scaffoldBaseProject", () => {
       const packageJson: unknown = JSON.parse(
         await readFile(join(projectRoot, "package.json"), "utf8"),
       );
-      if (aiPinField === undefined) {
-        expect(packageJson).not.toHaveProperty("overrides");
-        expect(packageJson).not.toHaveProperty("resolutions");
-      } else {
-        expect(packageJson).toHaveProperty(`${aiPinField}.ai`, "7.0.0");
-        expect(packageJson).not.toHaveProperty(
-          aiPinField === "overrides" ? "resolutions" : "overrides",
-        );
-      }
+      expect(packageJson).not.toHaveProperty("overrides");
+      expect(packageJson).not.toHaveProperty("resolutions");
     },
   );
 
@@ -1141,13 +1129,9 @@ describe("scaffoldBaseProject", () => {
     });
   });
 
-  test.each([
-    ["npm", "overrides"],
-    ["bun", "overrides"],
-    ["yarn", "resolutions"],
-  ] as const)(
+  test.each(["npm", "bun", "yarn"] as const)(
     "scaffolds a %s workspace member with root-only package fields at the workspace root",
-    async (packageManager, rootAiPinField) => {
+    async (packageManager) => {
       const workspaceRoot = await createTempDir();
       const targetDirectory = join(workspaceRoot, "apps");
       await mkdir(targetDirectory, { recursive: true });
@@ -1191,21 +1175,18 @@ describe("scaffoldBaseProject", () => {
         await readFile(join(workspaceRoot, "package.json"), "utf8"),
       ) as {
         engines?: { node?: string };
-        overrides?: { ai?: string };
-        resolutions?: { ai?: string };
+        overrides?: unknown;
+        resolutions?: unknown;
       };
       expect(rootPackageJson.engines?.node).toBe("24.x");
-      expect(rootPackageJson[rootAiPinField]?.ai).toBe("7.0.0");
+      expect(rootPackageJson.overrides).toBeUndefined();
+      expect(rootPackageJson.resolutions).toBeUndefined();
     },
   );
 
-  test.each([
-    ["npm", "overrides"],
-    ["bun", "overrides"],
-    ["yarn", "resolutions"],
-  ] as const)(
+  test.each(["npm", "bun", "yarn"] as const)(
     "scaffolds under an unclaimed %s workspace directory by adding a package pattern",
-    async (packageManager, rootAiPinField) => {
+    async (packageManager) => {
       const workspaceRoot = await createTempDir();
       const targetDirectory = join(workspaceRoot, "agents");
       await mkdir(targetDirectory, { recursive: true });
@@ -1249,13 +1230,14 @@ describe("scaffoldBaseProject", () => {
         await readFile(join(workspaceRoot, "package.json"), "utf8"),
       ) as {
         engines?: { node?: string };
-        overrides?: { ai?: string };
-        resolutions?: { ai?: string };
+        overrides?: unknown;
+        resolutions?: unknown;
         workspaces?: string[];
       };
       expect(rootPackageJson.workspaces).toEqual(["apps/*", "agents/*"]);
       expect(rootPackageJson.engines?.node).toBe("24.x");
-      expect(rootPackageJson[rootAiPinField]?.ai).toBe("7.0.0");
+      expect(rootPackageJson.overrides).toBeUndefined();
+      expect(rootPackageJson.resolutions).toBeUndefined();
     },
   );
 

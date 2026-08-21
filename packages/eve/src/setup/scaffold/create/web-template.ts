@@ -112,7 +112,6 @@ export const WEB_APP_TEMPLATE_PACKAGE_JSON = {
     "@streamdown/math": "1.0.2",
     "@streamdown/mermaid": "1.0.2",
     "@tailwindcss/postcss": "4.3.0",
-    ai: "^7.0.38",
     "class-variance-authority": "0.7.1",
     clsx: "2.1.1",
     cmdk: "1.1.1",

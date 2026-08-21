@@ -312,7 +312,6 @@ async function patchWebPackageJson(
     packageManager,
     workspaceProbeRoot,
     {
-      aiPackageVersion: dependencies.ai,
       nodeEngineRequirement: evePackage.nodeEngine,
       onWorkspaceRootMutation,
     },
