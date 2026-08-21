@@ -2360,7 +2360,7 @@ describe("turnStep", () => {
       sessionState: second.sessionState,
     });
 
-    expect(observedTaskDeliveries).toEqual([true, false, false]);
+    expect(observedTaskDeliveries).toEqual(["settled", "none", "none"]);
   });
 
   it("projects a requested sleep onto the durable step result", async () => {

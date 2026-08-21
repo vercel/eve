@@ -70,8 +70,11 @@ import {
 import {
   CONDITIONAL_DELIVERY_INSTRUCTION,
   EMPTY_DELIVERY_SENTINEL,
-  TASK_DELIVERY_INSTRUCTION,
 } from "#shared/empty-delivery.js";
+import {
+  TASK_DELIVERY_PENDING_INSTRUCTION,
+  TASK_DELIVERY_SETTLED_INSTRUCTION,
+} from "#tasks/delivery-context.js";
 
 vi.mock("ai", () => ({
   ToolLoopAgent: vi.fn(),
@@ -11310,22 +11313,28 @@ describe("createToolLoopHarness", () => {
       expect(instructions).toBe("You are a test assistant.");
     });
 
-    it("adds conditional-delivery guidance to a top-level framework wake", async () => {
-      setupMockAgent(defaultModelResult());
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
-      const ctx = new ContextContainer();
-      ctx.set(TurnTaskDeliveryKey, true);
+    it.each([
+      ["pending", TASK_DELIVERY_PENDING_INSTRUCTION],
+      ["settled", TASK_DELIVERY_SETTLED_INSTRUCTION],
+    ] as const)(
+      "adds %s task-delivery guidance to a top-level framework wake",
+      async (phase, instruction) => {
+        setupMockAgent(defaultModelResult());
+        const runStep = createToolLoopHarness(createTestConfig("conversation"));
+        const ctx = new ContextContainer();
+        ctx.set(TurnTaskDeliveryKey, phase);
 
-      await contextStorage.run(ctx, () =>
-        runStep(createTestSession(), { message: "Background task task_1 is completed." }),
-      );
+        await contextStorage.run(ctx, () =>
+          runStep(createTestSession(), { message: "Background task task_1 is completed." }),
+        );
 
-      const { instructions } = getLastAgentSettings();
-      expect(instructions).toEqual({
-        role: "system",
-        content: `You are a test assistant.\n\n${TASK_DELIVERY_INSTRUCTION}`,
-      });
-    });
+        const { instructions } = getLastAgentSettings();
+        expect(instructions).toEqual({
+          role: "system",
+          content: `You are a test assistant.\n\n${instruction}`,
+        });
+      },
+    );
 
     it("does not add conditional-delivery guidance to a human continuation", async () => {
       setupMockAgent(defaultModelResult());
@@ -11350,7 +11359,7 @@ describe("createToolLoopHarness", () => {
       setupMockAgent(defaultModelResult());
       const runStep = createToolLoopHarness(createTestConfig("conversation"));
       const ctx = new ContextContainer();
-      ctx.set(TurnTaskDeliveryKey, true);
+      ctx.set(TurnTaskDeliveryKey, "pending");
       setDelegatedParent(ctx);
 
       await contextStorage.run(ctx, () =>
