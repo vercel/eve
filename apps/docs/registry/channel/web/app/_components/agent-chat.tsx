@@ -42,7 +42,8 @@ export function AgentChat({
           },
     onSessionChange(session) {
       if (sessionId === undefined && session !== undefined) {
-        window.history.replaceState(
+        History.prototype.replaceState.call(
+          window.history,
           window.history.state,
           "",
           `/s/${encodeURIComponent(session.sessionId)}`,

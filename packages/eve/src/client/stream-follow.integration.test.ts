@@ -89,6 +89,44 @@ describe("stream following over real sockets", () => {
     expect(session.state).toMatchObject({ sessionId: "s1", streamIndex: 6 });
   });
 
+  it("reconnects an open stream that goes idle and continues from its cursor", async () => {
+    const events = [
+      { type: "step.started", data: {} },
+      { type: "message.appended", data: { messageDelta: "hello" } },
+      { type: "session.completed", data: {} },
+    ];
+    let connections = 0;
+    const host = await listen(
+      createServer((req, res) => {
+        connections += 1;
+        const index = startIndexOf(req.url);
+        res.writeHead(200, { "content-type": "application/x-ndjson" });
+        if (connections === 1) {
+          res.write(`${JSON.stringify(events[0])}\n`);
+          return;
+        }
+        for (const event of events.slice(index)) {
+          res.write(`${JSON.stringify(event)}\n`);
+        }
+      }),
+    );
+
+    const received: string[] = [];
+    for await (const event of followStreamIterable({
+      host,
+      resolveHeaders: () => Promise.resolve(new Headers()),
+      sessionId: "s",
+      startIndex: 0,
+      streamReadIdleTimeoutMs: 50,
+    })) {
+      received.push(event.type);
+      if (event.type === "session.completed") break;
+    }
+
+    expect(received).toEqual(["step.started", "message.appended", "session.completed"]);
+    expect(connections).toBe(2);
+  });
+
   it("gives up after the idle-reconnect budget when a settled run's stream ends boundary-less", async () => {
     let connections = 0;
     const host = await listen(

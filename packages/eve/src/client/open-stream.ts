@@ -23,6 +23,8 @@ interface ResolvedStreamReconnectPolicy {
   readonly streamOpenReconnectPolicy: RetryPolicy;
 }
 
+const DEFAULT_STREAM_READ_IDLE_TIMEOUT_MS = 15_000;
+
 const DEFAULT_STREAM_RECONNECT_POLICY: ResolvedStreamReconnectPolicy = {
   retryableErrorStatuses: new Set([404, 409, 425, 500, 502, 503, 504]),
   streamIdleReconnectPolicy: { baseDelayMs: 250, maxAttempts: 5, maxDelayMs: 4_000 },
@@ -79,6 +81,8 @@ interface FollowStreamInput {
   /** Keep reconnecting after empty streams until the consumer aborts or stops iteration. */
   readonly keepAlive?: boolean;
   readonly streamReconnectPolicy?: StreamReconnectPolicy;
+  /** @internal Test override for reconnecting an open stream that stops producing bytes. */
+  readonly streamReadIdleTimeoutMs?: number;
   readonly resolveHeaders: () => Promise<Headers>;
   readonly redirect?: ClientRedirectPolicy;
   readonly sessionId: string;
@@ -157,7 +161,9 @@ export async function* followStreamIterable(
 
     let deliveredEvent = false;
     try {
-      for await (const event of readNdjsonStream(connection.body)) {
+      for await (const event of readNdjsonStream(connection.body, {
+        idleTimeoutMs: input.streamReadIdleTimeoutMs ?? DEFAULT_STREAM_READ_IDLE_TIMEOUT_MS,
+      })) {
         startIndex += 1;
         deliveredEvent = true;
         reconnectDelayMs = idleRetryPolicy.baseDelayMs;
