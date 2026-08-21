@@ -179,7 +179,7 @@ export function AgentChat({ sessionId }: { readonly sessionId?: string }) {
 
 function ErrorMessage({ message }: { readonly message: string }) {
   return (
-    <Message from="assistant">
+    <Message className="max-w-full" from="assistant">
       <MessageContent>
         <div
           className="flex w-full items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm"
