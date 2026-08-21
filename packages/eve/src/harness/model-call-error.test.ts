@@ -170,6 +170,30 @@ describe("classifyModelCallError", () => {
     expect(classifyModelCallError(wrapped)).toBe("terminal");
   });
 
+  it("returns terminal for an AI stream-assembler desync", () => {
+    expect(classifyModelCallError(new Error("text part 8bfaeea5cfe5bd29 not found"))).toBe(
+      "terminal",
+    );
+    expect(
+      classifyModelCallError(
+        new Error("text part text-db2e55f7-60d4-3d3d-d3a1-dce002cbb009_us-east-1 not found"),
+      ),
+    ).toBe("terminal");
+
+    const wrapped = Object.assign(
+      new Error("model stream failed", {
+        cause: new Error("text part 1a2b3c4d not found"),
+      }),
+      { isRetryable: true },
+    );
+    expect(classifyModelCallError(wrapped)).toBe("terminal");
+
+    expect(classifyModelCallError(new Error("text part not found"))).toBe("recoverable");
+    expect(classifyModelCallError(new Error("reasoning part 1a2b3c4d not found"))).toBe(
+      "recoverable",
+    );
+  });
+
   it("returns retry when the AI SDK marks the error as retryable", () => {
     const err = Object.assign(new Error("upstream flaky"), { isRetryable: true });
     expect(classifyModelCallError(err)).toBe("retry");
