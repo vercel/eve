@@ -97,20 +97,27 @@ function applyTransform(
   const hoistedFunctions: string[] = [];
   const registrations: string[] = [];
 
+  // Byte-identical factories share one hoisted declaration so the emitted
+  // module never declares the same top-level function twice.
+  const emittedNames = new Set<string>();
+
   for (const credentials of factories) {
     const properties = [credentials.authPropertySource, credentials.headersPropertySource].filter(
       (property) => property !== undefined,
     );
     const stepId = `eve:dynamic-remote-agent//${credentials.hoistedName}`;
-    hoistedFunctions.push(
-      `function ${credentials.hoistedName}() {\n` +
-        `  return { ${properties.join(", ")} };\n` +
-        `}`,
-    );
-    registrations.push(`${credentials.hoistedName}.stepId = ${JSON.stringify(stepId)};`);
-    registrations.push(
-      `__eveStepRegistry.set(${JSON.stringify(stepId)}, ${credentials.hoistedName});`,
-    );
+    if (!emittedNames.has(credentials.hoistedName)) {
+      emittedNames.add(credentials.hoistedName);
+      hoistedFunctions.push(
+        `function ${credentials.hoistedName}() {\n` +
+          `  return { ${properties.join(", ")} };\n` +
+          `}`,
+      );
+      registrations.push(`${credentials.hoistedName}.stepId = ${JSON.stringify(stepId)};`);
+      registrations.push(
+        `__eveStepRegistry.set(${JSON.stringify(stepId)}, ${credentials.hoistedName});`,
+      );
+    }
     replacements.push({
       start: credentials.callStart,
       end: credentials.callEnd,
