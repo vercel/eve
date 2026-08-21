@@ -97,6 +97,7 @@ export const rootMarkdownRedirects: DocsRedirect[] = [
 
 export const compatibilityRedirects: DocsRedirect[] = [
   ...createIntegrationRedirects("chat-sdk-photon", "photon"),
+  { source: "/favicon.ico", destination: "/icon.svg", permanent: true },
   { source: "/feed", destination: "/rss.xml", permanent: true },
   { source: "/feed.xml", destination: "/rss.xml", permanent: true },
   { source: "/guides/hooks", destination: "/docs/guides/hooks", permanent: true },

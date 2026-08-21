@@ -199,4 +199,12 @@ describe("all redirects", () => {
       }
     }
   });
+
+  it("redirects the legacy favicon to the eve icon", () => {
+    expect(compatibilityRedirects).toContainEqual({
+      source: "/favicon.ico",
+      destination: "/icon.svg",
+      permanent: true,
+    });
+  });
 });
