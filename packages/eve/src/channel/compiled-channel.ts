@@ -1,4 +1,8 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
+import {
+  attachChannelProgressPresentation,
+  type ChannelProgressPresentation,
+} from "#channel/progress-renderer.js";
 import type { UserContent } from "ai";
 import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
@@ -73,6 +77,14 @@ export function getChannelInstrumentationKind(value: unknown): string | undefine
 
   const routeSignature = channelRouteSignature(value);
   return routeSignature === undefined ? undefined : channelInstrumentationKinds.get(routeSignature);
+}
+
+export function setChannelProgressRenderers(
+  channel: unknown,
+  input: ChannelProgressPresentation,
+): void {
+  if (!isCompiledChannel(channel)) throw new TypeError("Expected a compiled channel.");
+  attachChannelProgressPresentation(channel.adapter, input);
 }
 
 export function setChannelInstrumentationKind(channel: CompiledChannel, kind: string): void {

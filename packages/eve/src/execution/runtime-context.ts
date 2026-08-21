@@ -13,6 +13,7 @@ import {
   ModeKey,
   ParentSessionKey,
   ParentTraceContextKey,
+  ProgressKey,
   ScheduleIdKey,
   SessionCallbackKey,
   SubagentDepthKey,
@@ -74,6 +75,9 @@ export function buildRunContext(input: {
 
   if (run.callback !== undefined) {
     ctx.set(SessionCallbackKey, run.callback);
+  }
+  if (run.progress !== undefined) {
+    ctx.set(ProgressKey, run.progress);
   }
 
   if (run.parent !== undefined) {
