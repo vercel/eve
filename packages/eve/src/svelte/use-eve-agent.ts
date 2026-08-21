@@ -55,6 +55,8 @@ export interface UseEveAgentReturn<TData> {
   readonly error: Error | undefined;
   /** Raw server events received during this session (authoritative stream). */
   readonly events: readonly MessageStreamEvent[];
+  /** Replay the attached durable session and follow its in-flight turn, if any. */
+  readonly resume: () => Promise<void>;
   /** Clear all state and start a new session. */
   readonly reset: () => void;
   /** Send a message with optional turn settings. */
@@ -186,6 +188,10 @@ class SvelteEveAgent<TData> implements UseEveAgentReturn<TData> {
 
   reset = (): void => {
     this.#store.reset();
+  };
+
+  resume = (): Promise<void> => {
+    return this.#store.resume();
   };
 
   respond = <TOutput = unknown>(

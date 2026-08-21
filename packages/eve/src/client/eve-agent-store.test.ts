@@ -49,6 +49,12 @@ function streamResponse(events: readonly MessageStreamEvent[]): Response {
   );
 }
 
+function boundedStreamResponse(events: readonly MessageStreamEvent[]): Response {
+  const response = streamResponse(events);
+  response.headers.set("x-eve-stream-tail-index", String(events.length - 1));
+  return response;
+}
+
 function controlledStreamResponse() {
   const encoder = new TextEncoder();
   let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
@@ -199,6 +205,75 @@ describe("EveAgentStore stream overlap", () => {
     expect(store.snapshot.events.map((event) => event.meta.id)).toEqual(
       events.map((event) => event.meta.id),
     );
+  });
+});
+
+describe("EveAgentStore session resume", () => {
+  it("replays a settled session without opening a live stream", async () => {
+    const events = turnEvents();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(boundedStreamResponse(events));
+    const store = new EveAgentStore({
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      reducer: defaultMessageReducer(),
+    });
+
+    await store.resume();
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.events).toEqual(events);
+    expect(store.snapshot.session).toEqual({ sessionId: "session_1", streamIndex: events.length });
+  });
+
+  it("replays history and follows an interrupted turn through its boundary", async () => {
+    const [received, started, completed, waiting] = stampTestEvents([
+      createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
+      createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Hi there.",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createSessionWaitingEvent(),
+    ] as UnstampedMessageStreamEvent[]);
+    const live = controlledStreamResponse();
+    const requests: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
+      const url =
+        typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
+      requests.push(url);
+      return requests.length === 1 ? boundedStreamResponse([received!, started!]) : live.response;
+    });
+    const store = new EveAgentStore({
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      reducer: defaultMessageReducer(),
+    });
+
+    const resuming = store.resume();
+    await vi.waitFor(() => expect(store.snapshot.status).toBe("streaming"));
+    expect(store.snapshot.events.map((event) => event.type)).toEqual([
+      "message.received",
+      "turn.started",
+    ]);
+
+    live.emit(completed!);
+    live.emit(waiting!);
+    live.close();
+    await resuming;
+
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
+      state: "done",
+      stepIndex: 0,
+      text: "Hi there.",
+      type: "text",
+    });
+    expect(new URL(requests[0]!, "http://localhost").searchParams.get("startIndex")).toBeNull();
+    expect(new URL(requests[1]!, "http://localhost").searchParams.get("startIndex")).toBe("2");
   });
 });
 

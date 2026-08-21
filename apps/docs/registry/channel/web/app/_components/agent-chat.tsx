@@ -3,7 +3,7 @@
 import type { UserContent } from "ai";
 import { useEveAgent } from "eve/react";
 import { AlertCircleIcon, BrainIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Conversation,
   ConversationContent,
@@ -22,9 +22,32 @@ import { AgentMessage } from "./agent-message";
 
 const AGENT_NAME = "eve-agent";
 
-export function AgentChat() {
+export function AgentChat({ sessionId }: { readonly sessionId?: string }) {
   const [cancellationError, setCancellationError] = useState<string>();
-  const agent = useEveAgent();
+  const agent = useEveAgent({
+    initialSession:
+      sessionId === undefined
+        ? undefined
+        : {
+            sessionId,
+            streamIndex: 0,
+          },
+    onSessionChange(session) {
+      if (sessionId === undefined && session !== undefined) {
+        window.history.replaceState(
+          window.history.state,
+          "",
+          `/s/${encodeURIComponent(session.sessionId)}`,
+        );
+      }
+    },
+  });
+
+  useEffect(() => {
+    if (sessionId === undefined) return;
+    const timeout = window.setTimeout(() => void agent.resume(), 0);
+    return () => window.clearTimeout(timeout);
+  }, [agent.resume, sessionId]);
   const isBusy = agent.status === "submitted" || agent.status === "streaming";
   const isEmpty = agent.data.messages.length === 0;
   const lastMessage = agent.data.messages.at(-1);

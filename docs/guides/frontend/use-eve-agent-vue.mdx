@@ -43,14 +43,14 @@ async function handleSubmit() {
 
 The state fields are computed refs; the commands are ordinary methods:
 
-| Property                             | Vue shape                                      |
-| ------------------------------------ | ---------------------------------------------- |
-| `data`                               | `ComputedRef<TData>`                           |
-| `status`                             | `ComputedRef<UseEveAgentStatus>`               |
-| `error`                              | `ComputedRef<Error \| undefined>`              |
-| `events`                             | `ComputedRef<readonly MessageStreamEvent[]>`   |
-| `session`                            | `ComputedRef<ClientSessionState \| undefined>` |
-| `send`, `respond`, `cancel`, `reset` | Methods                                        |
+| Property                                       | Vue shape                                      |
+| ---------------------------------------------- | ---------------------------------------------- |
+| `data`                                         | `ComputedRef<TData>`                           |
+| `status`                                       | `ComputedRef<UseEveAgentStatus>`               |
+| `error`                                        | `ComputedRef<Error \| undefined>`              |
+| `events`                                       | `ComputedRef<readonly MessageStreamEvent[]>`   |
+| `session`                                      | `ComputedRef<ClientSessionState \| undefined>` |
+| `send`, `respond`, `resume`, `cancel`, `reset` | Methods                                        |
 
 Destructuring preserves reactivity because each state value remains a ref. Read refs with `.value` in `<script>` and without `.value` in a template. The [shared returned-state reference](./overview#returned-state) describes what each value and command does.
 
@@ -108,7 +108,7 @@ See [Human-in-the-loop prompts](./overview#human-in-the-loop-prompts) for reques
 
 ## Cancel, reset, and resume
 
-Call `cancel()` to stop the durable server-side turn while the composable remains attached through settlement. Disposing the component only disconnects its local stream; it does not cancel server execution. Call `reset()` to clear local state and start a new session. Pass `initialSession` and `initialEvents` to restore a saved conversation. See [Resumable sessions](./overview#resumable-sessions) for the persistence contract and [Sending and streaming](./overview#sending-and-streaming) for cancellation behavior.
+Call `cancel()` to stop the durable server-side turn while the composable remains attached through settlement. Disposing the component only disconnects its local stream; it does not cancel server execution. Call `reset()` to clear local state and start a new session. Pass `initialSession` and `initialEvents` to restore a saved conversation, then call `resume()` to replay the session and follow an in-flight turn. See [Resumable sessions](./overview#resumable-sessions) for the persistence contract and [Sending and streaming](./overview#sending-and-streaming) for cancellation behavior.
 
 ## Custom host and credentials
 

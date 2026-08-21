@@ -78,6 +78,7 @@ export function Chat() {
 | `session` | Serializable fixed session cursor (`sessionId`, `streamIndex`).             |
 | `send`    | Send text or a multi-part message, with per-turn options.                   |
 | `respond` | Answer pending HITL input requests, with per-turn options.                  |
+| `resume`  | Replay an attached session and follow its in-flight turn.                   |
 | `cancel`  | Request durable cancellation of the active turn.                            |
 | `reset`   | Clear local events, data, errors, and the local session cursor.             |
 
@@ -297,7 +298,19 @@ then save a final snapshot in `onFinish`.
 
 For multiple chat threads, keep one saved event log and session cursor per thread. `agent`, `host`, `reducer`, `session`, `initialEvents`, `initialSession`, `auth`, `headers`, and `optimistic` are read when the hook creates its store, so remount the chat component when switching threads, for example with `key={chat.id}`.
 
-If the user can refresh or navigate immediately after pressing send, create your app-level chat row and store the pending user message before calling `send()`. After the request starts, persist the session state as soon as it contains a `sessionId`, then reconnect an interrupted in-flight turn with `session.stream({ startIndex: savedEvents.length })` from the lower-level client.
+Call `resume()` after mounting with `initialSession` to rebuild the projection from the durable stream. If the stream ends at an in-flight turn, `resume()` stays attached until that turn reaches its boundary. If the stream already ends at a settled session boundary, it returns after replaying the history.
+
+```tsx
+const agent = useEveAgent({
+  initialSession: { sessionId, streamIndex: 0 },
+});
+
+useEffect(() => {
+  void agent.resume();
+}, [agent.resume]);
+```
+
+If the user can refresh or navigate immediately after pressing send, create your app-level chat row before calling `send()`, then persist the session ID from `onSessionChange`. This lets the reloaded UI mount with that ID and call `resume()` while the durable turn is still running.
 
 ## Custom hosts and headers
 
