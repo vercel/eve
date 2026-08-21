@@ -245,6 +245,42 @@ export default defineDynamic({
     });
   });
 
+  it("forwards destructured parameters with defaults", async () => {
+    const source = `
+import { defineDynamic, defineTool } from "eve/tools";
+
+export default defineDynamic({
+  events: {
+    "session.started": async () => ({
+      tool: defineTool({
+        description: "T",
+        inputSchema: { type: "object" },
+        async execute({ dryRun = false }, ctx) {
+          return { dryRun, requestId: ctx.requestId };
+        },
+      }),
+    }),
+  },
+});
+`;
+
+    const { callHandler, code } = await transformAndEval("tools/default-param.ts", source);
+    const tools = await callHandler();
+    const execute = (tools.tool as Record<string, unknown>).execute as Function;
+
+    expect(code).toMatch(
+      /async \(\.\.\.__args\) => await __eve_dynamic_exec_\d+\(\{\}, \.\.\.__args\)/,
+    );
+    await expect(execute({}, { requestId: "req-123" })).resolves.toEqual({
+      dryRun: false,
+      requestId: "req-123",
+    });
+    await expect(execute({ dryRun: true }, { requestId: "req-456" })).resolves.toEqual({
+      dryRun: true,
+      requestId: "req-456",
+    });
+  });
+
   it("__closureVars captures a snapshot at resolver return time", async () => {
     const source = `
 import { defineDynamic, defineTool } from "eve/tools";
@@ -2337,14 +2373,14 @@ import { defineDynamic, defineTool } from "eve/tools";
 
 export default defineDynamic({
   events: {
-    "session.started": async () => {
+    "session.started": async (_input, ctx) => {
       const tag = "typed";
       return {
         tool: defineTool({
           description: "T",
           inputSchema: { type: "object" },
           execute(_input: Record<string, unknown>, ctx: import("eve/tools").ToolContext) {
-            return { tag, hasCtx: ctx !== undefined };
+            return { tag, input: _input, hasCtx: ctx !== undefined };
           },
         }),
       };
@@ -2357,14 +2393,7 @@ export default defineDynamic({
     expect(result).not.toBeNull();
     const code = result!.code;
 
-    // The wrapper call args should be `{ tag }, _input, ctx` — NOT
-    // `{ tag }, _input, unknown>, ctx` which the old naive comma split
-    // would have produced.
-    const wrapperCallMatch = code.match(/__eve_dynamic_exec_\d+\(([^)]+)\)/);
-    expect(wrapperCallMatch).not.toBeNull();
-    const wrapperArgs = wrapperCallMatch![1]!;
-    expect(wrapperArgs).not.toMatch(/\bunknown>\b/);
-    // Should have the hoisted function
-    expect(code).toContain("__eve_dynamic_exec_");
+    expect(code).toContain("const { tag } = __vars");
+    expect(code).toMatch(/\(\.\.\.__args\) => __eve_dynamic_exec_\d+\(\{ tag \}, \.\.\.__args\)/);
   });
 });

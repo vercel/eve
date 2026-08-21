@@ -314,19 +314,12 @@ function createLiveWrapper(callback: CallbackInfo, hoistedName: string, closure:
   if (callback.isReference) {
     return `(...__args) => ${hoistedName}(${closure}, ...__args)`;
   }
-  const params = callback.params;
-  const bindings = params
-    ? splitParamsTopLevel(params)
-        .map((parameter) => extractParamBindingName(parameter))
-        .join(", ")
-    : "";
-  const args = bindings ? `${closure}, ${bindings}` : closure;
   const asyncPrefix = callback.isAsync ? "async " : "";
   if (callback.isGenerator) {
-    return `${asyncPrefix}function* (${params}) { yield* ${hoistedName}(${args}); }`;
+    return `${asyncPrefix}function* (...__args) { yield* ${hoistedName}(${closure}, ...__args); }`;
   }
   const awaitPrefix = callback.isAsync ? "await " : "";
-  return `${asyncPrefix}(${params}) => ${awaitPrefix}${hoistedName}(${args})`;
+  return `${asyncPrefix}(...__args) => ${awaitPrefix}${hoistedName}(${closure}, ...__args)`;
 }
 
 function stableModuleId(filename: string): string {
