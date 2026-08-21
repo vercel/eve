@@ -436,6 +436,37 @@ describe("ensureChannel", () => {
     expect(normalizeEol(channelSource)).toBe(normalizeEol(sourceChannel));
   });
 
+  test("scaffolds Web Chat questions as visible response forms", async () => {
+    const projectRoot = await createTempDir();
+    await mkdir(join(projectRoot, "agent"), { recursive: true });
+    await writeFile(
+      join(projectRoot, "package.json"),
+      `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await ensureChannel({
+      projectRoot,
+      kind: "web",
+      webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
+    });
+
+    const agentMessageSource = await readFile(
+      join(projectRoot, "app/_components/agent-message.tsx"),
+      "utf8",
+    );
+    const questionSource = await readFile(
+      join(projectRoot, "components/ai-elements/question.tsx"),
+      "utf8",
+    );
+    expect(agentMessageSource).toContain('inputRequest?.kind === "question"');
+    expect(agentMessageSource).toContain("<QuestionRequest");
+    expect(agentMessageSource).toContain("onInputResponses");
+    expect(questionSource).toContain("export const Question");
+    expect(questionSource).toContain("export const QuestionInput");
+    expect(questionSource).toContain("export const QuestionOption");
+  });
+
   test("scaffolds a Web Chat Stop button with the agent cancellation API", async () => {
     const projectRoot = await createTempDir();
     await mkdir(join(projectRoot, "agent"), { recursive: true });

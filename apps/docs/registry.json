@@ -1905,6 +1905,11 @@
           "target": "components/ai-elements/prompt-input.tsx"
         },
         {
+          "path": "registry/channel/web/components/ai-elements/question.tsx",
+          "type": "registry:file",
+          "target": "components/ai-elements/question.tsx"
+        },
+        {
           "path": "registry/channel/web/components/ai-elements/reasoning.tsx",
           "type": "registry:file",
           "target": "components/ai-elements/reasoning.tsx"

@@ -4,6 +4,7 @@ import type {
   EveAuthorizationPart,
   EveDynamicToolPart,
   EveMessage,
+  EveMessageInputRequest,
   EveMessagePart,
 } from "eve/react";
 import {
@@ -15,6 +16,17 @@ import {
   XCircleIcon,
 } from "lucide-react";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
+import {
+  Question,
+  QuestionActions,
+  QuestionDescription,
+  QuestionInput,
+  QuestionOption,
+  QuestionOptions,
+  QuestionPrompt,
+  type QuestionResponse,
+  QuestionSubmit,
+} from "@/components/ai-elements/question";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
 import {
   Tool,
@@ -101,7 +113,19 @@ function AgentMessagePart({
       return <AttachmentPart part={part} />;
     case "authorization":
       return <AuthorizationPrompt part={part} />;
-    case "dynamic-tool":
+    case "dynamic-tool": {
+      const inputRequest = part.toolMetadata?.eve?.inputRequest;
+      if (inputRequest?.kind === "question") {
+        return (
+          <QuestionRequest
+            canRespond={canRespond}
+            inputRequest={inputRequest}
+            inputResponse={part.toolMetadata?.eve?.inputResponse}
+            onInputResponses={onInputResponses}
+          />
+        );
+      }
+
       return (
         <Tool
           defaultOpen={part.state === "approval-requested" || part.state === "approval-responded"}
@@ -123,7 +147,74 @@ function AgentMessagePart({
           </ToolContent>
         </Tool>
       );
+    }
   }
+}
+
+function QuestionRequest({
+  canRespond,
+  inputRequest,
+  inputResponse,
+  onInputResponses,
+}: {
+  readonly canRespond: boolean;
+  readonly inputRequest: EveMessageInputRequest;
+  readonly inputResponse?: AgentInputResponse;
+  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
+}) {
+  const selectedOption = inputRequest.options?.find(
+    (option) => option.id === inputResponse?.optionId,
+  );
+  const hasOptions = (inputRequest.options?.length ?? 0) > 0;
+  const acceptsFreeform = inputRequest.allowFreeform === true || !hasOptions;
+
+  const submitResponse = ({ selectedValues, text }: QuestionResponse) =>
+    onInputResponses([
+      {
+        optionId: selectedValues[0],
+        requestId: inputRequest.requestId,
+        text,
+      },
+    ]);
+
+  return (
+    <Question
+      defaultValue={{
+        selectedValues: inputResponse?.optionId ? [inputResponse.optionId] : [],
+        text: inputResponse?.text ?? "",
+      }}
+      disabled={!canRespond || inputResponse !== undefined}
+      onSubmit={submitResponse}
+    >
+      <QuestionPrompt>{inputRequest.prompt}</QuestionPrompt>
+      {hasOptions ? (
+        <QuestionOptions className="flex-col items-stretch" aria-label={inputRequest.prompt}>
+          {inputRequest.options?.map((option) => (
+            <QuestionOption className="justify-start text-left" key={option.id} value={option.id}>
+              <span>
+                <span className="block">{option.label}</span>
+                {option.description ? (
+                  <span className="block font-normal text-xs opacity-70">{option.description}</span>
+                ) : null}
+              </span>
+            </QuestionOption>
+          ))}
+        </QuestionOptions>
+      ) : null}
+      {acceptsFreeform ? (
+        <QuestionInput aria-label="Answer" placeholder="Type your answer…" />
+      ) : null}
+      {inputResponse ? (
+        <QuestionDescription>
+          Responded: {selectedOption?.label ?? inputResponse.text ?? inputResponse.optionId}
+        </QuestionDescription>
+      ) : (
+        <QuestionActions>
+          <QuestionSubmit>Answer</QuestionSubmit>
+        </QuestionActions>
+      )}
+    </Question>
+  );
 }
 
 function AttachmentPart({ part }: { readonly part: EveFilePart }) {
