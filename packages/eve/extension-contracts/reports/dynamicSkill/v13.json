@@ -1,0 +1,7 @@
+{
+  "kind": "eve-extension-capability-contract",
+  "capability": "dynamicSkill",
+  "epoch": 13,
+  "sha256": "d0194e3d413ab385e1f2fac57c8ea9bcba9da6a3837a82e5fa0b68b6896833cc",
+  "exports": ["defineDynamic"]
+}
