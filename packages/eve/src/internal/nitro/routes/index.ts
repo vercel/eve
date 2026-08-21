@@ -23,9 +23,10 @@ const EVE_LOGO_SVG = `<svg aria-hidden="true" class="logo" fill="none" viewBox="
  * (model id, instructions, tools, skills, etc.) lives behind the resolved eve
  * channel auth policy at `/eve/v1/info`.
  *
- * The page also loads zero external assets — no fonts, no scripts, no
- * images, no analytics beacons — so it cannot leak the deployment's
- * origin to a third party simply by being visited.
+ * The page also loads zero external assets — no fonts, images, scripts,
+ * or analytics beacons — so it cannot leak the deployment's origin to a
+ * third party simply by being visited. One inline script powers the copy
+ * control without making a network request.
  *
  * `{{DEPLOYMENT_URL}}` is the only request-time substitution: the page
  * echoes the visitor's own request origin back into the `$ eve dev …`
@@ -49,6 +50,7 @@ const HOME_PAGE_HTML_TEMPLATE = `<!doctype html>
     --faint: #999;
     --border: rgba(0, 0, 0, 0.09);
     --accent: #00c46a;
+    --interaction: #007a42;
     --divider: rgba(0, 0, 0, 0.22);
     --brand-opacity: 0.08;
   }
@@ -60,6 +62,7 @@ const HOME_PAGE_HTML_TEMPLATE = `<!doctype html>
       --faint: #737373;
       --border: rgba(255, 255, 255, 0.14);
       --accent: #46d4a4;
+      --interaction: #46d4a4;
       --divider: rgba(255, 255, 255, 0.22);
       --brand-opacity: 0.12;
     }
@@ -182,7 +185,7 @@ const HOME_PAGE_HTML_TEMPLATE = `<!doctype html>
     text-align: left;
     font-size: 0.8125rem;
     margin: 1rem 0 0;
-    overflow-x: auto;
+    overflow: hidden;
     white-space: nowrap;
   }
   .terminal-prompt {
@@ -190,7 +193,57 @@ const HOME_PAGE_HTML_TEMPLATE = `<!doctype html>
     user-select: none;
     flex-shrink: 0;
   }
-  .terminal-cmd { color: var(--fg); }
+  .terminal-cmd {
+    color: var(--fg);
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .terminal-cmd::-webkit-scrollbar { display: none; }
+  .copy-button {
+    appearance: none;
+    display: inline-grid;
+    place-items: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    padding: 0;
+    border: 0;
+    border-radius: 0.375rem;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .copy-button:hover {
+    background: var(--border);
+    color: var(--fg);
+  }
+  .copy-button:focus-visible {
+    outline: 2px solid var(--interaction);
+    outline-offset: 2px;
+  }
+  .copy-button[data-copied="true"] { color: var(--interaction); }
+  .copy-button[hidden] { display: none; }
+  .copy-icon, .check-icon {
+    width: 1rem;
+    height: 1rem;
+  }
+  .check-icon { display: none; }
+  .copy-button[data-copied="true"] .copy-icon { display: none; }
+  .copy-button[data-copied="true"] .check-icon { display: block; }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
 </style>
 </head>
 <body>
@@ -203,10 +256,71 @@ const HOME_PAGE_HTML_TEMPLATE = `<!doctype html>
     <p class="lede"><span class="status"><span class="status-dot" aria-hidden="true"></span>Ready</span><span class="lede-divider" aria-hidden="true">／</span><span>Agent is up and accepting messages.</span> <a href="${EVE_DOCS_URL}">Docs<span class="lede-arrow" aria-hidden="true">&nbsp;&rarr;</span></a></p>
     <div class="terminal mono" role="group" aria-label="Send a message from your terminal">
       <span class="terminal-prompt" aria-hidden="true">$</span>
-      <span class="terminal-cmd">eve dev ${DEPLOYMENT_URL_PLACEHOLDER}</span>
+      <span class="terminal-cmd" data-copy-command>eve dev "${DEPLOYMENT_URL_PLACEHOLDER}"</span>
+      <button class="copy-button" type="button" aria-label="Copy command" title="Copy command" data-copy-button hidden>
+        <svg class="copy-icon" aria-hidden="true" fill="none" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+          <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor"></rect>
+          <path d="M3.5 10.5h-1a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v1" stroke="currentColor"></path>
+        </svg>
+        <svg class="check-icon" aria-hidden="true" fill="none" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+          <path d="m3 8 3 3 7-7" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"></path>
+        </svg>
+      </button>
+      <span class="sr-only" aria-live="polite" data-copy-status></span>
     </div>
   </section>
 </main>
+<script>
+  {
+    const command = document.querySelector("[data-copy-command]");
+    const copyButton = document.querySelector("[data-copy-button]");
+    const copyStatus = document.querySelector("[data-copy-status]");
+    let resetTimer;
+
+    copyButton.hidden = false;
+
+    async function copyText(text) {
+      if (navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(text);
+          return;
+        } catch {
+          // Browsers can expose the API but deny permission while still
+          // allowing the user-initiated selection fallback below.
+        }
+      }
+
+      const range = document.createRange();
+      const selection = window.getSelection();
+      range.selectNodeContents(command);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      const copied = document.execCommand("copy");
+      selection.removeAllRanges();
+      if (!copied) throw new Error("Copy command failed");
+    }
+
+    copyButton.addEventListener("click", async () => {
+      clearTimeout(resetTimer);
+      delete copyButton.dataset.copied;
+      try {
+        await copyText(command.textContent);
+        copyButton.dataset.copied = "true";
+        copyButton.setAttribute("title", "Copied");
+        copyStatus.textContent = "Command copied";
+      } catch {
+        copyButton.setAttribute("title", "Copy failed");
+        copyStatus.textContent = "Could not copy command";
+      }
+
+      resetTimer = setTimeout(() => {
+        delete copyButton.dataset.copied;
+        copyButton.setAttribute("title", "Copy command");
+        copyStatus.textContent = "";
+      }, 2000);
+    });
+  }
+</script>
 </body>
 </html>
 `;
@@ -231,6 +345,23 @@ function pickFirstForwardedValue(value: string | null): string | undefined {
   return first;
 }
 
+function resolveHttpOrigin(protocol: string, host: string): string | undefined {
+  const normalizedProtocol = protocol.replace(/:$/, "");
+  if (normalizedProtocol !== "http" && normalizedProtocol !== "https") {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(`${normalizedProtocol}://${host}`);
+    if (!/^[A-Za-z0-9._:[\]-]+$/.test(url.host)) {
+      return undefined;
+    }
+    return url.origin;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Resolves the public origin a visitor is using to reach the deployment.
  *
@@ -244,12 +375,24 @@ function pickFirstForwardedValue(value: string | null): string | undefined {
  */
 function resolveDeploymentUrl(request: Request): string {
   const headers = request.headers;
-  const requestUrl = new URL(request.url);
+  let requestUrl: URL;
+  try {
+    requestUrl = new URL(request.url);
+  } catch {
+    return "http://localhost";
+  }
   const forwardedHost = pickFirstForwardedValue(headers.get("x-forwarded-host"));
   const forwardedProto = pickFirstForwardedValue(headers.get("x-forwarded-proto"));
-  const host = forwardedHost ?? headers.get("host") ?? requestUrl.host;
-  const proto = forwardedProto ?? requestUrl.protocol.replace(/:$/, "");
-  return `${proto}://${host}`;
+  const publicHost = forwardedHost ?? headers.get("host");
+  const publicOrigin =
+    publicHost === null
+      ? undefined
+      : resolveHttpOrigin(forwardedProto ?? requestUrl.protocol, publicHost);
+  if (publicOrigin !== undefined) {
+    return publicOrigin;
+  }
+
+  return resolveHttpOrigin(requestUrl.protocol, requestUrl.host) ?? "http://localhost";
 }
 
 /**
