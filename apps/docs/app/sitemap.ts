@@ -1,5 +1,6 @@
 import { getPublicPath } from "@vercel/geistdocs/config";
 import type { MetadataRoute } from "next";
+import { cacheLife } from "next/cache";
 import { canonicalRoutes, integrationPath, templatePath } from "@/lib/geistdocs/canonical";
 import { config } from "@/lib/geistdocs/config";
 import { defaultLanguage } from "@/lib/geistdocs/languages";
@@ -28,7 +29,10 @@ const redirectPathnames = [
   ...defaultLanguageRedirects.map(({ source }) => source),
 ].filter((pathname) => !pathname.includes(":"));
 
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  "use cache";
+  cacheLife("max");
+
   const docs: SitemapSourceEntry[] = geistdocsSource.source
     .getPages(defaultLanguage)
     .map((page) => ({
