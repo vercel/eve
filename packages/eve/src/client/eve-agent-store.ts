@@ -445,8 +445,8 @@ export class EveAgentStore<TData> {
     this.#events = [...this.#events, event];
     this.#applyServerEvent(event);
     this.#callbacks.onEvent?.(event);
-    this.#applyTerminalStreamFailure(event);
     this.#status = "streaming";
+    this.#applyTerminalStreamFailure(event);
     if (publish) this.#publish();
   }
 

@@ -6,6 +6,7 @@ import { stampTestEvents } from "#internal/testing/events.js";
 import {
   createMessageCompletedEvent,
   createMessageReceivedEvent,
+  createSessionFailedEvent,
   createSessionWaitingEvent,
   createTurnCancelledEvent,
   createTurnStartedEvent,
@@ -209,6 +210,35 @@ describe("EveAgentStore stream overlap", () => {
 });
 
 describe("EveAgentStore session resume", () => {
+  it("publishes a replayed terminal failure with error status", async () => {
+    const failed = stampTestEvents([
+      createSessionFailedEvent({
+        code: "SESSION_FAILED",
+        message: "Session failed.",
+        sessionId: "session_1",
+      }),
+    ])[0]!;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(boundedStreamResponse([failed]));
+    const store = new EveAgentStore({
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      reducer: defaultMessageReducer(),
+    });
+    const published: Array<{ eventType: string | undefined; status: string }> = [];
+    store.subscribe(() => {
+      published.push({
+        eventType: store.snapshot.events.at(-1)?.type,
+        status: store.snapshot.status,
+      });
+    });
+
+    await store.resume();
+
+    expect(published.find((snapshot) => snapshot.eventType === "session.failed")?.status).toBe(
+      "error",
+    );
+    expect(store.snapshot.error?.message).toBe("Session failed.");
+  });
+
   it("replays a settled session without opening a live stream", async () => {
     const events = turnEvents();
     const fetchMock = vi
@@ -279,6 +309,36 @@ describe("EveAgentStore session resume", () => {
     });
     expect(new URL(requests[0]!, "http://localhost").searchParams.get("startIndex")).toBeNull();
     expect(new URL(requests[1]!, "http://localhost").searchParams.get("startIndex")).toBe("2");
+  });
+});
+
+describe("EveAgentStore terminal failure", () => {
+  it("publishes a live terminal failure with error status", async () => {
+    const failed = stampTestEvents([
+      createSessionFailedEvent({
+        code: "SESSION_FAILED",
+        message: "Session failed.",
+        sessionId: "session_1",
+      }),
+    ])[0]!;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(streamResponse([failed]));
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+    const published: Array<{ eventType: string | undefined; status: string }> = [];
+    store.subscribe(() => {
+      published.push({
+        eventType: store.snapshot.events.at(-1)?.type,
+        status: store.snapshot.status,
+      });
+    });
+
+    await store.send({ message: "Hello" });
+
+    expect(published.find((snapshot) => snapshot.eventType === "session.failed")?.status).toBe(
+      "error",
+    );
+    expect(store.snapshot.error?.message).toBe("Session failed.");
   });
 });
 
