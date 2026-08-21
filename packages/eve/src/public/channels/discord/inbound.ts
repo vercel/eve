@@ -48,6 +48,7 @@ export interface DiscordMember {
 export interface DiscordInteractionBase {
   readonly applicationId: string;
   readonly channelId: string;
+  readonly channelType?: number;
   readonly guildId?: string;
   readonly id: string;
   readonly member?: DiscordMember;
@@ -223,9 +224,11 @@ function parseInteractionBase(raw: Record<string, unknown>): DiscordInteractionB
   }
   const user = parseInteractionUser(raw);
   if (!user) return null;
+  const channel = isObject(raw.channel) ? raw.channel : undefined;
   return {
     applicationId: raw.application_id,
     channelId: raw.channel_id,
+    channelType: typeof channel?.type === "number" ? channel.type : undefined,
     guildId: isNonEmptyString(raw.guild_id) ? raw.guild_id : undefined,
     id: raw.id,
     member: parseMember(raw.member),

@@ -61,6 +61,7 @@ import { verifyTeamsRequest, type TeamsWebhookVerifier } from "#public/channels/
 import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 
 const log = createLogger("teams.channel");
 
@@ -303,6 +304,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
     state: initialTeamsState(),
     fetchFile: createTeamsFetchFile(filesPolicy),
     metadata: (state) => ({
+      audience: teamsAudience(state.conversationType),
       channelId: state.channelId,
       conversationType: state.conversationType,
       teamId: state.teamId,
@@ -430,6 +432,11 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
 
     events: mergedEvents,
   });
+}
+
+function teamsAudience(conversationType: string | null): ChannelAudience {
+  if (conversationType === "personal" || conversationType === "groupChat") return "private";
+  return "unknown";
 }
 
 function rebuildTeamsContext(

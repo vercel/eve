@@ -137,6 +137,29 @@ async function firePost(
 }
 
 describe("chatSdkChannel", () => {
+  it.each([
+    [{ isDM: true, channelVisibility: "unknown" }, "private"],
+    [{ isDM: false, channelVisibility: "workspace" }, "public"],
+    [{ isDM: false, channelVisibility: "private" }, "private"],
+  ] as const)("projects the $audience audience", (thread, audience) => {
+    const bridge = chatSdkChannel({
+      adapters: { test: testAdapter() },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const adapter = getAdapter(bridge.channel);
+    if (!adapter.state) throw new Error("Expected Chat SDK state.");
+    adapter.state.thread = {
+      _type: "chat:Thread",
+      adapterName: "test",
+      channelId: CHANNEL_ID,
+      id: THREAD_ID,
+      ...thread,
+    };
+
+    expect(adapter.instrumentation?.metadata?.(adapter.state)).toMatchObject({ audience });
+  });
+
   it("mounts GET and POST webhook routes per Chat SDK adapter", () => {
     const bridge = chatSdkChannel({
       adapters: {
