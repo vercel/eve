@@ -899,6 +899,77 @@ describe("createToolLoopHarness", () => {
     },
   );
 
+  // A near-miss must fail closed: production emitted `<evedev-empty-delivery/>`
+  // and the exact-match sentinel check let the literal control token through to
+  // the channel's `message.completed` default. Kept out of the it.each above
+  // because that table enumerates *exact* sentinel spellings, which are matched
+  // anywhere in the message; a corrupted token only counts as the whole message,
+  // so it cannot be fed the same `internal ${sentinel} trailing` fixture.
+  it("parks without delivery when a terminal response is only a corrupted sentinel", async () => {
+    const corrupted = "<evedev-empty-delivery/>";
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: corrupted, role: "assistant" }] },
+      text: corrupted,
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+
+    const result = await runStep(createTestSession(), { message: "Hi" });
+
+    expect(result.next).toBeNull();
+    expect(result.session.history).toEqual([{ content: "Hi", role: "user" }]);
+    // Intentional silence is a terminal outcome, not an empty response: the
+    // step must not trip the empty-response reissue.
+    expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(1);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ message: null }),
+        type: "message.completed",
+      }),
+    );
+  });
+
+  // `resolveAssistantStepText` reads only the *last* assistant message while
+  // the emission side sees the step's whole text run. Discarding the response
+  // wholesale therefore erased an earlier, genuinely delivered reply from
+  // durable history even though nothing about it was a marker.
+  it("keeps an earlier assistant reply in history when only the last message is the sentinel", async () => {
+    const report = "Here is the report.";
+    setupMockAgent({
+      finishReason: "stop",
+      response: {
+        messages: [
+          { content: report, role: "assistant" },
+          { content: EMPTY_DELIVERY_SENTINEL, role: "assistant" },
+        ],
+      },
+      text: EMPTY_DELIVERY_SENTINEL,
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+
+    const result = await runStep(createTestSession(), { message: "Hi" });
+
+    expect(result.next).toBeNull();
+    expect(result.session.history).toContainEqual({ content: report, role: "assistant" });
+    // Delivery is still suppressed, so both sides agree the turn said nothing
+    // to the user — they just no longer disagree about whether the earlier
+    // reply ever existed.
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ message: null }),
+        type: "message.completed",
+      }),
+    );
+  });
+
   it("keeps executable tools directly available to the model", async () => {
     setupMockAgent({
       finishReason: "stop",
@@ -5180,6 +5251,23 @@ describe("createToolLoopHarness", () => {
           content: expect.stringContaining(EMPTY_DELIVERY_SENTINEL),
           role: "user",
         });
+
+        // The nudge must lead with the silence option rather than demanding an
+        // answer: no human is present on a schedule run, and an "Answer now"
+        // lead reliably elicited conversational filler ("I now have all the
+        // data I need.") that then shipped to the channel.
+        //
+        // "Otherwise answer" and "never reply with filler" are load-bearing
+        // wording from buildEmptyResponseNudge, not incidental phrasing — the
+        // assertions pin the *order* of the two options and the explicit
+        // filler ban, so a reword that reinstates an answer-first lead fails.
+        const nudge = reissueMessages.at(-1)?.content as string;
+        const markerOption = nudge.indexOf(EMPTY_DELIVERY_SENTINEL);
+        const answerOption = nudge.indexOf("Otherwise answer");
+        expect(markerOption).toBeGreaterThanOrEqual(0);
+        expect(answerOption).toBeGreaterThanOrEqual(0);
+        expect(markerOption).toBeLessThan(answerOption);
+        expect(nudge).toContain("never reply with filler");
       } finally {
         warnSpy.mockRestore();
       }

@@ -2432,14 +2432,37 @@ function rethrowNoOutputAsEmptyResponse(error: unknown): never {
  * (its toolset change busts the prompt cache anyway), this one trails as
  * a user note to keep the cached prefix valid.
  */
-const EMPTY_RESPONSE_NUDGE =
-  "Your previous reply was empty and was not delivered. Answer now from the tool results above; do not re-run tools or mention this notice.";
+const EMPTY_RESPONSE_LEAD = "Your previous reply was empty and was not delivered.";
 
+const EMPTY_RESPONSE_NUDGE = `${EMPTY_RESPONSE_LEAD} Answer now from the tool results above; do not re-run tools or mention this notice.`;
+
+/**
+ * Silence-aware variant of {@link EMPTY_RESPONSE_NUDGE}. When conditional
+ * delivery is on, appending "Answer now…" and only then mentioning the
+ * marker reads as a human asking for a reply — in schedule app-auth runs
+ * (no human present) that reliably produced conversational filler, and
+ * channels received "I now have all the data I need." as the delivered
+ * message. Leading with the marker, and naming the filler shapes as
+ * forbidden, keeps the retry aligned with
+ * {@link CONDITIONAL_DELIVERY_INSTRUCTION}'s contract.
+ *
+ * Still a trailing user note rather than a system note: `extraSystemNote` is
+ * how a chained recovery repeats its own call shape (see
+ * {@link RecoveryRetryCallOptions}), so claiming it here would clobber the
+ * unsupported-tool recovery's note and invalidate the cached prompt prefix.
+ */
 function buildEmptyResponseNudge(emptyDeliveryEnabled: boolean): string {
   if (!emptyDeliveryEnabled) {
     return EMPTY_RESPONSE_NUDGE;
   }
-  return `${EMPTY_RESPONSE_NUDGE} If the current task explicitly requires conditional delivery and there is nothing to report, reply with exactly ${EMPTY_DELIVERY_SENTINEL}.`;
+  return (
+    `${EMPTY_RESPONSE_LEAD} If the current task explicitly makes delivery conditional and ` +
+    `there is nothing new to report, reply with exactly ${EMPTY_DELIVERY_SENTINEL} and no ` +
+    "other text. Otherwise answer from the tool results above with the user-facing response " +
+    "itself. Either way, do not re-run tools, do not mention this notice, and never reply " +
+    "with filler such as an acknowledgement that you have the data or an announcement that a " +
+    "report follows."
+  );
 }
 
 /**
@@ -2516,6 +2539,20 @@ async function handleStepResult(input: {
     result.finishReason !== "tool-calls" &&
     result.toolCalls.length === 0 &&
     hasEmptyDeliverySentinel(resolvedStepOutput);
+  // `resolveAssistantStepText` reads only the *last* assistant message, while
+  // `emitStreamContent` matches against the step's whole text run. On a step
+  // that replied twice — ["Here is the report.", "<eve-empty-delivery/>"] —
+  // that split dropped the earlier, genuinely delivered reply from durable
+  // history along with the marker. Only discard the response wholesale when
+  // the marker message is demonstrably the entire response.
+  //
+  // The two sides still read different strings, so a *near-miss* marker
+  // concatenated with real text is silenced here but delivered there. Closing
+  // that would mean teaching emission about assistant-message boundaries,
+  // which the stream does not carry: it exposes text-part ids, and one
+  // assistant message can span several of them.
+  const soleAssistantResponse =
+    result.response.messages.filter((message) => message.role === "assistant").length <= 1;
   const invalidInputToolErrors = getInvalidToolCallInputErrors({
     toolCalls: result.toolCalls as TypedToolCall<ToolSet>[],
   });
@@ -2527,14 +2564,15 @@ async function handleStepResult(input: {
     ...result.toolCalls.filter(isInvalidToolCall).map((toolCall) => toolCall.toolCallId),
     ...invalidInputToolErrors.map((toolError) => toolError.toolCallId),
   ]);
-  const rawResponseMessages = emptyDelivery
-    ? []
-    : appendMissingToolResultMessages({
-        append: invalidInputToolErrors.map((toolError) =>
-          createToolResultMessagePartFromToolError(toolError),
-        ),
-        responseMessages: result.response.messages,
-      });
+  const rawResponseMessages =
+    emptyDelivery && soleAssistantResponse
+      ? []
+      : appendMissingToolResultMessages({
+          append: invalidInputToolErrors.map((toolError) =>
+            createToolResultMessagePartFromToolError(toolError),
+          ),
+          responseMessages: result.response.messages,
+        });
   const stepOutput = emptyDelivery ? null : resolvedStepOutput;
 
   const providerExecutedOutcomeIds = new Set<string>();
