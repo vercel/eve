@@ -334,17 +334,12 @@ export async function resolveTeam(
  * slug throws so the run stops before any project mutation. When Vercel returns
  * an empty list, validation does not block and the later scoped command
  * surfaces any real scope error itself.
- *
- * `prompter` is accepted so callers can pass it uniformly across the team
- * resolution helpers; it is unused now that an invalid slug throws.
  */
 export async function validateTeam(
-  prompter: Prompter,
   projectRoot: string,
   team: string | undefined,
   options: VercelProjectOperationOptions = {},
 ): Promise<void> {
-  void prompter;
   if (team === undefined) return;
   const teams = await listTeams(projectRoot, options);
   if (teams.length > 0 && !teams.some((entry) => entry.slug === team)) {
@@ -366,7 +361,7 @@ export async function pickTeam(
   options: PickTeamOptions = {},
 ): Promise<string> {
   if (presetTeam !== undefined) {
-    await validateTeam(prompter, projectRoot, presetTeam, options);
+    await validateTeam(projectRoot, presetTeam, options);
     return resolveTeam(projectRoot, presetTeam, options);
   }
   const teams = await withSpinner(prompter, whimsyFor("teams"), () =>

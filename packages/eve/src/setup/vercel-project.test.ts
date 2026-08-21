@@ -1220,25 +1220,22 @@ describe("pickProject selection", () => {
 describe("validateTeam", () => {
   it("throws fast when the slug is absent from a non-empty team list", async () => {
     stubVercel({ teams: [{ name: "Other", slug: "other", current: true }] });
-    const { prompter } = answeringPrompter({});
 
-    await expect(validateTeam(prompter, "/tmp/parent", "missing")).rejects.toThrow(
+    await expect(validateTeam("/tmp/parent", "missing")).rejects.toThrow(
       /Team "missing" was not found/,
     );
   });
 
   it("does not block when the readable team list is empty", async () => {
     stubVercel({ teams: [] });
-    const { prompter } = answeringPrompter({});
 
-    await expect(validateTeam(prompter, "/tmp/parent", "missing")).resolves.toBeUndefined();
+    await expect(validateTeam("/tmp/parent", "missing")).resolves.toBeUndefined();
   });
 
   it("rejects when the team list is unreadable", async () => {
     stubVercel({ teams: undefined });
-    const { prompter } = answeringPrompter({});
 
-    await expect(validateTeam(prompter, "/tmp/parent", "missing")).rejects.toThrow(
+    await expect(validateTeam("/tmp/parent", "missing")).rejects.toThrow(
       /Could not list Vercel teams/,
     );
   });
