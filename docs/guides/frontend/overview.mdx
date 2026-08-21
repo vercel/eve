@@ -276,6 +276,7 @@ const [saved] = useState<SavedEveChat>(() => {
 const agent = useEveAgent({
   initialEvents: saved.events ?? [],
   initialSession: saved.session,
+  resume: saved.session !== undefined,
   onFinish(snapshot) {
     localStorage.setItem(
       "eve-chat",

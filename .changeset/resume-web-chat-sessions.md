@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Add `resume()` to `useEveAgent` and the shared agent store so browser clients can replay a durable session and reconnect to an in-flight turn after a reload. Generated web apps now keep the session ID in the URL and restore the conversation from that route.
+Add declarative `resume: true` and imperative `resume()` support for replaying durable frontend sessions and following in-flight turns. Generated Web Chat apps now keep session IDs in `/s/{sessionId}` URLs, restore conversations on reload, and provide a sessionless `/s` route for starting a new chat.
