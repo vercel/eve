@@ -2,7 +2,7 @@
 
 import type { UserContent } from "ai";
 import { useEveAgent } from "eve/react";
-import { AlertCircleIcon, BrainIcon } from "lucide-react";
+import { AlertCircleIcon, BrainIcon, PlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   Conversation,
@@ -17,6 +17,7 @@ import {
   PromptInputTextarea,
 } from "@/components/ai-elements/prompt-input";
 import { Shimmer } from "@/components/ai-elements/shimmer";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { AgentMessage } from "./agent-message";
 
@@ -117,9 +118,7 @@ export function AgentChat({ sessionId }: { readonly sessionId?: string }) {
   if (isRestoring && agent.events.length === 0) {
     return (
       <main className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-        <header className="flex h-14 shrink-0 items-center justify-center pl-4 pr-2">
-          <span className="truncate text-muted-foreground text-sm">{AGENT_NAME}</span>
-        </header>
+        <ChatHeader />
         <div className="min-h-0 flex-1" />
         <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-6 sm:px-6">{composer}</div>
       </main>
@@ -128,11 +127,7 @@ export function AgentChat({ sessionId }: { readonly sessionId?: string }) {
 
   return (
     <main className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-      {isEmpty ? null : (
-        <header className="flex h-14 shrink-0 items-center justify-center pl-4 pr-2">
-          <span className="truncate text-muted-foreground text-sm">{AGENT_NAME}</span>
-        </header>
-      )}
+      {isEmpty ? null : <ChatHeader />}
 
       {errorMessage ? (
         <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-2 sm:px-6">
@@ -192,6 +187,25 @@ export function AgentChat({ sessionId }: { readonly sessionId?: string }) {
         <div className="w-full">{composer}</div>
       </div>
     </main>
+  );
+}
+
+function ChatHeader() {
+  return (
+    <header className="relative flex h-14 shrink-0 items-center justify-center px-24">
+      <span className="truncate text-muted-foreground text-sm">{AGENT_NAME}</span>
+      <Button
+        aria-label="Start a new chat"
+        className="absolute right-2"
+        onClick={() => window.location.assign("/")}
+        size="sm"
+        type="button"
+        variant="ghost"
+      >
+        <PlusIcon className="size-4" />
+        <span className="hidden sm:inline">New chat</span>
+      </Button>
+    </header>
   );
 }
 
