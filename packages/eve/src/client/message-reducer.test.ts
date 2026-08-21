@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { defaultMessageReducer } from "#client/message-reducer.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import {
+  createActionInputAppendedEvent,
   createActionPartialEvent,
   createActionResultEvent,
   createActionsRequestedEvent,
@@ -17,6 +18,7 @@ import {
   createResultCompletedEvent,
   createStepStartedEvent,
   createTurnCancelledEvent,
+  createTurnFailedEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 
@@ -33,6 +35,113 @@ function reduceServerEvents(
 }
 
 describe("defaultMessageReducer", () => {
+  it("projects streamed tool input and upgrades it to the validated request", () => {
+    const reducer = defaultMessageReducer();
+    let data = reduceServerEvents(reducer, reducer.initial(), [
+      createActionInputAppendedEvent({
+        callId: "call_render",
+        inputTextDelta: "",
+        inputTextSoFar: "",
+        sequence: 1,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_1",
+      }),
+      createActionInputAppendedEvent({
+        callId: "call_render",
+        inputTextDelta: '{"title":"Hel',
+        inputTextSoFar: '{"title":"Hel',
+        sequence: 1,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages[0]?.parts).toContainEqual({
+      input: undefined,
+      inputText: '{"title":"Hel',
+      state: "input-streaming",
+      stepIndex: 0,
+      toolCallId: "call_render",
+      toolMetadata: { eve: { kind: "unknown", name: "render" } },
+      toolName: "render",
+      type: "dynamic-tool",
+    });
+
+    data = reduceServerEvents(reducer, data, [
+      createActionsRequestedEvent({
+        actions: [
+          {
+            callId: "call_render",
+            input: { title: "Hello" },
+            kind: "tool-call",
+            toolName: "render",
+          },
+        ],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages[0]?.parts).toContainEqual({
+      input: { title: "Hello" },
+      state: "input-available",
+      stepIndex: 0,
+      toolCallId: "call_render",
+      toolMetadata: { eve: { inputRequest: undefined, kind: "tool-call", name: "render" } },
+      toolName: "render",
+      type: "dynamic-tool",
+    });
+
+    const settled = data;
+    data = reduceServerEvents(reducer, data, [
+      createActionInputAppendedEvent({
+        callId: "call_render",
+        inputTextDelta: "late",
+        inputTextSoFar: "late",
+        sequence: 1,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_1",
+      }),
+    ]);
+    expect(data).toBe(settled);
+  });
+
+  it("removes an unfinished streamed tool input when the turn is cancelled", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createActionInputAppendedEvent({
+        callId: "call_render",
+        inputTextDelta: "{",
+        inputTextSoFar: "{",
+        sequence: 1,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_1",
+      }),
+      createTurnCancelledEvent({ sequence: 1, turnId: "turn_1" }),
+    ]);
+
+    expect(data.messages[0]?.parts).toEqual([{ type: "step-start" }]);
+  });
+
+  it("does not create an assistant message when a turn fails before streaming", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createTurnFailedEvent({
+        code: "MODEL_FAILED",
+        message: "model failed",
+        sequence: 1,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages).toEqual([]);
+  });
+
   it("replaces tool-generator snapshots and ignores a late partial after the terminal result", () => {
     const reducer = defaultMessageReducer();
     let data = reduceServerEvents(reducer, reducer.initial(), [

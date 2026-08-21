@@ -277,6 +277,108 @@ describe("emitStreamContent empty delivery", () => {
 });
 
 describe("emitStreamContent action requests", () => {
+  it("streams a visible action input lifecycle before the completed request", async () => {
+    const emit = createEmitStub();
+    const tools = new Map<string, HarnessToolDefinition>([
+      [
+        "render",
+        {
+          description: "Render a JSON document.",
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "render",
+        },
+      ],
+    ]);
+
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        { id: "call-render", toolName: "render", type: "tool-input-start" },
+        { delta: '{"title":"Hel', id: "call-render", type: "tool-input-delta" },
+        { delta: 'lo"}', id: "call-render", type: "tool-input-delta" },
+        { id: "call-render", type: "tool-input-end" },
+        {
+          input: { title: "Hello" },
+          toolCallId: "call-render",
+          toolName: "render",
+          type: "tool-call",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      {
+        excludedActionToolNames: new Set(),
+        tools,
+      },
+    );
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    expect(events.map((event) => event.type)).toEqual([
+      "action.input.appended",
+      "action.input.appended",
+      "action.input.appended",
+      "actions.requested",
+    ]);
+    expect(events.slice(1, 3)).toMatchObject([
+      {
+        data: {
+          callId: "call-render",
+          inputTextDelta: '{"title":"Hel',
+          inputTextSoFar: '{"title":"Hel',
+        },
+      },
+      {
+        data: {
+          callId: "call-render",
+          inputTextDelta: 'lo"}',
+          inputTextSoFar: '{"title":"Hello"}',
+        },
+      },
+    ]);
+  });
+
+  it("does not expose streamed input for excluded actions", async () => {
+    const emit = createEmitStub();
+
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        { id: "call-hidden", toolName: "hidden", type: "tool-input-start" },
+        { delta: '{"secret":true}', id: "call-hidden", type: "tool-input-delta" },
+        { id: "call-hidden", type: "tool-input-end" },
+      ] as TextStreamPart<ToolSet>[]),
+      {
+        excludedActionToolNames: new Set(["hidden"]),
+        tools: new Map(),
+      },
+    );
+
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("does not expose streamed input for provider-executed actions", async () => {
+    const emit = createEmitStub();
+
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        {
+          id: "call-provider",
+          providerExecuted: true,
+          toolName: "web_search",
+          type: "tool-input-start",
+        },
+        { delta: '{"query":"eve"}', id: "call-provider", type: "tool-input-delta" },
+        { id: "call-provider", type: "tool-input-end" },
+      ] as TextStreamPart<ToolSet>[]),
+      { excludedActionToolNames: new Set(), tools: new Map() },
+    );
+
+    expect(emit).not.toHaveBeenCalled();
+  });
+
   it("cancels a pending provider action batch when the stream aborts", async () => {
     vi.useFakeTimers();
     const emit = createEmitStub();
@@ -382,6 +484,9 @@ describe("emitStreamContent action requests", () => {
       EMISSION_STATE,
       streamOf([
         { id: "message-1", text: "Checking the release notes.", type: "text-delta" },
+        { id: "call-delegate", toolName: "delegate", type: "tool-input-start" },
+        { delta: '{"task":"research the release"}', id: "call-delegate", type: "tool-input-delta" },
+        { id: "call-delegate", type: "tool-input-end" },
         {
           input: { task: "research the release" },
           toolCallId: "call-delegate",
@@ -400,6 +505,8 @@ describe("emitStreamContent action requests", () => {
     expect(events.map((event) => event.type)).toEqual([
       "message.appended",
       "message.completed",
+      "action.input.appended",
+      "action.input.appended",
       "actions.requested",
     ]);
     expect(events[1]).toMatchObject({

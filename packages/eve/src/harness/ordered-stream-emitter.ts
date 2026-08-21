@@ -1,4 +1,5 @@
 import type {
+  ActionInputAppendedStreamEvent,
   UnstampedMessageStreamEvent,
   MessageAppendedStreamEvent,
   ReasoningAppendedStreamEvent,
@@ -185,6 +186,17 @@ function mergeAdjacentEmissions(
     return true;
   }
 
+  if (left.event.type === "action.input.appended" && right.type === "action.input.appended") {
+    if (left.event.data.callId !== right.data.callId || !sameCoordinates(left.event, right)) {
+      return false;
+    }
+    left.deltaParts ??= [left.event.data.inputTextDelta];
+    left.deltaParts.push(right.data.inputTextDelta);
+    left.event = right;
+    left.messages = messages;
+    return true;
+  }
+
   if (left.event.type === "action.partial" && right.type === "action.partial") {
     if (left.event.data.result.callId !== right.data.result.callId) return false;
     left.event = right;
@@ -198,6 +210,7 @@ function mergeAdjacentEmissions(
 function appendDelta(event: UnstampedMessageStreamEvent): string | undefined {
   if (event.type === "message.appended") return event.data.messageDelta;
   if (event.type === "reasoning.appended") return event.data.reasoningDelta;
+  if (event.type === "action.input.appended") return event.data.inputTextDelta;
   return undefined;
 }
 
@@ -224,12 +237,22 @@ function materializeEvent(emission: PendingEmission): UnstampedMessageStreamEven
     };
   }
 
+  if (emission.event.type === "action.input.appended") {
+    return {
+      ...emission.event,
+      data: {
+        ...emission.event.data,
+        inputTextDelta: emission.deltaParts.join(""),
+      },
+    };
+  }
+
   return emission.event;
 }
 
 function sameCoordinates(
-  left: MessageAppendedStreamEvent | ReasoningAppendedStreamEvent,
-  right: MessageAppendedStreamEvent | ReasoningAppendedStreamEvent,
+  left: ActionInputAppendedStreamEvent | MessageAppendedStreamEvent | ReasoningAppendedStreamEvent,
+  right: ActionInputAppendedStreamEvent | MessageAppendedStreamEvent | ReasoningAppendedStreamEvent,
 ): boolean {
   return (
     left.data.sequence === right.data.sequence &&

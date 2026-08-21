@@ -60,6 +60,7 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `reasoning.completed`     | The finalized reasoning block.                                                                                   |
 | `message.appended`        | An assistant text delta (incremental, with cumulative text so far).                                              |
 | `message.completed`       | A finalized assistant text block.                                                                                |
+| `action.input.appended`   | A tool-input text delta, with the cumulative raw input and tool-call identity.                                   |
 | `result.completed`        | The finalized structured result for a turn that requested an output schema; carries `result`.                    |
 | `compaction.requested`    | Context-window compaction began; carries `modelId`, `sessionId`, `turnId`, `usageInputTokens`.                   |
 | `compaction.completed`    | A compaction checkpoint was written to durable history.                                                          |
@@ -76,7 +77,9 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 
 The optional `data.trace` on session and turn starts contains eve-owned W3C trace coordinates: `traceId`, `spanId`, and `traceFlags`. Use it to correlate stream consumers such as eval reporters with an observability backend. An uninstrumented target omits it.
 
-`reasoning.appended` and `message.appended` stream incremental output as it arrives. When the durable stream writer is busy, eve may coalesce adjacent deltas of the same type; the text remains in source order, and any other event forms an ordering barrier. Each append carries both the new delta and the cumulative text for the current block. The finalized block shows up on `message.completed` and `reasoning.completed`, which is the compatibility path for clients that don't render incremental streaming.
+`reasoning.appended`, `message.appended`, and `action.input.appended` stream incremental output as it arrives. When the durable stream writer is busy, eve may coalesce adjacent deltas of the same type; the text remains in source order, and any other event forms an ordering barrier. Each append carries both the new delta and the cumulative text for the current block. The finalized text and reasoning blocks show up on `message.completed` and `reasoning.completed`, which is the compatibility path for clients that don't render incremental streaming.
+
+`action.input.appended` arrives before the matching `actions.requested` event. It carries `callId`, `toolName`, `inputTextDelta`, and `inputTextSoFar`; the input text may be incomplete JSON. The default client reducer projects it as a `dynamic-tool` part with `state: "input-streaming"` and the cumulative text in `inputText`. `actions.requested` replaces that part with `state: "input-available"` and the validated `input`. Excluded internal actions never publish their input stream.
 
 `action.partial` carries one complete preliminary output snapshot from an authored async-generator tool. A later partial for the same `callId` replaces it, and `action.result` is the final snapshot. When the durable writer is busy, eve may keep only the newest adjacent partial for a call. Treat partials as last-write-wins: a durable step can retry and replay overlapping event runs. Provider-executed tool progress and MCP progress notifications are not projected as `action.partial` events.
 
@@ -111,7 +114,7 @@ Alongside `type` and `data`, every event carries a `meta` envelope:
 
 `meta.id` is stable. eve mints it once, when the event is written to the durable stream, and stores it with the event. Reconnecting from a cursor, rewinding to `startIndex=0`, or replaying a finished session all return the same id for the same event.
 
-`meta.at` has always been there; `meta.id` arrived in stream version 20. Events written by an earlier version are stored with the envelope but no id inside it, so rewinding into the part of a session that ran before you upgraded yields events whose `meta.id` is absent, even though the type says it is always a string. eve passes those events through rather than dropping them, and they cannot be deduplicated. The exposure ends when the sessions that predate your upgrade do.
+`meta.at` has always been there; `meta.id` arrived in stream version 20, and `action.input.appended` arrived in version 24. Events written by an earlier version are stored with the envelope but no id inside it, so rewinding into the part of a session that ran before you upgraded yields events whose `meta.id` is absent, even though the type says it is always a string. eve passes those events through rather than dropping them, and they cannot be deduplicated. The exposure ends when the sessions that predate your upgrade do.
 
 That makes it the key for ingesting a stream into a database without duplicating rows when you re-read it:
 

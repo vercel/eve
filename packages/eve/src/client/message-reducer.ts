@@ -20,12 +20,15 @@ import {
   stringifyUnknown,
   toMessageInputRequest,
 } from "#client/message-action-parts.js";
+import {
+  optimisticUserMessageId,
+  partKey,
+  projectReceivedParts,
+  removeStreamingToolPartsForTurn,
+  upsertMessage,
+} from "#client/message-reducer-primitives.js";
 import type { InputResponse } from "#shared/input.js";
-import type {
-  AuthorizationCompletedStreamEvent,
-  InputResolution,
-  MessageReceivedPart,
-} from "#protocol/message.js";
+import type { AuthorizationCompletedStreamEvent, InputResolution } from "#protocol/message.js";
 
 export type {
   EveAuthorizationChallenge,
@@ -136,6 +139,37 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
           type: "reasoning",
         }),
       );
+
+    case "action.input.appended": {
+      const existing = findToolPart(data, event.data.callId);
+      if (existing !== undefined && existing.state !== "input-streaming") {
+        return data;
+      }
+
+      const nextPart: EveDynamicToolPart = {
+        input: undefined,
+        inputText: event.data.inputTextSoFar,
+        state: "input-streaming",
+        stepIndex: event.data.stepIndex,
+        toolCallId: event.data.callId,
+        toolMetadata: existing?.toolMetadata ?? {
+          eve: {
+            kind: "unknown",
+            name: event.data.toolName,
+          },
+        },
+        toolName: event.data.toolName,
+        type: "dynamic-tool",
+      };
+
+      if (existing !== undefined) {
+        return updateToolPart(data, event.data.callId, nextPart);
+      }
+
+      return updateAssistantMessage(data, event.data.turnId, (message) =>
+        upsertPart(ensureStepStartPart(message, event.data.stepIndex), nextPart),
+      );
+    }
 
     case "actions.requested": {
       let next = data;
@@ -341,7 +375,11 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       return updateAssistantMetadata(data, event.data.turnId, { result: event.data.result });
 
     case "turn.completed":
-      return updateAssistantMetadata(data, event.data.turnId, { status: "complete" });
+      return updateAssistantMessage(data, event.data.turnId, (message) => ({
+        ...message,
+        metadata: { ...message.metadata, status: "complete" },
+        parts: removeStreamingToolParts(message.parts),
+      }));
 
     case "turn.cancelled":
       // Finalize whatever the cancelled turn streamed: no message.completed
@@ -349,20 +387,28 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       return updateAssistantMessage(data, event.data.turnId, (message) => ({
         ...message,
         metadata: { ...message.metadata, status: "complete" },
-        parts: message.parts.map((part) =>
-          (part.type === "text" || part.type === "reasoning") && part.state === "streaming"
-            ? { ...part, state: "done" }
-            : part,
+        parts: removeStreamingToolParts(
+          message.parts.map((part) =>
+            (part.type === "text" || part.type === "reasoning") && part.state === "streaming"
+              ? { ...part, state: "done" }
+              : part,
+          ),
         ),
       }));
 
     case "turn.failed":
+      return removeStreamingToolPartsForTurn(data, event.data.turnId);
+
     case "session.failed":
       return data;
 
     default:
       return data;
   }
+}
+
+function removeStreamingToolParts(parts: readonly EveMessagePart[]): readonly EveMessagePart[] {
+  return parts.filter((part) => part.type !== "dynamic-tool" || part.state !== "input-streaming");
 }
 
 function respondToInputRequest(data: EveMessageData, response: InputResponse): EveMessageData {
@@ -645,55 +691,4 @@ function findToolPartByApprovalId(
     }
   }
   return undefined;
-}
-
-function projectReceivedParts(
-  parts: readonly MessageReceivedPart[] | undefined,
-  message: string,
-): readonly EveMessagePart[] {
-  return (
-    parts?.map((part) =>
-      part.type === "text"
-        ? { state: "done", text: part.text, type: "text" }
-        : {
-            filename: part.filename,
-            mediaType: part.mediaType,
-            size: part.size,
-            type: "file",
-            url: part.url,
-          },
-    ) ?? [{ state: "done", text: message, type: "text" }]
-  );
-}
-
-function partKey(part: EveMessagePart): string {
-  switch (part.type) {
-    case "text":
-      return `text:${part.stepIndex ?? 0}`;
-    case "reasoning":
-      return `reasoning:${part.stepIndex ?? 0}`;
-    case "file":
-      return `file:${part.stepIndex ?? 0}:${part.filename ?? part.url ?? part.mediaType}`;
-    case "step-start":
-      return "step-start";
-    case "authorization":
-      return `authorization:${part.turnId}:${part.stepIndex}:${part.name}`;
-    case "dynamic-tool":
-      return `dynamic-tool:${part.toolCallId}`;
-  }
-}
-
-function upsertMessage(data: EveMessageData, next: EveMessage): EveMessageData {
-  const index = data.messages.findIndex((message) => message.id === next.id);
-  if (index === -1) {
-    return { messages: [...data.messages, next] };
-  }
-
-  return {
-    messages: [...data.messages.slice(0, index), next, ...data.messages.slice(index + 1)],
-  };
-}
-
-function optimisticUserMessageId(submissionId: string): string {
-  return `optimistic:${submissionId}:user`;
 }
