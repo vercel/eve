@@ -714,6 +714,53 @@ describe("ensureChannel", () => {
       packageJsonUpdated: [],
     });
   });
+
+  test("finishes package setup after the registry installs Web Chat", async () => {
+    const projectRoot = await createTempDir();
+    const pagePath = join(projectRoot, "app/page.tsx");
+    const packageJsonPath = join(projectRoot, "package.json");
+    await mkdir(join(projectRoot, "app"), { recursive: true });
+    await writeFile(pagePath, "registry-installed\n", "utf8");
+    await writeFile(
+      packageJsonPath,
+      `${JSON.stringify(
+        {
+          name: "demo",
+          type: "module",
+          scripts: { test: "vitest" },
+          dependencies: { next: "16.3.0-preview.6" },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const result = await ensureChannel({
+      projectRoot,
+      kind: "web",
+      configureVercelServices: false,
+      skipDependencyMutation: true,
+      webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
+    });
+
+    expect(result.action).toBe("overwritten");
+    await expect(readFile(pagePath, "utf8")).resolves.toBe("registry-installed\n");
+    const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+      dependencies: Record<string, string>;
+      scripts: Record<string, string>;
+    };
+    expect(packageJson.dependencies).toEqual({ next: "16.3.0-preview.6" });
+    expect(packageJson).toMatchObject({
+      scripts: {
+        build: "next build",
+        "build:eve": "eve build",
+        dev: "next dev",
+        start: "next start",
+        test: "vitest",
+      },
+    });
+  });
 });
 
 describe("isNextJsProject", () => {
