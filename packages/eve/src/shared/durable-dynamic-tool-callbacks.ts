@@ -2,8 +2,20 @@ import type { Approval } from "#public/definitions/approval.js";
 import { resolveApprovalPolicy } from "#public/definitions/approval.js";
 import type { JsonObject } from "#shared/json.js";
 
+export type DurableDynamicCallbackPhase =
+  | "approvalRequest"
+  | "approvalResponse"
+  | "execute"
+  | "toModelOutput";
+
+export type DurableDynamicCallbackFn = (closure: JsonObject, ...args: never[]) => unknown;
+
+/**
+ * Persisted binding for one callback phase. Identity is
+ * `(toolName, phase)` — carried by the surrounding metadata — so only the
+ * snapshotted closure values persist.
+ */
 export interface DurableDynamicCallbackReference {
-  readonly stepId: string;
   readonly closure: JsonObject;
 }
 
@@ -14,72 +26,104 @@ export interface DurableDynamicToolCallbacks {
   readonly toModelOutput?: DurableDynamicCallbackReference;
 }
 
-const DURABLE_CALLBACK_REFERENCE = Symbol.for("eve:durable-dynamic-callback");
+/** Live descriptor stamped on authored callbacks; `callback` never persists. */
+export interface StampedDurableDynamicCallback {
+  readonly callback: DurableDynamicCallbackFn;
+  readonly closure: JsonObject;
+}
+
+export type LiveDurableDynamicToolCallbacks = Partial<{
+  execute: StampedDurableDynamicCallback;
+  approvalRequest: StampedDurableDynamicCallback;
+  approvalResponse: StampedDurableDynamicCallback;
+  toModelOutput: StampedDurableDynamicCallback;
+}>;
+
+const STAMPED_CALLBACK = Symbol.for("eve:durable-dynamic-callback");
 export const DURABLE_DYNAMIC_TOOL_CALLBACKS = Symbol.for("eve:durable-dynamic-tool-callbacks");
-const STEP_REGISTRY = Symbol.for("@workflow/core//registeredSteps");
 
-type Callback = (...args: never[]) => unknown;
+const REGISTRY = Symbol.for("eve:dynamic-tool-callbacks");
 
-function getStepRegistry(): Map<string, Function> {
-  const global = globalThis as Record<symbol, Map<string, Function> | undefined>;
-  const existing = global[STEP_REGISTRY];
+type Registry = Map<string, Map<DurableDynamicCallbackPhase, DurableDynamicCallbackFn>>;
+
+function getRegistry(): Registry {
+  const global = globalThis as Record<symbol, Registry | undefined>;
+  const existing = global[REGISTRY];
   if (existing !== undefined) return existing;
 
-  const registry = new Map<string, Function>();
-  global[STEP_REGISTRY] = registry;
+  const registry: Registry = new Map();
+  global[REGISTRY] = registry;
   return registry;
 }
 
-/** Registers one module-stable replay entry point. Re-registration replaces the same code-owned id. */
-export function registerDurableDynamicCallback<TArgs extends unknown[], TResult>(
-  stepId: string,
-  callback: (closure: JsonObject, ...args: TArgs) => TResult,
-): void {
-  if (stepId.length === 0) {
-    throw new Error("A durable dynamic callback step id cannot be empty.");
+/**
+ * Binds the current implementation of one tool callback phase. Re-resolution
+ * replaces the binding, so replay after a redeploy runs the latest code.
+ */
+export function registerDurableDynamicCallback(input: {
+  readonly callback: DurableDynamicCallbackFn;
+  readonly phase: DurableDynamicCallbackPhase;
+  readonly toolName: string;
+}): void {
+  const registry = getRegistry();
+  let phases = registry.get(input.toolName);
+  if (phases === undefined) {
+    phases = new Map();
+    registry.set(input.toolName, phases);
   }
-  getStepRegistry().set(stepId, callback);
+  phases.set(input.phase, input.callback);
 }
 
-/** Marks a live callback with the descriptor needed to reconstruct it after a cold start. */
-export function stampDurableDynamicCallback<TCallback extends Callback>(
+export function lookupDurableDynamicCallback(
+  toolName: string,
+  phase: DurableDynamicCallbackPhase,
+): DurableDynamicCallbackFn | undefined {
+  return getRegistry().get(toolName)?.get(phase);
+}
+
+/** Invokes a registered callback with its snapshotted closure and live arguments. */
+export function callDurableDynamicCallback(
+  callback: DurableDynamicCallbackFn,
+  closure: JsonObject,
+  ...args: unknown[]
+): unknown {
+  return (callback as (closure: JsonObject, ...args: unknown[]) => unknown)(closure, ...args);
+}
+
+/** True when any persisted callback of these tools has no registered binding. */
+export function hasUnregisteredDurableDynamicCallbacks(
+  metadata: readonly { callbacks: DurableDynamicToolCallbacks; name: string }[],
+): boolean {
+  return metadata.some((entry) =>
+    (Object.keys(entry.callbacks) as DurableDynamicCallbackPhase[]).some(
+      (phase) => lookupDurableDynamicCallback(entry.name, phase) === undefined,
+    ),
+  );
+}
+
+/** Marks a live callback with the descriptor needed to register it at resolve time. */
+export function stampDurableDynamicCallback<TCallback extends (...args: never[]) => unknown>(
   callback: TCallback,
-  reference: DurableDynamicCallbackReference,
+  descriptor: StampedDurableDynamicCallback,
 ): TCallback {
-  Object.defineProperty(callback, DURABLE_CALLBACK_REFERENCE, {
+  Object.defineProperty(callback, STAMPED_CALLBACK, {
     configurable: true,
-    value: reference,
+    value: descriptor,
   });
   return callback;
 }
 
-/** Creates a live callback backed by the same registered function used during durable replay. */
-export function createDurableDynamicCallback<TArgs extends unknown[], TResult>(input: {
-  readonly closure: JsonObject;
-  readonly callback: (closure: JsonObject, ...args: TArgs) => TResult;
-  readonly stepId: string;
-}): (...args: TArgs) => TResult {
-  registerDurableDynamicCallback(input.stepId, input.callback);
-  const callback = (...args: TArgs) => input.callback(input.closure, ...args);
-  return stampDurableDynamicCallback(callback, {
-    closure: input.closure,
-    stepId: input.stepId,
-  });
-}
-
 export function readDurableDynamicCallback(
   callback: unknown,
-): DurableDynamicCallbackReference | undefined {
+): StampedDurableDynamicCallback | undefined {
   if (typeof callback !== "function") return undefined;
-  return Reflect.get(callback, DURABLE_CALLBACK_REFERENCE) as
-    | DurableDynamicCallbackReference
-    | undefined;
+  return Reflect.get(callback, STAMPED_CALLBACK) as StampedDurableDynamicCallback | undefined;
 }
 
 /** Copies phase-specific callback descriptors onto a branded tool definition. */
 export function stampDurableDynamicToolCallbacks(
   definition: object,
-  callbacks: Partial<DurableDynamicToolCallbacks>,
+  callbacks: LiveDurableDynamicToolCallbacks,
 ): void {
   Object.defineProperty(definition, DURABLE_DYNAMIC_TOOL_CALLBACKS, {
     configurable: true,
@@ -89,9 +133,9 @@ export function stampDurableDynamicToolCallbacks(
 
 export function collectDurableDynamicToolCallbacks(input: {
   readonly approval?: Approval<never>;
-  readonly execute: Callback;
-  readonly toModelOutput?: Callback;
-}): Partial<DurableDynamicToolCallbacks> {
+  readonly execute: (...args: never[]) => unknown;
+  readonly toModelOutput?: (...args: never[]) => unknown;
+}): LiveDurableDynamicToolCallbacks {
   const approvalRequest =
     input.approval === undefined
       ? undefined
@@ -103,12 +147,7 @@ export function collectDurableDynamicToolCallbacks(input: {
 
   const execute = readDurableDynamicCallback(input.execute);
   const toModelOutput = readDurableDynamicCallback(input.toModelOutput);
-  const callbacks: {
-    execute?: DurableDynamicCallbackReference;
-    approvalRequest?: DurableDynamicCallbackReference;
-    approvalResponse?: DurableDynamicCallbackReference;
-    toModelOutput?: DurableDynamicCallbackReference;
-  } = {};
+  const callbacks: LiveDurableDynamicToolCallbacks = {};
   if (execute !== undefined) callbacks.execute = execute;
   if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest;
   if (approvalResponse !== undefined) callbacks.approvalResponse = approvalResponse;
@@ -118,8 +157,8 @@ export function collectDurableDynamicToolCallbacks(input: {
 
 export function readDurableDynamicToolCallbacks(
   definition: object,
-): Partial<DurableDynamicToolCallbacks> | undefined {
+): LiveDurableDynamicToolCallbacks | undefined {
   return (definition as Record<symbol, unknown>)[DURABLE_DYNAMIC_TOOL_CALLBACKS] as
-    | Partial<DurableDynamicToolCallbacks>
+    | LiveDurableDynamicToolCallbacks
     | undefined;
 }

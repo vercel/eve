@@ -37,6 +37,7 @@ import type { InstrumentationStepStartedEventInput } from "#public/instrumentati
 import { defineInstructions } from "#public/definitions/instructions.js";
 import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
 import type { DynamicResolveContext } from "#shared/dynamic-tool-definition.js";
+import { registerDurableDynamicCallback } from "#shared/durable-dynamic-tool-callbacks.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { compactMessages, shouldCompact } from "#harness/compaction.js";
 import { getHarnessEmissionState, isHarnessBetweenTurns } from "#harness/emission.js";
@@ -2175,19 +2176,21 @@ describe("createToolLoopHarness", () => {
       sessionId: "test-session",
       turn: { id: "turn-test", sequence: 0 },
     });
-    const registryKey = Symbol.for("@workflow/core//registeredSteps");
-    const globals = globalThis as Record<symbol, Map<string, Function> | undefined>;
-    const registry = globals[registryKey] ?? new Map<string, Function>();
-    globals[registryKey] = registry;
-    registry.set("test-step-execute", () => ({ ok: true }));
-    registry.set("test-step-approval", (_closure: unknown, approvalContext: unknown) =>
-      approval(approvalContext as never),
-    );
+    registerDurableDynamicCallback({
+      callback: () => ({ ok: true }),
+      phase: "execute",
+      toolName: "tfl__getLineStatus",
+    });
+    registerDurableDynamicCallback({
+      callback: (_closure: unknown, approvalContext: unknown) => approval(approvalContext as never),
+      phase: "approvalRequest",
+      toolName: "tfl__getLineStatus",
+    });
     ctx.set(StepDynamicToolMetadataKey, [
       {
         callbacks: {
-          approvalRequest: { closure: {}, stepId: "test-step-approval" },
-          execute: { closure: {}, stepId: "test-step-execute" },
+          approvalRequest: { closure: {} },
+          execute: { closure: {} },
         },
         description: "Get TfL line status.",
         entryKey: "tfl__getLineStatus",

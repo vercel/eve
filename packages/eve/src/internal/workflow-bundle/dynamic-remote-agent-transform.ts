@@ -1,9 +1,12 @@
+import { createHash } from "node:crypto";
+
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
 import {
   findProperty,
   type DynamicToolAstNode as AstNode,
   walkNode,
 } from "#internal/workflow-bundle/dynamic-tool-ast-references.js";
+import { stableModuleId } from "#internal/workflow-bundle/stable-module-id.js";
 
 interface CredentialsFactoryInfo {
   readonly authPropertySource?: string;
@@ -13,8 +16,6 @@ interface CredentialsFactoryInfo {
   readonly headersPropertySource?: string;
   readonly hoistedName: string;
 }
-
-let transformCounter = 0;
 
 /**
  * Hoists dynamic remote auth and headers into registered factories so durable
@@ -33,12 +34,17 @@ export async function transformDynamicRemoteAgentCredentials(
   }
 
   const ast = (await parseWithNitroRolldownAst(filename, source)) as AstNode;
-  const factories = findCredentialsFactories(source, ast);
+  const factories = findCredentialsFactories(filename, source, ast);
   return factories.length === 0 ? null : applyTransform(source, factories);
 }
 
-function findCredentialsFactories(source: string, ast: AstNode): CredentialsFactoryInfo[] {
+function findCredentialsFactories(
+  filename: string,
+  source: string,
+  ast: AstNode,
+): CredentialsFactoryInfo[] {
   const factories: CredentialsFactoryInfo[] = [];
+  const moduleId = stableModuleId(filename);
 
   walkNode(ast, (node) => {
     if (
@@ -60,13 +66,20 @@ function findCredentialsFactories(source: string, ast: AstNode): CredentialsFact
     if (auth === undefined && headers === undefined) {
       return false;
     }
+    // Content-addressed so the id survives rebuilds and never collides across
+    // modules or transform order; editing the factory itself invalidates it.
+    const callSource = source.slice(node.start, node.end);
+    const hash = createHash("sha256")
+      .update(`${moduleId}//${callSource}`)
+      .digest("hex")
+      .slice(0, 16);
     factories.push({
       authPropertySource: sliceNode(source, auth),
       callEnd: node.end,
-      callSource: source.slice(node.start, node.end),
+      callSource,
       callStart: node.start,
       headersPropertySource: sliceNode(source, headers),
-      hoistedName: `__eve_dynamic_remote_credentials_${transformCounter++}`,
+      hoistedName: `__eve_dynamic_remote_credentials_${hash}`,
     });
     return false;
   });

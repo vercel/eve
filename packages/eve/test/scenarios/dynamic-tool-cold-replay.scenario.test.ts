@@ -196,12 +196,18 @@ describe("dynamic tool cold replay", () => {
           expect(projection.pid).toBe(execute.pid);
         }
 
+        // The fresh process rebinds persisted callbacks by re-running session
+        // resolvers exactly once (identity is the tool name, so the same
+        // definitions re-register); replay itself never depends on it.
         const resolverRunsAfterRestart = (
           await readFile(join(app.appRoot, ".dynamic-resolver-runs"), "utf8")
         )
           .trim()
           .split("\n");
-        expect(resolverRunsAfterRestart).toEqual(resolverRunsBeforeRestart);
+        expect(resolverRunsAfterRestart).toHaveLength(resolverRunsBeforeRestart.length + 1);
+        expect(resolverRunsAfterRestart.slice(0, resolverRunsBeforeRestart.length)).toEqual(
+          resolverRunsBeforeRestart,
+        );
       } finally {
         await server.stop();
       }

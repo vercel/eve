@@ -48,10 +48,7 @@ import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { projectToDurableSession } from "#execution/session.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { defineTool } from "#public/definitions/tool.js";
-import {
-  registerDurableDynamicCallback,
-  stampDurableDynamicCallback,
-} from "#shared/durable-dynamic-tool-callbacks.js";
+import { stampDurableDynamicCallback } from "#shared/durable-dynamic-tool-callbacks.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import { readLatestTaskView, sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
@@ -2621,15 +2618,13 @@ describe("turnStep", () => {
       },
     );
     const approval = stampDurableDynamicCallback(() => "not-applicable" as const, {
+      callback: () => "not-applicable",
       closure: {},
-      stepId: "test:current-tool/approval",
     });
     const execute = stampDurableDynamicCallback(async () => ({ ok: true }), {
+      callback: async () => ({ ok: true }),
       closure: {},
-      stepId: "test:current-tool/execute",
     });
-    registerDurableDynamicCallback("test:current-tool/approval", () => "not-applicable");
-    registerDurableDynamicCallback("test:current-tool/execute", async () => ({ ok: true }));
     const handler = vi.fn(() => {
       lifecycleOrder.push("refresh");
       return {
@@ -2706,7 +2701,7 @@ describe("turnStep", () => {
     ctx.set(SessionDynamicToolMetadataKey, [
       {
         callbacks: {
-          execute: { closure: {}, stepId: "eve:dynamic-tool//old" },
+          execute: { closure: {} },
         },
         description: "Stale deployment tool",
         entryKey: "old_tool",
