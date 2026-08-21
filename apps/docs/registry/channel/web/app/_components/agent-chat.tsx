@@ -76,6 +76,7 @@ export function AgentChat({
   const turnFailure = isBusy ? undefined : getLatestTurnFailure(agent.events);
   const errorMessage = cancellationError ?? agent.error?.message ?? turnFailure;
   const hasConversationContent = sessionless || !isEmpty || errorMessage !== undefined;
+  const activeSessionId = sessionId ?? agent.session?.sessionId;
 
   const requestCancellation = () => {
     setCancellationError(undefined);
@@ -140,7 +141,7 @@ export function AgentChat({
         <Conversation
           className="min-h-0 flex-1"
           scrollRestorationKey={
-            sessionId === undefined ? undefined : `eve:web-chat-scroll:${sessionId}`
+            activeSessionId === undefined ? undefined : `eve:web-chat-scroll:${activeSessionId}`
           }
         >
           <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 py-6 sm:px-6">

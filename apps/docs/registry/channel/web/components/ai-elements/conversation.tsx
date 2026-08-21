@@ -64,26 +64,32 @@ function ConversationScrollRestoration({ storageKey }: { readonly storageKey: st
     }
     restoredKeyRef.current = storageKey;
 
+    const saveNow = () => {
+      const distanceFromBottom =
+        scrollElement.scrollHeight - scrollElement.clientHeight - scrollElement.scrollTop;
+      sessionStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          atBottom: distanceFromBottom <= 2,
+          scrollTop: scrollElement.scrollTop,
+        }),
+      );
+    };
     let frame: number | undefined;
-    const save = () => {
+    const scheduleSave = () => {
       if (frame !== undefined) return;
       frame = requestAnimationFrame(() => {
         frame = undefined;
-        const distanceFromBottom =
-          scrollElement.scrollHeight - scrollElement.clientHeight - scrollElement.scrollTop;
-        sessionStorage.setItem(
-          storageKey,
-          JSON.stringify({
-            atBottom: distanceFromBottom <= 2,
-            scrollTop: scrollElement.scrollTop,
-          }),
-        );
+        saveNow();
       });
     };
-    scrollElement.addEventListener("scroll", save, { passive: true });
+    scrollElement.addEventListener("scroll", scheduleSave, { passive: true });
+    window.addEventListener("pagehide", saveNow);
     return () => {
-      scrollElement.removeEventListener("scroll", save);
+      scrollElement.removeEventListener("scroll", scheduleSave);
+      window.removeEventListener("pagehide", saveNow);
       if (frame !== undefined) cancelAnimationFrame(frame);
+      saveNow();
     };
   }, [scrollRef, scrollToBottom, stopScroll, storageKey]);
 
