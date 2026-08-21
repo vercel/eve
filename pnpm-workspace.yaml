@@ -33,7 +33,6 @@ catalog:
   "@ai-sdk/provider": "^4.0.7"
   "@ai-sdk/provider-utils": "^5.0.25"
   "@opentelemetry/context-async-hooks": "2.6.1"
-  "@opentelemetry/core": "2.6.1"
   "@opentelemetry/sdk-trace-base": "2.6.1"
   "@types/node": "25.9.1"
   "@types/react": "19.2.15"
