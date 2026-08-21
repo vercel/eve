@@ -459,7 +459,7 @@ export interface EnsureChannelOptions {
   /** When false, Web Chat leaves Vercel Services config unwritten for preview-only scaffolds. */
   configureVercelServices?: boolean;
   onWorkspaceRootMutation?: (mutation: WorkspaceRootMutation) => void | Promise<void>;
-  /** Dependencies are already owned and installed by a registry item. */
+  /** Web Chat files and dependencies are already installed by a registry item. */
   skipDependencyMutation?: boolean;
 }
 
@@ -478,7 +478,11 @@ async function ensureWebChannel(
   const packageJsonPath = join(options.projectRoot, "package.json");
   const webEntryPath = join(options.projectRoot, "app/page.tsx");
   const webEntryAlreadyExists = await pathExists(webEntryPath);
-  if (!options.force && (await isNextJsProject(options.projectRoot))) {
+  if (
+    !options.force &&
+    !options.skipDependencyMutation &&
+    (await isNextJsProject(options.projectRoot))
+  ) {
     return {
       kind: "web",
       action: "skipped",
