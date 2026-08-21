@@ -12,7 +12,14 @@ import {
   readParentSessionId,
   readRootSessionId,
 } from "#execution/eve-workflow-attributes.js";
-import { ChannelRequestIdKey } from "#context/keys.js";
+import { AuthKey, ChannelRequestIdKey, InitiatorAuthKey } from "#context/keys.js";
+
+const userAuth = {
+  attributes: { email: "ada@example.com" },
+  authenticator: "slack-webhook",
+  principalId: "slack:T1:U1",
+  principalType: "user",
+};
 
 const slackChannelCtx = {
   "eve.channel": { kind: "slack", state: { team: "T1" } },
@@ -173,6 +180,54 @@ describe("buildSessionAttributes", () => {
 
     expect(attrs["$eve.channel_request_id"]).toBe("req_session");
   });
+
+  it("emits only normalized initiating user identity", () => {
+    const attrs = buildSessionAttributes({
+      inputMessage: "hi",
+      serializedContext: {
+        ...slackChannelCtx,
+        [AuthKey.name]: { ...userAuth, principalId: "slack:T1:U_CURRENT" },
+        [InitiatorAuthKey.name]: userAuth,
+      },
+    });
+
+    expect(attrs).toMatchObject({
+      "$eve.user_id": "slack:T1:U1",
+    });
+    expect(JSON.stringify(attrs)).not.toContain("ada@example.com");
+  });
+
+  it("falls back to current auth when an older context has no initiator slot", () => {
+    const attrs = buildSessionAttributes({
+      inputMessage: "hi",
+      serializedContext: { [AuthKey.name]: userAuth },
+    });
+
+    expect(attrs["$eve.user_id"]).toBe("slack:T1:U1");
+  });
+
+  it("preserves an explicitly anonymous initiator", () => {
+    const attrs = buildSessionAttributes({
+      inputMessage: "hi",
+      serializedContext: {
+        [AuthKey.name]: userAuth,
+        [InitiatorAuthKey.name]: null,
+      },
+    });
+
+    expect(attrs["$eve.user_id"]).toBeUndefined();
+  });
+
+  it("omits non-user principals", () => {
+    const attrs = buildSessionAttributes({
+      inputMessage: "hi",
+      serializedContext: {
+        [AuthKey.name]: { ...userAuth, principalId: "eve:app", principalType: "runtime" },
+      },
+    });
+
+    expect(attrs["$eve.user_id"]).toBeUndefined();
+  });
 });
 
 describe("buildSubagentRootAttributes", () => {
@@ -196,6 +251,17 @@ describe("buildSubagentRootAttributes", () => {
       "$eve.subagent": "subagents/linear",
       "$eve.trigger": "slack",
     });
+  });
+
+  it("does not duplicate user identity onto subagent roots", () => {
+    const attrs = buildSubagentRootAttributes({
+      identity: { nodeId: "subagents/linear" },
+      parentSessionId: "wrun_parent_subagent",
+      rootSessionId: "wrun_top_level_session",
+      serializedContext: { ...subagentChainCtx, [AuthKey.name]: userAuth },
+    });
+
+    expect(attrs["$eve.user_id"]).toBeUndefined();
   });
 
   it("emits the channel request id when present", () => {
@@ -226,6 +292,15 @@ describe("buildTurnAttributes", () => {
       "$eve.parent": "wrun_session_123",
       "$eve.root": "wrun_session_123",
     });
+  });
+
+  it("does not emit user identity", () => {
+    const attrs = buildTurnAttributes({
+      parentSessionId: "wrun_session_123",
+      rootSessionId: "wrun_session_123",
+    });
+
+    expect(attrs["$eve.user_id"]).toBeUndefined();
   });
 
   it("emits the channel request id when present", () => {
