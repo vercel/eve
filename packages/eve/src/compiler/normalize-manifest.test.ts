@@ -304,11 +304,11 @@ describe("compileAgentManifest", () => {
       tools: [createModuleSourceRef({ logicalPath: "tools/web_search.ts" })],
     });
     mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
-    mocks.applicationDefinition.mockResolvedValue(webSearch({ provider: "exa" }));
+    mocks.applicationDefinition.mockResolvedValue(webSearch({ provider: "parallel" }));
 
     const compiled = await compileAgentManifest(manifest);
 
-    expect(compiled.webSearchProvider).toBe("exa");
+    expect(compiled.webSearchProvider).toBe("parallel");
     expect(compiled.tools.map((tool) => tool.name)).toEqual([
       "bash",
       "load_skill",
@@ -324,6 +324,36 @@ describe("compileAgentManifest", () => {
         sourceId: "eve.framework-defaults:tools/connection_search.ts",
       }),
     );
+  });
+
+  it("lets an application tool replace the default web search sentinel", async () => {
+    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
+    mocks.applicationDefinition.mockResolvedValue(
+      defineTool({
+        description: "Search an application index",
+        inputSchema: z.object({ query: z.string() }),
+        execute: () => [],
+      }),
+    );
+
+    const compiled = await compileAgentManifest(
+      createAgentSourceManifest({
+        agentId: "root",
+        agentRoot: "/app/agent",
+        appRoot: "/app",
+        tools: [createModuleSourceRef({ logicalPath: "tools/web_search.ts" })],
+      }),
+    );
+
+    expect(compiled.webSearchProvider).toBeUndefined();
+    expect(compiled.tools).toContainEqual(
+      expect.objectContaining({
+        description: "Search an application index",
+        name: "web_search",
+        sourceId: "tools/web_search.ts",
+      }),
+    );
+    expect(compiled.bindings["eve.framework-defaults:tools/web_search.ts"]).toBeUndefined();
   });
 
   it("compiles framework defaults through ordinary module bindings", async () => {
@@ -345,6 +375,7 @@ describe("compileAgentManifest", () => {
       "web_fetch",
       "write_file",
     ]);
+    expect(compiled.webSearchProvider).toBe("exa");
     expect(compiled.sandbox).toMatchObject({
       logicalPath: "sandbox.ts",
       sourceId: "eve.framework-defaults:sandbox.ts",

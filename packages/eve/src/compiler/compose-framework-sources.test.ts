@@ -46,6 +46,7 @@ describe("composeFrameworkSources", () => {
       "tools/read_file.ts",
       "tools/todo.ts",
       "tools/web_fetch.ts",
+      "tools/web_search.ts",
       "tools/write_file.ts",
     ]);
     expect(result.manifest.sandbox?.logicalPath).toBe("sandbox.ts");
