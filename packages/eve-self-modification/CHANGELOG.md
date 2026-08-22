@@ -1,5 +1,12 @@
 # @eve/self-modification
 
+## 5.0.3
+
+### Patch Changes
+
+- Updated dependencies [ebf94fa]
+  - eve@0.44.3
+
 ## 5.0.2
 
 ### Patch Changes
