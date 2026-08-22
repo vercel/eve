@@ -1,10 +1,6 @@
-import { join, relative } from "node:path";
+import { join } from "node:path";
 
-import {
-  type AgentSourceManifest,
-  createPathDerivedSourceId,
-  type LocalSubagentSourceRef,
-} from "#discover/manifest.js";
+import { type AgentSourceManifest, type LocalSubagentSourceRef } from "#discover/manifest.js";
 import {
   type CompiledAgentNodeManifest,
   type CompiledAgentResources,
@@ -13,7 +9,10 @@ import {
   type CompiledSubagentNode,
   createCompiledSubagentNodeId,
 } from "#compiler/manifest.js";
-import { composeAgentSubagentSources } from "#compiler/normalize-extension.js";
+import {
+  getSubagentSourceOrigin,
+  type AgentSourceOrigin,
+} from "#compiler/compose-agent-sources.js";
 import type { CompiledDynamicSubagentDefinition } from "#compiler/remote-agent-node.js";
 import {
   loadModuleBackedDefinition,
@@ -29,6 +28,7 @@ import {
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import { serializeOutputSchema, type ToolSchemaSource } from "#shared/tool-schema.js";
 import type { JsonObject } from "#shared/json.js";
+import type { ModuleSourceRef } from "#shared/source-ref.js";
 import { isDynamicSentinel, type DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
 import { createFilesystemModuleBindings } from "#compiler/module-binding.js";
 
@@ -51,6 +51,7 @@ export type CompileAgentNodeManifestFn = (
     readonly externalDependencies?: readonly string[];
     readonly allowRootOnlyConfig?: boolean;
     readonly nodeId?: string;
+    readonly sourceOrigin?: AgentSourceOrigin;
     readonly sourcesComposed?: boolean;
   },
 ) => Promise<CompiledAgentNodeManifest>;
@@ -61,6 +62,7 @@ export type CompileAgentResourcesFn = (
   options?: {
     readonly externalDependencies?: readonly string[];
     readonly nodeId?: string;
+    readonly sourceOrigin?: AgentSourceOrigin;
     readonly sourcesComposed?: boolean;
   },
 ) => Promise<CompiledAgentResources>;
@@ -155,16 +157,24 @@ async function compileSubagentDefinition(input: {
     throw new Error(`Subagent "${input.source.logicalPath}" is missing an agent config module.`);
   }
 
-  const configModuleSource = createSubagentConfigModuleSourceRef(
-    input.source,
-    configModule,
-    input.parentAgentRoot,
-  );
+  const configModuleSource = createSubagentConfigModuleSourceRef(input.source, configModule);
+  const sourceOrigin = getSubagentSourceOrigin(input.source);
   const definition = await loadModuleBackedDefinition({
     agentRoot: input.source.manifest.agentRoot,
-    binding: input.context.bindingsByAgentRoot.get(input.source.manifest.agentRoot)?.[
-      configModule.sourceId
-    ],
+    binding:
+      input.context.bindingsByAgentRoot.get(input.source.manifest.agentRoot)?.[
+        configModule.sourceId
+      ] ??
+      (sourceOrigin === undefined
+        ? undefined
+        : {
+            backing: {
+              ...sourceOrigin.backing,
+              sourcePath: join(input.source.manifest.agentRoot, configModule.logicalPath),
+            },
+            logicalPath: configModule.logicalPath,
+            owner: sourceOrigin.owner,
+          }),
     displayPath: configModuleSource.logicalPath,
     externalDependencies: input.externalDependencies,
     kind: "subagent config",
@@ -219,6 +229,7 @@ async function compileSubagent(input: {
   readonly node: CompiledSubagentNode;
 }> {
   const nodeId = createCompiledSubagentNodeId(input.parentNodeId, input.source.sourceId);
+  const sourceOrigin = getSubagentSourceOrigin(input.source);
   const subagentName = input.source.subagentId;
   const sourceManifest = {
     ...input.source.manifest,
@@ -244,6 +255,7 @@ async function compileSubagent(input: {
       allowRootOnlyConfig: false,
       externalDependencies: inheritedExternalDependencies,
       nodeId,
+      sourceOrigin,
     });
     const description = agent.config.description;
     if (!description) {
@@ -261,7 +273,7 @@ async function compileSubagent(input: {
         agent.config.build?.externalDependencies ?? inheritedExternalDependencies,
       parentAgentRoot: input.source.manifest.agentRoot,
       parentNodeId: nodeId,
-      subagents: composeAgentSubagentSources(input.source.manifest),
+      subagents: input.context.manifestsByNodeId.get(nodeId)?.subagents ?? sourceManifest.subagents,
     });
     const compiledAgent = { ...agent, remoteAgents: [...descendants.remoteAgents] };
     return {
@@ -270,14 +282,11 @@ async function compileSubagent(input: {
         ...nodeBase,
         agent: {
           ...compiledAgent,
-          bindings: {
-            ...createFilesystemModuleBindings({
-              agentRoot: compiledAgent.agentRoot,
-              externalDependencies: compiledAgent.config.build?.externalDependencies,
-              manifest: compiledAgent,
-            }),
-            ...compiledAgent.bindings,
-          },
+          bindings: createSubagentNodeBindings({
+            agent: compiledAgent,
+            context: input.context,
+            externalDependencies: compiledAgent.config.build?.externalDependencies,
+          }),
         },
         description,
       },
@@ -287,6 +296,7 @@ async function compileSubagent(input: {
   const resources = await input.compileAgentResources(sourceManifest, input.context, {
     externalDependencies: inheritedExternalDependencies,
     nodeId,
+    sourceOrigin,
   });
   const descendants = await compileSubagentGraph({
     appRoot: input.appRoot,
@@ -296,7 +306,7 @@ async function compileSubagent(input: {
     externalDependencies: inheritedExternalDependencies,
     parentAgentRoot: input.source.manifest.agentRoot,
     parentNodeId: nodeId,
-    subagents: composeAgentSubagentSources(input.source.manifest),
+    subagents: input.context.manifestsByNodeId.get(nodeId)?.subagents ?? sourceManifest.subagents,
   });
   const compiledResources = { ...resources, remoteAgents: [...descendants.remoteAgents] };
   return {
@@ -305,15 +315,12 @@ async function compileSubagent(input: {
       ...nodeBase,
       agent: {
         ...compiledResources,
-        bindings: {
-          ...createFilesystemModuleBindings({
-            additionalRefs: [input.configResolver],
-            agentRoot: compiledResources.agentRoot,
-            externalDependencies: inheritedExternalDependencies,
-            manifest: compiledResources,
-          }),
-          ...compiledResources.bindings,
-        },
+        bindings: createSubagentNodeBindings({
+          additionalRefs: [input.configResolver],
+          agent: compiledResources,
+          context: input.context,
+          externalDependencies: inheritedExternalDependencies,
+        }),
       },
       configResolver: input.configResolver,
     },
@@ -321,6 +328,27 @@ async function compileSubagent(input: {
 }
 
 const compileLocalSubagent = compileSubagent;
+
+function createSubagentNodeBindings(input: {
+  readonly additionalRefs?: readonly ModuleSourceRef[];
+  readonly agent: CompiledAgentNodeManifest | CompiledAgentResources;
+  readonly context: ManifestCompileContext;
+  readonly externalDependencies?: readonly string[];
+}): CompiledAgentResources["bindings"] {
+  const bindings = createFilesystemModuleBindings({
+    additionalRefs: input.additionalRefs,
+    agentRoot: input.agent.agentRoot,
+    externalDependencies: input.externalDependencies,
+    manifest: input.agent,
+  });
+  const composedBindings = input.context.bindingsByAgentRoot.get(input.agent.agentRoot) ?? {};
+  for (const sourceId of Object.keys(bindings)) {
+    if (composedBindings[sourceId] !== undefined) {
+      bindings[sourceId] = composedBindings[sourceId];
+    }
+  }
+  return { ...bindings, ...input.agent.bindings };
+}
 
 function compileRemoteAgent(input: {
   readonly parentAgentRoot: string;
@@ -335,11 +363,7 @@ function compileRemoteAgent(input: {
 
   assertRemoteAgentDefinitionHasNoLocalPackageEntries(input.source);
 
-  const moduleSource = createSubagentConfigModuleSourceRef(
-    input.source,
-    configModule,
-    input.parentAgentRoot,
-  );
+  const moduleSource = createSubagentConfigModuleSourceRef(input.source, configModule);
   const definition = normalizeRemoteAgentDefinition(
     input.value,
     `Expected the remote agent config export "${configModule.exportName ?? "default"}" from "${moduleSource.logicalPath}" to match the public eve shape.`,
@@ -424,21 +448,13 @@ function mergeExternalDependencies(
 function createSubagentConfigModuleSourceRef(
   source: LocalSubagentSourceRef,
   configModule: NonNullable<LocalSubagentSourceRef["manifest"]["configModule"]>,
-  parentAgentRoot: string,
 ): {
   readonly exportName?: string;
   readonly logicalPath: string;
   readonly sourceId: string;
   readonly sourceKind: "module";
 } {
-  const logicalPath = relative(
-    parentAgentRoot,
-    join(source.manifest.agentRoot, configModule.logicalPath),
-  ).replaceAll("\\", "/");
-  const sourceId =
-    configModule.sourceId.startsWith("ext:") || configModule.sourceId.startsWith("ext-override:")
-      ? configModule.sourceId
-      : createPathDerivedSourceId(logicalPath);
+  const logicalPath = source.logicalPath;
   const moduleSource: {
     exportName?: string;
     logicalPath: string;
@@ -446,7 +462,7 @@ function createSubagentConfigModuleSourceRef(
     sourceKind: "module";
   } = {
     logicalPath,
-    sourceId,
+    sourceId: source.sourceId,
     sourceKind: "module",
   };
 

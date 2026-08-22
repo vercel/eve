@@ -2,7 +2,6 @@ import { join, relative, resolve } from "node:path";
 import { discoverConnectionSources } from "#discover/connections.js";
 import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discover/diagnostics.js";
 import {
-  detectRootNamespaceCollisions,
   discoverExtensionMountDeclarations,
   resolveExtensionMounts,
 } from "#discover/discover-agent.js";
@@ -290,19 +289,6 @@ async function discoverLocalSubagentPackage(input: {
     source: input.source,
   });
   diagnostics.push(...extensionsResult.diagnostics);
-  diagnostics.push(
-    ...detectRootNamespaceCollisions({
-      agentRoot: input.subagentRoot,
-      namespaces: extensionsResult.mounts.map((mount) => mount.namespace),
-      sources: [
-        ...toolsResult.sources,
-        ...connectionsResult.connections,
-        ...skillsResult.skills,
-        ...subagentsResult.subagents,
-      ],
-    }),
-  );
-
   const resolvedExtensions = await resolveExtensionMounts({
     agentRoot: input.subagentRoot,
     appRoot: input.appRoot,

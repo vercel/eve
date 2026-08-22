@@ -112,6 +112,8 @@ function createContext(
 ): ManifestCompileContext {
   return {
     bindingsByAgentRoot: new Map(),
+    compositionsByNodeId: new Map(),
+    manifestsByNodeId: new Map(),
     modelCatalog,
     moduleLoader: createAgentModuleNamespaceLoader(),
   };

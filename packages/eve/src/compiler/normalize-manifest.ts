@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import { mountRefNamespace, packageStateNamespace } from "#discover/extensions.js";
 import {
@@ -22,10 +24,6 @@ import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog
 import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
 import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
-import {
-  composeAgentSubagentSources,
-  compileExtensionContributions,
-} from "#compiler/normalize-extension.js";
 import type {
   ManifestCompileContext,
   ModuleBackedDefinitionLoadOptions,
@@ -37,8 +35,16 @@ import { compileScheduleDefinition } from "#compiler/normalize-schedule.js";
 import { compileSkillSource } from "#compiler/normalize-skill.js";
 import { compileSubagentGraph } from "#compiler/normalize-subagent.js";
 import { compileToolEntry } from "#compiler/normalize-tool.js";
-import { createFilesystemModuleBindings } from "#compiler/module-binding.js";
-import { composeFrameworkSources } from "#compiler/compose-framework-sources.js";
+import {
+  createFilesystemModuleBindings,
+  type CompiledModuleBinding,
+} from "#compiler/module-binding.js";
+import type { AgentSourceLayer } from "#compiler/agent-module-candidate.js";
+import {
+  composeAgentSources,
+  type AgentSourceOrigin,
+  type ComposedAgentSources,
+} from "#compiler/compose-agent-sources.js";
 import { frameworkAgentSourceRegistry } from "#framework-sources/registry.js";
 import { createAgentModuleNamespaceLoader } from "#compiler/module-namespace-loader.js";
 
@@ -50,20 +56,15 @@ export async function compileAgentManifest(
 ): Promise<CompiledAgentManifest> {
   const context: ManifestCompileContext = {
     bindingsByAgentRoot: new Map(),
+    compositionsByNodeId: new Map(),
+    manifestsByNodeId: new Map(),
     modelCatalog: createCompiledRuntimeModelCatalogLoader(manifest.appRoot),
     moduleLoader: createAgentModuleNamespaceLoader({ registry: frameworkAgentSourceRegistry }),
   };
-  const rootSources = composeFrameworkSources({
-    isRoot: true,
-    manifest,
+  const compiledNode = await compileAgentNodeManifest(manifest, context, {
     nodeId: ROOT_COMPILED_AGENT_NODE_ID,
-    registry: frameworkAgentSourceRegistry,
   });
-  context.bindingsByAgentRoot.set(manifest.agentRoot, rootSources.bindings);
-  const compiledNode = await compileAgentNodeManifest(rootSources.manifest, context, {
-    nodeId: ROOT_COMPILED_AGENT_NODE_ID,
-    sourcesComposed: true,
-  });
+  const rootSources = context.manifestsByNodeId.get(ROOT_COMPILED_AGENT_NODE_ID) ?? manifest;
   const subagentGraph = await compileSubagentGraph({
     appRoot: manifest.appRoot,
     compileAgentNodeManifest,
@@ -72,7 +73,7 @@ export async function compileAgentManifest(
     externalDependencies: compiledNode.config.build?.externalDependencies ?? [],
     parentAgentRoot: manifest.agentRoot,
     parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
-    subagents: composeAgentSubagentSources(rootSources.manifest),
+    subagents: rootSources.subagents,
   });
 
   const backgroundTool = [compiledNode, ...subagentGraph.nodes.map((node) => node.agent)]
@@ -109,19 +110,11 @@ async function compileAgentNodeManifest(
     readonly externalDependencies?: readonly string[];
     readonly allowRootOnlyConfig?: boolean;
     readonly nodeId?: string;
+    readonly sourceOrigin?: AgentSourceOrigin;
     readonly sourcesComposed?: boolean;
   } = {},
 ): Promise<CompiledAgentNodeManifest> {
-  const sources = options.sourcesComposed
-    ? { bindings: context.bindingsByAgentRoot.get(manifest.agentRoot) ?? {}, manifest }
-    : composeFrameworkSources({
-        isRoot: false,
-        manifest,
-        nodeId: options.nodeId ?? manifest.agentId,
-        registry: frameworkAgentSourceRegistry,
-      });
-  manifest = sources.manifest;
-  context.bindingsByAgentRoot.set(manifest.agentRoot, sources.bindings);
+  const nodeId = options.nodeId ?? manifest.agentId;
   const rawConfig = Object.hasOwn(options, "agentConfigDefinition")
     ? await compileAgentConfig(manifest, context, {
         definition: options.agentConfigDefinition,
@@ -152,9 +145,24 @@ async function compileAgentNodeManifest(
             externalDependencies,
           },
         };
+  const sources = options.sourcesComposed
+    ? getComposedSources(manifest, context, nodeId)
+    : composeAgentSources({
+        externalDependencies,
+        isRoot: nodeId === ROOT_COMPILED_AGENT_NODE_ID,
+        manifest,
+        nodeId,
+        origin: options.sourceOrigin,
+        registry: frameworkAgentSourceRegistry,
+      });
+  manifest = sources.manifest;
+  const bindings = bindOriginConfigModule(sources.bindings, manifest, options.sourceOrigin);
+  context.bindingsByAgentRoot.set(manifest.agentRoot, bindings);
+  context.compositionsByNodeId.set(nodeId, sources.composition);
+  context.manifestsByNodeId.set(nodeId, manifest);
   const resources = await compileAgentResources(manifest, context, {
     externalDependencies,
-    nodeId: options.nodeId,
+    nodeId,
     sourcesComposed: true,
   });
   const compiledNode = createCompiledAgentNodeManifest({ ...resources, config });
@@ -170,19 +178,25 @@ async function compileAgentResources(
   options: {
     readonly externalDependencies?: readonly string[];
     readonly nodeId?: string;
+    readonly sourceOrigin?: AgentSourceOrigin;
     readonly sourcesComposed?: boolean;
   } = {},
 ): Promise<CompiledAgentResources> {
+  const nodeId = options.nodeId ?? manifest.agentId;
   const sources = options.sourcesComposed
-    ? { bindings: context.bindingsByAgentRoot.get(manifest.agentRoot) ?? {}, manifest }
-    : composeFrameworkSources({
-        isRoot: false,
+    ? getComposedSources(manifest, context, nodeId)
+    : composeAgentSources({
+        externalDependencies: options.externalDependencies,
+        isRoot: nodeId === ROOT_COMPILED_AGENT_NODE_ID,
         manifest,
-        nodeId: options.nodeId ?? manifest.agentId,
+        nodeId,
+        origin: options.sourceOrigin,
         registry: frameworkAgentSourceRegistry,
       });
   manifest = sources.manifest;
   context.bindingsByAgentRoot.set(manifest.agentRoot, sources.bindings);
+  context.compositionsByNodeId.set(nodeId, sources.composition);
+  context.manifestsByNodeId.set(nodeId, manifest);
   const externalDependencies = [...(options.externalDependencies ?? [])];
   const loadOptions = (sourceId: string): ModuleBackedDefinitionLoadOptions => ({
     binding: sources.bindings[sourceId],
@@ -190,9 +204,14 @@ async function compileAgentResources(
     moduleLoader: context.moduleLoader,
   });
   const compiledToolEntries = await Promise.all(
-    manifest.tools.map((toolSource) =>
-      compileToolEntry(manifest.agentRoot, toolSource, loadOptions(toolSource.sourceId)),
-    ),
+    manifest.tools.map(async (toolSource) => ({
+      entry: await compileToolEntry(
+        manifest.agentRoot,
+        toolSource,
+        loadOptions(toolSource.sourceId),
+      ),
+      source: toolSource,
+    })),
   );
   const tools: CompiledToolDefinition[] = [];
   const dynamicTools: CompiledDynamicToolDefinition[] = [];
@@ -200,7 +219,9 @@ async function compileAgentResources(
   let workflowTool: CompiledWorkflowToolDefinition | undefined;
   let webSearchProvider: WebSearchProvider | undefined;
 
-  for (const entry of compiledToolEntries) {
+  for (const { entry, source } of compiledToolEntries) {
+    const sourceComposition = findSourceComposition(sources, source.sourceId);
+    assertExtensionToolPolicy(entry.kind, source.logicalPath, sourceComposition?.winner.layer);
     if (entry.kind === "tool") {
       tools.push(entry.definition);
     } else if (entry.kind === "dynamic-tool") {
@@ -210,24 +231,34 @@ async function compileAgentResources(
     } else if (entry.kind === "web-search-tool") {
       webSearchProvider = entry.provider;
     } else {
-      disabledFrameworkTools.push(entry.name);
+      const disabled = validateDisableTarget(source.logicalPath, sourceComposition);
+      if (disabled.owner.kind === "framework") disabledFrameworkTools.push(entry.name);
     }
   }
 
   const compiledChannelResults = await Promise.all(
-    manifest.channels.map((channelSource) =>
-      compileChannelDefinition(
+    manifest.channels.map(async (channelSource) => ({
+      entries: await compileChannelDefinition(
         manifest.agentRoot,
         channelSource,
         loadOptions(channelSource.sourceId),
       ),
-    ),
+      source: channelSource,
+    })),
   );
 
   // compileChannelDefinition returns one entry for a disabled-channel
   // sentinel or an array of entries (one per route) for an authored
   // CompiledChannel. Flatten so the manifest holds a single channel list.
-  const compiledChannels = compiledChannelResults.flat();
+  const compiledChannels = compiledChannelResults.flatMap(({ entries, source }) => {
+    const flattened = Array.isArray(entries) ? entries : [entries];
+    if (flattened[0]?.kind !== "disabled") return flattened;
+    const disabled = validateDisableTarget(
+      source.logicalPath,
+      findSourceComposition(sources, source.sourceId),
+    );
+    return disabled.owner.kind === "framework" ? flattened : [];
+  });
 
   const compiledSkillEntries = await Promise.all(
     manifest.skills.map((skillSource) =>
@@ -281,56 +312,6 @@ async function compileAgentResources(
     ),
   );
 
-  // Sorted by namespace so first-registration-wins dedup is deterministic when
-  // two extensions contribute the same composed name.
-  const toolNames = new Set(tools.map((tool) => tool.name));
-  const dynamicToolSlugs = new Set(dynamicTools.map((tool) => tool.slug));
-  const connectionNames = new Set(connections.map((connection) => connection.connectionName));
-  const skillNames = new Set(skills.map((skill) => skill.name));
-  const extensionInstructions: CompiledInstructionsDefinition[] = [];
-  for (const mount of [...manifest.resolvedExtensions].sort((left, right) =>
-    left.namespace.localeCompare(right.namespace),
-  )) {
-    const contributions = await compileExtensionContributions({
-      mount,
-      context,
-      consumerAgentRoot: manifest.agentRoot,
-      externalDependencies,
-    });
-    compiledChannels.push(...contributions.channels);
-    for (const tool of contributions.tools) {
-      if (!toolNames.has(tool.name)) {
-        toolNames.add(tool.name);
-        tools.push(tool);
-      }
-    }
-    for (const tool of contributions.dynamicTools) {
-      if (!dynamicToolSlugs.has(tool.slug)) {
-        dynamicToolSlugs.add(tool.slug);
-        dynamicTools.push(tool);
-      }
-    }
-    for (const connection of contributions.connections) {
-      if (!connectionNames.has(connection.connectionName)) {
-        connectionNames.add(connection.connectionName);
-        connections.push(connection);
-      }
-    }
-    for (const skill of contributions.skills) {
-      if (!skillNames.has(skill.name)) {
-        skillNames.add(skill.name);
-        skills.push(skill);
-      }
-    }
-    schedules.push(...contributions.schedules);
-    hooks.push(...contributions.hooks);
-    dynamicSkills.push(...contributions.dynamicSkills);
-    dynamicInstructions.push(...contributions.dynamicInstructions);
-    extensionInstructions.push(...contributions.instructions);
-  }
-
-  const instructions = [...staticInstructions, ...extensionInstructions];
-
   const resources = createCompiledAgentResources({
     agentRoot: manifest.agentRoot,
     appRoot: manifest.appRoot,
@@ -359,7 +340,7 @@ async function compileAgentResources(
     schedules,
     dynamicInstructions,
     skills,
-    instructions,
+    instructions: staticInstructions,
     tools,
   });
   return {
@@ -373,14 +354,18 @@ function createNodeBindings(
   context: ManifestCompileContext,
   externalDependencies?: readonly string[],
 ): CompiledAgentResources["bindings"] {
-  return {
-    ...createFilesystemModuleBindings({
-      agentRoot: manifest.agentRoot,
-      externalDependencies,
-      manifest,
-    }),
-    ...context.bindingsByAgentRoot.get(manifest.agentRoot),
-  };
+  const bindings = createFilesystemModuleBindings({
+    agentRoot: manifest.agentRoot,
+    externalDependencies,
+    manifest,
+  });
+  const composedBindings = context.bindingsByAgentRoot.get(manifest.agentRoot) ?? {};
+  for (const sourceId of Object.keys(bindings)) {
+    if (composedBindings[sourceId] !== undefined) {
+      bindings[sourceId] = composedBindings[sourceId];
+    }
+  }
+  return bindings;
 }
 
 function compileExtensionMounts(manifest: AgentSourceManifest): CompiledExtensionMount[] {
@@ -412,4 +397,90 @@ function mergeExternalDependencies(
   }
 
   return [...dependencies];
+}
+
+function getComposedSources(
+  manifest: AgentSourceManifest,
+  context: ManifestCompileContext,
+  nodeId: string,
+): ComposedAgentSources {
+  const composition = context.compositionsByNodeId.get(nodeId);
+  if (composition === undefined) {
+    throw new Error(`Agent node "${nodeId}" has no composed source graph.`);
+  }
+  return {
+    bindings: context.bindingsByAgentRoot.get(manifest.agentRoot) ?? {},
+    composition,
+    manifest,
+  };
+}
+
+function findSourceComposition(sources: ComposedAgentSources, sourceId: string) {
+  return sources.composition.entries.find((entry) => entry.winner.sourceId === sourceId);
+}
+
+function validateDisableTarget(
+  logicalPath: string,
+  composition: ReturnType<typeof findSourceComposition>,
+) {
+  if (composition === undefined) {
+    throw new Error(`Cannot validate the disable sentinel at "${logicalPath}".`);
+  }
+  const winner = composition.winner;
+  if (winner.layer === "extension-package") {
+    throw new Error(
+      `The extension source "${logicalPath}" exports a disable sentinel, but extension packages cannot disable lower sources.`,
+    );
+  }
+  const target = composition.candidates.at(-2);
+  if (target === undefined) {
+    throw new Error(
+      `The source "${logicalPath}" exports a disable sentinel, but no lower-precedence source occupies that slot.`,
+    );
+  }
+  if (winner.layer === "extension-override" && target.layer !== "extension-package") {
+    throw new Error(
+      `The extension override "${logicalPath}" exports a disable sentinel, but its extension package contributes no source at that slot.`,
+    );
+  }
+  return target;
+}
+
+function assertExtensionToolPolicy(
+  kind: "disabled" | "dynamic-tool" | "tool" | "web-search-tool" | "workflow-tool",
+  logicalPath: string,
+  layer: AgentSourceLayer | undefined,
+): void {
+  if (layer !== "extension-package" && layer !== "extension-override") return;
+  const role = layer === "extension-package" ? "extension package" : "extension override";
+  if (kind === "workflow-tool") {
+    throw new Error(
+      `The ${role} source "${logicalPath}" enables Workflow, but Workflow is owned by the consuming agent.`,
+    );
+  }
+  if (kind === "web-search-tool") {
+    throw new Error(
+      `The ${role} source "${logicalPath}" configures web search, but its provider is owned by the consuming agent.`,
+    );
+  }
+}
+
+function bindOriginConfigModule(
+  bindings: Readonly<Record<string, CompiledModuleBinding>>,
+  manifest: AgentSourceManifest,
+  origin: AgentSourceOrigin | undefined,
+): Readonly<Record<string, CompiledModuleBinding>> {
+  if (origin === undefined || manifest.configModule === undefined) return bindings;
+  const source = manifest.configModule;
+  return {
+    ...bindings,
+    [source.sourceId]: {
+      backing: {
+        ...origin.backing,
+        sourcePath: resolve(manifest.agentRoot, source.logicalPath),
+      },
+      logicalPath: source.logicalPath,
+      owner: origin.owner,
+    },
+  };
 }

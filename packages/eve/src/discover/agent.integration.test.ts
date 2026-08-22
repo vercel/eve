@@ -14,7 +14,6 @@ import {
   DISCOVER_EXTENSION_MOUNT_AMBIGUOUS,
   DISCOVER_EXTENSION_MOUNT_MISSING_DECLARATION,
   DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
-  DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT,
 } from "#discover/extensions.js";
 import {
   DISCOVER_DEPRECATED_SYSTEM_SLOT,
@@ -976,7 +975,7 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.resolvedExtensions).toEqual([]);
   });
 
-  it("rejects agent-root contributions that override a mounted extension's namespace", async () => {
+  it("allows agent-root contributions to replace a mounted extension's final slot", async () => {
     const project = buildMemoryAgentProject({
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
@@ -988,8 +987,6 @@ describe("discoverAgent (memory)", () => {
       },
       agentFiles: {
         "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
-        // A root tool using the mounted `crm__` prefix would shadow the
-        // extension from outside its mount directory.
         "tools/crm__search.ts": "export default {};\n",
         "subagents/crm__reviewer.ts": "export default {};\n",
         "instructions.md": "You are a precise assistant.",
@@ -1002,11 +999,13 @@ describe("discoverAgent (memory)", () => {
       source: project.source,
     });
 
-    const collisions = result.diagnostics.filter(
-      (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT,
+    expect(result.diagnostics).toEqual([]);
+    expect(result.manifest.tools.map((source) => source.logicalPath)).toContain(
+      "tools/crm__search.ts",
     );
-    expect(collisions).toHaveLength(2);
-    expect(collisions[0]?.message).toContain("extensions/crm/");
+    expect(result.manifest.subagents.map((source) => source.logicalPath)).toContain(
+      "subagents/crm__reviewer.ts",
+    );
   });
 
   it("rejects a mounted extension that requires an unsupported capability version", async () => {
@@ -1176,11 +1175,7 @@ describe("discoverAgent (memory)", () => {
       source: project.source,
     });
 
-    expect(
-      result.diagnostics.some(
-        (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT,
-      ),
-    ).toBe(false);
+    expect(result.diagnostics).toEqual([]);
   });
 
   it("rejects an extension distribution without generated compatibility metadata", async () => {

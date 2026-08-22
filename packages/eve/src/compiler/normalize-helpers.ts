@@ -9,6 +9,8 @@ import { toErrorMessage } from "#shared/errors.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { CompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
 import type { CompiledModuleBinding } from "#compiler/module-binding.js";
+import type { AgentModuleComposition } from "#compiler/compose-agent-module-candidates.js";
+import type { AgentSourceManifest } from "#discover/manifest.js";
 import {
   createAgentModuleNamespaceLoader,
   type AgentModuleNamespaceLoader,
@@ -26,6 +28,8 @@ const SANDBOX_PARENT_DEFINITION_MARKER = Symbol.for("eve.sandbox-parent-definiti
  */
 export interface ManifestCompileContext {
   readonly bindingsByAgentRoot: Map<string, Readonly<Record<string, CompiledModuleBinding>>>;
+  readonly compositionsByNodeId: Map<string, AgentModuleComposition>;
+  readonly manifestsByNodeId: Map<string, AgentSourceManifest>;
   readonly modelCatalog: CompiledRuntimeModelCatalogLoader;
   readonly moduleLoader: AgentModuleNamespaceLoader;
 }
