@@ -247,7 +247,7 @@ async function compileAgentResources(
         frameworkLoadSkill = true;
       }
     } else if (entry.kind === "dynamic-tool") {
-      dynamicTools.push(entry.definition);
+      dynamicTools.push(withExtensionNamespace(entry.definition, sourceComposition));
     } else if (entry.kind === "workflow-tool") {
       workflowTool = { maxSubagents: entry.maxSubagents };
     } else if (entry.kind === "web-search-tool") {
@@ -285,18 +285,25 @@ async function compileAgentResources(
   });
 
   const compiledSkillEntries = await Promise.all(
-    manifest.skills.map((skillSource) =>
-      compileSkillSource(manifest.agentRoot, skillSource, loadOptions(skillSource.sourceId)),
-    ),
+    manifest.skills.map(async (skillSource) => ({
+      entry: await compileSkillSource(
+        manifest.agentRoot,
+        skillSource,
+        loadOptions(skillSource.sourceId),
+      ),
+      source: skillSource,
+    })),
   );
   const skills: CompiledSkillDefinition[] = [];
   const dynamicSkills: CompiledDynamicSkillDefinition[] = [];
 
-  for (const entry of compiledSkillEntries) {
+  for (const { entry, source } of compiledSkillEntries) {
     if (entry.kind === "skill") {
       skills.push(entry.definition);
     } else {
-      dynamicSkills.push(entry.definition);
+      dynamicSkills.push(
+        withExtensionNamespace(entry.definition, findSourceComposition(sources, source.sourceId)),
+      );
     }
   }
 
@@ -451,6 +458,14 @@ function getComposedSources(
 
 function findSourceComposition(sources: ComposedAgentSources, sourceId: string) {
   return sources.composition.entries.find((entry) => entry.winner.sourceId === sourceId);
+}
+
+function withExtensionNamespace<T extends { readonly extensionNamespace?: string }>(
+  definition: T,
+  composition: ReturnType<typeof findSourceComposition>,
+): T {
+  const extensionNamespace = composition?.winner.extensionNamespace;
+  return extensionNamespace === undefined ? definition : { ...definition, extensionNamespace };
 }
 
 function validateDisableTarget(

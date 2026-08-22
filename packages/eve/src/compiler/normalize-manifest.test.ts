@@ -205,6 +205,59 @@ describe("compileAgentManifest", () => {
     });
   });
 
+  it("preserves the mount namespace on extension dynamic tool and skill resolvers", async () => {
+    const extensionManifest = createAgentSourceManifest({
+      agentId: "toolkit-extension",
+      agentRoot: "/packages/toolkit/dist/extension",
+      appRoot: "/packages/toolkit",
+      tools: [createModuleSourceRef({ logicalPath: "tools/forecast.ts" })],
+    });
+    const overrides = createAgentSourceManifest({
+      agentId: "toolkit-overrides",
+      agentRoot: "/app/agent/extensions/toolkit",
+      appRoot: "/app",
+      skills: [createModuleSourceRef({ logicalPath: "skills/playbooks.ts" })],
+    });
+    const manifest = createAgentSourceManifest({
+      agentId: "root",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      resolvedExtensions: [
+        {
+          namespace: "toolkit",
+          specifier: "toolkit-extension",
+          packageName: "toolkit-extension",
+          packageRoot: "/packages/toolkit",
+          sourceRoot: "/packages/toolkit/dist/extension",
+          manifest: extensionManifest,
+          overrides,
+          externalDependencies: [],
+        },
+      ],
+    });
+    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
+    mocks.applicationDefinition.mockResolvedValue(
+      defineDynamic({ events: { "session.started": () => null } }),
+    );
+
+    const compiled = await compileAgentManifest(manifest);
+
+    expect(compiled.dynamicTools).toContainEqual(
+      expect.objectContaining({
+        extensionNamespace: "toolkit",
+        logicalPath: "tools/toolkit__forecast.ts",
+        slug: "toolkit__forecast",
+      }),
+    );
+    expect(compiled.dynamicSkills).toContainEqual(
+      expect.objectContaining({
+        extensionNamespace: "toolkit",
+        logicalPath: "skills/toolkit__playbooks.ts",
+        slug: "toolkit__playbooks",
+      }),
+    );
+  });
+
   it("rejects background-task configuration on subagents", async () => {
     const subagentManifest = createAgentSourceManifest({
       agentId: "research",

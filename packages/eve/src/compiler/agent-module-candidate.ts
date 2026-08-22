@@ -8,6 +8,7 @@ export type AgentSourceLayer =
 
 export interface AgentModuleCandidate {
   readonly backing: CompiledModuleBacking;
+  readonly extensionNamespace?: string;
   readonly layer: AgentSourceLayer;
   readonly logicalPath: string;
   readonly nodeId: string;

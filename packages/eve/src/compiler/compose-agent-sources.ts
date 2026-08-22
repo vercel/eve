@@ -44,6 +44,7 @@ type ComposableSlot =
 
 export interface AgentSourceOrigin {
   readonly backing: Omit<Extract<CompiledModuleBacking, { kind: "filesystem" }>, "sourcePath">;
+  readonly extensionNamespace?: string;
   readonly layer: Exclude<AgentSourceLayer, "framework-default">;
   readonly owner: AgentSourceOwner;
   readonly sourceIdPrefix?: string;
@@ -184,6 +185,7 @@ function createExtensionCandidates(
         extensionScope,
         kind: "filesystem",
       },
+      extensionNamespace: mount.namespace,
       layer: "extension-package",
       owner: {
         kind: "extension",
@@ -206,6 +208,7 @@ function createExtensionCandidates(
           externalDependencies: [...externalDependencies],
           kind: "filesystem",
         },
+        extensionNamespace: mount.namespace,
         layer: "extension-override",
         owner: { kind: "application" },
         sourceIdPrefix: `ext-override:${mount.namespace}`,
@@ -245,6 +248,9 @@ function createManifestCandidates(input: {
     return {
       candidate: {
         backing: { ...input.origin.backing, sourcePath },
+        ...(input.origin.extensionNamespace === undefined
+          ? {}
+          : { extensionNamespace: input.origin.extensionNamespace }),
         layer: input.origin.layer,
         logicalPath,
         nodeId: input.nodeId,
