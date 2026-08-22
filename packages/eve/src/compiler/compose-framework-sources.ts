@@ -5,7 +5,7 @@ import type { AgentSourceRegistry } from "#compiler/agent-source-registry.js";
 import { composeAgentModuleCandidates } from "#compiler/compose-agent-module-candidates.js";
 import type { CompiledModuleBinding } from "#compiler/module-binding.js";
 import { createProgrammaticModuleCandidates } from "#compiler/programmatic-module-candidates.js";
-import type { AgentSourceManifest, ToolSourceRef } from "#discover/manifest.js";
+import type { AgentSourceManifest, ChannelSourceRef, ToolSourceRef } from "#discover/manifest.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 
 export interface ComposedFrameworkSources {
@@ -20,6 +20,7 @@ export function composeFrameworkSources(input: {
   readonly registry: AgentSourceRegistry;
 }): ComposedFrameworkSources {
   const applicationRefs = [
+    ...input.manifest.channels,
     ...input.manifest.tools,
     ...(input.manifest.sandbox === null ? [] : [input.manifest.sandbox]),
   ];
@@ -32,7 +33,9 @@ export function composeFrameworkSources(input: {
     registry: input.registry,
   }).filter(
     (candidate) =>
-      candidate.logicalPath === "sandbox.ts" || candidate.logicalPath.startsWith("tools/"),
+      candidate.logicalPath.startsWith("channels/") ||
+      candidate.logicalPath === "sandbox.ts" ||
+      candidate.logicalPath.startsWith("tools/"),
   );
   const composition = composeAgentModuleCandidates([
     ...frameworkCandidates,
@@ -40,6 +43,7 @@ export function composeFrameworkSources(input: {
   ]);
   const refsBySourceId = new Map(applicationRefs.map((source) => [source.sourceId, source]));
   const bindings: Record<string, CompiledModuleBinding> = {};
+  const channels: ChannelSourceRef[] = [];
   const tools: ToolSourceRef[] = [];
   let sandbox: ModuleSourceRef | null = null;
 
@@ -53,6 +57,7 @@ export function composeFrameworkSources(input: {
         owner: winner.owner,
       };
     }
+    if (winner.logicalPath.startsWith("channels/")) channels.push(source);
     if (winner.logicalPath.startsWith("tools/")) tools.push(source);
     if (winner.logicalPath === "sandbox.ts" || winner.logicalPath.startsWith("sandbox/")) {
       sandbox = source;
@@ -61,7 +66,7 @@ export function composeFrameworkSources(input: {
 
   return {
     bindings,
-    manifest: { ...input.manifest, sandbox, tools },
+    manifest: { ...input.manifest, channels, sandbox, tools },
   };
 }
 

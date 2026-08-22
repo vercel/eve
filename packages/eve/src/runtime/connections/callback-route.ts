@@ -115,7 +115,7 @@ export async function handleConnectionCallbackRequest(
   return handleCallbackRequest(request, ctx, false);
 }
 
-async function handleLegacyConnectionCallbackRequest(
+export async function handleLegacyConnectionCallbackRequest(
   request: Request,
   ctx: RouteContext,
 ): Promise<Response> {

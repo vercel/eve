@@ -40,7 +40,8 @@ describe("compileAgentManifest", () => {
         return await mocks.applicationDefinition(input);
       }
       const namespace = await input.moduleLoader.load(input.binding.backing);
-      return namespace[input.source.exportName ?? "default"];
+      const value = namespace[input.source.exportName ?? "default"];
+      return typeof value === "function" ? await value() : value;
     });
   });
 
@@ -376,6 +377,30 @@ describe("compileAgentManifest", () => {
       "write_file",
     ]);
     expect(compiled.webSearchProvider).toBe("exa");
+    expect(compiled.channels).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          adapterKind: "http",
+          logicalPath: "channels/eve.ts",
+          name: "eve",
+          sourceId: "eve.framework-root:channels/eve.ts",
+        }),
+        expect.objectContaining({
+          adapterKind: "http",
+          logicalPath: "channels/eve/v1/connections/callback/get.ts",
+          method: "GET",
+          name: "eve/v1/connections/callback/get",
+          sourceId: "eve.framework-root:channels/eve/v1/connections/callback/get.ts",
+        }),
+        expect.objectContaining({
+          adapterKind: "http",
+          logicalPath: "channels/eve/v1/task-input/post.ts",
+          method: "POST",
+          name: "eve/v1/task-input/post",
+          sourceId: "eve.framework-root:channels/eve/v1/task-input/post.ts",
+        }),
+      ]),
+    );
     expect(compiled.sandbox).toMatchObject({
       logicalPath: "sandbox.ts",
       sourceId: "eve.framework-defaults:sandbox.ts",

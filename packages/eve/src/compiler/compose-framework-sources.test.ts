@@ -5,13 +5,14 @@ import { createAgentSourceManifest, createModuleSourceRef } from "#discover/mani
 import { frameworkAgentSourceRegistry } from "#framework-sources/registry.js";
 
 describe("composeFrameworkSources", () => {
-  it("uses application tools and sandbox modules for matching canonical slots", () => {
+  it("uses application channels, tools, and sandbox modules for matching canonical slots", () => {
     const result = composeFrameworkSources({
       isRoot: true,
       manifest: createAgentSourceManifest({
         agentId: "root",
         agentRoot: "/app/agent",
         appRoot: "/app",
+        channels: [createModuleSourceRef({ logicalPath: "channels/eve.ts" })],
         sandbox: createModuleSourceRef({ logicalPath: "sandbox/sandbox.ts" }),
         tools: [createModuleSourceRef({ logicalPath: "tools/bash.ts" })],
       }),
@@ -23,6 +24,11 @@ describe("composeFrameworkSources", () => {
       result.manifest.tools.find((tool) => tool.logicalPath === "tools/bash.ts")?.sourceId,
     ).toBe("tools/bash.ts");
     expect(result.manifest.sandbox?.sourceId).toBe("sandbox/sandbox.ts");
+    expect(
+      result.manifest.channels.find((channel) => channel.logicalPath === "channels/eve.ts")
+        ?.sourceId,
+    ).toBe("channels/eve.ts");
+    expect(result.bindings["eve.framework-root:channels/eve.ts"]).toBeUndefined();
     expect(result.bindings["eve.framework-defaults:tools/bash.ts"]).toBeUndefined();
     expect(result.bindings["eve.framework-defaults:sandbox.ts"]).toBeUndefined();
   });
@@ -49,6 +55,7 @@ describe("composeFrameworkSources", () => {
       "tools/web_search.ts",
       "tools/write_file.ts",
     ]);
+    expect(result.manifest.channels).toEqual([]);
     expect(result.manifest.sandbox?.logicalPath).toBe("sandbox.ts");
     expect(result.bindings["eve.framework-defaults:tools/bash.ts"]).toEqual({
       backing: {

@@ -9,7 +9,7 @@ import * as webSearch from "./tools/web_search.js";
 import * as writeFile from "./tools/write_file.js";
 import { createAgentSourceRegistry } from "#compiler/agent-source-registry.js";
 import { defineProgrammaticAgentSource } from "#compiler/programmatic-agent-source.js";
-import { FRAMEWORK_AGENT_SOURCE_ID } from "./constants.js";
+import { FRAMEWORK_AGENT_SOURCE_ID, FRAMEWORK_ROOT_AGENT_SOURCE_ID } from "./constants.js";
 
 const frameworkAgentSource = defineProgrammaticAgentSource({
   id: FRAMEWORK_AGENT_SOURCE_ID,
@@ -26,6 +26,39 @@ const frameworkAgentSource = defineProgrammaticAgentSource({
   ],
 });
 
+const frameworkRootAgentSource = defineProgrammaticAgentSource({
+  id: FRAMEWORK_ROOT_AGENT_SOURCE_ID,
+  modules: [
+    { logicalPath: "channels/eve.ts", namespace: eveChannel },
+    { logicalPath: "channels/eve/v1/callback/post.ts", namespace: sessionCallbackPost },
+    {
+      logicalPath: "channels/eve/v1/connections/callback/get.ts",
+      namespace: connectionCallbackGet,
+    },
+    {
+      logicalPath: "channels/eve/v1/connections/callback/legacy/get.ts",
+      namespace: legacyConnectionCallbackGet,
+    },
+    {
+      logicalPath: "channels/eve/v1/connections/callback/legacy/post.ts",
+      namespace: legacyConnectionCallbackPost,
+    },
+    {
+      logicalPath: "channels/eve/v1/connections/callback/post.ts",
+      namespace: connectionCallbackPost,
+    },
+    { logicalPath: "channels/eve/v1/task-input/post.ts", namespace: taskInputPost },
+  ],
+});
+
 export const frameworkAgentSourceRegistry = createAgentSourceRegistry([
   { applyTo: "all-local-nodes", source: frameworkAgentSource },
+  { applyTo: "root", source: frameworkRootAgentSource },
 ]);
+import * as eveChannel from "./channels/eve.js";
+import * as sessionCallbackPost from "./channels/eve/v1/callback/post.js";
+import * as connectionCallbackGet from "./channels/eve/v1/connections/callback/get.js";
+import * as legacyConnectionCallbackGet from "./channels/eve/v1/connections/callback/legacy/get.js";
+import * as legacyConnectionCallbackPost from "./channels/eve/v1/connections/callback/legacy/post.js";
+import * as connectionCallbackPost from "./channels/eve/v1/connections/callback/post.js";
+import * as taskInputPost from "./channels/eve/v1/task-input/post.js";
