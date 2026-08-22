@@ -47,7 +47,11 @@ export default async function sandboxEgressRoute(event: {
             path: getVercelEgressDemandMarkerPath(route.ruleId),
           },
         ]);
-        return new Response("Sandbox egress authorization required", { status: 428 });
+        return new Response(
+          "eve: this route requires authorization. The request was recorded and " +
+            "authorization is being requested; re-run this command once it is granted.",
+          { status: 428 },
+        );
       } catch (error) {
         const errorId = logError(log, "sandbox egress proxy failed", error, {
           ruleId: route.ruleId,

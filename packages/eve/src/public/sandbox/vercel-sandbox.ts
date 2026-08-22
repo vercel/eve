@@ -19,7 +19,17 @@ type VercelSandboxAuthorCreateOptions<T> = T extends unknown
       VercelSandboxInternalCreateOptions
   : never;
 
-/** When eve resolves credentials attached to Vercel egress rules. */
+/**
+ * When eve resolves credentials attached to Vercel egress rules.
+ *
+ * `"eager"` resolves every credential before the sandbox is handed to the
+ * step. `"on-request"` leaves the route unauthenticated until a sandbox
+ * request first hits it: that request fails with HTTP 428 and an
+ * explanatory body, the command runs to completion, and eve then resolves
+ * the credential — raising the standard interactive-authorization flow when
+ * sign-in is needed. eve never kills or re-runs the command; the agent
+ * re-runs what it needs to once the route is authorized.
+ */
 export type VercelSandboxCredentialResolution = "eager" | "on-request";
 
 /**
