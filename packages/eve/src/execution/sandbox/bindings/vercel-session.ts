@@ -121,7 +121,7 @@ export function createVercelSandboxHandle(
         // Provider-side timeout is the backstop when the sandbox is unreachable.
       }
     },
-    async dispose() {
+    async revokeStepCredentials() {
       if (egressAuth !== undefined) {
         await sandbox.update({ networkPolicy: egressAuth.clearedPolicy });
       }

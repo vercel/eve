@@ -26,11 +26,11 @@ export interface SandboxBackendHandle<SO = Record<string, never>> {
    */
   shutdown(): Promise<void>;
   /**
-   * Releases step-local resources (e.g. brokered credentials) at the
-   * end of a step without stopping the underlying compute. Backends
-   * without step-scoped resources may omit this.
+   * Revokes step-scoped brokered credentials (e.g. authenticated egress
+   * routes) at the end of a step without stopping the underlying compute.
+   * Backends that broker no step-scoped credentials may omit this.
    */
-  dispose?(): Promise<void>;
+  revokeStepCredentials?(): Promise<void>;
 }
 
 /**

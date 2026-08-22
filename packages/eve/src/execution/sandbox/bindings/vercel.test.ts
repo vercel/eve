@@ -200,7 +200,7 @@ describe("createVercelSandbox", () => {
     expect(getToken).not.toHaveBeenCalled();
   });
 
-  it("activates eager route credentials and clears them on dispose", async () => {
+  it("activates eager route credentials and clears them when step credentials are revoked", async () => {
     const sessionSandbox = createMockSandbox({ name: "session-key" });
     const sandboxModule = {
       Sandbox: {
@@ -251,7 +251,7 @@ describe("createVercelSandbox", () => {
       },
     });
 
-    await handle.dispose?.();
+    await handle.revokeStepCredentials?.();
     expect(sessionSandbox.update).toHaveBeenLastCalledWith({
       networkPolicy: { allow: {}, subnets: undefined },
     });

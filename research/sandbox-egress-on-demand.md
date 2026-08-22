@@ -21,8 +21,14 @@ policy, and starts the command again from the beginning.
 
 Some useful safeguards are already present: unresolved routes fail closed, the proxy checks team,
 project, and sandbox session identity, rule ids are validated, replay is bounded, and managed
-credentials are removed when the step scope is disposed. Those safeguards do not address the
+credentials are revoked when the sandbox provider commits or rolls back the step (via the optional
+`revokeStepCredentials` hook on `SandboxBackendHandle`). Those safeguards do not address the
 failure modes below.
+
+Note on step-end revocation: with `inheritsParent` or a shared sandbox session id, concurrent
+steps share one sandbox, so one step's commit revokes the sandbox-wide brokered policy under the
+other. This needs an explicit decision (reference counting, or documented as accepted) before
+merge.
 
 ## Blocking failure modes
 
@@ -48,7 +54,8 @@ the sandbox would not establish this boundary.
 ### Credential activation is sandbox-wide
 
 After one command demands a rule, the prototype updates the network policy for the entire sandbox.
-Every concurrent process in that sandbox can then use the authenticated route until step disposal;
+Every concurrent process in that sandbox can then use the authenticated route until step-end
+revocation;
 the credential is not scoped to the request or command that triggered consent. An on-demand prompt
 therefore does not imply on-demand use or least privilege.
 

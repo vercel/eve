@@ -31,8 +31,8 @@ export interface SandboxState {
  */
 export interface SandboxAccess {
   captureState(): Promise<SandboxState>;
-  /** Releases step-local resources (e.g. brokered credentials) without stopping the sandbox. */
-  dispose?(): Promise<void>;
+  /** Revokes step-scoped brokered credentials without stopping the sandbox. */
+  revokeStepCredentials?(): Promise<void>;
   get(): Promise<SandboxSession | null>;
   stop(): Promise<void>;
 }

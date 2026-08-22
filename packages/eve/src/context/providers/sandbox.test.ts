@@ -56,14 +56,14 @@ function createBundle(input: {
 }
 
 describe("sandboxProvider", () => {
-  const dispose = vi.fn();
+  const revokeStepCredentials = vi.fn();
 
   beforeEach(() => {
-    dispose.mockReset();
+    revokeStepCredentials.mockReset();
     vi.mocked(ensureSandboxAccess).mockResolvedValue({
       captureState: vi.fn().mockResolvedValue({ initialized: false, session: null }),
-      dispose,
       get: vi.fn().mockResolvedValue(null),
+      revokeStepCredentials,
       stop: vi.fn().mockResolvedValue(undefined),
     });
   });
@@ -111,7 +111,7 @@ describe("sandboxProvider", () => {
     );
   });
 
-  it("releases the step-local sandbox access", async () => {
+  it("revokes step credentials after capturing state on commit", async () => {
     const ctx = new ContextContainer();
     const registry: RuntimeSandboxRegistry = createStubSandboxRegistry();
 
@@ -120,8 +120,23 @@ describe("sandboxProvider", () => {
     ctx.set(SessionIdKey, "session_1");
 
     const result = await sandboxProvider.create(ctx, createHarnessSession());
-    await sandboxProvider.dispose?.(result!.value);
+    const committed = await sandboxProvider.commit!(result!.value, createHarnessSession());
 
-    expect(dispose).toHaveBeenCalledOnce();
+    expect(committed.sandboxState).toEqual({ initialized: false, session: null });
+    expect(revokeStepCredentials).toHaveBeenCalledOnce();
+  });
+
+  it("revokes step credentials on rollback", async () => {
+    const ctx = new ContextContainer();
+    const registry: RuntimeSandboxRegistry = createStubSandboxRegistry();
+
+    ctx.set(BundleKey, createBundle({ agentName: "weather-agent", registry }));
+    ctx.set(ChannelKey, { kind: "slack" });
+    ctx.set(SessionIdKey, "session_1");
+
+    const result = await sandboxProvider.create(ctx, createHarnessSession());
+    await sandboxProvider.rollback!(result!.value, new Error("step failed"));
+
+    expect(revokeStepCredentials).toHaveBeenCalledOnce();
   });
 });

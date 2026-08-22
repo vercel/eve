@@ -42,10 +42,6 @@ export async function withContextScope<T>(
 
   ctx.clearVirtualContext();
 
-  let output: ContextScopeResult<T> | undefined;
-  let failure: unknown;
-  let failed = false;
-
   try {
     for (const provider of providers) {
       const result = await provider.create(ctx, session);
@@ -67,14 +63,12 @@ export async function withContextScope<T>(
       }
     }
 
-    output =
-      committed === scopeResult.session
-        ? scopeResult
-        : { result: scopeResult.result, session: committed };
-  } catch (error) {
-    failed = true;
-    failure = error;
+    if (committed === scopeResult.session) {
+      return scopeResult;
+    }
 
+    return { result: scopeResult.result, session: committed };
+  } catch (error) {
     const rollbackErrors: unknown[] = [];
     for (const provider of createdProviders.toReversed()) {
       if (provider.rollback === undefined) continue;
@@ -85,40 +79,14 @@ export async function withContextScope<T>(
       }
     }
     if (rollbackErrors.length > 0) {
-      failure = new AggregateError(
+      throw new AggregateError(
         [error, ...rollbackErrors],
         "Framework context rollback did not complete.",
         { cause: error },
       );
     }
+    throw error;
   }
-
-  const disposalErrors: unknown[] = [];
-  for (const provider of createdProviders.toReversed()) {
-    if (provider.dispose === undefined) continue;
-    try {
-      await provider.dispose(ctx.require(provider.key));
-    } catch (error) {
-      disposalErrors.push(error);
-    }
-  }
-
-  if (failed) {
-    if (disposalErrors.length > 0) {
-      throw new AggregateError(
-        [failure, ...disposalErrors],
-        "The step failed and context cleanup also failed.",
-      );
-    }
-    throw failure;
-  }
-  if (disposalErrors.length > 0) {
-    throw new AggregateError(disposalErrors, "Context cleanup failed.");
-  }
-  if (output === undefined) {
-    throw new Error("Context scope completed without a result.");
-  }
-  return output;
 }
 
 /**

@@ -157,7 +157,7 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
       }
     } catch (error) {
       try {
-        await handle.dispose?.();
+        await handle.revokeStepCredentials?.();
       } catch (cleanupError) {
         throw new AggregateError(
           [error, cleanupError],
@@ -191,10 +191,10 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
         session: persistedSession,
       };
     },
-    async dispose() {
+    async revokeStepCredentials() {
       if (handlePromise !== undefined) {
         const handle = await handlePromise.catch(() => null);
-        await handle?.dispose?.();
+        await handle?.revokeStepCredentials?.();
       }
     },
     async get(): Promise<SandboxSession | null> {

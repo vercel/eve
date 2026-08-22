@@ -61,7 +61,7 @@ function createTestRegistry(
   };
 }
 
-function createBackend(onCreate?: () => void, onDispose?: () => void): SandboxBackend {
+function createBackend(onCreate?: () => void, onRevoke?: () => void): SandboxBackend {
   const sandbox = mockSandbox({ id: "sbx_session_auth" });
   const create = vi.fn(async (input: SandboxBackendCreateInput) => {
     onCreate?.();
@@ -74,8 +74,8 @@ function createBackend(onCreate?: () => void, onDispose?: () => void): SandboxBa
       stop: vi.fn(async () => {}),
       useSessionFn: async () => sandbox.session,
       shutdown: async () => {},
-      dispose: async () => {
-        onDispose?.();
+      revokeStepCredentials: async () => {
+        onRevoke?.();
       },
       session: sandbox.session,
     };
@@ -298,11 +298,11 @@ describe("ensureSandboxAccess", () => {
     expect(vi.mocked(backend.create).mock.calls[1]?.[0].existingMetadata).toEqual({});
   });
 
-  it("disposes the backend handle when onSession fails", async () => {
+  it("revokes the backend handle's step credentials when onSession fails", async () => {
     const ctx = new ContextContainer();
     ctx.set(SessionKey, createSession());
-    const dispose = vi.fn();
-    const backend = createBackend(undefined, dispose);
+    const revoke = vi.fn();
+    const backend = createBackend(undefined, revoke);
     const registry = createTestRegistry(
       {
         onSession: async () => {
@@ -318,7 +318,7 @@ describe("ensureSandboxAccess", () => {
     });
 
     await expect(access.get()).rejects.toThrow("onSession failed");
-    expect(dispose).toHaveBeenCalledOnce();
+    expect(revoke).toHaveBeenCalledOnce();
   });
 
   it("re-runs onSession and drops stale metadata when the session key rotates", async () => {

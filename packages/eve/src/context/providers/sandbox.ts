@@ -49,11 +49,12 @@ export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
 
   async commit(access, session) {
     const state = await access.captureState();
+    await access.revokeStepCredentials?.();
     return { ...session, sandboxState: state };
   },
 
-  async dispose(access) {
-    await access.dispose?.();
+  async rollback(access) {
+    await access.revokeStepCredentials?.();
   },
 };
 
