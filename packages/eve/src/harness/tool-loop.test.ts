@@ -28,6 +28,7 @@ import {
   SessionDynamicSubagentSelectionsKey,
   StepDynamicToolMetadataKey,
   TurnTaskDeliveryKey,
+  TurnTaskStateKey,
 } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
@@ -73,6 +74,7 @@ import {
   EMPTY_DELIVERY_SENTINEL,
 } from "#shared/empty-delivery.js";
 import {
+  TASK_DELIVERY_INITIATING_INSTRUCTION,
   TASK_DELIVERY_PENDING_INSTRUCTION,
   TASK_DELIVERY_SETTLED_INSTRUCTION,
 } from "#tasks/delivery-context.js";
@@ -5188,6 +5190,36 @@ describe("createToolLoopHarness", () => {
           content: expect.stringContaining(EMPTY_DELIVERY_SENTINEL),
           role: "user",
         });
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("does not offer silent delivery on an initiating-task retry", async () => {
+      setupFirstThenAgent(emptyResult, successResult);
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { emit } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const ctx = new ContextContainer();
+      ctx.set(TurnTaskDeliveryKey, "initiating");
+
+      try {
+        await contextStorage.run(ctx, () =>
+          runStep(createTestSession(), { message: "[Task state]" }),
+        );
+
+        const reissueAgent = vi.mocked(ToolLoopAgent).mock.results[1]?.value as {
+          stream: ReturnType<typeof vi.fn>;
+        };
+        const reissueMessages = reissueAgent.stream.mock.calls[0]?.[0]?.messages as Array<{
+          content: unknown;
+          role: string;
+        }>;
+        expect(reissueMessages.at(-1)).toMatchObject({
+          content: expect.stringContaining("was not delivered"),
+          role: "user",
+        });
+        expect(reissueMessages.at(-1)?.content).not.toContain(EMPTY_DELIVERY_SENTINEL);
       } finally {
         warnSpy.mockRestore();
       }
@@ -11370,6 +11402,41 @@ describe("createToolLoopHarness", () => {
 
       const { instructions } = getLastAgentSettings();
       expect(instructions).toBe("You are a test assistant.");
+    });
+
+    it("adds initiating task-reporting guidance without enabling silent delivery", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const ctx = new ContextContainer();
+      ctx.set(TurnTaskDeliveryKey, "initiating");
+      ctx.set(TurnTaskStateKey, '[Task state]\n{"tasks":[]}');
+
+      await contextStorage.run(ctx, () =>
+        runStep(createTestSession(), { message: "Start the background work." }),
+      );
+
+      const { instructions } = getLastAgentSettings();
+      expect(instructions).toEqual({
+        role: "system",
+        content: `You are a test assistant.\n\n[Task state]\n{"tasks":[]}\n\n${TASK_DELIVERY_INITIATING_INSTRUCTION}`,
+      });
+    });
+
+    it("keeps a scheduled initiating task turn conditionally deliverable", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const ctx = createScheduleContext();
+      ctx.set(TurnTaskDeliveryKey, "initiating");
+
+      await contextStorage.run(ctx, () =>
+        runStep(createTestSession(), { message: "[Task state]" }),
+      );
+
+      const { instructions } = getLastAgentSettings();
+      expect(instructions).toEqual({
+        role: "system",
+        content: `You are a test assistant.\n\n${CONDITIONAL_DELIVERY_INSTRUCTION}`,
+      });
     });
 
     it.each([

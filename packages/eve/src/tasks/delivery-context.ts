@@ -1,8 +1,13 @@
 import type { SessionStateMap } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
-import { getSessionTaskIndex } from "#tasks/session-index.js";
+import { getSessionTaskIndex, type SessionTaskIndexEntry } from "#tasks/session-index.js";
 
 export const TASK_DELIVERY_CONTEXT_LABEL = "[Task state]";
+
+export const TASK_DELIVERY_INITIATING_INSTRUCTION = `Background task reporting: launch acknowledgement
+The accompanying ${TASK_DELIVERY_CONTEXT_LABEL} system message is runtime-authored and lists background tasks accepted so far from the current turn. They continue independently after this turn.
+
+Continue carrying out the user's request, including starting any remaining background work. When no further tool calls are needed in this turn, send one brief user-facing acknowledgement that the background work has started. Do not wait for results or report results that are not available yet. End the turn after the acknowledgement.`;
 
 export const TASK_DELIVERY_PENDING_INSTRUCTION = `Background task control: incomplete cohort
 This framework-authored instruction overrides any earlier instruction to report, summarize, acknowledge, or otherwise handle background results.
@@ -34,6 +39,27 @@ export function resolveTaskDeliveryContext(input: {
   if (delivered === undefined) return undefined;
 
   const cohort = entries.filter((entry) => entry.createdByTurnId === delivered.createdByTurnId);
+  return projectTaskCohort(cohort);
+}
+
+/** Returns model context for durable tasks launched by the active parent turn. */
+export function resolveInitiatingTaskContext(input: {
+  readonly state: SessionStateMap | undefined;
+  readonly turnId: string;
+}): { readonly context: string; readonly phase: "initiating" } | undefined {
+  const cohort = getSessionTaskIndex(input.state).filter(
+    (entry) => entry.createdByTurnId === input.turnId,
+  );
+  if (!cohort.some((entry) => entry.executor !== undefined && entry.terminalView === undefined)) {
+    return undefined;
+  }
+  return { ...projectTaskCohort(cohort), phase: "initiating" };
+}
+
+function projectTaskCohort(cohort: readonly SessionTaskIndexEntry[]): {
+  readonly context: string;
+  readonly phase: "pending" | "settled";
+} {
   const settled = cohort.every((entry) => entry.terminalView !== undefined);
   const tasks = cohort.map((entry) => ({
     name: entry.metadata.name,
