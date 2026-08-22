@@ -6,10 +6,10 @@ import { requireSessionStreamIndex } from "./shared.js";
 
 const REVIEW_FINDING = "blocker: task admission can discard deferred user input.";
 
-/** A late reviewer result already represented in the conversation requires no new message. */
+/** Related reviewer results stay silent until their same-turn cohort settles. */
 export default defineTaskEval({
   description:
-    "A completed reviewer repeats a finding already delivered to the user, so its wake remains silent.",
+    "Related reviewer wakes remain silent while pending, then produce one settled report.",
   transition: {
     primary: "task.parent.wake.emitted-ready",
     setup: [
@@ -43,7 +43,6 @@ export default defineTaskEval({
     const firstWake = await firstLive.result();
 
     firstWake.expectOk();
-    firstWake.messageIncludes(`request changes on PR #2277.\n\n- ${REVIEW_FINDING}`);
     const firstNotification = requireTaskNotification(firstWake);
     await t.require(
       firstNotification,
@@ -54,6 +53,17 @@ export default defineTaskEval({
       ),
     );
     firstWake.notCalledTool("task_peek");
+    firstWake.event("message.completed", {
+      count: 1,
+      data: (data) => data.finishReason !== "tool-calls" && data.message === null,
+    });
+    firstWake.notEvent("message.completed", {
+      data: (data) => data.finishReason !== "tool-calls" && data.message !== null,
+    });
+    await t.require(
+      firstWake.message,
+      satisfies((message) => message === undefined, "the pending cohort wake is silent"),
+    );
 
     const secondLive = t.target.watchTurn(sessionId, {
       startIndex: requireSessionStreamIndex(firstLive.session, "Late reviewer wake"),
@@ -73,17 +83,11 @@ export default defineTaskEval({
       ),
     );
     wake.notCalledTool("task_peek");
+    wake.messageIncludes(`request changes on PR #2277.\n\n- ${REVIEW_FINDING}`);
     wake.event("message.completed", {
       count: 1,
-      data: (data) => data.finishReason !== "tool-calls" && data.message === null,
-    });
-    wake.notEvent("message.completed", {
       data: (data) => data.finishReason !== "tool-calls" && data.message !== null,
     });
-    await t.require(
-      wake.message,
-      satisfies((message) => message === undefined, "the task wake delivers no channel message"),
-    );
     t.notCalledTool("task_peek");
     t.noFailedActions();
   },

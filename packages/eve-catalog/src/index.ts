@@ -401,6 +401,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "agentcard",
+    name: "Agentcard",
+    kind: "connection",
+    tagline: "let agents buy online",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Agentcard: the agent's wallet. Shop and check out at real merchants (DoorDash, Good Eggs, flights) with the conversational `buy` tool (thread conversation_id on follow-ups), issue a single-use virtual card to pay at any checkout, let the user add their own card, and manage the cash that funds it: balance, top-ups, transactions, KYC, human support.",
+      mcp: { url: "https://mcp.agentcard.sh/mcp" },
+    },
+  },
+  {
     slug: "airtable",
     name: "Airtable",
     kind: "connection",

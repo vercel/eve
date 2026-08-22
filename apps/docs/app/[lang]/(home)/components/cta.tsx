@@ -16,6 +16,7 @@ export function CTA() {
           <Link
             href="/docs/getting-started"
             onClick={() => track(analyticsEvents.gettingStartedOpened, { source: "home_footer" })}
+            prefetch={true}
           >
             Get started
           </Link>

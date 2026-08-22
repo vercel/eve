@@ -315,16 +315,16 @@ describe("fireTaskUpdateCallbackStep", () => {
         url: "https://caller.example.com/eve/v1/callback/task-token",
       },
       callId: "update-call",
-      childStepIndex: 2,
-      childTurnId: "turn-child",
+      updateIndex: 2,
+      updateEpoch: "turn-child",
       message: "Found three matching records.",
     });
 
     expect(taskId).toBe("task_abc");
     expect(parsePostedBody(fetchMock)).toEqual({
       callId: "update-call",
-      childStepIndex: 2,
-      childTurnId: "turn-child",
+      updateIndex: 2,
+      updateEpoch: "turn-child",
       kind: "task.update",
       message: "Found three matching records.",
       taskId: "task_abc",

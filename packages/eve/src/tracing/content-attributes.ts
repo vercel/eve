@@ -16,6 +16,7 @@
 /** Prompts, instructions, tool arguments — what went in. */
 const INPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
   "agent.channel.delivery.input",
+  "agent.approval.request",
   "ai.documents",
   "ai.prompt",
   "ai.prompt.messages",
@@ -37,6 +38,7 @@ const INPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
  * `recordOutputs`; matching that is what keeps one destination's view coherent.
  */
 const OUTPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
+  "agent.approval.response",
   "ai.embedding",
   "ai.embeddings",
   "ai.ranking",

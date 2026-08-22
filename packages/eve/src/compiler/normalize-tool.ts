@@ -86,6 +86,7 @@ export async function compileToolEntry(
     kind: "tool",
     definition: {
       description: entry.definition.description,
+      execution: entry.definition.execution,
       exportName: source.exportName,
       inputSchema: entry.definition.inputSchema ?? null,
       logicalPath: source.logicalPath,

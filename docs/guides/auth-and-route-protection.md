@@ -223,7 +223,7 @@ Keep secret values (`ROUTE_AUTH_BASIC_PASSWORD`, signing keys) in environment va
 
 ## Accepting forwarded identity from another deployment
 
-A `defineRemoteAgent({ forwardPrincipal: true })` caller (see [Remote agents](./remote-agents#forwarding-the-caller-identity)) asserts its end user's principal on the create-session request as a `forwardedPrincipal` body field. By default every such assertion is rejected with `403` — accepting someone else's word for who the user is requires naming exactly which forwarders you trust. Do that with `trustedForwarders` on `eveChannel`:
+A `defineRemoteAgent({ forwardPrincipal: true })` caller (see [Remote agents](./remote-agents#forwarding-the-caller-identity)) asserts its end user's principal on create and continuation requests as a `forwardedPrincipal` body field. By default every such assertion is rejected with `403` — accepting someone else's word for who the user is requires naming exactly which forwarders you trust. Do that with `trustedForwarders` on `eveChannel`:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -239,7 +239,11 @@ export default eveChannel({
 
 The predicate authorizes the _forwarder_ (the verified route-auth principal — who is asserting), not the forwarded principal (what is asserted). Match it precisely: a permissive predicate like `() => true` lets any caller that passes route auth assert any principal, including preview deployments of your own project when `vercelOidc()` is in the walk. `trustedForwarders` exists only on your authored channel — the framework default channel never accepts a forwarded principal, so a receiving deployment must author `agent/channels/eve.ts`.
 
-When the predicate accepts, the forwarded principal replaces the session principal: `ctx.session.auth.current` and `.initiator` carry the forwarded user exactly as if they had called your deployment directly, so user-scoped connections, local subagents, and further `forwardPrincipal` hops all see that user. The forwarder is recorded on the accepted contexts as the `eve:forwarded-by` attribute (always overwritten by the receiver, so a forwarder cannot falsify it). Rejections fail loud: a forwarded body without `trustedForwarders` configured or with a forwarder the predicate refuses is a `403`, and a malformed payload is a `400`. Only principal metadata is ever accepted — tokens and credentials never cross the hop.
+When the predicate accepts a create request, `ctx.session.auth.current` and `.initiator` carry the forwarded user exactly as if they had called your deployment directly. On continuation, only `auth.current` is replaced; `auth.initiator` remains the session creator. User-scoped connections, local subagents, and further `forwardPrincipal` hops therefore see the active turn's caller. The forwarder is recorded on accepted contexts as the `eve:forwarded-by` attribute (always overwritten by the receiver, so a forwarder cannot falsify it). Rejections fail loud: a forwarded body without `trustedForwarders` configured or with a forwarder the predicate refuses is a `403`, and a malformed payload is a `400`. Only principal metadata is ever accepted — tokens and credentials never cross the hop.
+
+> ⚠️ Both deployments must support continuation forwarding before you resume persistent remote sessions. A create-only receiver rejects a forwarded continuation with HTTP 400; the sender does not fall back to service authority. See [Forwarding the caller identity](./remote-agents#forwarding-the-caller-identity) for the upgrade behavior.
+
+Persistent sessions do not preserve caller authority between turns. Every accepted follow-up replaces `auth.current`, including replacing it with no authenticated caller on internal local delivery; per-user connection lookup is then keyed from that current principal. This prevents a later caller from resolving a prior caller's OAuth grant. It does not hide the persistent session's conversation history or artifacts from a caller who is otherwise allowed to continue that session; session ownership remains an application policy.
 
 ## What reaches `ctx.session.auth`
 

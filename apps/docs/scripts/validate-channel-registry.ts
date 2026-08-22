@@ -130,6 +130,21 @@ for (const [index, item] of items.entries()) {
   if (entry === undefined) throw new Error(`Unexpected channel registry item "${item.name}".`);
   const registrySlug = expectedSlugs[index];
 
+  if (entry.slug === "eve") {
+    if (
+      item.dependencies?.some((dependency) => dependency === "ai" || dependency.startsWith("ai@"))
+    ) {
+      throw new Error(
+        `Registry item "${item.name}" must preserve the agent's existing AI SDK dependency.`,
+      );
+    }
+    if (item.files?.some((file) => file.target === "tsconfig.json")) {
+      throw new Error(
+        `Registry item "${item.name}" must let eve prepare tsconfig.json before shadcn installs files.`,
+      );
+    }
+  }
+
   if (
     entry.slug === "slack" ||
     entry.slug === "discord" ||

@@ -1,7 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import { parseJsonObject, parseJsonValue } from "#shared/json.js";
+import { jsonValuesEqual, parseJsonObject, parseJsonValue } from "#shared/json.js";
 import { jsonObjectSchema, jsonValueSchema } from "#shared/json-schemas.js";
+
+describe("jsonValuesEqual", () => {
+  it("compares nested JSON values independent of object key order", () => {
+    expect(
+      jsonValuesEqual(
+        { filters: { city: "Brooklyn" }, rows: [1, null] },
+        {
+          rows: [1, null],
+          filters: { city: "Brooklyn" },
+        },
+      ),
+    ).toBe(true);
+    expect(jsonValuesEqual({ rows: [1, null] }, { rows: [null, 1] })).toBe(false);
+    expect(jsonValuesEqual({ inherited: true }, Object.create({ inherited: true }))).toBe(false);
+  });
+});
 
 describe("parseJsonValue", () => {
   it("preserves JSON primitives", () => {

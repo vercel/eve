@@ -674,6 +674,7 @@ describe("continueRemoteAgentSession", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await continueRemoteAgentSession({
+      auth: null,
       callback: {
         callId: "call-next",
         subagentName: "research",
@@ -709,6 +710,67 @@ describe("continueRemoteAgentSession", () => {
     );
   });
 
+  it("forwards only the current turn principal when continuation forwarding is enabled", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const current: SessionAuthContext = {
+      attributes: { user_id: "U456" },
+      authenticator: "slack-webhook",
+      issuer: "slack",
+      principalId: "slack:U456",
+      principalType: "user",
+      subject: "U456",
+    };
+
+    await continueRemoteAgentSession({
+      auth: current,
+      callback: {
+        callId: "call-next",
+        subagentName: "research",
+        token: "parent-inbox",
+        url: "https://caller.example.com/eve/v1/callback/parent-inbox",
+      },
+      message: "follow up",
+      remote: { ...createRemoteAgent(), forwardPrincipal: true },
+      sessionId: "remote-session",
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).forwardedPrincipal).toEqual({
+      current,
+    });
+  });
+
+  it("suggests receiver version skew without making a forwarded continuation permanent", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 400 })));
+    const current: SessionAuthContext = {
+      attributes: { user_id: "U456" },
+      authenticator: "slack-webhook",
+      issuer: "slack",
+      principalId: "slack:U456",
+      principalType: "user",
+      subject: "U456",
+    };
+
+    const error = await continueRemoteAgentSession({
+      auth: current,
+      callback: {
+        callId: "call-next",
+        subagentName: "research",
+        token: "parent-inbox",
+        url: "https://caller.example.com/eve/v1/callback/parent-inbox",
+      },
+      message: "follow up",
+      remote: { ...createRemoteAgent(), forwardPrincipal: true },
+      sessionId: "remote-session",
+    }).catch((cause: unknown) => cause);
+
+    expect(error).toMatchObject({
+      message:
+        'Remote agent "research" continue-session request failed with HTTP 400. The receiver may support forwarded principals only on session creation; upgrade it before retrying.',
+    });
+    expect(isRetryableRemoteAgentContinueError(error)).toBe(true);
+  });
+
   it("classifies only missing-session continue failures as permanent", async () => {
     const fetchMock = vi
       .fn()
@@ -721,6 +783,7 @@ describe("continueRemoteAgentSession", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const continueInput = () => ({
+      auth: null,
       callback: {
         callId: "call-next",
         subagentName: "research",

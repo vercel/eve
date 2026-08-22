@@ -56,6 +56,15 @@ export async function compileAgentManifest(
     subagents: composeAgentSubagentSources(manifest),
   });
 
+  const backgroundTool = [compiledNode, ...subagentGraph.nodes.map((node) => node.agent)]
+    .flatMap((node) => node.tools)
+    .find((tool) => tool.execution === "background");
+  if (backgroundTool !== undefined && compiledNode.config.experimental?.tasks !== true) {
+    throw new Error(
+      `Background tool "${backgroundTool.name}" requires experimental.tasks: true in the root agent config.`,
+    );
+  }
+
   return createCompiledAgentManifest({
     ...compiledNode,
     extensionMounts: compiledNode.extensionMounts,

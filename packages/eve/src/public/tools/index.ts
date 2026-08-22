@@ -3,6 +3,7 @@
  */
 
 export {
+  type BackgroundToolDefinition,
   type DisabledToolSentinel,
   type ExperimentalWorkflowToolDefinition,
   type ExperimentalWorkflowToolInput,
@@ -12,6 +13,11 @@ export {
   experimental_workflow,
   isDisabledToolSentinel,
   isExperimentalWorkflowToolDefinition,
+  type TaskBinding,
+  type TaskDelegated,
+  type TaskExec,
+  type TaskExecutorBinding,
+  type TaskReceipt,
   type ToolAuthOptions,
   type ToolAuthProvider,
   type ToolDefinition,

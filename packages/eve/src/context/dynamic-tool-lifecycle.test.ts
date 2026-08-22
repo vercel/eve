@@ -1,4 +1,4 @@
-import { asSchema, jsonSchema } from "ai";
+import { asSchema } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
@@ -18,8 +18,8 @@ vi.mock("#context/build-callback-context.js", () => ({
 const {
   replayDynamicSessionTools,
   dispatchDynamicToolEvent,
-  hydrateDynamicSessionTools,
   refreshDynamicSessionToolsForRuntimeRevision,
+  validateDurableDynamicToolCallbacks,
 } = await import("#context/dynamic-tool-lifecycle.js");
 const { buildDynamicTools, buildResponseAuthorizationTools } =
   await import("#context/build-dynamic-tools.js");
@@ -27,12 +27,17 @@ const { buildDynamicTools, buildResponseAuthorizationTools } =
 import { ContextContainer } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
-  LiveStepToolsKey,
   SessionIdKey,
   SessionDynamicToolMetadataKey,
   SessionDynamicToolRuntimeRevisionKey,
+  StepDynamicToolMetadataKey,
   TurnDynamicToolMetadataKey,
 } from "#context/keys.js";
+import {
+  lookupDurableDynamicCallback,
+  registerDurableDynamicCallback,
+  stampDurableDynamicToolCallbacks,
+} from "#shared/durable-dynamic-tool-callbacks.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import { createSessionStartedEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 
@@ -98,21 +103,31 @@ describe("dynamic tool naming", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// safeSerialize behavior (re-implemented for isolated testing)
-// ---------------------------------------------------------------------------
-
-function safeSerialize(obj: Record<string, unknown>): Record<string, unknown> {
-  try {
-    return JSON.parse(JSON.stringify(obj));
-  } catch {
-    return {};
+describe("durable callback capture validation", () => {
+  function validateExecuteCapture(closure: unknown) {
+    const entry = defineTool({
+      description: "captured tool",
+      inputSchema: { type: "object" },
+      execute: async () => null,
+    });
+    stampDurableDynamicToolCallbacks(entry, {
+      execute: { callback: () => null, closure: closure as JsonObject },
+    });
+    return validateDurableDynamicToolCallbacks("captured", entry);
   }
-}
 
-describe("safeSerialize", () => {
-  it("preserves plain JSON-serializable values", () => {
-    const result = safeSerialize({
+  it("preserves JSON values and explicitly omits undefined object properties", () => {
+    const callbacks = validateExecuteCapture({
+      str: "hello",
+      num: 42,
+      bool: true,
+      nested: { key: "value" },
+      arr: [1, 2, 3],
+      nil: null,
+      omitted: undefined,
+    });
+
+    expect(callbacks.execute.closure).toEqual({
       str: "hello",
       num: 42,
       bool: true,
@@ -120,174 +135,93 @@ describe("safeSerialize", () => {
       arr: [1, 2, 3],
       nil: null,
     });
-
-    expect(result).toEqual({
-      str: "hello",
-      num: 42,
-      bool: true,
-      nested: { key: "value" },
-      arr: [1, 2, 3],
-      nil: null,
-    });
   });
 
-  it("silently drops function values", () => {
-    const result = safeSerialize({
-      name: "tenant-a",
-      callback: () => "ignored",
-      apiUrl: "https://api.example.com",
-    });
-
-    expect(result).toEqual({
-      name: "tenant-a",
-      apiUrl: "https://api.example.com",
-    });
-    expect(result.callback).toBeUndefined();
+  it.each([
+    ["function", { value: () => null }],
+    ["Date", { value: new Date("2024-01-01T00:00:00.000Z") }],
+    ["Map", { value: new Map([["key", "value"]]) }],
+    ["class instance", { value: new (class Capture {})() }],
+    ["symbol", { value: Symbol("capture") }],
+    ["NaN", { value: Number.NaN }],
+  ])("rejects a %s capture with the tool and phase", (_label, closure) => {
+    expect(() => validateExecuteCapture(closure)).toThrow(
+      'Dynamic tool "captured" callback "execute" has a non-serializable capture',
+    );
   });
 
-  it("silently drops undefined values", () => {
-    const result = safeSerialize({
-      name: "test",
-      missing: undefined,
-    });
-
-    expect(result).toEqual({
-      name: "test",
-    });
-  });
-
-  it("silently drops symbol values", () => {
-    const result = safeSerialize({
-      name: "test",
-      sym: Symbol("test"),
-    });
-
-    expect(result).toEqual({
-      name: "test",
-    });
-  });
-
-  it("returns empty object for circular references", () => {
+  it("rejects cyclic captures", () => {
     const circular: Record<string, unknown> = { name: "test" };
     circular.self = circular;
-
-    const result = safeSerialize(circular);
-    expect(result).toEqual({});
-  });
-
-  it("strips prototype chain from class instances", () => {
-    class Config {
-      name = "test";
-      getValue() {
-        return this.name;
-      }
-    }
-
-    const result = safeSerialize({ config: new Config() });
-    expect(result).toEqual({ config: { name: "test" } });
-    expect(typeof (result.config as Record<string, unknown>).getValue).toBe("undefined");
-  });
-
-  it("preserves Date as ISO string", () => {
-    const date = new Date("2024-01-01T00:00:00.000Z");
-    const result = safeSerialize({ date });
-    expect(result.date).toBe("2024-01-01T00:00:00.000Z");
+    expect(() => validateExecuteCapture(circular)).toThrow(
+      'Dynamic tool "captured" callback "execute" has a non-serializable capture',
+    );
   });
 });
 
 // ---------------------------------------------------------------------------
-// replayDynamicSessionTools — step function lookup + closure replay
+// replayDynamicSessionTools — name+phase lookup + closure replay
 // ---------------------------------------------------------------------------
 
-function getOrCreateStepRegistry(sym: symbol): Map<string, Function> {
-  const g = globalThis as Record<symbol, Map<string, Function> | undefined>;
-  const existing = g[sym];
+const dynamicCallbackRegistrySym = Symbol.for("eve:dynamic-tool-callbacks");
+
+function getDynamicCallbackRegistry(): Map<string, Map<string, Function>> {
+  const g = globalThis as Record<symbol, Map<string, Map<string, Function>> | undefined>;
+  const existing = g[dynamicCallbackRegistrySym];
   if (existing !== undefined) return existing;
-  const fresh = new Map<string, Function>();
-  g[sym] = fresh;
+  const fresh = new Map<string, Map<string, Function>>();
+  g[dynamicCallbackRegistrySym] = fresh;
   return fresh;
 }
 
+function registerTestCallback(
+  toolName: string,
+  phase: string,
+  callback: (closure: unknown, ...args: unknown[]) => unknown,
+): void {
+  registerDurableDynamicCallback({
+    callback: callback as never,
+    phase: phase as never,
+    toolName,
+  });
+}
+
 describe("replayDynamicSessionTools", () => {
-  it("skips metadata entries without executeStepFnName", () => {
-    const metadata: DurableDynamicToolMetadata[] = [
-      {
-        name: "missing-fn",
-        description: "No step fn",
-        inputSchema: { type: "object" },
-        resolverSlug: "test",
-        entryKey: "tool",
-        // executeStepFnName and closureVars are undefined
-      },
-    ];
+  function metadata(name: string, closure: JsonObject = {}): DurableDynamicToolMetadata {
+    return {
+      callbacks: { execute: { closure } },
+      description: `${name} description`,
+      entryKey: name,
+      inputSchema: { type: "object" },
+      name,
+      resolverSlug: "test",
+    };
+  }
 
-    const tools = replayDynamicSessionTools(metadata, []);
-    expect(tools).toHaveLength(0);
-  });
-
-  it("skips metadata entries without closureVars", () => {
-    const metadata: DurableDynamicToolMetadata[] = [
-      {
-        name: "no-vars",
-        description: "Has step fn but no closure vars",
-        inputSchema: { type: "object" },
-        resolverSlug: "test",
-        entryKey: "tool",
-        executeStepFnName: "eve:dynamic-tool//__eve_dynamic_exec_99",
-        // closureVars is undefined
-      },
-    ];
-
-    const tools = replayDynamicSessionTools(metadata, []);
-    expect(tools).toHaveLength(0);
-  });
-
-  it("skips entries where step function is not registered", () => {
-    const metadata: DurableDynamicToolMetadata[] = [
-      {
-        name: "unregistered",
-        description: "Step fn not in registry",
-        inputSchema: { type: "object" },
-        resolverSlug: "test",
-        entryKey: "tool",
-        executeStepFnName: "eve:dynamic-tool//__eve_nonexistent",
-        closureVars: { someVar: "value" },
-      },
-    ];
-
-    const tools = replayDynamicSessionTools(metadata, []);
-    expect(tools).toHaveLength(0);
+  it("fails execution closed when the registered callback is unavailable", async () => {
+    const [tool] = replayDynamicSessionTools([metadata("unregistered")], []);
+    await expect(tool!.execute!({}, executeOptions)).rejects.toThrow(
+      'Dynamic tool "unregistered" cannot replay its execute callback',
+    );
   });
 
   it("reconstructs tool with registered step function and closure vars", async () => {
-    const stepId = "eve:dynamic-tool//__eve_dynamic_exec_test_replay";
     const stepFn = vi.fn((__vars: unknown, input: unknown) => ({
       result: (__vars as Record<string, unknown>).apiUrl,
       input,
     }));
-    Object.assign(stepFn, { stepId });
-
-    const registrySym = Symbol.for("@workflow/core//registeredSteps");
-    const registry = getOrCreateStepRegistry(registrySym);
-    registry.set(stepId, stepFn);
+    registerTestCallback("replay-tool", "execute", stepFn);
 
     try {
-      const metadata: DurableDynamicToolMetadata[] = [
-        {
-          name: "replay-tool",
-          description: "Replayed tool",
-          inputSchema: { type: "object" },
-          resolverSlug: "test",
-          entryKey: "tool",
-          executeStepFnName: stepId,
-          closureVars: { apiUrl: "https://api.example.com", tenantName: "Acme" },
-        },
-      ];
+      const durable = metadata("replay-tool", {
+        apiUrl: "https://api.example.com",
+        tenantName: "Acme",
+      });
 
-      const tools = replayDynamicSessionTools(metadata, []);
+      const tools = replayDynamicSessionTools([durable], []);
       expect(tools).toHaveLength(1);
       expect(tools[0]!.name).toBe("replay-tool");
-      expect(tools[0]!.description).toBe("Replayed tool");
+      expect(tools[0]!.description).toBe("replay-tool description");
 
       // Execute the replayed tool — mock provides the callback context
       const tool = tools[0]!;
@@ -298,38 +232,32 @@ describe("replayDynamicSessionTools", () => {
         expect.anything(),
       );
     } finally {
-      registry.delete(stepId);
+      getDynamicCallbackRegistry().delete("replay-tool");
     }
   });
 
+  it("runs the latest registered implementation after a redeploy rebinds the name", async () => {
+    registerTestCallback("latest-tool", "execute", () => ({ version: 1 }));
+    const tools = replayDynamicSessionTools([metadata("latest-tool")], []);
+    await expect(tools[0]!.execute!({}, executeOptions)).resolves.toEqual({ version: 1 });
+
+    // A redeploy re-resolves and replaces the binding under the same identity.
+    registerTestCallback("latest-tool", "execute", () => ({ version: 2 }));
+    const rebound = replayDynamicSessionTools([metadata("latest-tool")], []);
+    await expect(rebound[0]!.execute!({}, executeOptions)).resolves.toEqual({ version: 2 });
+    getDynamicCallbackRegistry().delete("latest-tool");
+  });
+
   it("replayed tool passes stored closure vars, not live values", async () => {
-    const stepId = "eve:dynamic-tool//__eve_dynamic_exec_snapshot";
     const calls: unknown[] = [];
-    const stepFn = (__vars: unknown, input: unknown) => {
+    registerTestCallback("snapshot-tool", "execute", (__vars: unknown, input: unknown) => {
       calls.push({ vars: __vars, input });
       return { ok: true };
-    };
-    Object.assign(stepFn, { stepId });
-
-    const registrySym = Symbol.for("@workflow/core//registeredSteps");
-    const registry = getOrCreateStepRegistry(registrySym);
-    registry.set(stepId, stepFn);
+    });
 
     try {
       const closureVars = { counter: 1, label: "v1" };
-      const metadata: DurableDynamicToolMetadata[] = [
-        {
-          name: "snapshot-tool",
-          description: "Snapshot test",
-          inputSchema: { type: "object" },
-          resolverSlug: "snap",
-          entryKey: "tool",
-          executeStepFnName: stepId,
-          closureVars,
-        },
-      ];
-
-      const tools = replayDynamicSessionTools(metadata, []);
+      const tools = replayDynamicSessionTools([metadata("snapshot-tool", closureVars)], []);
 
       const tool = tools[0]!;
       tool.execute!({}, executeOptions);
@@ -343,88 +271,27 @@ describe("replayDynamicSessionTools", () => {
       expect(calls).toHaveLength(2);
       expect((calls[0] as Record<string, unknown>).vars).toBe(closureVars);
     } finally {
-      registry.delete(stepId);
+      getDynamicCallbackRegistry().delete("snapshot-tool");
     }
   });
 
   it("reconstructs multiple tools from metadata", () => {
-    const registrySym = Symbol.for("@workflow/core//registeredSteps");
-    const registry = getOrCreateStepRegistry(registrySym);
-
-    const stepIdA = "eve:dynamic-tool//__eve_dynamic_exec_multi_a";
-    const stepIdB = "eve:dynamic-tool//__eve_dynamic_exec_multi_b";
-    const fnA = () => ({ tool: "a" });
-    const fnB = () => ({ tool: "b" });
-    registry.set(stepIdA, fnA);
-    registry.set(stepIdB, fnB);
+    registerTestCallback("tenant__query", "execute", () => ({ tool: "a" }));
+    registerTestCallback("tenant__export", "execute", () => ({ tool: "b" }));
 
     try {
-      const metadata: DurableDynamicToolMetadata[] = [
-        {
-          name: "tenant__query",
-          description: "Query",
-          inputSchema: { type: "object" },
-          resolverSlug: "tenant",
-          entryKey: "query",
-          executeStepFnName: stepIdA,
-          closureVars: { tenant: "acme" },
-        },
-        {
-          name: "tenant__export",
-          description: "Export",
-          inputSchema: { type: "object" },
-          resolverSlug: "tenant",
-          entryKey: "export",
-          executeStepFnName: stepIdB,
-          closureVars: { tenant: "acme" },
-        },
+      const durable = [
+        metadata("tenant__query", { tenant: "acme" }),
+        metadata("tenant__export", { tenant: "acme" }),
       ];
 
-      const tools = replayDynamicSessionTools(metadata, []);
+      const tools = replayDynamicSessionTools(durable, []);
       expect(tools).toHaveLength(2);
       expect(tools[0]!.name).toBe("tenant__query");
       expect(tools[1]!.name).toBe("tenant__export");
     } finally {
-      registry.delete(stepIdA);
-      registry.delete(stepIdB);
-    }
-  });
-
-  it("skips only the broken entries — valid ones still work", () => {
-    const registrySym = Symbol.for("@workflow/core//registeredSteps");
-    const registry = getOrCreateStepRegistry(registrySym);
-
-    const validStepId = "eve:dynamic-tool//__eve_dynamic_exec_partial_ok";
-    registry.set(validStepId, () => ({ ok: true }));
-
-    try {
-      const metadata: DurableDynamicToolMetadata[] = [
-        {
-          name: "broken",
-          description: "Missing step fn",
-          inputSchema: { type: "object" },
-          resolverSlug: "test",
-          entryKey: "broken",
-          executeStepFnName: "eve:dynamic-tool//__nonexistent",
-          closureVars: {},
-        },
-        {
-          name: "valid",
-          description: "Working tool",
-          inputSchema: { type: "object" },
-          resolverSlug: "test",
-          entryKey: "valid",
-          executeStepFnName: validStepId,
-          closureVars: { key: "value" },
-        },
-      ];
-
-      const tools = replayDynamicSessionTools(metadata, []);
-      // Only the valid tool should be reconstructed
-      expect(tools).toHaveLength(1);
-      expect(tools[0]!.name).toBe("valid");
-    } finally {
-      registry.delete(validStepId);
+      getDynamicCallbackRegistry().delete("tenant__query");
+      getDynamicCallbackRegistry().delete("tenant__export");
     }
   });
 });
@@ -482,43 +349,76 @@ function makeEvent(type: string): UnstampedMessageStreamEvent {
   return { type, data: {} } as UnstampedMessageStreamEvent;
 }
 
-const registrySym = Symbol.for("@workflow/core//registeredSteps");
-const testRegistry = getOrCreateStepRegistry(registrySym);
-let stepCounter = 0;
+const dynamicCallbackRegistry = getDynamicCallbackRegistry();
 
 function simulateColdStart(ctx: ContextContainer): void {
   for (const metadata of ctx.get(SessionDynamicToolMetadataKey) ?? []) {
-    if (metadata.executeStepFnName?.startsWith("eve:framework-dynamic:")) {
-      testRegistry.delete(metadata.executeStepFnName);
-    }
-    if (metadata.approvalStepFnName !== undefined) {
-      testRegistry.delete(metadata.approvalStepFnName);
-    }
-    if (metadata.approvalResponseStepFnName !== undefined) {
-      testRegistry.delete(metadata.approvalResponseStepFnName);
-    }
+    dynamicCallbackRegistry.delete(metadata.name);
   }
   ctx.clearVirtualContext();
 }
 
 /**
- * Creates a tool entry with bundler-injected step function fields so
- * `buildDynamicTools` can replay it from durable metadata.
+ * Creates a tool entry stamped with a live durable callback so resolve-time
+ * registration binds it under the tool's final name.
  */
 function createReplayableTool(
   description = "stub",
-  executeFn: (...args: unknown[]) => unknown = () => ({ ok: true }),
+  executeFn: (input: Record<string, unknown>) => unknown = () => ({ ok: true }),
 ): DynamicToolEntry {
-  const stepId = `test-step-${++stepCounter}`;
-  testRegistry.set(stepId, (_vars: unknown, input: unknown) => executeFn(input));
   const entry = defineTool({
     description,
     inputSchema: { type: "object" },
     execute: async (input: Record<string, unknown>): Promise<unknown> => executeFn(input),
   });
-  Object.assign(entry, {
-    __executeStepFn: { stepId },
-    __closureVars: {},
+  stampDurableDynamicToolCallbacks(entry, {
+    execute: {
+      callback: (_closure, input) => executeFn(input as Record<string, unknown>),
+      closure: {},
+    },
+  });
+  return entry;
+}
+
+function stampTestTool(entry: DynamicToolEntry): DynamicToolEntry {
+  const request = entry.approval === undefined ? undefined : resolveApprovalPolicy(entry.approval);
+  const response =
+    entry.approval === undefined || typeof entry.approval === "function"
+      ? undefined
+      : entry.approval.response;
+  stampDurableDynamicToolCallbacks(entry, {
+    execute: {
+      callback: (_closure, input, context) =>
+        entry.execute(
+          input as Record<string, unknown>,
+          context as Parameters<DynamicToolEntry["execute"]>[1],
+        ),
+      closure: {},
+    },
+    ...(request === undefined
+      ? {}
+      : {
+          approvalRequest: {
+            callback: (_closure, context) => request(context as ApprovalContext),
+            closure: {},
+          },
+        }),
+    ...(response === undefined
+      ? {}
+      : {
+          approvalResponse: {
+            callback: (_closure, context) => response(context as never),
+            closure: {},
+          },
+        }),
+    ...(entry.toModelOutput === undefined
+      ? {}
+      : {
+          toModelOutput: {
+            callback: (_closure, output) => entry.toModelOutput!(output),
+            closure: {},
+          },
+        }),
   });
   return entry;
 }
@@ -585,7 +485,7 @@ describe("dispatchDynamicToolEvent", () => {
 
   it("reuses registered session callbacks without rerunning the resolver", async () => {
     let ctx = createCtx();
-    const handler = vi.fn(() => ({ tool: createFrameworkTool("cached live tool") }));
+    const handler = vi.fn(() => ({ tool: createReplayableTool("cached durable tool") }));
     const resolver = createResolver("live", ["session.started"], handler);
     ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_current");
 
@@ -597,241 +497,33 @@ describe("dispatchDynamicToolEvent", () => {
     });
     ctx = await deserializeContext(serializeContext(ctx));
 
-    await hydrateDynamicSessionTools({
-      ctx,
-      resolvers: [resolver],
-      messages: [],
-      event: createSessionStartedEvent(),
-    });
-
     expect(handler).toHaveBeenCalledOnce();
     expect(buildDynamicTools(ctx).map((tool) => tool.name)).toEqual(["tool"]);
   });
 
-  it("rebuilds a missing approval callback after a same-revision cold start", async () => {
+  it("does not rerun a resolver when a registered callback is missing", async () => {
     const ctx = createCtx();
-    const stepId = `test-step-${++stepCounter}`;
-    const stableStepId = `test-step-${++stepCounter}`;
-    testRegistry.set(stepId, () => ({ ok: true }));
-    testRegistry.set(stableStepId, () => ({ ok: true }));
-    let approvalStepFnName: string | undefined;
-    let resolutionCount = 0;
-    const handler = vi.fn(() => {
-      resolutionCount++;
-      const entry = defineTool({
-        description: resolutionCount === 1 ? "approval policy" : "changed approval policy",
-        inputSchema: { type: "object" },
-        approval: () => "not-applicable" as const,
-        execute: async (): Promise<unknown> => ({ ok: true }),
-      });
-      Object.assign(entry, {
-        __executeStepFn: { stepId },
-        __closureVars: {},
-      });
-      return { governed: entry };
-    });
-    const resolver = createResolver("governed", ["session.started"], handler);
-    const stableHandler = vi.fn(() => {
-      const entry = defineTool({
-        description: "stable tool",
-        inputSchema: { type: "object" },
-        execute: async (): Promise<unknown> => ({ ok: true }),
-      });
-      Object.assign(entry, {
-        __executeStepFn: { stepId: stableStepId },
-        __closureVars: {},
-      });
-      return { stable: entry };
-    });
-    const stableResolver = createResolver("stable", ["session.started"], stableHandler);
-
-    try {
-      await dispatchDynamicToolEvent({
-        ctx,
-        resolvers: [resolver, stableResolver],
-        messages: [],
-        event: makeEvent("session.started"),
-      });
-      ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_current");
-
-      approvalStepFnName = ctx.get(SessionDynamicToolMetadataKey)?.[0]?.approvalStepFnName;
-      expect(approvalStepFnName).toBe(
-        `eve:dynamic-tool-approval:${ctx.get(SessionIdKey)}:governed:governed`,
-      );
-      simulateColdStart(ctx);
-
-      await hydrateDynamicSessionTools({
-        ctx,
-        resolvers: [
-          createResolver("governed", ["session.started"], handler),
-          createResolver("stable", ["session.started"], stableHandler),
-        ],
-        messages: [],
-        event: createSessionStartedEvent(),
-      });
-
-      expect(handler).toHaveBeenCalledTimes(2);
-      expect(stableHandler).toHaveBeenCalledOnce();
-      expect(ctx.get(SessionDynamicToolMetadataKey)?.map((entry) => entry.name)).toEqual([
-        "governed",
-        "stable",
-      ]);
-      const tool = buildDynamicTools(ctx)[0]!;
-      expect(tool.description).toBe("approval policy");
-      await expect(
-        resolveApprovalPolicy(tool.approval!)(createApprovalContext({ toolName: tool.name })),
-      ).resolves.toBe("not-applicable");
-    } finally {
-      testRegistry.delete(stepId);
-      testRegistry.delete(stableStepId);
-      if (approvalStepFnName !== undefined) testRegistry.delete(approvalStepFnName);
-    }
-  });
-
-  it("rejects ownership changes while hydrating session callbacks", async () => {
-    const ctx = createCtx();
-    const original = [
-      createResolver("alpha", ["session.started"], () => ({ a: createFrameworkTool() })),
-      createResolver("beta", ["session.started"], () => ({ b: createFrameworkTool() })),
-    ];
+    const handler = vi.fn(() => ({ tool: createReplayableTool() }));
+    const resolver = createResolver("live", ["session.started"], handler);
     await dispatchDynamicToolEvent({
       ctx,
-      resolvers: original,
+      resolvers: [resolver],
       messages: [],
       event: makeEvent("session.started"),
     });
     simulateColdStart(ctx);
 
-    await expect(
-      hydrateDynamicSessionTools({
-        ctx,
-        resolvers: [
-          createResolver("alpha", ["session.started"], () => ({ a: createFrameworkTool() })),
-          createResolver("beta", ["session.started"], () => ({ a: createFrameworkTool() })),
-        ],
-        messages: [],
-        event: createSessionStartedEvent(),
-      }),
-    ).rejects.toThrow('Dynamic tool "a" from resolver "beta" collides');
+    const [tool] = buildDynamicTools(ctx);
+    await expect(tool!.execute!({}, executeOptions)).rejects.toThrow(
+      "cannot replay its execute callback",
+    );
+    expect(handler).toHaveBeenCalledOnce();
   });
 
-  it("keeps replay callbacks isolated between sessions", async () => {
-    const sessionIds = ["session-a", "session-b"] as const;
-    const resolver = createResolver("governed", ["session.started"], (_event, resolveCtx) => {
-      const sessionId = (resolveCtx as { session: { id: string } }).session.id;
-      return {
-        governed: defineTool({
-          description: "session policy",
-          inputSchema: { type: "object" },
-          approval: () => (sessionId === "session-a" ? "not-applicable" : "user-approval"),
-          execute: async (): Promise<unknown> => ({ sessionId }),
-        }),
-      };
-    });
-
-    const contexts = sessionIds.map((sessionId) => createCtx(sessionId));
-    for (const ctx of contexts) {
-      await dispatchDynamicToolEvent({
-        ctx,
-        resolvers: [resolver],
-        messages: [],
-        event: makeEvent("session.started"),
-      });
-    }
-
-    const sessionATool = buildDynamicTools(contexts[0]!)[0]!;
-    const sessionBTool = buildDynamicTools(contexts[1]!)[0]!;
-    await expect(
-      resolveApprovalPolicy(sessionATool.approval!)(
-        createApprovalContext({ toolName: sessionATool.name }),
-      ),
-    ).resolves.toBe("not-applicable");
-    await expect(
-      resolveApprovalPolicy(sessionBTool.approval!)(
-        createApprovalContext({ toolName: sessionBTool.name }),
-      ),
-    ).resolves.toBe("user-approval");
-  });
-
-  it("evicts callback groups deterministically and rehydrates them on demand", async () => {
-    const session = createCtx("bounded-session");
-    let version = 0;
-    const handler = vi.fn(() => {
-      const current = ++version;
-      return {
-        governed: defineTool({
-          description: `version ${current}`,
-          inputSchema: { type: "object" },
-          approval: () => (current === 1 ? "user-approval" : "not-applicable"),
-          execute: async (): Promise<unknown> => current,
-        }),
-      };
-    });
-    const resolver = createResolver("bounded", ["session.started"], handler);
-
-    await dispatchDynamicToolEvent({
-      ctx: session,
-      resolvers: [resolver],
-      messages: [],
-      event: makeEvent("session.started"),
-    });
-    await dispatchDynamicToolEvent({
-      ctx: session,
-      resolvers: [resolver],
-      messages: [],
-      event: makeEvent("session.started"),
-    });
-
-    for (let index = 0; index < 255; index++) {
-      await dispatchDynamicToolEvent({
-        ctx: createCtx(`bounded-filler-${index}`),
-        resolvers: [
-          createResolver("filler", ["session.started"], () => ({
-            tool: createFrameworkTool(),
-          })),
-        ],
-        messages: [],
-        event: makeEvent("session.started"),
-      });
-    }
-
-    const retained = buildDynamicTools(session)[0]!;
-    await expect(retained.execute!({}, executeOptions)).resolves.toBe(2);
-    await expect(
-      resolveApprovalPolicy(retained.approval!)(createApprovalContext({ toolName: retained.name })),
-    ).resolves.toBe("not-applicable");
-
-    await dispatchDynamicToolEvent({
-      ctx: createCtx("bounded-evictor"),
-      resolvers: [
-        createResolver("evictor", ["session.started"], () => ({
-          tool: createFrameworkTool(),
-        })),
-      ],
-      messages: [],
-      event: makeEvent("session.started"),
-    });
-
-    expect(buildDynamicTools(session)).toEqual([]);
-    await expect(retained.execute!({}, executeOptions)).resolves.toBe(2);
-
-    await hydrateDynamicSessionTools({
-      ctx: session,
-      resolvers: [resolver],
-      messages: [],
-      event: createSessionStartedEvent(),
-    });
-    await expect(buildDynamicTools(session)[0]!.execute!({}, executeOptions)).resolves.toBe(3);
-  });
-
-  it("preserves metadata and retries when cold hydration fails", async () => {
+  it("rebinds missing session callbacks even when the runtime revision is unchanged", async () => {
     const ctx = createCtx();
-    const handler = vi
-      .fn()
-      .mockImplementationOnce(() => ({ tool: createFrameworkTool("live tool") }))
-      .mockRejectedValue(new Error("temporary resolver failure"));
+    const handler = vi.fn(() => ({ tool: createReplayableTool("rebound") }));
     const resolver = createResolver("live", ["session.started"], handler);
-
     await dispatchDynamicToolEvent({
       ctx,
       resolvers: [resolver],
@@ -839,20 +531,36 @@ describe("dispatchDynamicToolEvent", () => {
       event: makeEvent("session.started"),
     });
     ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_current");
-    const originalMetadata = ctx.get(SessionDynamicToolMetadataKey);
+    simulateColdStart(ctx);
 
-    for (let attempt = 0; attempt < 2; attempt++) {
-      simulateColdStart(ctx);
-      await hydrateDynamicSessionTools({
-        ctx,
-        resolvers: [createResolver("live", ["session.started"], handler)],
-        messages: [],
-        event: createSessionStartedEvent(),
-      });
-      expect(ctx.get(SessionDynamicToolMetadataKey)).toEqual(originalMetadata);
-    }
+    // Fresh process: bindings are gone although the bundle did not change.
+    expect(lookupDurableDynamicCallback("tool", "execute")).toBeUndefined();
 
-    expect(handler).toHaveBeenCalledTimes(3);
+    await refreshDynamicSessionToolsForRuntimeRevision({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: createSessionStartedEvent(),
+      runtimeRevision: "deployment:dpl_current",
+    });
+
+    expect(handler).toHaveBeenCalledTimes(2);
+    const [tool] = buildDynamicTools(ctx);
+    await expect(tool!.execute!({}, executeOptions)).resolves.toEqual({ ok: true });
+  });
+
+  it("rejects metadata persisted by the pre-release offset-based format", () => {
+    const entry = defineTool({
+      description: "legacy tool",
+      inputSchema: { type: "object" },
+      execute: async (): Promise<unknown> => ({}),
+    });
+    stampDurableDynamicToolCallbacks(entry, {
+      execute: { closure: {}, stepId: "eve:dynamic-tool//old/execute/0-100" } as never,
+    });
+    expect(() => validateDurableDynamicToolCallbacks("legacy", entry)).toThrow(
+      /pre-release eve version/,
+    );
   });
 
   it("clears removed session resolvers on a new runtime revision", async () => {
@@ -899,11 +607,13 @@ describe("dispatchDynamicToolEvent", () => {
       type: "object",
     };
     const resolver = createResolver("connection", ["step.started"], () => ({
-      remote: defineTool({
-        description: "remote tool",
-        inputSchema,
-        execute: async (): Promise<unknown> => ({ ok: true }),
-      }),
+      remote: stampTestTool(
+        defineTool({
+          description: "remote tool",
+          inputSchema,
+          execute: async (): Promise<unknown> => ({ ok: true }),
+        }),
+      ),
     }));
 
     await dispatchDynamicToolEvent({
@@ -970,11 +680,13 @@ describe("dispatchDynamicToolEvent", () => {
     const ctx = createCtx();
     const resolver = {
       ...createResolver("search", ["step.started"], () => ({
-        query: defineTool({
-          description: "search records",
-          inputSchema: { type: "object" },
-          execute: async (_input, toolCtx) => ({ toolName: toolCtx.toolName }),
-        }),
+        query: stampTestTool(
+          defineTool({
+            description: "search records",
+            inputSchema: { type: "object" },
+            execute: async (_input, toolCtx) => ({ toolName: toolCtx.toolName }),
+          }),
+        ),
       })),
       extensionNamespace: "warehouse",
     };
@@ -998,14 +710,16 @@ describe("dispatchDynamicToolEvent", () => {
     const getToken = vi.fn(async () => ({ token: "step-token" }));
     const auth = { getToken, principalType: "app" as const };
     const resolver = createResolver("oauth", ["step.started"], () => ({
-      probe: defineTool({
-        description: "resolve auth",
-        inputSchema: { type: "object" },
-        execute: async (_input, toolCtx) => {
-          const { token } = await toolCtx.getToken(auth);
-          return { token };
-        },
-      }),
+      probe: stampTestTool(
+        defineTool({
+          description: "resolve auth",
+          inputSchema: { type: "object" },
+          execute: async (_input, toolCtx) => {
+            const { token } = await toolCtx.getToken(auth);
+            return { token };
+          },
+        }),
+      ),
     }));
 
     await dispatchDynamicToolEvent({
@@ -1032,7 +746,7 @@ describe("dispatchDynamicToolEvent", () => {
 
     await dispatchDynamicToolEvent({ ctx, event, messages: [], resolvers: [resolver] });
     ctx.clearVirtualContext();
-    expect(buildDynamicTools(ctx)).toEqual([]);
+    expect(buildDynamicTools(ctx).map((tool) => tool.name)).toEqual(["query"]);
 
     await dispatchDynamicToolEvent({ ctx, event, messages: [], resolvers: [resolver] });
     expect(buildDynamicTools(ctx)[0]?.description).toBe("cached");
@@ -1151,106 +865,92 @@ describe("dispatchDynamicToolEvent", () => {
     expect(buildDynamicTools(ctx)).toHaveLength(2);
   });
 
-  it("rehydrates session tools from durable metadata on a fresh step", async () => {
+  it("replays session tools from durable metadata on a fresh step", async () => {
     const ctx = createCtx();
 
-    // Register a step function so replayDynamicSessionTools can
-    // reconstruct the tool on the second step.
-    const stepId = "eve:dynamic-tool//__eve_dispatch_rehydrate_test";
-    const stepFn = vi.fn((_vars: unknown, input: unknown, toolCtx: unknown) => ({
+    const stepFn = vi.fn((_closure: unknown, input: unknown, toolCtx: unknown) => ({
       input,
       toolName: (toolCtx as { toolName: string }).toolName,
     }));
-    const registrySym = Symbol.for("@workflow/core//registeredSteps");
-    const registry = getOrCreateStepRegistry(registrySym);
-    registry.set(stepId, stepFn);
 
-    try {
-      // Build a resolver whose tool entry carries bundler-injected fields
-      const resolver = createResolver("tenant", ["session.started"], () => {
-        const entry = defineTool({
-          description: "tenant query",
-          inputSchema: { type: "object" },
-          execute: async () => ({ ok: true }),
-        });
-        Object.assign(entry, {
-          __executeStepFn: { stepId },
-          __closureVars: { apiUrl: "https://api.example.com" },
-        });
-        return { query: entry };
+    // Build a resolver whose tool entry carries a durable callback descriptor.
+    const resolver = createResolver("tenant", ["session.started"], () => {
+      const entry = defineTool({
+        description: "tenant query",
+        inputSchema: { type: "object" },
+        execute: async () => ({ ok: true }),
       });
-
-      // First step: resolve session tools, metadata is stored durably
-      await dispatchDynamicToolEvent({
-        ctx,
-        resolvers: [resolver],
-        messages: [],
-        event: makeEvent("session.started"),
+      stampDurableDynamicToolCallbacks(entry, {
+        execute: {
+          callback: stepFn as never,
+          closure: { apiUrl: "https://api.example.com" },
+        },
       });
-      expect(buildDynamicTools(ctx)).toHaveLength(1);
-      expect(ctx.get(SessionDynamicToolMetadataKey)).toHaveLength(1);
-      expect(ctx.get(SessionDynamicToolMetadataKey)![0]!.executeStepFnName).toBe(stepId);
+      return { query: entry };
+    });
 
-      // Simulate workflow step boundary: clear virtual context.
-      // Durable metadata survives — buildDynamicTools reads from durable keys.
-      ctx.clearVirtualContext();
-      expect(ctx.get(SessionDynamicToolMetadataKey)).toHaveLength(1);
+    // First step: resolve session tools, metadata is stored durably and the
+    // callback binds under the final tool name.
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+    expect(buildDynamicTools(ctx)).toHaveLength(1);
+    expect(ctx.get(SessionDynamicToolMetadataKey)).toHaveLength(1);
+    expect(ctx.get(SessionDynamicToolMetadataKey)![0]!.callbacks.execute.closure).toEqual({
+      apiUrl: "https://api.example.com",
+    });
 
-      const tools = buildDynamicTools(ctx);
-      expect(tools).toHaveLength(1);
-      expect(tools[0]!.name).toBe("query");
-      await expect(tools[0]!.execute!({}, executeOptions)).resolves.toEqual({
-        input: {},
-        toolName: "query",
-      });
-    } finally {
-      registry.delete(stepId);
-    }
+    // Simulate workflow step boundary: clear virtual context.
+    // Durable metadata survives — buildDynamicTools reads from durable keys.
+    ctx.clearVirtualContext();
+    expect(ctx.get(SessionDynamicToolMetadataKey)).toHaveLength(1);
+
+    const tools = buildDynamicTools(ctx);
+    expect(tools).toHaveLength(1);
+    expect(tools[0]!.name).toBe("query");
+    await expect(tools[0]!.execute!({}, executeOptions)).resolves.toEqual({
+      input: {},
+      toolName: "query",
+    });
   });
 
   it("provides inline auth to a replayed session-scoped tool", async () => {
     const ctx = createCtx();
-    const stepId = "eve:dynamic-tool//__eve_dispatch_auth_rehydrate_test";
     const getToken = vi.fn(async () => ({ token: "replayed-token" }));
     const auth = { getToken, principalType: "app" as const };
-    const stepFn = vi.fn(async (_vars: unknown, _input: unknown, toolCtx: unknown) => {
+    const stepFn = vi.fn(async (_closure: unknown, _input: unknown, toolCtx: unknown) => {
       const { token } = await (toolCtx as ToolContext).getToken(auth);
       return { token };
     });
-    const registrySym = Symbol.for("@workflow/core//registeredSteps");
-    const registry = getOrCreateStepRegistry(registrySym);
-    registry.set(stepId, stepFn);
 
-    try {
-      const resolver = createResolver("oauth", ["session.started"], () => {
-        const entry = defineTool({
-          description: "resolve replayed auth",
-          inputSchema: { type: "object" },
-          execute: async () => ({ ok: true }),
-        });
-        Object.assign(entry, {
-          __executeStepFn: { stepId },
-          __closureVars: {},
-        });
-        return { probe: entry };
+    const resolver = createResolver("oauth", ["session.started"], () => {
+      const entry = defineTool({
+        description: "resolve replayed auth",
+        inputSchema: { type: "object" },
+        execute: async () => ({ ok: true }),
       });
+      stampDurableDynamicToolCallbacks(entry, {
+        execute: { callback: stepFn as never, closure: {} },
+      });
+      return { probe: entry };
+    });
 
-      await dispatchDynamicToolEvent({
-        ctx,
-        resolvers: [resolver],
-        messages: [],
-        event: makeEvent("session.started"),
-      });
-      ctx.clearVirtualContext();
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+    ctx.clearVirtualContext();
 
-      const tool = buildDynamicTools(ctx)[0]!;
-      await expect(tool.execute!({}, executeOptions)).resolves.toEqual({
-        token: "replayed-token",
-      });
-      expect(getToken).toHaveBeenCalledOnce();
-    } finally {
-      registry.delete(stepId);
-    }
+    const tool = buildDynamicTools(ctx)[0]!;
+    await expect(tool.execute!({}, executeOptions)).resolves.toEqual({
+      token: "replayed-token",
+    });
+    expect(getToken).toHaveBeenCalledOnce();
   });
 
   it("resolver returning null produces no tools", async () => {
@@ -1333,11 +1033,7 @@ function createFrameworkTool(
   description = "framework stub",
   executeFn: (input: Record<string, unknown>) => unknown = () => ({ ok: true }),
 ): DynamicToolEntry {
-  return defineTool({
-    description,
-    inputSchema: { type: "object" },
-    execute: async (input: Record<string, unknown>): Promise<unknown> => executeFn(input),
-  });
+  return createReplayableTool(description, executeFn);
 }
 
 describe("framework dynamic tools (no bundler transform)", () => {
@@ -1357,10 +1053,7 @@ describe("framework dynamic tools (no bundler transform)", () => {
 
     const metadata = ctx.get(SessionDynamicToolMetadataKey);
     expect(metadata).toHaveLength(1);
-    expect(metadata![0]!.executeStepFnName).toBe(
-      `eve:framework-dynamic:${ctx.get(SessionIdKey)}:fwk:search`,
-    );
-    expect(metadata![0]!.closureVars).toEqual({});
+    expect(metadata![0]!.callbacks.execute.closure).toEqual({});
 
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(1);
@@ -1393,7 +1086,6 @@ describe("framework dynamic tools (no bundler transform)", () => {
 
     const metadata = ctx.get(TurnDynamicToolMetadataKey);
     expect(metadata).toHaveLength(1);
-    expect(metadata![0]!.executeStepFnName).toBe("eve:framework-dynamic:helper:assist");
 
     ctx.clearVirtualContext();
 
@@ -1450,15 +1142,15 @@ describe("framework dynamic tools (no bundler transform)", () => {
   it("propagates approval from a step-scoped entry into the harness tool", async () => {
     const ctx = createCtx();
     const approvalFn = vi.fn(() => "user-approval" as const);
-    const entry: DynamicToolEntry = defineTool({
-      description: "destructive op",
-      inputSchema: { type: "object" },
-      approval: approvalFn,
-      execute: async (): Promise<unknown> => ({ ok: true }),
-    });
+    const entry: DynamicToolEntry = stampTestTool(
+      defineTool({
+        description: "destructive op",
+        inputSchema: { type: "object" },
+        approval: approvalFn,
+        execute: async (): Promise<unknown> => ({ ok: true }),
+      }),
+    );
     const resolver = createResolver("connection", ["step.started"], () => ({ risky: entry }));
-    testRegistry.delete("eve:framework-dynamic:connection:risky");
-    testRegistry.delete("eve:dynamic-tool-approval:connection:risky");
 
     await dispatchDynamicToolEvent({
       ctx,
@@ -1470,22 +1162,23 @@ describe("framework dynamic tools (no bundler transform)", () => {
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(1);
     expect(tools[0]!.name).toBe("risky");
-    expect(tools[0]!.approval).toBe(approvalFn);
     const approvalCtx = createApprovalContext({ toolName: "risky" });
-    expect(resolveApprovalPolicy(tools[0]!.approval!)(approvalCtx)).toBe("user-approval");
-    expect(testRegistry.has("eve:framework-dynamic:connection:risky")).toBe(false);
-    expect(testRegistry.has("eve:dynamic-tool-approval:connection:risky")).toBe(false);
+    await expect(resolveApprovalPolicy(tools[0]!.approval!)(approvalCtx)).resolves.toBe(
+      "user-approval",
+    );
   });
 
   it("replays approval from session-scoped dynamic tools", async () => {
     const ctx = createCtx();
     const approvalFn = vi.fn(async () => "user-approval" as const);
-    const entry: DynamicToolEntry = defineTool({
-      description: "destructive op",
-      inputSchema: { type: "object" },
-      approval: approvalFn,
-      execute: async (): Promise<unknown> => ({ ok: true }),
-    });
+    const entry: DynamicToolEntry = stampTestTool(
+      defineTool({
+        description: "destructive op",
+        inputSchema: { type: "object" },
+        approval: approvalFn,
+        execute: async (): Promise<unknown> => ({ ok: true }),
+      }),
+    );
     const resolver = createResolver("session_guard", ["session.started"], () => ({
       guarded: entry,
     }));
@@ -1510,18 +1203,19 @@ describe("framework dynamic tools (no bundler transform)", () => {
     expect(approvalFn).toHaveBeenCalledExactlyOnceWith(approvalCtx);
   });
 
-  it("replays turn metadata written before request/response policy naming", async () => {
+  it("replays phase-specific turn metadata", async () => {
     const ctx = createCtx();
     const approval = vi.fn(() => "user-approval" as const);
-    testRegistry.set("legacy-turn-execute", () => ({ ok: true }));
-    testRegistry.set("legacy-turn-approval", approval);
+    registerTestCallback("guarded", "execute", () => ({ ok: true }));
+    registerTestCallback("guarded", "approvalRequest", approval);
     ctx.set(TurnDynamicToolMetadataKey, [
       {
-        approvalStepFnName: "legacy-turn-approval",
-        closureVars: {},
+        callbacks: {
+          approvalRequest: { closure: {} },
+          execute: { closure: {} },
+        },
         description: "legacy guarded tool",
         entryKey: "legacy:guarded",
-        executeStepFnName: "legacy-turn-execute",
         inputSchema: { type: "object" },
         name: "guarded",
         resolverSlug: "legacy",
@@ -1534,29 +1228,41 @@ describe("framework dynamic tools (no bundler transform)", () => {
     await expect(
       resolveApprovalPolicy(tool.approval)(createApprovalContext({ toolName: "guarded" })),
     ).resolves.toBe("user-approval");
+    getDynamicCallbackRegistry().delete("guarded");
   });
 
   it("uses the first dynamic definition for response authorization", () => {
     const ctx = createCtx();
-    ctx.set(LiveStepToolsKey, [
+    registerTestCallback("guarded", "execute", () => null);
+    registerTestCallback("guarded", "approvalRequest", () => "user-approval");
+    registerTestCallback(
+      "guarded",
+      "approvalResponse",
+      async () => ({ status: "allowed" }) as const,
+    );
+    ctx.set(StepDynamicToolMetadataKey, [
       {
-        approval: {
-          request: () => "user-approval",
-          response: async () => ({ status: "allowed" }) as const,
+        callbacks: {
+          approvalRequest: { closure: {} },
+          approvalResponse: { closure: {} },
+          execute: { closure: {} },
         },
         description: "step",
-        execute: () => null,
-        inputSchema: jsonSchema({ type: "object" }),
+        entryKey: "step:guarded",
+        inputSchema: { type: "object" },
         name: "guarded",
+        resolverSlug: "step",
       },
     ]);
     ctx.set(SessionDynamicToolMetadataKey, [
       {
-        approvalResponseStepFnName: "session-authorizer",
-        approvalStepFnName: "session-policy",
+        callbacks: {
+          approvalRequest: { closure: {} },
+          approvalResponse: { closure: {} },
+          execute: { closure: {} },
+        },
         description: "session",
         entryKey: "session:guarded",
-        executeStepFnName: "session-execute",
         inputSchema: { type: "object" },
         name: "guarded",
         resolverSlug: "session",
@@ -1569,9 +1275,10 @@ describe("framework dynamic tools (no bundler transform)", () => {
     });
 
     expect(tools.get("guarded")?.description).toBe("step");
+    getDynamicCallbackRegistry().delete("guarded");
   });
 
-  it("rehydrates an untransformed executor and approval policies after a cold start", async () => {
+  it("rejects an untransformed tool atomically without resolver hydration", async () => {
     const ctx = createCtx();
     const execute = vi.fn(async () => ({ ok: true }));
     const request = vi.fn(async () => "user-approval" as const);
@@ -1592,58 +1299,12 @@ describe("framework dynamic tools (no bundler transform)", () => {
       messages: [],
       resolvers: [resolver],
     });
-    ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_current");
-
-    simulateColdStart(ctx);
-    await hydrateDynamicSessionTools({
-      ctx,
-      event: createSessionStartedEvent(),
-      messages: [],
-      resolvers: [createResolver("session_guard", ["session.started"], handler)],
-    });
-
-    expect(handler).toHaveBeenCalledTimes(2);
-    const tool = buildDynamicTools(ctx)[0]!;
-    await expect(tool.execute!({}, executeOptions)).resolves.toEqual({ ok: true });
-    expect(execute).toHaveBeenCalledOnce();
-
-    const approval = tool.approval;
-    if (approval === undefined || typeof approval === "function") {
-      throw new Error("Expected rehydrated approval configuration.");
-    }
-    const approvalCtx = createApprovalContext({ toolName: "guarded" });
-    await expect(approval.request(approvalCtx)).resolves.toBe("user-approval");
-    expect(request).toHaveBeenCalledExactlyOnceWith(approvalCtx);
-
-    const responseCtx = {
-      auth: {
-        getToken: vi.fn(),
-        requireAuth: () => {
-          throw new Error("not implemented");
-        },
-      },
-      request: {
-        callId: "call_1",
-        requestId: "approval_1",
-        toolInput: { owner: "vercel", repo: "eve" },
-        toolName: "guarded",
-      },
-      response: { decision: "approve" as const },
-      responder: {
-        attributes: {},
-        authenticator: "slack",
-        principalId: "U123",
-        principalType: "user",
-      },
-      session: {
-        id: "test-session",
-        initiator: null,
-        turn: { id: "test-turn", sequence: 0 },
-      },
-    };
-
-    await expect(approval.response!(responseCtx)).resolves.toEqual({ status: "allowed" });
-    expect(response).toHaveBeenCalledExactlyOnceWith(responseCtx);
+    expect(handler).toHaveBeenCalledOnce();
+    expect(ctx.get(SessionDynamicToolMetadataKey)).toEqual([]);
+    expect(buildDynamicTools(ctx)).toEqual([]);
+    expect(execute).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+    expect(response).not.toHaveBeenCalled();
   });
 
   it("propagates outputSchema from dynamic entries into harness tools and metadata", async () => {
@@ -1654,12 +1315,14 @@ describe("framework dynamic tools (no bundler transform)", () => {
       required: ["ok"],
       type: "object",
     };
-    const entry: DynamicToolEntry = defineTool({
-      description: "typed op",
-      inputSchema: { type: "object" },
-      outputSchema,
-      execute: async (): Promise<unknown> => ({ ok: true }),
-    });
+    const entry: DynamicToolEntry = stampTestTool(
+      defineTool({
+        description: "typed op",
+        inputSchema: { type: "object" },
+        outputSchema,
+        execute: async (): Promise<unknown> => ({ ok: true }),
+      }),
+    );
     const resolver = createResolver("connection", ["session.started"], () => ({ typed: entry }));
 
     await dispatchDynamicToolEvent({

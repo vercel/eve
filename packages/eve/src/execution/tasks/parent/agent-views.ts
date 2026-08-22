@@ -1,8 +1,11 @@
+import type { ModelMessage } from "ai";
+
 import type { HarnessSession } from "#harness/types.js";
 import { resolveAgentsAnnouncement, type AgentView } from "#harness/handles/prompt.js";
 import { formatAgentStatus, getAgentHandleStore } from "#harness/handles/store.js";
 import { readTaskViews } from "#execution/tasks/parent/control-shared.js";
 import { getSessionTaskIndex } from "#tasks/session-index.js";
+import { readSubagentTaskMetadata } from "#tasks/types.js";
 
 /** Derives model-visible task-agent availability from authoritative task views. */
 export async function readTaskAgentViews(session: HarnessSession): Promise<readonly AgentView[]> {
@@ -15,8 +18,10 @@ export async function readTaskAgentViews(session: HarnessSession): Promise<reado
   const views = await readTaskViews(entries);
   const byAgent = new Map<string, typeof views>();
   for (const view of views) {
-    const current = byAgent.get(view.metadata.agentId) ?? [];
-    byAgent.set(view.metadata.agentId, [...current, view]);
+    const metadata = readSubagentTaskMetadata(view);
+    if (metadata === undefined) continue;
+    const current = byAgent.get(metadata.agentId) ?? [];
+    byAgent.set(metadata.agentId, [...current, view]);
   }
 
   return addresses.map((address) => {
@@ -53,11 +58,12 @@ export async function readTaskAgentViews(session: HarnessSession): Promise<reado
 /** Appends the changed task-agent projection before the next model call. */
 export async function appendTaskAgentAnnouncement(
   session: HarnessSession,
+  messages: readonly ModelMessage[] = session.history,
 ): Promise<HarnessSession> {
   const agentViews = await readTaskAgentViews(session);
   const announcement = resolveAgentsAnnouncement({
     agentViews,
-    messages: session.history,
+    messages,
     store: getAgentHandleStore(session.state),
   });
   return announcement === undefined

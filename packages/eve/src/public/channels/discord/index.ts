@@ -11,6 +11,7 @@ export type { ModelMessage } from "ai";
  * Discord sessions, used for tracing and observability.
  */
 export interface DiscordInstrumentationMetadata extends Record<string, unknown> {
+  readonly audience: import("#shared/channel-audience.js").ChannelAudience;
   /** Originating Discord channel id, or `null` when unavailable. */
   readonly channelId: string | null;
   /** Originating Discord guild id, or `null` when the interaction was not in a guild. */

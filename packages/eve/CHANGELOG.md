@@ -1,5 +1,51 @@
 # eve
 
+## 0.44.1
+
+### Patch Changes
+
+- 7c99773: Linq setup now recognizes Vercel CLI versions that lack required trigger options and offers to upgrade the CLI from the `/add` flow instead of reporting a generic connector failure.
+- 02403b9: Dynamic tool callbacks are now identified by tool name and phase instead of byte offsets in the authored source. Editing an agent file no longer risks a parked approval replaying the wrong tool: after a redeploy or crash, parked calls run the latest deployed callback code under the same name, and a tool that no longer exists fails closed with an explicit error. Session-scoped resolvers may run once more on resume to rebind callbacks, so keep them idempotent.
+- 84ddb09: Apply release-age policies during project and extension setup instead of bypassing them. New standalone pnpm projects use strict enforcement, while projects inside an existing workspace retain that workspace's policy.
+- 85b2dc8: Redact model, tool, approval, and delivery content from hosted instrumentation for private and unknown channel audiences. Content-denied Workflow runs now carry a metadata marker and omit their content-derived title so dashboards can exclude them without reading the event stream. Local `eve dev` tracing continues to retain content for unknown TUI and HTTP sessions.
+- a4fd288: Add declarative `resume: true` and imperative `resume()` support for replaying durable frontend sessions and following in-flight turns. Generated Web Chat apps now keep session IDs in `/s/{sessionId}` URLs, restore conversations on reload, and provide a sessionless `/s` route for starting a new chat.
+- 923921c: Give models runtime-authored task state after background work starts so initiating turns acknowledge launch, partial task wakes stay silent, and settled cohorts produce one combined report.
+- 673def2: Allow `useEveAgent` message sends with `turnPolicy: "steer"` while a turn is active, keeping the local projection attached to the durable replacement stream. Generated web chats now keep the composer enabled during responses and steer by default when a follow-up is submitted. Cancelled turns preserve their accepted user input in durable history, so replacement turns retain the interrupted request as context.
+
+## 0.44.0
+
+### Minor Changes
+
+- 47e8b64: Make traces public-only by default while retaining unclassified HTTP/TUI sessions in zero-config local tracing, and add composable input/output redaction, span filtering, and attribute filtering to the export pipeline.
+
+### Patch Changes
+
+- beba1a2: Prepare the TypeScript path alias and Next.js compiler settings before `eve add channel/web` installs the Web Chat registry item, so fresh agent projects build without manual `tsconfig.json` changes.
+- 830dd40: Classify built-in messaging channel metadata by conversation audience.
+- 4da95bb: Fix dynamic tool builds when callback parameters use destructuring defaults by forwarding the original arguments through the durable callback wrapper.
+- 4ed62a7: Render `ask_question` prompts as visible, vendored AI Elements forms in generated Web Chat apps, with vertical single-choice options and freeform answers submitted through eve's structured input response API.
+- e43d9cb: Add an optional audience classification to channel instrumentation metadata.
+
+## 0.43.0
+
+### Minor Changes
+
+- 1390675: Background tools can now report a delegated task's terminal result in-process via `task.send({ kind: "complete" | "fail" | "cancel", ... })`, without minting a callback URL.
+
+### Patch Changes
+
+- 1c2684a: Add the native Agentcard MCP connection to the registry through Vercel Connect.
+- f3f4f4a: Allow in-process background tool executors to report progress and terminal results through `task.send`. Progress updates now use executor-neutral coordinates internally, and background task types are exported from `eve/tools`.
+- 7de783e: Existing Linq account setup now fetches the phone numbers assigned to the partner API token, then lets you select the numbers for your agent.
+- 3ec0e5b: Route model-facing session history through one prepared view so dynamic resolvers, compaction, instrumentation, and model calls receive a consistent conversation without changing durable history.
+- b57c965: Forward the active caller on persistent local and remote subagent continuations so user-scoped connections resolve for the current turn without inheriting the previous caller's authority. Upgrade both remote-agent deployments before resuming existing persistent sessions; create-only receivers reject forwarded continuations rather than falling back to service authority.
+- 3811d81: Update the project scripts after `eve add channel/web` so `pnpm dev` starts the generated Next.js app.
+- be9be27: Make dynamic tool approval, execution, and output callbacks durable across cold starts. Non-serializable callback captures now fail with an actionable error instead of losing values during replay.
+- 1390675: Add generic background `defineTool` execution so authored tools can return `task.delegated()` receipts and run through the durable task lifecycle without subagent-specific harness branches.
+- 99de091: Run local and remote subagents through generic background `defineTool` execution when `experimental.tasks` is enabled, preserving durable task receipts, HITL, cancellation, and child stream events.
+- f3f4f4a: Give the parent model runtime-authored task state on background wakes so related intermediate results can stay silent and settle into one consolidated report.
+- 3811d81: New npm, Yarn, and Bun agents no longer receive an obsolete AI SDK package-manager pin. Web Chat installation now preserves the AI SDK version already declared by the agent, avoiding npm `EOVERRIDE` failures.
+
 ## 0.42.0
 
 ### Minor Changes

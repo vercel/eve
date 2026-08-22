@@ -87,6 +87,15 @@ export function requireBackgroundTaskId(turn: EveEvalTurn): string {
   throw new Error("Turn completed without a background task receipt.");
 }
 
+export function parseToolErrorOutput(output: unknown): unknown {
+  if (typeof output !== "string") return output;
+  try {
+    return JSON.parse(output);
+  } catch {
+    return output;
+  }
+}
+
 /** Returns the exact model-visible task view from a task-control result. */
 export function requireTaskView(output: unknown, taskId: string): Record<string, unknown> {
   if (output === null || typeof output !== "object") {

@@ -64,6 +64,10 @@ catalog:
   vitest: "4.1.10"
   zod: "4.4.3"
 
+catalogs:
+  docs:
+    next: "16.3.1"
+
 minimumReleaseAge: 2880 # 2 days
 
 minimumReleaseAgeExclude:

@@ -1604,6 +1604,12 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     configureNote:
       "Browser Use runs tasks in managed cloud browsers. Add approval gates or tool filters before allowing unattended browser actions.",
   },
+  agentcard: {
+    logo: "agentcard",
+    docsHref: "/docs/connections/mcp",
+    keywords: ["mcp", "shopping", "checkout", "payments", "virtual cards", "commerce", "connect"],
+    authModes: ["user"],
+  },
   vercel: {
     logo: "vercel",
     docsHref: "https://vercel.com/docs/agent-resources/vercel-mcp",

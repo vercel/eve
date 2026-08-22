@@ -119,10 +119,18 @@ In the runtime-action dispatch step, add a delegated mode alongside the existing
 1. create the durable `working` task run and record it in the session task index;
 2. dispatch the child with a task binding in its adapter state, reusing the handle-store
    start/continue planning for identity and addressing;
-3. persist the child acknowledgement (`childSessionId`) on the handle, as agent-messaging
-   already does at dispatch;
+3. return `task.delegated({ executor, receipt })` with a new `"subagent"` executor kind whose
+   `data` carries the child acknowledgement (`{ agentId, childSessionId }`). The ack rides the
+   task-private executor binding, never the model-visible receipt, so dispatch must yield
+   `childSessionId` before `delegated()` is called;
 4. resolve the originating tool call **immediately** with the task receipt
    `{ taskId, status: "working" }`.
+
+The handle ack is written at step commit, not by the tool: the background tool provider's
+commit path matches `executor.kind === "subagent"` next to its unconditional session task
+index write and persists the acknowledgement on the agent handle. There is no author-facing
+effect API — framework-owned session writes stay in the provider, and compensation of the
+dispatch on parent-step failure is already unconditional (`rejectDelegatedDispatch`).
 
 Step 4 is what keeps the parent turn moving and history provider-valid: the receipt is the one
 result the existing key-based batch matching consumes, so the turn continues without a second
@@ -130,7 +138,10 @@ result path. A task notification starts or nudges a parent turn and carries its 
 error directly. Nothing selects this mode yet.
 
 Verification: integration tests invoking the mode directly; replay tests proving the same
-originating call returns the same task and never dispatches twice.
+originating call returns the same task, byte-identical `executor.data`, and never dispatches
+twice; commit writes the handle ack; parent-step failure compensates through
+`rejectDelegatedDispatch` alone; turn cancellation retains the delegation result for the
+restarted step.
 
 ### Stage 4 — the task wire, and the flag selects the mode
 
@@ -166,6 +177,11 @@ Converge local and remote subagents onto the same delegated path while preservin
 definitions, then make tasks the default subagent execution and retire the flag once the
 acceptance criteria hold. Both are behavior changes, not additive, and are sequenced last
 deliberately; they get their own plans if anything nontrivial surfaces.
+
+Retiring `RuntimeAction` also requires defining `task_cancel` and `task_update` in terms of
+`defineTool`, then deleting the `task-control` metadata and dispatch path. Before that migration,
+settle the smallest generic `defineTool` execution capability that gives framework tools access to
+their durable session and task ownership state; the harness must not branch on either tool by name.
 
 ## Settled decisions
 

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { z } from "#compiled/zod/index.js";
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import {
   createAgentSourceManifest,
@@ -12,7 +13,7 @@ import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { collectModuleRefsForManifest } from "#compiler/module-map.js";
 import { defineAgent, defineDynamic } from "#public/definitions/agent.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
-import { experimental_workflow } from "#public/definitions/tool.js";
+import { defineTool, experimental_workflow } from "#public/definitions/tool.js";
 import { webSearch } from "#public/tools/web-search.js";
 
 const mocks = vi.hoisted(() => ({
@@ -239,6 +240,35 @@ describe("compileAgentManifest", () => {
     await expect(compileAgentManifest(manifest)).rejects.toThrow(
       'Remove "experimental.tasks" from "research"',
     );
+  });
+
+  it("requires experimental.tasks for background tools", async () => {
+    const manifest = createAgentSourceManifest({
+      agentId: "root",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      tools: [createModuleSourceRef({ logicalPath: "tools/export.ts" })],
+    });
+    mocks.loadModuleBackedDefinition.mockResolvedValue(
+      defineTool({
+        description: "Starts an export.",
+        execution: "background",
+        inputSchema: z.object({}),
+        execute: () => ({ ok: true }),
+      }),
+    );
+    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
+
+    await expect(compileAgentManifest(manifest)).rejects.toThrow(
+      'Background tool "export" requires experimental.tasks: true in the root agent config.',
+    );
+
+    mocks.compileAgentConfig.mockResolvedValue(
+      createConfig({ experimental: { tasks: true }, name: "root" }),
+    );
+    await expect(compileAgentManifest(manifest)).resolves.toMatchObject({
+      tools: [expect.objectContaining({ execution: "background", name: "export" })],
+    });
   });
 
   it("compiles experimental Workflow tool configuration", async () => {

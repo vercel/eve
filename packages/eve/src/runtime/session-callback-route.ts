@@ -120,11 +120,11 @@ const taskTurnStartedCallbackSchema = z.object({
 
 const taskUpdateCallbackSchema = z.object({
   callId: z.string().min(1),
-  childStepIndex: eventCoordinateSchema,
-  childTurnId: z.string().min(1),
   kind: z.literal("task.update"),
   message: z.string().min(1),
   taskId: z.string().min(1),
+  updateEpoch: z.string().min(1),
+  updateIndex: eventCoordinateSchema,
 });
 
 /**
@@ -330,10 +330,10 @@ function projectTaskUpdate(
   if (tokenRejection !== undefined) return tokenRejection;
   return {
     callId: parsed.data.callId,
-    childStepIndex: parsed.data.childStepIndex,
-    childTurnId: parsed.data.childTurnId,
     kind: "task-update",
     message: parsed.data.message,
+    updateEpoch: parsed.data.updateEpoch,
+    updateIndex: parsed.data.updateIndex,
   };
 }
 

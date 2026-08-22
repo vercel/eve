@@ -123,8 +123,8 @@ describe("session callback route", () => {
       new Request(`https://app.example.com/eve/v1/callback/${TASK_TOKEN}`, {
         body: JSON.stringify({
           callId: "update-call",
-          childStepIndex: 2,
-          childTurnId: "turn-child",
+          updateIndex: 2,
+          updateEpoch: "turn-child",
           kind: "task.update",
           message: "Found three matching records.",
           taskId: TASK_ID,
@@ -137,8 +137,8 @@ describe("session callback route", () => {
     expect(response.status).toBe(202);
     expect(resumeHookMock).toHaveBeenCalledWith(TASK_TOKEN, {
       callId: "update-call",
-      childStepIndex: 2,
-      childTurnId: "turn-child",
+      updateIndex: 2,
+      updateEpoch: "turn-child",
       kind: "task-update",
       message: "Found three matching records.",
     });

@@ -132,7 +132,7 @@ approval checks.
 
 ## Dynamic tools
 
-Pass `defineDynamic` an `events` object whose handlers return either a single `defineTool(...)`, a `Record<string, defineTool(...)>`, or `null` for no tools. Wrap every entry in `defineTool()`. The wrapper stamps them so their `execute` functions survive workflow step boundaries.
+Pass `defineDynamic` an `events` object whose handlers return either a single `defineTool(...)`, a `Record<string, defineTool(...)>`, or `null` for no tools. Wrap every entry in `defineTool()`. eve records durable descriptors for `execute`, approval request and response policies, and `toModelOutput`, so a parked call can reconstruct the same callbacks in a fresh process.
 
 Dynamic tool executors receive the same `ToolContext` as static authored tools, including inline provider auth through `ctx.getToken(provider)` and `ctx.requireAuth(provider)`.
 
@@ -160,11 +160,21 @@ export default defineDynamic({
 });
 ```
 
-### Prefer an inline `execute` function
+### Author replayable callbacks
 
-Write `execute` as an inline function expression, arrow, or method shorthand placed directly as the property value. The bundler transform stores the function and its closure variables for durable replay without rerunning the resolver.
+Write callback properties as inline function expressions, arrows, method shorthand, or module-level function references. eve transforms authored modules that import `defineTool`, including helper modules outside `agent/tools/`, and stores each callback's referenced closure values independently.
 
-The transform does not detect `execute: myFn`, `execute: makeFn()`, or executors created inside an imported dependency. For a `session.started` tool, eve can reconstruct these live functions by rerunning the owning resolver after a durable resume. Keep session resolvers idempotent and avoid unnecessary side effects. A `turn.started` tool still requires an inline executor to survive a fresh runtime.
+Closure values must be JSON-serializable. Plain objects, arrays, strings, finite numbers, booleans, and `null` are supported; `undefined` object properties are omitted. Functions, class instances, `Date`, `Map`, symbols, non-finite numbers, and cyclic values fail resolution with the tool name and callback phase instead of being serialized lossily.
+
+Call expressions such as `execute: makeExecutor()` are not transformed. Put the callback body directly in `defineTool()` inside an authored module; eve-provided factories may also supply pre-registered callbacks. eve rejects a dynamic tool if any present callback lacks durable metadata.
+
+### Identity and redeploys
+
+A parked call binds to its callback by **tool name and phase** — the same identity a static tool uses — never by source position. This gives dynamic tools static-tool semantics across deploys:
+
+- Editing a callback body (or anything else that does not change tool names) is safe: replaying a parked call runs the latest deployed code with the closure values snapshotted when the call was made.
+- If a persisted callback has no registered implementation (fresh process after a crash, or after a redeploy), eve re-runs `session.started` resolvers once to rebind it, then replays.
+- If the tool no longer exists under that name, replay fails closed with an explicit error instead of invoking something else. Turn-scoped and step-scoped tools are not rebound; a parked call to a missing one errors.
 
 ### Naming
 
@@ -181,13 +191,13 @@ A dynamic tool or skill whose name matches an **authored** one **overrides** it 
 
 ### Events
 
-| Event             | Resolver runs                              | Tools available for             |
-| ----------------- | ------------------------------------------ | ------------------------------- |
-| `session.started` | At session start; sometimes after a pause¹ | Every model call in the session |
-| `turn.started`    | Once per turn                              | Every model call in the turn    |
-| `step.started`    | Before each model call                     | That model call                 |
+| Event             | Resolver runs                                         | Tools available for             |
+| ----------------- | ----------------------------------------------------- | ------------------------------- |
+| `session.started` | At session start; may be redelivered during recovery¹ | Every model call in the session |
+| `turn.started`    | Once per turn                                         | Every model call in the turn    |
+| `step.started`    | Before each model call                                | That model call                 |
 
-¹ If a session pauses to wait for approval or other input, eve may run the resolver again when the session continues. Design session resolvers so they can safely run more than once. They do not run before every model call.
+¹ Workflow recovery can redeliver a resolver event, so keep resolvers idempotent. Replaying a parked callback does not depend on running the resolver again — except for the one-shot rebind described under [Identity and redeploys](#identity-and-redeploys).
 
 ### Execution order
 

@@ -130,7 +130,7 @@ export async function wakeTaskUpdateParentStep(input: {
     payload: {
       message: `Background task ${input.view.taskId} (${input.view.metadata.name}) update: ${input.update.message}`,
     },
-    taskDeliveryId: `${input.view.taskId}:update:${input.update.childTurnId}:${input.update.childStepIndex}:${input.update.callId}`,
+    taskDeliveryId: `${input.view.taskId}:update:${input.update.updateEpoch}:${input.update.updateIndex}:${input.update.callId}`,
   };
   try {
     await resumeSessionInbox(input.token, command);

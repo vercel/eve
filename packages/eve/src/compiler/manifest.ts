@@ -614,6 +614,7 @@ const compiledConnectionDefinitionSchema = z
 const compiledToolDefinitionSchema = z
   .object({
     description: z.string(),
+    execution: z.literal("background").optional(),
     exportName: z.string().optional(),
     inputSchema: jsonObjectSchema.nullable(),
     logicalPath: z.string(),

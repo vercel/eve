@@ -142,6 +142,17 @@ describe("telegramChannel() inbound route", () => {
     ).toEqual([{ method: "POST", path: "/eve/v1/telegram" }]);
   });
 
+  it.each([
+    ["private", "private"],
+    ["group", "private"],
+    ["supergroup", "private"],
+    [null, "unknown"],
+  ] as const)("maps %s chats to the %s audience", (chatType, audience) => {
+    const adapter = withState(getAdapter(telegramChannel()), { chatType });
+
+    expect(adapter.instrumentation?.metadata?.(adapter.state)).toMatchObject({ audience });
+  });
+
   it("dispatches verified private messages with Telegram auth and chat-wide token", async () => {
     const channel = telegramChannel({
       api: { fetch: fakeTelegramFetch() },

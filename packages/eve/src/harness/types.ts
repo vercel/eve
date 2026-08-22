@@ -15,6 +15,7 @@ import type { WebSearchProvider } from "#shared/web-search.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessInstrumentation } from "#harness/instrumentation/runtime.js";
+import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
 
 /**
  * Serializable tool definition stored on the session.
@@ -211,6 +212,14 @@ export interface SettledTurn {
  * Result returned by one harness step invocation.
  */
 export interface StepResult {
+  /** Background-tool effects projected onto the session that entered this step. */
+  readonly backgroundTaskSession?: HarnessSession;
+  /** Durable tasks started by background tools and awaiting the parent commit barrier. */
+  readonly backgroundTasks?: readonly {
+    readonly taskInboxToken: string;
+    readonly taskId: string;
+    readonly taskRunId: string;
+  }[];
   readonly next: StepNext;
   readonly session: HarnessSession;
   /**
@@ -293,6 +302,10 @@ export interface ToolLoopHarnessConfig {
   /** AI Gateway provider selected for the framework `web_search` tool. */
   readonly webSearchProvider?: WebSearchProvider;
   readonly handleEvent?: HandleEventFn;
+  /** Projects raw durable history before it crosses a message-bearing boundary. */
+  readonly historyProjector?: HistoryViewProjector;
+  /** Execution-prepared view of the history supplied to the first harness step. */
+  readonly historyView?: PreparedHistoryView;
   /**
    * Internal lifecycle hooks injected into each actual model attempt.
    * Omitted in production until an instrumentation runtime opts in.

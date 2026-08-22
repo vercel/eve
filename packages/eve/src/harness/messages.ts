@@ -81,6 +81,23 @@ export function normalizeUserContent(
   return parts.length === content.length ? content : parts;
 }
 
+/** Removes blank text blocks that some providers reject from model-bound history. */
+export function normalizeModelMessages(messages: readonly ModelMessage[]): ModelMessage[] {
+  return messages.flatMap((message) => {
+    if (typeof message.content === "string") {
+      return message.content.trim().length > 0 ? [message] : [];
+    }
+
+    const content = message.content.filter(
+      (part) => part.type !== "text" || part.text.trim().length > 0,
+    );
+    if (content.length === 0) return [];
+    return content.length === message.content.length
+      ? [message]
+      : [{ ...message, content } as ModelMessage];
+  });
+}
+
 /**
  * Extracts the final visible assistant text from model response messages.
  *

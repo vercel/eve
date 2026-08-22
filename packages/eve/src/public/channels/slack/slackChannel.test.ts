@@ -358,6 +358,14 @@ describe("slackChannel()", () => {
 
     expect(channel).toMatchObject({ turnPolicy: "queue" });
   });
+
+  it("projects the durable audience into instrumentation metadata", () => {
+    const adapter = withState(getAdapter(slackChannel()), { audience: "private" });
+
+    expect(adapter.instrumentation?.metadata?.(adapter.state)).toMatchObject({
+      audience: "private",
+    });
+  });
 });
 
 describe("slackChannel() default event handlers", () => {
@@ -1337,6 +1345,7 @@ describe("slackChannel() inbound mention pipeline", () => {
       }),
       message: "Imperative follow-up",
       state: {
+        audience: "unknown",
         channelId: "C_BOUND",
         teamId: "T01",
         threadTs: "1700000000.000300",
@@ -1531,6 +1540,7 @@ describe("slackChannel() inbound mention pipeline", () => {
     expect(send).toHaveBeenCalledTimes(1);
     const [, input] = send.mock.calls[0]!;
     expect(input.title).toBe("Run");
+    expect(input.state).toMatchObject({ audience: "public" });
     expect(input.message).toContain("<content>\npublic message text\n</content>");
   });
 
@@ -1563,6 +1573,7 @@ describe("slackChannel() inbound mention pipeline", () => {
     expect(send).toHaveBeenCalledTimes(1);
     const [, input] = send.mock.calls[0]!;
     expect(input.title).toBe("Private message");
+    expect(input.state).toMatchObject({ audience: "private" });
     expect(input.title).not.toContain("sensitive message");
     expect(input.message).toContain("<content>\nsensitive message\n</content>");
   });

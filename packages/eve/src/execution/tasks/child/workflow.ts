@@ -166,7 +166,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
         continue;
       }
       const result = applyTaskTransition(view, command);
-      if (result.outcome !== "accepted") continue;
+      if (result.action !== "accepted") continue;
       const becameTerminal =
         !isTerminalTaskStatus(view.status) && isTerminalTaskStatus(result.view.status);
       const becameReady = !isReadyTaskStatus(view.status) && isReadyTaskStatus(result.view.status);

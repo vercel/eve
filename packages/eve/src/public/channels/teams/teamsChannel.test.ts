@@ -122,6 +122,20 @@ describe("teamsChannel", () => {
     expect(channel.adapter.kind).toBe("teams");
   });
 
+  it.each([
+    ["personal", "private"],
+    ["groupChat", "private"],
+    ["channel", "unknown"],
+  ] as const)("maps %s conversations to the %s audience", (conversationType, audience) => {
+    const teamsAdapter = adapter(teamsChannel());
+    if (!teamsAdapter.state) throw new Error("Expected Teams state.");
+    teamsAdapter.state.conversationType = conversationType;
+
+    expect(teamsAdapter.instrumentation?.metadata?.(teamsAdapter.state)).toMatchObject({
+      audience,
+    });
+  });
+
   it("dispatches verified personal messages with Teams state", async () => {
     const channel = teamsChannel({
       credentials: { webhookVerifier: () => true },

@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import { ContextContainer, loadContext } from "#context/container.js";
 import { RemoteAgentContinueRequestError } from "#execution/remote-agent-dispatch.js";
 import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
+import { prepareAgentActionDispatch } from "#execution/dispatch-runtime-actions-shared.js";
 import { dispatchTaskStep } from "#execution/tasks/parent/dispatch-task-step.js";
 import {
   resolvePendingRuntimeActions,
@@ -101,6 +103,14 @@ const BASE_STATE: DurableSessionState = {
   version: 1,
 };
 const CHILD_SESSION_ID = "child-session-123456789012";
+const TURN_AUTH: SessionAuthContext = {
+  attributes: { user_id: "U456" },
+  authenticator: "slack-webhook",
+  issuer: "slack",
+  principalId: "slack:U456",
+  principalType: "user",
+  subject: "U456",
+};
 
 const PARKED_START_OPERATION_ID = deriveAgentOperationId({
   callId: "call-0",
@@ -172,6 +182,56 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     callId: "call-1",
     parentSessionId: "parent-session",
     parentTurnId: "turn-1",
+  });
+
+  it("plans an in-step agent call from the live context", async () => {
+    const session = createBaseSession();
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(ChannelKey, ADAPTER);
+    ctx.set(BundleKey, {
+      compiledArtifactsSource: {},
+      resolvedAgent: { config: { experimental: { tasks: true } } },
+      subagentRegistry: {
+        subagentsByNodeId: new Map([
+          ["remote/research", { definition: REMOTE_REGISTRY_DEFINITION }],
+        ]),
+      },
+      turnAgent: session.agent,
+    } as never);
+    mocks.readDurableSession.mockResolvedValue(session);
+    mocks.deserializeContext.mockRejectedValue(
+      new Error(
+        "A development Workflow generation selector was resumed outside a generation-bound delivery.",
+      ),
+    );
+
+    const prepared = await prepareAgentActionDispatch({
+      action: {
+        callId: "call-1",
+        description: "Research",
+        input: { message: "research this" },
+        kind: "remote-agent-call",
+        name: "research",
+        nodeId: "remote/research",
+        remoteAgentName: "research",
+      },
+      ctx,
+      event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
+      localFanoutSize: 0,
+      serializedContext: {
+        [BundleKey.name]: { source: { kind: "development" } },
+      },
+      sessionState: BASE_STATE,
+    });
+
+    expect(prepared.plan).toEqual([
+      expect.objectContaining({
+        kind: "start",
+        target: expect.objectContaining({ kind: "remote" }),
+      }),
+    ]);
+    expect(mocks.deserializeContext).not.toHaveBeenCalled();
   });
 
   it("owns a local child before the start effect and confirms its running address", async () => {
@@ -747,6 +807,38 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
     expect(mocks.startWorkflowPreferLatest).not.toHaveBeenCalled();
   });
 
+  it("passes the active turn principal to a tasks-mode continuation", async () => {
+    const addressedHandle: AgentHandle = {
+      address: LOCAL_PARKED_HANDLE.address,
+      identity: LOCAL_PARKED_HANDLE.identity,
+      phase: "addressed",
+    };
+    const session = createPendingSession({
+      handle: addressedHandle,
+      agentId: addressedHandle.identity.id,
+    });
+    installContext(session, undefined, true, TURN_AUTH);
+
+    const result = await dispatchTaskStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(mocks.dispatchSession).toHaveBeenCalledWith({
+      command: expect.objectContaining({
+        auth: TURN_AUTH,
+        kind: "send",
+      }),
+      sessionId: CHILD_SESSION_ID,
+    });
+    expect(result.results[0]).toMatchObject({
+      origin: "child",
+      output: { agentId: addressedHandle.identity.id, status: "working" },
+    });
+  });
+
   const continueOperationId = deriveAgentOperationId({
     callId: "call-1",
     parentSessionId: "parent-session",
@@ -777,6 +869,7 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
           subagentName: "research",
         },
         kind: "send",
+        auth: null,
         payload: {
           message: "continue with raw input",
           outputSchema: undefined,
@@ -959,10 +1052,15 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
       handle: REMOTE_PARKED_HANDLE,
       agentId: REMOTE_PARKED_HANDLE.identity.id,
     });
-    installContext(session, {
-      definition: REMOTE_REGISTRY_DEFINITION,
-      nodeId: REMOTE_PARKED_HANDLE.identity.nodeId,
-    });
+    installContext(
+      session,
+      {
+        definition: REMOTE_REGISTRY_DEFINITION,
+        nodeId: REMOTE_PARKED_HANDLE.identity.nodeId,
+      },
+      false,
+      TURN_AUTH,
+    );
     mocks.continueRemoteAgentSession.mockRejectedValue(
       new RemoteAgentContinueRequestError(
         "continue-session request failed permanently with HTTP 404.",
@@ -979,6 +1077,7 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
 
     expect(mocks.continueRemoteAgentSession).toHaveBeenCalledWith(
       expect.objectContaining({
+        auth: TURN_AUTH,
         message: "continue with raw input",
         remote: expect.objectContaining({
           nodeId: REMOTE_PARKED_HANDLE.identity.nodeId,
@@ -1171,6 +1270,7 @@ function installContext(
   session: HarnessSession,
   remote?: { readonly definition: unknown; readonly nodeId: string },
   tasks = false,
+  auth: SessionAuthContext | null = null,
 ): void {
   const subagentsByNodeId = new Map<string, { definition: unknown }>();
   if (remote !== undefined) {
@@ -1190,7 +1290,7 @@ function installContext(
     },
   };
   const values = new Map<unknown, unknown>([
-    [AuthKey, null],
+    [AuthKey, auth],
     [BundleKey, bundle],
     [CapabilitiesKey, undefined],
     [ChannelInstrumentationKey, undefined],

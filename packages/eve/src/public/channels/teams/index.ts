@@ -7,6 +7,7 @@ export type { ModelMessage } from "ai";
  * null when the inbound activity did not include it.
  */
 export interface TeamsInstrumentationMetadata extends Record<string, unknown> {
+  readonly audience: import("#shared/channel-audience.js").ChannelAudience;
   readonly channelId: string | null;
   readonly conversationType: string | null;
   readonly teamId: string | null;

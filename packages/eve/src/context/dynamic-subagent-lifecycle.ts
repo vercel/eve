@@ -6,10 +6,14 @@ import type { ContextReader } from "#context/key.js";
 import {
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicSubagentSelectionsKey,
+  TasksEnabledKey,
   TurnDynamicSubagentSelectionsKey,
   type DurableDynamicSubagentSelection,
 } from "#context/keys.js";
-import { createHarnessDelegationToolDefinition } from "#execution/delegation-tool.js";
+import {
+  createBackgroundSubagentHarnessDefinition,
+  createHarnessDelegationToolDefinition,
+} from "#execution/delegation-tool.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createLogger } from "#internal/logging.js";
 import type { SessionStartedStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -182,7 +186,11 @@ export function buildDynamicSubagentTools(input: ContextReader): readonly Harnes
       );
     }
     names.add(selection.prepared.name);
-    tools.push(createHarnessDelegationToolDefinition(selection.prepared));
+    tools.push(
+      input.get(TasksEnabledKey) === true
+        ? createBackgroundSubagentHarnessDefinition(selection.prepared)
+        : createHarnessDelegationToolDefinition(selection.prepared),
+    );
   }
 
   return tools;

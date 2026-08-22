@@ -54,6 +54,7 @@ export function installInstrumentationRuntime(input: {
       recordOutputs: input.collected.settings.recordOutputs,
       stateStore: new ContextAgentTraceStateStore(),
       tracer: trace.getTracer("eve.agent", input.frameworkVersion),
+      tracePolicy: input.collected.settings.tracePolicy,
     });
     // The span must exist before authored providers observe the lifecycle event.
     serialBefore.push({ ...agentOtel.hook, stateNamespace: "internal:otel" });

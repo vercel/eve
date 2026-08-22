@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { ParentTraceContextKey } from "#context/keys.js";
+import { ChannelInstrumentationKey, ParentTraceContextKey } from "#context/keys.js";
 import { instrumentChannelDelivery } from "#harness/channel-delivery-instrumentation.js";
 import {
   createInstrumentationHooks,
@@ -38,6 +38,10 @@ describe("channel delivery instrumentation", () => {
       traceFlags: 1,
       traceId: "11111111111111111111111111111111",
     };
+    ctx.set(ChannelInstrumentationKey, {
+      kind: "channel:slack",
+      metadata: { audience: "public" },
+    });
     ctx.set(ParentTraceContextKey, parentTraceContext);
 
     await contextStorage.run(ctx, async () => {

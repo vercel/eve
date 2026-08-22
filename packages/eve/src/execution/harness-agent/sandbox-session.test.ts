@@ -112,8 +112,8 @@ describe("createHarnessSandboxHandle", () => {
       portEndpoint: { url: "wss://port-4320.example.test/" },
     });
     const reservation = vi.mocked(session.run).mock.calls[1]?.[0];
-    expect(reservation.command).toContain("server.listen");
-    expect(reservation.env).toMatchObject({ EVE_HARNESS_PORTS: "4319 4320" });
+    expect(reservation?.command).toContain("server.listen");
+    expect(reservation?.env).toMatchObject({ EVE_HARNESS_PORTS: "4319 4320" });
     await handle.dispose();
   });
 

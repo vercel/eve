@@ -83,16 +83,26 @@ const subagentAuthorizationEventHookPayloadSchema = z
     subagentName: z.string(),
   })
   .strict();
-const taskMetadataSchema = z
-  .object({
-    agentId: z.string(),
-    kind: z.literal("subagent"),
-    mode: z.enum(["local", "remote"]),
-    name: z.string(),
-  })
-  .strict();
+const taskMetadataSchema = z.union([
+  z
+    .object({
+      agentId: z.string(),
+      kind: z.literal("subagent"),
+      mode: z.enum(["local", "remote"]),
+      name: z.string(),
+    })
+    .strict(),
+  z.object({ kind: z.string(), name: z.string() }).strict(),
+]);
 const taskExecutorSchema = z
   .object({
+    binding: z
+      .object({
+        data: z.record(z.string(), jsonValueSchema),
+        kind: z.string(),
+      })
+      .strict()
+      .optional(),
     childSessionId: z.string().optional(),
     childTurnId: z.string().optional(),
     lifecycle: z.enum(["parked", "terminal"]).optional(),

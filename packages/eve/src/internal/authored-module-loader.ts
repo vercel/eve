@@ -285,7 +285,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
       id: input.moduleMapPath,
       source: moduleMapSource,
     }),
-    createDynamicCapabilityTransformPlugin({ dynamicTools: false }),
+    createDynamicCapabilityTransformPlugin(),
     createAuthoredDirectiveGuardPlugin(),
     extensionScopePlugin,
     createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),

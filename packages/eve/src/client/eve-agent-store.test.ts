@@ -6,6 +6,7 @@ import { stampTestEvents } from "#internal/testing/events.js";
 import {
   createMessageCompletedEvent,
   createMessageReceivedEvent,
+  createSessionFailedEvent,
   createSessionWaitingEvent,
   createTurnCancelledEvent,
   createTurnStartedEvent,
@@ -47,6 +48,12 @@ function streamResponse(events: readonly MessageStreamEvent[]): Response {
       },
     }),
   );
+}
+
+function boundedStreamResponse(events: readonly MessageStreamEvent[]): Response {
+  const response = streamResponse(events);
+  response.headers.set("x-eve-stream-tail-index", String(events.length - 1));
+  return response;
 }
 
 function controlledStreamResponse() {
@@ -199,6 +206,219 @@ describe("EveAgentStore stream overlap", () => {
     expect(store.snapshot.events.map((event) => event.meta.id)).toEqual(
       events.map((event) => event.meta.id),
     );
+  });
+});
+
+describe("EveAgentStore session resume", () => {
+  it("publishes a replayed terminal failure with error status", async () => {
+    const failed = stampTestEvents([
+      createSessionFailedEvent({
+        code: "SESSION_FAILED",
+        message: "Session failed.",
+        sessionId: "session_1",
+      }),
+    ])[0]!;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(boundedStreamResponse([failed]));
+    const store = new EveAgentStore({
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      reducer: defaultMessageReducer(),
+    });
+    const published: Array<{ eventType: string | undefined; status: string }> = [];
+    store.subscribe(() => {
+      published.push({
+        eventType: store.snapshot.events.at(-1)?.type,
+        status: store.snapshot.status,
+      });
+    });
+
+    await store.resume();
+
+    expect(published.find((snapshot) => snapshot.eventType === "session.failed")?.status).toBe(
+      "error",
+    );
+    expect(store.snapshot.error?.message).toBe("Session failed.");
+  });
+
+  it("replays a settled session without opening a live stream", async () => {
+    const events = turnEvents();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(boundedStreamResponse(events));
+    const store = new EveAgentStore({
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      reducer: defaultMessageReducer(),
+    });
+    const publishedEventCounts: number[] = [];
+    store.subscribe(() => publishedEventCounts.push(store.snapshot.events.length));
+
+    await store.resume();
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(publishedEventCounts).not.toContain(1);
+    expect(publishedEventCounts).not.toContain(2);
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.events).toEqual(events);
+    expect(store.snapshot.session).toEqual({ sessionId: "session_1", streamIndex: events.length });
+  });
+
+  it("replays history and follows an interrupted turn through its boundary", async () => {
+    const [received, started, completed, waiting] = stampTestEvents([
+      createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
+      createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Hi there.",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createSessionWaitingEvent(),
+    ] as UnstampedMessageStreamEvent[]);
+    const live = controlledStreamResponse();
+    const requests: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
+      const url =
+        typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
+      requests.push(url);
+      return requests.length === 1 ? boundedStreamResponse([received!, started!]) : live.response;
+    });
+    const store = new EveAgentStore({
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      reducer: defaultMessageReducer(),
+    });
+
+    const resuming = store.resume();
+    expect(store.resume()).toBe(resuming);
+    await vi.waitFor(() => expect(store.snapshot.status).toBe("streaming"));
+    expect(store.snapshot.events.map((event) => event.type)).toEqual([
+      "message.received",
+      "turn.started",
+    ]);
+
+    live.emit(completed!);
+    live.emit(waiting!);
+    live.close();
+    await resuming;
+
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
+      state: "done",
+      stepIndex: 0,
+      text: "Hi there.",
+      type: "text",
+    });
+    expect(new URL(requests[0]!, "http://localhost").searchParams.get("startIndex")).toBeNull();
+    expect(new URL(requests[1]!, "http://localhost").searchParams.get("startIndex")).toBe("2");
+  });
+});
+
+describe("EveAgentStore steering", () => {
+  it("accepts an in-flight steer and follows its replacement turn", async () => {
+    const activeStream = controlledStreamResponse();
+    const replacementStream = controlledStreamResponse();
+    const [
+      firstReceived,
+      firstStarted,
+      firstCancelled,
+      firstWaiting,
+      secondReceived,
+      secondStarted,
+      secondCompleted,
+      secondWaiting,
+    ] = stampTestEvents([
+      createMessageReceivedEvent({ message: "First", sequence: 0, turnId: "turn_1" }),
+      createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
+      createTurnCancelledEvent({ sequence: 2, turnId: "turn_1" }),
+      createSessionWaitingEvent(),
+      createMessageReceivedEvent({ message: "Instead", sequence: 0, turnId: "turn_2" }),
+      createTurnStartedEvent({ sequence: 1, turnId: "turn_2" }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Replacement reply.",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn_2",
+      }),
+      createSessionWaitingEvent(),
+    ] as UnstampedMessageStreamEvent[]);
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(activeStream.response)
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(replacementStream.response);
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+
+    const firstSend = store.send({ message: "First" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    activeStream.emit(firstReceived!);
+    activeStream.emit(firstStarted!);
+
+    const steering = store.send({ message: "Instead", turnPolicy: "steer" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toMatchObject({
+      message: "Instead",
+      turnPolicy: "steer",
+    });
+
+    activeStream.emit(firstCancelled!);
+    activeStream.emit(firstWaiting!);
+    activeStream.close();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    replacementStream.emit(secondReceived!);
+    replacementStream.emit(secondStarted!);
+    replacementStream.emit(secondCompleted!);
+    replacementStream.emit(secondWaiting!);
+    replacementStream.close();
+
+    await Promise.all([firstSend, steering]);
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.events).toEqual([
+      firstReceived,
+      firstStarted,
+      firstCancelled,
+      firstWaiting,
+      secondReceived,
+      secondStarted,
+      secondCompleted,
+      secondWaiting,
+    ]);
+    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
+      state: "done",
+      stepIndex: 0,
+      text: "Replacement reply.",
+      type: "text",
+    });
+  });
+});
+
+describe("EveAgentStore terminal failure", () => {
+  it("publishes a live terminal failure with error status", async () => {
+    const failed = stampTestEvents([
+      createSessionFailedEvent({
+        code: "SESSION_FAILED",
+        message: "Session failed.",
+        sessionId: "session_1",
+      }),
+    ])[0]!;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(streamResponse([failed]));
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+    const published: Array<{ eventType: string | undefined; status: string }> = [];
+    store.subscribe(() => {
+      published.push({
+        eventType: store.snapshot.events.at(-1)?.type,
+        status: store.snapshot.status,
+      });
+    });
+
+    await store.send({ message: "Hello" });
+
+    expect(published.find((snapshot) => snapshot.eventType === "session.failed")?.status).toBe(
+      "error",
+    );
+    expect(store.snapshot.error?.message).toBe("Session failed.");
   });
 });
 

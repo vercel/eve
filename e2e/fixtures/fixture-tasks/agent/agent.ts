@@ -9,13 +9,16 @@ import {
 
 const TASK_ID_PATTERN = /task_[a-z0-9]+/iu;
 const EMPTY_DELIVERY_SENTINEL = "<eve-empty-delivery/>";
-const CONDITIONAL_DELIVERY_MARKER = "Conditional delivery";
 const REDUNDANT_REVIEW_SCENARIO = "TASK-WAKE-REDUNDANT-REVIEW";
 const REDUNDANT_REVIEW_FINDING = "blocker: task admission can discard deferred user input.";
-const REDUNDANT_DELIVERY_GUIDANCE =
-  "results already delivered or incorporated into an earlier response";
+const TASK_STATE_LABEL = "[Task state]\n";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
+  if (request.userMessages.includes(REDUNDANT_REVIEW_SCENARIO)) {
+    const taskState = latestTaskState(request.userMessages);
+    if (taskState !== undefined) return handleRedundantReviewWake(taskState);
+  }
+
   // Framework agent-list notes are model context, not scenario turns.
   const message = [...request.userMessages].reverse().find(isScenarioMessage) ?? "";
   if (request.userMessages.some((entry) => entry.includes("TASK-UPDATE-PROGRESS"))) {
@@ -77,9 +80,6 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   }
   if (message.includes("TASK-C8-REMOTE-CHILD")) return runRemoteGate(request);
   if (message.startsWith("Background task ")) {
-    if (request.userMessages.includes(REDUNDANT_REVIEW_SCENARIO)) {
-      return handleRedundantReviewWake(request, message);
-    }
     // Scenarios that act on wake notifications route to their script;
     // every other scenario acknowledges them without running tools.
     // The exclusivity race delegates so a completion notification that
@@ -201,29 +201,43 @@ function startRedundantReviewers(request: MockModelRequest): MockModelResponse |
   return "TASK-REDUNDANT-REVIEWERS-STARTED";
 }
 
-function handleRedundantReviewWake(
-  request: MockModelRequest,
-  message: string,
-): MockModelResponse | string {
-  if (!message.includes(REDUNDANT_REVIEW_FINDING)) {
-    throw new Error("The completed reviewer did not return the expected finding.");
+function handleRedundantReviewWake(taskState: TaskState): string {
+  if (taskState.tasks.some((task) => task.status === "pending")) {
+    return EMPTY_DELIVERY_SENTINEL;
   }
-
-  const findingWasAlreadyReported = request.messages.some(
-    (entry) => entry.role === "assistant" && entry.text.includes(REDUNDANT_REVIEW_FINDING),
+  const outputs = taskState.tasks.flatMap((task) =>
+    task.output?.type === "result" && typeof task.output.data === "string"
+      ? [task.output.data]
+      : [],
   );
-  if (!findingWasAlreadyReported) {
-    return `request changes on PR #2277.\n\n- ${REDUNDANT_REVIEW_FINDING}`;
+  if (
+    outputs.length !== taskState.tasks.length ||
+    !outputs.every((output) => output.includes(REDUNDANT_REVIEW_FINDING))
+  ) {
+    throw new Error("The settled reviewer cohort did not contain every expected finding.");
   }
+  return `request changes on PR #2277.\n\n- ${REDUNDANT_REVIEW_FINDING}`;
+}
 
-  const conditionalInstruction = request.messages.find(
-    (entry) => entry.role === "system" && entry.text.includes(CONDITIONAL_DELIVERY_MARKER),
-  );
-  if (conditionalInstruction === undefined) return "TASK-WAKE-WAS-NOT-CONDITIONAL";
+interface TaskState {
+  readonly tasks: readonly {
+    readonly output?: { readonly data: unknown; readonly type: string };
+    readonly status: string;
+  }[];
+}
 
-  return conditionalInstruction.text.includes(REDUNDANT_DELIVERY_GUIDANCE)
-    ? EMPTY_DELIVERY_SENTINEL
-    : "already incorporated into the review above.";
+function latestTaskState(messages: readonly string[]): TaskState | undefined {
+  const message = [...messages].reverse().find((entry) => entry.startsWith(TASK_STATE_LABEL));
+  if (message === undefined) return undefined;
+  const parsed: unknown = JSON.parse(message.slice(TASK_STATE_LABEL.length));
+  if (
+    parsed === null ||
+    typeof parsed !== "object" ||
+    !Array.isArray(Reflect.get(parsed, "tasks"))
+  ) {
+    throw new Error("Invalid task state supplied to the model.");
+  }
+  return parsed as TaskState;
 }
 
 function sendTaskUpdate(request: MockModelRequest): MockModelResponse | string {
