@@ -1,5 +1,17 @@
 # eve
 
+## 0.44.1
+
+### Patch Changes
+
+- 7c99773: Linq setup now recognizes Vercel CLI versions that lack required trigger options and offers to upgrade the CLI from the `/add` flow instead of reporting a generic connector failure.
+- 02403b9: Dynamic tool callbacks are now identified by tool name and phase instead of byte offsets in the authored source. Editing an agent file no longer risks a parked approval replaying the wrong tool: after a redeploy or crash, parked calls run the latest deployed callback code under the same name, and a tool that no longer exists fails closed with an explicit error. Session-scoped resolvers may run once more on resume to rebind callbacks, so keep them idempotent.
+- 84ddb09: Apply release-age policies during project and extension setup instead of bypassing them. New standalone pnpm projects use strict enforcement, while projects inside an existing workspace retain that workspace's policy.
+- 85b2dc8: Redact model, tool, approval, and delivery content from hosted instrumentation for private and unknown channel audiences. Content-denied Workflow runs now carry a metadata marker and omit their content-derived title so dashboards can exclude them without reading the event stream. Local `eve dev` tracing continues to retain content for unknown TUI and HTTP sessions.
+- a4fd288: Add declarative `resume: true` and imperative `resume()` support for replaying durable frontend sessions and following in-flight turns. Generated Web Chat apps now keep session IDs in `/s/{sessionId}` URLs, restore conversations on reload, and provide a sessionless `/s` route for starting a new chat.
+- 923921c: Give models runtime-authored task state after background work starts so initiating turns acknowledge launch, partial task wakes stay silent, and settled cohorts produce one combined report.
+- 673def2: Allow `useEveAgent` message sends with `turnPolicy: "steer"` while a turn is active, keeping the local projection attached to the durable replacement stream. Generated web chats now keep the composer enabled during responses and steer by default when a follow-up is submitted. Cancelled turns preserve their accepted user input in durable history, so replacement turns retain the interrupted request as context.
+
 ## 0.44.0
 
 ### Minor Changes
