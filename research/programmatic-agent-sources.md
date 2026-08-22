@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/2347
-status: proposed
-last_updated: "2026-08-21"
+status: in-progress
+last_updated: "2026-08-22"
 ---
 
 # Programmatic agent sources
@@ -482,30 +482,32 @@ implementation acceptance item, not work performed by the research PR.
 
 ## Delivery
 
-1. **Source-neutral compilation.** Introduce candidates, the namespace-loader
-   boundary, required per-node bindings, hashing, and cold-start loading. Route
-   existing filesystem and in-memory compilation through it with no behavior
-   change.
-2. **Canonical composition.** Project extensions into final logical paths and
-   compose framework, extension, override, and application candidates before
-   normalization. Delete the per-primitive extension composition path as each
-   primitive moves.
-3. **Ordinary framework sources.** Migrate public default tools,
-   `connection_search`, the default sandbox, the default channel, and all six
-   callback modules. Make the effective manifest drive graph and Nitro routes.
-4. **Kernel and inspection.** Install the closed native capability and adapter
-   inventories, move `load_skill` to an ordinary definition if its context
-   provider proof succeeds, and replace agent-info v2 with the single v3
-   projector.
-5. **Memory proof and cleanup gate.** Complete the explicit memory lifecycle
-   proof, run end-to-end cold-start coverage, and verify every superseded path
-   below is gone before declaring the architecture ready for memory.
+This implementation is a serial stack with one deliberately large core
+migration. Source-neutral bindings and composition can land independently, as
+can inspection, the test-only in-memory compiler, and documentation. Moving
+framework capabilities cannot be split by primitive: generated binding
+reachability, framework and extension precedence, legacy-path deletion, and
+the closed kernel inventory must change together or an intermediate manifest
+can contain bindings with no executable owner.
 
-Each stage must stay buildable and delete the path it supersedes. Transitional
-adapters may exist within a branch while a stage is being implemented, but do
-not land a permanent compatibility layer. The final implementation includes a
-minor changeset and updates tool, dynamic capability, channel, sandbox, and
-agent-info documentation.
+The landing order is:
+
+1. establish source-neutral module bindings;
+2. establish the canonical source composer;
+3. atomically move the default sandbox, ordinary framework tools,
+   `connection_search`, `load_skill`, `web_search`, the eve channel, and
+   callback routes onto that composer; project extension packages and
+   overrides into the same slots; install the closed kernel inventory; and
+   delete the superseded compiler and runtime machinery;
+4. replace agent-info v2 with the single v3 projector;
+5. route the test-only in-memory compiler through the same source graph; and
+6. finish with documentation, deterministic fixture inspection, and one minor
+   changeset for the breaking inspection contract.
+
+The memory lifecycle proof is intentionally not part of this stack. It remains
+a required follow-up before memory may adopt programmatic sources, as specified
+in [Memory lifecycle proof still required](#memory-lifecycle-proof-still-required).
+It must not introduce a compatibility layer or a memory-only contributor seam.
 
 ## Required deletions
 

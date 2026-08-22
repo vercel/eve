@@ -34,6 +34,26 @@ The application exposes a health route plus eve channel routes that inspect the 
 
 The session routes use only durable session IDs. Create a session explicitly, then put its returned ID in every follow-up, control, and stream path.
 
+### Inspect the compiled agent
+
+`GET /eve/v1/info` returns the version 3 inspection snapshot used by the CLI,
+development UI, and typed client. The response projects one effective compiled
+agent rather than rebuilding framework state at request time:
+
+- static definitions include their logical path, source ID, and owner;
+- dynamic tool, skill, and instruction resolvers are listed separately from
+  their session-specific outputs;
+- `kernel.prepared` reports native capabilities the compiled node can prepare,
+  while `kernel.reserved` reports names the kernel never exposes as authored
+  definitions;
+- `channels` is the effective ordered route list used for dispatch; and
+- `composition` records framework or extension candidates that application
+  sources shadowed or disabled.
+
+The snapshot does not claim which conditional capabilities a particular model
+call received. Use `Client.info()` from `eve/client` when you want the response
+validated against the current schema.
+
 ### Start and continue a session
 
 Start a session with an initial message, then use the returned `sessionId` for every follow-up and control operation:

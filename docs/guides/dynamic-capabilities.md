@@ -123,8 +123,7 @@ returns `null`. If a resolver throws or returns an invalid definition, eve logs 
 failure and omits the subagent.
 
 The resolved set applies to local and remote direct delegation and the
-`Workflow` tool. eve
-also checks availability again before starting the child, so a stale or
+`Workflow` tool. eve also checks availability again before starting the child, so a stale or
 manually constructed call fails with `SUBAGENT_UNAVAILABLE`. Treat conditional
 availability as capability composition, not as the only authorization
 boundary: sensitive child tools still need their own authorization and
@@ -187,7 +186,14 @@ A single return produces one tool named after the file slug, identical to a stat
 
 ### Conflicts
 
-A dynamic tool or skill whose name matches an **authored** one **overrides** it — a per-caller resolver can replace a built-in by name. Two **dynamic** resolvers emitting the same name is a genuine ambiguity and throws; namespace one of the keys manually to resolve it.
+A dynamic tool or skill whose name matches an **authored** one **overrides** it — a per-caller resolver can replace a built-in by name. Two **dynamic** resolvers emitting the same name create a genuine ambiguity and throw; namespace one of the keys manually to resolve it.
+
+### Inspection
+
+`GET /eve/v1/info` reports each compiled dynamic resolver with its source and
+subscribed event names. It does not execute resolvers or include their
+session-specific outputs. Those outputs materialize only inside the matching
+session lifecycle.
 
 ### Events
 
@@ -260,7 +266,7 @@ export default defineDynamic({
 
 The caller's team gets its own playbook advertised as a loadable skill; everyone else gets nothing.
 
-Skills follow the same naming rule as tools: a single `defineSkill(...)` is named after the file slug, while a map names each entry by its bare key (namespace the key yourself if it might collide). A dynamic skill overrides a same-named authored one; two dynamic resolvers emitting the same name throws.
+Skills follow the same naming rule as tools: a single `defineSkill(...)` is named after the file slug, while a map names each entry by its bare key (namespace the key yourself if it might collide). A dynamic skill overrides a same-named authored one; two dynamic resolvers emitting the same name throw.
 
 ## Dynamic instructions
 

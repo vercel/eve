@@ -7,7 +7,7 @@ eve provides a default tool set for every agent and additional framework tools y
 
 ## Default tools
 
-Default tools require no imports. The exact set depends on the agent and session. `agent` is available only in the root session; `load_skill` and `connection_search` appear only when the agent declares the corresponding resources; `ask_question` requires a session that can request user input; and `web_search` requires a supported model provider. The harness advertises only the tools available to the current session.
+Default tools require no imports. Most defaults compile from the same path-derived slots as authored tools, so a file such as `agent/tools/bash.ts` replaces or disables the default before the agent starts. Session-dependent capabilities are prepared separately: `agent` is available only in the root session; `load_skill` and `connection_search` appear only when the agent declares the corresponding resources; `ask_question` requires a session that can request user input; and `web_search` requires a supported model provider. The harness advertises only the tools available to the current session.
 
 The default shell and file tools (`bash`, `read_file`, and `write_file`) run in the app and proxy their work into the agent's [sandbox](../sandbox). The table shows where each tool's effect lands.
 

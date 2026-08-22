@@ -34,12 +34,19 @@ Non-2xx responses throw `ClientError`, which carries the HTTP `status` and respo
 
 ## Inspect an agent
 
-Use `info()` to inspect a development agent. The client parses and validates the complete response before returning it:
+Use `info()` to inspect a running agent. The client parses and validates the complete response before returning it:
 
 ```ts
 const info = await client.info();
 console.log(info.agent.name, info.agent.model.id);
 ```
+
+The version 3 result distinguishes compiled resources from native runtime
+capabilities. Read `tools.static` and the other static lists for effective
+definitions and their source owners, `tools.dynamic` for resolver definitions,
+`kernel` for prepared or reserved native capabilities, `channels` for the
+ordered dispatch routes, and `composition` for shadowed or disabled sources.
+Dynamic resolver output is session-specific and is not part of this snapshot.
 
 ## Authentication
 

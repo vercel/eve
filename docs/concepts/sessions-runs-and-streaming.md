@@ -244,13 +244,25 @@ Start with the [Client SDK](../guides/client/overview) guide. It covers basic us
 
 ## Inspect the agent over HTTP
 
-`GET /eve/v1/info` returns a JSON inspection snapshot for the running agent: model, static instructions, authored and framework tools, skills, channels, schedules, subagents, sandbox, connections, hooks, workflow, and workspace metadata. Static instructions are an ordered array whose entries expose `content` and `role`; dynamic resolver output is runtime context and is not included. The route uses the resolved `eveChannel()` auth when `agent/channels/eve.ts` authors one; otherwise it falls back to the framework default of Vercel OIDC plus local development access.
+`GET /eve/v1/info` returns the version 3 inspection snapshot for the effective
+compiled agent. Static resources carry their source owner, dynamic resolvers
+are separate from their session-specific outputs, native kernel capabilities
+are separate from compiled tools, and channel routes appear once in dispatch
+order. Composition diagnostics explain which lower-precedence sources were
+shadowed or disabled. See [Inspect the compiled
+agent](../channels/eve#inspect-the-compiled-agent) for the field groups and
+their boundaries.
 
 ```bash
 curl http://127.0.0.1:2000/eve/v1/info
 ```
 
-With the default auth chain (`[vercelOidc(), localDev(), placeholderAuth()]`), a Vercel OIDC bearer takes precedence, an `eve dev` or `vercel dev` server authenticates local requests, and everything else is rejected. A deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).
+The route uses the selected `eveChannel()` auth. With the default auth chain
+(`[vercelOidc(), localDev(), placeholderAuth()]`), a Vercel OIDC bearer takes
+precedence, an `eve dev` or `vercel dev` server authenticates local requests,
+and everything else is rejected. A deployed Vercel target requires a valid
+OIDC bearer, with a same-project bypass for in-deployment callers. See [auth &
+route protection](../guides/auth-and-route-protection).
 
 ## Dispatch order
 
