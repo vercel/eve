@@ -1,0 +1,1 @@
+export const AGENT_LOOP_STEPS_PER_WORKFLOW_STEP = 1;

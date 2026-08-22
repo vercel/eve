@@ -3,6 +3,7 @@ import { start } from "#internal/workflow/runtime.js";
 
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import {
+  agentLoopCheckpointRetryFixtureWorkflow,
   durableSessionRetryFixtureWorkflow,
   durableSessionStoreFixtureWorkflow,
 } from "#internal/testing/durable-session-workflow.js";
@@ -62,6 +63,36 @@ describe("durableSessionStore integration", () => {
         historyDepth: 6,
         marker: "fourth",
         sessionId: result.sessionId,
+      });
+    });
+  });
+
+  it("retains an agent-loop checkpoint across a physical step retry", async () => {
+    const runtime = createTestRuntime({ agent: { name: "agent-loop-checkpoint-retry" } });
+
+    await runtime.run(async () => {
+      const run = await start(agentLoopCheckpointRetryFixtureWorkflow, [
+        { writeBeforeFailure: true },
+      ]);
+      await expect(run.returnValue).resolves.toEqual({
+        attempt: 2,
+        completedSteps: 3,
+        resumed: true,
+      });
+    });
+  });
+
+  it("retries logical step one without blocking on an empty checkpoint journal", async () => {
+    const runtime = createTestRuntime({ agent: { name: "agent-loop-checkpoint-empty" } });
+
+    await runtime.run(async () => {
+      const run = await start(agentLoopCheckpointRetryFixtureWorkflow, [
+        { writeBeforeFailure: false },
+      ]);
+      await expect(run.returnValue).resolves.toEqual({
+        attempt: 2,
+        completedSteps: 0,
+        resumed: false,
       });
     });
   });

@@ -20,7 +20,11 @@ import {
   type TurnWorkflowInput,
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
-import type { NextDriverAction } from "#execution/next-driver-action.js";
+import type {
+  DurableCommitBarrier,
+  DurableTransition,
+  NextDriverAction,
+} from "#execution/next-driver-action.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import { emitRunReportStep } from "#execution/tool-run/emit-run-report-step.js";
@@ -133,17 +137,8 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         result.action === "dispatch-workflow-runtime-actions" || result.action === "park"
           ? result.pendingRuntimeActionKeys
           : undefined;
-      const hasBackgroundTasks = (result.backgroundTasks?.length ?? 0) > 0;
-
-      if (hasBackgroundTasks) {
-        if (result.backgroundTaskState === undefined) {
-          throw new Error("Background tasks were returned without their committed session state.");
-        }
-        await cursor.adopt({
-          serializedContext: beforeStep.serializedContext,
-          sessionState: result.backgroundTaskState,
-        });
-        await acknowledgeDelegatedTasksStep({ tasks: result.backgroundTasks ?? [] });
+      if (result.commitBarrier !== undefined) {
+        await executeCommitBarrier(result.commitBarrier, cursor);
       }
 
       // A cancel observed while the step was returning must still win: the
@@ -154,28 +149,27 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         // the driver epilogue and later turns, plus the accepted user input in
         // durable history. Adopt those before settling so a steered replacement
         // keeps the interrupted request without committing partial model output.
-        await cursor.adopt({
-          serializedContext: result.serializedContext,
-          sessionState: result.backgroundTaskState ?? result.sessionState,
-        });
+        await cursor.adopt(result.cancellationTransition ?? result);
         await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
         return;
       }
 
       if (
         cancellation?.signal.aborted === true &&
-        (pendingActionKeys === undefined || hasBackgroundTasks)
+        (pendingActionKeys === undefined || result.commitBarrier !== undefined)
       ) {
         // Some worlds cannot interrupt a running step, so it can complete
-        // normally after the workflow observes cancellation. Roll that result
-        // back except for a session model selected by its one-time preamble.
-        await cursor.adopt({
+        // normally after the workflow observes cancellation. Prefer the
+        // step-owned cancellation transition; old results retain the original
+        // whole-step rollback plus the one-time session model.
+        const cancellationTransition: DurableTransition = result.cancellationTransition ?? {
           serializedContext: preserveSerializedSessionDynamicModelSelection(
             beforeStep.serializedContext,
             result.serializedContext,
           ),
           sessionState: cursor.sessionState,
-        });
+        };
+        await cursor.adopt(cancellationTransition);
         // No `canPark` check here: that gate rejects model-authored waits
         // (`next: null`) in task mode, whereas every session can resume by
         // stable ID after a cancelled turn. The epilogue runs in the driver
@@ -188,6 +182,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       if (result.sleepDurationMs !== undefined) {
         const outcome = await waitForTurnSleep(result.sleepDurationMs, cancellation);
         if (outcome === "cancel") {
+          await cursor.adopt(result);
           await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
           return;
         }
@@ -310,6 +305,17 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
 type TurnReaders =
   | readonly [...RunOwnerReaders, ChannelReader<"inbox", TurnInboxPayload>]
   | readonly [ChannelReader<"inbox", TurnInboxPayload>];
+
+async function executeCommitBarrier(
+  barrier: DurableCommitBarrier,
+  cursor: TurnExecutionCursor,
+): Promise<void> {
+  await cursor.adopt(barrier.transition);
+  switch (barrier.effect.kind) {
+    case "release-background-tasks":
+      await acknowledgeDelegatedTasksStep({ tasks: barrier.effect.tasks });
+  }
+}
 
 async function finishCancelledTurn(input: {
   readonly bufferedDeliveries: readonly DeliverHookPayload[];

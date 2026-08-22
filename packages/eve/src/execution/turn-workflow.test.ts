@@ -314,6 +314,37 @@ describe("turnWorkflow", () => {
     );
   });
 
+  it("keeps completed step state when cancellation interrupts a durable sleep", async () => {
+    const initialState = createSessionState({ continuationToken: "http:initial" });
+    const sleepingState = createSessionState({ continuationToken: "http:sleeping" });
+    let requestCancel!: () => void;
+    const cancelPayload = new Promise<unknown>((resolve) => {
+      requestCancel = () => resolve({});
+    });
+    installInbox([], { cancelPayloads: [cancelPayload] });
+    sleepMock.mockImplementationOnce(async () => {
+      requestCancel();
+      await new Promise<never>(() => {});
+    });
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "continue",
+      sleepDurationMs: 2_500,
+      serializedContext: { state: "sleeping" },
+      sessionState: sleepingState,
+    });
+
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      sessionState: initialState,
+    });
+    await turnWorkflow(input);
+
+    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
+      serializedContext: { state: "sleeping" },
+      sessionState: sleepingState,
+    });
+  });
+
   it("parks when an authorization is pending", async () => {
     const sessionState = createSessionState();
     vi.mocked(turnStep).mockResolvedValueOnce({
@@ -468,10 +499,19 @@ describe("turnWorkflow", () => {
     installInbox([]);
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "cancelled",
-      backgroundTaskState: backgroundState,
-      backgroundTasks,
+      cancellationTransition: {
+        serializedContext: { state: "cancelled" },
+        sessionState: backgroundState,
+      },
+      commitBarrier: {
+        effect: { kind: "release-background-tasks", tasks: backgroundTasks },
+        transition: {
+          serializedContext: { state: "cancelled" },
+          sessionState: backgroundState,
+        },
+      },
       serializedContext: { state: "cancelled" },
-      sessionState: initialState,
+      sessionState: backgroundState,
     });
 
     const { input } = createInput({
@@ -484,6 +524,41 @@ describe("turnWorkflow", () => {
     expect(acknowledgeDelegatedTasksStep).toHaveBeenCalledWith({ tasks: backgroundTasks });
     expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
       serializedContext: { state: "cancelled" },
+      sessionState: backgroundState,
+    });
+  });
+
+  it("keeps earlier logical context when cancellation races background tasks", async () => {
+    const initialState = createSessionState({ continuationToken: "http:initial" });
+    const backgroundState = createSessionState({ continuationToken: "http:background" });
+    installInbox([], { cancelPayloads: [{}] });
+    vi.mocked(turnStep).mockImplementationOnce(async (stepInput) => {
+      await vi.waitFor(() => expect(stepInput.abortSignal?.aborted).toBe(true));
+      const tasks = [{ taskId: "task-1", taskInboxToken: "task-inbox-1", taskRunId: "task-run-1" }];
+      const cancellationTransition = {
+        serializedContext: { state: "checkpoint" },
+        sessionState: backgroundState,
+      };
+      return {
+        action: "continue",
+        cancellationTransition,
+        commitBarrier: {
+          effect: { kind: "release-background-tasks" as const, tasks },
+          transition: cancellationTransition,
+        },
+        serializedContext: { state: "task-result" },
+        sessionState: backgroundState,
+      };
+    });
+
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      sessionState: initialState,
+    });
+    await turnWorkflow(input);
+
+    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
+      serializedContext: { state: "checkpoint" },
       sessionState: backgroundState,
     });
   });
@@ -537,6 +612,36 @@ describe("turnWorkflow", () => {
         action: expect.objectContaining({ kind: "done" }),
       }),
     );
+  });
+
+  it("uses the logical-step checkpoint when cancellation races a batched result", async () => {
+    const initialState = createSessionState({ continuationToken: "http:initial" });
+    const checkpointState = createSessionState({ continuationToken: "http:checkpoint" });
+    const resultState = createSessionState({ continuationToken: "http:result" });
+    installInbox([], { cancelPayloads: [{}] });
+    vi.mocked(turnStep).mockImplementationOnce(async (stepInput) => {
+      await vi.waitFor(() => expect(stepInput.abortSignal?.aborted).toBe(true));
+      return {
+        action: "continue",
+        cancellationTransition: {
+          serializedContext: { state: "checkpoint" },
+          sessionState: checkpointState,
+        },
+        serializedContext: { state: "result" },
+        sessionState: resultState,
+      };
+    });
+
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      sessionState: initialState,
+    });
+    await turnWorkflow(input);
+
+    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
+      serializedContext: { state: "checkpoint" },
+      sessionState: checkpointState,
+    });
   });
 
   it("runs uncancellable when the session cancel token is claimed by another run", async () => {
@@ -1369,11 +1474,11 @@ function createCancelHookMock(
     dispose: vi.fn(),
     [Symbol.asyncIterator](): AsyncIterator<unknown> {
       return {
-        next: () => {
+        next: async () => {
           const value = queue.shift();
           return value === undefined
-            ? new Promise<IteratorResult<unknown>>(() => {})
-            : Promise.resolve({ done: false, value });
+            ? await new Promise<IteratorResult<unknown>>(() => {})
+            : { done: false, value: await value };
         },
         return: vi.fn(async () => ({ done: true, value: undefined })),
       };
