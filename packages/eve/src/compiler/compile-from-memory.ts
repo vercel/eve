@@ -1,170 +1,193 @@
 import type { JsonObject } from "#shared/json.js";
-import { classifyModelRouting } from "#internal/classify-model-routing.js";
+import type { SkillFileContent } from "#public/definitions/skill.js";
+import type { ResolvedToolDefinition } from "#runtime/types.js";
+import { createAgentSourceManifest, createModuleSourceRef } from "#discover/manifest.js";
 import {
-  type CompiledAgentDefinition,
-  type CompiledAgentManifest,
-  type CompiledSkillDefinition,
-  type CompiledToolDefinition,
-  createCompiledAgentManifest,
-  ROOT_COMPILED_AGENT_NODE_ID,
-} from "#compiler/manifest.js";
-import type { CompiledModuleMap } from "#compiler/module-map.js";
-import { prepareKernelCapabilities } from "#compiler/prepare-kernel-capabilities.js";
+  createAgentSourceRegistry,
+  type AgentSourceRegistry,
+} from "#compiler/agent-source-registry.js";
+import { defineProgrammaticAgentSource } from "#compiler/programmatic-agent-source.js";
+import { frameworkAgentSourceRegistry } from "#framework-sources/registry.js";
+import { compileAgentManifest } from "#compiler/normalize-manifest.js";
+import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import {
+  createProgrammaticCompiledModuleMap,
+  type CompiledModuleMap,
+} from "#compiler/module-map.js";
+import type { CompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
 
-/**
- * Declarative description of an in-memory authored agent used by the test
- * harness.
- */
+const MEMORY_APPLICATION_SOURCE_ID = "eve-memory-application";
+const MEMORY_MODEL_LIMITS = {
+  contextWindowTokens: 128_000,
+  maxOutputTokens: 32_000,
+} as const;
+
+/** Declarative description of an in-memory authored agent used by tests. */
 export interface CompileFromMemoryInput {
   /** Identifies this synthetic agent in manifest metadata and error output. */
   readonly name?: string;
-  /**
-   * Virtual app root used in manifest paths. The directory does not need to
-   * exist on disk; discovery never runs against it.
-   */
+  /** Virtual app root. No files need to exist beneath it. */
   readonly appRoot?: string;
-  /**
-   * Virtual agent root. Defaults to `<appRoot>/agent`.
-   */
+  /** Virtual agent root. Defaults to `<appRoot>/agent`. */
   readonly agentRoot?: string;
-  /** Model id assigned to the synthetic agent config. */
+  /** Model id authored by the synthetic `agent.ts`. */
   readonly model: string;
-  /** Session token limits assigned to the synthetic agent config. */
   readonly limits?: {
     readonly maxInputTokensPerSession?: number | false;
     readonly maxOutputTokensPerSession?: number | false;
     readonly sessionTimeoutMs?: number | false;
   };
   readonly outputSchema?: JsonObject;
-  /**
-   * Authored tools to project into the compiled manifest and module map.
-   *
-   * Each entry corresponds to a single module-backed tool. The harness does
-   * not load the tool module from disk — its runtime behaviour is injected
-   * separately via the AppHarness `mockTool` API.
-   */
   readonly tools?: readonly CompileFromMemoryToolInput[];
-  /**
-   * Authored markdown skills to include in the manifest.
-   */
   readonly skills?: readonly CompileFromMemorySkillInput[];
 }
 
-/**
- * Per-tool descriptor entry consumed by {@link compileFromMemory}.
- */
+/** One ordinary `tools/<name>.ts` module in the in-memory application source. */
 export interface CompileFromMemoryToolInput {
-  /** Model-facing tool name; must match the slot name in the module map. */
   readonly name: string;
-  /** Human-readable description propagated to the compiled manifest. */
   readonly description?: string;
-  /**
-   * JSON-schema-like object describing the tool input. Passed through as-is
-   * (lowered to `null` when omitted).
-   */
   readonly inputSchema?: JsonObject | null;
-  /** JSON-schema-like object describing the tool output. */
   readonly outputSchema?: JsonObject;
+  readonly execute?: ResolvedToolDefinition["execute"];
+  readonly execution?: ResolvedToolDefinition["execution"];
+  readonly approval?: ResolvedToolDefinition["approval"];
+  readonly toModelOutput?: ResolvedToolDefinition["toModelOutput"];
 }
 
-/**
- * Per-skill descriptor entry consumed by {@link compileFromMemory}.
- */
+/** One ordinary `skills/<name>.ts` module in the in-memory application source. */
 export interface CompileFromMemorySkillInput {
   readonly name: string;
   readonly description: string;
   readonly markdown?: string;
+  readonly files?: Readonly<Record<string, SkillFileContent>>;
+  readonly license?: string;
+  readonly metadata?: Readonly<Record<string, string>>;
 }
 
-/**
- * Result produced by {@link compileFromMemory}. Shaped to match the subset
- * of `CompileAgentResult` that the runtime and harness need.
- */
 export interface CompileFromMemoryResult {
   readonly manifest: CompiledAgentManifest;
   readonly moduleMap: CompiledModuleMap;
 }
 
 /**
- * Builds a compiled manifest and matching module map directly from an
- * in-memory descriptor, bypassing discovery and bundling entirely.
- *
- * Intended for integration tests that want to exercise runtime behaviour
- * without the cost of real compilation. Production code must continue to
- * use {@link compileAgent}.
+ * Compiles an in-process authored source through the same source composition,
+ * primitive normalizers, binding validation, and kernel preparation used by a
+ * filesystem-authored agent. Only module loading differs: namespaces come from
+ * a scoped programmatic registry instead of JavaScript files on disk.
  */
-export function compileFromMemory(input: CompileFromMemoryInput): CompileFromMemoryResult {
+export async function compileFromMemory(
+  input: CompileFromMemoryInput,
+): Promise<CompileFromMemoryResult> {
   const appRoot = input.appRoot ?? "/virtual/eve-memory-app";
   const agentRoot = input.agentRoot ?? `${appRoot}/agent`;
   const agentName = input.name ?? "memory-agent";
-
-  const config: CompiledAgentDefinition = {
-    model: { id: input.model, routing: classifyModelRouting(input.model) },
-    name: agentName,
-  };
-  if (input.limits !== undefined) {
-    config.limits = input.limits;
-  }
-  if (input.outputSchema !== undefined) {
-    config.outputSchema = input.outputSchema;
-  }
-
-  const tools: CompiledToolDefinition[] = (input.tools ?? []).map((toolInput) => ({
-    description: toolInput.description ?? `${toolInput.name} test tool.`,
-    inputSchema: toolInput.inputSchema ?? null,
-    logicalPath: `tools/${toolInput.name}.ts`,
-    name: toolInput.name,
-    outputSchema: toolInput.outputSchema,
-    sourceId: createMemorySourceId(`tools/${toolInput.name}.ts`),
-    sourceKind: "module",
-  }));
-
-  const skills: CompiledSkillDefinition[] = (input.skills ?? []).map((skillInput) => ({
-    description: skillInput.description,
-    logicalPath: `skills/${skillInput.name}.md`,
-    markdown: skillInput.markdown ?? `# ${skillInput.name}\n`,
-    name: skillInput.name,
-    sourceId: createMemorySourceId(`skills/${skillInput.name}.md`),
-    sourceKind: "markdown",
-  }));
-
-  const manifest = createCompiledAgentManifest({
-    agentRoot,
-    appRoot,
-    config,
-    kernelCapabilities: prepareKernelCapabilities({
-      disabled: new Set(),
-      frameworkLoadSkill: true,
-      hasSkills: skills.length > 0,
-      isRoot: true,
-      tasksEnabled: true,
-      toolNames: new Set(tools.map((tool) => tool.name)),
-      webSearch: false,
-      workflow: false,
-    }),
-    skills,
-    tools,
+  const toolModules = (input.tools ?? []).map((tool) => {
+    const logicalPath = `tools/${tool.name}.ts`;
+    return {
+      logicalPath,
+      namespace: { default: createAuthoredToolDefinition(tool) },
+    };
   });
-
-  const moduleMap: CompiledModuleMap = {
-    nodes: {
-      [ROOT_COMPILED_AGENT_NODE_ID]: {
-        modules: Object.fromEntries(
-          tools.map((tool) => [tool.sourceId, Object.freeze({}) as Record<string, unknown>]),
-        ),
+  const skillModules = (input.skills ?? []).map((skill) => {
+    const logicalPath = `skills/${skill.name}.ts`;
+    return {
+      logicalPath,
+      namespace: { default: createAuthoredSkillDefinition(skill) },
+    };
+  });
+  const applicationSource = defineProgrammaticAgentSource({
+    id: MEMORY_APPLICATION_SOURCE_ID,
+    modules: [
+      {
+        logicalPath: "agent.ts",
+        namespace: { default: createAuthoredAgentDefinition(input) },
       },
+      ...toolModules,
+      ...skillModules,
+    ],
+  });
+  const registry = createMemoryRegistry(applicationSource);
+  const manifest = await compileAgentManifest(
+    createAgentSourceManifest({
+      agentId: agentName,
+      agentRoot,
+      appRoot,
+      configModule: createModuleSourceRef({ logicalPath: "agent.ts" }),
+      skills: skillModules.map(({ logicalPath }) =>
+        createModuleSourceRef({ logicalPath, sourceId: createMemorySourceId(logicalPath) }),
+      ),
+      tools: toolModules.map(({ logicalPath }) =>
+        createModuleSourceRef({ logicalPath, sourceId: createMemorySourceId(logicalPath) }),
+      ),
+    }),
+    {
+      applicationSourceOrigin: {
+        backing: { kind: "programmatic", registryId: applicationSource.id },
+        layer: "application",
+        owner: { kind: "application" },
+      },
+      modelCatalog: memoryModelCatalog,
+      moduleRegistry: registry,
     },
-  };
+  );
 
   return {
     manifest,
-    moduleMap,
+    moduleMap: createProgrammaticCompiledModuleMap({ manifest, registry }),
   };
 }
 
+function createMemoryRegistry(
+  applicationSource: ReturnType<typeof defineProgrammaticAgentSource>,
+): AgentSourceRegistry {
+  return createAgentSourceRegistry([
+    ...frameworkAgentSourceRegistry.registrations,
+    { applyTo: "root", source: applicationSource },
+  ]);
+}
+
+function createAuthoredAgentDefinition(input: CompileFromMemoryInput): Record<string, unknown> {
+  const definition: Record<string, unknown> = { model: input.model };
+  if (input.limits !== undefined) definition.limits = input.limits;
+  if (input.outputSchema !== undefined) definition.outputSchema = input.outputSchema;
+  return definition;
+}
+
+function createAuthoredToolDefinition(tool: CompileFromMemoryToolInput): Record<string, unknown> {
+  const definition: Record<string, unknown> = {
+    description: tool.description ?? `${tool.name} test tool.`,
+    execute: tool.execute ?? (async () => null),
+  };
+  if (tool.approval !== undefined) definition.approval = tool.approval;
+  if (tool.execution !== undefined) definition.execution = tool.execution;
+  if (tool.inputSchema !== undefined) definition.inputSchema = tool.inputSchema;
+  if (tool.outputSchema !== undefined) definition.outputSchema = tool.outputSchema;
+  if (tool.toModelOutput !== undefined) definition.toModelOutput = tool.toModelOutput;
+  return definition;
+}
+
+function createAuthoredSkillDefinition(
+  skill: CompileFromMemorySkillInput,
+): Record<string, unknown> {
+  const definition: Record<string, unknown> = {
+    description: skill.description,
+    markdown: skill.markdown ?? `# ${skill.name}\n`,
+  };
+  if (skill.files !== undefined) definition.files = skill.files;
+  if (skill.license !== undefined) definition.license = skill.license;
+  if (skill.metadata !== undefined) definition.metadata = skill.metadata;
+  return definition;
+}
+
+const memoryModelCatalog: CompiledRuntimeModelCatalogLoader = {
+  async getByProviderModelId() {
+    return null;
+  },
+  async getModelLimits() {
+    return MEMORY_MODEL_LIMITS;
+  },
+};
+
 function createMemorySourceId(logicalPath: string): string {
-  // A deterministic, stable id per logical path. The runtime only requires
-  // these to be unique within the module map, so a prefix + the path is
-  // sufficient — no hashing needed.
-  return `memory::${logicalPath}`;
+  return `memory:${logicalPath}`;
 }

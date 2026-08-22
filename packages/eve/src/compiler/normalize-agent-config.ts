@@ -17,6 +17,7 @@ import {
 } from "#shared/agent-definition.js";
 import type { DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
 import type { CompiledAgentDefinition, CompiledRuntimeModelReference } from "#compiler/manifest.js";
+import type { CompiledModuleBinding } from "#compiler/module-binding.js";
 import type { CompiledRuntimeModelLimits } from "#compiler/model-catalog.js";
 import {
   loadModuleBackedDefinition,
@@ -33,6 +34,7 @@ export async function compileAgentConfig(
   manifest: AgentSourceManifest,
   context: ManifestCompileContext,
   options: {
+    readonly binding?: CompiledModuleBinding;
     readonly definition?: unknown;
   } = {},
 ): Promise<CompiledAgentDefinition> {
@@ -47,6 +49,7 @@ export async function compileAgentConfig(
         ? { model: DEFAULT_AGENT_MODEL_ID }
         : await loadModuleBackedDefinition({
             agentRoot: manifest.agentRoot,
+            binding: options.binding,
             displayPath: configModulePath!,
             kind: "agent config",
             moduleLoader: context.moduleLoader,

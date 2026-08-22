@@ -43,7 +43,9 @@ type ComposableSlot =
   | "tools";
 
 export interface AgentSourceOrigin {
-  readonly backing: Omit<Extract<CompiledModuleBacking, { kind: "filesystem" }>, "sourcePath">;
+  readonly backing:
+    | Omit<Extract<CompiledModuleBacking, { kind: "filesystem" }>, "sourcePath">
+    | Omit<Extract<CompiledModuleBacking, { kind: "programmatic" }>, "moduleId">;
   readonly extensionNamespace?: string;
   readonly layer: Exclude<AgentSourceLayer, "framework-default">;
   readonly owner: AgentSourceOwner;
@@ -115,7 +117,10 @@ export function composeAgentSources(input: {
       throw new Error(`Missing source metadata for candidate "${winner.sourceId}".`);
     }
     selected[entry.slot].push(entry.source as never);
-    if (entry.source.sourceKind === "module" && winner.layer !== "application") {
+    if (
+      entry.source.sourceKind === "module" &&
+      (winner.layer !== "application" || winner.backing.kind === "programmatic")
+    ) {
       bindings[winner.sourceId] = {
         backing: winner.backing,
         logicalPath: winner.logicalPath,
@@ -247,7 +252,11 @@ function createManifestCandidates(input: {
     const sourcePath = physicalSourcePath(input.manifest, original);
     return {
       candidate: {
-        backing: { ...input.origin.backing, sourcePath },
+        backing: createOriginModuleBacking({
+          logicalPath: original.logicalPath,
+          origin: input.origin,
+          sourcePath,
+        }),
         ...(input.origin.extensionNamespace === undefined
           ? {}
           : { extensionNamespace: input.origin.extensionNamespace }),
@@ -271,6 +280,15 @@ function composeSubagentSources(
   readonly bindings: Readonly<Record<string, CompiledModuleBinding>>;
   readonly sources: LocalSubagentSourceRef[];
 } {
+  if (applicationOrigin.backing.kind === "programmatic" && manifest.subagents.length > 0) {
+    throw new Error(
+      `Programmatic application source "${applicationOrigin.backing.registryId}" cannot introduce subagents.`,
+    );
+  }
+  const applicationExternalDependencies =
+    applicationOrigin.backing.kind === "filesystem"
+      ? applicationOrigin.backing.externalDependencies
+      : [];
   const candidates: Array<{
     readonly candidate: AgentModuleCandidate;
     readonly source: LocalSubagentSourceRef;
@@ -286,10 +304,7 @@ function composeSubagentSources(
 
   for (const mount of manifest.resolvedExtensions) {
     const externalDependencies = [
-      ...new Set([
-        ...applicationOrigin.backing.externalDependencies,
-        ...mount.externalDependencies,
-      ]),
+      ...new Set([...applicationExternalDependencies, ...mount.externalDependencies]),
     ];
     const packageOrigin: AgentSourceOrigin = {
       backing: {
@@ -364,6 +379,11 @@ function createSubagentCandidate(
   source: LocalSubagentSourceRef,
   origin: AgentSourceOrigin,
 ): AgentModuleCandidate {
+  if (origin.backing.kind === "programmatic") {
+    throw new Error(
+      `Programmatic application source "${origin.backing.registryId}" cannot introduce subagents.`,
+    );
+  }
   return {
     backing: { ...origin.backing, sourcePath: source.entryPath },
     layer: origin.layer,
@@ -372,6 +392,22 @@ function createSubagentCandidate(
     owner: origin.owner,
     sourceId: source.sourceId,
   };
+}
+
+export function createOriginModuleBacking(input: {
+  readonly logicalPath: string;
+  readonly origin: AgentSourceOrigin;
+  readonly sourcePath: string;
+}): CompiledModuleBacking {
+  if (input.origin.backing.kind === "programmatic") {
+    return {
+      kind: "programmatic",
+      moduleId: input.logicalPath,
+      registryId: input.origin.backing.registryId,
+    };
+  }
+
+  return { ...input.origin.backing, sourcePath: input.sourcePath };
 }
 
 function projectRootExtensionSubagent(

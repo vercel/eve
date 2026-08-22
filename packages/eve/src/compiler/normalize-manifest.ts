@@ -41,8 +41,10 @@ import {
   type CompiledModuleBinding,
 } from "#compiler/module-binding.js";
 import type { AgentSourceLayer } from "#compiler/agent-module-candidate.js";
+import type { AgentSourceRegistry } from "#compiler/agent-source-registry.js";
 import {
   composeAgentSources,
+  createOriginModuleBacking,
   type AgentSourceOrigin,
   type ComposedAgentSources,
 } from "#compiler/compose-agent-sources.js";
@@ -59,18 +61,28 @@ import {
 /**
  * Compiles one discovery manifest into the normalized manifest loaded by the runtime.
  */
+export interface CompileAgentManifestOptions {
+  readonly applicationSourceOrigin?: AgentSourceOrigin;
+  readonly modelCatalog?: ManifestCompileContext["modelCatalog"];
+  readonly moduleRegistry?: AgentSourceRegistry;
+}
+
 export async function compileAgentManifest(
   manifest: AgentSourceManifest,
+  options: CompileAgentManifestOptions = {},
 ): Promise<CompiledAgentManifest> {
   const context: ManifestCompileContext = {
     bindingsByNodeId: new Map(),
     compositionsByNodeId: new Map(),
     manifestsByNodeId: new Map(),
-    modelCatalog: createCompiledRuntimeModelCatalogLoader(manifest.appRoot),
-    moduleLoader: createAgentModuleNamespaceLoader({ registry: frameworkAgentSourceRegistry }),
+    modelCatalog: options.modelCatalog ?? createCompiledRuntimeModelCatalogLoader(manifest.appRoot),
+    moduleLoader: createAgentModuleNamespaceLoader({
+      registry: options.moduleRegistry ?? frameworkAgentSourceRegistry,
+    }),
   };
   const compiledNode = await compileAgentNodeManifest(manifest, context, {
     nodeId: ROOT_COMPILED_AGENT_NODE_ID,
+    sourceOrigin: options.applicationSourceOrigin,
   });
   const rootSources = context.manifestsByNodeId.get(ROOT_COMPILED_AGENT_NODE_ID) ?? manifest;
   const subagentGraph = await compileSubagentGraph({
@@ -124,11 +136,23 @@ async function compileAgentNodeManifest(
   } = {},
 ): Promise<CompiledAgentNodeManifest> {
   const nodeId = options.nodeId ?? manifest.agentId;
+  const configBinding =
+    options.sourceOrigin === undefined || manifest.configModule === undefined
+      ? undefined
+      : {
+          backing: createOriginModuleBacking({
+            logicalPath: manifest.configModule.logicalPath,
+            origin: options.sourceOrigin,
+            sourcePath: resolve(manifest.agentRoot, manifest.configModule.logicalPath),
+          }),
+          logicalPath: manifest.configModule.logicalPath,
+          owner: options.sourceOrigin.owner,
+        };
   const rawConfig = Object.hasOwn(options, "agentConfigDefinition")
     ? await compileAgentConfig(manifest, context, {
         definition: options.agentConfigDefinition,
       })
-    : await compileAgentConfig(manifest, context);
+    : await compileAgentConfig(manifest, context, { binding: configBinding });
   if (options.allowRootOnlyConfig === false && rawConfig.experimental?.workflow !== undefined) {
     throw new Error(
       `Workflow runtime configuration is only supported on the root agent config. Remove "experimental.workflow" from "${manifest.agentId}".`,
@@ -558,10 +582,11 @@ function bindOriginConfigModule(
   return {
     ...bindings,
     [source.sourceId]: {
-      backing: {
-        ...origin.backing,
+      backing: createOriginModuleBacking({
+        logicalPath: source.logicalPath,
+        origin,
         sourcePath: resolve(manifest.agentRoot, source.logicalPath),
-      },
+      }),
       logicalPath: source.logicalPath,
       owner: origin.owner,
     },

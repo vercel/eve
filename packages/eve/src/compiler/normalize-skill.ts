@@ -2,6 +2,7 @@ import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import type { SkillSourceRef } from "#discover/manifest.js";
 import type { SkillPackageSourceRef } from "#shared/source-ref.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
+import type { SkillDefinition } from "#public/definitions/skill.js";
 import { normalizeSkillDefinition } from "#internal/authored-definition/core.js";
 import type {
   CompiledDynamicSkillDefinition,
@@ -48,22 +49,7 @@ export async function compileSkillSource(
     );
     return {
       kind: "skill",
-      definition: {
-        description: definition.description,
-        files: definition.files,
-        license: definition.license,
-        logicalPath: source.logicalPath,
-        markdown: definition.markdown,
-        metadata:
-          definition.metadata === undefined
-            ? undefined
-            : {
-                ...definition.metadata,
-              },
-        name: stripLogicalPathExtension(source.logicalPath).replace(/^skills\//, ""),
-        sourceId: source.sourceId,
-        sourceKind: source.sourceKind,
-      },
+      definition: createCompiledSkillDefinition(source, definition),
     };
   }
 
@@ -100,26 +86,38 @@ export async function compileSkillSource(
     exportValue,
     `Expected the skill export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
   );
-
   return {
     kind: "skill",
-    definition: {
-      description: definition.description,
-      files: definition.files,
-      license: definition.license,
-      logicalPath: source.logicalPath,
-      markdown: definition.markdown,
-      metadata:
-        definition.metadata === undefined
-          ? undefined
-          : {
-              ...definition.metadata,
-            },
-      name: stripLogicalPathExtension(source.logicalPath).replace(/^skills\//, ""),
-      sourceId: source.sourceId,
-      sourceKind: source.sourceKind,
-    },
+    definition: createCompiledSkillDefinition(source, definition),
   };
+}
+
+function createCompiledSkillDefinition(
+  source: Extract<SkillSourceRef, { sourceKind: "markdown" | "module" }>,
+  definition: SkillDefinition,
+): CompiledSkillDefinition {
+  const shared = {
+    description: definition.description,
+    license: definition.license,
+    logicalPath: source.logicalPath,
+    markdown: definition.markdown,
+    metadata:
+      definition.metadata === undefined
+        ? undefined
+        : {
+            ...definition.metadata,
+          },
+    name: stripLogicalPathExtension(source.logicalPath).replace(/^skills\//, ""),
+    sourceId: source.sourceId,
+  };
+  const compiled: CompiledSkillDefinition =
+    source.sourceKind === "markdown"
+      ? { ...shared, sourceKind: "markdown" }
+      : { ...shared, exportName: source.exportName, sourceKind: "module" };
+  if (definition.files !== undefined) {
+    Object.assign(compiled, { files: definition.files });
+  }
+  return compiled;
 }
 
 function compileSkillPackageSource(

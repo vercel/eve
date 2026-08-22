@@ -7,8 +7,12 @@ import type {
   CompiledAgentResources,
 } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import { assertTotalModuleBindings } from "#compiler/module-binding.js";
+import { assertTotalModuleBindings, type CompiledModuleBinding } from "#compiler/module-binding.js";
 import { collectModuleRefsForManifest } from "#compiler/module-references.js";
+import {
+  getProgrammaticModuleNamespace,
+  type AgentSourceRegistry,
+} from "#compiler/agent-source-registry.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import {
@@ -42,6 +46,37 @@ export const compiledModuleMapSchema = z
   .strict();
 
 /**
+ * Materializes a module map when every compiled binding is backed by one
+ * programmatic source registry. This is the in-process counterpart to the
+ * generated module-map artifact: both consume the compiled manifest's total
+ * binding table instead of reconstructing modules from authored inputs.
+ */
+export function createProgrammaticCompiledModuleMap(input: {
+  readonly manifest: CompiledAgentManifest;
+  readonly registry: AgentSourceRegistry;
+}): CompiledModuleMap {
+  return {
+    nodes: Object.fromEntries(
+      collectBoundModuleNodeScopes(input.manifest).map((node) => [
+        node.nodeId,
+        {
+          modules: Object.fromEntries(
+            node.modules.map(({ binding, sourceId }) => {
+              if (binding.backing.kind !== "programmatic") {
+                throw new Error(
+                  `Cannot materialize filesystem binding "${sourceId}" on compiled node "${node.nodeId}" without generating a module-map artifact.`,
+                );
+              }
+              return [sourceId, getProgrammaticModuleNamespace(input.registry, binding.backing)];
+            }),
+          ),
+        },
+      ]),
+    ),
+  };
+}
+
+/**
  * Input for generating the compiled authored module map artifact.
  */
 export interface CreateCompiledModuleMapSourceInput {
@@ -70,6 +105,60 @@ interface CollectedModuleNodeScope {
   readonly nodeId: string;
 }
 
+interface CollectedBoundModuleNodeScope {
+  readonly modules: ReadonlyArray<{
+    readonly binding: CompiledModuleBinding;
+    readonly sourceId: string;
+  }>;
+  readonly nodeId: string;
+}
+
+function collectBoundModuleNodeScopes(
+  manifest: CompiledAgentManifest,
+): CollectedBoundModuleNodeScope[] {
+  return [
+    collectBoundModuleNodeScope({
+      manifest,
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
+    }),
+    ...[...manifest.subagents]
+      .sort((left, right) => left.nodeId.localeCompare(right.nodeId))
+      .map((subagent) =>
+        collectBoundModuleNodeScope({
+          additionalModuleRef: subagent.configResolver,
+          manifest: subagent.agent,
+          nodeId: subagent.nodeId,
+        }),
+      ),
+  ];
+}
+
+function collectBoundModuleNodeScope(input: {
+  readonly additionalModuleRef?: ModuleSourceRef;
+  readonly manifest: CompiledAgentNodeManifest | CompiledAgentResources;
+  readonly nodeId: string;
+}): CollectedBoundModuleNodeScope {
+  assertTotalModuleBindings({
+    additionalRefs: input.additionalModuleRef === undefined ? [] : [input.additionalModuleRef],
+    bindings: input.manifest.bindings,
+    manifest: input.manifest,
+    nodeId: input.nodeId,
+  });
+
+  return {
+    modules: [
+      ...collectModuleRefsForManifest(input.manifest),
+      ...(input.additionalModuleRef === undefined ? [] : [input.additionalModuleRef]),
+    ]
+      .sort((left, right) => left.sourceId.localeCompare(right.sourceId))
+      .map((source) => ({
+        binding: input.manifest.bindings[source.sourceId]!,
+        sourceId: source.sourceId,
+      })),
+    nodeId: input.nodeId,
+  };
+}
+
 /**
  * Generates the compiler-owned module map artifact that statically imports
  * every module-backed authored source.
@@ -93,33 +182,22 @@ export function createCompiledModuleMapSource(input: CreateCompiledModuleMapSour
     ...input.programmaticRegistryImports,
   };
   let nextBindingIndex = 0;
-  const collectedScopes: CollectedModuleNodeScope[] = [
-    collectModuleNodeScope({
-      importSpecifierStyle,
-      manifest: input.manifest,
-      moduleMapDirectory,
-      nextBindingName() {
-        return `module_${nextBindingIndex++}`;
-      },
-      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
-      programmaticRegistryImports,
-    }),
-    ...[...input.manifest.subagents]
-      .sort((left, right) => left.nodeId.localeCompare(right.nodeId))
-      .map((subagent) =>
-        collectModuleNodeScope({
-          importSpecifierStyle,
-          manifest: subagent.agent,
-          additionalModuleRef: subagent.configResolver,
-          moduleMapDirectory,
-          nextBindingName() {
-            return `module_${nextBindingIndex++}`;
-          },
-          nodeId: subagent.nodeId,
-          programmaticRegistryImports,
-        }),
-      ),
-  ];
+  const collectedScopes: CollectedModuleNodeScope[] = collectBoundModuleNodeScopes(
+    input.manifest,
+  ).map((scope) => ({
+    modules: scope.modules.map(({ binding, sourceId }) =>
+      collectModuleImport({
+        binding,
+        bindingName: `module_${nextBindingIndex++}`,
+        importSpecifierStyle,
+        moduleMapDirectory,
+        nodeId: scope.nodeId,
+        programmaticRegistryImports,
+        sourceId,
+      }),
+    ),
+    nodeId: scope.nodeId,
+  }));
   const allModules = collectedScopes.flatMap((scope) => scope.modules);
 
   const staticImports = allModules.map((moduleImport) => moduleImport.importStatement);
@@ -134,43 +212,6 @@ export function createCompiledModuleMapSource(input: CreateCompiledModuleMapSour
     "export default moduleMap;",
     "",
   ].join("\n");
-}
-
-function collectModuleNodeScope(input: {
-  readonly additionalModuleRef?: ModuleSourceRef;
-  readonly importSpecifierStyle: "absolute" | "relative";
-  readonly manifest: CompiledAgentNodeManifest | CompiledAgentResources;
-  readonly moduleMapDirectory: string;
-  readonly nextBindingName: () => string;
-  readonly nodeId: string;
-  readonly programmaticRegistryImports?: CreateCompiledModuleMapSourceInput["programmaticRegistryImports"];
-}): CollectedModuleNodeScope {
-  assertTotalModuleBindings({
-    additionalRefs: input.additionalModuleRef === undefined ? [] : [input.additionalModuleRef],
-    bindings: input.manifest.bindings,
-    manifest: input.manifest,
-    nodeId: input.nodeId,
-  });
-
-  return {
-    modules: [
-      ...collectModuleRefsForManifest(input.manifest),
-      ...(input.additionalModuleRef === undefined ? [] : [input.additionalModuleRef]),
-    ]
-      .sort((left, right) => left.sourceId.localeCompare(right.sourceId))
-      .map((moduleSourceRef) =>
-        collectModuleImport({
-          binding: input.manifest.bindings[moduleSourceRef.sourceId]!,
-          bindingName: input.nextBindingName(),
-          importSpecifierStyle: input.importSpecifierStyle,
-          moduleMapDirectory: input.moduleMapDirectory,
-          nodeId: input.nodeId,
-          programmaticRegistryImports: input.programmaticRegistryImports,
-          sourceId: moduleSourceRef.sourceId,
-        }),
-      ),
-    nodeId: input.nodeId,
-  };
 }
 
 export { collectModuleRefsForManifest } from "#compiler/module-references.js";

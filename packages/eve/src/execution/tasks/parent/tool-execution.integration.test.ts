@@ -45,7 +45,7 @@ describe("background subagent tool execution", () => {
   });
 
   it("runs concurrent local and remote defineTool calls as independent durable tasks", async () => {
-    const runtime = createTestRuntime({ agent: { name: "background-subagent" } });
+    const runtime = await createTestRuntime({ agent: { name: "background-subagent" } });
 
     await runtime.run(async () => {
       const remoteNode = {

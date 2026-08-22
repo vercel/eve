@@ -1,6 +1,6 @@
 import type { JsonObject } from "#shared/json.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
-import { compileFromMemory } from "#compiler/compile-from-memory.js";
+import { compileFromMemory, type CompileFromMemoryInput } from "#compiler/compile-from-memory.js";
 import type { CompiledAgentManifest, CompiledSkillDefinition } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { SessionParent, SessionTurn } from "#context/keys.js";
@@ -13,7 +13,7 @@ import {
 } from "#runtime/sessions/runtime-session.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
-import { serializeInputSchema } from "#shared/tool-schema.js";
+import { serializeInputSchema, serializeOutputSchema } from "#shared/tool-schema.js";
 import {
   buildActiveSessionContext,
   type ActiveSessionInit,
@@ -126,64 +126,40 @@ const DEFAULT_AGENT_NAME = "test-agent";
 /**
  * Builds an in-memory {@link TestRuntime} for the given descriptor.
  *
- * The returned runtime already has its synthetic compiled artifacts
+ * The resolved runtime already has its synthetic compiled artifacts
  * installed on its scoped session. Callers invoke `runtime.run(fn)` or
  * `runtime.runAsSession(init, fn)` to execute code under the active
  * session (and, in the latter case, under a seeded authored context).
  */
 export const TEST_DEFAULT_MODEL_ID = "openai/gpt-5.4";
 
-export function createTestRuntime(descriptor: TestAppDescriptor = {}): TestRuntime {
-  const compileInput: {
-    name: string;
-    model: string;
-    limits?: {
-      readonly maxInputTokensPerSession?: number | false;
-      readonly maxOutputTokensPerSession?: number | false;
-      readonly sessionTimeoutMs?: number | false;
-    };
-    outputSchema?: JsonObject;
-    tools?: readonly {
-      readonly name: string;
-      readonly description?: string;
-      readonly inputSchema?: JsonObject | null;
-    }[];
-    skills?: readonly {
-      readonly name: string;
-      readonly description: string;
-      readonly markdown?: string;
-    }[];
-  } = {
+export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Promise<TestRuntime> {
+  const compileInput: CompileFromMemoryInput = {
     name: descriptor.agent?.name ?? DEFAULT_AGENT_NAME,
     model: descriptor.agent?.model ?? TEST_DEFAULT_MODEL_ID,
     limits: descriptor.agent?.limits,
     outputSchema: descriptor.agent?.outputSchema,
+    tools: descriptor.tools?.map((tool) => ({
+      approval: tool.approval,
+      description: tool.description,
+      execute: tool.execute,
+      execution: tool.execution,
+      inputSchema: serializeInputSchema(tool.inputSchema),
+      name: tool.name,
+      outputSchema: serializeOutputSchema(tool.outputSchema),
+      toModelOutput: tool.toModelOutput,
+    })),
+    skills: descriptor.skills?.map((skill) => ({
+      name: skill.name,
+      description: skill.description,
+      files: skill.files,
+      license: skill.license,
+      markdown: skill.markdown,
+      metadata: skill.metadata,
+    })),
   };
 
-  if (descriptor.tools !== undefined && descriptor.tools.length > 0) {
-    compileInput.tools = descriptor.tools.map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: serializeInputSchema(tool.inputSchema),
-    }));
-  }
-
-  if (descriptor.skills !== undefined && descriptor.skills.length > 0) {
-    compileInput.skills = descriptor.skills.map((skill) => {
-      const entry: { name: string; description: string; markdown?: string } = {
-        name: skill.name,
-        description: skill.description,
-      };
-
-      if (skill.markdown !== undefined) {
-        entry.markdown = skill.markdown;
-      }
-
-      return entry;
-    });
-  }
-
-  const { manifest, moduleMap } = compileFromMemory(compileInput);
+  const { manifest, moduleMap } = await compileFromMemory(compileInput);
   const session = createRuntimeSession(descriptor.agent?.name ?? DEFAULT_AGENT_NAME);
   const tools = descriptor.tools ?? [];
   const skills = descriptor.skills ?? [];

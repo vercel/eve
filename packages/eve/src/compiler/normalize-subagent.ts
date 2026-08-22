@@ -10,6 +10,7 @@ import {
   createCompiledSubagentNodeId,
 } from "#compiler/manifest.js";
 import {
+  createOriginModuleBacking,
   getSubagentSourceOrigin,
   type AgentSourceOrigin,
 } from "#compiler/compose-agent-sources.js";
@@ -166,10 +167,11 @@ async function compileSubagentDefinition(input: {
       sourceOrigin === undefined
         ? undefined
         : {
-            backing: {
-              ...sourceOrigin.backing,
+            backing: createOriginModuleBacking({
+              logicalPath: configModule.logicalPath,
+              origin: sourceOrigin,
               sourcePath: join(input.source.manifest.agentRoot, configModule.logicalPath),
-            },
+            }),
             logicalPath: configModule.logicalPath,
             owner: sourceOrigin.owner,
           },
