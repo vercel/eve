@@ -13,7 +13,7 @@ import {
 } from "#compiler/artifacts.js";
 import {
   createCompiledAgentNodeManifest,
-  type CompiledChannelEntry,
+  type CompiledChannelDefinition,
   type CompiledSubagentNode,
 } from "#compiler/manifest.js";
 import {
@@ -424,7 +424,7 @@ describe("application Nitro creation", () => {
     const { createProductionApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
     const preparedHost = createPreparedHost();
-    const websocketChannel: CompiledChannelEntry = {
+    const websocketChannel: CompiledChannelDefinition = {
       kind: "channel",
       logicalPath: "channels/voice.ts",
       method: "WEBSOCKET",

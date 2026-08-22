@@ -13,7 +13,7 @@ export type AgentSourceOwner = z.infer<typeof agentSourceOwnerSchema>;
 export type CompiledModuleBacking = z.infer<typeof compiledModuleBackingSchema>;
 export type CompiledModuleBinding = z.infer<typeof compiledModuleBindingSchema>;
 
-const agentSourceOwnerSchema = z.discriminatedUnion("kind", [
+export const agentSourceOwnerSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("application") }).strict(),
   z.object({ feature: z.string(), kind: z.literal("framework") }).strict(),
   z

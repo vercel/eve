@@ -10,10 +10,6 @@ import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { HeadersValue } from "#client/types.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
 import { createResolvedRuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
-import {
-  getAllFrameworkChannelNames,
-  getFrameworkChannelDefinitions,
-} from "#runtime/framework-channels/index.js";
 import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
@@ -25,7 +21,6 @@ import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
 import { RESERVED_KERNEL_CAPABILITY_NAMES } from "#kernel/capabilities.js";
 import type {
-  ResolvedChannelDefinition,
   ResolvedDynamicSubagentDefinition,
   ResolvedRuntimeDelegationNode,
   ResolvedRuntimeRemoteAgentNode,
@@ -141,34 +136,6 @@ async function resolveRuntimeAgentNode(
     { tools: agent.tools },
     { reservedToolNames: RESERVED_KERNEL_CAPABILITY_NAMES },
   );
-  // Authored channels override framework defaults by matching logical name;
-  // disable sentinels remove framework defaults with the same name.
-  const authoredChannelNames = new Set(agent.channels.map((channel) => channel.name));
-  const allFrameworkChannelNames = getAllFrameworkChannelNames();
-
-  for (const disabledName of agent.disabledFrameworkChannels) {
-    if (!allFrameworkChannelNames.has(disabledName)) {
-      throw new ResolveRuntimeAgentGraphError(
-        `agent/channels/${disabledName}.ts exports disableRoute() but "${disabledName}" is not a framework channel. ` +
-          `Rename the file to one of: ${[...allFrameworkChannelNames].sort().join(", ")}.`,
-        {
-          nodeId,
-          sourceId: input.sourceId,
-        },
-      );
-    }
-  }
-
-  const disabledFrameworkChannels = new Set(agent.disabledFrameworkChannels);
-  const activeFrameworkChannels = getFrameworkChannelDefinitions().filter(
-    (channel) =>
-      !authoredChannelNames.has(channel.name) && !disabledFrameworkChannels.has(channel.name),
-  );
-  const channels: readonly ResolvedChannelDefinition[] = [
-    ...activeFrameworkChannels,
-    ...agent.channels,
-  ];
-
   const sandboxRegistry = createRuntimeSandboxRegistry({
     authoredSandbox: agent.sandbox,
     workspaceResourceRoot: agent.workspaceResourceRoot,
@@ -197,7 +164,7 @@ async function resolveRuntimeAgentNode(
 
   const node: ResolvedAgentGraphBundle["root"] = {
     agent: resolvedAgent,
-    channels,
+    channels: agent.channels,
     hookRegistry: createRuntimeHookRegistry(resolvedAgent.hooks),
     nodeId,
     sandboxRegistry,

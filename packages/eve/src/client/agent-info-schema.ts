@@ -1,10 +1,29 @@
 import { z } from "#compiled/zod/index.js";
 
+const owner = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("application") }).strict(),
+  z.object({ feature: z.string(), kind: z.literal("framework") }).strict(),
+  z
+    .object({
+      kind: z.literal("extension"),
+      namespace: z.string(),
+      packageName: z.string(),
+    })
+    .strict(),
+]);
+
 const source = z.object({
   exportName: z.string().optional(),
   logicalPath: z.string(),
+  owner,
   sourceId: z.string().optional(),
   sourceKind: z.string(),
+});
+
+const compositionSource = z.object({
+  logicalPath: z.string(),
+  owner,
+  sourceId: z.string(),
 });
 
 const entry = source.extend({ name: z.string() });
@@ -32,7 +51,6 @@ const modelEndpoint = z.union([
 const agentModelBaseFields = {
   contextWindowTokens: z.number().optional(),
   providerOptions: z.unknown().optional(),
-  // An unrecognized future effort level degrades to absent, not a parse failure.
   reasoning: z
     .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
     .optional()
@@ -61,26 +79,17 @@ const agentModel = z.union([
 
 const tool = entry.extend({
   description: z.string(),
-  hasAuth: z.boolean(),
+  hasAuth: z.literal(false),
   hasExecute: z.boolean(),
   hasModelOutputProjection: z.boolean(),
   hasOutputSchema: z.boolean(),
   inputSchema: z.unknown(),
-  origin: z.enum(["authored", "framework"]),
   outputSchema: z.unknown().optional(),
-  replacesFrameworkTool: z.boolean(),
   requiresApproval: z.boolean(),
-});
-
-const frameworkTool = tool.extend({
-  disabledByAuthor: z.boolean(),
-  replacedByAuthoredTool: z.boolean(),
-  status: z.enum(["active", "disabled", "opt-in", "replaced"]),
 });
 
 const dynamicResolver = source.extend({
   eventNames: z.array(z.string()),
-  origin: z.enum(["authored", "framework"]),
   slug: z.string(),
 });
 
@@ -121,14 +130,7 @@ const subagent = entry.extend({
 const channel = entry.extend({
   adapterKind: z.string().optional(),
   method: z.string(),
-  origin: z.enum(["authored", "framework"]),
   urlPath: z.string(),
-});
-
-const frameworkChannel = channel.extend({
-  disabledByAuthor: z.boolean(),
-  replacedByAuthoredChannel: z.boolean(),
-  status: z.enum(["active", "disabled", "replaced"]),
 });
 
 const connection = source.extend({
@@ -156,6 +158,25 @@ const sandbox = source.extend({
   sourceHash: z.string().optional(),
 });
 
+const kernelCapability = z.object({
+  audience: z.enum(["all-sessions", "root-node", "task-child", "turn-output"]),
+  canonicalPath: z.string(),
+  conditions: z.array(
+    z.enum([
+      "root-node",
+      "tasks-enabled",
+      "task-child",
+      "request-input-supported",
+      "skills-present",
+      "model-supports-provider-tools",
+      "workflow-node-eligible",
+      "structured-output-requested",
+    ]),
+  ),
+  materialization: z.enum(["harness", "provider", "runtime-action", "tool-loop"]),
+  name: z.string(),
+});
+
 /** Runtime contract for the complete `/eve/v1/info` response. */
 export const AgentInfoResultSchema = z.object({
   agent: z.object({
@@ -168,11 +189,22 @@ export const AgentInfoResultSchema = z.object({
     outputSchema: z.unknown().optional(),
   }),
   capabilities: z.object({ devRoutes: z.boolean() }),
-  channels: z.object({
-    authored: z.array(channel),
-    available: z.array(channel),
-    disabledFramework: z.array(z.string()),
-    framework: z.array(frameworkChannel),
+  channels: z.array(channel),
+  composition: z.object({
+    disabled: z.array(
+      z.object({
+        slot: z.string(),
+        source: compositionSource,
+        target: compositionSource.optional(),
+      }),
+    ),
+    shadowed: z.array(
+      z.object({
+        by: compositionSource,
+        slot: z.string(),
+        source: compositionSource,
+      }),
+    ),
   }),
   connections: z.array(connection),
   diagnostics: z.object({
@@ -183,6 +215,10 @@ export const AgentInfoResultSchema = z.object({
   instructions: z.object({
     dynamic: z.array(dynamicResolver),
     static: z.array(instructions),
+  }),
+  kernel: z.object({
+    prepared: z.array(kernelCapability),
+    reserved: z.array(kernelCapability),
   }),
   kind: z.literal("eve-agent-info"),
   mode: z.enum(["development", "production"]),
@@ -197,18 +233,10 @@ export const AgentInfoResultSchema = z.object({
     total: z.number(),
   }),
   tools: z.object({
-    authored: z.array(tool),
-    available: z.array(tool),
-    disabledFramework: z.array(z.string()),
     dynamic: z.array(dynamicResolver),
-    framework: z.array(frameworkTool),
-    reserved: z.array(z.string()),
+    static: z.array(tool),
   }),
-  version: z.literal(2),
-  workflow: z.object({
-    enabled: z.boolean(),
-    toolName: z.string(),
-  }),
+  version: z.literal(3),
   workspace: z.object({
     resourceRoot: z.unknown(),
     rootEntries: z.array(z.string()),
@@ -221,10 +249,10 @@ type ReadonlyDeep<T> = T extends readonly (infer Item)[]
     ? { readonly [Key in keyof T]: ReadonlyDeep<T[Key]> }
     : T;
 
+export type AgentInfoOwner = ReadonlyDeep<z.output<typeof owner>>;
 export type AgentInfoSource = ReadonlyDeep<z.output<typeof source>>;
 export type AgentInfoEntry = ReadonlyDeep<z.output<typeof entry>>;
 export type AgentInfoToolEntry = ReadonlyDeep<z.output<typeof tool>>;
-export type AgentInfoFrameworkToolEntry = ReadonlyDeep<z.output<typeof frameworkTool>>;
 export type AgentInfoDynamicResolverEntry = ReadonlyDeep<z.output<typeof dynamicResolver>>;
 export type AgentInfoTools = AgentInfoResult["tools"];
 export type AgentInfoSkillEntry = ReadonlyDeep<z.output<typeof skill>>;
@@ -233,9 +261,10 @@ export type AgentInfoInstructions = AgentInfoResult["instructions"];
 export type AgentInfoScheduleEntry = ReadonlyDeep<z.output<typeof schedule>>;
 export type AgentInfoSubagentEntry = ReadonlyDeep<z.output<typeof subagent>>;
 export type AgentInfoChannelEntry = ReadonlyDeep<z.output<typeof channel>>;
-export type AgentInfoFrameworkChannelEntry = ReadonlyDeep<z.output<typeof frameworkChannel>>;
 export type AgentInfoChannels = AgentInfoResult["channels"];
 export type AgentInfoConnectionEntry = ReadonlyDeep<z.output<typeof connection>>;
 export type AgentInfoHookEntry = ReadonlyDeep<z.output<typeof hook>>;
 export type AgentInfoSandboxEntry = ReadonlyDeep<z.output<typeof sandbox>>;
+export type AgentInfoKernelCapabilityEntry = ReadonlyDeep<z.output<typeof kernelCapability>>;
+export type AgentInfoComposition = AgentInfoResult["composition"];
 export type AgentInfoResult = ReadonlyDeep<z.output<typeof AgentInfoResultSchema>>;

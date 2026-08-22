@@ -100,12 +100,8 @@ function agentInfoWithModel(
     capabilities: {
       devRoutes: true,
     },
-    channels: {
-      authored: [],
-      available: [],
-      disabledFramework: [],
-      framework: [],
-    },
+    channels: [],
+    composition: { disabled: [], shadowed: [] },
     connections: [],
     diagnostics: {
       discoveryErrors: 0,
@@ -117,6 +113,7 @@ function agentInfoWithModel(
       static: [],
     },
     kind: "eve-agent-info",
+    kernel: { prepared: [], reserved: [] },
     mode: "development",
     sandbox: null,
     schedules: [],
@@ -128,19 +125,8 @@ function agentInfoWithModel(
       local: [],
       total: 0,
     },
-    tools: {
-      authored: [],
-      available: [],
-      disabledFramework: [],
-      dynamic: [],
-      framework: [],
-      reserved: [],
-    },
-    version: 2,
-    workflow: {
-      enabled: false,
-      toolName: "Workflow",
-    },
+    tools: { dynamic: [], static: [] },
+    version: 3,
     workspace: {
       resourceRoot: null,
       rootEntries: [],

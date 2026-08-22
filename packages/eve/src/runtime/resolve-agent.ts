@@ -48,21 +48,11 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
             ...skill.metadata,
           },
   })) satisfies ResolvedSkillDefinition[];
-  // Disabled channel entries (kind === "disabled") are filtered out here
-  // and surfaced separately on `ResolvedAgent.disabledFrameworkChannels`
-  // so the graph resolver can remove the corresponding framework defaults.
-  const resolvedChannels: ResolvedChannelDefinition[] = [];
-  const disabledFrameworkChannels: string[] = [];
-
-  for (const channelEntry of input.manifest.channels) {
-    if (channelEntry.kind === "disabled") {
-      disabledFrameworkChannels.push(channelEntry.name);
-      continue;
-    }
-    resolvedChannels.push(
-      await resolveChannelDefinition(channelEntry, input.moduleMap, input.nodeId),
-    );
-  }
+  const resolvedChannels: ResolvedChannelDefinition[] = await Promise.all(
+    input.manifest.channels.map((channelEntry) =>
+      resolveChannelDefinition(channelEntry, input.moduleMap, input.nodeId),
+    ),
+  );
   const resolvedTools = await Promise.all(
     input.manifest.tools.map((toolDefinition) =>
       resolveToolDefinition(
@@ -110,7 +100,6 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
   const resolvedAgent: ResolvedAgent = {
     channels: resolvedChannels,
     connections: resolvedConnections,
-    disabledFrameworkChannels,
     kernelCapabilities: [...input.manifest.kernelCapabilities],
     workflowTool:
       input.manifest.workflowTool === undefined

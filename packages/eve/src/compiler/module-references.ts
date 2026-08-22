@@ -20,7 +20,6 @@ export function collectModuleRefsForManifest(
   }
 
   for (const channel of manifest.channels) {
-    if (channel.kind === "disabled") continue;
     refs.set(channel.sourceId, toModuleRef(channel));
   }
 

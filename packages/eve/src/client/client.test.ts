@@ -16,27 +16,21 @@ const AGENT_INFO: AgentInfoResult = {
     name: "Weather Agent",
   },
   capabilities: { devRoutes: true },
-  channels: { authored: [], available: [], disabledFramework: [], framework: [] },
+  channels: [],
+  composition: { disabled: [], shadowed: [] },
   connections: [],
   diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
   hooks: [],
   instructions: { dynamic: [], static: [] },
+  kernel: { prepared: [], reserved: [] },
   kind: "eve-agent-info",
   mode: "development",
   sandbox: null,
   schedules: [],
   skills: { dynamic: [], static: [] },
   subagents: { local: [], total: 0 },
-  tools: {
-    authored: [],
-    available: [],
-    disabledFramework: [],
-    dynamic: [],
-    framework: [],
-    reserved: [],
-  },
-  version: 2,
-  workflow: { enabled: false, toolName: "Workflow" },
+  tools: { dynamic: [], static: [] },
+  version: 3,
   workspace: { resourceRoot: null, rootEntries: [] },
 };
 
@@ -196,8 +190,7 @@ describe("Client request policy", () => {
       inputSchema: null,
       logicalPath: "eve:framework/web-search",
       name: "web_search",
-      origin: "framework",
-      replacesFrameworkTool: false,
+      owner: { feature: "web-search", kind: "framework" },
       requiresApproval: false,
       sourceKind: "module",
     };
@@ -206,7 +199,7 @@ describe("Client request policy", () => {
         ...AGENT_INFO,
         tools: {
           ...AGENT_INFO.tools,
-          available: [toolWithoutOutputSchema],
+          static: [toolWithoutOutputSchema],
         },
       }),
     );
@@ -214,11 +207,11 @@ describe("Client request policy", () => {
 
     const info = await client.info();
 
-    expect(info.tools.available[0]).toMatchObject({
+    expect(info.tools.static[0]).toMatchObject({
       hasOutputSchema: false,
       name: "web_search",
     });
-    expect(info.tools.available[0]).not.toHaveProperty("outputSchema");
+    expect(info.tools.static[0]).not.toHaveProperty("outputSchema");
   });
 
   it("returns the parsed agent info payload", async () => {

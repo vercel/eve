@@ -24,9 +24,10 @@ import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog
 import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
 import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
-import type {
-  ManifestCompileContext,
-  ModuleBackedDefinitionLoadOptions,
+import {
+  loadModuleBackedDefinition,
+  type ManifestCompileContext,
+  type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
 import { compileHookEntry } from "#compiler/normalize-hook.js";
 import { compileSandboxDefinition } from "#compiler/normalize-sandbox.js";
@@ -48,6 +49,7 @@ import {
 import { frameworkAgentSourceRegistry } from "#framework-sources/registry.js";
 import { createAgentModuleNamespaceLoader } from "#compiler/module-namespace-loader.js";
 import { prepareKernelCapabilities } from "#compiler/prepare-kernel-capabilities.js";
+import { prepareSourceComposition } from "#compiler/prepare-source-composition.js";
 import {
   getKernelCapabilityAtPath,
   getReplaceableKernelCapabilityAtPath,
@@ -225,6 +227,7 @@ async function compileAgentResources(
   const tools: CompiledToolDefinition[] = [];
   const dynamicTools: CompiledDynamicToolDefinition[] = [];
   const disabledKernelCapabilities = new Set<KernelCapabilityName>();
+  const disabledWinnerSourceIds = new Set<string>();
   let frameworkLoadSkill = false;
   let workflowTool: CompiledWorkflowToolDefinition | undefined;
   let webSearchProvider: WebSearchProvider | undefined;
@@ -254,6 +257,7 @@ async function compileAgentResources(
       webSearchProvider = entry.provider;
     } else {
       const disabled = validateDisableTarget(source.logicalPath, sourceComposition);
+      disabledWinnerSourceIds.add(source.sourceId);
       if (disabled.kind === "kernel") disabledKernelCapabilities.add(disabled.name);
     }
   }
@@ -272,17 +276,15 @@ async function compileAgentResources(
   // compileChannelDefinition returns one entry for a disabled-channel
   // sentinel or an array of entries (one per route) for an authored
   // CompiledChannel. Flatten so the manifest holds a single channel list.
-  const compiledChannels = compiledChannelResults.flatMap(({ entries, source }) => {
-    const flattened = Array.isArray(entries) ? entries : [entries];
-    if (flattened[0]?.kind !== "disabled") return flattened;
-    const disabled = validateDisableTarget(
-      source.logicalPath,
-      findSourceComposition(sources, source.sourceId),
-    );
-    return disabled.kind === "source" && disabled.target.owner.kind === "framework"
-      ? flattened
-      : [];
-  });
+  const compiledChannels = dedupeChannelRoutes(
+    compiledChannelResults.flatMap(({ entries, source }) => {
+      const flattened = Array.isArray(entries) ? entries : [entries];
+      if (flattened[0]?.kind !== "disabled") return flattened;
+      validateDisableTarget(source.logicalPath, findSourceComposition(sources, source.sourceId));
+      disabledWinnerSourceIds.add(source.sourceId);
+      return [];
+    }),
+  );
 
   const compiledSkillEntries = await Promise.all(
     manifest.skills.map(async (skillSource) => ({
@@ -332,7 +334,19 @@ async function compileAgentResources(
       ),
     ),
   );
-  const hooks = manifest.hooks.map((hookSource) => compileHookEntry(hookSource));
+  const hooks = await Promise.all(
+    manifest.hooks.map(async (hookSource) =>
+      compileHookEntry(
+        hookSource,
+        await loadModuleBackedDefinition({
+          agentRoot: manifest.agentRoot,
+          ...loadOptions(hookSource.sourceId),
+          kind: "hook",
+          source: hookSource,
+        }),
+      ),
+    ),
+  );
   const schedules = await Promise.all(
     manifest.schedules.map((scheduleSource) =>
       compileScheduleDefinition(
@@ -378,6 +392,10 @@ async function compileAgentResources(
       sourcePath: workspace.sourcePath,
     })),
     schedules,
+    sourceComposition: prepareSourceComposition({
+      composition: sources.composition,
+      disabledWinnerSourceIds,
+    }),
     dynamicInstructions,
     skills,
     instructions: staticInstructions,
@@ -466,6 +484,18 @@ function withExtensionNamespace<T extends { readonly extensionNamespace?: string
 ): T {
   const extensionNamespace = composition?.winner.extensionNamespace;
   return extensionNamespace === undefined ? definition : { ...definition, extensionNamespace };
+}
+
+function dedupeChannelRoutes<T extends { readonly method: string; readonly urlPath: string }>(
+  channels: readonly T[],
+): T[] {
+  const seen = new Set<string>();
+  return channels.filter((channel) => {
+    const key = `${channel.method} ${channel.urlPath}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function validateDisableTarget(

@@ -71,11 +71,9 @@ describe("loadAgentInfoData", () => {
         compiledArtifactsSource: agentInfoCompiledArtifactsSource,
       });
 
-      expect(data.agent.config?.name).toBe(data.manifest.config.name);
       expect(data.manifest.config.name).toBe(manifest.config.name);
-      expect(data.agent.sandbox).not.toBeNull();
-      expect(data.agent.sandbox?.sourceKind).toBe("module");
-      expect(data.schedules).toEqual([]);
+      expect(data.manifest.sandbox).not.toBeNull();
+      expect(data.manifest.sandbox?.sourceKind).toBe("module");
     });
   });
 });

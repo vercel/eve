@@ -43,6 +43,8 @@ export async function compileSandboxDefinition(
   return {
     backendName: resolveCompiledBackendName(normalized.backend),
     description: normalized.description,
+    hasBootstrap: normalized.bootstrap !== undefined,
+    hasOnSession: normalized.onSession !== undefined,
     inheritsParent: inheritsParent || undefined,
     exportName: source.exportName,
     logicalPath: source.logicalPath,

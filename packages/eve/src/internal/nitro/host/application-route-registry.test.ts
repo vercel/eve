@@ -1,52 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  createApplicationRouteRegistryFromInput,
-  mergeApplicationChannelRouteRegistrations,
-} from "#internal/nitro/host/application-route-registry.js";
-
-describe("mergeApplicationChannelRouteRegistrations", () => {
-  it("applies authored overrides, disabled defaults, and framework-first route dedupe", () => {
-    const registrations = mergeApplicationChannelRouteRegistrations({
-      frameworkChannelNames: new Set(["callback", "eve", "shared"]),
-      frameworkChannels: [
-        { method: "POST", name: "eve", urlPath: "/framework/session" },
-        { method: "POST", name: "callback", urlPath: "/callback" },
-        { method: "GET", name: "shared", urlPath: "/duplicate" },
-      ],
-      manifestChannels: [
-        { kind: "disabled", name: "callback" },
-        { kind: "channel", method: "POST", name: "eve", urlPath: "/authored/session" },
-        { kind: "channel", method: "GET", name: "custom", urlPath: "/duplicate" },
-      ],
-    });
-
-    expect(registrations).toEqual([
-      { cors: undefined, method: "GET", route: "/duplicate" },
-      { cors: undefined, method: "POST", route: "/authored/session" },
-    ]);
-  });
-
-  it("rejects disable files that do not name a framework channel", () => {
-    expect(() =>
-      mergeApplicationChannelRouteRegistrations({
-        frameworkChannelNames: new Set(["eve"]),
-        frameworkChannels: [],
-        manifestChannels: [{ kind: "disabled", name: "unknown" }],
-      }),
-    ).toThrow(
-      'agent/channels/unknown.ts exports disableRoute() but "unknown" is not a framework channel',
-    );
-  });
-});
+import { createApplicationRouteRegistryFromInput } from "#internal/nitro/host/application-route-registry.js";
 
 describe("createApplicationRouteRegistryFromInput", () => {
   it("centralizes package, channel, development, and workflow precedence", () => {
     const cors = { origin: ["https://example.com"] } as const;
     const registry = createApplicationRouteRegistryFromInput({
       development: true,
-      frameworkChannelNames: new Set(),
-      frameworkChannels: [],
       manifestChannels: [
         { cors, kind: "channel", method: "POST", name: "hooks", urlPath: "/hooks" },
         { cors, kind: "channel", method: "GET", name: "hooks", urlPath: "/hooks" },
@@ -117,8 +77,6 @@ describe("createApplicationRouteRegistryFromInput", () => {
 
   it("omits development routes outside development", () => {
     const registry = createApplicationRouteRegistryFromInput({
-      frameworkChannelNames: new Set(),
-      frameworkChannels: [],
       manifestChannels: [],
     });
 

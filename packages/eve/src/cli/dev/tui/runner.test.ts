@@ -111,12 +111,8 @@ const AGENT_INFO: AgentInfoResult = {
   capabilities: {
     devRoutes: true,
   },
-  channels: {
-    authored: [],
-    available: [],
-    disabledFramework: [],
-    framework: [],
-  },
+  channels: [],
+  composition: { disabled: [], shadowed: [] },
   connections: [],
   diagnostics: {
     discoveryErrors: 0,
@@ -130,12 +126,14 @@ const AGENT_INFO: AgentInfoResult = {
         content: "You are a weather assistant.",
         logicalPath: "agent/instructions.md",
         name: "instructions",
+        owner: { kind: "application" },
         role: "system",
         sourceKind: "markdown",
       },
     ],
   },
   kind: "eve-agent-info",
+  kernel: { prepared: [], reserved: [] },
   mode: "development",
   sandbox: null,
   schedules: [],
@@ -148,7 +146,8 @@ const AGENT_INFO: AgentInfoResult = {
     total: 0,
   },
   tools: {
-    authored: [
+    dynamic: [],
+    static: [
       {
         description: "Get the weather.",
         hasAuth: false,
@@ -158,24 +157,14 @@ const AGENT_INFO: AgentInfoResult = {
         inputSchema: { type: "object" },
         logicalPath: "agent/tools/get_weather.ts",
         name: "get_weather",
-        origin: "authored",
+        owner: { kind: "application" },
         outputSchema: null,
-        replacesFrameworkTool: false,
         requiresApproval: false,
         sourceKind: "module",
       },
     ],
-    available: [],
-    disabledFramework: [],
-    dynamic: [],
-    framework: [],
-    reserved: [],
   },
-  version: 2,
-  workflow: {
-    enabled: false,
-    toolName: "Workflow",
-  },
+  version: 3,
   workspace: {
     resourceRoot: null,
     rootEntries: [],

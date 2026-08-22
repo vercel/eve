@@ -17,9 +17,20 @@ export const KERNEL_CAPABILITY_NAMES = [
 
 export type KernelCapabilityName = (typeof KERNEL_CAPABILITY_NAMES)[number];
 
+export type KernelCapabilityCondition =
+  | "root-node"
+  | "tasks-enabled"
+  | "task-child"
+  | "request-input-supported"
+  | "skills-present"
+  | "model-supports-provider-tools"
+  | "workflow-node-eligible"
+  | "structured-output-requested";
+
 export interface KernelCapabilityDefinition {
   readonly audience: "all-sessions" | "root-node" | "task-child" | "turn-output";
   readonly canonicalPath: `tools/${string}.ts`;
+  readonly conditions: readonly KernelCapabilityCondition[];
   readonly materialization: "harness" | "provider" | "runtime-action" | "tool-loop";
   readonly replacement: "authored-source" | "reserved";
 }
@@ -31,48 +42,56 @@ export const KERNEL_CAPABILITIES: Readonly<
   agent: {
     audience: "root-node",
     canonicalPath: "tools/agent.ts",
+    conditions: ["root-node"],
     materialization: "runtime-action",
     replacement: "authored-source",
   },
   task_cancel: {
     audience: "root-node",
     canonicalPath: "tools/task_cancel.ts",
+    conditions: ["root-node", "tasks-enabled"],
     materialization: "runtime-action",
     replacement: "authored-source",
   },
   task_update: {
     audience: "task-child",
     canonicalPath: "tools/task_update.ts",
+    conditions: ["task-child", "tasks-enabled"],
     materialization: "runtime-action",
     replacement: "authored-source",
   },
   ask_question: {
     audience: "all-sessions",
     canonicalPath: "tools/ask_question.ts",
+    conditions: ["request-input-supported"],
     materialization: "harness",
     replacement: "authored-source",
   },
   load_skill: {
     audience: "all-sessions",
     canonicalPath: "tools/load_skill.ts",
+    conditions: ["skills-present"],
     materialization: "harness",
     replacement: "authored-source",
   },
   web_search: {
     audience: "all-sessions",
     canonicalPath: "tools/web_search.ts",
+    conditions: ["model-supports-provider-tools"],
     materialization: "provider",
     replacement: "authored-source",
   },
   Workflow: {
     audience: "all-sessions",
     canonicalPath: "tools/workflow.ts",
+    conditions: ["workflow-node-eligible"],
     materialization: "tool-loop",
     replacement: "authored-source",
   },
   final_output: {
     audience: "turn-output",
     canonicalPath: "tools/final_output.ts",
+    conditions: ["structured-output-requested"],
     materialization: "tool-loop",
     replacement: "reserved",
   },

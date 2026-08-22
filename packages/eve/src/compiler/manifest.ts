@@ -31,8 +31,10 @@ import type { InternalToolDefinition } from "#shared/tool-definition.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
 import { KERNEL_CAPABILITY_NAMES, type KernelCapabilityName } from "#kernel/capabilities.js";
 import {
+  agentSourceOwnerSchema,
   compiledModuleBindingSchema,
   createFilesystemModuleBindings,
+  type AgentSourceOwner,
   type CompiledModuleBinding,
 } from "#compiler/module-binding.js";
 
@@ -49,12 +51,27 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 43;
+export const COMPILED_AGENT_MANIFEST_VERSION = 44;
 
-/**
- * Compiled channel entry preserved in the compiled manifest.
- */
-export type CompiledChannelEntry = CompiledChannelDefinition | DisabledCompiledChannelEntry;
+export interface CompiledSourceReference {
+  readonly logicalPath: string;
+  readonly owner: AgentSourceOwner;
+  readonly sourceId: string;
+}
+
+export interface CompiledSourceComposition {
+  readonly disabled: readonly {
+    readonly slot: string;
+    readonly source: CompiledSourceReference;
+    readonly target?: CompiledSourceReference;
+  }[];
+  readonly shadowed: readonly {
+    readonly by: CompiledSourceReference;
+    readonly slot: string;
+    readonly source: CompiledSourceReference;
+  }[];
+  readonly sourceOwners: Readonly<Record<string, AgentSourceOwner>>;
+}
 
 /**
  * Active compiled channel entry — backed by an authored `Channel` module.
@@ -83,16 +100,6 @@ export interface CompiledChannelDefinition {
    * channel leaves CORS untouched.
    */
   readonly cors?: NormalizedChannelCorsOptions;
-}
-
-/**
- * Disabled compiled channel entry — marker that an authored file at this
- * slug exported `disableRoute()` to remove the matching framework default.
- */
-interface DisabledCompiledChannelEntry {
-  readonly kind: "disabled";
-  readonly name: string;
-  readonly logicalPath: string;
 }
 
 /**
@@ -192,7 +199,12 @@ export type CompiledConnectionDefinition = z.infer<typeof compiledConnectionDefi
 /**
  * Normalized authored tool metadata preserved in the compiled manifest.
  */
-export type CompiledToolDefinition = InternalToolDefinition & ModuleSourceRef;
+export type CompiledToolDefinition = InternalToolDefinition &
+  ModuleSourceRef & {
+    readonly hasExecute?: boolean;
+    readonly hasModelOutputProjection?: boolean;
+    readonly requiresApproval?: boolean;
+  };
 
 /**
  * Serializable configuration for the experimental framework `Workflow` tool.
@@ -250,6 +262,7 @@ export interface CompiledDynamicInstructionsDefinition extends ModuleSourceRef {
  * resolution happens at runtime via {@link resolveHookDefinition}.
  */
 export interface CompiledHookDefinition extends ModuleSourceRef {
+  readonly eventNames: readonly string[];
   /**
    * Path-relative slug used for diagnostics and ordering. Derived from
    * the authored file's logical path
@@ -333,10 +346,10 @@ const channelMethodSchema = z.union([
 
 const compiledChannelCorsSchema = z
   .object({
-    origin: z.union([z.literal("*"), z.literal("null"), z.array(z.string())]).optional(),
-    methods: z.union([z.literal("*"), z.array(z.string())]).optional(),
-    allowHeaders: z.union([z.literal("*"), z.array(z.string())]).optional(),
-    exposeHeaders: z.union([z.literal("*"), z.array(z.string())]).optional(),
+    origin: z.union([z.literal("*"), z.literal("null"), z.array(z.string()).readonly()]).optional(),
+    methods: z.union([z.literal("*"), z.array(z.string()).readonly()]).optional(),
+    allowHeaders: z.union([z.literal("*"), z.array(z.string()).readonly()]).optional(),
+    exposeHeaders: z.union([z.literal("*"), z.array(z.string()).readonly()]).optional(),
     credentials: z.boolean().optional(),
     maxAge: z.union([z.string(), z.literal(false)]).optional(),
     preflight: z
@@ -362,19 +375,6 @@ const compiledChannelDefinitionSchema = z
     cors: compiledChannelCorsSchema.optional(),
   })
   .strict();
-
-const disabledCompiledChannelEntrySchema = z
-  .object({
-    kind: z.literal("disabled"),
-    name: z.string(),
-    logicalPath: z.string(),
-  })
-  .strict();
-
-const compiledChannelEntrySchema = z.union([
-  compiledChannelDefinitionSchema,
-  disabledCompiledChannelEntrySchema,
-]) as unknown as z.ZodType<CompiledChannelEntry>;
 
 const modelRoutingSchema = z.union([
   z
@@ -554,6 +554,8 @@ const compiledSandboxDefinitionSchema = z
      */
     backendName: z.string().optional(),
     description: z.string().optional(),
+    hasBootstrap: z.boolean(),
+    hasOnSession: z.boolean(),
     inheritsParent: z.boolean().optional(),
     exportName: z.string().optional(),
     logicalPath: z.string(),
@@ -585,6 +587,9 @@ const compiledConnectionDefinitionSchema = z
   .object({
     connectionName: z.string(),
     description: z.string(),
+    hasApproval: z.boolean(),
+    hasAuthorization: z.boolean(),
+    hasHeaders: z.boolean(),
     exportName: z.string().optional(),
     logicalPath: z.string(),
     /**
@@ -622,10 +627,13 @@ const compiledToolDefinitionSchema = z
     description: z.string(),
     execution: z.literal("background").optional(),
     exportName: z.string().optional(),
+    hasExecute: z.boolean(),
+    hasModelOutputProjection: z.boolean(),
     inputSchema: jsonObjectSchema.nullable(),
     logicalPath: z.string(),
     name: z.string(),
     outputSchema: jsonObjectSchema.optional(),
+    requiresApproval: z.boolean(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
   })
@@ -669,6 +677,7 @@ const compiledDynamicInstructionsDefinitionSchema: z.ZodType<CompiledDynamicInst
 
 const compiledHookDefinitionSchema: z.ZodType<CompiledHookDefinition> = z
   .object({
+    eventNames: z.array(z.string()).readonly(),
     exportName: z.string().optional(),
     logicalPath: z.string(),
     slug: z.string(),
@@ -689,6 +698,42 @@ const compiledExtensionMountSchema: z.ZodType<CompiledExtensionMount> = z
   })
   .strict();
 
+const compiledSourceReferenceSchema: z.ZodType<CompiledSourceReference> = z
+  .object({
+    logicalPath: z.string(),
+    owner: agentSourceOwnerSchema,
+    sourceId: z.string(),
+  })
+  .strict();
+
+const compiledSourceCompositionSchema: z.ZodType<CompiledSourceComposition> = z
+  .object({
+    disabled: z
+      .array(
+        z
+          .object({
+            slot: z.string(),
+            source: compiledSourceReferenceSchema,
+            target: compiledSourceReferenceSchema.optional(),
+          })
+          .strict(),
+      )
+      .readonly(),
+    shadowed: z
+      .array(
+        z
+          .object({
+            by: compiledSourceReferenceSchema,
+            slot: z.string(),
+            source: compiledSourceReferenceSchema,
+          })
+          .strict(),
+      )
+      .readonly(),
+    sourceOwners: z.record(z.string(), agentSourceOwnerSchema).readonly(),
+  })
+  .strict();
+
 /**
  * Zod schema for one non-recursive compiled authored agent payload.
  */
@@ -696,7 +741,7 @@ const compiledAgentResourceFields = {
   agentRoot: z.string(),
   appRoot: z.string(),
   bindings: z.record(z.string(), compiledModuleBindingSchema).readonly(),
-  channels: z.array(compiledChannelEntrySchema),
+  channels: z.array(compiledChannelDefinitionSchema),
   connections: z.array(compiledConnectionDefinitionSchema),
   diagnosticsSummary: discoverDiagnosticsSummarySchema,
   kernelCapabilities: z.array(z.enum(KERNEL_CAPABILITY_NAMES)).readonly(),
@@ -710,6 +755,7 @@ const compiledAgentResourceFields = {
   sandbox: compiledSandboxDefinitionSchema.nullable(),
   sandboxWorkspaces: z.array(compiledSandboxWorkspaceSchema),
   schedules: z.array(compiledScheduleDefinitionSchema),
+  sourceComposition: compiledSourceCompositionSchema,
   remoteAgents: z.array(compiledRemoteAgentNodeSchema),
   skills: z.array(compiledSkillSourceSchema).readonly(),
   instructions: z.array(compiledInstructionsSchema).readonly().default([]),
@@ -806,7 +852,7 @@ export const compiledAgentManifestSchema = z
     appRoot: z.string(),
     bindings: z.record(z.string(), compiledModuleBindingSchema).readonly(),
     extensionMounts: z.array(compiledExtensionMountSchema).default([]),
-    channels: z.array(compiledChannelEntrySchema),
+    channels: z.array(compiledChannelDefinitionSchema),
     config: compiledAgentConfigSchema,
     connections: z.array(compiledConnectionDefinitionSchema),
     diagnosticsSummary: discoverDiagnosticsSummarySchema,
@@ -822,6 +868,7 @@ export const compiledAgentManifestSchema = z
     sandbox: compiledSandboxDefinitionSchema.nullable(),
     sandboxWorkspaces: z.array(compiledSandboxWorkspaceSchema),
     schedules: z.array(compiledScheduleDefinitionSchema),
+    sourceComposition: compiledSourceCompositionSchema,
     skills: z.array(compiledSkillSourceSchema).readonly(),
     subagentEdges: z.array(compiledSubagentEdgeSchema),
     subagents: z.array(compiledSubagentNodeSchema),
@@ -836,7 +883,7 @@ export interface CreateCompiledAgentResourcesInput {
   readonly agentRoot: string;
   readonly appRoot: string;
   readonly bindings?: Readonly<Record<string, CompiledModuleBinding>>;
-  readonly channels?: readonly CompiledChannelEntry[];
+  readonly channels?: readonly CompiledChannelDefinition[];
   readonly connections?: readonly CompiledConnectionDefinition[];
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
   readonly kernelCapabilities?: readonly KernelCapabilityName[];
@@ -851,6 +898,7 @@ export interface CreateCompiledAgentResourcesInput {
   readonly sandbox?: CompiledSandboxDefinition | null;
   readonly sandboxWorkspaces?: readonly CompiledSandboxWorkspace[];
   readonly schedules?: readonly CompiledScheduleDefinition[];
+  readonly sourceComposition?: CompiledSourceComposition;
   readonly skills?: readonly CompiledSkillDefinition[];
   readonly instructions?: readonly CompiledInstructionsDefinition[];
   readonly tools?: readonly CompiledToolDefinition[];
@@ -887,8 +935,18 @@ export function createCompiledAgentResources(
     sandbox: input.sandbox ?? null,
     sandboxWorkspaces: [...(input.sandboxWorkspaces ?? [])],
     schedules: [...(input.schedules ?? [])],
+    sourceComposition: input.sourceComposition ?? {
+      disabled: [],
+      shadowed: [],
+      sourceOwners: {},
+    },
     skills: [...(input.skills ?? [])],
-    tools: [...(input.tools ?? [])],
+    tools: (input.tools ?? []).map((tool) => ({
+      ...tool,
+      hasExecute: tool.hasExecute ?? true,
+      hasModelOutputProjection: tool.hasModelOutputProjection ?? false,
+      requiresApproval: tool.requiresApproval ?? false,
+    })),
     workspaceResourceRoot: input.workspaceResourceRoot ?? {
       logicalPath: "",
       rootEntries: deriveResourceRootEntries({
@@ -1035,7 +1093,7 @@ export function createCompiledSubagentNodeId(parentNodeId: string, sourceId: str
 export function createCompiledAgentManifest(input: {
   readonly agentRoot: string;
   readonly appRoot: string;
-  readonly channels?: readonly CompiledChannelEntry[];
+  readonly channels?: readonly CompiledChannelDefinition[];
   readonly config: CompiledAgentDefinition;
   readonly connections?: readonly CompiledConnectionDefinition[];
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
@@ -1049,6 +1107,7 @@ export function createCompiledAgentManifest(input: {
   readonly sandbox?: CompiledSandboxDefinition | null;
   readonly sandboxWorkspaces?: readonly CompiledSandboxWorkspace[];
   readonly schedules?: readonly CompiledScheduleDefinition[];
+  readonly sourceComposition?: CompiledSourceComposition;
   readonly skills?: readonly CompiledSkillDefinition[];
   readonly subagentEdges?: readonly CompiledSubagentEdge[];
   readonly subagents?: readonly CompiledSubagentNode[];

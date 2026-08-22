@@ -410,13 +410,6 @@ export interface ResolvedAgent {
   readonly channels: readonly ResolvedChannelDefinition[];
   readonly config?: ResolvedAgentDefinition;
   readonly connections: readonly ResolvedConnectionDefinition[];
-  /**
-   * Logical names of framework-provided channels the author opted out of by
-   * exporting `disableRoute()` from a file in `agent/channels/`. Each
-   * entry is the slash-joined slug path of one such file. The graph
-   * resolver uses this list to filter the framework default channel set.
-   */
-  readonly disabledFrameworkChannels: readonly string[];
   /** Native execution work prepared by the compiler for this graph node. */
   readonly kernelCapabilities: readonly KernelCapabilityName[];
   /**

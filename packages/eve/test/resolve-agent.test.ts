@@ -50,6 +50,8 @@ describe("resolveAgent", () => {
         },
       ],
       sandbox: {
+        hasBootstrap: false,
+        hasOnSession: false,
         logicalPath: "sandbox/sandbox.mjs",
         sourceHash: "sandbox-source-hash",
         sourceId: "sandbox/sandbox.mjs",

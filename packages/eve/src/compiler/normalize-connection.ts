@@ -60,6 +60,9 @@ export async function compileConnectionDefinition(
     compiled = {
       ...shared,
       description: normalized.description,
+      hasApproval: normalized.approval !== undefined,
+      hasAuthorization: normalized.auth !== undefined,
+      hasHeaders: normalized.headers !== undefined,
       protocol: "openapi",
       url: normalized.baseUrl ?? "",
     };
@@ -69,6 +72,9 @@ export async function compileConnectionDefinition(
     compiled = {
       ...shared,
       description: normalized.description,
+      hasApproval: normalized.approval !== undefined,
+      hasAuthorization: normalized.auth !== undefined,
+      hasHeaders: normalized.headers !== undefined,
       protocol: "mcp",
       url: normalized.url,
     };

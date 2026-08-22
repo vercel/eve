@@ -5,7 +5,7 @@ import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import {
   createCompiledAgentManifest,
   createCompiledAgentNodeManifest,
-  type CompiledChannelEntry,
+  type CompiledChannelDefinition,
   type CompiledInstructionsDefinition,
   type CompiledScheduleDefinition,
   type CompiledSubagentNode,
@@ -70,7 +70,7 @@ function makeCompiledState(
     schedules?: CompiledScheduleDefinition[];
   } = {},
 ): CompileAgentResult {
-  const channels: CompiledChannelEntry[] = [
+  const channels: CompiledChannelDefinition[] = [
     {
       kind: "channel",
       name: "slack",

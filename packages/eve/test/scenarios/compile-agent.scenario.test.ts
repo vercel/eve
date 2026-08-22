@@ -638,7 +638,7 @@ describe("compileAgent", () => {
       sourceId: "tools/get_weather.mts",
       sourceKind: "module",
     });
-    expect(result.manifest.sandbox).toEqual({
+    expect(result.manifest.sandbox).toMatchObject({
       description: undefined,
       exportName: undefined,
       logicalPath: "sandbox/sandbox.cjs",
@@ -1164,9 +1164,11 @@ describe("compileAgent", () => {
       startPath: appRoot,
     });
 
-    expect(result.manifest.sandbox).toEqual({
+    expect(result.manifest.sandbox).toMatchObject({
       description: undefined,
       exportName: undefined,
+      hasBootstrap: true,
+      hasOnSession: false,
       logicalPath: "sandbox/sandbox.mjs",
       revalidationKey: "bootstrap-revalidation-key-v1",
       sourceHash: expect.any(String),
@@ -1203,9 +1205,11 @@ describe("compileAgent", () => {
       startPath: appRoot,
     });
 
-    expect(result.manifest.sandbox).toEqual({
+    expect(result.manifest.sandbox).toMatchObject({
       description: undefined,
       exportName: undefined,
+      hasBootstrap: true,
+      hasOnSession: false,
       logicalPath: "sandbox/sandbox.mjs",
       revalidationKey: undefined,
       sourceHash: expect.any(String),

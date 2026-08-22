@@ -46,6 +46,9 @@ function makeConnection(
   const base: CompiledConnectionDefinition = {
     connectionName: name,
     description: `${name} description`,
+    hasApproval: false,
+    hasAuthorization: false,
+    hasHeaders: false,
     logicalPath: `connections/${name}.ts`,
     protocol,
     sourceId: `connections/${name}.ts`,
@@ -146,7 +149,6 @@ describe("buildVercelAgentSummary", () => {
         makeChannel({ name: "messages", adapterKind: "http" }),
         makeChannel({ name: "stripe", adapterKind: "stripe-webhook" }),
         makeChannel({ name: "mystery" }),
-        { kind: "disabled", logicalPath: "channels/disabled.ts", name: "disabled" },
       ],
       config: {
         description: "An agent for tests.",

@@ -21,6 +21,9 @@ describe("resolveConnectionDefinition", () => {
     const definition: CompiledConnectionDefinition = {
       connectionName: "warehouse",
       description: "Tenant warehouse",
+      hasApproval: false,
+      hasAuthorization: true,
+      hasHeaders: true,
       logicalPath: "connections/warehouse.ts",
       protocol: "mcp",
       sourceId: "connections/warehouse",

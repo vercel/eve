@@ -2,7 +2,7 @@ import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import type { ChannelSourceRef } from "#discover/manifest.js";
 import { normalizeChannelDefinition } from "#internal/authored-definition/channel.js";
 import { type ChannelRouteMethod, isDisabledRouteSentinel } from "#public/definitions/channel.js";
-import type { CompiledChannelEntry } from "#compiler/manifest.js";
+import type { CompiledChannelDefinition } from "#compiler/manifest.js";
 import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
@@ -12,15 +12,18 @@ import {
  * Compiles one authored channel module into the normalized channel
  * entries stored on the compiled agent manifest.
  *
- * Recognizes the `disableRoute()` sentinel and emits a `disabled`
- * entry so the runtime can short-circuit channel registration without
- * losing the source path for diagnostics.
+ * Recognizes the `disableRoute()` sentinel so the compiler can omit the
+ * selected slot while retaining its composition diagnostic.
  *
  * Authored channels are always `CompiledChannel` values (from
  * `defineChannel`). Each route in the channel's `routes` array becomes
  * a separate compiled channel entry. The channel name is derived from
  * the filesystem path; the URL path comes from the route's `path` field.
  */
+type CompiledChannelEntry =
+  | CompiledChannelDefinition
+  | { readonly kind: "disabled"; readonly logicalPath: string; readonly name: string };
+
 export async function compileChannelDefinition(
   agentRoot: string,
   source: ChannelSourceRef,

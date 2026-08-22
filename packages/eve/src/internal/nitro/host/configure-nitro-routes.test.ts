@@ -24,7 +24,12 @@ interface PreparedApplicationHostStub {
   appRoot: string;
   compileResult: {
     manifest: {
-      channels: [];
+      channels: Array<{
+        kind: "channel";
+        method: "GET";
+        name: string;
+        urlPath: string;
+      }>;
       config: {
         name: string;
         experimental?: { workflow?: { world?: string } };
@@ -120,6 +125,7 @@ function createPreparedHost(
   input: {
     agentName?: string;
     appRoot?: string;
+    includeInfoChannel?: boolean;
     workflowWorld?: string;
     workflowBuildDir?: string;
   } = {},
@@ -131,7 +137,10 @@ function createPreparedHost(
     appRoot,
     compileResult: {
       manifest: {
-        channels: [],
+        channels:
+          input.includeInfoChannel === true
+            ? [{ kind: "channel", method: "GET", name: "eve", urlPath: EVE_INFO_ROUTE_PATH }]
+            : [],
         config:
           input.workflowWorld === undefined
             ? { name: input.agentName ?? "test-agent" }
@@ -336,8 +345,14 @@ describe("Nitro route configuration", () => {
     const devNitro = createNitroStub({ dev: true });
     const prodNitro = createNitroStub({ dev: false });
 
-    await configureDevelopmentNitroRoutes(devNitro, createPreparedHost());
-    await configureProductionNitroRoutes(prodNitro, createPreparedHost());
+    await configureDevelopmentNitroRoutes(
+      devNitro,
+      createPreparedHost({ includeInfoChannel: true }),
+    );
+    await configureProductionNitroRoutes(
+      prodNitro,
+      createPreparedHost({ includeInfoChannel: true }),
+    );
 
     expect(devNitro.options.handlers).toContainEqual({
       handler: `#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`,

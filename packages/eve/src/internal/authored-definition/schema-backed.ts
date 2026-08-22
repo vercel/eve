@@ -29,7 +29,12 @@ import {
  * Identity is path-derived — the compiler stamps the filename slug onto
  * the compiled entry. This shape never carries an authored `name`.
  */
-type NormalizedAuthoredTool = Readonly<Omit<InternalToolDefinitionWithExecuteFn, "name">>;
+type NormalizedAuthoredTool = Readonly<
+  Omit<InternalToolDefinitionWithExecuteFn, "name"> & {
+    readonly hasModelOutputProjection: boolean;
+    readonly requiresApproval: boolean;
+  }
+>;
 type MutableNormalizedAuthoredTool = {
   -readonly [K in keyof NormalizedAuthoredTool]: NormalizedAuthoredTool[K];
 };
@@ -113,7 +118,9 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   const definition: MutableNormalizedAuthoredTool = {
     description: expectString(record.description, message),
     execute: expectFunction(record.execute, message),
+    hasModelOutputProjection: record.toModelOutput !== undefined,
     inputSchema,
+    requiresApproval: record.approval !== undefined,
   };
   if (record.execution !== undefined) {
     const execution = expectString(record.execution, message);

@@ -1,29 +1,7 @@
 import { readTaskInputTargetToken } from "#execution/task-input-capability.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
-import { EVE_TASK_INPUT_ROUTE_PATTERN } from "#protocol/routes.js";
-import type { ChannelMethod, RouteContext } from "#public/definitions/channel.js";
+import type { RouteContext } from "#public/definitions/channel.js";
 import type { InputResponse } from "#runtime/input/types.js";
-import type { ResolvedChannelDefinition } from "#runtime/types.js";
-
-const NAME = "eve/v1/task-input/post";
-
-export function getTaskInputResponseChannelDefinitions(): readonly ResolvedChannelDefinition[] {
-  return [
-    {
-      fetch: handleTaskInputResponseRequest,
-      logicalPath: `framework://channels/${NAME}`,
-      method: "POST" satisfies ChannelMethod,
-      name: NAME,
-      sourceId: "eve:framework:task-input-post",
-      sourceKind: "module",
-      urlPath: EVE_TASK_INPUT_ROUTE_PATTERN,
-    },
-  ];
-}
-
-export function getTaskInputResponseChannelNames(): ReadonlySet<string> {
-  return new Set([NAME]);
-}
 
 export async function handleTaskInputResponseRequest(
   request: Request,

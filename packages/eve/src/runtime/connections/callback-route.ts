@@ -23,91 +23,11 @@
  */
 
 import { resumeHook } from "#internal/workflow/runtime.js";
-import {
-  EVE_CONNECTION_CALLBACK_ROUTE_PATTERN,
-  EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN,
-} from "#protocol/routes.js";
-import type { ChannelMethod, RouteContext } from "#public/definitions/channel.js";
-import type { ResolvedChannelDefinition } from "#runtime/types.js";
+import type { RouteContext } from "#public/definitions/channel.js";
 import { buildAuthorizationCompletePage } from "#runtime/connections/authorization-complete-page.js";
 import type { AuthorizationCallback } from "#runtime/connections/types.js";
 
-/**
- * Logical name prefix of the framework-shipped connection callback
- * channel. The trailing method segment (`get` or `post`) keeps each
- * `(method, urlPath)` pair distinct in the channel registry.
- */
-export const HTTP_CONNECTION_CALLBACK_CHANNEL_NAME_PREFIX = "eve/v1/connections/callback";
-
-/**
- * HTTP methods accepted by the connection callback route.
- *
- * Most OAuth IdPs redirect back over `GET` (authorization code in the
- * query string). Some `form_post` response modes deliver the callback
- * over `POST` instead, so the framework registers both. Both
- * methods route through the same handler.
- */
-const HANDLED_METHODS: readonly ChannelMethod[] = ["GET", "POST"];
-const ROUTE_KINDS = ["attempt", "legacy"] as const;
-type CallbackRouteKind = (typeof ROUTE_KINDS)[number];
-
-/**
- * Returns the framework-shipped channel definitions that mount the
- * connection callback route at {@link EVE_CONNECTION_CALLBACK_ROUTE_PATTERN}.
- *
- * Returns one definition per accepted HTTP method and route generation. The
- * legacy shape remains mounted for callbacks minted by already-pinned runs.
- * The framework channel resolver mounts each `(method, urlPath)` pair as a
- * separate Nitro route.
- */
-export function getConnectionCallbackChannelDefinitions(): readonly ResolvedChannelDefinition[] {
-  return ROUTE_KINDS.flatMap((kind) =>
-    HANDLED_METHODS.map((method) => buildCallbackChannelDefinition(method, kind)),
-  );
-}
-
-/**
- * Returns the set of logical channel names registered by the connection
- * callback route. Used by `getAllFrameworkChannelNames` so authors who
- * `disableRoute()` one of these names get a useful diagnostic instead
- * of a silent no-op.
- */
-export function getConnectionCallbackChannelNames(): ReadonlySet<string> {
-  return new Set(getConnectionCallbackChannelDefinitions().map((definition) => definition.name));
-}
-
-function buildCallbackChannelDefinition(
-  method: ChannelMethod,
-  kind: CallbackRouteKind,
-): ResolvedChannelDefinition {
-  const name = channelNameForMethod(method, kind);
-  return {
-    name,
-    method,
-    urlPath:
-      kind === "attempt"
-        ? EVE_CONNECTION_CALLBACK_ROUTE_PATTERN
-        : EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN,
-    fetch:
-      kind === "attempt" ? handleConnectionCallbackRequest : handleLegacyConnectionCallbackRequest,
-    logicalPath: `framework://channels/${name}`,
-    sourceId: `eve:framework:connection-callback-${kind}-${method.toLowerCase()}`,
-    sourceKind: "module",
-  };
-}
-
-function channelNameForMethod(method: ChannelMethod, kind: CallbackRouteKind): string {
-  const suffix = method.toLowerCase();
-  return kind === "attempt"
-    ? `${HTTP_CONNECTION_CALLBACK_CHANNEL_NAME_PREFIX}/${suffix}`
-    : `${HTTP_CONNECTION_CALLBACK_CHANNEL_NAME_PREFIX}/legacy/${suffix}`;
-}
-
-/**
- * Inbound handler for the connection callback route. Exported for test
- * coverage; the framework channel resolver wires it into Nitro via
- * {@link getConnectionCallbackChannelDefinitions}.
- */
+/** Inbound handler mounted by the corresponding framework channel source. */
 export async function handleConnectionCallbackRequest(
   request: Request,
   ctx: RouteContext,

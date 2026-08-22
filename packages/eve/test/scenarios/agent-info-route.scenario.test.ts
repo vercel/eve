@@ -122,28 +122,24 @@ describe("eve agent info route", () => {
     const payload = (await response.json()) as AgentInfoResponse;
 
     expect(payload.kind).toBe("eve-agent-info");
-    expect(payload.version).toBe(2);
+    expect(payload.version).toBe(3);
     expect(payload.mode).toBe("development");
     expect(payload.agent.model.id).toBe("openai/gpt-5.4");
     expect(payload.instructions.static[0]?.content).toContain("precise assistant");
     expect(payload.instructions.static[0]?.role).toBe("system");
     expect(payload.instructions.dynamic).toEqual([]);
-    expect(payload.tools.authored.map((tool) => tool.name)).toEqual(["get_weather"]);
-    expect(payload.tools.available.map((tool) => tool.name)).toContain("bash");
-    expect(payload.tools.available.map((tool) => tool.name)).toContain("agent");
-    expect(payload.tools.available.map((tool) => tool.name)).toContain("get_weather");
-    expect(payload.tools.framework.find((tool) => tool.name === "bash")).toMatchObject({
-      origin: "framework",
-      status: "active",
+    expect(
+      payload.tools.static
+        .filter((tool) => tool.owner.kind === "application")
+        .map((tool) => tool.name),
+    ).toEqual(["get_weather"]);
+    expect(payload.tools.static.map((tool) => tool.name)).toContain("bash");
+    expect(payload.kernel.prepared.map((capability) => capability.name)).toContain("agent");
+    expect(payload.tools.static.find((tool) => tool.name === "bash")?.owner).toMatchObject({
+      kind: "framework",
     });
-    expect(payload.tools.framework.find((tool) => tool.name === "agent")).toMatchObject({
-      origin: "framework",
-      status: "active",
-    });
-    expect(payload.channels.available.map((channel) => channel.urlPath)).toContain(
-      EVE_SESSION_ROUTE_PATH,
-    );
-    expect(payload.channels.framework.length).toBeGreaterThan(0);
+    expect(payload.channels.map((channel) => channel.urlPath)).toContain(EVE_SESSION_ROUTE_PATH);
+    expect(payload.channels.some((channel) => channel.owner.kind === "framework")).toBe(true);
     expect(payload.diagnostics).toEqual({
       discoveryErrors: 0,
       discoveryWarnings: 0,
@@ -159,8 +155,14 @@ describe("eve agent info route", () => {
       await requestAgentInfo(appRoot, LOOPBACK_REQUEST)
     ).json()) as AgentInfoResponse;
 
-    expect(disabledPayload.tools.available.map((tool) => tool.name)).not.toContain("agent");
-    expect(disabledPayload.tools.framework.find((tool) => tool.name === "agent")).toBeUndefined();
+    expect(disabledPayload.kernel.prepared.map((capability) => capability.name)).not.toContain(
+      "agent",
+    );
+    expect(
+      disabledPayload.composition.disabled.some(
+        (entry) => entry.source.logicalPath === "tools/agent.mjs",
+      ),
+    ).toBe(true);
   });
 
   it("returns 401 for a deployment request without a Vercel OIDC bearer token", async () => {
