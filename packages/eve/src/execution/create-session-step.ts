@@ -14,7 +14,7 @@ import type { JsonObject } from "#shared/json.js";
 import { resolveEffectiveAgentRuntimeFromConfig } from "#execution/effective-agent-config.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { TASK_UPDATE_SESSION_INSTRUCTION } from "#execution/tasks/child/instructions.js";
-import { isTaskToolAvailable, TASK_UPDATE_TOOL_NAME } from "#runtime/framework-tools/tasks.js";
+import { hasKernelCapability } from "#kernel/capabilities.js";
 
 /**
  * Result returned by {@link createSessionStep}.
@@ -56,14 +56,7 @@ export async function createSessionStep(input: {
   );
   const taskUpdatesEnabled =
     input.taskOwned === true &&
-    isTaskToolAvailable({
-      disabledFrameworkTools: bundle.resolvedAgent.disabledFrameworkTools ?? [],
-      hasAuthoredTool: effectiveAgent.turnAgent.tools.some(
-        (tool) => tool.name === TASK_UPDATE_TOOL_NAME,
-      ),
-      tasksEnabled: bundle.resolvedAgent.config?.experimental?.tasks === true,
-      toolName: TASK_UPDATE_TOOL_NAME,
-    });
+    hasKernelCapability(bundle.resolvedAgent.kernelCapabilities, "task_update");
 
   // Both token axes resolve tighter-wins against the cap inherited from the
   // delegating parent: a child may narrow what its parent granted, never widen

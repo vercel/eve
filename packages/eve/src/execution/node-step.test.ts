@@ -200,7 +200,7 @@ function createTestNode(
   return {
     agent: {
       ...agent,
-      disabledFrameworkTools: [],
+      kernelCapabilities: ["agent", "ask_question"],
     },
     channels: [],
     hookRegistry: createEmptyHookRegistry(),
@@ -251,6 +251,10 @@ describe("createNodeHarnessTools", () => {
     const toolRegistry = await createRuntimeToolRegistry({ tools: [definition] });
     const tools = createNodeHarnessTools({
       node: createTestNode(createTestTurnAgent({ tools: toolRegistry.preparedTools }), {
+        agent: {
+          ...({} as ResolvedRuntimeAgentNode["agent"]),
+          kernelCapabilities: ["agent", "ask_question", "load_skill"],
+        },
         toolRegistry,
       }),
     });
@@ -297,20 +301,26 @@ describe("createNodeHarnessTools", () => {
 
   it("does not give declared subagent nodes the built-in agent tool", () => {
     const tools = createNodeHarnessTools({
-      node: createTestNode(undefined, { nodeId: "subagents/researcher" }),
+      node: createTestNode(undefined, {
+        agent: {
+          ...({} as ResolvedRuntimeAgentNode["agent"]),
+          kernelCapabilities: ["ask_question"],
+        },
+        nodeId: "subagents/researcher",
+      }),
     });
 
     expect(tools.has("agent")).toBe(false);
   });
 
-  it("does not give the root node the built-in agent tool when it is disabled", () => {
+  it("does not give the root node the built-in agent tool when the plan omits it", () => {
     const node = createTestNode();
     const tools = createNodeHarnessTools({
       node: {
         ...node,
         agent: {
           ...node.agent,
-          disabledFrameworkTools: ["agent"],
+          kernelCapabilities: ["ask_question"],
         },
       },
     });
@@ -334,6 +344,7 @@ describe("createNodeHarnessTools", () => {
         agent: {
           ...node.agent,
           config: { experimental: { tasks: true }, model: { id: "test-model" }, name: "test" },
+          kernelCapabilities: ["agent", "ask_question", "task_cancel", "task_update"],
         },
       },
     });
@@ -377,6 +388,9 @@ describe("createNodeHarnessTools", () => {
             model: { id: "test-model" },
             name: "test",
           },
+          kernelCapabilities: tasks
+            ? (["agent", "ask_question", "task_cancel", "task_update"] as const)
+            : (["agent", "ask_question"] as const),
         },
       };
     };
@@ -404,7 +418,7 @@ describe("createNodeHarnessTools", () => {
     ).toBe(2);
   });
 
-  it("respects disableTool for individual task tools", () => {
+  it("materializes only task tools present in the compiled plan", () => {
     const node = createTestNode();
     const tools = createNodeHarnessTools({
       node: {
@@ -412,7 +426,7 @@ describe("createNodeHarnessTools", () => {
         agent: {
           ...node.agent,
           config: { experimental: { tasks: true }, model: { id: "test-model" }, name: "test" },
-          disabledFrameworkTools: ["task_cancel"],
+          kernelCapabilities: ["agent", "ask_question", "task_update"],
         },
       },
     });

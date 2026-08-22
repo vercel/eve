@@ -14,21 +14,16 @@ import {
   getAllFrameworkChannelNames,
   getFrameworkChannelDefinitions,
 } from "#runtime/framework-channels/index.js";
-import {
-  getAllFrameworkToolNames,
-  getFrameworkToolDefinitions,
-} from "#runtime/framework-tools/index.js";
 import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
 import { resolveDynamicSubagentDefinition } from "#runtime/resolve-dynamic-subagent.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import { createRuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
-import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createRuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
-import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
+import { RESERVED_KERNEL_CAPABILITY_NAMES } from "#kernel/capabilities.js";
 import type {
   ResolvedChannelDefinition,
   ResolvedDynamicSubagentDefinition,
@@ -142,49 +137,9 @@ async function resolveRuntimeAgentNode(
     moduleMap: input.moduleMap,
     nodeId: input.nodeId,
   });
-  const frameworkTools = getFrameworkToolDefinitions();
-  const frameworkToolNames = new Set(frameworkTools.map((t) => t.name));
-  const allFrameworkToolNames = getAllFrameworkToolNames();
-
-  // Authored tools whose filename slug matches a framework default replace
-  // it. Authored disable sentinels (whose target is also taken from the
-  // file's slug) remove a framework default. Both interactions happen here,
-  // before the registry is built, so the duplicate-name guard inside
-  // `createRuntimeToolRegistry` keeps doing its job for authored-vs-authored
-  // collisions.
-  const authoredToolNames = new Set(agent.tools.map((tool) => tool.name));
-
-  for (const disabledName of agent.disabledFrameworkTools) {
-    if (!allFrameworkToolNames.has(disabledName)) {
-      throw new ResolveRuntimeAgentGraphError(
-        `agent/tools/${disabledName}.ts exports disableTool() but "${disabledName}" is not a framework tool. ` +
-          `Rename the file to one of: ${[...allFrameworkToolNames].sort().join(", ")}.`,
-        {
-          nodeId,
-          sourceId: input.sourceId,
-        },
-      );
-    }
-  }
-
-  const disabledFrameworkTools = new Set(agent.disabledFrameworkTools);
-  const activeFrameworkTools = frameworkTools.filter(
-    (tool) => !authoredToolNames.has(tool.name) && !disabledFrameworkTools.has(tool.name),
-  );
-
   const toolRegistry = await createRuntimeToolRegistry(
-    {
-      tools: [...activeFrameworkTools, ...agent.tools],
-    },
-    {
-      reservedToolNames: [
-        WORKFLOW_TOOL_NAME,
-        ...(frameworkToolNames.has(LOAD_SKILL_TOOL_NAME) ||
-        authoredToolNames.has(LOAD_SKILL_TOOL_NAME)
-          ? []
-          : [LOAD_SKILL_TOOL_NAME]),
-      ],
-    },
+    { tools: agent.tools },
+    { reservedToolNames: RESERVED_KERNEL_CAPABILITY_NAMES },
   );
   // Authored channels override framework defaults by matching logical name;
   // disable sentinels remove framework defaults with the same name.
@@ -223,8 +178,11 @@ async function resolveRuntimeAgentNode(
       agent.config?.experimental?.tasks === true ||
       agent.config?.experimental?.subagentPersistentSessions === true,
     reservedToolNames: [
-      LOAD_SKILL_TOOL_NAME,
-      ...toolRegistry.preparedTools.map((tool) => tool.name),
+      ...new Set([
+        ...agent.kernelCapabilities,
+        ...RESERVED_KERNEL_CAPABILITY_NAMES,
+        ...toolRegistry.preparedTools.map((tool) => tool.name),
+      ]),
     ],
     subagents: await resolveRuntimeSubagents({
       childNodeIdsByParentNodeId: input.childNodeIdsByParentNodeId,

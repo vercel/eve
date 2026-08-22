@@ -22,7 +22,7 @@ describe("createSessionStep", () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       resolvedAgent: {
         config: { experimental: { tasks: true } },
-        disabledFrameworkTools: [],
+        kernelCapabilities: ["task_update"],
       },
       turnAgent: TestTurnAgent,
     } as never);
@@ -43,7 +43,7 @@ describe("createSessionStep", () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       resolvedAgent: {
         config: {},
-        disabledFrameworkTools: [],
+        kernelCapabilities: [],
       },
       turnAgent: TestTurnAgent,
     } as never);

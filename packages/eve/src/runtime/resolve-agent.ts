@@ -111,7 +111,7 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
     channels: resolvedChannels,
     connections: resolvedConnections,
     disabledFrameworkChannels,
-    disabledFrameworkTools: [...input.manifest.disabledFrameworkTools],
+    kernelCapabilities: [...input.manifest.kernelCapabilities],
     workflowTool:
       input.manifest.workflowTool === undefined
         ? undefined

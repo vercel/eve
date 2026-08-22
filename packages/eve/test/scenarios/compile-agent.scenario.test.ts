@@ -691,20 +691,20 @@ describe("compileAgent", () => {
       startPath: app.appRoot,
     });
 
-    // The disable sentinel reaches the compiled manifest as a name in the
-    // dedicated array, not as a tool entry.
-    expect([...result.manifest.disabledFrameworkTools].sort()).toEqual([
-      "agent",
-      "web_fetch",
-      "web_search",
-    ]);
+    expect(result.manifest.kernelCapabilities).toEqual(["ask_question"]);
 
     // Both the wrapped bash and the replacement todo land in `tools` as
     // ordinary CompiledToolDefinitions. The web_fetch override is intentionally
     // absent — the disable sentinel is partitioned out before this point.
     const toolsByName = new Map(result.manifest.tools.map((tool) => [tool.name, tool]));
 
-    expect([...toolsByName.keys()].sort()).toEqual(["bash", "todo"]);
+    expect([...toolsByName.keys()].sort()).toEqual([
+      "bash",
+      "load_skill",
+      "read_file",
+      "todo",
+      "write_file",
+    ]);
 
     expect(toolsByName.get("bash")).toMatchObject({
       description: "Run a vetted shell command in the project sandbox.",

@@ -47,6 +47,12 @@ import {
 } from "#compiler/compose-agent-sources.js";
 import { frameworkAgentSourceRegistry } from "#framework-sources/registry.js";
 import { createAgentModuleNamespaceLoader } from "#compiler/module-namespace-loader.js";
+import { prepareKernelCapabilities } from "#compiler/prepare-kernel-capabilities.js";
+import {
+  getKernelCapabilityAtPath,
+  getReplaceableKernelCapabilityAtPath,
+  type KernelCapabilityName,
+} from "#kernel/capabilities.js";
 
 /**
  * Compiles one discovery manifest into the normalized manifest loaded by the runtime.
@@ -55,7 +61,7 @@ export async function compileAgentManifest(
   manifest: AgentSourceManifest,
 ): Promise<CompiledAgentManifest> {
   const context: ManifestCompileContext = {
-    bindingsByAgentRoot: new Map(),
+    bindingsByNodeId: new Map(),
     compositionsByNodeId: new Map(),
     manifestsByNodeId: new Map(),
     modelCatalog: createCompiledRuntimeModelCatalogLoader(manifest.appRoot),
@@ -97,6 +103,7 @@ export async function compileAgentManifest(
     bindings: createNodeBindings(
       compiledManifest,
       context,
+      ROOT_COMPILED_AGENT_NODE_ID,
       compiledManifest.config.build?.externalDependencies,
     ),
   };
@@ -157,18 +164,19 @@ async function compileAgentNodeManifest(
       });
   manifest = sources.manifest;
   const bindings = bindOriginConfigModule(sources.bindings, manifest, options.sourceOrigin);
-  context.bindingsByAgentRoot.set(manifest.agentRoot, bindings);
+  context.bindingsByNodeId.set(nodeId, bindings);
   context.compositionsByNodeId.set(nodeId, sources.composition);
   context.manifestsByNodeId.set(nodeId, manifest);
   const resources = await compileAgentResources(manifest, context, {
     externalDependencies,
     nodeId,
     sourcesComposed: true,
+    tasksEnabled: config.experimental?.tasks === true,
   });
   const compiledNode = createCompiledAgentNodeManifest({ ...resources, config });
   return {
     ...compiledNode,
-    bindings: createNodeBindings(compiledNode, context, config.build?.externalDependencies),
+    bindings: createNodeBindings(compiledNode, context, nodeId, config.build?.externalDependencies),
   };
 }
 
@@ -180,6 +188,7 @@ async function compileAgentResources(
     readonly nodeId?: string;
     readonly sourceOrigin?: AgentSourceOrigin;
     readonly sourcesComposed?: boolean;
+    readonly tasksEnabled?: boolean;
   } = {},
 ): Promise<CompiledAgentResources> {
   const nodeId = options.nodeId ?? manifest.agentId;
@@ -194,7 +203,7 @@ async function compileAgentResources(
         registry: frameworkAgentSourceRegistry,
       });
   manifest = sources.manifest;
-  context.bindingsByAgentRoot.set(manifest.agentRoot, sources.bindings);
+  context.bindingsByNodeId.set(nodeId, sources.bindings);
   context.compositionsByNodeId.set(nodeId, sources.composition);
   context.manifestsByNodeId.set(nodeId, manifest);
   const externalDependencies = [...(options.externalDependencies ?? [])];
@@ -215,15 +224,28 @@ async function compileAgentResources(
   );
   const tools: CompiledToolDefinition[] = [];
   const dynamicTools: CompiledDynamicToolDefinition[] = [];
-  const disabledFrameworkTools: string[] = [];
+  const disabledKernelCapabilities = new Set<KernelCapabilityName>();
+  let frameworkLoadSkill = false;
   let workflowTool: CompiledWorkflowToolDefinition | undefined;
   let webSearchProvider: WebSearchProvider | undefined;
 
   for (const { entry, source } of compiledToolEntries) {
     const sourceComposition = findSourceComposition(sources, source.sourceId);
     assertExtensionToolPolicy(entry.kind, source.logicalPath, sourceComposition?.winner.layer);
+    const kernelCapability = getKernelCapabilityAtPath(source.logicalPath);
+    if (kernelCapability === "final_output") {
+      throw new Error(
+        `The source "${source.logicalPath}" occupies the reserved final_output kernel slot. Structured output owns this tool name when an agent requests an output schema.`,
+      );
+    }
     if (entry.kind === "tool") {
       tools.push(entry.definition);
+      if (
+        entry.definition.name === "load_skill" &&
+        sourceComposition?.winner.owner.kind === "framework"
+      ) {
+        frameworkLoadSkill = true;
+      }
     } else if (entry.kind === "dynamic-tool") {
       dynamicTools.push(entry.definition);
     } else if (entry.kind === "workflow-tool") {
@@ -232,7 +254,7 @@ async function compileAgentResources(
       webSearchProvider = entry.provider;
     } else {
       const disabled = validateDisableTarget(source.logicalPath, sourceComposition);
-      if (disabled.owner.kind === "framework") disabledFrameworkTools.push(entry.name);
+      if (disabled.kind === "kernel") disabledKernelCapabilities.add(disabled.name);
     }
   }
 
@@ -257,7 +279,9 @@ async function compileAgentResources(
       source.logicalPath,
       findSourceComposition(sources, source.sourceId),
     );
-    return disabled.owner.kind === "framework" ? flattened : [];
+    return disabled.kind === "source" && disabled.target.owner.kind === "framework"
+      ? flattened
+      : [];
   });
 
   const compiledSkillEntries = await Promise.all(
@@ -319,7 +343,16 @@ async function compileAgentResources(
     extensionMounts: compileExtensionMounts(manifest),
     connections,
     diagnosticsSummary: manifest.diagnosticsSummary,
-    disabledFrameworkTools,
+    kernelCapabilities: prepareKernelCapabilities({
+      disabled: disabledKernelCapabilities,
+      frameworkLoadSkill,
+      hasSkills: skills.length > 0 || dynamicSkills.length > 0,
+      isRoot: nodeId === ROOT_COMPILED_AGENT_NODE_ID,
+      tasksEnabled: options.tasksEnabled === true,
+      toolNames: new Set(tools.map((tool) => tool.name)),
+      webSearch: webSearchProvider !== undefined,
+      workflow: workflowTool !== undefined,
+    }),
     workflowTool,
     webSearchProvider,
     dynamicSkills,
@@ -345,13 +378,14 @@ async function compileAgentResources(
   });
   return {
     ...resources,
-    bindings: createNodeBindings(resources, context, externalDependencies),
+    bindings: createNodeBindings(resources, context, nodeId, externalDependencies),
   };
 }
 
 function createNodeBindings(
   manifest: CompiledAgentNodeManifest | CompiledAgentResources,
   context: ManifestCompileContext,
+  nodeId: string,
   externalDependencies?: readonly string[],
 ): CompiledAgentResources["bindings"] {
   const bindings = createFilesystemModuleBindings({
@@ -359,7 +393,7 @@ function createNodeBindings(
     externalDependencies,
     manifest,
   });
-  const composedBindings = context.bindingsByAgentRoot.get(manifest.agentRoot) ?? {};
+  const composedBindings = context.bindingsByNodeId.get(nodeId) ?? {};
   for (const sourceId of Object.keys(bindings)) {
     if (composedBindings[sourceId] !== undefined) {
       bindings[sourceId] = composedBindings[sourceId];
@@ -409,7 +443,7 @@ function getComposedSources(
     throw new Error(`Agent node "${nodeId}" has no composed source graph.`);
   }
   return {
-    bindings: context.bindingsByAgentRoot.get(manifest.agentRoot) ?? {},
+    bindings: context.bindingsByNodeId.get(nodeId) ?? {},
     composition,
     manifest,
   };
@@ -434,6 +468,10 @@ function validateDisableTarget(
   }
   const target = composition.candidates.at(-2);
   if (target === undefined) {
+    const kernelCapability = getReplaceableKernelCapabilityAtPath(logicalPath);
+    if (winner.layer === "application" && kernelCapability !== undefined) {
+      return { kind: "kernel" as const, name: kernelCapability };
+    }
     throw new Error(
       `The source "${logicalPath}" exports a disable sentinel, but no lower-precedence source occupies that slot.`,
     );
@@ -443,7 +481,7 @@ function validateDisableTarget(
       `The extension override "${logicalPath}" exports a disable sentinel, but its extension package contributes no source at that slot.`,
     );
   }
-  return target;
+  return { kind: "source" as const, target };
 }
 
 function assertExtensionToolPolicy(

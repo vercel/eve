@@ -111,7 +111,7 @@ function createContext(
   modelCatalog: ManifestCompileContext["modelCatalog"],
 ): ManifestCompileContext {
   return {
-    bindingsByAgentRoot: new Map(),
+    bindingsByNodeId: new Map(),
     compositionsByNodeId: new Map(),
     manifestsByNodeId: new Map(),
     modelCatalog,

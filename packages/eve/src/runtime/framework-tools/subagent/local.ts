@@ -26,7 +26,7 @@ import type {
   RuntimeRemoteAgentCallActionRequest,
   RuntimeSubagentCallActionRequest,
 } from "#runtime/actions/types.js";
-import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#runtime/framework-tools/tasks.js";
+import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#runtime/framework-tools/subagent/task-receipt.js";
 import { PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA } from "#runtime/subagents/registry.js";
 import { parseJsonObject } from "#shared/json.js";
 import { createSubagentExecutorBinding } from "#tasks/types.js";

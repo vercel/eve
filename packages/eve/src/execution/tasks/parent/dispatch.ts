@@ -23,11 +23,8 @@ import type {
   RuntimeToolCallActionRequest,
 } from "#runtime/actions/types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-import {
-  TASK_CANCEL_TOOL_NAME,
-  TASK_CONTROL_TOOL_NAMES,
-  TASK_UPDATE_TOOL_NAME,
-} from "#runtime/framework-tools/tasks.js";
+import { TASK_CANCEL_TOOL_NAME } from "#runtime/framework-tools/task-cancel.js";
+import { TASK_UPDATE_TOOL_NAME } from "#runtime/framework-tools/task-update.js";
 import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
 import {
   isTerminalTaskStatus,
@@ -41,6 +38,10 @@ const log = createLogger("execution.tasks.dispatch");
 
 const CANCEL_COMMIT_POLL_ATTEMPTS = 10;
 const CANCEL_COMMIT_POLL_DELAY_MS = 250;
+const TASK_CONTROL_TOOL_NAMES: ReadonlySet<string> = new Set([
+  TASK_CANCEL_TOOL_NAME,
+  TASK_UPDATE_TOOL_NAME,
+]);
 
 /** True for task-control calls dispatched outside the model loop. */
 export function isTaskControlAction(

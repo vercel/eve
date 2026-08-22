@@ -371,54 +371,6 @@ describe("resolveRuntimeAgentGraph", () => {
     ]);
     expect(graph.root.turnAgent.tools).toMatchObject([
       {
-        description:
-          "Ask the user a question and wait for their response before continuing. Use this when you need clarification or a choice from the user.",
-        kind: "authored-tool",
-        name: "ask_question",
-      },
-      {
-        description: "Execute a shell command in the shared workspace environment.",
-        kind: "authored-tool",
-        name: "bash",
-      },
-      {
-        kind: "authored-tool",
-        name: "read_file",
-      },
-      {
-        kind: "authored-tool",
-        name: "write_file",
-      },
-      {
-        kind: "authored-tool",
-        name: "todo",
-      },
-      {
-        description: [
-          "Fetch a webpage and return its content in the requested format. Use this to retrieve and analyze content from URLs.",
-          "",
-          "Usage notes:",
-          "- The URL must be a fully-formed valid URL starting with https://",
-          "- HTML responses are automatically converted to markdown or plain text based on the requested format",
-          '- Format options: "markdown" (default), "text", or "html"',
-          "- Default timeout is 30 seconds (max 120 seconds)",
-          "- Maximum response size is 5 MB; content is further capped at the shared tool-output budget (50 KB / 2000 lines)",
-          "- This tool is read-only and does not modify any files",
-        ].join("\n"),
-        kind: "authored-tool",
-        name: "web_fetch",
-      },
-      {
-        description:
-          "Search the web for real-time information. Use this to find up-to-date information about current events, recent developments, or topics that may have changed since the knowledge cutoff.",
-        kind: "authored-tool",
-        name: "web_search",
-      },
-      {
-        kind: "authored-tool",
-        name: "load_skill",
-      },
-      {
         description: "Get the weather.",
         inputSchema: null,
         kind: "authored-tool",
@@ -452,54 +404,6 @@ describe("resolveRuntimeAgentGraph", () => {
       },
     ]);
     expect(researcherNode?.turnAgent.tools).toMatchObject([
-      {
-        description:
-          "Ask the user a question and wait for their response before continuing. Use this when you need clarification or a choice from the user.",
-        kind: "authored-tool",
-        name: "ask_question",
-      },
-      {
-        description: "Execute a shell command in the shared workspace environment.",
-        kind: "authored-tool",
-        name: "bash",
-      },
-      {
-        kind: "authored-tool",
-        name: "read_file",
-      },
-      {
-        kind: "authored-tool",
-        name: "write_file",
-      },
-      {
-        kind: "authored-tool",
-        name: "todo",
-      },
-      {
-        description: [
-          "Fetch a webpage and return its content in the requested format. Use this to retrieve and analyze content from URLs.",
-          "",
-          "Usage notes:",
-          "- The URL must be a fully-formed valid URL starting with https://",
-          "- HTML responses are automatically converted to markdown or plain text based on the requested format",
-          '- Format options: "markdown" (default), "text", or "html"',
-          "- Default timeout is 30 seconds (max 120 seconds)",
-          "- Maximum response size is 5 MB; content is further capped at the shared tool-output budget (50 KB / 2000 lines)",
-          "- This tool is read-only and does not modify any files",
-        ].join("\n"),
-        kind: "authored-tool",
-        name: "web_fetch",
-      },
-      {
-        description:
-          "Search the web for real-time information. Use this to find up-to-date information about current events, recent developments, or topics that may have changed since the knowledge cutoff.",
-        kind: "authored-tool",
-        name: "web_search",
-      },
-      {
-        kind: "authored-tool",
-        name: "load_skill",
-      },
       {
         description: "Search the web.",
         inputSchema: null,
@@ -769,19 +673,10 @@ describe("resolveRuntimeAgentGraph", () => {
       logicalPath: "tools/bash.mjs",
       name: "bash",
     });
-    expect(tools.map((tool) => tool.name)).toEqual([
-      "ask_question",
-      "read_file",
-      "write_file",
-      "todo",
-      "web_fetch",
-      "web_search",
-      "load_skill",
-      "bash",
-    ]);
+    expect(tools.map((tool) => tool.name)).toEqual(["bash"]);
   });
 
-  it("removes a framework tool when listed in disabledFrameworkTools", async () => {
+  it("does not synthesize ordinary tools omitted from compiled artifacts", async () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/app/agent",
       appRoot: "/app",
@@ -792,7 +687,6 @@ describe("resolveRuntimeAgentGraph", () => {
         },
         name: "weather-agent",
       },
-      disabledFrameworkTools: ["web_fetch"],
     });
 
     const graph = await resolveRuntimeAgentGraph({
@@ -806,18 +700,10 @@ describe("resolveRuntimeAgentGraph", () => {
       },
     });
 
-    expect(graph.root.turnAgent.tools.map((tool) => tool.name)).toEqual([
-      "ask_question",
-      "bash",
-      "read_file",
-      "write_file",
-      "todo",
-      "web_search",
-      "load_skill",
-    ]);
+    expect(graph.root.turnAgent.tools).toEqual([]);
   });
 
-  it("accepts the runtime-owned agent tool in disabledFrameworkTools", async () => {
+  it("uses the compiled kernel plan as the only native tool authority", async () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/app/agent",
       appRoot: "/app",
@@ -828,7 +714,7 @@ describe("resolveRuntimeAgentGraph", () => {
         },
         name: "weather-agent",
       },
-      disabledFrameworkTools: ["agent"],
+      kernelCapabilities: [],
     });
 
     const graph = await resolveRuntimeAgentGraph({
@@ -842,7 +728,7 @@ describe("resolveRuntimeAgentGraph", () => {
       },
     });
 
-    expect(graph.root.agent.disabledFrameworkTools).toContain("agent");
+    expect(graph.root.agent.kernelCapabilities).toEqual([]);
     expect(createNodeHarnessTools({ node: graph.root }).has("agent")).toBe(false);
   });
 
@@ -857,7 +743,6 @@ describe("resolveRuntimeAgentGraph", () => {
         },
         name: "weather-agent",
       },
-      disabledFrameworkTools: ["web_fetch"],
       tools: [
         {
           description: "Sandboxed shell.",
@@ -890,22 +775,14 @@ describe("resolveRuntimeAgentGraph", () => {
     const graph = await resolveRuntimeAgentGraph({ manifest, moduleMap });
     const tools = graph.root.turnAgent.tools;
 
-    expect(tools.map((tool) => tool.name)).toEqual([
-      "ask_question",
-      "read_file",
-      "write_file",
-      "todo",
-      "web_search",
-      "load_skill",
-      "bash",
-    ]);
+    expect(tools.map((tool) => tool.name)).toEqual(["bash"]);
     expect(tools.find((tool) => tool.name === "bash")).toMatchObject({
       description: "Sandboxed shell.",
       logicalPath: "tools/bash.mjs",
     });
   });
 
-  it("includes web_search as a default framework tool", async () => {
+  it("materializes web_search from the compiled kernel plan", async () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/app/agent",
       appRoot: "/app",
@@ -916,6 +793,8 @@ describe("resolveRuntimeAgentGraph", () => {
         },
         name: "weather-agent",
       },
+      kernelCapabilities: ["web_search"],
+      webSearchProvider: "exa",
     });
 
     const graph = await resolveRuntimeAgentGraph({
@@ -929,10 +808,10 @@ describe("resolveRuntimeAgentGraph", () => {
       },
     });
 
-    expect(graph.root.turnAgent.tools.map((t) => t.name)).toContain("web_search");
+    expect(createNodeHarnessTools({ node: graph.root }).has("web_search")).toBe(true);
   });
 
-  it("removes web_search when listed in disabledFrameworkTools", async () => {
+  it("omits web_search when the compiled kernel plan omits it", async () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/app/agent",
       appRoot: "/app",
@@ -943,7 +822,7 @@ describe("resolveRuntimeAgentGraph", () => {
         },
         name: "weather-agent",
       },
-      disabledFrameworkTools: ["web_search"],
+      kernelCapabilities: [],
     });
 
     const graph = await resolveRuntimeAgentGraph({
@@ -957,7 +836,7 @@ describe("resolveRuntimeAgentGraph", () => {
       },
     });
 
-    expect(graph.root.turnAgent.tools.map((t) => t.name)).not.toContain("web_search");
+    expect(createNodeHarnessTools({ node: graph.root }).has("web_search")).toBe(false);
   });
 
   it("replaces the framework web_search when an authored tool overrides it", async () => {
@@ -1009,7 +888,7 @@ describe("resolveRuntimeAgentGraph", () => {
     });
   });
 
-  it("throws when disabledFrameworkTools references an unknown framework tool", async () => {
+  it("accepts a compiled manifest with no ordinary or native tools", async () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/app/agent",
       appRoot: "/app",
@@ -1020,22 +899,21 @@ describe("resolveRuntimeAgentGraph", () => {
         },
         name: "weather-agent",
       },
-      disabledFrameworkTools: ["nonexistent_tool"],
+      kernelCapabilities: [],
     });
 
-    await expect(
-      resolveRuntimeAgentGraph({
-        manifest,
-        moduleMap: {
-          nodes: {
-            [ROOT_COMPILED_AGENT_NODE_ID]: {
-              modules: {},
-            },
+    const graph = await resolveRuntimeAgentGraph({
+      manifest,
+      moduleMap: {
+        nodes: {
+          [ROOT_COMPILED_AGENT_NODE_ID]: {
+            modules: {},
           },
         },
-      }),
-    ).rejects.toThrow(
-      /agent\/tools\/nonexistent_tool\.ts exports disableTool\(\) but "nonexistent_tool" is not a framework tool/,
-    );
+      },
+    });
+
+    expect(graph.root.turnAgent.tools).toEqual([]);
+    expect(createNodeHarnessTools({ node: graph.root }).size).toBe(0);
   });
 });

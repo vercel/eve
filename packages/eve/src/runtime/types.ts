@@ -36,6 +36,7 @@ import type { InternalAgentDefinition } from "#shared/agent-definition.js";
 import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
+import type { KernelCapabilityName } from "#kernel/capabilities.js";
 import type { SandboxBackend } from "#shared/sandbox-backend.js";
 import type { SandboxBootstrapContext, SandboxSessionContext } from "#shared/sandbox-definition.js";
 import type { ToolSchema } from "#shared/tool-schema.js";
@@ -416,13 +417,8 @@ export interface ResolvedAgent {
    * resolver uses this list to filter the framework default channel set.
    */
   readonly disabledFrameworkChannels: readonly string[];
-  /**
-   * Names of framework-provided tools the author opted out of by exporting
-   * `disableTool()` from a file in `agent/tools/`. Each entry is the
-   * filename slug of one such file. The graph resolver uses this list to
-   * filter the framework default tool set.
-   */
-  readonly disabledFrameworkTools: readonly string[];
+  /** Native execution work prepared by the compiler for this graph node. */
+  readonly kernelCapabilities: readonly KernelCapabilityName[];
   /**
    * Configuration for the experimental framework `Workflow` orchestration
    * tool. Present when an authored tool module exports

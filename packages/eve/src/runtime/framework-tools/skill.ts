@@ -6,7 +6,6 @@ import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { AuthoredSkillsKey } from "#context/providers/skill-key.js";
 import type { ToolDefinition } from "#public/definitions/tool.js";
 import { loadSkillFromSandbox } from "#runtime/skills/sandbox-access.js";
-import type { ResolvedToolDefinition } from "#runtime/types.js";
 
 /**
  * Typed input accepted by {@link executeLoadSkillTool}.
@@ -90,19 +89,4 @@ export const loadSkillToolDefinition: ToolDefinition = {
   execute: async (input) => executeLoadSkillTool(input as LoadSkillInput),
   inputSchema: SKILL_INPUT_SCHEMA,
   outputSchema: SKILL_OUTPUT_SCHEMA,
-};
-
-/**
- * Transitional runtime-catalog projection. Source-composed manifests replace
- * this entry by canonical path; legacy in-memory graph fixtures still use it.
- */
-export const SKILL_TOOL_DEFINITION: ResolvedToolDefinition = {
-  description: loadSkillToolDefinition.description,
-  execute: (input) => executeLoadSkillTool(input as LoadSkillInput),
-  inputSchema: SKILL_INPUT_SCHEMA,
-  logicalPath: "eve:framework/load-skill",
-  name: "load_skill",
-  outputSchema: SKILL_OUTPUT_SCHEMA,
-  sourceId: "eve:load-skill-tool",
-  sourceKind: "module",
 };

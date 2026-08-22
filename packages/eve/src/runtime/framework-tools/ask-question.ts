@@ -1,7 +1,7 @@
 import { z } from "#compiled/zod/index.js";
 
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { inputRequestSchema } from "#runtime/input/types.js";
-import type { ResolvedToolDefinition } from "#runtime/types.js";
 
 /**
  * Stable model-visible name for the framework question tool.
@@ -22,19 +22,20 @@ export const ASK_QUESTION_OUTPUT_SCHEMA = z
   })
   .strict();
 
+export const ASK_QUESTION_TOOL_DESCRIPTION =
+  "Ask the user a question and wait for their response before continuing. Use this when you need clarification or a choice from the user.";
+
 /**
  * Root-only framework tool that lets the agent request structured user input.
  *
  * This is a client-side tool (as indicated by it not having an `execute` method). It requires user input
  * and therefore cannot be autonomously executed by the runtime.
  */
-export const ASK_QUESTION_TOOL_DEFINITION: ResolvedToolDefinition = {
-  description:
-    "Ask the user a question and wait for their response before continuing. Use this when you need clarification or a choice from the user.",
-  inputSchema: ASK_QUESTION_INPUT_SCHEMA,
-  logicalPath: "eve:framework/ask-question",
-  name: ASK_QUESTION_TOOL_NAME,
-  outputSchema: ASK_QUESTION_OUTPUT_SCHEMA,
-  sourceId: "eve:ask-question-tool",
-  sourceKind: "module",
-};
+export function createAskQuestionHarnessDefinition(): HarnessToolDefinition {
+  return {
+    description: ASK_QUESTION_TOOL_DESCRIPTION,
+    inputSchema: ASK_QUESTION_INPUT_SCHEMA,
+    name: ASK_QUESTION_TOOL_NAME,
+    outputSchema: ASK_QUESTION_OUTPUT_SCHEMA,
+  };
+}

@@ -1,6 +1,6 @@
 import type { ModelMessage } from "ai";
 
-import { AGENT_TOOL_NAME, isImplicitAgentToolAvailable } from "#runtime/framework-tools/agent.js";
+import { hasKernelCapability } from "#kernel/capabilities.js";
 import { composeRuntimeBasePrompt } from "#runtime/prompt/compose.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import type { ResolvedAgent, ResolvedAgentDefinition } from "#runtime/types.js";
@@ -94,16 +94,8 @@ export function createResolvedRuntimeTurnAgent(input: {
   const subagentDeclaredTool = input.tools.some(
     (tool) => tool.kind === "subagent" || tool.kind === "remote",
   );
-  // The framework `agent` tool is injected after graph resolution, so
-  // declared tools alone under-count. isImplicitAgentToolAvailable is the
-  // same predicate node-step uses for the injection itself — including the
-  // authored-tool shadowing leg, so instructions never advertise a tool an
-  // authored "agent" tool has replaced.
-  const subagentImplicitRootTool = isImplicitAgentToolAvailable({
-    disabledFrameworkTools: agent.disabledFrameworkTools,
-    hasAuthoredAgentTool: input.tools.some((tool) => tool.name === AGENT_TOOL_NAME),
-    nodeId: input.nodeId,
-  });
+  const subagentImplicitRootTool = hasKernelCapability(agent.kernelCapabilities, "agent");
+  const kernelToolsAvailable = agent.kernelCapabilities.length > 0;
   const base: RuntimeTurnAgentBase = {
     availableSkills: agent.skills.map((skill) => ({
       description: skill.description,
@@ -121,7 +113,7 @@ export function createResolvedRuntimeTurnAgent(input: {
         config?.experimental?.subagentPersistentSessions === true,
       subagentsAvailable: subagentDeclaredTool || subagentImplicitRootTool,
       tasksEnabled: config?.experimental?.tasks === true,
-      toolsAvailable: input.tools.length > 0 || subagentImplicitRootTool,
+      toolsAvailable: input.tools.length > 0 || kernelToolsAvailable,
       workspaceSpec: agent.workspaceSpec,
     }),
     compactionModel: config?.compaction?.model,

@@ -1,19 +1,17 @@
-import { getAllFrameworkToolNames } from "#runtime/framework-tools/index.js";
 import {
   getAllFrameworkChannelNames,
   getFrameworkChannelDefinitions,
 } from "#runtime/framework-channels/index.js";
 import type { AgentInfoManifestData } from "#internal/nitro/routes/agent-info/load-agent-info-data.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
-import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 import type {
   AgentInfoFrameworkChannelEntry,
   AgentInfoResponse,
 } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
 import {
-  buildFrameworkToolInfo,
-  getRootDelegationToolNames,
+  buildActiveFrameworkToolInfo,
+  getReservedKernelCapabilityNames,
   renderChannel,
   renderDynamicResolver,
   renderSchedule,
@@ -48,12 +46,12 @@ export function buildAgentInfoResponseFromManifest(
   const disabledFrameworkChannels = manifest.channels
     .filter((channel) => channel.kind === "disabled")
     .map((channel) => channel.name);
-  const authoredToolNames = new Set(manifest.tools.map((tool) => tool.name));
-  const disabledFrameworkTools = new Set(manifest.disabledFrameworkTools);
-  const allFrameworkToolNames = getAllFrameworkToolNames();
   const allFrameworkChannelNames = getAllFrameworkChannelNames();
   const frameworkChannelDefinitions = getFrameworkChannelDefinitions();
-  const authoredTools = manifest.tools.map((tool) => ({
+  const renderCompiledTool = (
+    tool: (typeof manifest.tools)[number],
+    origin: "authored" | "framework",
+  ) => ({
     ...toSource(tool),
     description: tool.description,
     hasAuth: false,
@@ -63,21 +61,26 @@ export function buildAgentInfoResponseFromManifest(
     hasOutputSchema: tool.outputSchema !== undefined && tool.outputSchema !== null,
     inputSchema: tool.inputSchema,
     name: tool.name,
-    origin: "authored" as const,
+    origin,
     outputSchema: tool.outputSchema ?? null,
-    replacesFrameworkTool: allFrameworkToolNames.has(tool.name),
+    replacesFrameworkTool: false,
     requiresApproval: false,
-  }));
+  });
+  const authoredTools = manifest.tools
+    .filter((tool) => manifest.bindings[tool.sourceId]?.owner.kind !== "framework")
+    .map((tool) => renderCompiledTool(tool, "authored"));
+  const ordinaryFrameworkTools = manifest.tools
+    .filter((tool) => manifest.bindings[tool.sourceId]?.owner.kind === "framework")
+    .map((tool) => renderCompiledTool(tool, "framework"));
   const authoredChannelNames = new Set(authoredChannels.map((channel) => channel.name));
   const disabledFrameworkChannelNames = new Set(disabledFrameworkChannels);
   const activeFrameworkChannels = frameworkChannelDefinitions.filter(
     (channel) =>
       !authoredChannelNames.has(channel.name) && !disabledFrameworkChannelNames.has(channel.name),
   );
-  const frameworkToolInfo = buildFrameworkToolInfo({
-    authoredToolNames,
-    delegationToolNames: getRootDelegationToolNames(manifest),
-    disabledFrameworkToolNames: disabledFrameworkTools,
+  const frameworkToolInfo = buildActiveFrameworkToolInfo({
+    kernelCapabilities: manifest.kernelCapabilities,
+    ordinary: ordinaryFrameworkTools,
   });
   const renderedAuthoredChannels = authoredChannels.map((channel) => ({
     ...toSource(channel),
@@ -217,7 +220,7 @@ export function buildAgentInfoResponseFromManifest(
     tools: {
       available: [...frameworkToolInfo.available, ...authoredTools],
       authored: authoredTools,
-      disabledFramework: [...manifest.disabledFrameworkTools],
+      disabledFramework: [],
       dynamic: manifest.dynamicTools.map((resolver) =>
         renderDynamicResolver(resolver, {
           origin:
@@ -227,7 +230,7 @@ export function buildAgentInfoResponseFromManifest(
         }),
       ),
       framework: frameworkToolInfo.framework,
-      reserved: [WORKFLOW_TOOL_NAME, LOAD_SKILL_TOOL_NAME],
+      reserved: getReservedKernelCapabilityNames(),
     },
     version: 2,
     workflow: {

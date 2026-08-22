@@ -53,6 +53,7 @@ export type CompileAgentNodeManifestFn = (
     readonly nodeId?: string;
     readonly sourceOrigin?: AgentSourceOrigin;
     readonly sourcesComposed?: boolean;
+    readonly tasksEnabled?: boolean;
   },
 ) => Promise<CompiledAgentNodeManifest>;
 
@@ -162,10 +163,7 @@ async function compileSubagentDefinition(input: {
   const definition = await loadModuleBackedDefinition({
     agentRoot: input.source.manifest.agentRoot,
     binding:
-      input.context.bindingsByAgentRoot.get(input.source.manifest.agentRoot)?.[
-        configModule.sourceId
-      ] ??
-      (sourceOrigin === undefined
+      sourceOrigin === undefined
         ? undefined
         : {
             backing: {
@@ -174,7 +172,7 @@ async function compileSubagentDefinition(input: {
             },
             logicalPath: configModule.logicalPath,
             owner: sourceOrigin.owner,
-          }),
+          },
     displayPath: configModuleSource.logicalPath,
     externalDependencies: input.externalDependencies,
     kind: "subagent config",
@@ -286,6 +284,7 @@ async function compileSubagent(input: {
             agent: compiledAgent,
             context: input.context,
             externalDependencies: compiledAgent.config.build?.externalDependencies,
+            nodeId,
           }),
         },
         description,
@@ -320,6 +319,7 @@ async function compileSubagent(input: {
           agent: compiledResources,
           context: input.context,
           externalDependencies: inheritedExternalDependencies,
+          nodeId,
         }),
       },
       configResolver: input.configResolver,
@@ -334,6 +334,7 @@ function createSubagentNodeBindings(input: {
   readonly agent: CompiledAgentNodeManifest | CompiledAgentResources;
   readonly context: ManifestCompileContext;
   readonly externalDependencies?: readonly string[];
+  readonly nodeId: string;
 }): CompiledAgentResources["bindings"] {
   const bindings = createFilesystemModuleBindings({
     additionalRefs: input.additionalRefs,
@@ -341,7 +342,7 @@ function createSubagentNodeBindings(input: {
     externalDependencies: input.externalDependencies,
     manifest: input.agent,
   });
-  const composedBindings = input.context.bindingsByAgentRoot.get(input.agent.agentRoot) ?? {};
+  const composedBindings = input.context.bindingsByNodeId.get(input.nodeId) ?? {};
   for (const sourceId of Object.keys(bindings)) {
     if (composedBindings[sourceId] !== undefined) {
       bindings[sourceId] = composedBindings[sourceId];

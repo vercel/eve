@@ -7,6 +7,7 @@ import {
   createHarnessDelegationToolDefinition,
 } from "#execution/delegation-tool.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { hasKernelCapability, RESERVED_KERNEL_CAPABILITY_NAMES } from "#kernel/capabilities.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
@@ -21,15 +22,11 @@ import {
   type RuntimeModelResolutionScope,
 } from "#runtime/agent/resolve-model.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import {
-  AGENT_TOOL_DESCRIPTION,
-  AGENT_TOOL_NAME,
-  isImplicitAgentToolAvailable,
-} from "#runtime/framework-tools/agent.js";
-import {
-  createTaskToolHarnessDefinitions,
-  isTaskToolAvailable,
-} from "#runtime/framework-tools/tasks.js";
+import { AGENT_TOOL_DESCRIPTION, AGENT_TOOL_NAME } from "#runtime/framework-tools/agent.js";
+import { createAskQuestionHarnessDefinition } from "#runtime/framework-tools/ask-question.js";
+import { createTaskCancelHarnessDefinition } from "#runtime/framework-tools/task-cancel.js";
+import { createTaskUpdateHarnessDefinition } from "#runtime/framework-tools/task-update.js";
+import { createWebSearchHarnessDefinition } from "#runtime/framework-tools/web-search.js";
 import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
 
@@ -105,15 +102,21 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
           input.node.turnAgent.dynamicModel,
         );
   const tools = createNodeHarnessTools({ node: input.node });
+  const reservedToolNames = new Set([
+    ...input.node.agent.kernelCapabilities,
+    ...RESERVED_KERNEL_CAPABILITY_NAMES,
+  ]);
   const instrumentation = getInstrumentationRuntime();
   const step = createToolLoopHarness({
     abortSignal: input.abortSignal,
     capabilities: input.capabilities,
     clearOnly: input.clearOnly,
     compactOnly: input.compactOnly,
-    workflow: input.node.agent.workflowTool !== undefined,
+    workflow: hasKernelCapability(input.node.agent.kernelCapabilities, "Workflow"),
     workflowMaxSubagents: input.workflowMaxSubagents,
-    webSearchProvider: input.node.agent.webSearchProvider,
+    webSearchProvider: hasKernelCapability(input.node.agent.kernelCapabilities, "web_search")
+      ? input.node.agent.webSearchProvider
+      : undefined,
     handleEvent: input.handleEvent,
     historyProjector: input.historyProjector,
     historyView: input.historyView,
@@ -125,6 +128,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
       input.node.agent.config?.experimental?.subagentPersistentSessions === true,
     dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
+    reservedToolNames,
     runtimeIdentity: buildRuntimeIdentity(input.node),
     tools,
   });
@@ -211,17 +215,17 @@ export function createNodeHarnessTools(input: {
     });
 
     if (definition !== null) {
+      if (
+        definition.frameworkAction === "load-skill" &&
+        !hasKernelCapability(input.node.agent.kernelCapabilities, "load_skill")
+      ) {
+        continue;
+      }
       tools.set(tool.name, definition);
     }
   }
 
-  if (
-    isImplicitAgentToolAvailable({
-      disabledFrameworkTools: input.node.agent.disabledFrameworkTools,
-      hasAuthoredAgentTool: tools.has(AGENT_TOOL_NAME),
-      nodeId: input.node.nodeId,
-    })
-  ) {
+  if (hasKernelCapability(input.node.agent.kernelCapabilities, "agent")) {
     const implicitAgent = {
       description: AGENT_TOOL_DESCRIPTION,
       inputSchema:
@@ -241,17 +245,24 @@ export function createNodeHarnessTools(input: {
     );
   }
 
-  for (const definition of createTaskToolHarnessDefinitions()) {
-    if (
-      isTaskToolAvailable({
-        disabledFrameworkTools: input.node.agent.disabledFrameworkTools,
-        hasAuthoredTool: tools.has(definition.name),
-        tasksEnabled,
-        toolName: definition.name,
-      })
-    ) {
-      tools.set(definition.name, definition);
-    }
+  if (hasKernelCapability(input.node.agent.kernelCapabilities, "task_cancel")) {
+    const definition = createTaskCancelHarnessDefinition();
+    tools.set(definition.name, definition);
+  }
+
+  if (hasKernelCapability(input.node.agent.kernelCapabilities, "task_update")) {
+    const definition = createTaskUpdateHarnessDefinition();
+    tools.set(definition.name, definition);
+  }
+
+  if (hasKernelCapability(input.node.agent.kernelCapabilities, "ask_question")) {
+    const definition = createAskQuestionHarnessDefinition();
+    tools.set(definition.name, definition);
+  }
+
+  if (hasKernelCapability(input.node.agent.kernelCapabilities, "web_search")) {
+    const definition = createWebSearchHarnessDefinition();
+    tools.set(definition.name, definition);
   }
 
   return tools;
@@ -280,8 +291,7 @@ function resolveHarnessToolDefinition(input: {
   }
 
   const def = registeredTool.definition;
-  const isNativeFrameworkTool = def.sourceOwner === undefined && def.sourceId.startsWith("eve:");
-  const isFrameworkOwned = def.sourceOwner?.kind === "framework" || isNativeFrameworkTool;
+  const isFrameworkOwned = def.sourceOwner?.kind === "framework";
   const rawExecute = def.execute;
 
   return {
@@ -289,7 +299,6 @@ function resolveHarnessToolDefinition(input: {
     description: def.description,
     execution: def.execution,
     execute: resolveAuthoredExecute({
-      isNativeFrameworkTool,
       rawExecute,
       scope: def.name,
     }),
@@ -306,25 +315,18 @@ function resolveHarnessToolDefinition(input: {
 /**
  * Selects the harness-facing `execute` for one authored tool.
  *
- * - Native framework tools run their `execute` verbatim — they
- *   manage their own context and never receive an authored
- *   {@link ToolContext}.
- * - Authored tools are wrapped by {@link createToolExecuteWithAuth},
+ * Tool implementations are wrapped by {@link createToolExecuteWithAuth},
  *   which builds a token-aware context. Providers passed to
  *   `ctx.getToken(provider)` use tool-qualified auth scopes.
  * - Tools without `execute` (provider-managed) stay `undefined`.
  */
 function resolveAuthoredExecute(input: {
-  readonly isNativeFrameworkTool: boolean;
   readonly rawExecute: ResolvedToolDefinition["execute"];
   readonly scope: string;
 }): HarnessToolDefinition["execute"] {
-  const { isNativeFrameworkTool, rawExecute, scope } = input;
+  const { rawExecute, scope } = input;
   if (rawExecute === undefined) {
     return undefined;
-  }
-  if (isNativeFrameworkTool) {
-    return rawExecute;
   }
   const authored = rawExecute as (
     toolInput: unknown,

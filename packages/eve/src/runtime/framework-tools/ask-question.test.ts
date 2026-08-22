@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ASK_QUESTION_INPUT_SCHEMA,
-  ASK_QUESTION_TOOL_DEFINITION,
+  createAskQuestionHarnessDefinition,
 } from "#runtime/framework-tools/ask-question.js";
 import { serializeInputSchema } from "#shared/tool-schema.js";
 
@@ -52,6 +52,6 @@ describe("ASK_QUESTION_INPUT_SCHEMA", () => {
       required: ["prompt"],
       type: "object",
     });
-    expect(ASK_QUESTION_TOOL_DEFINITION.inputSchema).toBe(ASK_QUESTION_INPUT_SCHEMA);
+    expect(createAskQuestionHarnessDefinition().inputSchema).toBe(ASK_QUESTION_INPUT_SCHEMA);
   });
 });

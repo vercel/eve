@@ -344,6 +344,8 @@ export interface ToolLoopHarnessConfig {
     readonly messages: readonly ModelMessage[];
   }) => Promise<void>;
   readonly resolveModel: (reference: RuntimeModelReference) => Promise<LanguageModel>;
+  /** Names owned by the native kernel that runtime-resolved tools cannot replace. */
+  readonly reservedToolNames?: ReadonlySet<string>;
   /**
    * Runtime identity metadata attached to the `session.started` event.
    *

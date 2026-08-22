@@ -295,6 +295,7 @@ describe("compileAgentManifest", () => {
     const compiled = await compileAgentManifest(manifest);
 
     expect(compiled.workflowTool).toEqual({ maxSubagents: 6 });
+    expect(compiled.kernelCapabilities).toContain("Workflow");
   });
 
   it("compiles web search provider configuration", async () => {
@@ -357,6 +358,28 @@ describe("compileAgentManifest", () => {
     expect(compiled.bindings["eve.framework-defaults:tools/web_search.ts"]).toBeUndefined();
   });
 
+  it("rejects authored tools in the reserved final_output kernel slot", async () => {
+    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
+    mocks.applicationDefinition.mockResolvedValue(
+      defineTool({
+        description: "Return structured data",
+        execute: () => ({ ok: true }),
+        inputSchema: z.object({}),
+      }),
+    );
+
+    await expect(
+      compileAgentManifest(
+        createAgentSourceManifest({
+          agentId: "root",
+          agentRoot: "/app/agent",
+          appRoot: "/app",
+          tools: [createModuleSourceRef({ logicalPath: "tools/final_output.ts" })],
+        }),
+      ),
+    ).rejects.toThrow("reserved final_output kernel slot");
+  });
+
   it("compiles framework defaults through ordinary module bindings", async () => {
     mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
 
@@ -377,6 +400,7 @@ describe("compileAgentManifest", () => {
       "write_file",
     ]);
     expect(compiled.webSearchProvider).toBe("exa");
+    expect(compiled.kernelCapabilities).toEqual(["agent", "ask_question", "web_search"]);
     expect(compiled.channels).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -570,6 +594,45 @@ describe("compileAgentManifest", () => {
     expect("config" in compiled.subagents[0]!.agent).toBe(false);
     expect(compiled.subagents[0]?.description).toBeUndefined();
     expect(mocks.compileAgentConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps composed bindings isolated when a dynamic subagent shares the root directory", async () => {
+    const dynamic = defineDynamic({
+      events: {
+        "session.started": () =>
+          defineAgent({
+            description: "Resolve a remote worker.",
+            model: "openai/gpt-5.5",
+          }),
+      },
+    });
+    const root = createAgentSourceManifest({
+      agentId: "root",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      subagents: [
+        createLocalSubagentSourceRef({
+          entryPath: "/app/agent/subagents/dynamic.ts",
+          logicalPath: "subagents/dynamic.ts",
+          manifest: createAgentSourceManifest({
+            agentId: "dynamic",
+            agentRoot: "/app/agent",
+            appRoot: "/app",
+            configModule: createModuleSourceRef({ logicalPath: "subagents/dynamic.ts" }),
+          }),
+          rootPath: "/app/agent",
+          subagentId: "dynamic",
+        }),
+      ],
+    });
+    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
+    mocks.applicationDefinition.mockResolvedValue(dynamic);
+
+    const compiled = await compileAgentManifest(root);
+
+    expect(
+      compiled.bindings["eve.framework-root:channels/eve/v1/callback/post.ts"]?.backing.kind,
+    ).toBe("programmatic");
   });
 
   it("applies dynamic subagent build configuration before resolving events", async () => {

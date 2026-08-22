@@ -38,7 +38,7 @@ function createManifestWithTool(agentRoot: string): CompiledAgentManifest {
       warnings: 0,
     },
     extensionMounts: [],
-    disabledFrameworkTools: [],
+    kernelCapabilities: [],
     dynamicInstructions: [],
     dynamicSkills: [],
     dynamicTools: [],

@@ -1677,7 +1677,7 @@ describe("turnStep", () => {
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: { experimental: { tasks: true } } },
+      resolvedAgent: { config: { experimental: { tasks: true } }, kernelCapabilities: [] },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,

@@ -2,7 +2,8 @@ import type { ToolSet } from "ai";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 import { AGENT_TOOL_NAME } from "#runtime/framework-tools/agent.js";
-import { TASK_TOOL_NAMES, TASK_UPDATE_TOOL_NAME } from "#runtime/framework-tools/tasks.js";
+import { TASK_CANCEL_TOOL_NAME } from "#runtime/framework-tools/task-cancel.js";
+import { TASK_UPDATE_TOOL_NAME } from "#runtime/framework-tools/task-update.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import {
   ensureWorkflowContinuationSecurity,
@@ -196,7 +197,7 @@ function isRootOnlyFrameworkTool(definition: HarnessToolDefinition): boolean {
     return true;
   }
 
-  return definition.name !== TASK_UPDATE_TOOL_NAME && TASK_TOOL_NAMES.has(definition.name);
+  return definition.name === TASK_CANCEL_TOOL_NAME;
 }
 
 function isToolDefinitionList(

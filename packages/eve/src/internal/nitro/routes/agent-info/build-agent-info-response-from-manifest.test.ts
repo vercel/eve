@@ -5,7 +5,7 @@ import { createCompiledAgentManifest } from "#compiler/manifest.js";
 import { buildAgentInfoResponseFromManifest } from "#internal/nitro/routes/agent-info/build-agent-info-response-from-manifest.js";
 
 describe("buildAgentInfoResponseFromManifest", () => {
-  it("reports opt-in framework tools as unavailable", () => {
+  it("does not invent tools absent from compiled artifacts", () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/app/agent",
       appRoot: "/app",
@@ -28,8 +28,7 @@ describe("buildAgentInfoResponseFromManifest", () => {
 
     expect(result.tools.available.map((tool) => tool.name)).not.toContain("glob");
     expect(result.tools.available.map((tool) => tool.name)).not.toContain("grep");
-    expect(result.tools.framework.find((tool) => tool.name === "glob")?.status).toBe("opt-in");
-    expect(result.tools.framework.find((tool) => tool.name === "grep")?.status).toBe("opt-in");
+    expect(result.tools.framework).toEqual([]);
     expect(AgentInfoResultSchema.safeParse(result).success).toBe(true);
   });
 

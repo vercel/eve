@@ -1,5 +1,5 @@
 import { defineTool } from "#public/definitions/tool.js";
-import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#runtime/framework-tools/tasks.js";
+import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#runtime/framework-tools/subagent/task-receipt.js";
 import { PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA } from "#runtime/subagents/registry.js";
 import { executeSubagentTool } from "#runtime/framework-tools/subagent/local.js";
 

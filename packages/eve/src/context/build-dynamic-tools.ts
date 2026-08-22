@@ -133,9 +133,12 @@ export function replayDynamicTools(
 export function buildResponseAuthorizationTools(input: {
   readonly authoredTools: HarnessToolMap;
   readonly context?: ContextReader;
+  readonly reservedToolNames?: ReadonlySet<string>;
 }): HarnessToolMap {
   const tools = new Map<string, HarnessToolDefinition>();
-  for (const tool of input.context === undefined ? [] : buildDynamicTools(input.context)) {
+  for (const tool of input.context === undefined
+    ? []
+    : buildDynamicTools(input.context, input.reservedToolNames)) {
     if (!tools.has(tool.name)) tools.set(tool.name, tool);
   }
   for (const [name, tool] of input.authoredTools) {
@@ -144,9 +147,17 @@ export function buildResponseAuthorizationTools(input: {
   return tools;
 }
 
-export function buildDynamicTools(ctx: ContextReader): readonly HarnessToolDefinition[] {
+export function buildDynamicTools(
+  ctx: ContextReader,
+  reservedToolNames: ReadonlySet<string> = new Set(),
+): readonly HarnessToolDefinition[] {
   const step = replayDynamicTools(ctx.get(StepDynamicToolMetadataKey) ?? []);
   const turn = replayDynamicTools(ctx.get(TurnDynamicToolMetadataKey) ?? []);
   const session = replayDynamicTools(ctx.get(SessionDynamicToolMetadataKey) ?? []);
-  return [...step, ...turn, ...session];
+  const tools = [...step, ...turn, ...session];
+  const collision = tools.find((tool) => reservedToolNames.has(tool.name));
+  if (collision !== undefined) {
+    throw new Error(`Dynamic tool "${collision.name}" collides with a native kernel capability.`);
+  }
+  return tools;
 }

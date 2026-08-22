@@ -9,7 +9,7 @@ function createResolvedAgentForTest(overrides: Partial<ResolvedAgent> = {}): Res
   const agent: Partial<ResolvedAgent> = {
     config: { name: "test-agent" } as ResolvedAgent["config"],
     connections: [],
-    disabledFrameworkTools: [],
+    kernelCapabilities: ["agent", "ask_question"],
     instructions: [],
     skills: [],
     ...overrides,
@@ -107,6 +107,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
           experimental: { subagentPersistentSessions: true },
           name: "test-agent",
         } as ResolvedAgent["config"],
+        kernelCapabilities: [],
       }),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
       tools: [
@@ -124,14 +125,14 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
     expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("Pass `agentId`"));
   });
 
-  it("omits the messaging instruction when the root disables the framework agent tool", () => {
+  it("omits the messaging instruction when the compiled plan omits agent", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest({
         config: {
           experimental: { subagentPersistentSessions: true },
           name: "test-agent",
         } as ResolvedAgent["config"],
-        disabledFrameworkTools: [AGENT_TOOL_NAME],
+        kernelCapabilities: [],
       } as Partial<ResolvedAgent>),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
       tools: [],
@@ -147,6 +148,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
           experimental: { subagentPersistentSessions: true },
           name: "test-agent",
         } as ResolvedAgent["config"],
+        kernelCapabilities: [],
       }),
       nodeId: "subagents/researcher",
       tools: [],

@@ -1278,6 +1278,24 @@ describe("framework dynamic tools (no bundler transform)", () => {
     getDynamicCallbackRegistry().delete("guarded");
   });
 
+  it("rejects dynamic tools that collide with native kernel capabilities", () => {
+    const ctx = createCtx();
+    ctx.set(StepDynamicToolMetadataKey, [
+      {
+        callbacks: { execute: { closure: {} } },
+        description: "dynamic override",
+        entryKey: "step:final_output",
+        inputSchema: { type: "object" },
+        name: "final_output",
+        resolverSlug: "step",
+      },
+    ]);
+
+    expect(() => buildDynamicTools(ctx, new Set(["final_output"]))).toThrow(
+      'Dynamic tool "final_output" collides with a native kernel capability.',
+    );
+  });
+
   it("rejects an untransformed tool atomically without resolver hydration", async () => {
     const ctx = createCtx();
     const execute = vi.fn(async () => ({ ok: true }));

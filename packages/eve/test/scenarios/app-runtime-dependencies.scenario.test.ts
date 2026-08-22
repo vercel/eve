@@ -801,9 +801,7 @@ describe("app runtime dependency tracing", () => {
     );
     expect(serverModuleSource).not.toContain('import("esbuild")');
     expect(serverModuleSource).not.toContain('import("rolldown")');
-    expect(serverModuleSource).toContain(
-      "This tool requires sandbox access on the runtime context.",
-    );
+    expect(serverModuleSource).toContain("read_file only supports text files.");
     expect(serverModuleSource).toContain("The dynamic skill");
     expect(serverModuleSource).toContain("URL must start with https://");
   }, 30_000);

@@ -29,6 +29,7 @@ import type {
 } from "#shared/agent-definition.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
+import { KERNEL_CAPABILITY_NAMES, type KernelCapabilityName } from "#kernel/capabilities.js";
 import {
   compiledModuleBindingSchema,
   createFilesystemModuleBindings,
@@ -48,7 +49,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 42;
+export const COMPILED_AGENT_MANIFEST_VERSION = 43;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -698,7 +699,7 @@ const compiledAgentResourceFields = {
   channels: z.array(compiledChannelEntrySchema),
   connections: z.array(compiledConnectionDefinitionSchema),
   diagnosticsSummary: discoverDiagnosticsSummarySchema,
-  disabledFrameworkTools: z.array(z.string()).readonly(),
+  kernelCapabilities: z.array(z.enum(KERNEL_CAPABILITY_NAMES)).readonly(),
   workflowTool: compiledWorkflowToolDefinitionSchema.optional(),
   webSearchProvider: z.enum(["exa", "parallel"]).optional(),
   dynamicInstructions: z.array(compiledDynamicInstructionsDefinitionSchema).default([]),
@@ -809,7 +810,7 @@ export const compiledAgentManifestSchema = z
     config: compiledAgentConfigSchema,
     connections: z.array(compiledConnectionDefinitionSchema),
     diagnosticsSummary: discoverDiagnosticsSummarySchema,
-    disabledFrameworkTools: z.array(z.string()).readonly(),
+    kernelCapabilities: z.array(z.enum(KERNEL_CAPABILITY_NAMES)).readonly(),
     workflowTool: compiledWorkflowToolDefinitionSchema.optional(),
     webSearchProvider: z.enum(["exa", "parallel"]).optional(),
     dynamicInstructions: z.array(compiledDynamicInstructionsDefinitionSchema).default([]),
@@ -838,7 +839,7 @@ export interface CreateCompiledAgentResourcesInput {
   readonly channels?: readonly CompiledChannelEntry[];
   readonly connections?: readonly CompiledConnectionDefinition[];
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
-  readonly disabledFrameworkTools?: readonly string[];
+  readonly kernelCapabilities?: readonly KernelCapabilityName[];
   readonly workflowTool?: CompiledWorkflowToolDefinition;
   readonly webSearchProvider?: WebSearchProvider;
   readonly dynamicInstructions?: readonly CompiledDynamicInstructionsDefinition[];
@@ -870,7 +871,7 @@ export function createCompiledAgentResources(
       errors: 0,
       warnings: 0,
     },
-    disabledFrameworkTools: [...(input.disabledFrameworkTools ?? [])],
+    kernelCapabilities: [...(input.kernelCapabilities ?? [])],
     workflowTool:
       input.workflowTool === undefined
         ? undefined
@@ -1038,7 +1039,7 @@ export function createCompiledAgentManifest(input: {
   readonly config: CompiledAgentDefinition;
   readonly connections?: readonly CompiledConnectionDefinition[];
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
-  readonly disabledFrameworkTools?: readonly string[];
+  readonly kernelCapabilities?: readonly KernelCapabilityName[];
   readonly workflowTool?: CompiledWorkflowToolDefinition;
   readonly webSearchProvider?: WebSearchProvider;
   readonly dynamicSkills?: readonly CompiledDynamicSkillDefinition[];

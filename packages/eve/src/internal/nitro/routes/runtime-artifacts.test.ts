@@ -27,7 +27,7 @@ function installEmptyBundledArtifacts(): void {
       errors: 0,
       warnings: 0,
     },
-    disabledFrameworkTools: [],
+    kernelCapabilities: [],
     kind: "eve-agent-compiled-manifest",
     sandbox: null,
     schedules: [],

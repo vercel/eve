@@ -1,9 +1,9 @@
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import {
-  getAllFrameworkToolDefinitions,
-  getAllFrameworkToolNames,
-  getOptInFrameworkToolNames,
-} from "#runtime/framework-tools/index.js";
+  KERNEL_CAPABILITIES,
+  RESERVED_KERNEL_CAPABILITY_NAMES,
+  type KernelCapabilityName,
+} from "#kernel/capabilities.js";
 import {
   getAllFrameworkChannelNames,
   getFrameworkChannelDefinitions,
@@ -22,7 +22,6 @@ import type {
   ResolvedToolDefinition,
 } from "#runtime/types.js";
 import { serializeInputSchema, serializeOutputSchema } from "#shared/tool-schema.js";
-import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 import type { AgentReasoningDefinition, ModelRouting } from "#shared/agent-definition.js";
 import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
@@ -238,7 +237,7 @@ export function buildAgentInfoResponse(
   if (config === undefined) {
     throw new Error("Cannot inspect unresolved dynamic subagent resources as a root agent.");
   }
-  const tools = buildToolInfo(agent, getRootDelegationToolNames(data.manifest), data.manifest);
+  const tools = buildToolInfo(agent, data.manifest);
 
   return {
     agent: {
@@ -380,30 +379,22 @@ function buildChannelInfo(agent: ResolvedAgent): AgentInfoChannels {
   };
 }
 
-function buildToolInfo(
-  agent: ResolvedAgent,
-  delegationToolNames: ReadonlySet<string>,
-  manifest: CompiledAgentManifest,
-): AgentInfoTools {
-  const authoredToolNames = new Set(agent.tools.map((tool) => tool.name));
-  const disabledFrameworkTools = new Set(agent.disabledFrameworkTools);
-  const allFrameworkToolNames = getAllFrameworkToolNames();
-  const authored = agent.tools.map((tool) =>
-    renderTool(tool, {
-      origin: "authored",
-      replacesFrameworkTool: allFrameworkToolNames.has(tool.name),
-    }),
-  );
-  const frameworkInfo = buildFrameworkToolInfo({
-    authoredToolNames,
-    delegationToolNames,
-    disabledFrameworkToolNames: disabledFrameworkTools,
+function buildToolInfo(agent: ResolvedAgent, manifest: CompiledAgentManifest): AgentInfoTools {
+  const authored = agent.tools
+    .filter((tool) => tool.sourceOwner?.kind !== "framework")
+    .map((tool) => renderTool(tool, { origin: "authored", replacesFrameworkTool: false }));
+  const ordinaryFramework = agent.tools
+    .filter((tool) => tool.sourceOwner?.kind === "framework")
+    .map((tool) => renderTool(tool, { origin: "framework", replacesFrameworkTool: false }));
+  const frameworkInfo = buildActiveFrameworkToolInfo({
+    kernelCapabilities: agent.kernelCapabilities,
+    ordinary: ordinaryFramework,
   });
 
   return {
     available: [...frameworkInfo.available, ...authored],
     authored,
-    disabledFramework: [...agent.disabledFrameworkTools],
+    disabledFramework: [],
     dynamic: agent.dynamicToolResolvers.map((resolver) =>
       renderDynamicResolver(resolver, {
         origin:
@@ -413,48 +404,47 @@ function buildToolInfo(
       }),
     ),
     framework: frameworkInfo.framework,
-    reserved: [WORKFLOW_TOOL_NAME, LOAD_SKILL_TOOL_NAME],
+    reserved: getReservedKernelCapabilityNames(),
   };
 }
 
-export function buildFrameworkToolInfo(input: {
-  readonly authoredToolNames: ReadonlySet<string>;
-  readonly delegationToolNames: ReadonlySet<string>;
-  readonly disabledFrameworkToolNames: ReadonlySet<string>;
+export function buildActiveFrameworkToolInfo(input: {
+  readonly kernelCapabilities: readonly KernelCapabilityName[];
+  readonly ordinary: readonly AgentInfoToolEntry[];
 }): Pick<AgentInfoTools, "available" | "framework"> {
-  const occupiedToolNames = new Set([...input.authoredToolNames, ...input.delegationToolNames]);
-  const available: AgentInfoToolEntry[] = [];
-  const framework: AgentInfoFrameworkToolEntry[] = [];
-  const optInFrameworkToolNames = getOptInFrameworkToolNames();
+  const active = [...input.ordinary, ...input.kernelCapabilities.map(renderKernelCapability)];
+  return {
+    available: active,
+    framework: active.map((tool) => ({
+      ...tool,
+      disabledByAuthor: false,
+      replacedByAuthoredTool: false,
+      status: "active" as const,
+    })),
+  };
+}
 
-  for (const definition of getAllFrameworkToolDefinitions()) {
-    const disabledByAuthor = input.disabledFrameworkToolNames.has(definition.name);
-    const replacedByAuthoredTool = input.authoredToolNames.has(definition.name);
-    const status: AgentInfoFrameworkToolEntry["status"] = disabledByAuthor
-      ? "disabled"
-      : occupiedToolNames.has(definition.name)
-        ? "replaced"
-        : optInFrameworkToolNames.has(definition.name)
-          ? "opt-in"
-          : "active";
-    const rendered = renderTool(definition, {
-      origin: "framework",
-      replacesFrameworkTool: false,
-    });
+function renderKernelCapability(name: KernelCapabilityName): AgentInfoToolEntry {
+  const definition = KERNEL_CAPABILITIES[name];
+  return {
+    description: "",
+    hasAuth: false,
+    hasExecute: definition.materialization === "runtime-action",
+    hasModelOutputProjection: false,
+    hasOutputSchema: false,
+    inputSchema: null,
+    logicalPath: definition.canonicalPath,
+    name,
+    origin: "framework",
+    outputSchema: null,
+    replacesFrameworkTool: false,
+    requiresApproval: false,
+    sourceKind: "kernel",
+  };
+}
 
-    if (status === "active") {
-      available.push(rendered);
-    }
-
-    framework.push({
-      ...rendered,
-      disabledByAuthor,
-      replacedByAuthoredTool,
-      status,
-    });
-  }
-
-  return { available, framework };
+export function getReservedKernelCapabilityNames(): readonly string[] {
+  return RESERVED_KERNEL_CAPABILITY_NAMES;
 }
 
 export function getRootDelegationToolNames(manifest: CompiledAgentManifest): ReadonlySet<string> {

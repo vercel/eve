@@ -157,7 +157,7 @@ import { attemptIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
 import { resolveParentLineage } from "#harness/parent-lineage.js";
 import { prepareTurnTraceContext } from "#harness/prepare-trace-context.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { TASK_UPDATE_TOOL_NAME } from "#runtime/framework-tools/tasks.js";
+import { TASK_UPDATE_TOOL_NAME } from "#runtime/framework-tools/task-update.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 import {
   consumeDeferredStepInput,
@@ -565,6 +565,7 @@ function resolveStepOtelContext(
 function buildHarnessToolsWithDynamicSubagents(
   tools: HarnessToolMap,
   ctx: Parameters<typeof buildDynamicSubagentTools>[0] | undefined,
+  reservedToolNames: ReadonlySet<string> | undefined,
 ): HarnessToolMap {
   const effectiveTools = new Map(tools);
   if (ctx === undefined) {
@@ -572,7 +573,7 @@ function buildHarnessToolsWithDynamicSubagents(
   }
 
   for (const dynamicSubagent of buildDynamicSubagentTools(ctx)) {
-    if (effectiveTools.has(dynamicSubagent.name)) {
+    if (effectiveTools.has(dynamicSubagent.name) || reservedToolNames?.has(dynamicSubagent.name)) {
       throw new Error(
         `Dynamic subagent "${dynamicSubagent.name}" collides with another runtime-visible tool name.`,
       );
@@ -875,6 +876,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       tools: buildResponseAuthorizationTools({
         authoredTools: config.tools,
         context: approvalContext,
+        reservedToolNames: config.reservedToolNames,
       }),
     });
     session = coordinated.session;
@@ -1442,7 +1444,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       const callMessages = opts.trailingUserNote
         ? [...modelMessages, { role: "user" as const, content: opts.trailingUserNote }]
         : modelMessages;
-      const harnessTools = buildHarnessToolsWithDynamicSubagents(config.tools, ctx);
+      const harnessTools = buildHarnessToolsWithDynamicSubagents(
+        config.tools,
+        ctx,
+        config.reservedToolNames,
+      );
       const backgroundBatch = createBackgroundToolCallBatch();
       const advertisedHarnessTools = getAdvertisedTools({
         delegatedCaller: taskUpdatesEnabled,
@@ -1465,7 +1471,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         const dynamicTools = getAdvertisedTools({
           delegatedCaller: taskUpdatesEnabled,
           session,
-          tools: buildDynamicTools(ctx),
+          tools: buildDynamicTools(ctx, config.reservedToolNames),
         });
         const dynamicToolSet = buildToolSetFromDefinitions({
           approvedTools,
@@ -1732,7 +1738,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       emissionState,
       runStep,
       session,
-      tools: buildHarnessToolsWithDynamicSubagents(config.tools, ctx),
+      tools: buildHarnessToolsWithDynamicSubagents(config.tools, ctx, config.reservedToolNames),
     });
     if (pendingWorkflowInterrupt !== null) {
       return pendingWorkflowInterrupt;
@@ -2720,6 +2726,7 @@ async function handleStepResult(input: {
     const responseAuthorizationTools = buildResponseAuthorizationTools({
       authoredTools: config.tools,
       context: contextStorage.getStore(),
+      reservedToolNames: config.reservedToolNames,
     });
     let parkedSession = appendPendingInputBatch({
       event: {

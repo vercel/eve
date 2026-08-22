@@ -47,7 +47,6 @@ export async function compileAgentConfig(
         ? { model: DEFAULT_AGENT_MODEL_ID }
         : await loadModuleBackedDefinition({
             agentRoot: manifest.agentRoot,
-            binding: context.bindingsByAgentRoot.get(manifest.agentRoot)?.[configModule.sourceId],
             displayPath: configModulePath!,
             kind: "agent config",
             moduleLoader: context.moduleLoader,
