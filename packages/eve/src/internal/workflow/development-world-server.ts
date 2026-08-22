@@ -9,6 +9,7 @@ import {
   LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH,
   resolveLocalWorkflowWorldDataDirectory,
 } from "#internal/workflow/local-world-data-directory.js";
+import { applyLocalWorkflowWorldDeliveryTimeoutDefaults } from "#internal/workflow/local-world-delivery-timeouts.js";
 import {
   decodeDevelopmentWorldValue,
   encodeDevelopmentWorldValue,
@@ -77,6 +78,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     this.#appRoot = input.appRoot;
     this.#resolveActiveGenerationId = input.resolveActiveGenerationId;
     this.#transportSecret = input.transportSecret;
+    applyLocalWorkflowWorldDeliveryTimeoutDefaults();
     this.#world = createWorld({
       dataDir: resolveLocalWorkflowWorldDataDirectory(input.appRoot),
       recoverActiveRuns: false,
