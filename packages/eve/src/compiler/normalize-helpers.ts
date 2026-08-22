@@ -1,16 +1,18 @@
-import { join } from "node:path";
+import { resolve } from "node:path";
 
 import {
   getAuthoredModuleExport,
   materializeAuthoredModuleExport,
 } from "#internal/authored-module.js";
-import {
-  type AuthoredModuleLoadOptions,
-  loadAuthoredModuleNamespace,
-} from "#internal/authored-module-loader.js";
+import type { AuthoredModuleLoadOptions } from "#internal/authored-module-loader.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { CompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
+import type { CompiledModuleBinding } from "#compiler/module-binding.js";
+import {
+  createAgentModuleNamespaceLoader,
+  type AgentModuleNamespaceLoader,
+} from "#compiler/module-namespace-loader.js";
 
 const SANDBOX_PARENT_DEFINITION_MARKER = Symbol.for("eve.sandbox-parent-definition");
 
@@ -27,7 +29,9 @@ export interface ManifestCompileContext {
 }
 
 export interface ModuleBackedDefinitionLoadOptions {
+  readonly binding?: CompiledModuleBinding;
   readonly externalDependencies?: AuthoredModuleLoadOptions["externalDependencies"];
+  readonly moduleLoader?: AgentModuleNamespaceLoader;
 }
 
 /**
@@ -42,13 +46,25 @@ export interface ModuleBackedDefinitionLoadOptions {
 export async function loadModuleBackedDefinition(input: {
   readonly agentRoot: string;
   readonly displayPath?: string;
+  readonly binding?: CompiledModuleBinding;
   readonly externalDependencies?: ModuleBackedDefinitionLoadOptions["externalDependencies"];
   readonly kind: string;
+  readonly moduleLoader?: AgentModuleNamespaceLoader;
   readonly source: ModuleSourceRef;
 }): Promise<unknown> {
-  const moduleNamespace = await loadAuthoredModuleNamespace(
-    join(input.agentRoot, input.source.logicalPath),
-    { externalDependencies: input.externalDependencies },
+  const binding =
+    input.binding ??
+    ({
+      backing: {
+        externalDependencies: [...(input.externalDependencies ?? [])],
+        kind: "filesystem",
+        sourcePath: resolve(input.agentRoot, input.source.logicalPath),
+      },
+      logicalPath: input.source.logicalPath,
+      owner: { kind: "application" },
+    } satisfies CompiledModuleBinding);
+  const moduleNamespace = await (input.moduleLoader ?? createAgentModuleNamespaceLoader()).load(
+    binding.backing,
   );
   const exportValue = getAuthoredModuleExport(moduleNamespace, input.source);
 

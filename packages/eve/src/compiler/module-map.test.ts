@@ -73,6 +73,41 @@ function createManifestWithTool(agentRoot: string): CompiledAgentManifest {
 }
 
 describe("createCompiledModuleMapSource", () => {
+  it("emits a static registry lookup for programmatic modules", () => {
+    const manifest = createManifestWithTool("/consumer/agent");
+    const source = createCompiledModuleMapSource({
+      manifest: {
+        ...manifest,
+        bindings: {
+          "tools/echo.ts": {
+            backing: {
+              kind: "programmatic",
+              moduleId: "tools/echo.ts",
+              registryId: "eve.defaults",
+            },
+            logicalPath: "tools/echo.ts",
+            owner: { feature: "defaults", kind: "framework" },
+          },
+        },
+      },
+      moduleMapPath: "/consumer/.eve/compile/module-map.mjs",
+      programmaticRegistryImports: {
+        "eve.defaults": {
+          exportName: "defaultAgentSourceRegistry",
+          importSpecifier: "eve/internal/default-agent-source-registry",
+        },
+      },
+    });
+
+    expect(source).toContain(
+      'import { defaultAgentSourceRegistry as module_0 } from "eve/internal/default-agent-source-registry";',
+    );
+    expect(source).toContain(
+      'module_0.getModule({"kind":"programmatic","moduleId":"tools/echo.ts","registryId":"eve.defaults"}).namespace',
+    );
+    expect(source).not.toContain("/consumer/agent/tools/echo.ts");
+  });
+
   it("imports the physical binding instead of reconstructing it from logical identity", () => {
     const manifest = createManifestWithTool("/consumer/agent");
     const source = createCompiledModuleMapSource({
