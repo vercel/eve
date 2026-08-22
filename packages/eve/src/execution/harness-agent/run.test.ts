@@ -75,7 +75,10 @@ describe("runHarnessAgent", () => {
       }),
     ).resolves.toBe("done");
 
-    expect(mocks.createHarnessSandboxHandle).toHaveBeenCalledWith({ harness: "codex", sandbox });
+    expect(mocks.createHarnessSandboxHandle).toHaveBeenCalledWith({
+      harness: "codex",
+      sandbox,
+    });
     expect(mocks.loadHarnessAdapter).toHaveBeenCalledWith({
       bridge,
       harness: "codex",

@@ -15,6 +15,7 @@ export async function runHarnessAgent<TOutput = string>(input: {
   readonly settings: HarnessAgentSettings;
   readonly task: string;
 }): Promise<TOutput> {
+  const workDir = resolveHarnessWorkDir(input.settings.workingDirectory);
   const sandboxHandle = await createHarnessSandboxHandle({
     harness: input.harness,
     sandbox: input.sandbox,
@@ -37,7 +38,7 @@ export async function runHarnessAgent<TOutput = string>(input: {
           ? undefined
           : Output.object({ schema: input.outputSchema as FlexibleSchema<unknown> }),
       permissionMode: "allow-all",
-      sandboxConfig: { workDir: resolveHarnessWorkDir(input.settings.workingDirectory) },
+      sandboxConfig: { workDir },
       skills: input.settings.skills,
     });
     session = await agent.createSession({
@@ -66,8 +67,18 @@ async function cleanupHarnessInvocation(input: {
   readonly dispose: () => Promise<void>;
   readonly session: Awaited<ReturnType<HarnessAgent["createSession"]>> | undefined;
 }): Promise<unknown[]> {
-  const cleanup = await Promise.allSettled([input.session?.destroy(), input.dispose()]);
-  return cleanup.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
+  const failures: unknown[] = [];
+  try {
+    await input.session?.destroy();
+  } catch (error) {
+    failures.push(error);
+  }
+  try {
+    await input.dispose();
+  } catch (error) {
+    failures.push(error);
+  }
+  return failures;
 }
 
 function resolveHarnessWorkDir(workingDirectory: string | undefined): string {
