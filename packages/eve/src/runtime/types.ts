@@ -20,6 +20,7 @@ import type {
 } from "#runtime/connections/types.js";
 import type { OpenAPISpecSource } from "#public/definitions/connections/openapi.js";
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
+import type { AgentSourceOwner } from "#compiler/module-binding.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
 import type { JsonObject } from "#shared/json.js";
 import type { Optional } from "#shared/optional.js";
@@ -161,6 +162,8 @@ export type ResolvedToolDefinition = Readonly<
   >
 > &
   ResolvedModuleSourceRef & {
+    /** Compiler-recorded owner of the source that won this logical tool slot. */
+    readonly sourceOwner?: AgentSourceOwner;
     /**
      * Validated runtime input schema. Compiled and durable JSON Schemas are
      * rehydrated before entering this runtime-owned definition.

@@ -237,6 +237,48 @@ function createNoopRuntime(): Runtime {
 }
 
 describe("createNodeHarnessTools", () => {
+  it("classifies source-composed load_skill from binding ownership", async () => {
+    const definition = {
+      description: "Load a skill.",
+      execute: async () => "loaded",
+      inputSchema: toInputSchema({ type: "object" }),
+      logicalPath: "tools/load_skill.ts",
+      name: "load_skill",
+      sourceId: "eve.framework-defaults:tools/load_skill.ts",
+      sourceKind: "module" as const,
+      sourceOwner: { feature: "eve.framework-defaults", kind: "framework" as const },
+    };
+    const toolRegistry = await createRuntimeToolRegistry({ tools: [definition] });
+    const tools = createNodeHarnessTools({
+      node: createTestNode(createTestTurnAgent({ tools: toolRegistry.preparedTools }), {
+        toolRegistry,
+      }),
+    });
+
+    expect(tools.get("load_skill")?.frameworkAction).toBe("load-skill");
+  });
+
+  it("keeps an application load_skill override as an ordinary tool", async () => {
+    const definition = {
+      description: "Application skill loader.",
+      execute: async () => "custom",
+      inputSchema: toInputSchema({ type: "object" }),
+      logicalPath: "tools/load_skill.ts",
+      name: "load_skill",
+      sourceId: "tools/load_skill.ts",
+      sourceKind: "module" as const,
+      sourceOwner: { kind: "application" as const },
+    };
+    const toolRegistry = await createRuntimeToolRegistry({ tools: [definition] });
+    const tools = createNodeHarnessTools({
+      node: createTestNode(createTestTurnAgent({ tools: toolRegistry.preparedTools }), {
+        toolRegistry,
+      }),
+    });
+
+    expect(tools.get("load_skill")?.frameworkAction).toBeUndefined();
+  });
+
   it("guides the model to split large tasks across parallel agent calls", () => {
     const agentTool = createNodeHarnessTools({ node: createTestNode() }).get("agent");
 

@@ -3,38 +3,41 @@ import { describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { DynamicSkillManifestKey, SandboxKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
+import { AuthoredSkillsKey } from "#context/providers/skill-key.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { ConnectionRegistry } from "#runtime/connections/types.js";
-import {
-  createSkillToolDefinition,
-  SKILL_TOOL_DEFINITION,
-} from "#runtime/framework-tools/skill.js";
+import { loadSkill } from "#public/tools/defaults.js";
 import { createSandboxSkillHandle } from "#runtime/skills/sandbox-access.js";
 import type { ResolvedSkillDefinition } from "#runtime/types.js";
 
-function skillToolExecutor(skills: readonly ResolvedSkillDefinition[] = []) {
-  const execute = createSkillToolDefinition(skills).execute;
+function skillToolExecutor() {
+  const execute = loadSkill.execute;
   if (execute === undefined) throw new Error("load_skill tool is missing an execute function");
   return execute;
 }
 
-describe("SKILL_TOOL_DEFINITION", () => {
+function setAuthoredSkills(
+  ctx: ContextContainer,
+  skills: readonly ResolvedSkillDefinition[] = [],
+): void {
+  ctx.set(AuthoredSkillsKey, skills);
+}
+
+describe("loadSkill", () => {
   it("describes when skill loading should be used", () => {
-    expect(SKILL_TOOL_DEFINITION.description).toContain(
-      "request clearly matches a listed skill description",
-    );
-    expect(SKILL_TOOL_DEFINITION.description).toContain(
+    expect(loadSkill.description).toContain("request clearly matches a listed skill description");
+    expect(loadSkill.description).toContain(
       "Loading adds the skill instructions to the current turn.",
     );
-    expect(SKILL_TOOL_DEFINITION.description).toContain("Available skills block");
-    expect(SKILL_TOOL_DEFINITION.description).not.toContain("connection_search");
+    expect(loadSkill.description).toContain("Available skills block");
+    expect(loadSkill.description).not.toContain("connection_search");
   });
 });
 
 describe("load_skill executor", () => {
   it("loads an authored markdown skill when no sandbox context is available", async () => {
     const ctx = new ContextContainer();
-    const execute = skillToolExecutor([
+    setAuthoredSkills(ctx, [
       {
         description: "Research a topic systematically",
         logicalPath: "skills/research.md",
@@ -52,11 +55,10 @@ describe("load_skill executor", () => {
         sourceKind: "markdown",
       },
     ]);
+    const execute = skillToolExecutor();
 
     await expect(
-      contextStorage.run(ctx, () =>
-        execute({ skill: "research" }, { messages: [], toolCallId: "call_1" }),
-      ),
+      contextStorage.run(ctx, () => execute({ skill: "research" }, {} as never)),
     ).resolves.toBe("# Research\n\nFollow the evidence.\n");
   });
 
@@ -74,7 +76,7 @@ describe("load_skill executor", () => {
     };
     const ctx = new ContextContainer();
     ctx.set(SandboxKey, access);
-    const execute = skillToolExecutor([
+    setAuthoredSkills(ctx, [
       {
         assetsPath: "/authored/skills/incident-response/assets",
         description: "Run the full incident response procedure",
@@ -91,11 +93,10 @@ describe("load_skill executor", () => {
         sourceKind: "skill-package",
       },
     ]);
+    const execute = skillToolExecutor();
 
     await expect(
-      contextStorage.run(ctx, () =>
-        execute({ skill: "incident-response" }, { messages: [], toolCallId: "call_2" }),
-      ),
+      contextStorage.run(ctx, () => execute({ skill: "incident-response" }, {} as never)),
     ).resolves.toBe(
       "# Incident response\n\nConsult `references/services/api/owners.md` when needed.\n",
     );
@@ -116,10 +117,7 @@ describe("load_skill executor", () => {
     });
     const ctx = new ContextContainer();
     ctx.set(SandboxKey, sandbox.access);
-    ctx.set(DynamicSkillManifestKey, {
-      policy: [{ description: "Apply the dynamic policy", name: "policy" }],
-    });
-    const execute = skillToolExecutor([
+    setAuthoredSkills(ctx, [
       {
         description: "Apply the static policy",
         logicalPath: "skills/policy.md",
@@ -129,17 +127,20 @@ describe("load_skill executor", () => {
         sourceKind: "markdown",
       },
     ]);
+    ctx.set(DynamicSkillManifestKey, {
+      policy: [{ description: "Apply the dynamic policy", name: "policy" }],
+    });
+    const execute = skillToolExecutor();
 
     await expect(
-      contextStorage.run(ctx, () =>
-        execute({ skill: "policy" }, { messages: [], toolCallId: "call_dynamic" }),
-      ),
+      contextStorage.run(ctx, () => execute({ skill: "policy" }, {} as never)),
     ).resolves.toBe("# Dynamic policy\n");
   });
 
   it("surfaces dynamic skill names when the requested id is missing", async () => {
     const ctx = new ContextContainer();
     ctx.set(SandboxKey, mockSandbox().access);
+    setAuthoredSkills(ctx);
     ctx.set(DynamicSkillManifestKey, {
       custom: [
         { description: "Talk like a dog", name: "custom__talk-like-a-dog" },
@@ -149,9 +150,7 @@ describe("load_skill executor", () => {
     const execute = skillToolExecutor();
 
     await expect(
-      contextStorage.run(ctx, () =>
-        execute({ skill: "talk-like-a-dog" }, { messages: [], toolCallId: "call_1" }),
-      ),
+      contextStorage.run(ctx, () => execute({ skill: "talk-like-a-dog" }, {} as never)),
     ).rejects.toThrow("Available skills: custom__bark, custom__talk-like-a-dog.");
   });
 
@@ -168,12 +167,11 @@ describe("load_skill executor", () => {
     const ctx = new ContextContainer();
     ctx.set(SandboxKey, mockSandbox().access);
     ctx.set(ConnectionRegistryKey, registry);
+    setAuthoredSkills(ctx);
     const execute = skillToolExecutor();
 
     await expect(
-      contextStorage.run(ctx, () =>
-        execute({ skill: "linear" }, { messages: [], toolCallId: "call_1" }),
-      ),
+      contextStorage.run(ctx, () => execute({ skill: "linear" }, {} as never)),
     ).rejects.toThrow(
       '"linear" is an installed connection, not a skill. Use connection_search with connection "linear" to find its tools.',
     );

@@ -280,7 +280,8 @@ function resolveHarnessToolDefinition(input: {
   }
 
   const def = registeredTool.definition;
-  const isFrameworkTool = def.sourceId.startsWith("eve:");
+  const isNativeFrameworkTool = def.sourceOwner === undefined && def.sourceId.startsWith("eve:");
+  const isFrameworkOwned = def.sourceOwner?.kind === "framework" || isNativeFrameworkTool;
   const rawExecute = def.execute;
 
   return {
@@ -288,12 +289,12 @@ function resolveHarnessToolDefinition(input: {
     description: def.description,
     execution: def.execution,
     execute: resolveAuthoredExecute({
-      isFrameworkTool,
+      isNativeFrameworkTool,
       rawExecute,
       scope: def.name,
     }),
     frameworkAction:
-      isFrameworkTool && def.name === LOAD_SKILL_TOOL_NAME ? "load-skill" : undefined,
+      isFrameworkOwned && def.name === LOAD_SKILL_TOOL_NAME ? "load-skill" : undefined,
     inputSchema: def.inputSchema ?? UNSPECIFIED_INPUT_SCHEMA,
     name: def.name,
     approval: def.approval,
@@ -305,7 +306,7 @@ function resolveHarnessToolDefinition(input: {
 /**
  * Selects the harness-facing `execute` for one authored tool.
  *
- * - Framework tools (`eve:` source) run their `execute` verbatim — they
+ * - Native framework tools run their `execute` verbatim — they
  *   manage their own context and never receive an authored
  *   {@link ToolContext}.
  * - Authored tools are wrapped by {@link createToolExecuteWithAuth},
@@ -314,15 +315,15 @@ function resolveHarnessToolDefinition(input: {
  * - Tools without `execute` (provider-managed) stay `undefined`.
  */
 function resolveAuthoredExecute(input: {
-  readonly isFrameworkTool: boolean;
+  readonly isNativeFrameworkTool: boolean;
   readonly rawExecute: ResolvedToolDefinition["execute"];
   readonly scope: string;
 }): HarnessToolDefinition["execute"] {
-  const { isFrameworkTool, rawExecute, scope } = input;
+  const { isNativeFrameworkTool, rawExecute, scope } = input;
   if (rawExecute === undefined) {
     return undefined;
   }
-  if (isFrameworkTool) {
+  if (isNativeFrameworkTool) {
     return rawExecute;
   }
   const authored = rawExecute as (

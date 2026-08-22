@@ -142,9 +142,7 @@ async function resolveRuntimeAgentNode(
     moduleMap: input.moduleMap,
     nodeId: input.nodeId,
   });
-  const frameworkTools = getFrameworkToolDefinitions({
-    authoredSkills: agent.skills,
-  });
+  const frameworkTools = getFrameworkToolDefinitions();
   const frameworkToolNames = new Set(frameworkTools.map((t) => t.name));
   const allFrameworkToolNames = getAllFrameworkToolNames();
 

@@ -65,7 +65,12 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
   }
   const resolvedTools = await Promise.all(
     input.manifest.tools.map((toolDefinition) =>
-      resolveToolDefinition(toolDefinition, input.moduleMap, input.nodeId),
+      resolveToolDefinition(
+        toolDefinition,
+        input.moduleMap,
+        input.nodeId,
+        input.manifest.bindings[toolDefinition.sourceId]?.owner,
+      ),
     ),
   );
   const resolvedDynamicInstructionsResolvers = await Promise.all(

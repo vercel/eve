@@ -4,10 +4,7 @@ import { BASH_TOOL_DEFINITION } from "#runtime/framework-tools/bash.js";
 import { GLOB_TOOL_DEFINITION } from "#runtime/framework-tools/glob.js";
 import { GREP_TOOL_DEFINITION } from "#runtime/framework-tools/grep.js";
 import { READ_FILE_TOOL_DEFINITION } from "#runtime/framework-tools/read-file.js";
-import {
-  createSkillToolDefinition,
-  SKILL_TOOL_DEFINITION,
-} from "#runtime/framework-tools/skill.js";
+import { SKILL_TOOL_DEFINITION } from "#runtime/framework-tools/skill.js";
 import { TASK_TOOL_DEFINITIONS } from "#runtime/framework-tools/tasks.js";
 import { TODO_TOOL_DEFINITION } from "#runtime/framework-tools/todo.js";
 import { WEB_FETCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-fetch.js";
@@ -20,7 +17,7 @@ export { ReadFileStateKey } from "#runtime/framework-tools/file-state.js";
 export type { TodoItem, TodoState } from "#runtime/framework-tools/todo.js";
 export { TodoStateKey } from "#runtime/framework-tools/todo.js";
 
-import type { ResolvedSkillDefinition, ResolvedToolDefinition } from "#runtime/types.js";
+import type { ResolvedToolDefinition } from "#runtime/types.js";
 
 const REGISTERED_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
   ASK_QUESTION_TOOL_DEFINITION,
@@ -51,17 +48,8 @@ const ALL_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
  *
  * Source-composed dynamic tools are not represented in this legacy catalog.
  */
-export function getFrameworkToolDefinitions(config?: {
-  readonly authoredSkills?: readonly ResolvedSkillDefinition[];
-}): readonly ResolvedToolDefinition[] {
-  const authoredSkills = config?.authoredSkills;
-  if (authoredSkills === undefined) return REGISTERED_FRAMEWORK_TOOLS;
-
-  return REGISTERED_FRAMEWORK_TOOLS.map((definition) =>
-    definition.name === SKILL_TOOL_DEFINITION.name
-      ? createSkillToolDefinition(authoredSkills)
-      : definition,
-  );
+export function getFrameworkToolDefinitions(): readonly ResolvedToolDefinition[] {
+  return REGISTERED_FRAMEWORK_TOOLS;
 }
 
 /**

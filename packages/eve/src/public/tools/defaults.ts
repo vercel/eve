@@ -3,7 +3,7 @@
  * values so authors can spread, wrap, or patch them inside their own
  * `agent/tools/*.ts` files.
  */
-import { SKILL_TOOL_DEFINITION } from "#runtime/framework-tools/skill.js";
+import { loadSkillToolDefinition } from "#runtime/framework-tools/skill.js";
 import {
   TODO_INPUT_SCHEMA,
   TODO_OUTPUT_SCHEMA,
@@ -16,7 +16,6 @@ import {
 } from "#runtime/framework-tools/web-fetch.js";
 import { executeWebFetchTool, type WebFetchInput } from "#execution/web-fetch/tool.js";
 import type { ToolDefinition } from "#public/definitions/tool.js";
-import { toPublicToolDefinition } from "#public/tools/internal.js";
 import { defineBashTool } from "#public/tools/define-bash-tool.js";
 import { defineGlobTool } from "#public/tools/define-glob-tool.js";
 import { defineGrepTool } from "#public/tools/define-grep-tool.js";
@@ -146,4 +145,4 @@ export const todo: ToolDefinition = {
  * framework does not surface skill descriptions to the model, so the model has
  * nothing to load.
  */
-export const loadSkill: ToolDefinition = toPublicToolDefinition(SKILL_TOOL_DEFINITION);
+export const loadSkill: ToolDefinition = loadSkillToolDefinition;

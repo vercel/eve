@@ -1,5 +1,6 @@
 import * as bash from "./tools/bash.js";
 import * as connectionSearch from "./tools/connection_search.js";
+import * as loadSkill from "./tools/load_skill.js";
 import * as readFile from "./tools/read_file.js";
 import * as sandbox from "./sandbox.js";
 import * as todo from "./tools/todo.js";
@@ -15,6 +16,7 @@ const frameworkAgentSource = defineProgrammaticAgentSource({
     { logicalPath: "sandbox.ts", namespace: sandbox },
     { logicalPath: "tools/bash.ts", namespace: bash },
     { logicalPath: "tools/connection_search.ts", namespace: connectionSearch },
+    { logicalPath: "tools/load_skill.ts", namespace: loadSkill },
     { logicalPath: "tools/read_file.ts", namespace: readFile },
     { logicalPath: "tools/todo.ts", namespace: todo },
     { logicalPath: "tools/web_fetch.ts", namespace: webFetch },

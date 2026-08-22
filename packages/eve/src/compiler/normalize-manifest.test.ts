@@ -311,6 +311,7 @@ describe("compileAgentManifest", () => {
     expect(compiled.webSearchProvider).toBe("exa");
     expect(compiled.tools.map((tool) => tool.name)).toEqual([
       "bash",
+      "load_skill",
       "read_file",
       "todo",
       "web_fetch",
@@ -338,6 +339,7 @@ describe("compileAgentManifest", () => {
 
     expect(compiled.tools.map((tool) => tool.name)).toEqual([
       "bash",
+      "load_skill",
       "read_file",
       "todo",
       "web_fetch",
