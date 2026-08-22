@@ -26,6 +26,7 @@ export default {
   packageName: "@vercel/sandbox-drives",
   packageJsonName: "@vercel/sandbox",
   compiledPath: "@vercel/sandbox",
+  entries: [{ outputPath: "index" }, { input: "@vercel/sandbox/proxy", outputPath: "proxy" }],
   plugins: [createOptionalNativeStubPlugin(["fsevents"])],
   copyDeclarations: createDeclarationCopier({
     files: discoverDeclarationFiles,

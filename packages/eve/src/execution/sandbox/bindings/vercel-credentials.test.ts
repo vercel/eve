@@ -1,136 +1,34 @@
-import { describe, expect, it, vi } from "vitest";
+import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  extractVercelCredentialBrokering,
-  resolveVercelCredentialPolicy,
-} from "#execution/sandbox/bindings/vercel-credentials.js";
+import { getVercelSandboxCredentials } from "#execution/sandbox/bindings/vercel-credentials.js";
 
-describe("Vercel sandbox credential brokering", () => {
-  it("resolves non-interactive credentials for the policy builder", async () => {
-    const getToken = vi.fn(async () => ({
-      expiresAt: 123,
-      token: "secret-token",
-    }));
-    const buildPolicy = vi.fn(({ service }) => ({
-      allow: {
-        "api.example.com": [
-          {
-            transform: [
-              {
-                headers: {
-                  authorization: `Bearer ${service.token}`,
-                },
-              },
-            ],
-          },
-        ],
-      },
-    }));
-    const { brokering } = extractVercelCredentialBrokering({
-      credentials: { service: { getToken } },
-      networkPolicy: buildPolicy,
-    });
+vi.mock("#compiled/@vercel/oidc/index.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#compiled/@vercel/oidc/index.js")>()),
+  getVercelOidcToken: vi.fn(),
+}));
 
-    expect(brokering).toBeDefined();
-    await expect(resolveVercelCredentialPolicy(brokering!, "session-key")).resolves.toEqual({
-      allow: {
-        "api.example.com": [
-          {
-            transform: [
-              {
-                headers: {
-                  authorization: "Bearer secret-token",
-                },
-              },
-            ],
-          },
-        ],
-      },
-    });
-    expect(getToken).toHaveBeenCalledWith({
-      connection: { url: "" },
-      principal: { type: "app" },
-    });
-    expect(buildPolicy).toHaveBeenNthCalledWith(1, {
-      service: { token: "" },
-    });
-    expect(buildPolicy).toHaveBeenNthCalledWith(2, {
-      service: { expiresAt: 123, token: "secret-token" },
-    });
-  });
+afterEach(() => {
+  vi.mocked(getVercelOidcToken).mockReset();
+  vi.unstubAllEnvs();
+});
 
-  it("uses an empty token when a credential is unavailable", async () => {
-    const { brokering } = extractVercelCredentialBrokering({
-      credentials: {
-        service: {
-          getToken: async () => {
-            throw new Error("not connected");
-          },
-        },
-      },
-      networkPolicy: ({ service }) => ({
-        allow: {
-          "api.example.com": [
-            {
-              transform: [
-                {
-                  headers: {
-                    authorization: `Bearer ${service.token}`,
-                  },
-                },
-              ],
-            },
-          ],
-        },
-      }),
-    });
+describe("Vercel sandbox credentials", () => {
+  it("rejects a non-object Vercel OIDC payload", async () => {
+    for (const key of [
+      "VERCEL_TEAM_ID",
+      "VERCEL_ORG_ID",
+      "VERCEL_PROJECT_ID",
+      "VERCEL_OIDC_TOKEN",
+      "VERCEL_TOKEN",
+    ]) {
+      vi.stubEnv(key, undefined);
+    }
+    const payload = Buffer.from("null").toString("base64url");
+    vi.mocked(getVercelOidcToken).mockResolvedValue(`header.${payload}.signature`);
 
-    await expect(resolveVercelCredentialPolicy(brokering!, "session-key")).resolves.toEqual({
-      allow: {
-        "api.example.com": [
-          {
-            transform: [
-              {
-                headers: {
-                  authorization: "Bearer ",
-                },
-              },
-            ],
-          },
-        ],
-      },
-    });
-  });
-
-  it("rejects incomplete or interactive brokering definitions", () => {
-    expect(() =>
-      extractVercelCredentialBrokering({
-        credentials: { service: { getToken: async () => ({ token: "secret" }) } },
-        networkPolicy: "deny-all",
-      }),
-    ).toThrow(/requires `networkPolicy` to be a function/);
-
-    expect(() =>
-      extractVercelCredentialBrokering({
-        networkPolicy: () => "deny-all",
-      }),
-    ).toThrow(/requires at least one entry in `credentials`/);
-
-    expect(() =>
-      extractVercelCredentialBrokering({
-        credentials: {
-          service: {
-            completeAuthorization: async () => ({ token: "secret" }),
-            getToken: async () => ({ token: "secret" }),
-            principalType: "user",
-            startAuthorization: async () => ({
-              challenge: { url: "https://example.com" },
-              resume: {},
-            }),
-          },
-        },
-        networkPolicy: () => "deny-all",
-      } as never),
-    ).toThrow(/interactive authorization is not supported/);
+    await expect(getVercelSandboxCredentials({})).rejects.toThrow(
+      "Invalid Vercel OIDC token: missing owner_id or project_id.",
+    );
   });
 });

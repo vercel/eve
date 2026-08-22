@@ -256,49 +256,69 @@ Domain-level allow-lists and credential brokering are supported by `vercel()` an
 
 ## Credential brokering
 
-Secrets never enter the sandbox. Instead, the network policy's per-domain `transform` injects credentials at the firewall, so a header can authenticate egress to a host while the secret stays out of the sandbox process entirely.
+Credential brokering is an optional backend capability, not part of the portable sandbox contract. `vercel()` and `microsandbox()` can inject headers at the network boundary, so secrets stay out of the sandbox process. Docker and just-bash do not support these transforms.
 
-With the Vercel backend, `vercel()` can resolve non-interactive authorization strategies for every runtime step and pass the results to a function-form policy:
+The two supported backends expose different levels of integration:
+
+- `vercel()` supports eve-managed authorization rules and direct transforms.
+- `microsandbox()` supports direct transforms, but not eve-managed authorization rules.
+
+### Managed authorization on Vercel Sandbox
+
+With `vercel()`, attach authorization directly to each route and choose an explicit credential resolution mode:
 
 ```ts title="agent/sandbox.ts"
+import { connect } from "@vercel/connect/eve";
 import { defineSandbox } from "eve/sandbox";
 import { vercel } from "eve/sandbox/vercel";
 
 export default defineSandbox({
   backend: vercel({
-    credentials: {
-      service: {
-        async getToken() {
-          return { token: process.env.EXAMPLE_API_TOKEN! };
-        },
-      },
-    },
-    networkPolicy: ({ service }) => ({
+    credentialResolution: "on-request",
+    authProxyBaseUrl: "https://eve-tunnel.example.com",
+    networkPolicy: {
       allow: {
-        "api.example.com": [
+        "api.github.com": [
           {
-            transform: [
+            auth: connect("github"),
+            transform: ({ token }) => [
               {
-                headers: {
-                  authorization: `Bearer ${service.token}`,
-                },
+                headers: { authorization: `Bearer ${token}` },
+              },
+            ],
+          },
+        ],
+        "registry.internal": [
+          {
+            auth: connect("registry"),
+            credentialResolution: "eager",
+            transform: ({ token }) => [
+              {
+                headers: { authorization: `Bearer ${token}` },
               },
             ],
           },
         ],
       },
-    }),
+    },
   }),
 });
 ```
 
-The strategy uses the same `getToken` contract as connection authorization and may set `principalType: "user"` for per-user credentials. Interactive authorization is not supported here because sandbox attachment cannot pause for consent.
+`auth` accepts a static authorization provider using the same `getToken` and interactive strategy shapes as connections and authored tools. Dynamic resolver functions are not supported on sandbox rules. The backend-level `credentialResolution` defaults to `"eager"`; an individual rule may override it. Native Vercel `match` filters remain available on both authenticated and unauthenticated rules.
 
-Eve resolves the credentials before authored step code runs, applies the resulting policy, and replaces every brokered token with an empty value when the step ends or fails. If resolution fails, that credential is also represented by an empty token while the authored egress restrictions remain active. A failed cleanup fails the step rather than being ignored. Brokered credentials are unavailable during template bootstrap.
+- `"eager"` resolves all eager rules before eve returns the sandbox to authored code.
+- `"on-request"` resolves only a rule actually reached by an awaited sandbox process. Unused rules never prompt.
 
-This managed form belongs specifically to `vercel()`; a generic sandbox backend is not required to implement it. Avoid also setting network policy through `onSession` or `setNetworkPolicy` when using managed brokering, since a second writer can replace the brokered policy.
+On-request resolution uses Vercel's `forwardURL` firewall capability. The authenticated proxy writes a demand marker into the originating sandbox and returns HTTP 428. eve terminates the blocked awaited command, resolves only the demanded rules, then replays the command. Missing interactive credentials park and resume through eve's normal callback lifecycle. Replay can repeat effects performed before the blocked request, so commands should be safe to retry. Detached or otherwise un-awaited processes do not support demand-triggered consent.
 
-You can also construct transforms directly on Vercel Sandbox or microsandbox:
+Both modes require Vercel Pro or Enterprise because firewall transformations are not available on Hobby. On-request mode additionally uses a beta Vercel capability and requires a public HTTPS eve endpoint. Vercel deployments derive that endpoint automatically; local development must set `authProxyBaseUrl` to a public HTTPS tunnel or deployment. eve also uses this origin for interactive authorization callbacks, avoiding protected immutable deployment URLs when an explicit public origin is configured.
+
+eve removes resolved tokens after every step. Unresolved eager routes remain closed, while unresolved on-request routes revert to their trigger rules. Managed policies reject authored `forwardURL` rules and reject replacement through `onSession({ use })`. `sandbox.setNetworkPolicy()` is also rejected when on-request rules exist because a second policy writer would remove eve's triggers. With eager-only rules, it replaces the complete active policy until the step ends. Brokered credentials are unavailable during template bootstrap.
+
+### Direct transforms
+
+Both `vercel()` and `microsandbox()` accept transforms whose credentials are already available to the app runtime:
 
 ```ts
 async onSession({ use }) {
@@ -322,7 +342,7 @@ async onSession({ use }) {
 }
 ```
 
-For mid-turn brokering, call `setNetworkPolicy` with the same shape. The [Vercel Sandbox docs](https://vercel.com/docs/sandbox) cover the firewall mechanism itself.
+For mid-turn brokering on either backend, call `setNetworkPolicy` with the same shape. The [Vercel Sandbox docs](https://vercel.com/docs/sandbox) cover the hosted firewall mechanism itself.
 
 ## What to read next
 

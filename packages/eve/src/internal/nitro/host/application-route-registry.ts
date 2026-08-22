@@ -5,6 +5,8 @@ import {
   EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN,
   EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH,
   EVE_HEALTH_ROUTE_PATH,
+  EVE_SANDBOX_EGRESS_FORWARD_ROUTE_PATTERN,
+  EVE_SANDBOX_EGRESS_ROUTE_PATTERN,
 } from "#protocol/routes.js";
 import {
   getAllFrameworkChannelNames,
@@ -55,6 +57,11 @@ export type ApplicationRouteRegistration =
   | {
       readonly kind: "home";
       readonly method: "GET";
+      readonly path: string;
+    }
+  | {
+      readonly kind: "sandbox-egress";
+      readonly method: "ALL";
       readonly path: string;
     }
   | {
@@ -112,6 +119,8 @@ const PACKAGE_ROUTES: readonly ApplicationRouteRegistration[] = [
   { kind: "home", method: "GET", path: "/" },
   { kind: "health", method: "GET", path: EVE_HEALTH_ROUTE_PATH },
   { kind: "health", method: "HEAD", path: EVE_HEALTH_ROUTE_PATH },
+  { kind: "sandbox-egress", method: "ALL", path: EVE_SANDBOX_EGRESS_ROUTE_PATTERN },
+  { kind: "sandbox-egress", method: "ALL", path: EVE_SANDBOX_EGRESS_FORWARD_ROUTE_PATTERN },
 ];
 
 function createMethodPathKey(input: {

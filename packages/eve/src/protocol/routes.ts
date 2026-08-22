@@ -16,6 +16,12 @@ export const EVE_HEALTH_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/health`;
  */
 export const EVE_INFO_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/info`;
 
+/** OIDC-authenticated Vercel Sandbox firewall callback for demanded auth. */
+export const EVE_SANDBOX_EGRESS_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/sandbox/egress/:ruleId`;
+
+/** The same callback when Vercel appends the original upstream path. */
+export const EVE_SANDBOX_EGRESS_FORWARD_ROUTE_PATTERN = `${EVE_SANDBOX_EGRESS_ROUTE_PATTERN}/**`;
+
 /** Stable route for creating ID-addressed sessions. */
 export const EVE_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session`;
 

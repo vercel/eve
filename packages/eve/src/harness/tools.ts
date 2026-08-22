@@ -1,17 +1,18 @@
 import { type ToolApprovalConfiguration, type ToolApprovalStatus, type ToolSet, tool } from "ai";
 
 import type { SessionCapabilities } from "#channel/types.js";
+import { loadContext } from "#context/container.js";
+import { isSandboxAuthorizationInterrupt } from "#execution/sandbox/authorization-interrupt.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
 import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
 import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
 import { isObject } from "#shared/guards.js";
-import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { resolveApprovalPolicy, type ApprovalStatus } from "#public/definitions/approval.js";
 import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/provider-tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
-import { loadContext } from "#context/container.js";
 import {
   authorizationPendingModelText,
   isAuthorizationPendingModelOutput,
@@ -219,15 +220,22 @@ export function wrapToolExecute(
             })
           : execute(input, options);
     } catch (error) {
-      return Promise.reject(error);
+      if (!isSandboxAuthorizationInterrupt(error)) {
+        return Promise.reject(error);
+      }
+      output = error.signal;
     }
 
     if (isAsyncIterable(output)) {
       return normalizeToolExecuteIterable(output, definition.name, options);
     }
 
-    return Promise.resolve(output).then((value) =>
-      normalizeToolExecuteOutput(value, definition.name, options),
+    return Promise.resolve(output).then(
+      (value) => normalizeToolExecuteOutput(value, definition.name, options),
+      (error) => {
+        if (!isSandboxAuthorizationInterrupt(error)) throw error;
+        return normalizeToolExecuteOutput(error.signal, definition.name, options);
+      },
     );
   };
 }

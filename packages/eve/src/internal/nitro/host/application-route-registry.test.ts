@@ -87,6 +87,8 @@ describe("createApplicationRouteRegistryFromInput", () => {
       { kind: "home", method: "GET", path: "/" },
       { kind: "health", method: "GET", path: "/eve/v1/health" },
       { kind: "health", method: "HEAD", path: "/eve/v1/health" },
+      { kind: "sandbox-egress", method: "ALL", path: "/eve/v1/sandbox/egress/:ruleId" },
+      { kind: "sandbox-egress", method: "ALL", path: "/eve/v1/sandbox/egress/:ruleId/**" },
       { cors, kind: "channel", method: "POST", path: "/hooks" },
       { cors, kind: "channel-preflight", method: "OPTIONS", path: "/hooks" },
       { cors, kind: "channel", method: "GET", path: "/hooks" },
@@ -126,6 +128,8 @@ describe("createApplicationRouteRegistryFromInput", () => {
       "home",
       "health",
       "health",
+      "sandbox-egress",
+      "sandbox-egress",
       "workflow",
     ]);
   });

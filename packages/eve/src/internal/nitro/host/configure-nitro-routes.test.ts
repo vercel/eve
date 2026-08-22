@@ -87,8 +87,13 @@ vi.mock("../../application/paths.js", () => ({
 
 const { configureDevelopmentNitroRoutes, configureProductionNitroRoutes } =
   await import("./configure-nitro-routes.js");
-const { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN, EVE_HEALTH_ROUTE_PATH, EVE_INFO_ROUTE_PATH } =
-  await import("#protocol/routes.js");
+const {
+  EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN,
+  EVE_HEALTH_ROUTE_PATH,
+  EVE_INFO_ROUTE_PATH,
+  EVE_SANDBOX_EGRESS_FORWARD_ROUTE_PATTERN,
+  EVE_SANDBOX_EGRESS_ROUTE_PATTERN,
+} = await import("#protocol/routes.js");
 
 function createNitroStub(
   input: { buildDir?: string; dev?: boolean; rootDir?: string } = {},
@@ -183,6 +188,21 @@ describe("Nitro route configuration", () => {
       'import handler from "file:///G:/projects/test-eve/node_modules/.pnpm/eve@0.3.0/node_modules/eve/dist/src/internal/nitro/routes/health.js";',
     );
     expect(virtualSource).not.toContain('"G:\\');
+
+    expect(
+      nitro.options.handlers.find((handler) => handler.route === EVE_SANDBOX_EGRESS_ROUTE_PATTERN),
+    ).toMatchObject({
+      handler: `#eve-route-handler/ALL ${EVE_SANDBOX_EGRESS_ROUTE_PATTERN}`,
+      route: EVE_SANDBOX_EGRESS_ROUTE_PATTERN,
+    });
+    expect(
+      nitro.options.handlers.find(
+        (handler) => handler.route === EVE_SANDBOX_EGRESS_FORWARD_ROUTE_PATTERN,
+      ),
+    ).toMatchObject({
+      handler: `#eve-route-handler/ALL ${EVE_SANDBOX_EGRESS_FORWARD_ROUTE_PATTERN}`,
+      route: EVE_SANDBOX_EGRESS_FORWARD_ROUTE_PATTERN,
+    });
   });
 
   it("bakes the agent name into the home page route", async () => {

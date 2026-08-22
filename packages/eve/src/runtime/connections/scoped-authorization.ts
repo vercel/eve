@@ -169,18 +169,23 @@ export async function completeScopedAuthorization(input: ScopedAuthorization): P
  */
 export async function startScopedAuthorization(
   input: ScopedAuthorization,
+  callbackBaseUrl?: string,
 ): Promise<AuthorizationSignal | undefined> {
   const { scope, authorization, connection } = input;
   if (!supportsInteractiveAuthorization(authorization)) return undefined;
 
   const attempt = createAuthorizationAttempt(scope);
   if (attempt === undefined) return undefined;
+  const hookUrl =
+    callbackBaseUrl === undefined
+      ? attempt.hookUrl
+      : rebaseAuthorizationHookUrl(attempt.hookUrl, callbackBaseUrl);
 
   const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
   const principal = resolveScopedPrincipal(input);
   const callbackUrl = resolveAuthorizationCallbackUrl({
     authorization,
-    callbackUrl: attempt.hookUrl,
+    callbackUrl: hookUrl,
   });
   const { challenge, resume } = await interactive.startAuthorization({
     callbackUrl,
@@ -197,6 +202,15 @@ export async function startScopedAuthorization(
       resume,
     },
   ]);
+}
+
+function rebaseAuthorizationHookUrl(hookUrl: string, callbackBaseUrl: string): string {
+  const generated = new URL(hookUrl);
+  const rebased = new URL(callbackBaseUrl);
+  rebased.pathname = `${rebased.pathname.replace(/\/$/, "")}${generated.pathname}`;
+  rebased.search = generated.search;
+  rebased.hash = generated.hash;
+  return rebased.toString();
 }
 
 function resolveScopedPrincipal(input: ScopedAuthorization, ctx?: AlsContext) {

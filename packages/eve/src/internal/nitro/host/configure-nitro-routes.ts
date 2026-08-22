@@ -335,6 +335,13 @@ function registerApplicationRoutes(
         });
         break;
       }
+      case "sandbox-egress": {
+        registerHandler(nitro, {
+          handlerPath: resolvePackageSourceFilePath("src/internal/nitro/routes/sandbox-egress.ts"),
+          route: route.path,
+        });
+        break;
+      }
       case "workflow":
         break;
     }
