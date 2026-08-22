@@ -1,3 +1,5 @@
+import { stripLogicalPathExtension } from "#discover/filesystem.js";
+
 /**
  * The complete set of capabilities implemented by eve's native execution kernel.
  * Everything else enters the runtime through compiled agent sources.
@@ -80,12 +82,16 @@ const KERNEL_CAPABILITY_NAMES_SET: ReadonlySet<string> = new Set(KERNEL_CAPABILI
 export const RESERVED_KERNEL_CAPABILITY_NAMES: readonly KernelCapabilityName[] =
   KERNEL_CAPABILITY_NAMES.filter((name) => KERNEL_CAPABILITIES[name].replacement === "reserved");
 const KERNEL_CAPABILITIES_BY_PATH: ReadonlyMap<string, KernelCapabilityName> = new Map(
-  KERNEL_CAPABILITY_NAMES.map((name) => [KERNEL_CAPABILITIES[name].canonicalPath, name] as const),
+  KERNEL_CAPABILITY_NAMES.map(
+    (name) => [stripLogicalPathExtension(KERNEL_CAPABILITIES[name].canonicalPath), name] as const,
+  ),
 );
 const REPLACEABLE_KERNEL_CAPABILITIES_BY_PATH: ReadonlyMap<string, KernelCapabilityName> = new Map(
   KERNEL_CAPABILITY_NAMES.filter(
     (name) => KERNEL_CAPABILITIES[name].replacement === "authored-source",
-  ).map((name) => [KERNEL_CAPABILITIES[name].canonicalPath, name] as const),
+  ).map(
+    (name) => [stripLogicalPathExtension(KERNEL_CAPABILITIES[name].canonicalPath), name] as const,
+  ),
 );
 
 export function isKernelCapabilityName(value: string): value is KernelCapabilityName {
@@ -95,11 +101,11 @@ export function isKernelCapabilityName(value: string): value is KernelCapability
 export function getReplaceableKernelCapabilityAtPath(
   logicalPath: string,
 ): KernelCapabilityName | undefined {
-  return REPLACEABLE_KERNEL_CAPABILITIES_BY_PATH.get(logicalPath);
+  return REPLACEABLE_KERNEL_CAPABILITIES_BY_PATH.get(stripLogicalPathExtension(logicalPath));
 }
 
 export function getKernelCapabilityAtPath(logicalPath: string): KernelCapabilityName | undefined {
-  return KERNEL_CAPABILITIES_BY_PATH.get(logicalPath);
+  return KERNEL_CAPABILITIES_BY_PATH.get(stripLogicalPathExtension(logicalPath));
 }
 
 export function hasKernelCapability(

@@ -9,6 +9,7 @@ import {
   ROOT_COMPILED_AGENT_NODE_ID,
 } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
+import { prepareKernelCapabilities } from "#compiler/prepare-kernel-capabilities.js";
 
 /**
  * Declarative description of an in-memory authored agent used by the test
@@ -131,6 +132,16 @@ export function compileFromMemory(input: CompileFromMemoryInput): CompileFromMem
     agentRoot,
     appRoot,
     config,
+    kernelCapabilities: prepareKernelCapabilities({
+      disabled: new Set(),
+      frameworkLoadSkill: true,
+      hasSkills: skills.length > 0,
+      isRoot: true,
+      tasksEnabled: true,
+      toolNames: new Set(tools.map((tool) => tool.name)),
+      webSearch: false,
+      workflow: false,
+    }),
     skills,
     tools,
   });

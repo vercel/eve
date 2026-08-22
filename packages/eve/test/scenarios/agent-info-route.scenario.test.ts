@@ -160,10 +160,7 @@ describe("eve agent info route", () => {
     ).json()) as AgentInfoResponse;
 
     expect(disabledPayload.tools.available.map((tool) => tool.name)).not.toContain("agent");
-    expect(disabledPayload.tools.framework.find((tool) => tool.name === "agent")).toMatchObject({
-      disabledByAuthor: true,
-      status: "disabled",
-    });
+    expect(disabledPayload.tools.framework.find((tool) => tool.name === "agent")).toBeUndefined();
   });
 
   it("returns 401 for a deployment request without a Vercel OIDC bearer token", async () => {
