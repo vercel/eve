@@ -108,6 +108,15 @@ async function withinDeadline<T>(operation: Promise<T>, message: string): Promis
 }
 
 describe("drained Nitro dev server", () => {
+  it("keeps idle connections alive during slower structural rebuilds", async () => {
+    const server = new DrainedNitroDevServer(LOGGER);
+    const listener = await listen(server);
+
+    expect(listener.node.server.keepAliveTimeout).toBe(30_000);
+
+    await server.close();
+  });
+
   it("keeps the previous worker serving when a candidate fails readiness", async () => {
     const { createRunner, runners } = createRunnerFactory(
       async (_request, runnerIndex) => new Response(`runner-${String(runnerIndex)}`),
