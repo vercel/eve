@@ -40,8 +40,6 @@ import {
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { createLogger } from "#internal/logging.js";
 import { toError } from "#shared/errors.js";
-import type { ModelMessage } from "ai";
-
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 
 const logger = createLogger("framework.connection-search-dynamic");
@@ -78,7 +76,7 @@ const CONNECTION_SEARCH_OUTPUT_SCHEMA = z.array(CONNECTION_SEARCH_RESULT_ITEM_SC
  * `executeConnectionSearch` so the resolver can find discovered tools without
  * relying on model-facing tool result history.
  */
-const ConnectionSearchResultsKey = new ContextKey<readonly ConnectionSearchResultItem[]>(
+export const ConnectionSearchResultsKey = new ContextKey<readonly ConnectionSearchResultItem[]>(
   "eve.connectionSearchResults",
 );
 
@@ -363,44 +361,6 @@ async function executeConnectionSearch(
   return summaries;
 }
 
-/**
- * Extracts connection search results from conversation history.
- * Scans tool-result messages for `connection_search` results and
- * returns deduplicated tool metadata (latest result wins per qualifiedName).
- */
-export function extractDiscoveredTools(
-  messages: readonly ModelMessage[],
-): ConnectionSearchResultItem[] {
-  const byQualifiedName = new Map<string, ConnectionSearchResultItem>();
-
-  for (const msg of messages) {
-    if (msg.role !== "tool") continue;
-    const parts = msg.content as Array<{
-      type: string;
-      toolName?: string;
-      output?: unknown;
-    }>;
-    for (const part of parts) {
-      if (part.type !== "tool-result" || part.toolName !== "connection_search") continue;
-      const output = part.output;
-      if (output === undefined || output === null) continue;
-      const items = (
-        typeof output === "object" && "type" in output && "value" in output
-          ? (output as { value: unknown }).value
-          : output
-      ) as unknown;
-      if (!Array.isArray(items)) continue;
-      for (const item of items as ConnectionSearchResultItem[]) {
-        if (item.tool && item.qualifiedName) {
-          byQualifiedName.set(item.qualifiedName, item);
-        }
-      }
-    }
-  }
-
-  return [...byQualifiedName.values()];
-}
-
 function readDiscoveredToolClosure(closure: JsonObject): {
   readonly connectionName: string;
   readonly toolName: string;
@@ -511,26 +471,15 @@ async function authorizeDiscoveredConnectionToolApproval(
     : await response(context);
 }
 
-// The step-scoped definition re-derives its tools from conversation history.
-// After compaction removes old search results, those tools naturally disappear.
 const connectionSearchDynamicDefinition = defineDynamic({
   events: {
-    "step.started": async (_event, ctx) => {
+    "step.started": async () => {
       const registry = loadContext().get(ConnectionRegistryKey);
       if (!registry || registry.getConnections().length === 0) return null;
 
       const connections = registry.getConnections();
       const connectionNames = connections.map((c) => c.connectionName);
-      const fromMessages = extractDiscoveredTools(ctx.messages);
-      const fromContext = loadContext().get(ConnectionSearchResultsKey) ?? [];
-      const mergedMap = new Map<string, ConnectionSearchResultItem>();
-      for (const r of fromContext) {
-        if (r.qualifiedName) mergedMap.set(r.qualifiedName, r);
-      }
-      for (const r of fromMessages) {
-        if (r.qualifiedName) mergedMap.set(r.qualifiedName, r);
-      }
-      const discovered = [...mergedMap.values()];
+      const discovered = loadContext().get(ConnectionSearchResultsKey) ?? [];
 
       const tools: Record<string, object> = {};
 

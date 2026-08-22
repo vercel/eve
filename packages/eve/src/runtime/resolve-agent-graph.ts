@@ -16,7 +16,6 @@ import {
 } from "#runtime/framework-channels/index.js";
 import {
   getAllFrameworkToolNames,
-  getFrameworkDynamicToolResolvers,
   getFrameworkToolDefinitions,
 } from "#runtime/framework-tools/index.js";
 import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
@@ -238,10 +237,7 @@ async function resolveRuntimeAgentNode(
       subagentNodesById: input.subagentNodesById,
     }),
   });
-  const resolvedAgent = {
-    ...agent,
-    dynamicToolResolvers: [...agent.dynamicToolResolvers, ...getFrameworkDynamicToolResolvers()],
-  };
+  const resolvedAgent = agent;
 
   const node: ResolvedAgentGraphBundle["root"] = {
     agent: resolvedAgent,

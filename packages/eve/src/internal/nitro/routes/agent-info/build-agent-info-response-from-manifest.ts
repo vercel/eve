@@ -1,7 +1,4 @@
-import {
-  getAllFrameworkToolNames,
-  getFrameworkDynamicToolResolvers,
-} from "#runtime/framework-tools/index.js";
+import { getAllFrameworkToolNames } from "#runtime/framework-tools/index.js";
 import {
   getAllFrameworkChannelNames,
   getFrameworkChannelDefinitions,
@@ -221,14 +218,14 @@ export function buildAgentInfoResponseFromManifest(
       available: [...frameworkToolInfo.available, ...authoredTools],
       authored: authoredTools,
       disabledFramework: [...manifest.disabledFrameworkTools],
-      dynamic: [
-        ...getFrameworkDynamicToolResolvers().map((resolver) =>
-          renderDynamicResolver(resolver, { origin: "framework" }),
-        ),
-        ...manifest.dynamicTools.map((resolver) =>
-          renderDynamicResolver(resolver, { origin: "authored" }),
-        ),
-      ],
+      dynamic: manifest.dynamicTools.map((resolver) =>
+        renderDynamicResolver(resolver, {
+          origin:
+            manifest.bindings[resolver.sourceId]?.owner.kind === "framework"
+              ? "framework"
+              : "authored",
+        }),
+      ),
       framework: frameworkToolInfo.framework,
       reserved: [WORKFLOW_TOOL_NAME, LOAD_SKILL_TOOL_NAME],
     },

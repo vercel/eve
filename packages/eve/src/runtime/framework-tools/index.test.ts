@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   getAllFrameworkToolDefinitions,
   getAllFrameworkToolNames,
-  getFrameworkDynamicToolResolvers,
   getFrameworkToolDefinitions,
   getOptInFrameworkToolNames,
 } from "#runtime/framework-tools/index.js";
@@ -26,8 +25,7 @@ describe("framework-tools/index", () => {
     expect(names.has("task_update")).toBe(true);
     expect(names.has("task_sleep")).toBe(false);
     expect(names.has("task_send")).toBe(false);
-    // connection_search is now a dynamic tool resolver, not a framework tool
-    expect(names.has("connection_search")).toBe(false);
+    expect(names.has("connection_search")).toBe(true);
   });
 
   it("contains every framework tool exactly once", () => {
@@ -77,16 +75,5 @@ describe("framework-tools/index", () => {
 
       expect(tool.outputSchema, `${tool.name} has outputSchema`).toBeDefined();
     }
-  });
-
-  it("registers connection search through the framework dynamic tool registry", () => {
-    expect(getFrameworkDynamicToolResolvers()).toMatchObject([
-      {
-        eventNames: ["step.started"],
-        logicalPath: "eve:framework/connection-search-dynamic",
-        slug: "connection",
-        sourceId: "eve:connection-search-dynamic",
-      },
-    ]);
   });
 });

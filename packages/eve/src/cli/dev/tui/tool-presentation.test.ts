@@ -174,6 +174,7 @@ describe("presentTool", () => {
       agent: { message: "audit the auth flow" },
       ask_question: { prompt: "Which environment?" },
       bash: { command: "ls" },
+      connection_search: { keywords: "linear issues" },
       glob: { pattern: "**/*.ts" },
       grep: { pattern: "useEve" },
       load_skill: { skill: "commit" },

@@ -2,7 +2,6 @@ import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import {
   getAllFrameworkToolDefinitions,
   getAllFrameworkToolNames,
-  getFrameworkDynamicToolResolvers,
   getOptInFrameworkToolNames,
 } from "#runtime/framework-tools/index.js";
 import {
@@ -239,7 +238,7 @@ export function buildAgentInfoResponse(
   if (config === undefined) {
     throw new Error("Cannot inspect unresolved dynamic subagent resources as a root agent.");
   }
-  const tools = buildToolInfo(agent, getRootDelegationToolNames(data.manifest));
+  const tools = buildToolInfo(agent, getRootDelegationToolNames(data.manifest), data.manifest);
 
   return {
     agent: {
@@ -384,11 +383,11 @@ function buildChannelInfo(agent: ResolvedAgent): AgentInfoChannels {
 function buildToolInfo(
   agent: ResolvedAgent,
   delegationToolNames: ReadonlySet<string>,
+  manifest: CompiledAgentManifest,
 ): AgentInfoTools {
   const authoredToolNames = new Set(agent.tools.map((tool) => tool.name));
   const disabledFrameworkTools = new Set(agent.disabledFrameworkTools);
   const allFrameworkToolNames = getAllFrameworkToolNames();
-  const dynamicFrameworkResolvers = getFrameworkDynamicToolResolvers();
   const authored = agent.tools.map((tool) =>
     renderTool(tool, {
       origin: "authored",
@@ -405,14 +404,14 @@ function buildToolInfo(
     available: [...frameworkInfo.available, ...authored],
     authored,
     disabledFramework: [...agent.disabledFrameworkTools],
-    dynamic: [
-      ...dynamicFrameworkResolvers.map((resolver) =>
-        renderDynamicResolver(resolver, { origin: "framework" }),
-      ),
-      ...agent.dynamicToolResolvers.map((resolver) =>
-        renderDynamicResolver(resolver, { origin: "authored" }),
-      ),
-    ],
+    dynamic: agent.dynamicToolResolvers.map((resolver) =>
+      renderDynamicResolver(resolver, {
+        origin:
+          manifest.bindings[resolver.sourceId]?.owner.kind === "framework"
+            ? "framework"
+            : "authored",
+      }),
+    ),
     framework: frameworkInfo.framework,
     reserved: [WORKFLOW_TOOL_NAME, LOAD_SKILL_TOOL_NAME],
   };

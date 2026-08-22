@@ -316,6 +316,13 @@ describe("compileAgentManifest", () => {
       "web_fetch",
       "write_file",
     ]);
+    expect(compiled.dynamicTools).toContainEqual(
+      expect.objectContaining({
+        logicalPath: "tools/connection_search.ts",
+        slug: "connection_search",
+        sourceId: "eve.framework-defaults:tools/connection_search.ts",
+      }),
+    );
   });
 
   it("compiles framework defaults through ordinary module bindings", async () => {
@@ -377,6 +384,37 @@ describe("compileAgentManifest", () => {
     );
     expect(compiled.bindings["tools/bash.ts"]?.backing.kind).toBe("filesystem");
     expect(compiled.bindings["eve.framework-defaults:tools/bash.ts"]).toBeUndefined();
+  });
+
+  it("lets an application tool replace the framework connection search resolver", async () => {
+    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
+    mocks.applicationDefinition.mockResolvedValue(
+      defineTool({
+        description: "Search a fixed connection index",
+        inputSchema: z.object({}),
+        execute: () => [],
+      }),
+    );
+
+    const compiled = await compileAgentManifest(
+      createAgentSourceManifest({
+        agentId: "root",
+        agentRoot: "/app/agent",
+        appRoot: "/app",
+        tools: [createModuleSourceRef({ logicalPath: "tools/connection_search.ts" })],
+      }),
+    );
+
+    expect(compiled.tools).toContainEqual(
+      expect.objectContaining({
+        name: "connection_search",
+        sourceId: "tools/connection_search.ts",
+      }),
+    );
+    expect(compiled.dynamicTools).not.toContainEqual(
+      expect.objectContaining({ slug: "connection_search" }),
+    );
+    expect(compiled.bindings["eve.framework-defaults:tools/connection_search.ts"]).toBeUndefined();
   });
 
   it("preserves ordered static instruction content, roles, and legacy definitions", async () => {

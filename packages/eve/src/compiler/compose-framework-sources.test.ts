@@ -41,6 +41,7 @@ describe("composeFrameworkSources", () => {
 
     expect(result.manifest.tools.map((tool) => tool.logicalPath)).toEqual([
       "tools/bash.ts",
+      "tools/connection_search.ts",
       "tools/read_file.ts",
       "tools/todo.ts",
       "tools/web_fetch.ts",

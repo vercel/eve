@@ -11,8 +11,10 @@ import {
 import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { ConnectionRegistry, ConnectionToolMetadata } from "#runtime/connections/types.js";
-import { extractDiscoveredTools } from "#runtime/framework-tools/connection-search-dynamic.js";
-import { getFrameworkDynamicToolResolvers } from "#runtime/framework-tools/index.js";
+import connectionSearchDynamicDefinition, {
+  ConnectionSearchResultsKey,
+} from "#runtime/framework-tools/connection-search-dynamic.js";
+import { resolveLoadedDynamicToolDefinition } from "#runtime/resolve-dynamic-tool.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import {
   isBrandedToolEntry,
@@ -20,9 +22,6 @@ import {
   type DynamicToolSet,
 } from "#shared/dynamic-tool-definition.js";
 import { readDurableDynamicToolCallbacks } from "#shared/durable-dynamic-tool-callbacks.js";
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Msg = any;
 
 function connection(name: string): ResolvedConnectionDefinition {
   return {
@@ -58,7 +57,12 @@ async function executeConnectionSearch(
 }
 
 function getConnectionSearchResolver() {
-  return getFrameworkDynamicToolResolvers()[0]!;
+  return resolveLoadedDynamicToolDefinition(connectionSearchDynamicDefinition, {
+    logicalPath: "tools/connection_search.ts",
+    slug: "connection_search",
+    sourceId: "eve.framework-defaults:tools/connection_search.ts",
+    sourceKind: "module",
+  });
 }
 
 function registry(input: {
@@ -112,29 +116,17 @@ describe("connection dynamic tools", () => {
       connections: [linear],
       loadTools: { linear: async () => [] },
     });
-    const messages: Msg[] = [
-      {
-        role: "tool",
-        content: [
-          {
-            type: "tool-result",
-            toolCallId: "call-1",
-            toolName: "connection_search",
-            output: [
-              {
-                connection: "linear",
-                description: "List issues",
-                inputSchema: { type: "object" },
-                qualifiedName: "linear__list_issues",
-                tool: "list_issues",
-              },
-            ],
-          },
-        ],
-      },
-    ];
     const ctx = new ContextContainer();
     ctx.set(ConnectionRegistryKey, connectionRegistry);
+    ctx.set(ConnectionSearchResultsKey, [
+      {
+        connection: "linear",
+        description: "List issues",
+        inputSchema: { type: "object" },
+        qualifiedName: "linear__list_issues",
+        tool: "list_issues",
+      },
+    ]);
     const resolver = getConnectionSearchResolver();
     const resolve = resolver.events["step.started"]!;
 
@@ -143,7 +135,7 @@ describe("connection dynamic tools", () => {
         {},
         {
           channel: {},
-          messages,
+          messages: [],
           session: { auth: { current: null, initiator: null }, id: "test-session" },
         },
       )) as DynamicToolSet;
@@ -152,6 +144,47 @@ describe("connection dynamic tools", () => {
     expect(resolver.eventNames).toEqual(["step.started"]);
     expect(Object.keys(tools)).toEqual(["connection_search", "linear__list_issues"]);
     expect(Object.values(tools).every(isBrandedToolEntry)).toBe(true);
+  });
+
+  it("does not reconstruct discovered tools from message history", async () => {
+    const linear = connection("linear");
+    const ctx = new ContextContainer();
+    ctx.set(
+      ConnectionRegistryKey,
+      registry({ connections: [linear], loadTools: { linear: async () => [] } }),
+    );
+
+    const tools = await contextStorage.run(ctx, async () =>
+      getConnectionSearchResolver().events["step.started"]!(
+        {},
+        {
+          channel: {},
+          messages: [
+            {
+              content: [
+                {
+                  output: [
+                    {
+                      connection: "linear",
+                      description: "List issues",
+                      qualifiedName: "linear__list_issues",
+                      tool: "list_issues",
+                    },
+                  ],
+                  toolCallId: "call-1",
+                  toolName: "connection_search",
+                  type: "tool-result",
+                },
+              ],
+              role: "tool",
+            },
+          ],
+          session: { auth: { current: null, initiator: null }, id: "test-session" },
+        },
+      ),
+    );
+
+    expect(Object.keys(tools as DynamicToolSet)).toEqual(["connection_search"]);
   });
 });
 
@@ -444,152 +477,5 @@ describe("connection_search", () => {
     });
 
     expect(isAuthorizationSignal(result)).toBe(true);
-  });
-});
-
-describe("extractDiscoveredTools", () => {
-  it("extracts tools from raw array output", () => {
-    const messages: Msg[] = [
-      { role: "user", content: [{ type: "text", text: "search" }] },
-      {
-        role: "tool",
-        content: [
-          {
-            type: "tool-result",
-            toolCallId: "call-1",
-            toolName: "connection_search",
-            output: [
-              {
-                connection: "linear",
-                tool: "list_issues",
-                qualifiedName: "linear__list_issues",
-                description: "List issues",
-                inputSchema: { type: "object" },
-                outputSchema: { type: "object" },
-              },
-            ],
-          },
-        ],
-      },
-    ];
-
-    const result = extractDiscoveredTools(messages);
-    expect(result).toHaveLength(1);
-    expect(result[0]!.qualifiedName).toBe("linear__list_issues");
-    expect(result[0]!.connection).toBe("linear");
-    expect(result[0]!.tool).toBe("list_issues");
-    expect(result[0]!.outputSchema).toEqual({ type: "object" });
-  });
-
-  it("extracts tools from ToolResultOutput json wrapper", () => {
-    const messages: Msg[] = [
-      {
-        role: "tool",
-        content: [
-          {
-            type: "tool-result",
-            toolCallId: "call-1",
-            toolName: "connection_search",
-            output: {
-              type: "json",
-              value: [
-                {
-                  connection: "linear",
-                  tool: "list_issues",
-                  qualifiedName: "linear__list_issues",
-                  description: "List issues",
-                  inputSchema: { type: "object" },
-                },
-              ],
-            },
-          },
-        ],
-      },
-    ];
-
-    const result = extractDiscoveredTools(messages);
-    expect(result).toHaveLength(1);
-    expect(result[0]!.qualifiedName).toBe("linear__list_issues");
-  });
-
-  it("returns empty for no tool results", () => {
-    const messages: Msg[] = [{ role: "user", content: [{ type: "text", text: "hello" }] }];
-    expect(extractDiscoveredTools(messages)).toHaveLength(0);
-  });
-
-  it("deduplicates by qualifiedName (latest wins)", () => {
-    const messages: Msg[] = [
-      {
-        role: "tool",
-        content: [
-          {
-            type: "tool-result",
-            toolCallId: "call-1",
-            toolName: "connection_search",
-            output: [
-              {
-                connection: "linear",
-                tool: "list_issues",
-                qualifiedName: "linear__list_issues",
-                description: "Old description",
-              },
-            ],
-          },
-        ],
-      },
-      {
-        role: "tool",
-        content: [
-          {
-            type: "tool-result",
-            toolCallId: "call-2",
-            toolName: "connection_search",
-            output: [
-              {
-                connection: "linear",
-                tool: "list_issues",
-                qualifiedName: "linear__list_issues",
-                description: "New description",
-              },
-            ],
-          },
-        ],
-      },
-    ];
-
-    const result = extractDiscoveredTools(messages);
-    expect(result).toHaveLength(1);
-    expect(result[0]!.description).toBe("New description");
-  });
-
-  it("skips items without tool or qualifiedName", () => {
-    const messages: Msg[] = [
-      {
-        role: "tool",
-        content: [
-          {
-            type: "tool-result",
-            toolCallId: "call-1",
-            toolName: "connection_search",
-            output: [
-              {
-                connection: "linear",
-                description: "No tool or qualifiedName",
-              },
-              {
-                connection: "linear",
-                tool: "list_issues",
-                qualifiedName: "linear__list_issues",
-                description: "Valid",
-              },
-            ],
-          },
-        ],
-      },
-    ];
-
-    const result = extractDiscoveredTools(messages);
-    expect(result).toHaveLength(1);
-    expect(result[0]!.description).toBe("Valid");
   });
 });
