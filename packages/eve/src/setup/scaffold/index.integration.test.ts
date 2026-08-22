@@ -228,6 +228,12 @@ describe("ensureChannel", () => {
     await expect(readFile(join(projectRoot, "app/page.tsx"), "utf8")).resolves.toContain(
       "AgentChat",
     );
+    await expect(readFile(join(projectRoot, "app/s/page.tsx"), "utf8")).resolves.toContain(
+      "<AgentChat sessionless />",
+    );
+    await expect(
+      readFile(join(projectRoot, "app/s/[sessionId]/page.tsx"), "utf8"),
+    ).resolves.toContain("<AgentChat sessionId={sessionId} />");
     await expect(
       readFile(join(projectRoot, "agent/tools/randomize.ts"), "utf8"),
     ).rejects.toMatchObject({

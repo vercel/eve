@@ -1492,6 +1492,16 @@
           "target": "app/page.tsx"
         },
         {
+          "path": "registry/channel/web/app/s/[sessionId]/page.tsx",
+          "type": "registry:file",
+          "target": "app/s/[sessionId]/page.tsx"
+        },
+        {
+          "path": "registry/channel/web/app/s/page.tsx",
+          "type": "registry:file",
+          "target": "app/s/page.tsx"
+        },
+        {
           "path": "registry/channel/web/components.json",
           "type": "registry:file",
           "target": "components.json"

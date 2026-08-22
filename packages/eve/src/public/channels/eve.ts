@@ -1068,7 +1068,7 @@ async function createSessionStreamResponse(request: Request, session: Session): 
     if (tailIndex !== undefined) {
       headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
     }
-    return new Response(serializeAsNdjson(events), {
+    return new Response(serializeAsNdjson(events, request.signal), {
       headers,
     });
   } catch {
@@ -1352,16 +1352,19 @@ function parseStartIndex(request: Request): number | undefined | Response {
   return parsed;
 }
 
-function serializeAsNdjson(events: ReadableStream<unknown>): ReadableStream<Uint8Array> {
+function serializeAsNdjson(
+  events: ReadableStream<unknown>,
+  signal: AbortSignal,
+): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
-  return events.pipeThrough(
-    new TransformStream<unknown, Uint8Array>({
-      start(controller) {
-        controller.enqueue(encoder.encode("\n"));
-      },
-      transform(event, controller) {
-        controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
-      },
-    }),
-  );
+  const transform = new TransformStream<unknown, Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode("\n"));
+    },
+    transform(event, controller) {
+      controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+    },
+  });
+  void events.pipeTo(transform.writable, { signal }).catch(() => {});
+  return transform.readable;
 }
