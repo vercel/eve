@@ -143,6 +143,45 @@ describe("createCompiledModuleMapSource", () => {
     );
   });
 
+  it("imports root-only framework sources from the framework registry", () => {
+    const manifest = createManifestWithTool("/consumer/agent");
+    const sourceId = "eve.framework-root:channels/eve.ts";
+    const source = createCompiledModuleMapSource({
+      manifest: {
+        ...manifest,
+        bindings: {
+          [sourceId]: {
+            backing: {
+              kind: "programmatic",
+              moduleId: "channels/eve.ts",
+              registryId: "eve.framework-root",
+            },
+            logicalPath: "channels/eve.ts",
+            owner: { feature: "eve.framework-root", kind: "framework" },
+          },
+        },
+        channels: [
+          {
+            kind: "channel",
+            logicalPath: "channels/eve.ts",
+            method: "POST",
+            name: "eve",
+            sourceId,
+            sourceKind: "module",
+            urlPath: "/eve/v1/session",
+          },
+        ],
+        tools: [],
+      },
+      moduleMapPath: "/consumer/.eve/compile/module-map.mjs",
+    });
+
+    expect(source).toContain("frameworkAgentSourceRegistry as module_0");
+    expect(source).toContain(
+      'module_0.getModule({"kind":"programmatic","moduleId":"channels/eve.ts","registryId":"eve.framework-root"}).namespace',
+    );
+  });
+
   it("imports the physical binding instead of reconstructing it from logical identity", () => {
     const manifest = createManifestWithTool("/consumer/agent");
     const source = createCompiledModuleMapSource({

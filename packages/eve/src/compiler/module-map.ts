@@ -11,7 +11,10 @@ import { assertTotalModuleBindings } from "#compiler/module-binding.js";
 import { collectModuleRefsForManifest } from "#compiler/module-references.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
-import { FRAMEWORK_AGENT_SOURCE_ID } from "#framework-sources/constants.js";
+import {
+  FRAMEWORK_AGENT_SOURCE_ID,
+  FRAMEWORK_ROOT_AGENT_SOURCE_ID,
+} from "#framework-sources/constants.js";
 
 /**
  * Compiled module ownership for one runtime graph node.
@@ -76,6 +79,12 @@ export function createCompiledModuleMapSource(input: CreateCompiledModuleMapSour
   const importSpecifierStyle = input.importSpecifierStyle ?? "relative";
   const programmaticRegistryImports = {
     [FRAMEWORK_AGENT_SOURCE_ID]: {
+      exportName: "frameworkAgentSourceRegistry",
+      importSpecifier: normalizeEsmImportSpecifier(
+        fileURLToPath(new URL("../framework-sources/registry.js", import.meta.url)),
+      ),
+    },
+    [FRAMEWORK_ROOT_AGENT_SOURCE_ID]: {
       exportName: "frameworkAgentSourceRegistry",
       importSpecifier: normalizeEsmImportSpecifier(
         fileURLToPath(new URL("../framework-sources/registry.js", import.meta.url)),
