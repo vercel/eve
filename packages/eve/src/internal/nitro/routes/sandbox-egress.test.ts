@@ -37,12 +37,16 @@ vi.mock("#internal/logging.js", () => ({
 
 const { default: sandboxEgressRoute } = await import("./sandbox-egress.js");
 
+const DEMAND_TOKEN = "a".repeat(43);
+
 describe("sandbox egress proxy route", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("rejects requests that fail proxy OIDC validation", async () => {
     const response = await sandboxEgressRoute({
-      req: new Request("https://eve.example/eve/v1/sandbox/egress/r0-0/eve-sandbox"),
+      req: new Request(
+        `https://eve.example/eve/v1/sandbox/egress/r0-0/eve-sandbox/${DEMAND_TOKEN}`,
+      ),
     });
     expect(response.status).toBe(403);
     expect(get).not.toHaveBeenCalled();
@@ -56,17 +60,33 @@ describe("sandbox egress proxy route", () => {
     expect(get).not.toHaveBeenCalled();
   });
 
-  it("writes a marker to the originating sandbox and returns 428", async () => {
+  it("rejects routes without a well-formed demand token", async () => {
     const response = await sandboxEgressRoute({
-      req: new Request("https://eve.example/eve/v1/sandbox/egress/r2-1/eve-sandbox%3Aname/get", {
+      req: new Request("https://eve.example/eve/v1/sandbox/egress/r0-0/eve-sandbox/not-a-token", {
         headers: { "vercel-sandbox-oidc-token": "signed" },
       }),
+    });
+    expect(response.status).toBe(404);
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it("writes the demand token as marker content and returns 428", async () => {
+    const response = await sandboxEgressRoute({
+      req: new Request(
+        `https://eve.example/eve/v1/sandbox/egress/r2-1/eve-sandbox%3Aname/${DEMAND_TOKEN}/get`,
+        {
+          headers: { "vercel-sandbox-oidc-token": "signed" },
+        },
+      ),
     });
 
     expect(response.status).toBe(428);
     expect(get).toHaveBeenCalledWith(expect.objectContaining({ name: "eve-sandbox:name" }));
     expect(writeFiles).toHaveBeenCalledWith([
-      expect.objectContaining({ path: "/tmp/eve-egress-demand/r2-1" }),
+      {
+        content: new TextEncoder().encode(DEMAND_TOKEN),
+        path: "/tmp/eve-egress-demand/r2-1",
+      },
     ]);
   });
 
@@ -77,9 +97,12 @@ describe("sandbox egress proxy route", () => {
     });
 
     const response = await sandboxEgressRoute({
-      req: new Request("https://eve.example/eve/v1/sandbox/egress/r2-1/other-sandbox/get", {
-        headers: { "vercel-sandbox-oidc-token": "signed" },
-      }),
+      req: new Request(
+        `https://eve.example/eve/v1/sandbox/egress/r2-1/other-sandbox/${DEMAND_TOKEN}/get`,
+        {
+          headers: { "vercel-sandbox-oidc-token": "signed" },
+        },
+      ),
     });
 
     expect(response.status).toBe(403);
@@ -90,9 +113,12 @@ describe("sandbox egress proxy route", () => {
     get.mockRejectedValueOnce(new Error("secret provider response"));
 
     const response = await sandboxEgressRoute({
-      req: new Request("https://eve.example/eve/v1/sandbox/egress/r2-1/eve-sandbox/get", {
-        headers: { "vercel-sandbox-oidc-token": "signed" },
-      }),
+      req: new Request(
+        `https://eve.example/eve/v1/sandbox/egress/r2-1/eve-sandbox/${DEMAND_TOKEN}/get`,
+        {
+          headers: { "vercel-sandbox-oidc-token": "signed" },
+        },
+      ),
     });
 
     expect(response.status).toBe(500);

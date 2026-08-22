@@ -32,6 +32,7 @@ export function createVercelSandboxHandle(
     string,
     import("#runtime/connections/types.js").TokenResult
   > = new Map(),
+  demandToken?: string,
 ): SandboxBackendHandle<VercelSandboxSessionUseOptions> {
   let credentials = new Map(initialCredentials);
   const onRequestRuleIds =
@@ -44,7 +45,11 @@ export function createVercelSandboxHandle(
     egressAuth === undefined || onRequestRuleIds.length === 0
       ? undefined
       : async (): Promise<void> => {
-          const demanded = await readVercelEgressDemandedRuleIds(sandbox, onRequestRuleIds);
+          const demanded = await readVercelEgressDemandedRuleIds(
+            sandbox,
+            onRequestRuleIds,
+            demandToken,
+          );
           if (demanded.length === 0) return;
           const unresolved = demanded.filter((ruleId) => !credentials.has(ruleId));
           if (unresolved.length === 0) {
@@ -58,6 +63,7 @@ export function createVercelSandboxHandle(
               sessionKey,
               unresolved,
               sandbox.name,
+              demandToken,
             );
           } catch (error) {
             // Interactive authorization parks the step. The demand markers
@@ -65,14 +71,14 @@ export function createVercelSandboxHandle(
             // approved credential before the model re-runs the command.
             if (isSandboxAuthorizationInterrupt(error)) throw error;
             await sandbox.update({
-              networkPolicy: egressAuth.buildPolicy(credentials, sandbox.name),
+              networkPolicy: egressAuth.buildPolicy(credentials, sandbox.name, demandToken),
             });
             await clearVercelEgressDemandMarkers(sandbox, unresolved);
             throw error;
           }
           credentials = new Map([...credentials, ...resolved.credentials]);
           await sandbox.update({
-            networkPolicy: egressAuth.buildPolicy(credentials, sandbox.name),
+            networkPolicy: egressAuth.buildPolicy(credentials, sandbox.name, demandToken),
           });
           await clearVercelEgressDemandMarkers(sandbox, unresolved);
           if (resolved.unresolvedRuleIds.length > 0) {
@@ -108,7 +114,10 @@ export function createVercelSandboxHandle(
     async captureState() {
       return {
         backendName: "vercel",
-        metadata: { sandboxName: sandbox.name },
+        metadata: {
+          sandboxName: sandbox.name,
+          ...(demandToken === undefined ? {} : { demandToken }),
+        },
         sessionKey,
       };
     },

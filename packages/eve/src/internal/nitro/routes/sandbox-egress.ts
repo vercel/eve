@@ -4,7 +4,10 @@ import {
   getVercelSandboxCredentials,
   getVercelSandboxFetch,
 } from "#execution/sandbox/bindings/vercel-credentials.js";
-import { getVercelEgressDemandMarkerPath } from "#execution/sandbox/bindings/vercel-egress-demand.js";
+import {
+  getVercelEgressDemandMarkerPath,
+  isVercelEgressDemandToken,
+} from "#execution/sandbox/bindings/vercel-egress-demand.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 
@@ -41,9 +44,12 @@ export default async function sandboxEgressRoute(event: {
         }
 
         stage = "marker_write";
+        // The marker content is the host-minted demand token from the
+        // forwardURL. The sandbox can write marker files but never learns a
+        // valid token, so only proxy-attested demand passes verification.
         await sandbox.writeFiles([
           {
-            content: new TextEncoder().encode(route.ruleId),
+            content: new TextEncoder().encode(route.demandToken),
             path: getVercelEgressDemandMarkerPath(route.ruleId),
           },
         ]);
@@ -72,11 +78,21 @@ export default async function sandboxEgressRoute(event: {
 
 function readRoute(
   url: string,
-): { readonly ruleId: string; readonly sandboxName: string } | undefined {
+):
+  | { readonly demandToken: string; readonly ruleId: string; readonly sandboxName: string }
+  | undefined {
   const pathname = new URL(url).pathname;
   if (!pathname.startsWith(EGRESS_ROUTE_PREFIX)) return undefined;
-  const [ruleId, encodedSandboxName] = pathname.slice(EGRESS_ROUTE_PREFIX.length).split("/");
-  if (ruleId === undefined || !/^r\d+-\d+$/.test(ruleId) || encodedSandboxName === undefined) {
+  const [ruleId, encodedSandboxName, demandToken] = pathname
+    .slice(EGRESS_ROUTE_PREFIX.length)
+    .split("/");
+  if (
+    ruleId === undefined ||
+    !/^r\d+-\d+$/.test(ruleId) ||
+    encodedSandboxName === undefined ||
+    demandToken === undefined ||
+    !isVercelEgressDemandToken(demandToken)
+  ) {
     return undefined;
   }
   try {
@@ -84,7 +100,7 @@ function readRoute(
     if (sandboxName.length === 0 || sandboxName.includes("/") || sandboxName.includes("\0")) {
       return undefined;
     }
-    return { ruleId, sandboxName };
+    return { demandToken, ruleId, sandboxName };
   } catch {
     return undefined;
   }

@@ -48,6 +48,7 @@ export interface VercelEgressAuth {
   readonly buildPolicy: (
     credentials: ReadonlyMap<string, TokenResult>,
     sandboxName?: string,
+    demandToken?: string,
   ) => SandboxNetworkPolicy;
   readonly clearedPolicy: SandboxNetworkPolicy;
   readonly eagerRuleIds: readonly string[];
@@ -91,8 +92,16 @@ export function extractVercelEgressAuth(options: VercelSandboxCreateOptions | un
   const buildPolicy = (
     credentials: ReadonlyMap<string, TokenResult>,
     sandboxName?: string,
+    demandToken?: string,
   ): SandboxNetworkPolicy =>
-    buildManagedPolicy(authoredPolicy, normalizedRules, credentials, callbackBaseUrl, sandboxName);
+    buildManagedPolicy(
+      authoredPolicy,
+      normalizedRules,
+      credentials,
+      callbackBaseUrl,
+      sandboxName,
+      demandToken,
+    );
   return {
     egressAuth: {
       callbackBaseUrl,
@@ -112,6 +121,7 @@ export async function resolveVercelEgressPolicy(
   sandboxScope: string,
   ruleIds: readonly string[] = egressAuth.eagerRuleIds,
   sandboxName?: string,
+  demandToken?: string,
 ): Promise<{
   readonly credentials: ReadonlyMap<string, TokenResult>;
   readonly policy: SandboxNetworkPolicy;
@@ -199,7 +209,7 @@ export async function resolveVercelEgressPolicy(
     .map((entry) => entry.label);
   return {
     credentials,
-    policy: egressAuth.buildPolicy(credentials, sandboxName),
+    policy: egressAuth.buildPolicy(credentials, sandboxName, demandToken),
     unresolvedRuleIds,
   };
 }
@@ -257,6 +267,7 @@ function buildManagedPolicy(
   credentials: ReadonlyMap<string, TokenResult>,
   callbackBaseUrl: string | undefined,
   sandboxName: string | undefined,
+  demandToken: string | undefined,
 ): SandboxNetworkPolicy {
   if (typeof policy !== "object" || policy === null || Array.isArray(policy.allow)) {
     throw new Error("vercel(): managed `auth` rules require record-form `networkPolicy.allow`.");
@@ -281,11 +292,15 @@ function buildManagedPolicy(
         if (authoredRule.match !== undefined) compiledRule.match = authoredRule.match;
         return [compiledRule];
       }
-      if (managed.credentialResolution === "on-request" && sandboxName !== undefined) {
+      if (
+        managed.credentialResolution === "on-request" &&
+        sandboxName !== undefined &&
+        demandToken !== undefined
+      ) {
         const compiledRule: NetworkPolicyRule = {
           forwardURL:
             `${callbackBaseUrl}/eve/v1/sandbox/egress/${managed.id}/` +
-            encodeURIComponent(sandboxName),
+            `${encodeURIComponent(sandboxName)}/${demandToken}`,
         };
         if (authoredRule.match !== undefined) compiledRule.match = authoredRule.match;
         return [compiledRule];

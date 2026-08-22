@@ -13,6 +13,8 @@ import {
 } from "#execution/sandbox/bindings/vercel-session.js";
 import {
   clearVercelEgressDemandMarkers,
+  isVercelEgressDemandToken,
+  mintVercelEgressDemandToken,
   readVercelEgressDemandedRuleIds,
 } from "#execution/sandbox/bindings/vercel-egress-demand.js";
 import type { SandboxBootstrapContext } from "#public/definitions/sandbox.js";
@@ -146,6 +148,7 @@ export function createVercelSandbox(
       }
 
       let brokeredPolicy: SandboxNetworkPolicy | undefined;
+      let demandToken: string | undefined;
       let resolvedCredentials = new Map<string, TokenResult>();
       if (extracted.egressAuth === undefined) {
         if (template === null && session.created) {
@@ -157,10 +160,15 @@ export function createVercelSandbox(
         const onRequestRuleIds = [...extracted.egressAuth.rules.values()]
           .filter((rule) => rule.credentialResolution === "on-request")
           .map((rule) => rule.id);
+        // Markers written before this attach are only honored when their
+        // content matches the demand token of the policy build that produced
+        // them (persisted in the previous step's captured metadata).
         const demandedRuleIds = await readVercelEgressDemandedRuleIds(
           session.sandbox,
           onRequestRuleIds,
+          getVercelDemandToken(createInput.existingMetadata),
         );
+        demandToken = onRequestRuleIds.length > 0 ? mintVercelEgressDemandToken() : undefined;
         try {
           if (template === null && session.created) {
             await ensureVercelSandboxBaseRuntime(session.sandbox);
@@ -174,6 +182,7 @@ export function createVercelSandbox(
             createInput.sessionKey,
             [...new Set([...extracted.egressAuth.eagerRuleIds, ...demandedRuleIds])],
             session.sandbox.name,
+            demandToken,
           );
           brokeredPolicy = resolved.policy;
           resolvedCredentials = new Map(resolved.credentials);
@@ -192,7 +201,11 @@ export function createVercelSandbox(
         } catch (error) {
           try {
             await session.sandbox.update({
-              networkPolicy: extracted.egressAuth.buildPolicy(new Map(), session.sandbox.name),
+              networkPolicy: extracted.egressAuth.buildPolicy(
+                new Map(),
+                session.sandbox.name,
+                demandToken,
+              ),
             });
             await clearVercelEgressDemandMarkers(session.sandbox, demandedRuleIds);
           } catch (cleanupError) {
@@ -211,6 +224,7 @@ export function createVercelSandbox(
         extracted.egressAuth,
         brokeredPolicy,
         resolvedCredentials,
+        demandToken,
       );
     },
     async prewarm(
@@ -580,6 +594,13 @@ function extractAuthorSnapshotId(createOptions: VercelCreateOptions): string | u
 function getVercelSandboxName(metadata: Record<string, unknown> | undefined): string | undefined {
   const sandboxName = metadata?.sandboxName;
   return typeof sandboxName === "string" ? sandboxName : undefined;
+}
+
+function getVercelDemandToken(metadata: Record<string, unknown> | undefined): string | undefined {
+  const demandToken = metadata?.demandToken;
+  return typeof demandToken === "string" && isVercelEgressDemandToken(demandToken)
+    ? demandToken
+    : undefined;
 }
 
 function resolveVercelSandboxTags(

@@ -28,6 +28,18 @@ policy, exactly as it already is for connection tools.
    The proxy authenticates the request (Vercel Sandbox OIDC metadata: team, project, sandbox
    session), records demand, and answers HTTP 428 with an explanatory body telling the caller that
    authorization was requested and to re-run once it is granted.
+
+   Demand is proxy-attested: each policy build embeds a host-minted random token in the
+   `forwardURL`, and the proxy writes that token as the demand marker's content. The token travels
+   only host → firewall → proxy — the sandbox sees the marker file but never a valid token — so eve
+   honors a marker only when its content matches the token of the policy build that produced it
+   (persisted in captured sandbox metadata across parks). Fabricated and stale markers fail
+   verification; deleting a marker is self-denial and fail-closed. Note the boundary this does and
+   does not move: any sandbox process can always summon an authorization prompt by genuinely
+   requesting the protected domain — exactly as any process can invoke a connection tool — so the
+   prompt UX must name the domain and requesting sandbox; the token guarantees a prompt is only
+   ever caused by a real, OIDC-authenticated request that traversed the firewall.
+
 2. The blocked request has completed (with an error), so the command exits on its own. eve performs
    one demand check after exit — no polling while the command runs.
 3. Demanded credentials that resolve non-interactively are activated immediately: eve updates the
@@ -44,10 +56,6 @@ rollback, and no process kill/restart machinery.
 
 ## Remaining work before merge
 
-- **Demand records are sandbox-writable.** The proxy writes marker files into the sandbox; any
-  sandbox process can forge one. Under fail-fast semantics the blast radius is a spurious
-  authorization prompt (not a replayed side effect), but demand should still move to host-owned
-  state or a verifiable single-use capability bound to sandbox session, rule, and expiry.
 - **Credential activation is sandbox-wide.** Once a demanded credential resolves, every process in
   the sandbox can use the route. With `inheritsParent` or a shared sandbox session id, concurrent
   steps share one sandbox, and one step's commit revokes the sandbox-wide brokered policy (via the
