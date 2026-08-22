@@ -75,7 +75,9 @@ describe("development generation artifacts", () => {
       ),
     });
     const subagent = compileResult.manifest.subagents[0];
-    const subagentToolSourceId = subagent?.agent.tools[0]?.sourceId;
+    const subagentToolSourceId = subagent?.agent.tools.find(
+      (tool) => tool.name === "read_shared",
+    )?.sourceId;
     expect(subagentToolSourceId).toBeDefined();
     const subagentTool = moduleMap.nodes[subagent!.nodeId]?.modules[subagentToolSourceId!] as {
       default: { execute(): string };
@@ -385,7 +387,9 @@ describe("development generation artifacts", () => {
         snapshot.runtimeAppRoot,
       ),
     });
-    const toolSourceId = compileResult.manifest.tools[0]?.sourceId;
+    const toolSourceId = compileResult.manifest.tools.find(
+      (tool) => tool.name === "read_dynamic",
+    )?.sourceId;
     expect(toolSourceId).toBeDefined();
     const tool = moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules[toolSourceId!] as {
       default: { execute(): Promise<string> };
@@ -454,7 +458,9 @@ describe("development generation artifacts", () => {
         snapshot.runtimeAppRoot,
       ),
     });
-    const toolSourceId = compileResult.manifest.tools[0]?.sourceId;
+    const toolSourceId = compileResult.manifest.tools.find(
+      (tool) => tool.name === "read_value",
+    )?.sourceId;
     expect(toolSourceId).toBeDefined();
     const tool = moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules[toolSourceId!] as {
       default: { execute(): string };

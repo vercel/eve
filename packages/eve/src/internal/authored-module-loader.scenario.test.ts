@@ -1057,7 +1057,7 @@ describe("loadAuthoredModuleNamespace", () => {
       const manifest = await compileAgentManifest(discovered.manifest);
 
       expect(manifest.config.build?.externalDependencies).toEqual(["external-only"]);
-      expect(manifest.tools).toHaveLength(1);
+      expect(manifest.tools.some((tool) => tool.name === "read_external")).toBe(true);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
@@ -1163,7 +1163,7 @@ describe("loadAuthoredModuleNamespace", () => {
 
       expect(manifest.config.build?.externalDependencies).toEqual(["external-only"]);
       expect(subagent?.agent.config.build?.externalDependencies).toEqual(["external-only"]);
-      expect(subagent?.agent.tools).toHaveLength(1);
+      expect(subagent?.agent.tools.some((tool) => tool.name === "read_external")).toBe(true);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }

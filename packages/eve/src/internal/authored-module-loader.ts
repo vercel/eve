@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
@@ -31,6 +31,11 @@ import {
 } from "#internal/bundler/nitro-rolldown.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 import { createDynamicCapabilityTransformPlugin } from "#internal/workflow-bundle/dynamic-capability-transform-plugin.js";
+import {
+  resolvePackageCompiledFilePath,
+  resolvePackageRoot,
+  resolvePackageSourceFilePath,
+} from "#internal/application/package.js";
 
 const AUTHORED_BUNDLED_MODULE_EXTENSION = /\.[cm]?[jt]sx?$/;
 const AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH = join(
@@ -285,6 +290,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
       id: input.moduleMapPath,
       source: moduleMapSource,
     }),
+    createEvePackageImportResolverPlugin(),
     createDynamicCapabilityTransformPlugin(),
     createAuthoredDirectiveGuardPlugin(),
     extensionScopePlugin,
@@ -319,6 +325,60 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
   } catch (error) {
     throw createAuthoredModuleBundleError(input.moduleMapPath, error);
   }
+}
+
+/**
+ * Resolves eve's private package imports to the files present in the executing
+ * installation. Generation bundling opts into the `eve-source` condition for
+ * linked workspace packages, but published eve packages intentionally omit
+ * `src/`; resolving these edges explicitly keeps package-owned programmatic
+ * sources bundleable in both layouts.
+ */
+function createEvePackageImportResolverPlugin(): Record<string, unknown> {
+  const packageRoot = realpathSync.native(resolvePackageRoot());
+
+  return {
+    name: "eve-package-imports",
+    resolveId(source: string, importer: string | undefined) {
+      if (importer === undefined || !source.startsWith("#")) return undefined;
+
+      const importerPath = resolve(importer);
+      if (!isPathInsideOrEqual(realpathExistingAncestor(importerPath), packageRoot)) {
+        return undefined;
+      }
+
+      if (source.startsWith("#compiled/")) {
+        return {
+          id: resolvePackageCompiledFilePath(`src/compiled/${source.slice("#compiled/".length)}`),
+        };
+      }
+
+      const match = source.match(/^#(.+)\.js$/);
+      if (match === null) return undefined;
+
+      return {
+        id: resolvePackageSourceFilePath(`src/${match[1]}.ts`),
+      };
+    },
+  };
+}
+
+function realpathExistingAncestor(path: string): string {
+  let candidate = path;
+  while (!existsSync(candidate)) {
+    const parent = dirname(candidate);
+    if (parent === candidate) return path;
+    candidate = parent;
+  }
+  return realpathSync.native(candidate);
+}
+
+function isPathInsideOrEqual(path: string, root: string): boolean {
+  const relativePath = relative(root, path);
+  return (
+    relativePath === "" ||
+    (relativePath !== ".." && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath))
+  );
 }
 
 function createVirtualGenerationModuleMapPlugin(input: {

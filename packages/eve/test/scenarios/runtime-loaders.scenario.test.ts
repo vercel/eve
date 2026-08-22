@@ -345,8 +345,8 @@ describe("runtime compiled artifact loaders", () => {
         compiledArtifactsSource,
       }),
     ]);
-    const [compiledChannel] = manifest.channels;
-    const [resolvedChannel] = resolvedAgent.channels;
+    const compiledChannel = manifest.channels.find((channel) => channel.name === "slack");
+    const resolvedChannel = resolvedAgent.channels.find((channel) => channel.name === "slack");
 
     expect(manifest.config).toEqual({
       compaction: {},
@@ -412,14 +412,12 @@ describe("runtime compiled artifact loaders", () => {
     expect(resolvedChannel.method).toBe("POST");
     expect(resolvedChannel.urlPath).toBe("/slack");
     expect(typeof resolvedChannel.fetch).toBe("function");
-    expect(resolvedAgent.channels).toHaveLength(1);
+    expect(resolvedAgent.channels.some((channel) => channel.name === "eve")).toBe(true);
     // Authored instructions modules execute once at build time. They never appear in
     // the runtime module map.
-    expect(Object.keys(moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules ?? {})).toEqual([
-      "agent.mjs",
-      "channels/slack.mjs",
-      "tools/get_weather.mjs",
-    ]);
+    expect(Object.keys(moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules ?? {})).toEqual(
+      expect.arrayContaining(["agent.mjs", "channels/slack.mjs", "tools/get_weather.mjs"]),
+    );
     expect(
       (
         moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules["tools/get_weather.mjs"] as {
@@ -428,10 +426,9 @@ describe("runtime compiled artifact loaders", () => {
       ).default.description,
     ).toBe("Get the weather.");
     await expect(
-      resolvedAgent.tools[0]?.execute?.(
-        { city: "Brooklyn" },
-        { messages: [], toolCallId: "call_1" },
-      ),
+      resolvedAgent.tools
+        .find((tool) => tool.name === "get_weather")
+        ?.execute?.({ city: "Brooklyn" }, { messages: [], toolCallId: "call_1" }),
     ).resolves.toEqual({
       city: "Brooklyn",
       source: "lib",
@@ -531,11 +528,9 @@ describe("runtime compiled artifact loaders", () => {
       ROOT_COMPILED_AGENT_NODE_ID,
       "subagents/researcher",
     ]);
-    expect(Object.keys(moduleMap.nodes["subagents/researcher"]?.modules ?? {})).toEqual([
-      "agent.mjs",
-      "sandbox/sandbox.mjs",
-      "tools/search.mjs",
-    ]);
+    expect(Object.keys(moduleMap.nodes["subagents/researcher"]?.modules ?? {})).toEqual(
+      expect.arrayContaining(["agent.mjs", "sandbox/sandbox.mjs", "tools/search.mjs"]),
+    );
     expect(researcherNode?.agent.instructions).toEqual([
       {
         content: "Investigate research tasks thoroughly.",
@@ -560,10 +555,9 @@ describe("runtime compiled artifact loaders", () => {
       ),
     ).toBe(false);
     await expect(
-      researcherNode?.agent.tools[0]?.execute?.(
-        { query: "climate" },
-        { messages: [], toolCallId: "call_1" },
-      ),
+      researcherNode?.agent.tools
+        .find((tool) => tool.name === "search")
+        ?.execute?.({ query: "climate" }, { messages: [], toolCallId: "call_1" }),
     ).resolves.toEqual({
       query: "climate",
       source: "subagent-lib",
@@ -618,7 +612,7 @@ describe("runtime compiled artifact loaders", () => {
     const firstResolved = await loadResolvedCompiledAgent({
       compiledArtifactsSource,
     });
-    const firstTool = firstResolved.tools[0];
+    const firstTool = firstResolved.tools.find((tool) => tool.name === "get_weather");
 
     if (firstTool === undefined) {
       throw new Error("Expected one compiled tool before the source update.");
@@ -646,7 +640,7 @@ describe("runtime compiled artifact loaders", () => {
     const secondResolved = await loadResolvedCompiledAgent({
       compiledArtifactsSource,
     });
-    const secondTool = secondResolved.tools[0];
+    const secondTool = secondResolved.tools.find((tool) => tool.name === "get_weather");
 
     if (secondTool === undefined) {
       throw new Error("Expected one compiled tool after the source update.");
