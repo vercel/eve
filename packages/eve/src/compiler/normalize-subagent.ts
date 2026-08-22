@@ -50,13 +50,19 @@ export type CompileAgentNodeManifestFn = (
     readonly agentConfigDefinition?: unknown;
     readonly externalDependencies?: readonly string[];
     readonly allowRootOnlyConfig?: boolean;
+    readonly nodeId?: string;
+    readonly sourcesComposed?: boolean;
   },
 ) => Promise<CompiledAgentNodeManifest>;
 
 export type CompileAgentResourcesFn = (
   manifest: AgentSourceManifest,
   context: ManifestCompileContext,
-  options?: { readonly externalDependencies?: readonly string[] },
+  options?: {
+    readonly externalDependencies?: readonly string[];
+    readonly nodeId?: string;
+    readonly sourcesComposed?: boolean;
+  },
 ) => Promise<CompiledAgentResources>;
 
 /**
@@ -156,9 +162,13 @@ async function compileSubagentDefinition(input: {
   );
   const definition = await loadModuleBackedDefinition({
     agentRoot: input.source.manifest.agentRoot,
+    binding: input.context.bindingsByAgentRoot.get(input.source.manifest.agentRoot)?.[
+      configModule.sourceId
+    ],
     displayPath: configModuleSource.logicalPath,
     externalDependencies: input.externalDependencies,
     kind: "subagent config",
+    moduleLoader: input.context.moduleLoader,
     source: configModule,
   });
   const dynamic = normalizeDynamicSubagentDefinition(
@@ -233,6 +243,7 @@ async function compileSubagent(input: {
       agentConfigDefinition: input.agentConfigDefinition,
       allowRootOnlyConfig: false,
       externalDependencies: inheritedExternalDependencies,
+      nodeId,
     });
     const description = agent.config.description;
     if (!description) {
@@ -259,11 +270,14 @@ async function compileSubagent(input: {
         ...nodeBase,
         agent: {
           ...compiledAgent,
-          bindings: createFilesystemModuleBindings({
-            agentRoot: compiledAgent.agentRoot,
-            externalDependencies: compiledAgent.config.build?.externalDependencies,
-            manifest: compiledAgent,
-          }),
+          bindings: {
+            ...createFilesystemModuleBindings({
+              agentRoot: compiledAgent.agentRoot,
+              externalDependencies: compiledAgent.config.build?.externalDependencies,
+              manifest: compiledAgent,
+            }),
+            ...compiledAgent.bindings,
+          },
         },
         description,
       },
@@ -272,6 +286,7 @@ async function compileSubagent(input: {
 
   const resources = await input.compileAgentResources(sourceManifest, input.context, {
     externalDependencies: inheritedExternalDependencies,
+    nodeId,
   });
   const descendants = await compileSubagentGraph({
     appRoot: input.appRoot,
@@ -290,12 +305,15 @@ async function compileSubagent(input: {
       ...nodeBase,
       agent: {
         ...compiledResources,
-        bindings: createFilesystemModuleBindings({
-          additionalRefs: [input.configResolver],
-          agentRoot: compiledResources.agentRoot,
-          externalDependencies: inheritedExternalDependencies,
-          manifest: compiledResources,
-        }),
+        bindings: {
+          ...createFilesystemModuleBindings({
+            additionalRefs: [input.configResolver],
+            agentRoot: compiledResources.agentRoot,
+            externalDependencies: inheritedExternalDependencies,
+            manifest: compiledResources,
+          }),
+          ...compiledResources.bindings,
+        },
       },
       configResolver: input.configResolver,
     },

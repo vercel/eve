@@ -33,8 +33,10 @@ export async function compileScheduleDefinition(
       : normalizeScheduleDefinition(
           await loadModuleBackedDefinition({
             agentRoot,
+            binding: options.binding,
             externalDependencies: options.externalDependencies,
             kind: "schedule",
+            moduleLoader: options.moduleLoader,
             source,
           }),
           `Expected the schedule export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,

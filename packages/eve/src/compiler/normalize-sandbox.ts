@@ -23,8 +23,10 @@ export async function compileSandboxDefinition(
   const message = `Expected the sandbox export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`;
   const loaded = await loadModuleBackedDefinition({
     agentRoot,
+    binding: options.binding,
     externalDependencies: options.externalDependencies,
     kind: "sandbox",
+    moduleLoader: options.moduleLoader,
     source,
   });
   const inheritsParent = await resolveParentSandboxSelector(loaded, message);
@@ -45,7 +47,7 @@ export async function compileSandboxDefinition(
     exportName: source.exportName,
     logicalPath: source.logicalPath,
     revalidationKey,
-    sourceHash: await resolveSandboxSourceHash(agentRoot, source),
+    sourceHash: await resolveSandboxSourceHash(agentRoot, source, options.binding),
     sourceId: source.sourceId,
     sourceKind: "module",
   };
@@ -129,7 +131,17 @@ async function resolveSandboxRevalidationKey(input: {
 async function resolveSandboxSourceHash(
   agentRoot: string,
   source: SandboxSourceRef,
+  binding: ModuleBackedDefinitionLoadOptions["binding"],
 ): Promise<string> {
-  const content = await readFile(join(agentRoot, source.logicalPath));
+  if (binding?.backing.kind === "programmatic") {
+    return createHash("sha256")
+      .update(`${binding.backing.registryId}:${binding.backing.moduleId}`)
+      .digest("hex");
+  }
+  const content = await readFile(
+    binding?.backing.kind === "filesystem"
+      ? binding.backing.sourcePath
+      : join(agentRoot, source.logicalPath),
+  );
   return createHash("sha256").update(content).digest("hex");
 }

@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+
 import { z } from "#compiled/zod/index.js";
 import type {
   CompiledAgentManifest,
@@ -9,6 +11,7 @@ import { assertTotalModuleBindings } from "#compiler/module-binding.js";
 import { collectModuleRefsForManifest } from "#compiler/module-references.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
+import { FRAMEWORK_AGENT_SOURCE_ID } from "#framework-sources/constants.js";
 
 /**
  * Compiled module ownership for one runtime graph node.
@@ -71,6 +74,15 @@ interface CollectedModuleNodeScope {
 export function createCompiledModuleMapSource(input: CreateCompiledModuleMapSourceInput): string {
   const moduleMapDirectory = dirnameFilesystemPath(input.moduleMapPath);
   const importSpecifierStyle = input.importSpecifierStyle ?? "relative";
+  const programmaticRegistryImports = {
+    [FRAMEWORK_AGENT_SOURCE_ID]: {
+      exportName: "frameworkAgentSourceRegistry",
+      importSpecifier: normalizeEsmImportSpecifier(
+        fileURLToPath(new URL("../framework-sources/registry.js", import.meta.url)),
+      ),
+    },
+    ...input.programmaticRegistryImports,
+  };
   let nextBindingIndex = 0;
   const collectedScopes: CollectedModuleNodeScope[] = [
     collectModuleNodeScope({
@@ -81,7 +93,7 @@ export function createCompiledModuleMapSource(input: CreateCompiledModuleMapSour
         return `module_${nextBindingIndex++}`;
       },
       nodeId: ROOT_COMPILED_AGENT_NODE_ID,
-      programmaticRegistryImports: input.programmaticRegistryImports,
+      programmaticRegistryImports,
     }),
     ...[...input.manifest.subagents]
       .sort((left, right) => left.nodeId.localeCompare(right.nodeId))
@@ -95,7 +107,7 @@ export function createCompiledModuleMapSource(input: CreateCompiledModuleMapSour
             return `module_${nextBindingIndex++}`;
           },
           nodeId: subagent.nodeId,
-          programmaticRegistryImports: input.programmaticRegistryImports,
+          programmaticRegistryImports,
         }),
       ),
   ];

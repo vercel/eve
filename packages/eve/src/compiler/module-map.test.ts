@@ -108,6 +108,41 @@ describe("createCompiledModuleMapSource", () => {
     expect(source).not.toContain("/consumer/agent/tools/echo.ts");
   });
 
+  it("knows how to import the framework source registry", () => {
+    const manifest = createManifestWithTool("/consumer/agent");
+    const sourceId = "eve.framework-defaults:tools/bash.ts";
+    const source = createCompiledModuleMapSource({
+      manifest: {
+        ...manifest,
+        bindings: {
+          [sourceId]: {
+            backing: {
+              kind: "programmatic",
+              moduleId: "tools/bash.ts",
+              registryId: "eve.framework-defaults",
+            },
+            logicalPath: "tools/bash.ts",
+            owner: { feature: "eve.framework-defaults", kind: "framework" },
+          },
+        },
+        tools: [
+          {
+            ...manifest.tools[0]!,
+            logicalPath: "tools/bash.ts",
+            name: "bash",
+            sourceId,
+          },
+        ],
+      },
+      moduleMapPath: "/consumer/.eve/compile/module-map.mjs",
+    });
+
+    expect(source).toContain("frameworkAgentSourceRegistry as module_0");
+    expect(source).toContain(
+      'module_0.getModule({"kind":"programmatic","moduleId":"tools/bash.ts","registryId":"eve.framework-defaults"}).namespace',
+    );
+  });
+
   it("imports the physical binding instead of reconstructing it from logical identity", () => {
     const manifest = createManifestWithTool("/consumer/agent");
     const source = createCompiledModuleMapSource({

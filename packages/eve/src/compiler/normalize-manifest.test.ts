@@ -17,6 +17,7 @@ import { defineTool, experimental_workflow } from "#public/definitions/tool.js";
 import { webSearch } from "#public/tools/web-search.js";
 
 const mocks = vi.hoisted(() => ({
+  applicationDefinition: vi.fn(),
   compileAgentConfig: vi.fn(),
   loadModuleBackedDefinition: vi.fn(),
 }));
@@ -31,8 +32,16 @@ vi.mock("#compiler/normalize-helpers.js", () => ({
 
 describe("compileAgentManifest", () => {
   beforeEach(() => {
+    mocks.applicationDefinition.mockReset();
     mocks.compileAgentConfig.mockReset();
     mocks.loadModuleBackedDefinition.mockReset();
+    mocks.loadModuleBackedDefinition.mockImplementation(async (input) => {
+      if (input.binding?.backing.kind !== "programmatic") {
+        return await mocks.applicationDefinition(input);
+      }
+      const namespace = await input.moduleLoader.load(input.binding.backing);
+      return namespace[input.source.exportName ?? "default"];
+    });
   });
 
   it("rejects Workflow runtime configuration on subagents", async () => {
@@ -74,7 +83,7 @@ describe("compileAgentManifest", () => {
 
       return createConfig({ name: "root" });
     });
-    mocks.loadModuleBackedDefinition.mockResolvedValue({
+    mocks.applicationDefinition.mockResolvedValue({
       description: "Research subagent",
       model: "openai/gpt-5.5",
     });
@@ -173,7 +182,7 @@ describe("compileAgentManifest", () => {
         ? createConfig({ name: input.agentId, description: "Research the request." })
         : createConfig({ name: input.agentId }),
     );
-    mocks.loadModuleBackedDefinition.mockResolvedValue({
+    mocks.applicationDefinition.mockResolvedValue({
       description: "Research the request.",
       model: "openai/gpt-5.5",
     });
@@ -232,7 +241,7 @@ describe("compileAgentManifest", () => {
 
       return createConfig({ name: "root" });
     });
-    mocks.loadModuleBackedDefinition.mockResolvedValue({
+    mocks.applicationDefinition.mockResolvedValue({
       description: "Research subagent",
       model: "openai/gpt-5.5",
     });
@@ -249,7 +258,7 @@ describe("compileAgentManifest", () => {
       appRoot: "/app",
       tools: [createModuleSourceRef({ logicalPath: "tools/export.ts" })],
     });
-    mocks.loadModuleBackedDefinition.mockResolvedValue(
+    mocks.applicationDefinition.mockResolvedValue(
       defineTool({
         description: "Starts an export.",
         execution: "background",
@@ -266,9 +275,10 @@ describe("compileAgentManifest", () => {
     mocks.compileAgentConfig.mockResolvedValue(
       createConfig({ experimental: { tasks: true }, name: "root" }),
     );
-    await expect(compileAgentManifest(manifest)).resolves.toMatchObject({
-      tools: [expect.objectContaining({ execution: "background", name: "export" })],
-    });
+    const compiled = await compileAgentManifest(manifest);
+    expect(compiled.tools).toContainEqual(
+      expect.objectContaining({ execution: "background", name: "export" }),
+    );
   });
 
   it("compiles experimental Workflow tool configuration", async () => {
@@ -279,7 +289,7 @@ describe("compileAgentManifest", () => {
       tools: [createModuleSourceRef({ logicalPath: "tools/workflow.ts" })],
     });
     mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
-    mocks.loadModuleBackedDefinition.mockResolvedValue(experimental_workflow({ maxSubagents: 6 }));
+    mocks.applicationDefinition.mockResolvedValue(experimental_workflow({ maxSubagents: 6 }));
 
     const compiled = await compileAgentManifest(manifest);
 
@@ -294,12 +304,79 @@ describe("compileAgentManifest", () => {
       tools: [createModuleSourceRef({ logicalPath: "tools/web_search.ts" })],
     });
     mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
-    mocks.loadModuleBackedDefinition.mockResolvedValue(webSearch({ provider: "exa" }));
+    mocks.applicationDefinition.mockResolvedValue(webSearch({ provider: "exa" }));
 
     const compiled = await compileAgentManifest(manifest);
 
     expect(compiled.webSearchProvider).toBe("exa");
-    expect(compiled.tools).toEqual([]);
+    expect(compiled.tools.map((tool) => tool.name)).toEqual([
+      "bash",
+      "read_file",
+      "todo",
+      "web_fetch",
+      "write_file",
+    ]);
+  });
+
+  it("compiles framework defaults through ordinary module bindings", async () => {
+    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
+
+    const compiled = await compileAgentManifest(
+      createAgentSourceManifest({
+        agentId: "root",
+        agentRoot: "/app/agent",
+        appRoot: "/app",
+      }),
+    );
+
+    expect(compiled.tools.map((tool) => tool.name)).toEqual([
+      "bash",
+      "read_file",
+      "todo",
+      "web_fetch",
+      "write_file",
+    ]);
+    expect(compiled.sandbox).toMatchObject({
+      logicalPath: "sandbox.ts",
+      sourceId: "eve.framework-defaults:sandbox.ts",
+    });
+    expect(Object.values(compiled.bindings)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          backing: expect.objectContaining({
+            kind: "programmatic",
+            registryId: "eve.framework-defaults",
+          }),
+          owner: { feature: "eve.framework-defaults", kind: "framework" },
+        }),
+      ]),
+    );
+  });
+
+  it("lets application tools replace framework defaults by logical path", async () => {
+    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
+    mocks.applicationDefinition.mockResolvedValue(
+      defineTool({
+        description: "Application bash",
+        inputSchema: z.object({}),
+        execute: () => ({ ok: true }),
+      }),
+    );
+
+    const compiled = await compileAgentManifest(
+      createAgentSourceManifest({
+        agentId: "root",
+        agentRoot: "/app/agent",
+        appRoot: "/app",
+        tools: [createModuleSourceRef({ logicalPath: "tools/bash.ts" })],
+      }),
+    );
+
+    expect(compiled.tools.find((tool) => tool.name === "bash")?.description).toBe(
+      "Application bash",
+    );
+    expect(compiled.bindings["tools/bash.ts"]?.backing.kind).toBe("filesystem");
+    expect(compiled.bindings["eve.framework-defaults:tools/bash.ts"]).toBeUndefined();
   });
 
   it("preserves ordered static instruction content, roles, and legacy definitions", async () => {
@@ -313,7 +390,7 @@ describe("compileAgentManifest", () => {
       ],
     });
     mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
-    mocks.loadModuleBackedDefinition
+    mocks.applicationDefinition
       .mockResolvedValueOnce(defineInstructions({ content: "Account context.", role: "user" }))
       .mockResolvedValueOnce(defineInstructions({ markdown: "Legacy system context." }));
 
@@ -341,7 +418,7 @@ describe("compileAgentManifest", () => {
       instructions: [createModuleSourceRef({ logicalPath: "instructions/dynamic.ts" })],
     });
     mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
-    mocks.loadModuleBackedDefinition.mockResolvedValue(
+    mocks.applicationDefinition.mockResolvedValue(
       defineDynamic({
         events: {
           "step.started": () => defineInstructions({ content: "Too late." }),
@@ -362,7 +439,7 @@ describe("compileAgentManifest", () => {
       tools: [createModuleSourceRef({ logicalPath: "tools/search.ts" })],
     });
     mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
-    mocks.loadModuleBackedDefinition.mockResolvedValue(webSearch({ provider: "exa" }));
+    mocks.applicationDefinition.mockResolvedValue(webSearch({ provider: "exa" }));
 
     await expect(compileAgentManifest(manifest)).rejects.toThrow(
       'must be exported from "tools/web_search.ts"',
@@ -384,7 +461,7 @@ describe("compileAgentManifest", () => {
     mocks.compileAgentConfig.mockImplementation(async (input: AgentSourceManifest) =>
       createConfig({ name: input.agentId }),
     );
-    mocks.loadModuleBackedDefinition.mockResolvedValue(dynamic);
+    mocks.applicationDefinition.mockResolvedValue(dynamic);
 
     const compiled = await compileAgentManifest(manifest);
 
@@ -414,7 +491,7 @@ describe("compileAgentManifest", () => {
     mocks.compileAgentConfig.mockImplementation(async (input: AgentSourceManifest) =>
       createConfig({ name: input.agentId }),
     );
-    mocks.loadModuleBackedDefinition.mockResolvedValue(dynamic);
+    mocks.applicationDefinition.mockResolvedValue(dynamic);
 
     const compiled = await compileAgentManifest(manifest);
 
@@ -431,7 +508,7 @@ describe("compileAgentManifest", () => {
 
   it("rejects invalid dynamic subagent build configuration", async () => {
     mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
-    mocks.loadModuleBackedDefinition.mockResolvedValue({
+    mocks.applicationDefinition.mockResolvedValue({
       build: { externalDependencies: "just-bash" },
       events: { "session.started": () => null },
       kind: "eve:dynamic",
@@ -444,7 +521,7 @@ describe("compileAgentManifest", () => {
 
   it("rejects fallback on a dynamic subagent", async () => {
     mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
-    mocks.loadModuleBackedDefinition.mockResolvedValue({
+    mocks.applicationDefinition.mockResolvedValue({
       ...defineDynamic({
         events: {
           "session.started": () => null,
@@ -463,7 +540,7 @@ describe("compileAgentManifest", () => {
 
   it("rejects step-scoped dynamic subagents", async () => {
     mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
-    mocks.loadModuleBackedDefinition.mockResolvedValue(
+    mocks.applicationDefinition.mockResolvedValue(
       defineDynamic({
         events: {
           "step.started": () =>

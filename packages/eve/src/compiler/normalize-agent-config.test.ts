@@ -5,6 +5,7 @@ import { defineDynamic } from "#public/definitions/tool.js";
 import { chatgpt } from "#public/models/openai/index.js";
 import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import type { ManifestCompileContext } from "#compiler/normalize-helpers.js";
+import { createAgentModuleNamespaceLoader } from "#compiler/module-namespace-loader.js";
 
 const mocks = vi.hoisted(() => ({
   loadModuleBackedDefinition: vi.fn(),
@@ -41,7 +42,7 @@ describe("compileAgentConfig", () => {
     });
 
     const modelCatalog = createModelCatalog();
-    const compiled = await compileAgentConfig(manifest, { modelCatalog });
+    const compiled = await compileAgentConfig(manifest, createContext(modelCatalog));
 
     expect(compiled.model).toBeUndefined();
     expect(compiled.dynamicModel).toEqual({
@@ -63,7 +64,7 @@ describe("compileAgentConfig", () => {
     });
     const modelCatalog = createModelCatalog();
 
-    const compiled = await compileAgentConfig(manifest, { modelCatalog });
+    const compiled = await compileAgentConfig(manifest, createContext(modelCatalog));
 
     expect(compiled.model).toEqual(
       expect.objectContaining({
@@ -87,15 +88,11 @@ describe("compileAgentConfig", () => {
       }),
     });
 
-    const compiled = await compileAgentConfig(
-      manifest,
-      { modelCatalog: createModelCatalog() },
-      {
-        definition: {
-          model: "openai/gpt-5.5",
-        },
+    const compiled = await compileAgentConfig(manifest, createContext(createModelCatalog()), {
+      definition: {
+        model: "openai/gpt-5.5",
       },
-    );
+    });
 
     expect(mocks.loadModuleBackedDefinition).not.toHaveBeenCalled();
     expect(compiled.description).toBeUndefined();
@@ -107,5 +104,15 @@ function createModelCatalog(): ManifestCompileContext["modelCatalog"] {
   return {
     getByProviderModelId: vi.fn(),
     getModelLimits: vi.fn(async () => ({ contextWindowTokens: 256_000 })),
+  };
+}
+
+function createContext(
+  modelCatalog: ManifestCompileContext["modelCatalog"],
+): ManifestCompileContext {
+  return {
+    bindingsByAgentRoot: new Map(),
+    modelCatalog,
+    moduleLoader: createAgentModuleNamespaceLoader(),
   };
 }

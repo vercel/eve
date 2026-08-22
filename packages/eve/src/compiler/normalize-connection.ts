@@ -35,8 +35,10 @@ export async function compileConnectionDefinition(
 ): Promise<CompiledConnectionDefinition> {
   const loaded = await loadModuleBackedDefinition({
     agentRoot,
+    binding: options.binding,
     externalDependencies: options.externalDependencies,
     kind: "connection",
+    moduleLoader: options.moduleLoader,
     source,
   });
   const protocol = readConnectionProtocol(loaded);

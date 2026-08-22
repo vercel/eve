@@ -16,6 +16,8 @@ import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { formatValidationError } from "#runtime/validation.js";
 import { loadAuthoredModuleNamespace } from "#internal/authored-module-loader.js";
 import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
+import { createAgentModuleNamespaceLoader } from "#compiler/module-namespace-loader.js";
+import { frameworkAgentSourceRegistry } from "#framework-sources/registry.js";
 
 /**
  * Ambient namespace read by `defineExtension` when it is evaluated from a module
@@ -25,6 +27,9 @@ import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-auth
  * leaks into consumer code.
  */
 const EXT_CONFIG_SCOPE = Symbol.for("eve.ext-config-scope");
+const programmaticModuleLoader = createAgentModuleNamespaceLoader({
+  registry: frameworkAgentSourceRegistry,
+});
 
 /**
  * Loads a disk-backed module map by hydrating authored modules directly from
@@ -180,10 +185,9 @@ async function hydrateCompiledNodeScope(input: {
 
   for (const ref of refs) {
     const binding = input.manifest.bindings[ref.sourceId]!;
-    if (binding.backing.kind !== "filesystem") {
-      throw new Error(
-        `Cannot hydrate programmatic binding "${ref.sourceId}" from authored filesystem source.`,
-      );
+    if (binding.backing.kind === "programmatic") {
+      modules[ref.sourceId] = await programmaticModuleLoader.load(binding.backing);
+      continue;
     }
     const modulePath = binding.backing.sourcePath;
     const extensionScopeNamespace =

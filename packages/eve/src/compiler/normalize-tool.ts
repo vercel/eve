@@ -41,8 +41,10 @@ export async function compileToolEntry(
   const entry = normalizeToolDefinition(
     await loadModuleBackedDefinition({
       agentRoot,
+      binding: options.binding,
       externalDependencies: options.externalDependencies,
       kind: "tool",
+      moduleLoader: options.moduleLoader,
       source,
     }),
     `Expected the tool export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,

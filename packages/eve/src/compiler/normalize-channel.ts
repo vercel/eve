@@ -28,8 +28,10 @@ export async function compileChannelDefinition(
 ): Promise<CompiledChannelEntry | readonly CompiledChannelEntry[]> {
   const rawValue = await loadModuleBackedDefinition({
     agentRoot,
+    binding: options.binding,
     externalDependencies: options.externalDependencies,
     kind: "channel",
+    moduleLoader: options.moduleLoader,
     source,
   });
 

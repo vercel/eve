@@ -25,7 +25,9 @@ const SANDBOX_PARENT_DEFINITION_MARKER = Symbol.for("eve.sandbox-parent-definiti
  * reuses the cache across all of its child compilations.
  */
 export interface ManifestCompileContext {
+  readonly bindingsByAgentRoot: Map<string, Readonly<Record<string, CompiledModuleBinding>>>;
   readonly modelCatalog: CompiledRuntimeModelCatalogLoader;
+  readonly moduleLoader: AgentModuleNamespaceLoader;
 }
 
 export interface ModuleBackedDefinitionLoadOptions {

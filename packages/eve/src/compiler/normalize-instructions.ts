@@ -68,8 +68,10 @@ export async function compileInstructionsEntry(
 
   const exportValue = await loadModuleBackedDefinition({
     agentRoot,
+    binding: options.binding,
     externalDependencies: options.externalDependencies,
     kind: "instructions",
+    moduleLoader: options.moduleLoader,
     source,
   });
 

@@ -70,8 +70,10 @@ export async function compileSkillSource(
   // Module-backed skill — load the export and check for DynamicSentinel.
   const exportValue = await loadModuleBackedDefinition({
     agentRoot,
+    binding: options.binding,
     externalDependencies: options.externalDependencies,
     kind: "skill",
+    moduleLoader: options.moduleLoader,
     source,
   });
 
