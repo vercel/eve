@@ -101,6 +101,27 @@ describe("startAuthoredSourceWatcher", () => {
     }
   });
 
+  it("rebuilds once after resuming a suspended watcher", async () => {
+    const host = createPreparedHost();
+    const coordinator = createCoordinator(host);
+    const watcher = await startAuthoredSourceWatcher({ coordinator, preparedHost: host });
+
+    try {
+      await watcher.suspend();
+      mockedWatcher.emit("change", join(host.appRoot, "package.json"));
+      await vi.advanceTimersByTimeAsync(200);
+      expect(coordinator.rebuild).not.toHaveBeenCalled();
+
+      await watcher.resume();
+      expect(coordinator.rebuild).toHaveBeenCalledOnce();
+      expect(coordinator.rebuild).toHaveBeenCalledWith({
+        changedPaths: [join(host.appRoot, "package.json")],
+      });
+    } finally {
+      await watcher.close();
+    }
+  });
+
   it("ignores generated directories while watching authored roots", async () => {
     const host = createPreparedHost();
     const watcher = await startAuthoredSourceWatcher({
@@ -110,6 +131,7 @@ describe("startAuthoredSourceWatcher", () => {
 
     try {
       const ignored = getIgnoredPredicate();
+      expect(ignored(join(host.appRoot, ".devtools", "generations.json"))).toBe(true);
       expect(ignored(join(host.appRoot, ".eve", "dev-hosts", "candidate"))).toBe(true);
       expect(ignored(join(host.appRoot, "node_modules", "eve"))).toBe(true);
       expect(ignored(join(host.appRoot, "agent", "tools", "weather.ts"))).toBe(false);
@@ -181,7 +203,7 @@ describe("startAuthoredSourceWatcher", () => {
     }
   });
 
-  it("watches root config, env, workspace lockfiles, and tsconfig extends", async () => {
+  it("watches root config, provider selection, env, workspace lockfiles, and tsconfig extends", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-dev-watch-root-"));
     const appRoot = join(workspaceRoot, "apps", "watch-agent");
     temporaryDirectories.push(workspaceRoot);
@@ -203,6 +225,7 @@ describe("startAuthoredSourceWatcher", () => {
       const paths = getInitialWatchPaths();
       expect(paths).toContain(join(appRoot, "package.json"));
       expect(paths).toContain(join(appRoot, ".env.local"));
+      expect(paths).toContain(join(appRoot, ".eve", "provider.json"));
       expect(paths).toContain(join(workspaceRoot, "pnpm-lock.yaml"));
       expect(paths).toContain(join(workspaceRoot, "tsconfig.base.json"));
     } finally {
@@ -273,6 +296,7 @@ describe("startAuthoredSourceWatcher", () => {
             outDir,
             packageName: "@acme/crm",
             runtimeDependencies: ["eve"],
+            externalDependencies: [],
             shortName: "crm",
           },
         },

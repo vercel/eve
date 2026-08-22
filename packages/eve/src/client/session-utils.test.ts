@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 import { collectTurnEvents, summarizeTurnEvents } from "./session-utils.js";
 
@@ -10,6 +10,7 @@ describe("summarizeTurnEvents", () => {
   it("projects the complete waiting-turn lifecycle in one pass", () => {
     const request = {
       action: { callId: "call_1", input: {}, kind: "tool-call" as const, toolName: "bash" },
+      kind: "tool-approval" as const,
       display: "confirmation" as const,
       options: [{ id: "approve", label: "Approve" }],
       prompt: "Approve?",
@@ -33,9 +34,9 @@ describe("summarizeTurnEvents", () => {
       },
       {
         type: "session.waiting",
-        data: { continuationToken: "eve:next", wait: "next-user-message" },
+        data: { continuationToken: "session-id", wait: "next-user-message" },
       },
-    ] satisfies HandleMessageStreamEvent[];
+    ] satisfies UnstampedMessageStreamEvent[];
 
     expect(summarizeTurnEvents(events)).toMatchObject({
       boundary: { type: "session.waiting" },
@@ -64,9 +65,9 @@ describe("summarizeTurnEvents", () => {
       },
       {
         type: "session.waiting",
-        data: { continuationToken: "eve:next", wait: "next-user-message" },
+        data: { continuationToken: "session-id", wait: "next-user-message" },
       },
-    ] satisfies HandleMessageStreamEvent[];
+    ] satisfies UnstampedMessageStreamEvent[];
 
     expect(summarizeTurnEvents(events)).toMatchObject({
       failure: { type: "turn.failed", data: { message: "Unavailable" } },
@@ -78,10 +79,10 @@ describe("summarizeTurnEvents", () => {
 
 describe("collectTurnEvents", () => {
   it("stops at the current-turn boundary", async () => {
-    async function* stream(): AsyncGenerator<HandleMessageStreamEvent> {
+    async function* stream(): AsyncGenerator<UnstampedMessageStreamEvent> {
       yield {
         type: "session.waiting",
-        data: { continuationToken: "eve:next", wait: "next-user-message" },
+        data: { continuationToken: "session-id", wait: "next-user-message" },
       };
       yield { type: "session.completed" };
     }
@@ -89,7 +90,7 @@ describe("collectTurnEvents", () => {
     await expect(collectTurnEvents(stream())).resolves.toEqual([
       {
         type: "session.waiting",
-        data: { continuationToken: "eve:next", wait: "next-user-message" },
+        data: { continuationToken: "session-id", wait: "next-user-message" },
       },
     ]);
   });

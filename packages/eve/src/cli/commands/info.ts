@@ -1,4 +1,5 @@
 import { type ApplicationInspection, inspectApplication } from "#services/inspect-application.js";
+import type { CompiledInstructionsDefinition } from "#compiler/manifest.js";
 import { type CliRow, createCliTheme, renderCliBanner, renderCliSection } from "#cli/ui/output.js";
 
 interface CliInfoLogger {
@@ -25,7 +26,7 @@ export interface ApplicationInfoJson {
   subagents: string[];
   schedules: string[];
   channels: { name: string; kind: string | null; method: string | null; urlPath: string | null }[];
-  messaging: { create: string; continue: string; stream: string };
+  messaging: { create: string; messages: string; stream: string };
   artifacts: {
     compiledManifest: string;
     discoveryManifest: string;
@@ -33,6 +34,12 @@ export interface ApplicationInfoJson {
     moduleMap: string;
     metadata: string;
   } | null;
+}
+
+function formatInstructions(instructions: readonly CompiledInstructionsDefinition[]): string {
+  return instructions
+    .map((instructions) => `${instructions.logicalPath} (${instructions.role})`)
+    .join(", ");
 }
 
 /**
@@ -53,8 +60,11 @@ export function buildApplicationInfoJson(inspection: ApplicationInspection): App
           warnings: compiledState.metadata.discovery.summary.warnings,
         }
       : null,
-    model: compiledState?.manifest.config.model.id ?? null,
-    instructions: compiledState?.manifest.instructions?.logicalPath ?? null,
+    model: compiledState?.manifest.config.model?.id ?? null,
+    instructions:
+      compiledState === null || compiledState.manifest.instructions.length === 0
+        ? null
+        : formatInstructions(compiledState.manifest.instructions),
     skills: (compiledState?.manifest.skills ?? []).map((skill) => skill.name),
     tools: (compiledState?.manifest.tools ?? []).map((tool) => tool.name),
     subagents: (compiledState?.manifest.subagents ?? []).map((subagent) => subagent.name),
@@ -71,7 +81,7 @@ export function buildApplicationInfoJson(inspection: ApplicationInspection): App
     ),
     messaging: {
       create: messaging.createSessionRoutePath,
-      continue: messaging.continueSessionRoutePattern,
+      messages: messaging.sessionMessagesRoutePattern,
       stream: messaging.streamRoutePattern,
     },
     artifacts: compiledState
@@ -171,7 +181,10 @@ export async function printApplicationInfo(
       },
       {
         label: "Instructions",
-        value: compiledState.manifest.instructions?.logicalPath ?? "none",
+        value:
+          compiledState.manifest.instructions.length === 0
+            ? "none"
+            : formatInstructions(compiledState.manifest.instructions),
       },
       {
         label: "Skills",
@@ -213,14 +226,14 @@ export async function printApplicationInfo(
       },
     );
     instructionsRows.push(
-      compiledState.manifest.instructions === undefined
+      compiledState.manifest.instructions.length === 0
         ? {
             label: "Instructions",
             value: "No instructions prompt discovered.",
           }
         : {
             label: "Instructions",
-            value: compiledState.manifest.instructions.logicalPath,
+            value: formatInstructions(compiledState.manifest.instructions),
           },
     );
   } else {
@@ -273,9 +286,9 @@ export async function printApplicationInfo(
             value: `POST ${inspection.messaging.createSessionRoutePath}`,
           },
           {
-            label: "Continue",
+            label: "Messages",
             tone: "info",
-            value: `POST ${inspection.messaging.continueSessionRoutePattern}`,
+            value: `POST ${inspection.messaging.sessionMessagesRoutePattern}`,
           },
           {
             label: "Stream",

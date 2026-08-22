@@ -18,6 +18,7 @@ export type CompiledToolEntry =
   | { readonly kind: "tool"; readonly definition: CompiledToolDefinition }
   | { readonly kind: "disabled"; readonly name: string }
   | { readonly kind: "workflow-tool"; readonly maxSubagents?: number }
+  | { readonly kind: "web-search-tool"; readonly provider: "exa" | "parallel" }
   | { readonly kind: "dynamic-tool"; readonly definition: CompiledDynamicToolDefinition };
 
 /**
@@ -58,6 +59,15 @@ export async function compileToolEntry(
     return { kind: "workflow-tool", maxSubagents: entry.maxSubagents };
   }
 
+  if (entry.kind === "web-search-tool") {
+    if (toolName !== "web_search") {
+      throw new Error(
+        `The webSearch() definition must be exported from "tools/web_search.ts", not "${source.logicalPath}".`,
+      );
+    }
+    return { kind: "web-search-tool", provider: entry.provider };
+  }
+
   if (entry.kind === "dynamic-tool") {
     return {
       kind: "dynamic-tool",
@@ -76,6 +86,7 @@ export async function compileToolEntry(
     kind: "tool",
     definition: {
       description: entry.definition.description,
+      execution: entry.definition.execution,
       exportName: source.exportName,
       inputSchema: entry.definition.inputSchema ?? null,
       logicalPath: source.logicalPath,

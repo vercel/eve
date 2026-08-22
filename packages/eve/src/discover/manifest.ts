@@ -20,7 +20,7 @@ export const AGENT_SOURCE_MANIFEST_KIND = "eve-agent-discovery-manifest";
 /**
  * Current manifest schema version.
  */
-export const AGENT_SOURCE_MANIFEST_VERSION = 12;
+export const AGENT_SOURCE_MANIFEST_VERSION = 13;
 
 /**
  * Channel source reference preserved by the discovery manifest.
@@ -155,6 +155,8 @@ export interface ResolvedExtensionMount {
   readonly sourceRoot: string;
   /** Discovered agent-shaped source manifest for the extension. */
   readonly manifest: AgentSourceManifest;
+  /** Runtime packages this extension requires the consuming application to externalize. */
+  readonly externalDependencies: readonly string[];
   /**
    * Consumer-authored overrides discovered in the mount directory form
    * (`extensions/<ns>/{tools,connections,…}/`). Composed under the same

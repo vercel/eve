@@ -14,11 +14,13 @@ export interface AddRegistryItemsOptions {
   cwd?: string;
   config?: RegistryConfig;
   overwrite?: boolean;
+  silent?: boolean;
 }
 
 export interface RegistrySearchItem {
   registry: string;
   name: string;
+  title?: string;
   addCommandArgument: string;
   type?: string;
   description?: string;

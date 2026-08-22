@@ -25,12 +25,10 @@ async function createTempDir(): Promise<string> {
 
 const TEST_EVE_PACKAGE = { version: "0.25.0", nodeEngine: ">=24" } as const;
 const LATEST_EVE_PACKAGE = { version: "latest", nodeEngine: ">=24" } as const;
-const RELEASE_AGE_POLICY =
-  'minimumReleaseAgeExclude:\n  - "@ai-sdk/*"\n  - "@rolldown/*"\n  - "@vercel/*"\n  - "@workflow/*"\n  - ai\n  - experimental-ai-sdk-code-mode\n  - eve\n  - nitro\n  - rolldown\n  - workflow\n';
-
 const TEST_WEB_PACKAGE_VERSIONS = {
   evePackage: TEST_EVE_PACKAGE,
   aiPackageVersion: "7.0.0",
+  betterAuthPackageVersion: "1.6.26-test",
   nextPackageVersion: "16.2.6",
   reactPackageVersion: "19.2.6",
   reactDomPackageVersion: "19.2.6",
@@ -241,12 +239,15 @@ describe("ensureChannel", () => {
       join(projectRoot, "app/_components/agent-chat.tsx"),
       "utf8",
     );
-    expect(agentChatSource).toContain("rounded-full transition-colors");
-    expect(agentChatSource).not.toContain("rounded - full transition - colors");
+    expect(agentChatSource).toContain("<PromptInputTextarea disabled={isRestoring}");
+    expect(agentChatSource).toContain('turnPolicy: "steer"');
+    expect(agentChatSource).toContain("{showPendingThinking ? <PendingThinking /> : null}");
+    expect(agentChatSource).not.toContain("StatusDot");
     await expect(readFile(join(projectRoot, "next.config.ts"), "utf8")).resolves.toContain(
       "withEve",
     );
     const packageJson = await readFile(join(projectRoot, "package.json"), "utf8");
+    expect(packageJson).not.toContain('"better-auth"');
     expect(packageJson).toContain('"next": "16.2.6"');
     expect(packageJson).toContain('"build:eve": "eve build"');
     expect(packageJson).toContain('"dev": "next dev"');
@@ -272,6 +273,78 @@ describe("ensureChannel", () => {
         2,
       )}\n`,
     );
+  });
+
+  test("writes a Sign in with Vercel authenticated Web Chat app", async () => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      `${JSON.stringify({ name: "private-agent", type: "module" }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const result = await ensureChannel({
+      projectRoot,
+      kind: "web",
+      webAuthentication: "sign-in-with-vercel",
+      webPackageVersions: {
+        ...TEST_WEB_PACKAGE_VERSIONS,
+        nextPackageVersion: undefined,
+      },
+    });
+
+    expect(result).toMatchObject({ kind: "web", action: "created" });
+    expect(result.filesWritten).toEqual(
+      expect.arrayContaining([
+        join(projectRoot, "app/_components/web-chat-auth.tsx"),
+        join(projectRoot, "app/api/auth/[...all]/route.ts"),
+        join(projectRoot, "lib/auth-client.ts"),
+        join(projectRoot, "lib/auth.ts"),
+      ]),
+    );
+
+    const packageJson = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+    };
+    expect(packageJson.dependencies["better-auth"]).toBe("1.6.26-test");
+    expect(packageJson.dependencies.next).toBe("16.3.0");
+
+    const pageSource = await readFile(join(projectRoot, "app/page.tsx"), "utf8");
+    expect(pageSource).toContain("<AuthenticatedAgentChat");
+    const authenticatedChatSource = await readFile(
+      join(projectRoot, "app/_components/authenticated-agent-chat.tsx"),
+      "utf8",
+    );
+    expect(authenticatedChatSource).toContain("auth.api.getSession");
+    expect(authenticatedChatSource).toContain("<SignIn />");
+    expect(authenticatedChatSource).toContain("<AccountControl");
+
+    const authSource = await readFile(join(projectRoot, "lib/auth.ts"), "utf8");
+    expect(authSource).toContain('requireEnvironmentVariable("BETTER_AUTH_SECRET")');
+    expect(authSource).toContain("process.env.VERCEL_PROJECT_PRODUCTION_URL");
+    expect(authSource).toContain('clientId: requireEnvironmentVariable("VERCEL_APP_CLIENT_ID")');
+    expect(authSource).toContain('throw new Error("No trusted deployment hosts are configured")');
+    expect(authSource).not.toContain("*.vercel.app");
+
+    const channelSource = await readFile(join(projectRoot, "agent/channels/eve.ts"), "utf8");
+    expect(channelSource).toContain("auth.api.getSession");
+    expect(channelSource).toContain('authenticator: "better-auth:vercel"');
+    expect(channelSource).not.toContain('issuer: "https://vercel.com"');
+    expect(channelSource).toContain("vercelOidc()");
+    expect(channelSource).toContain("localDev()");
+    expect(channelSource).not.toContain("placeholderAuth");
+
+    const accountSource = await readFile(
+      join(projectRoot, "app/_components/web-chat-auth.tsx"),
+      "utf8",
+    );
+    expect(accountSource).toContain('className="size-9 cursor-pointer');
+    expect(accountSource).toContain("Continue with Vercel");
+    expect(accountSource).toContain('viewBox="0 0 24 20"');
+    expect(accountSource).toContain('viewBox="0 0 169 53"');
+    expect(accountSource).toContain("Sign in to start a session");
+    expect(accountSource).toContain("Log out");
+    expect(accountSource).not.toContain("__EVE_INIT_APP_NAME__");
   });
 
   test("overrides an incompatible node engine when adding Web Chat", async () => {
@@ -366,7 +439,38 @@ describe("ensureChannel", () => {
     expect(normalizeEol(channelSource)).toBe(normalizeEol(sourceChannel));
   });
 
-  test("scaffolds a Web Chat Stop button that cancels the active durable turn", async () => {
+  test("scaffolds Web Chat questions as visible response forms", async () => {
+    const projectRoot = await createTempDir();
+    await mkdir(join(projectRoot, "agent"), { recursive: true });
+    await writeFile(
+      join(projectRoot, "package.json"),
+      `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await ensureChannel({
+      projectRoot,
+      kind: "web",
+      webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
+    });
+
+    const agentMessageSource = await readFile(
+      join(projectRoot, "app/_components/agent-message.tsx"),
+      "utf8",
+    );
+    const questionSource = await readFile(
+      join(projectRoot, "components/ai-elements/question.tsx"),
+      "utf8",
+    );
+    expect(agentMessageSource).toContain('inputRequest?.kind === "question"');
+    expect(agentMessageSource).toContain("<QuestionRequest");
+    expect(agentMessageSource).toContain("onInputResponses");
+    expect(questionSource).toContain("export const Question");
+    expect(questionSource).toContain("export const QuestionInput");
+    expect(questionSource).toContain("export const QuestionOption");
+  });
+
+  test("scaffolds a Web Chat Stop button with the agent cancellation API", async () => {
     const projectRoot = await createTempDir();
     await mkdir(join(projectRoot, "agent"), { recursive: true });
     await writeFile(
@@ -385,10 +489,9 @@ describe("ensureChannel", () => {
       join(projectRoot, "app/_components/agent-chat.tsx"),
       "utf8",
     );
-    expect(agentChatSource).toContain("preserveCompletedSessions: true");
-    expect(agentChatSource).toContain("session.cancel({ turnId })");
-    expect(agentChatSource).toContain("cancellation.sentTurnId === turnId");
-    expect(agentChatSource).not.toContain("onStop={agent.stop}");
+    expect(agentChatSource).toContain("agent.cancel()");
+    expect(agentChatSource).not.toContain(".attach(sessionId)");
+    expect(agentChatSource).not.toContain('event.type !== "turn.started"');
   });
 
   test("writes npm dist-tags for Web Chat without semver range decoration", async () => {
@@ -493,10 +596,11 @@ describe("ensureChannel", () => {
     );
   });
 
-  test("adds the Web Chat pnpm build policy to existing workspace policy", async () => {
+  test("adds Web Chat build policy after an existing YAML document marker", async () => {
     const projectRoot = await createTempDir();
     const pnpmWorkspacePath = join(projectRoot, "pnpm-workspace.yaml");
-    const existingPolicy = "packages:\n  - packages/*\nallowBuilds:\n  esbuild: true\n";
+    const existingPolicy =
+      "# Existing workspace policy\n---  # Workspace document\npackages:\n  - packages/*\nallowBuilds:\n  esbuild: true\n";
     await writeFile(
       join(projectRoot, "package.json"),
       `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
@@ -511,15 +615,16 @@ describe("ensureChannel", () => {
     });
 
     await expect(readFile(pnpmWorkspacePath, "utf8")).resolves.toBe(
-      `packages:\n  - packages/*\nallowBuilds:\n  esbuild: true\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
+      "# Existing workspace policy\n---  # Workspace document\npackages:\n  - packages/*\nallowBuilds:\n  esbuild: true\n  sharp: false\n",
     );
     expect(result.filesWritten).toContain(pnpmWorkspacePath);
   });
 
-  test("preserves an existing explicit sharp build policy when adding Web Chat", async () => {
+  test("preserves an existing release-age policy", async () => {
     const projectRoot = await createTempDir();
     const pnpmWorkspacePath = join(projectRoot, "pnpm-workspace.yaml");
-    const existingPolicy = "allowBuilds:\n  sharp: true\n";
+    const existingPolicy =
+      '"minimumReleaseAgeStrict": &strict false # Keep this comment\notherPolicy: *strict\nallowBuilds:\n  sharp: true\n';
     await writeFile(
       join(projectRoot, "package.json"),
       `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
@@ -533,36 +638,8 @@ describe("ensureChannel", () => {
       webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
     });
 
-    await expect(readFile(pnpmWorkspacePath, "utf8")).resolves.toBe(
-      `${existingPolicy}\n${RELEASE_AGE_POLICY}`,
-    );
-    expect(result.filesWritten).toContain(pnpmWorkspacePath);
-  });
-
-  test("adds the release age exclusions to an existing pnpm workspace exclusion list", async () => {
-    const projectRoot = await createTempDir();
-    const pnpmWorkspacePath = join(projectRoot, "pnpm-workspace.yaml");
-    await writeFile(
-      join(projectRoot, "package.json"),
-      `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
-      "utf8",
-    );
-    await writeFile(
-      pnpmWorkspacePath,
-      "minimumReleaseAgeExclude:\n  - react\nallowBuilds:\n  sharp: false\n",
-      "utf8",
-    );
-
-    const result = await ensureChannel({
-      projectRoot,
-      kind: "web",
-      webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
-    });
-
-    await expect(readFile(pnpmWorkspacePath, "utf8")).resolves.toBe(
-      'minimumReleaseAgeExclude:\n  - react\n  - "@ai-sdk/*"\n  - "@rolldown/*"\n  - "@vercel/*"\n  - "@workflow/*"\n  - ai\n  - experimental-ai-sdk-code-mode\n  - eve\n  - nitro\n  - rolldown\n  - workflow\nallowBuilds:\n  sharp: false\n',
-    );
-    expect(result.filesWritten).toContain(pnpmWorkspacePath);
+    await expect(readFile(pnpmWorkspacePath, "utf8")).resolves.toBe(existingPolicy);
+    expect(result.filesSkipped).toContain(pnpmWorkspacePath);
   });
 
   test("adds Web Chat pnpm policy and a missing package pattern at the ancestor workspace root", async () => {
@@ -594,7 +671,7 @@ describe("ensureChannel", () => {
     expect(result.filesWritten).not.toContain(join(projectRoot, "pnpm-workspace.yaml"));
     await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      `packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
+      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n",
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectRoot, "package.json"), "utf8"),
@@ -643,6 +720,53 @@ describe("ensureChannel", () => {
       filesWritten: [],
       filesSkipped: [packageJsonPath],
       packageJsonUpdated: [],
+    });
+  });
+
+  test("finishes package setup after the registry installs Web Chat", async () => {
+    const projectRoot = await createTempDir();
+    const pagePath = join(projectRoot, "app/page.tsx");
+    const packageJsonPath = join(projectRoot, "package.json");
+    await mkdir(join(projectRoot, "app"), { recursive: true });
+    await writeFile(pagePath, "registry-installed\n", "utf8");
+    await writeFile(
+      packageJsonPath,
+      `${JSON.stringify(
+        {
+          name: "demo",
+          type: "module",
+          scripts: { test: "vitest" },
+          dependencies: { next: "16.3.0-preview.6" },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const result = await ensureChannel({
+      projectRoot,
+      kind: "web",
+      configureVercelServices: false,
+      skipDependencyMutation: true,
+      webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
+    });
+
+    expect(result.action).toBe("overwritten");
+    await expect(readFile(pagePath, "utf8")).resolves.toBe("registry-installed\n");
+    const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+      dependencies: Record<string, string>;
+      scripts: Record<string, string>;
+    };
+    expect(packageJson.dependencies).toEqual({ next: "16.3.0-preview.6" });
+    expect(packageJson).toMatchObject({
+      scripts: {
+        build: "next build",
+        "build:eve": "eve build",
+        dev: "next dev",
+        start: "next start",
+        test: "vitest",
+      },
     });
   });
 });
@@ -803,7 +927,10 @@ describe("listAuthoredChannels", () => {
     await writeFile(join(projectRoot, "agent/channels/slack/connection.ts"), "", "utf8");
     await writeFile(join(projectRoot, "agent/channels/email.mts"), "", "utf8");
 
-    await expect(listAuthoredChannels(projectRoot)).resolves.toEqual(["email", "slack"]);
+    await expect(listAuthoredChannels(join(projectRoot, "agent"))).resolves.toEqual([
+      "email",
+      "slack",
+    ]);
   });
 });
 
@@ -888,7 +1015,7 @@ describe("scaffoldBaseProject", () => {
     expect(agentSource).not.toContain("modelOptions");
     const packageJson = await readFile(join(projectRoot, "package.json"), "utf8");
     expect(packageJson).toContain('"eve": "^0.25.0"');
-    // Channels added later (`eve channels add slack`, possibly next to a
+    // Channels added later (`eve add channel/slack`, possibly next to a
     // running `eve dev`) import @vercel/connect; init ships it so a later
     // channel add never introduces a missing dependency.
     expect(packageJson).toContain('"@vercel/connect": "0.2.2"');
@@ -913,9 +1040,27 @@ describe("scaffoldBaseProject", () => {
       PNPM_WORKSPACE_CONTENT,
     );
     const agentsMd = await readFile(join(projectRoot, "AGENTS.md"), "utf8");
-    expect(agentsMd).toContain("installed eve package docs");
-    expect(agentsMd).toContain("node_modules/eve/docs/");
-    expect(agentsMd).toContain("resolve the\ninstalled `eve` package location");
+    expect(agentsMd).toContain("content-only change to the root agent's");
+    expect(agentsMd).toContain("You do not need to read the framework docs");
+    expect(agentsMd).toContain("preserve that file unless the user asks to change the model");
+    expect(agentsMd).toContain("`agent/instructions.ts` or files under `agent/instructions/`");
+    expect(agentsMd).toContain("ls node_modules/eve/docs");
+    expect(agentsMd).toContain("Start with `docs/README.md`: it maps each task");
+    expect(agentsMd).toContain("Use a bounded authoring loop");
+    expect(agentsMd).toContain("Stop discovery once the file location");
+    expect(agentsMd).toContain("Follow links or inspect public types only");
+    expect(agentsMd).toContain("recursively glob `node_modules`");
+    expect(agentsMd).toContain("eve registry search <query> --json");
+    expect(agentsMd).toContain("eve registry view <item>");
+    expect(agentsMd).toContain("For a generic capability, author a tool instead.");
+    expect(agentsMd).toContain("eve add <item> --non-interactive");
+    expect(agentsMd).toContain("Exit code 0 means setup completed");
+    expect(agentsMd).toContain("replace its `<JSON value>` answer placeholder");
+    expect(agentsMd).toContain("docs/install-integrations.mdx");
+    expect(agentsMd).toContain("eve link --non-interactive --project <name-or-id>");
+    expect(agentsMd).toContain("eve deploy --non-interactive --yes");
+    expect(agentsMd).toContain("Use eve to link and deploy Vercel projects");
+    expect(agentsMd).toContain("Run the validation the task requests");
     // `vercel deploy` uploads everything a .vercelignore doesn't exclude, and
     // the platform default-ignores only the .env.local variants — eve's dev
     // artifacts and a bare .env must be excluded here or a source deploy
@@ -926,14 +1071,9 @@ describe("scaffoldBaseProject", () => {
     }
   });
 
-  test.each([
-    ["pnpm", undefined],
-    ["npm", "overrides"],
-    ["yarn", "resolutions"],
-    ["bun", "overrides"],
-  ] as const)(
-    "scaffolds a standalone %s project with its own package-manager metadata",
-    async (packageManager, aiPinField) => {
+  test.each(["pnpm", "npm", "yarn", "bun"] as const)(
+    "scaffolds a standalone %s project without an AI package-manager pin",
+    async (packageManager) => {
       const targetDirectory = await createTempDir();
       const projectRoot = await scaffoldBaseProject({
         projectName: "demo-agent",
@@ -952,18 +1092,16 @@ describe("scaffoldBaseProject", () => {
       await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(
         packageManager === "pnpm",
       );
+      if (packageManager === "pnpm") {
+        await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toContain(
+          "minimumReleaseAgeStrict: true",
+        );
+      }
       const packageJson: unknown = JSON.parse(
         await readFile(join(projectRoot, "package.json"), "utf8"),
       );
-      if (aiPinField === undefined) {
-        expect(packageJson).not.toHaveProperty("overrides");
-        expect(packageJson).not.toHaveProperty("resolutions");
-      } else {
-        expect(packageJson).toHaveProperty(`${aiPinField}.ai`, "7.0.0");
-        expect(packageJson).not.toHaveProperty(
-          aiPinField === "overrides" ? "resolutions" : "overrides",
-        );
-      }
+      expect(packageJson).not.toHaveProperty("overrides");
+      expect(packageJson).not.toHaveProperty("resolutions");
     },
   );
 
@@ -976,7 +1114,11 @@ describe("scaffoldBaseProject", () => {
       `${JSON.stringify({ private: true, engines: { node: "22.x" } }, null, 2)}\n`,
       "utf8",
     );
-    await writeFile(join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n", "utf8");
+    await writeFile(
+      join(workspaceRoot, "pnpm-workspace.yaml"),
+      "minimumReleaseAgeStrict: false\npackages:\n  - apps/*\n",
+      "utf8",
+    );
 
     const projectRoot = await scaffoldBaseProject({
       projectName: "demo-agent",
@@ -991,7 +1133,7 @@ describe("scaffoldBaseProject", () => {
 
     await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      `packages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
+      "minimumReleaseAgeStrict: false\npackages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n",
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectRoot, "package.json"), "utf8"),
@@ -1034,7 +1176,7 @@ describe("scaffoldBaseProject", () => {
 
     await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      `packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
+      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n",
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectRoot, "package.json"), "utf8"),
@@ -1051,13 +1193,9 @@ describe("scaffoldBaseProject", () => {
     });
   });
 
-  test.each([
-    ["npm", "overrides"],
-    ["bun", "overrides"],
-    ["yarn", "resolutions"],
-  ] as const)(
+  test.each(["npm", "bun", "yarn"] as const)(
     "scaffolds a %s workspace member with root-only package fields at the workspace root",
-    async (packageManager, rootAiPinField) => {
+    async (packageManager) => {
       const workspaceRoot = await createTempDir();
       const targetDirectory = join(workspaceRoot, "apps");
       await mkdir(targetDirectory, { recursive: true });
@@ -1101,21 +1239,18 @@ describe("scaffoldBaseProject", () => {
         await readFile(join(workspaceRoot, "package.json"), "utf8"),
       ) as {
         engines?: { node?: string };
-        overrides?: { ai?: string };
-        resolutions?: { ai?: string };
+        overrides?: unknown;
+        resolutions?: unknown;
       };
       expect(rootPackageJson.engines?.node).toBe("24.x");
-      expect(rootPackageJson[rootAiPinField]?.ai).toBe("7.0.0");
+      expect(rootPackageJson.overrides).toBeUndefined();
+      expect(rootPackageJson.resolutions).toBeUndefined();
     },
   );
 
-  test.each([
-    ["npm", "overrides"],
-    ["bun", "overrides"],
-    ["yarn", "resolutions"],
-  ] as const)(
+  test.each(["npm", "bun", "yarn"] as const)(
     "scaffolds under an unclaimed %s workspace directory by adding a package pattern",
-    async (packageManager, rootAiPinField) => {
+    async (packageManager) => {
       const workspaceRoot = await createTempDir();
       const targetDirectory = join(workspaceRoot, "agents");
       await mkdir(targetDirectory, { recursive: true });
@@ -1159,13 +1294,14 @@ describe("scaffoldBaseProject", () => {
         await readFile(join(workspaceRoot, "package.json"), "utf8"),
       ) as {
         engines?: { node?: string };
-        overrides?: { ai?: string };
-        resolutions?: { ai?: string };
+        overrides?: unknown;
+        resolutions?: unknown;
         workspaces?: string[];
       };
       expect(rootPackageJson.workspaces).toEqual(["apps/*", "agents/*"]);
       expect(rootPackageJson.engines?.node).toBe("24.x");
-      expect(rootPackageJson[rootAiPinField]?.ai).toBe("7.0.0");
+      expect(rootPackageJson.overrides).toBeUndefined();
+      expect(rootPackageJson.resolutions).toBeUndefined();
     },
   );
 
@@ -1245,6 +1381,9 @@ describe("scaffoldBaseProject", () => {
 
     await expect(readFile(join(projectRoot, "package.json"), "utf8")).resolves.toContain(
       '"eve": "latest"',
+    );
+    await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
+      PNPM_WORKSPACE_CONTENT,
     );
   });
 

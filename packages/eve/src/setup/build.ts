@@ -13,6 +13,10 @@ import { fileURLToPath } from "node:url";
 const SETUP_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SETUP_ROOT, "../../../..");
 const SOURCE_ROOT = join(REPO_ROOT, "apps/docs/registry/channel/web");
+const SIGN_IN_WITH_VERCEL_SOURCE_ROOT = join(
+  REPO_ROOT,
+  "apps/docs/registry/channel/web-sign-in-with-vercel",
+);
 const REGISTRY_PATH = join(REPO_ROOT, "apps/docs/registry.json");
 const OUTPUT_PATH = join(SETUP_ROOT, "scaffold/create/web-template.ts");
 
@@ -73,8 +77,8 @@ function shouldCopySourcePath(relativePath: string): boolean {
   );
 }
 
-async function discoverSourceFiles(relativeDirectory = ""): Promise<string[]> {
-  const entries = await readdir(join(SOURCE_ROOT, relativeDirectory), { withFileTypes: true });
+async function discoverSourceFiles(sourceRoot: string, relativeDirectory = ""): Promise<string[]> {
+  const entries = await readdir(join(sourceRoot, relativeDirectory), { withFileTypes: true });
   const discoveredFiles: string[] = [];
 
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
@@ -82,7 +86,7 @@ async function discoverSourceFiles(relativeDirectory = ""): Promise<string[]> {
     if (!shouldCopySourcePath(relativePath)) continue;
 
     if (entry.isDirectory()) {
-      discoveredFiles.push(...(await discoverSourceFiles(relativePath)));
+      discoveredFiles.push(...(await discoverSourceFiles(sourceRoot, relativePath)));
     } else if (entry.isFile()) {
       discoveredFiles.push(relativePath);
     }
@@ -157,11 +161,18 @@ function parsePackageTemplate(source: string): PackageTemplate {
 }
 
 async function renderGeneratedModule(): Promise<string> {
-  const sourceFiles = await discoverSourceFiles();
+  const sourceFiles = await discoverSourceFiles(SOURCE_ROOT);
   const entries = await Promise.all(
     sourceFiles.map(async (relativePath) => {
       const source = await readFile(join(SOURCE_ROOT, relativePath), "utf8");
       return renderFileEntry(relativePath, applyDeclaredTransforms(relativePath, source));
+    }),
+  );
+  const signInWithVercelSourceFiles = await discoverSourceFiles(SIGN_IN_WITH_VERCEL_SOURCE_ROOT);
+  const signInWithVercelEntries = await Promise.all(
+    signInWithVercelSourceFiles.map(async (relativePath) => {
+      const source = await readFile(join(SIGN_IN_WITH_VERCEL_SOURCE_ROOT, relativePath), "utf8");
+      return renderFileEntry(relativePath, source);
     }),
   );
   const packageTemplate = parsePackageTemplate(await readFile(REGISTRY_PATH, "utf8"));
@@ -172,6 +183,10 @@ async function renderGeneratedModule(): Promise<string> {
     "",
     "export const WEB_APP_TEMPLATE_FILES = {",
     ...entries,
+    "} as const;",
+    "",
+    "export const WEB_APP_SIGN_IN_WITH_VERCEL_TEMPLATE_FILES = {",
+    ...signInWithVercelEntries,
     "} as const;",
     "",
     "export const WEB_APP_TEMPLATE_PACKAGE_JSON = {",

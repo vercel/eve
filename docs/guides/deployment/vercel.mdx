@@ -13,11 +13,13 @@ Link the agent directory to a Vercel project:
 eve link
 ```
 
-The command links an existing project or creates one, then pulls its environment variables. In continuous integration (CI) environments, use the non-interactive Vercel command instead:
+The command links an existing project or creates one, then pulls its environment variables. For non-interactive use, name the project instead of picking it:
 
 ```bash
-vercel link --project your_project_name --yes --non-interactive
+eve link --project your_project_name --non-interactive
 ```
+
+Use `--team` as well when the account has access to more than one team. `eve link` creates the project if it doesn't exist yet.
 
 ## Configure credentials and auth
 
@@ -57,6 +59,12 @@ eve deploy
 
 `eve deploy` installs dependencies, runs `vercel deploy --prod`, and pulls the project environment after deployment. You can also push to a Git-connected Vercel project. Hosted Vercel builds set `VERCEL`, so `eve build` writes the deployment bundle under `.vercel/output`.
 
+For non-interactive use, confirm the production deploy up front. `--project` links first, so a new project needs no separate `eve link`:
+
+```bash
+eve deploy --project your_project_name --non-interactive --yes
+```
+
 Vercel uses the generated output to configure these services:
 
 - **Web runtime**: serves health, session, stream, channel, callback, and schedule routes
@@ -85,6 +93,6 @@ The Agent Runs tab requires enablement for your Vercel team. Contact your Vercel
 
 Use these guides to secure and observe the deployed agent:
 
-- [Auth and route protection](../auth-and-route-protection): configure who can call the deployed agent
+- [Authentication](../auth-and-route-protection): configure who can call the deployed agent
 - [Observability](../instrumentation): export traces and diagnose runtime failures
 - [Sandbox](../../sandbox): configure resources, isolation, and network access

@@ -1,62 +1,11 @@
 import type {
   AuthorizationRequiredStreamEvent,
-  HandleMessageStreamEvent,
   MessageCompletedStreamEvent,
   TurnFailureStreamEvent,
+  UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
-import type { SessionState } from "#client/types.js";
 import type { InputRequest } from "#runtime/input/types.js";
-
-/**
- * Returns a fresh session state with no active run.
- */
-export function createInitialSessionState(): SessionState {
-  return { streamIndex: 0 };
-}
-
-/**
- * Advances the session cursor after one streamed turn completes.
- *
- * When the boundary event is `session.waiting`, the session is preserved for
- * the next message. For `session.completed` and `session.failed`, the session
- * resets so the next call starts a new conversation. Without a boundary, the
- * session stays resumable from its advanced cursor.
- */
-export function advanceSession(input: {
-  readonly continuationToken?: string;
-  readonly events: readonly HandleMessageStreamEvent[];
-  readonly preserveCompletedSessions?: boolean;
-  readonly sessionId: string;
-  readonly session: SessionState;
-}): SessionState {
-  const boundaryEvent = findBoundaryEvent(input.events);
-  const streamIndex = input.session.streamIndex + input.events.length;
-
-  if (
-    boundaryEvent?.type === "session.waiting" ||
-    (input.preserveCompletedSessions === true && boundaryEvent?.type === "session.completed")
-  ) {
-    return {
-      continuationToken:
-        boundaryEvent?.type === "session.waiting"
-          ? boundaryEvent.data.continuationToken
-          : (input.continuationToken ?? input.session.continuationToken),
-      sessionId: input.sessionId,
-      streamIndex,
-    };
-  }
-
-  if (boundaryEvent === undefined) {
-    return {
-      continuationToken: input.continuationToken ?? input.session.continuationToken,
-      sessionId: input.sessionId,
-      streamIndex,
-    };
-  }
-
-  return createInitialSessionState();
-}
 
 /** A connection authorization challenge that remains unresolved at a turn boundary. */
 export interface PendingAuthorization {
@@ -68,7 +17,7 @@ export interface PendingAuthorization {
 
 /** Canonical projection of the lifecycle state represented by one turn's events. */
 export interface TurnEventSummary {
-  readonly boundary: HandleMessageStreamEvent | undefined;
+  readonly boundary: UnstampedMessageStreamEvent | undefined;
   readonly failure: TurnFailureStreamEvent | undefined;
   readonly inputRequests: readonly InputRequest[];
   readonly message: string | undefined;
@@ -77,8 +26,10 @@ export interface TurnEventSummary {
 }
 
 /** Reduces one turn's protocol events into their client-facing lifecycle state. */
-export function summarizeTurnEvents(events: readonly HandleMessageStreamEvent[]): TurnEventSummary {
-  let boundary: HandleMessageStreamEvent | undefined;
+export function summarizeTurnEvents(
+  events: readonly UnstampedMessageStreamEvent[],
+): TurnEventSummary {
+  let boundary: UnstampedMessageStreamEvent | undefined;
   let failure: TurnFailureStreamEvent | undefined;
   let message: string | undefined;
   const inputRequests: InputRequest[] = [];
@@ -114,9 +65,9 @@ export function summarizeTurnEvents(events: readonly HandleMessageStreamEvent[])
 
 /** Collects one segment of an event stream through its current-turn boundary. */
 export async function collectTurnEvents(
-  stream: AsyncIterable<HandleMessageStreamEvent>,
-): Promise<readonly HandleMessageStreamEvent[]> {
-  const events: HandleMessageStreamEvent[] = [];
+  stream: AsyncIterable<UnstampedMessageStreamEvent>,
+): Promise<readonly UnstampedMessageStreamEvent[]> {
+  const events: UnstampedMessageStreamEvent[] = [];
   for await (const event of stream) {
     events.push(event);
     if (isCurrentTurnBoundaryEvent(event)) break;
@@ -124,18 +75,8 @@ export async function collectTurnEvents(
   return events;
 }
 
-function findBoundaryEvent(
-  events: readonly HandleMessageStreamEvent[],
-): HandleMessageStreamEvent | undefined {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const event = events[i];
-    if (event !== undefined && isCurrentTurnBoundaryEvent(event)) return event;
-  }
-  return undefined;
-}
-
 function isFinalMessageCompleted(
-  event: HandleMessageStreamEvent,
+  event: UnstampedMessageStreamEvent,
 ): event is MessageCompletedStreamEvent {
   return event.type === "message.completed" && event.data.finishReason !== "tool-calls";
 }

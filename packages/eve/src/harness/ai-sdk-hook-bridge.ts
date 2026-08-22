@@ -2,23 +2,37 @@ import type { Telemetry } from "ai";
 
 import type {
   InstrumentationAttemptScope,
-  InstrumentationAttemptStartedEvent,
+  InstrumentationStepAttemptStartedEvent,
+  InstrumentationContentPart,
   InstrumentationContextRunner,
   InstrumentationHooks,
   InstrumentationModelCallCompletedEvent,
   InstrumentationModelCallStartedEvent,
+  InstrumentationOperationRef,
   InstrumentationToolCallCompletedEvent,
   InstrumentationToolCallStartedEvent,
-} from "#harness/instrumentation-lifecycle.js";
+  InstrumentationToolOutput,
+  InstrumentationUsage,
+} from "#harness/instrumentation/lifecycle.js";
+import {
+  attemptIdempotencyKey,
+  modelCallIdempotencyKey,
+  toolCallIdempotencyKey,
+} from "#harness/instrumentation/lifecycle.js";
+import { structuralProviderMetadata } from "#harness/instrumentation/content.js";
 
 type TelemetryEvent<TKey extends keyof Telemetry> = Parameters<NonNullable<Telemetry[TKey]>>[0];
 
 interface AttemptState {
-  readonly modelIds: Map<string, string>;
+  /** False when no provider asked for content, so none is projected at all. */
+  readonly capturesContent: boolean;
+  readonly modelKeys: Map<string, string>;
+  readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly scope: InstrumentationAttemptScope;
-  readonly toolIds: Map<string, string>;
-  operationStart?: Readonly<TelemetryEvent<"onStart">>;
-  stepStart?: Readonly<TelemetryEvent<"onStepStart">>;
+  readonly toolKeys: Map<string, string>;
+  operation?: InstrumentationOperationRef;
+  // Only the number is kept: it disambiguates call identities within an attempt.
+  stepNumber?: number;
 }
 
 /** Creates one provider-neutral AI SDK bridge for one actual model attempt. */
@@ -26,153 +40,267 @@ export function createAiSdkHookBridge(
   scope: InstrumentationAttemptScope,
   hooks: InstrumentationHooks,
   runInContext: InstrumentationContextRunner = directRunInContext,
+  runtimeContext?: Readonly<Record<string, unknown>>,
 ): Telemetry {
   const state: AttemptState = {
-    modelIds: new Map(),
+    capturesContent: hooks.capturesContent,
+    modelKeys: new Map(),
+    runtimeContext:
+      runtimeContext !== undefined && Object.keys(runtimeContext).length > 0
+        ? Object.freeze({ ...runtimeContext })
+        : undefined,
     scope,
-    toolIds: new Map(),
+    toolKeys: new Map(),
   };
 
   return {
     onStart(event) {
-      state.operationStart = snapshot(event);
+      state.operation = Object.freeze({
+        modelId: event.modelId,
+        operationId: event.operationId,
+        provider: event.provider,
+      });
     },
     async onStepStart(event) {
-      state.stepStart = snapshot(event);
-      const started = toAttemptStarted(state);
+      state.stepNumber = event.stepNumber;
+      const started = toStepAttemptStarted(state);
       if (started !== undefined) await hooks.publish(started);
     },
     async onLanguageModelCallStart(event) {
-      const id = createModelCallIdentity(state, event.callId);
-      state.modelIds.set(event.callId, id);
-      const started = toModelCallStarted(state, id, event);
-      await hooks.before("model.call", started);
+      const key = modelCallIdempotencyKey(state.scope, state.stepNumber ?? 0);
+      state.modelKeys.set(event.callId, key);
+      const started = toModelCallStarted(state, key, event);
+      await hooks.publish(started);
     },
     executeLanguageModelCall({ callId, execute }) {
-      const id = state.modelIds.get(callId);
-      return id === undefined
+      const key = state.modelKeys.get(callId);
+      return key === undefined
         ? execute()
-        : runInContext({ id, scope, type: "model.call" }, execute);
+        : runInContext({ idempotencyKey: key, scope, type: "model.call" }, execute);
     },
     async onLanguageModelCallEnd(event) {
-      const id = state.modelIds.get(event.callId);
-      if (id === undefined) return;
-      state.modelIds.delete(event.callId);
-      const completed = toModelCallCompleted(state, id, event);
-      await hooks.after("model.call", completed);
+      const key = state.modelKeys.get(event.callId);
+      if (key === undefined) return;
+      state.modelKeys.delete(event.callId);
+      const completed = toModelCallCompleted(state, key, event);
+      await hooks.publish(completed);
+    },
+    async onStepEnd(event) {
+      // Step results carry provider metadata (e.g. Vercel AI Gateway cost)
+      // that the per-call telemetry events don't. Publish it for providers
+      // that know what to do with it; skip when there is none.
+      if (event.providerMetadata === undefined) return;
+      const providerMetadata = state.capturesContent
+        ? event.providerMetadata
+        : structuralProviderMetadata(event.providerMetadata);
+      await hooks.publish(
+        Object.freeze({
+          idempotencyKey: attemptIdempotencyKey(state.scope),
+          providerMetadata,
+          scope: state.scope,
+          type: "step.attempt.metadata",
+        }),
+      );
     },
     async onToolExecutionStart(event) {
-      const id = createToolCallIdentity(state, event.toolCall.toolCallId);
-      state.toolIds.set(event.toolCall.toolCallId, id);
-      const started = toToolCallStarted(state, id, event);
-      await hooks.before("tool.call", started);
+      const key = toolCallIdempotencyKey(
+        state.scope,
+        event.toolCall.toolCallId,
+        state.stepNumber ?? 0,
+      );
+      state.toolKeys.set(event.toolCall.toolCallId, key);
+      const started = toToolCallStarted(state, key, event);
+      await hooks.publish(started);
     },
     executeTool({ toolCallId, execute }) {
-      const id = state.toolIds.get(toolCallId);
-      return id === undefined ? execute() : runInContext({ id, scope, type: "tool.call" }, execute);
+      const key = state.toolKeys.get(toolCallId);
+      return key === undefined
+        ? execute()
+        : runInContext({ idempotencyKey: key, scope, type: "tool.call" }, execute);
     },
     async onToolExecutionEnd(event) {
       const toolCallId = event.toolCall.toolCallId;
-      const id = state.toolIds.get(toolCallId);
-      if (id === undefined) return;
-      state.toolIds.delete(toolCallId);
-      const completed = toToolCallCompleted(state, id, event);
-      await hooks.after("tool.call", completed);
+      const key = state.toolKeys.get(toolCallId);
+      if (key === undefined) return;
+      state.toolKeys.delete(toolCallId);
+      const completed = toToolCallCompleted(state, key, event);
+      await hooks.publish(completed);
     },
     async onAbort(event) {
-      await failOpenOperations(event);
+      await failOpenOperations(event.reason);
     },
-    async onError(error) {
-      await failOpenOperations(error);
+    async onError(event) {
+      await failOpenOperations((event as { readonly error: unknown }).error);
     },
   };
 
   async function failOpenOperations(error: unknown): Promise<void> {
     const pending: Promise<void>[] = [];
-    for (const id of state.modelIds.values()) {
-      pending.push(hooks.after("model.call", { error, id, scope, type: "model.call.failed" }));
+    for (const idempotencyKey of state.modelKeys.values()) {
+      pending.push(
+        hooks.publish(Object.freeze({ error, idempotencyKey, scope, type: "model.call.failed" })),
+      );
     }
-    for (const id of state.toolIds.values()) {
-      pending.push(hooks.after("tool.call", { error, id, scope, type: "tool.call.failed" }));
+    for (const idempotencyKey of state.toolKeys.values()) {
+      pending.push(
+        hooks.publish(Object.freeze({ error, idempotencyKey, scope, type: "tool.call.failed" })),
+      );
     }
-    state.modelIds.clear();
-    state.toolIds.clear();
+    state.modelKeys.clear();
+    state.toolKeys.clear();
     await Promise.all(pending);
   }
 }
 
 const directRunInContext: InstrumentationContextRunner = (_operation, execute) => execute();
 
-function snapshot<T extends object>(event: T): Readonly<T> {
-  return Object.freeze({ ...event });
-}
-
-function toAttemptStarted(state: AttemptState): InstrumentationAttemptStartedEvent | undefined {
-  if (state.operationStart === undefined || state.stepStart === undefined) return undefined;
-  return {
-    operation: state.operationStart,
+function toStepAttemptStarted(
+  state: AttemptState,
+): InstrumentationStepAttemptStartedEvent | undefined {
+  if (state.operation === undefined || state.stepNumber === undefined) return undefined;
+  return Object.freeze({
+    idempotencyKey: attemptIdempotencyKey(state.scope),
+    operation: state.operation,
+    runtimeContext: state.runtimeContext,
     scope: state.scope,
-    step: state.stepStart,
-    type: "attempt.started",
-  };
-}
-
-function createModelCallIdentity(state: AttemptState, callId: string): string {
-  return `${state.scope.attemptId}:model:${callId}:${state.stepStart?.stepNumber ?? 0}`;
+    type: "step.attempt.started",
+  });
 }
 
 function toModelCallStarted(
   state: AttemptState,
-  id: string,
+  idempotencyKey: string,
   source: TelemetryEvent<"onLanguageModelCallStart">,
 ): InstrumentationModelCallStartedEvent {
-  return {
-    id,
+  return Object.freeze({
+    idempotencyKey,
+    input: state.capturesContent
+      ? Object.freeze({
+          instructions: source.instructions,
+          messages: Object.freeze([...source.messages]),
+        })
+      : undefined,
+    model: Object.freeze({ modelId: source.modelId, provider: source.provider }),
+    runtimeContext: state.runtimeContext,
     scope: state.scope,
-    source: snapshot(source),
     type: "model.call.started",
-  };
+  });
 }
 
 function toModelCallCompleted(
   state: AttemptState,
-  id: string,
+  idempotencyKey: string,
   source: TelemetryEvent<"onLanguageModelCallEnd">,
 ): InstrumentationModelCallCompletedEvent {
-  return {
-    id,
+  return Object.freeze({
+    content: state.capturesContent ? toContentParts(source.content) : undefined,
+    finishReason: source.finishReason,
+    idempotencyKey,
     scope: state.scope,
-    source: snapshot(source),
     type: "model.call.completed",
-  };
+    usage: toUsage(source.usage),
+  });
 }
 
-function createToolCallIdentity(state: AttemptState, toolCallId: string): string {
-  return `${state.scope.attemptId}:tool:${toolCallId}:${state.stepStart?.stepNumber ?? 0}`;
+function toUsage(usage: TelemetryEvent<"onLanguageModelCallEnd">["usage"]): InstrumentationUsage {
+  return Object.freeze({
+    inputTokenDetails: Object.freeze({
+      cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens,
+      cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens,
+    }),
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+  });
+}
+
+/** Drops kinds eve does not record; see {@link InstrumentationContentPart}. */
+function toContentParts(
+  content: TelemetryEvent<"onLanguageModelCallEnd">["content"],
+): readonly InstrumentationContentPart[] {
+  const parts: InstrumentationContentPart[] = [];
+  for (const part of content) {
+    switch (part.type) {
+      case "text":
+      case "reasoning":
+        parts.push(Object.freeze({ text: part.text, type: part.type }));
+        break;
+      case "tool-call":
+        parts.push(
+          Object.freeze({
+            callId: part.toolCallId,
+            input: part.input,
+            toolName: part.toolName,
+            type: "tool-call",
+          }),
+        );
+        break;
+      case "tool-result":
+        parts.push(
+          Object.freeze({
+            callId: part.toolCallId,
+            input: part.input,
+            output: part.output,
+            toolName: part.toolName,
+            type: "tool-result",
+          }),
+        );
+        break;
+      case "tool-error":
+        parts.push(
+          Object.freeze({
+            callId: part.toolCallId,
+            error: part.error,
+            input: part.input,
+            toolName: part.toolName,
+            type: "tool-error",
+          }),
+        );
+        break;
+      default:
+        break;
+    }
+  }
+  return Object.freeze(parts);
 }
 
 function toToolCallStarted(
   state: AttemptState,
-  id: string,
+  idempotencyKey: string,
   source: TelemetryEvent<"onToolExecutionStart">,
 ): InstrumentationToolCallStartedEvent {
-  return {
-    id,
+  return Object.freeze({
+    callId: source.toolCall.toolCallId,
+    idempotencyKey,
+    input: state.capturesContent ? source.toolCall.input : undefined,
     scope: state.scope,
-    source: snapshot(source),
+    toolName: source.toolCall.toolName,
     type: "tool.call.started",
-  };
+  });
 }
 
 function toToolCallCompleted(
   state: AttemptState,
-  id: string,
+  idempotencyKey: string,
   source: TelemetryEvent<"onToolExecutionEnd">,
 ): InstrumentationToolCallCompletedEvent {
-  return {
-    id,
+  return Object.freeze({
+    idempotencyKey,
+    output: toToolOutput(source.toolOutput, state.capturesContent),
     scope: state.scope,
-    source: snapshot(source),
     type: "tool.call.completed",
-  };
+  });
+}
+
+function toToolOutput(
+  toolOutput: TelemetryEvent<"onToolExecutionEnd">["toolOutput"],
+  capturesContent: boolean,
+): InstrumentationToolOutput {
+  if (toolOutput.type === "tool-result") {
+    return Object.freeze(
+      capturesContent ? { output: toolOutput.output, type: "result" } : { type: "result" },
+    );
+  }
+  return Object.freeze(
+    capturesContent ? { error: toolOutput.error, type: "error" } : { type: "error" },
+  );
 }

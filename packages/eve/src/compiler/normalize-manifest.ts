@@ -3,6 +3,7 @@ import { mountRefNamespace, packageStateNamespace } from "#discover/extensions.j
 import {
   type CompiledAgentManifest,
   type CompiledAgentNodeManifest,
+  type CompiledAgentResources,
   type CompiledDynamicInstructionsDefinition,
   type CompiledExtensionMount,
   type CompiledDynamicSkillDefinition,
@@ -13,13 +14,18 @@ import {
   type CompiledWorkflowToolDefinition,
   createCompiledAgentManifest,
   createCompiledAgentNodeManifest,
+  createCompiledAgentResources,
   ROOT_COMPILED_AGENT_NODE_ID,
 } from "#compiler/manifest.js";
+import type { WebSearchProvider } from "#shared/web-search.js";
 import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
 import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
 import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
-import { compileExtensionContributions } from "#compiler/normalize-extension.js";
+import {
+  composeAgentSubagentSources,
+  compileExtensionContributions,
+} from "#compiler/normalize-extension.js";
 import type { ManifestCompileContext } from "#compiler/normalize-helpers.js";
 import { compileHookEntry } from "#compiler/normalize-hook.js";
 import { compileSandboxDefinition } from "#compiler/normalize-sandbox.js";
@@ -42,29 +48,26 @@ export async function compileAgentManifest(
   const subagentGraph = await compileSubagentGraph({
     appRoot: manifest.appRoot,
     compileAgentNodeManifest,
+    compileAgentResources,
     context,
     externalDependencies: compiledNode.config.build?.externalDependencies ?? [],
+    parentAgentRoot: manifest.agentRoot,
     parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
-    subagents: manifest.subagents,
+    subagents: composeAgentSubagentSources(manifest),
   });
 
-  const extensionMounts: CompiledExtensionMount[] = manifest.resolvedExtensions.map((mount) => {
-    const mountRef = manifest.extensions.find(
-      (entry) => mountRefNamespace(entry.logicalPath) === mount.namespace,
+  const backgroundTool = [compiledNode, ...subagentGraph.nodes.map((node) => node.agent)]
+    .flatMap((node) => node.tools)
+    .find((tool) => tool.execution === "background");
+  if (backgroundTool !== undefined && compiledNode.config.experimental?.tasks !== true) {
+    throw new Error(
+      `Background tool "${backgroundTool.name}" requires experimental.tasks: true in the root agent config.`,
     );
-    return {
-      namespace: mount.namespace,
-      packageName: mount.packageName,
-      packageNamespace: packageStateNamespace(mount.packageName),
-      sourceRoot: mount.sourceRoot,
-      mountSourceId: mountRef?.sourceId ?? `extensions/${mount.namespace}`,
-      mountLogicalPath: mountRef?.logicalPath ?? `extensions/${mount.namespace}`,
-    };
-  });
+  }
 
   return createCompiledAgentManifest({
     ...compiledNode,
-    extensionMounts,
+    extensionMounts: compiledNode.extensionMounts,
     remoteAgents: subagentGraph.remoteAgents,
     subagentEdges: subagentGraph.edges,
     subagents: subagentGraph.nodes,
@@ -75,19 +78,30 @@ async function compileAgentNodeManifest(
   manifest: AgentSourceManifest,
   context: ManifestCompileContext,
   options: {
+    readonly agentConfigDefinition?: unknown;
     readonly externalDependencies?: readonly string[];
-    readonly allowWorkflowConfig?: boolean;
+    readonly allowRootOnlyConfig?: boolean;
   } = {},
 ): Promise<CompiledAgentNodeManifest> {
-  const rawConfig = await compileAgentConfig(manifest, context);
-  if (options.allowWorkflowConfig === false && rawConfig.experimental?.workflow !== undefined) {
+  const rawConfig = Object.hasOwn(options, "agentConfigDefinition")
+    ? await compileAgentConfig(manifest, context, {
+        definition: options.agentConfigDefinition,
+      })
+    : await compileAgentConfig(manifest, context);
+  if (options.allowRootOnlyConfig === false && rawConfig.experimental?.workflow !== undefined) {
     throw new Error(
       `Workflow runtime configuration is only supported on the root agent config. Remove "experimental.workflow" from "${manifest.agentId}".`,
+    );
+  }
+  if (options.allowRootOnlyConfig === false && rawConfig.experimental?.tasks !== undefined) {
+    throw new Error(
+      `Background tasks are only supported on the root agent config. Remove "experimental.tasks" from "${manifest.agentId}".`,
     );
   }
   const externalDependencies = mergeExternalDependencies(
     options.externalDependencies,
     rawConfig.build?.externalDependencies,
+    manifest.resolvedExtensions.flatMap((mount) => mount.externalDependencies),
   );
   const config =
     externalDependencies.length === 0
@@ -99,6 +113,16 @@ async function compileAgentNodeManifest(
             externalDependencies,
           },
         };
+  const resources = await compileAgentResources(manifest, context, { externalDependencies });
+  return createCompiledAgentNodeManifest({ ...resources, config });
+}
+
+async function compileAgentResources(
+  manifest: AgentSourceManifest,
+  context: ManifestCompileContext,
+  options: { readonly externalDependencies?: readonly string[] } = {},
+): Promise<CompiledAgentResources> {
+  const externalDependencies = [...(options.externalDependencies ?? [])];
   const compiledToolEntries = await Promise.all(
     manifest.tools.map((toolSource) =>
       compileToolEntry(manifest.agentRoot, toolSource, { externalDependencies }),
@@ -108,6 +132,7 @@ async function compileAgentNodeManifest(
   const dynamicTools: CompiledDynamicToolDefinition[] = [];
   const disabledFrameworkTools: string[] = [];
   let workflowTool: CompiledWorkflowToolDefinition | undefined;
+  let webSearchProvider: WebSearchProvider | undefined;
 
   for (const entry of compiledToolEntries) {
     if (entry.kind === "tool") {
@@ -116,6 +141,8 @@ async function compileAgentNodeManifest(
       dynamicTools.push(entry.definition);
     } else if (entry.kind === "workflow-tool") {
       workflowTool = { maxSubagents: entry.maxSubagents };
+    } else if (entry.kind === "web-search-tool") {
+      webSearchProvider = entry.provider;
     } else {
       disabledFrameworkTools.push(entry.name);
     }
@@ -182,7 +209,7 @@ async function compileAgentNodeManifest(
   const dynamicToolSlugs = new Set(dynamicTools.map((tool) => tool.slug));
   const connectionNames = new Set(connections.map((connection) => connection.connectionName));
   const skillNames = new Set(skills.map((skill) => skill.name));
-  const extensionInstructionFragments: string[] = [];
+  const extensionInstructions: CompiledInstructionsDefinition[] = [];
   for (const mount of [...manifest.resolvedExtensions].sort((left, right) =>
     left.namespace.localeCompare(right.namespace),
   )) {
@@ -192,6 +219,7 @@ async function compileAgentNodeManifest(
       consumerAgentRoot: manifest.agentRoot,
       externalDependencies,
     });
+    compiledChannels.push(...contributions.channels);
     for (const tool of contributions.tools) {
       if (!toolNames.has(tool.name)) {
         toolNames.add(tool.name);
@@ -216,38 +244,25 @@ async function compileAgentNodeManifest(
         skills.push(skill);
       }
     }
+    schedules.push(...contributions.schedules);
     hooks.push(...contributions.hooks);
     dynamicSkills.push(...contributions.dynamicSkills);
     dynamicInstructions.push(...contributions.dynamicInstructions);
-    extensionInstructionFragments.push(...contributions.instructionFragments);
+    extensionInstructions.push(...contributions.instructions);
   }
 
-  const composedMarkdown = [
-    ...staticInstructions.map((entry) => entry.markdown),
-    ...extensionInstructionFragments,
-  ];
-  const composedInstructions: CompiledInstructionsDefinition | undefined =
-    composedMarkdown.length === 0
-      ? undefined
-      : staticInstructions.length === 1 && extensionInstructionFragments.length === 0
-        ? staticInstructions[0]
-        : {
-            name: "instructions",
-            logicalPath: "instructions",
-            markdown: composedMarkdown.join("\n\n"),
-            sourceId: staticInstructions[0]?.sourceId ?? "instructions",
-            sourceKind: "module",
-          };
+  const instructions = [...staticInstructions, ...extensionInstructions];
 
-  return createCompiledAgentNodeManifest({
+  return createCompiledAgentResources({
     agentRoot: manifest.agentRoot,
     appRoot: manifest.appRoot,
     channels: compiledChannels,
-    config,
+    extensionMounts: compileExtensionMounts(manifest),
     connections,
     diagnosticsSummary: manifest.diagnosticsSummary,
     disabledFrameworkTools,
     workflowTool,
+    webSearchProvider,
     dynamicSkills,
     dynamicTools,
     hooks,
@@ -266,8 +281,25 @@ async function compileAgentNodeManifest(
     schedules,
     dynamicInstructions,
     skills,
-    instructions: composedInstructions,
+    instructions,
     tools,
+  });
+}
+
+function compileExtensionMounts(manifest: AgentSourceManifest): CompiledExtensionMount[] {
+  return manifest.resolvedExtensions.map((mount) => {
+    const mountRef = manifest.extensions.find(
+      (entry) => mountRefNamespace(entry.logicalPath) === mount.namespace,
+    );
+    return {
+      externalDependencies: [...mount.externalDependencies],
+      namespace: mount.namespace,
+      packageName: mount.packageName,
+      packageNamespace: packageStateNamespace(mount.packageName),
+      sourceRoot: mount.sourceRoot,
+      mountSourceId: mountRef?.sourceId ?? `extensions/${mount.namespace}`,
+      mountLogicalPath: mountRef?.logicalPath ?? `extensions/${mount.namespace}`,
+    };
   });
 }
 

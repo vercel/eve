@@ -15,6 +15,8 @@ const EVE_CONTEXT_STORAGE_KEY = Symbol.for("eve.context-storage");
  * the serialization layer.
  */
 export interface AlsContext extends ContextAccessor {
+  /** Removes a durable or step-local value from the context. */
+  delete<T>(key: ContextKey<T>): boolean;
   /**
    * Iterates all durable key/value pairs currently stored in the context.
    * Used by the serialization layer to persist context at step boundaries.
@@ -63,6 +65,12 @@ export class ContextContainer implements AlsContext {
       return this.require(key);
     }
     return this.set(key, create());
+  }
+
+  delete<T>(key: ContextKey<T>): boolean {
+    const deletedDurable = this._durableValues.delete(key.name);
+    const deletedVirtual = this._virtualValues.delete(key.name);
+    return deletedDurable || deletedVirtual;
   }
 
   /**

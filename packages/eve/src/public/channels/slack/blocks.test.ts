@@ -51,7 +51,7 @@ describe("cardToBlocks", () => {
         children: [
           Actions([
             Button({ id: "approve", label: "Approve", style: "primary" }),
-            Button({ id: "deny", label: "Deny", style: "danger", value: "force" }),
+            Button({ id: "cancel", label: "Cancel", style: "danger", value: "force" }),
           ]),
         ],
       }),
@@ -68,8 +68,8 @@ describe("cardToBlocks", () => {
           },
           {
             type: "button",
-            action_id: "deny",
-            text: { type: "plain_text", text: "Deny", emoji: true },
+            action_id: "cancel",
+            text: { type: "plain_text", text: "Cancel", emoji: true },
             value: "force",
             style: "danger",
           },

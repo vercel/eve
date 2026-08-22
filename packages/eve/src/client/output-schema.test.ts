@@ -4,12 +4,12 @@ import { extractCompletedResult } from "#client/output-schema.js";
 import {
   createResultCompletedEvent,
   createTurnCompletedEvent,
-  type HandleMessageStreamEvent,
+  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 
 describe("output schema client helpers", () => {
   it("extracts the most recent completed structured result", () => {
-    const events: HandleMessageStreamEvent[] = [
+    const events: UnstampedMessageStreamEvent[] = [
       createResultCompletedEvent({
         result: { title: "First" },
         sequence: 0,

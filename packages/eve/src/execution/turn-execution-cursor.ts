@@ -1,8 +1,13 @@
-import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
+import type { DeliverHookPayload } from "#channel/types.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { sendTurnControlStep } from "#execution/turn-control-protocol.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import type { TurnStepInput } from "#execution/durable-session-migrations/turn-workflow.js";
+import type {
+  TurnStepInput,
+  TurnStepPayload,
+} from "#execution/durable-session-migrations/turn-workflow.js";
+import { SessionStateCursor } from "#execution/session-state-cursor.js";
+import type { SettledTurn } from "#harness/types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 interface TurnTransition {
@@ -16,20 +21,21 @@ type TurnTerminalAction =
       readonly kind: "done";
       readonly output: unknown;
       readonly usage?: TokenUsage;
+      readonly usageDelta?: TokenUsage;
     }
   | {
+      readonly authorizationAttemptIds?: readonly string[];
       readonly authorizationNames?: readonly string[];
       readonly cancelled?: true;
       readonly kind: "park";
+      readonly settled?: SettledTurn;
     };
 
 /** Owns the mutable durable state cursor for one active turn workflow. */
-export class TurnExecutionCursor {
+export class TurnExecutionCursor extends SessionStateCursor {
   readonly controlToken: string;
   readonly parentWritable: WritableStream<Uint8Array>;
 
-  private currentSerializedContext: Record<string, unknown>;
-  private currentSessionState: DurableSessionState;
   private lastReportedContinuationToken: string;
 
   constructor(input: {
@@ -38,26 +44,15 @@ export class TurnExecutionCursor {
     readonly serializedContext: Record<string, unknown>;
     readonly sessionState: DurableSessionState;
   }) {
+    super({ serializedContext: input.serializedContext, sessionState: input.sessionState });
     this.controlToken = input.controlToken;
-    this.currentSerializedContext = input.serializedContext;
-    this.currentSessionState = input.sessionState;
     this.lastReportedContinuationToken = input.sessionState.continuationToken;
     this.parentWritable = input.parentWritable;
   }
 
-  /** Latest serialized runtime context adopted by the active turn. */
-  get serializedContext(): Record<string, unknown> {
-    return this.currentSerializedContext;
-  }
-
-  /** Latest durable session state adopted by the active turn. */
-  get sessionState(): DurableSessionState {
-    return this.currentSessionState;
-  }
-
   /** Adopts a state transition and reports any continuation-token change once. */
   async adopt(transition: TurnTransition): Promise<void> {
-    this.setState(transition);
+    this.adoptState(transition);
 
     const nextToken = transition.sessionState.continuationToken;
     if (nextToken === "" || nextToken === this.lastReportedContinuationToken) return;
@@ -67,13 +62,13 @@ export class TurnExecutionCursor {
   }
 
   /** Builds the next atomic turn-step input from the cursor's current state. */
-  createStepInput(input: HookPayload | undefined, abortSignal?: AbortSignal): TurnStepInput {
+  createStepInput(input: TurnStepPayload | undefined, abortSignal?: AbortSignal): TurnStepInput {
     return {
       abortSignal,
       input,
       parentWritable: this.parentWritable,
-      serializedContext: this.currentSerializedContext,
-      sessionState: this.currentSessionState,
+      serializedContext: this.serializedContext,
+      sessionState: this.sessionState,
     };
   }
 
@@ -87,12 +82,12 @@ export class TurnExecutionCursor {
     action: TurnTerminalAction,
     bufferedDeliveries: readonly DeliverHookPayload[],
   ): Promise<void> {
-    this.setState(transition);
+    this.adoptState(transition);
     await this.send({
       action: {
         ...action,
-        serializedContext: this.currentSerializedContext,
-        sessionState: this.currentSessionState,
+        serializedContext: this.serializedContext,
+        sessionState: this.sessionState,
       },
       bufferedDeliveries: bufferedDeliveries.length === 0 ? undefined : [...bufferedDeliveries],
       kind: "turn-result",
@@ -102,10 +97,5 @@ export class TurnExecutionCursor {
   /** Sends one control payload to the session driver. */
   async send(payload: TurnControlPayload): Promise<void> {
     await sendTurnControlStep({ controlToken: this.controlToken, payload });
-  }
-
-  private setState(transition: TurnTransition): void {
-    this.currentSerializedContext = transition.serializedContext ?? this.currentSerializedContext;
-    this.currentSessionState = transition.sessionState;
   }
 }

@@ -1,8 +1,9 @@
+import { e2eSubagentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
 
 export default defineAgent({
   description:
     'Look up the current stock price for a given ticker symbol. Pass the ticker symbol you want to look up in the message (e.g. "AAPL", "GOOG", or "TSLA").',
-  model: process.env.EVE_E2E_MODEL ?? "openai/gpt-5.6-sol",
+  ...e2eSubagentConfig(),
   reasoning: "high",
 });

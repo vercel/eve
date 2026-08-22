@@ -1,4 +1,4 @@
-import { localDev, vercelOidc } from "#public/channels/auth.js";
+import { localDev, placeholderAuth, vercelOidc } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
 import type { CompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
@@ -11,6 +11,10 @@ import {
   getSessionCallbackChannelNames,
 } from "#runtime/session-callback-route.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
+import {
+  getTaskInputResponseChannelDefinitions,
+  getTaskInputResponseChannelNames,
+} from "#runtime/task-input-response-route.js";
 
 const EVE_CHANNEL_NAME = "eve";
 
@@ -19,7 +23,7 @@ const EVE_CHANNEL_NAME = "eve";
  */
 export function getFrameworkChannelDefinitions(): readonly ResolvedChannelDefinition[] {
   const compiled = eveChannel({
-    auth: [vercelOidc(), localDev()],
+    auth: [vercelOidc(), localDev(), placeholderAuth()],
   }) as CompiledChannel;
 
   const result: ResolvedChannelDefinition[] = [];
@@ -36,6 +40,7 @@ export function getFrameworkChannelDefinitions(): readonly ResolvedChannelDefini
       fetch: async (req: Request, ctx: any) => route.handler(req, ctx),
       handler: route.handler,
       adapter: compiled.adapter,
+      turnPolicy: compiled.turnPolicy,
       logicalPath: `framework://channels/${route.path}`,
       sourceId: `eve:framework:${route.method.toLowerCase()}-${route.path}`,
       sourceKind: "module",
@@ -45,6 +50,7 @@ export function getFrameworkChannelDefinitions(): readonly ResolvedChannelDefini
   result.push(
     ...getConnectionCallbackChannelDefinitions(),
     ...getSessionCallbackChannelDefinitions(),
+    ...getTaskInputResponseChannelDefinitions(),
   );
 
   return result;
@@ -55,5 +61,6 @@ export function getAllFrameworkChannelNames(): ReadonlySet<string> {
     EVE_CHANNEL_NAME,
     ...getConnectionCallbackChannelNames(),
     ...getSessionCallbackChannelNames(),
+    ...getTaskInputResponseChannelNames(),
   ]);
 }

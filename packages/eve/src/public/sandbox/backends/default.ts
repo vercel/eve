@@ -1,5 +1,5 @@
 import {
-  isDockerDaemonAvailableSync,
+  isLinuxDockerDaemonAvailableSync,
   isMicrosandboxPlatformSupported,
 } from "#execution/sandbox/bindings/local.js";
 import { lazyBackend } from "#execution/sandbox/lazy-backend.js";
@@ -41,7 +41,7 @@ export interface DefaultSandboxProbes {
 // this object literal evaluates. Accessing them at call time is safe.
 const PRODUCTION_PROBES: DefaultSandboxProbes = {
   isDeployedOnVercel: () => Boolean(process.env.VERCEL),
-  isDockerAvailable: () => isDockerDaemonAvailableSync(),
+  isDockerAvailable: () => isLinuxDockerDaemonAvailableSync(),
   isMicrosandboxSupported: () => isMicrosandboxPlatformSupported(),
 };
 
@@ -51,7 +51,7 @@ const PRODUCTION_PROBES: DefaultSandboxProbes = {
  *
  * 1. **Vercel Sandbox** when deploying on Vercel (`process.env.VERCEL`
  *    is set) — local container/VM runtimes cannot run there.
- * 2. **Docker** when a Docker daemon is reachable.
+ * 2. **Docker** when a Linux-container Docker daemon is reachable.
  * 3. **microsandbox** when the host supports it (macOS on Apple
  *    Silicon, or glibc Linux with KVM); `eve dev` auto-installs the
  *    package into the project.

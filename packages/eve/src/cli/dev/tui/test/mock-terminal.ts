@@ -80,6 +80,7 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
   #lines: string[] = [];
   #cursorLine = 0;
   #cursorColumn = 0;
+  #mainScreen?: { lines: string[]; cursorLine: number; cursorColumn: number };
   #waiters: Array<{
     text: string;
     resolve: () => void;
@@ -249,6 +250,25 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
       parameters[0] === undefined || parameters[0] === "" ? fallback : Number(parameters[0]);
 
     if (isPrivate) {
+      // The alternate screen swaps the grid: entering starts the modal view
+      // from a blank screen, leaving restores the transcript snapshot.
+      if (rawParameters === "?1049" && (command === "h" || command === "l")) {
+        if (command === "h") {
+          this.#mainScreen = {
+            lines: this.#lines,
+            cursorLine: this.#cursorLine,
+            cursorColumn: this.#cursorColumn,
+          };
+          this.#lines = [];
+          this.#cursorLine = 0;
+          this.#cursorColumn = 0;
+        } else if (this.#mainScreen !== undefined) {
+          this.#lines = this.#mainScreen.lines;
+          this.#cursorLine = this.#mainScreen.cursorLine;
+          this.#cursorColumn = this.#mainScreen.cursorColumn;
+          this.#mainScreen = undefined;
+        }
+      }
       return startIndex + sequence.length;
     }
 

@@ -12,11 +12,16 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "catalog:",
+    "@eve-e2e/config": "workspace:*",
+    "@workflow/world-postgres": "catalog:",
     "eve": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "typescript": "catalog:"
+  },
+  "e2e": {
+    "modelMatrix": "full"
   }
 }

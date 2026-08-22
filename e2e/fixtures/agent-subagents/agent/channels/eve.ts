@@ -3,21 +3,21 @@ import { eveChannel } from "eve/channels/eve";
 import type { SessionAuthContext } from "eve/context";
 
 /**
- * Authored eve channel for the remote principal-forwarding eval. Three
+ * Authored eve channel for the remote principal-forwarding eval. Four
  * deterministic principals, no injected env (the deployment is deliberately
  * open — fixture-only; do not pattern production channels off this):
  *
  * - The `remote-loopback` hop authenticates with a fixed bearer and runs as
  *   the `router-app` service principal — the trusted forwarder.
- * - A second fixed bearer authenticates as a distinct end user, so the eval
- *   can continue a session as a different caller and prove the current and
- *   initiator principals cross the hop independently.
+ * - Bob and the observer each have a fixed bearer, so the eval can continue
+ *   Alice's child as two distinct callers. Bob has his own user grant; the
+ *   observer deliberately has none.
  * - Every other caller (the local eval driver is anonymous; the Vercel one
- *   may carry ambient OIDC) falls through to a fixed `user` principal, so
- *   the parent session always has an end-user identity to forward.
+ *   may carry ambient OIDC) falls through to Alice's fixed user principal.
  */
 const ROUTER_AUTHORIZATION = "Bearer e2e-principal-forwarding-router";
-const SECOND_USER_AUTHORIZATION = "Bearer e2e-principal-forwarding-second-user";
+const BOB_AUTHORIZATION = "Bearer e2e-principal-forwarding-bob";
+const OBSERVER_AUTHORIZATION = "Bearer e2e-principal-forwarding-observer";
 
 function createFixtureUserPrincipal(principalId: string): SessionAuthContext {
   return {
@@ -40,14 +40,19 @@ const authenticateRouter: AuthFn<Request> = (request) => {
   };
 };
 
-const authenticateSecondUser: AuthFn<Request> = (request) => {
-  if (request.headers.get("authorization") !== SECOND_USER_AUTHORIZATION) return null;
+const authenticateBob: AuthFn<Request> = (request) => {
+  if (request.headers.get("authorization") !== BOB_AUTHORIZATION) return null;
   return createFixtureUserPrincipal("e2e-user-2");
+};
+
+const authenticateObserver: AuthFn<Request> = (request) => {
+  if (request.headers.get("authorization") !== OBSERVER_AUTHORIZATION) return null;
+  return createFixtureUserPrincipal("e2e-observer");
 };
 
 const authenticateDefaultUser: AuthFn<Request> = () => createFixtureUserPrincipal("e2e-user");
 
 export default eveChannel({
-  auth: [authenticateRouter, authenticateSecondUser, authenticateDefaultUser],
+  auth: [authenticateRouter, authenticateBob, authenticateObserver, authenticateDefaultUser],
   trustedForwarders: (forwarder) => forwarder.principalId === "router-app",
 });

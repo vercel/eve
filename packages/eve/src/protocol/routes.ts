@@ -16,34 +16,31 @@ export const EVE_HEALTH_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/health`;
  */
 export const EVE_INFO_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/info`;
 
-/**
- * Stable framework-owned route for creating a new session.
- */
-export const EVE_CREATE_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session`;
+/** Stable route for creating ID-addressed sessions. */
+export const EVE_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session`;
+
+/** Stable route pattern for sending a message to one exact session ID. */
+export const EVE_SESSION_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId`;
+
+/** Stable route pattern for cancelling one exact session ID. */
+export const EVE_SESSION_CANCEL_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/cancel`;
+
+/** Stable route pattern for compacting one exact session ID. */
+export const EVE_SESSION_COMPACT_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/compact`;
+
+/** Stable route pattern for clearing one exact session ID. */
+export const EVE_SESSION_CLEAR_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/clear`;
+
+/** Stable route pattern for resetting one exact session ID. */
+export const EVE_SESSION_RESET_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/reset`;
+
+/** Stable event-stream route pattern for one exact session ID. */
+export const EVE_SESSION_STREAM_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/stream`;
 
 /**
- * Stable framework-owned route for retiring the session that owns a client
- * continuation token. The request body supplies the channel-local token.
+ * Parent-origin proxy route for one remotely executed child session stream.
  */
-export const EVE_RESET_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session/reset`;
-
-/**
- * Stable framework-owned route pattern for sending a message to an existing
- * session.
- */
-export const EVE_CONTINUE_SESSION_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:sessionId`;
-
-/**
- * Stable framework-owned message stream route pattern.
- */
-export const EVE_MESSAGE_STREAM_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:sessionId/stream`;
-
-/**
- * Stable framework-owned route pattern for cancelling a session's
- * in-flight turn. Accepts an optional `{ turnId }` body guard scoping
- * the cancel to the turn the caller observed.
- */
-export const EVE_CANCEL_TURN_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:sessionId/cancel`;
+export const EVE_SUBAGENT_STREAM_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:parentSessionId/subagents/:callId/:childSessionId/stream`;
 
 /**
  * Framework-owned route pattern for dispatching one authored schedule
@@ -53,7 +50,7 @@ export const EVE_CANCEL_TURN_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:sessi
  * never mount this route. Smoke tests and human developers use it to
  * trigger a schedule out-of-band (without a cron firing) and recover the
  * resulting `{ scheduleId, sessionIds }` payload as JSON so they can
- * subscribe to {@link EVE_MESSAGE_STREAM_ROUTE_PATTERN} for each session.
+ * subscribe to {@link EVE_SESSION_STREAM_ROUTE_PATTERN} for each session.
  *
  * `:scheduleId` is the authored schedule's filesystem-derived name (e.g.
  * `agent/schedules/heartbeat.ts` -> `"heartbeat"`).
@@ -76,6 +73,12 @@ export const EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/dev/run
  */
 export const EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH = `${EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH}/rebuild`;
 
+/** Dev-only route that pauses authored-source rebuilding while a setup subprocess owns the terminal. */
+export const EVE_DEV_RUNTIME_ARTIFACTS_SUSPEND_ROUTE_PATH = `${EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH}/suspend`;
+
+/** Dev-only route that resumes authored-source rebuilding after setup subprocess completion. */
+export const EVE_DEV_RUNTIME_ARTIFACTS_RESUME_ROUTE_PATH = `${EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH}/resume`;
+
 /**
  * Builds the dev-only schedule dispatch URL for one named authored
  * schedule. The path encodes the schedule id so reserved characters in
@@ -89,9 +92,9 @@ export function createEveDevDispatchSchedulePath(scheduleId: string): string {
  * Stable framework-owned route pattern for receiving inbound IdP redirects
  * during in-turn interactive connection authorization.
  *
- * `:name` is the connection name; `:token` is the workflow hook token minted
- * by the workflow body so the route handler can resume the suspended turn
- * via `resumeHook(token, payload)`.
+ * `:name` is the connection name, `:attemptId` identifies the exact challenge,
+ * and `:token` is the workflow hook token minted by the workflow body so the
+ * route handler can resume the suspended turn via `resumeHook(token, payload)`.
  *
  * The route is unauthenticated by design: an OAuth IdP follows this URL
  * via a 3xx redirect from the user's browser with no eve credentials
@@ -99,7 +102,10 @@ export function createEveDevDispatchSchedulePath(scheduleId: string): string {
  * resume; anyone who has it can deliver the callback payload, which is
  * exactly what the IdP needs to do.
  */
-export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connections/:name/callback/:token`;
+export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connections/:name/callback/:attemptId/:token`;
+
+/** Callback shape minted by deployments before authorization attempt IDs. */
+export const EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connections/:name/callback/:token`;
 
 /**
  * Stable framework-owned route pattern for terminal session callbacks.
@@ -109,30 +115,51 @@ export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connec
  */
 export const EVE_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/callback/:token`;
 
-/**
- * Creates the stable framework-owned message stream route path for one session.
- */
-export function createEveMessageStreamRoutePath(sessionId: string): string {
-  return `${EVE_ROUTE_PREFIX}/session/${encodeURIComponent(sessionId)}/stream`;
+/** Capability route used by a parent task to answer a remote child HITL batch. */
+export const EVE_TASK_INPUT_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/task-input/:token`;
+
+/** Builds the ID-addressed message route for one session. */
+export function createEveSessionRoutePath(sessionId: string): string {
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}`;
 }
 
-/**
- * Creates the stable framework-owned continue-session route path.
- */
-export function createEveContinueSessionRoutePath(sessionId: string): string {
-  return `${EVE_ROUTE_PREFIX}/session/${encodeURIComponent(sessionId)}`;
+/** Builds the ID-addressed cancel route for one session. */
+export function createEveSessionCancelRoutePath(sessionId: string): string {
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/cancel`;
 }
 
-/**
- * Creates the stable framework-owned cancel-turn route path for one session.
- */
-export function createEveCancelTurnRoutePath(sessionId: string): string {
-  return `${EVE_ROUTE_PREFIX}/session/${encodeURIComponent(sessionId)}/cancel`;
+/** Builds the parent-origin stream path for one remote child session. */
+export function createEveSubagentStreamRoutePath(input: {
+  readonly callId: string;
+  readonly childSessionId: string;
+  readonly parentSessionId: string;
+}): string {
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(input.parentSessionId)}/subagents/${encodeURIComponent(input.callId)}/${encodeURIComponent(input.childSessionId)}/stream`;
+}
+
+/** Builds the ID-addressed compact route for one session. */
+export function createEveSessionCompactRoutePath(sessionId: string): string {
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/compact`;
+}
+
+/** Builds the ID-addressed clear route for one session. */
+export function createEveSessionClearRoutePath(sessionId: string): string {
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/clear`;
+}
+
+/** Builds the ID-addressed reset route for one session. */
+export function createEveSessionResetRoutePath(sessionId: string): string {
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/reset`;
+}
+
+/** Builds the ID-addressed event-stream route for one session. */
+export function createEveSessionStreamRoutePath(sessionId: string): string {
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/stream`;
 }
 
 /**
  * Creates the stable framework-owned connection callback route path for
- * one (`name`, `token`) pair.
+ * one (`name`, `attemptId`, `token`) tuple.
  *
  * The workflow body builds this path against {@link EVE_ROUTE_PREFIX} when
  * minting the redirect URL it hands to the IdP via `startAuthorization`.
@@ -140,8 +167,12 @@ export function createEveCancelTurnRoutePath(sessionId: string): string {
  * pattern and forwards the projected request payload into
  * `resumeHook(token, payload)`.
  */
-export function createEveConnectionCallbackRoutePath(name: string, token: string): string {
-  return `${EVE_ROUTE_PREFIX}/connections/${encodeURIComponent(name)}/callback/${encodeURIComponent(token)}`;
+export function createEveConnectionCallbackRoutePath(
+  name: string,
+  attemptId: string,
+  token: string,
+): string {
+  return `${EVE_ROUTE_PREFIX}/connections/${encodeURIComponent(name)}/callback/${encodeURIComponent(attemptId)}/${encodeURIComponent(token)}`;
 }
 
 /**
@@ -149,4 +180,9 @@ export function createEveConnectionCallbackRoutePath(name: string, token: string
  */
 export function createEveCallbackRoutePath(token: string): string {
   return `${EVE_ROUTE_PREFIX}/callback/${encodeURIComponent(token)}`;
+}
+
+/** Builds the capability path used to answer one remote child turn. */
+export function createEveTaskInputRoutePath(token: string): string {
+  return `${EVE_ROUTE_PREFIX}/task-input/${encodeURIComponent(token)}`;
 }

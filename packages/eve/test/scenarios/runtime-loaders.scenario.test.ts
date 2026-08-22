@@ -353,6 +353,7 @@ describe("runtime compiled artifact loaders", () => {
       model: {
         contextWindowTokens: expect.any(Number),
         id: "openai/gpt-5.4",
+        maxOutputTokens: 128_000,
         routing: { kind: "gateway", target: "openai" },
       },
       name: "runtime-loader-test-agent",
@@ -362,13 +363,16 @@ describe("runtime compiled artifact loaders", () => {
         sourceId: "agent.mjs",
       },
     });
-    expect(manifest.instructions).toEqual({
-      name: "instructions",
-      logicalPath: "instructions.mjs",
-      markdown: "You are a precise runtime loader test agent.",
-      sourceId: "instructions.mjs",
-      sourceKind: "module",
-    });
+    expect(manifest.instructions).toEqual([
+      {
+        content: "You are a precise runtime loader test agent.",
+        name: "instructions",
+        logicalPath: "instructions.mjs",
+        role: "system",
+        sourceId: "instructions.mjs",
+        sourceKind: "module",
+      },
+    ]);
     if (compiledChannel === undefined) {
       throw new Error("Expected one compiled channel.");
     }
@@ -532,13 +536,16 @@ describe("runtime compiled artifact loaders", () => {
       "sandbox/sandbox.mjs",
       "tools/search.mjs",
     ]);
-    expect(researcherNode?.agent.instructions).toEqual({
-      name: "instructions",
-      logicalPath: "instructions.md",
-      markdown: "Investigate research tasks thoroughly.",
-      sourceId: "instructions.md",
-      sourceKind: "markdown",
-    });
+    expect(researcherNode?.agent.instructions).toEqual([
+      {
+        content: "Investigate research tasks thoroughly.",
+        name: "instructions",
+        logicalPath: "instructions.md",
+        role: "system",
+        sourceId: "instructions.md",
+        sourceKind: "markdown",
+      },
+    ]);
     expect(researcherNode?.agent.sandbox).toMatchObject({
       logicalPath: "sandbox/sandbox.mjs",
       sourceId: "sandbox/sandbox.mjs",

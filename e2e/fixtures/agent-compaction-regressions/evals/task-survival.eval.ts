@@ -3,6 +3,7 @@ import { defineEval } from "eve/evals";
 import { TASK_PRESERVED_MARKER, TASK_TAIL_SENTINEL } from "../constants";
 
 export default defineEval({
+  tags: ["real-model"],
   description: "The verbatim task text survives compaction and reaches the model.",
   async test(t) {
     const turn = await t.send(

@@ -88,16 +88,30 @@ const agent = useEveAgent({
 });
 ```
 
-The default eve channel is fail-closed. With no `agent/channels/eve.ts` authored, eve registers `eveChannel({ auth: [vercelOidc(), localDev()] })`: `vercelOidc()` gets the first chance to resolve a Vercel caller, `localDev()` opens the remaining localhost requests, and everything else gets a `401`. To run your app's own auth policy, add `agent/channels/eve.ts`:
+The browser still needs a production authentication policy. See [Authenticate browser requests](./overview#authenticate-browser-requests) for the default fail-closed behavior and channel configuration.
 
-```ts title="agent/channels/eve.ts"
-import { eveChannel } from "eve/channels/eve";
-import { localDev, vercelOidc } from "eve/channels/auth";
+## Use the generated Web Chat routes
 
-export default eveChannel({ auth: [vercelOidc(), localDev()] });
+`eve init --channel-web-nextjs` and `eve add channel/web` generate a chat UI with URL-addressed durable sessions:
+
+- `/` is the initial landing page.
+- `/s` opens the conversation layout without creating an eve session. The first message creates the session.
+- `/s/[sessionId]` attaches to that durable session, replays its transcript, and follows an in-flight turn.
+
+After the first message is accepted, Web Chat replaces the browser URL with `/s/{sessionId}` without remounting the active stream. Reloading that URL passes the session to `useEveAgent` with `resume: true`, so completed history is replayed and an unfinished response continues streaming. **New chat** navigates to the sessionless `/s` route; it does not reset or delete the prior session, which remains available at its URL.
+
+The generated UI keeps transcript scroll position in browser `sessionStorage`. This is presentation state only and is not written to the eve session.
+
+For a custom Next.js chat route, pass the route session ID explicitly:
+
+```tsx
+const agent = useEveAgent({
+  initialSession: { sessionId, streamIndex: 0 },
+  resume: true,
+});
 ```
 
-For a public demo, use `none()` (also from `eve/channels/auth`) to skip authentication. See [Channels](../../channels/overview) and [Auth & route protection](../auth-and-route-protection).
+See [Resumable sessions](./overview#resumable-sessions) for persistence and replay semantics.
 
 ## Dev vs deploy topology
 

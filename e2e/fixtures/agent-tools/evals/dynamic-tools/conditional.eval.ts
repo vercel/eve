@@ -4,6 +4,7 @@ import { defineEval } from "eve/evals";
 // truly runs once per session, both turns see { branch: "first" }; a
 // re-run would surface { branch: "reran" }.
 export default defineEval({
+  tags: ["real-model"],
   description: "Dynamic tools smoke: the resolver runs once per session, not per turn.",
   async test(t) {
     const first = await t.send(

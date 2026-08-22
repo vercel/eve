@@ -28,6 +28,7 @@ export function normalizeRequestedOutputSchema(
 type RuntimeSubagentInputFormatRequest = {
   readonly message: string;
   readonly name: string;
+  readonly persistentSession?: boolean;
   readonly type: "runtime";
 };
 
@@ -35,6 +36,7 @@ type LocalSubagentInputFormatRequest = {
   readonly description: string;
   readonly message: string;
   readonly name: string;
+  readonly persistentSession?: boolean;
   readonly type: "local";
 };
 
@@ -42,6 +44,7 @@ type RemoteSubagentInputFormatRequest = {
   readonly description: string;
   readonly message: string;
   readonly name: string;
+  readonly persistentSession?: boolean;
   readonly type: "remote";
 };
 
@@ -62,6 +65,7 @@ const formatSubagentInputByType = {
       descriptionLines: [],
       message: input.message,
       name: input.name,
+      persistentSession: input.persistentSession,
     });
   },
   local(input) {
@@ -69,6 +73,7 @@ const formatSubagentInputByType = {
       descriptionLines: formatDescriptionLines(input.description),
       message: input.message,
       name: input.name,
+      persistentSession: input.persistentSession,
     });
   },
   remote(input) {
@@ -76,6 +81,7 @@ const formatSubagentInputByType = {
       descriptionLines: formatDescriptionLines(input.description),
       message: input.message,
       name: input.name,
+      persistentSession: input.persistentSession,
     });
   },
 } satisfies SubagentInputFormatters;
@@ -104,13 +110,16 @@ function formatSubagentPrompt(input: {
   readonly descriptionLines: readonly string[];
   readonly message: string;
   readonly name: string;
+  readonly persistentSession?: boolean;
 }): FormattedSubagentInvocation {
   return {
     message: [
       `You are the subagent "${input.name}".`,
       ...input.descriptionLines,
       "",
-      "The caller delegated the following task to you. Complete it and return the final result directly.",
+      input.persistentSession === true
+        ? "The caller delegated the following task to you. Complete it and return the result directly. The caller may send follow-up messages after you answer."
+        : "The caller delegated the following task to you. Complete it and return the final result directly.",
       "",
       "Caller message:",
       input.message,

@@ -25,6 +25,7 @@ const EXPECTED_HISTORY =
   "2: system > user:task > assistant:tool-call > tool:result>";
 
 export default defineEval({
+  tags: ["real-model"],
   description: "Compaction stubs a large inline file content part without losing its sibling text.",
   async test(t) {
     const turn = await t.send(

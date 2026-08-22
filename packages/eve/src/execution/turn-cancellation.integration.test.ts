@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 
 import { createTestRuntime, type TestRuntime } from "#internal/testing/app-harness.js";
+import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import {
   captureTurnEvents,
   containsEventSequence,
@@ -10,20 +11,19 @@ import {
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { sessionCancelHookToken } from "#execution/turn-cancellation-token.js";
+import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { turnCancellationHookToken } from "#execution/turn-cancellation-token.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
-import { createEveCancelTurnRoutePath } from "#protocol/routes.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
-import { createCancelFn } from "#channel/cancel.js";
+import { createEveSessionCancelRoutePath } from "#protocol/routes.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { createChannelAddress } from "#channel/channel-address.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import { createSession } from "#channel/session.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
-import type { Agent } from "#public/definitions/channel.js";
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
-import { attachRouteAgent } from "#internal/nitro/routes/channel-route-context.js";
 import { toInputSchema } from "#shared/tool-schema.js";
 
 /**
@@ -197,7 +197,7 @@ async function expectNoStepRetries(runId: string): Promise<void> {
   expect([...completions.entries()].filter(([, count]) => count > 1)).toEqual([]);
 }
 
-function expectNoFailureEvents(events: readonly HandleMessageStreamEvent[]): void {
+function expectNoFailureEvents(events: readonly UnstampedMessageStreamEvent[]): void {
   const types = events.map((event) => event.type);
   for (const failureType of FAILURE_EVENT_TYPES) {
     expect(types).not.toContain(failureType);
@@ -223,67 +223,112 @@ function createCancelRouteCaller(): (
   const runtime = createWorkflowRuntime({
     compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
   });
-  const agent: Agent = {
-    cancelTurn: (input) => runtime.cancelTurn(input),
-    async deliver() {
-      throw new Error("cancel route must not deliver");
-    },
-    async getEventStream() {
-      throw new Error("cancel route must not read events");
-    },
-    async run() {
-      throw new Error("cancel route must not start a session");
-    },
-  };
 
   return async (sessionId, body) => {
-    const request = new Request(`https://example.com${createEveCancelTurnRoutePath(sessionId)}`, {
-      method: "POST",
-      ...(body === undefined
-        ? {}
-        : { body: JSON.stringify(body), headers: { "content-type": "application/json" } }),
-    });
-    const args = attachRouteAgent(
+    const request = new Request(
+      `https://example.com${createEveSessionCancelRoutePath(sessionId)}`,
       {
-        send: () => {
-          throw new Error("cancel route must not send");
-        },
-        resolveActiveSession: async () => undefined,
-        cancel: () => {
-          throw new Error("cancel route must not use the channel cancel helper");
-        },
-        reset: () => {
-          throw new Error("cancel route must not reset a session");
-        },
-        getSession: () => {
-          throw new Error("cancel route must not get a session");
-        },
-        receive: () => {
-          throw new Error("cancel route must not receive");
-        },
-        params: { sessionId },
-        waitUntil: () => undefined,
-        requestIp: "127.0.0.1",
-      } satisfies RouteHandlerArgs,
-      agent,
+        method: "POST",
+        ...(body === undefined
+          ? {}
+          : { body: JSON.stringify(body), headers: { "content-type": "application/json" } }),
+      },
     );
+    const args = {
+      ...mockChannelContext(() => {
+        throw new Error("cancel route must not send through a channel address");
+      }),
+      attachSession: (id: string) => createSession(id, runtime),
+      to: () => {
+        throw new Error("cancel route must not send to another channel");
+      },
+      params: { sessionId },
+      waitUntil: () => undefined,
+      requestIp: "127.0.0.1",
+    } satisfies RouteHandlerArgs;
     return await handler(request, args);
   };
 }
 
 async function expectCancelResponse(
   response: Response,
-  expected: { readonly sessionId: string; readonly status: "accepted" | "no_active_turn" },
+  expected:
+    | { readonly sessionId: string; readonly status: "accepted" }
+    | { readonly status: "no_active_turn" },
 ): Promise<void> {
-  expect(response.status).toBe(202);
-  await expect(response.json()).resolves.toEqual({
-    ok: true,
-    sessionId: expected.sessionId,
-    status: expected.status,
-  });
+  expect(response.status).toBe(expected.status === "accepted" ? 202 : 200);
+  await expect(response.json()).resolves.toEqual(
+    expected.status === "accepted"
+      ? { ok: true, sessionId: expected.sessionId, status: "accepted" }
+      : { ok: true, status: "no_active_turn" },
+  );
 }
 
 describe("turn cancellation integration", () => {
+  it("buffers a default steering message before replacing the active turn", async () => {
+    const fixture = createWaitToolRuntime("turn-steer-message");
+    const rawToken = "turn-steer-message";
+    const continuationToken = `http:${rawToken}`;
+    const workflowRuntime = createWorkflowRuntime({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    });
+    const address = createChannelAddress({
+      adapter: { kind: "http" },
+      channelName: "http",
+      continuationToken: rawToken,
+      runtime: workflowRuntime,
+    });
+
+    await fixture.runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: `Use the ${WAIT_TOOL_NAME} tool.` },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        await waitForHookByToken(continuationToken);
+        await fixture.toolStarted;
+
+        await expect(
+          address.send("replacement after steer", { auth: null }),
+        ).resolves.toMatchObject({ id: run.runId });
+
+        const cancelledTurn = await stream.nextTurn();
+        expect(
+          containsEventSequence(cancelledTurn, [
+            "turn.started",
+            "turn.cancelled",
+            "session.waiting",
+          ]),
+        ).toBe(true);
+        expect(fixture.toolAborts()).toBe(1);
+
+        const replacementTurn = await stream.nextTurn();
+        expect(filterEventsByType(replacementTurn, "turn.started")).toHaveLength(1);
+        expect(filterEventsByType(replacementTurn, "turn.cancelled")).toHaveLength(0);
+        expectNoFailureEvents(replacementTurn);
+        expect(
+          replacementTurn.some(
+            (event) =>
+              event.type === "message.received" &&
+              typeof event.data.message === "string" &&
+              event.data.message.includes("replacement after steer"),
+          ),
+        ).toBe(true);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
   it("cancels a turn mid-tool and accepts the next message normally", async () => {
     const fixture = createWaitToolRuntime("turn-cancel-tool");
     const continuationToken = "http:turn-cancel-tool";
@@ -302,18 +347,21 @@ describe("turn cancellation integration", () => {
       const stream = captureTurnEvents(run);
 
       try {
-        const cancelToken = sessionCancelHookToken(run.runId);
-        const cancelHook = await waitForHookByToken(cancelToken);
+        const commandToken = sessionCommandHookToken(run.runId);
+        const cancelHook = await waitForHookByToken(
+          turnCancellationHookToken(`${run.runId}:turn-control:0`),
+        );
+        await waitForHookByToken(commandToken);
         await fixture.toolStarted;
         // A matching turn guard cancels the observed turn (the first
         // turn's id is `turn_0`).
-        await resumeHook(cancelToken, { turnId: "turn_0" });
+        await resumeHook(commandToken, { kind: "cancel", turnId: "turn_0" });
 
         const cancelledTurn = await stream.nextTurn();
 
-        // A duplicate cancel after the turn settled lands on a
-        // consumed/disposed hook and must not disturb the session.
-        await resumeHook(cancelToken, {}).catch(() => undefined);
+        // A duplicate cancel after the turn settled is consumed by the
+        // parked driver and must not disturb the session.
+        await resumeHook(commandToken, { kind: "cancel" });
 
         expect(cancelledTurn.at(-1)?.type).toBe("session.waiting");
         expect(
@@ -335,8 +383,8 @@ describe("turn cancellation integration", () => {
 
         await waitForHook({ runId: run.runId }, { token: continuationToken });
         await resumeHook(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "follow up after cancel" }],
+          kind: "send",
+          payload: { message: "follow up after cancel" },
         });
 
         const followUpTurn = await stream.nextTurn();
@@ -365,7 +413,6 @@ describe("turn cancellation integration", () => {
 
     await fixture.runtime.run(async () => {
       await expectCancelResponse(await cancelViaRoute("missing-session"), {
-        sessionId: "missing-session",
         status: "no_active_turn",
       });
 
@@ -382,7 +429,7 @@ describe("turn cancellation integration", () => {
       const stream = captureTurnEvents(run);
 
       try {
-        await waitForHookByToken(sessionCancelHookToken(run.runId));
+        await waitForHookByToken(sessionCommandHookToken(run.runId));
         await fixture.toolStarted;
 
         const cancelled = await cancelViaRoute(run.runId);
@@ -402,18 +449,18 @@ describe("turn cancellation integration", () => {
         expectNoFailureEvents(cancelledTurn);
         expect(fixture.toolAborts()).toBe(1);
 
-        // With the turn settled and its cancel hook swept from the
-        // world, a duplicate cancel is the benign "nothing to cancel"
-        // success. (Between settle and sweep a duplicate may still be
-        // accepted as "accepted" and land unconsumed — also benign.)
-        await waitForHookSweep(sessionCancelHookToken(run.runId));
-        const duplicate = await cancelViaRoute(run.runId);
-        await expectCancelResponse(duplicate, { sessionId: run.runId, status: "no_active_turn" });
+        const started = filterEventsByType(cancelledTurn, "turn.started")[0];
+        if (started === undefined) throw new Error("Expected the cancelled turn to have started.");
+
+        // The stable inbox remains owned while the session is parked, so a
+        // guarded duplicate is harmless even if another alias resolves first.
+        const duplicate = await cancelViaRoute(run.runId, { turnId: started.data.turnId });
+        await expectCancelResponse(duplicate, { sessionId: run.runId, status: "accepted" });
 
         await waitForHook({ runId: run.runId }, { token: continuationToken });
         await resumeHook(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "follow up after route cancel" }],
+          kind: "send",
+          payload: { message: "follow up after route cancel" },
         });
 
         const followUpTurn = await stream.nextTurn();
@@ -442,12 +489,18 @@ describe("turn cancellation integration", () => {
     const workflowRuntime = createWorkflowRuntime({
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
     });
-    const cancel = createCancelFn(workflowRuntime, "http");
+    const address = (continuationToken: string) =>
+      createChannelAddress({
+        adapter: { kind: "http" },
+        channelName: "http",
+        continuationToken,
+        runtime: workflowRuntime,
+      });
 
     await fixture.runtime.run(async () => {
       // A token no session owns is the benign "nothing to cancel" success
       // and must never start a session.
-      await expect(cancel({ continuationToken: "no-such-thread" })).resolves.toEqual({
+      await expect(address("no-such-thread").cancel()).resolves.toEqual({
         status: "no_active_turn",
       });
 
@@ -467,7 +520,8 @@ describe("turn cancellation integration", () => {
         await waitForHookByToken(continuationToken);
         await fixture.toolStarted;
 
-        await expect(cancel({ continuationToken: rawToken })).resolves.toEqual({
+        await expect(address(rawToken).cancel()).resolves.toEqual({
+          sessionId: run.runId,
           status: "accepted",
         });
 
@@ -485,17 +539,19 @@ describe("turn cancellation integration", () => {
         expectNoFailureEvents(cancelledTurn);
         expect(fixture.toolAborts()).toBe(1);
 
-        // Session.cancel() addresses the same session by id. With the turn
-        // settled and its cancel hook swept, it reports the benign status.
-        await waitForHookSweep(sessionCancelHookToken(run.runId));
-        const session = createSession(run.runId, rawToken, workflowRuntime);
-        await expect(session.cancel()).resolves.toEqual({ status: "no_active_turn" });
-
-        await waitForHook({ runId: run.runId }, { token: continuationToken });
-        await resumeHook(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "follow up after helper cancel" }],
+        // Session.cancel() addresses the same parked session by its stable ID.
+        const session = createSession(run.runId, workflowRuntime);
+        await expect(session.cancel()).resolves.toEqual({
+          sessionId: run.runId,
+          status: "accepted",
         });
+
+        await expect(
+          workflowRuntime.dispatchContinuation({
+            command: { kind: "send", payload: { message: "follow up after helper cancel" } },
+            continuationToken,
+          }),
+        ).resolves.toEqual({ sessionId: run.runId, status: "accepted" });
 
         const followUpTurn = await stream.nextTurn();
 
@@ -538,9 +594,9 @@ describe("turn cancellation integration", () => {
         // tool, holding the parent in `waitForRuntimeActionResults`.
         await fixture.toolStarted;
 
-        const cancelToken = sessionCancelHookToken(run.runId);
+        const cancelToken = sessionCommandHookToken(run.runId);
         await waitForHookByToken(cancelToken);
-        await resumeHook(cancelToken, {});
+        await resumeHook(cancelToken, { kind: "cancel" });
 
         const cancelledTurn = await stream.nextTurn();
 
@@ -552,14 +608,14 @@ describe("turn cancellation integration", () => {
         const childSessionId = filterEventsByType(cancelledTurn, "subagent.called")[0]?.data
           .childSessionId;
         expect(childSessionId).toBeDefined();
-        await waitForHookSweep(sessionCancelHookToken(childSessionId ?? ""));
+        await waitForHookSweep(turnCancellationHookToken(`${childSessionId ?? ""}:turn-control:0`));
         expect(fixture.toolAborts()).toBe(1);
 
         // The cleared pending batch must not re-dispatch on the next turn.
         await waitForHook({ runId: run.runId }, { token: continuationToken });
         await resumeHook(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "follow up after subagent cancel" }],
+          kind: "send",
+          payload: { message: "follow up after subagent cancel" },
         });
 
         const followUpTurn = await stream.nextTurn();
@@ -606,7 +662,9 @@ describe("turn cancellation integration", () => {
         // The child asks a question; the proxy epilogue emits this turn's
         // waiting boundary while the parent keeps waiting on the child.
         const hitlTurn = await stream.nextTurn();
-        expect(hitlTurn.at(-1)?.type).toBe("session.waiting");
+        expect(hitlTurn.at(-1)?.type, JSON.stringify(hitlTurn.at(-1), null, 2)).toBe(
+          "session.waiting",
+        );
         const requested = filterEventsByType(hitlTurn, "input.requested");
         expect(requested).toHaveLength(1);
         const requestId = requested[0]?.data.requests[0]?.requestId;
@@ -615,9 +673,12 @@ describe("turn cancellation integration", () => {
           .childSessionId;
         expect(childSessionId).toBeDefined();
 
-        const cancelToken = sessionCancelHookToken(run.runId);
-        const cancelHook = await waitForHookByToken(cancelToken);
-        await resumeHook(cancelToken, {});
+        const cancelToken = sessionCommandHookToken(run.runId);
+        await waitForHookByToken(cancelToken);
+        const cancelHook = await waitForHookByToken(
+          turnCancellationHookToken(`${run.runId}:turn-control:0`),
+        );
+        await resumeHook(cancelToken, { kind: "cancel" });
         // Barrier: the answer must not race the cancel — a delivery that
         // beats the cancel is legitimately routed to the still-live child.
         await waitForRunCompletion(cancelHook.runId);
@@ -626,13 +687,11 @@ describe("turn cancellation integration", () => {
         // fabricated turn.cancelled or a second session.waiting.
         const world = await getWorld();
         const answer = {
-          kind: "deliver",
-          payloads: [
-            {
-              inputResponses: [{ requestId: requestId ?? "", text: "blue" }],
-              message: "answer after hitl cancel",
-            },
-          ],
+          kind: "send",
+          payload: {
+            inputResponses: [{ requestId: requestId ?? "", text: "blue" }],
+            message: "answer after hitl cancel",
+          },
         };
         await waitForHook({ runId: run.runId }, { token: continuationToken });
         await resumeHook(continuationToken, answer);
@@ -688,21 +747,21 @@ describe("turn cancellation integration", () => {
       const stream = captureTurnEvents(run);
 
       try {
-        const cancelToken = sessionCancelHookToken(run.runId);
+        const cancelToken = sessionCommandHookToken(run.runId);
         await waitForHookByToken(cancelToken);
         await fixture.toolStarted;
 
         // A guard naming a turn the session has never run: the payload is
         // consumed as a no-op — the caller's cancel must never leak onto
         // a turn they did not observe.
-        await resumeHook(cancelToken, { turnId: "turn_99" });
+        await resumeHook(cancelToken, { kind: "cancel", turnId: "turn_99" });
 
         // The turn must still be cancellable afterwards: the skip loop
         // re-arms the durable read rather than consuming the hook.
         await new Promise((resolve) => setTimeout(resolve, 250));
         expect(fixture.toolAborts()).toBe(0);
 
-        await resumeHook(cancelToken, { turnId: "turn_0" });
+        await resumeHook(cancelToken, { kind: "cancel", turnId: "turn_0" });
 
         const cancelledTurn = await stream.nextTurn();
 
@@ -739,14 +798,13 @@ describe("turn cancellation integration", () => {
         expect(firstTurn.at(-1)?.type).toBe("session.waiting");
         expect(filterEventsByType(firstTurn, "turn.completed")).toHaveLength(1);
 
-        // The turn workflow has settled and disposed its cancel hook; a
-        // late cancel either rejects (hook gone) or lands unconsumed.
-        await resumeHook(sessionCancelHookToken(run.runId), {}).catch(() => undefined);
+        // The stable inbox accepts a late cancel and the parked driver consumes it as a no-op.
+        await resumeHook(sessionCommandHookToken(run.runId), { kind: "cancel" });
 
         await waitForHook({ runId: run.runId }, { token: continuationToken });
         await resumeHook(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "follow up after late cancel" }],
+          kind: "send",
+          payload: { message: "follow up after late cancel" },
         });
 
         const secondTurn = await stream.nextTurn();
@@ -790,8 +848,8 @@ describe("turn cancellation integration", () => {
 
         await waitForHook({ runId: run.runId }, { token: continuationToken });
         await resumeHook(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "second turn" }],
+          kind: "send",
+          payload: { message: "second turn" },
         });
         expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
 
@@ -804,7 +862,7 @@ describe("turn cancellation integration", () => {
         let completedTurnRuns = 0;
         let cancelHooks = 0;
         while (Date.now() < deadline) {
-          const cancelToken0 = sessionCancelHookToken(run.runId);
+          const cancelToken0 = turnCancellationHookToken(`${run.runId}:turn-control:0`);
           const cancelHook0 = await world.hooks.getByToken(cancelToken0).catch(() => null);
           cancelHooks = cancelHook0 === null ? 0 : 1;
 

@@ -9,6 +9,7 @@ const DYNAMIC_SKILL_TOKEN = "dynamic-skill-ok-P4K9";
  * markdown body, which then shapes the reply.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "Skills smoke: dynamic single-skill resolution.",
   async test(t) {
     await t.send("Please use the dynamic tenant policy skill and follow its instructions exactly.");

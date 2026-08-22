@@ -31,7 +31,7 @@ describe("selectDefaultSandbox", () => {
     expect(probed).toBe(false);
   });
 
-  it("picks docker when a daemon is available", () => {
+  it("picks docker when a compatible daemon is available", () => {
     const backend = selectDefaultSandbox(
       undefined,
       probes({ isDockerAvailable: () => true, isMicrosandboxSupported: () => true }),

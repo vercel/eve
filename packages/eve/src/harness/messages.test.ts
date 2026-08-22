@@ -1,7 +1,9 @@
 import type { FilePart, ModelMessage, UserContent } from "ai";
 import { describe, expect, it } from "vitest";
 import {
+  coalesceDeliveries,
   coalesceTurnInputs,
+  normalizeModelMessages,
   normalizeUserContent,
   resolveAssistantStepText,
 } from "#harness/messages.js";
@@ -18,6 +20,67 @@ function textFilePart(overrides: {
     type: "file",
   };
 }
+
+describe("coalesceDeliveries", () => {
+  const caller = {
+    callId: "call-1",
+    replyTo: { kind: "hook" as const, token: "turn-caller" },
+    subagentName: "research",
+  };
+
+  it("preserves the only caller in a delivery batch", () => {
+    expect(
+      coalesceDeliveries([
+        { kind: "deliver", payloads: [{ context: ["background"] }] },
+        { caller, kind: "deliver", payloads: [{ message: "question" }] },
+      ]),
+    ).toEqual({
+      caller,
+      kind: "deliver",
+      payloads: [{ context: ["background"] }, { message: "question" }],
+    });
+  });
+
+  it("rejects a batch with more than one turn caller", () => {
+    expect(() =>
+      coalesceDeliveries([
+        { caller, kind: "deliver", payloads: [{ message: "first" }] },
+        {
+          caller: { ...caller, callId: "call-2" },
+          kind: "deliver",
+          payloads: [{ message: "second" }],
+        },
+      ]),
+    ).toThrow("Cannot coalesce deliveries from different turns.");
+  });
+
+  it("reindexes all delivery metadata while coalescing", () => {
+    const metadata = (deliveryId: string) => ({
+      channelKind: "channel:slack",
+      channelName: "slack",
+      deliveryId,
+      payloadIndex: 0,
+    });
+
+    const result = coalesceDeliveries([
+      {
+        deliveryMetadata: [metadata("delivery-1")],
+        kind: "deliver" as const,
+        payloads: [{ message: "first" }],
+      },
+      {
+        deliveryMetadata: [metadata("delivery-2")],
+        kind: "deliver" as const,
+        payloads: [{ message: "second" }],
+      },
+    ]);
+
+    expect(result.deliveryMetadata).toEqual([
+      metadata("delivery-1"),
+      { ...metadata("delivery-2"), payloadIndex: 1 },
+    ]);
+  });
+});
 
 describe("coalesceTurnInputs", () => {
   it("joins two messages with a double newline", () => {
@@ -160,6 +223,26 @@ describe("normalizeUserContent", () => {
     expect(coalesceTurnInputs({ message: [attachment] }, { message: " " }).message).toEqual([
       attachment,
     ]);
+  });
+});
+
+describe("normalizeModelMessages", () => {
+  it("drops blank text without removing meaningful structured content", () => {
+    const toolCall = {
+      input: {},
+      toolCallId: "call-1",
+      toolName: "probe",
+      type: "tool-call" as const,
+    };
+    const visible = { content: "Keep me", role: "user" as const };
+
+    expect(
+      normalizeModelMessages([
+        { content: " ", role: "assistant" },
+        { content: [{ text: "", type: "text" }, toolCall], role: "assistant" },
+        visible,
+      ]),
+    ).toEqual([{ content: [toolCall], role: "assistant" }, visible]);
   });
 });
 

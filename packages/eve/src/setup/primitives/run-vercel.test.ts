@@ -22,6 +22,7 @@ const mockedSpawn = vi.mocked(spawn);
  * streams, close/error events, and a spyable `kill`.
  */
 type ChildProcessDouble = ChildProcess & {
+  stdin: PassThrough;
   stdout: PassThrough;
   stderr: PassThrough;
   kill: ReturnType<typeof vi.fn<(signal?: NodeJS.Signals | number) => boolean>>;
@@ -29,6 +30,7 @@ type ChildProcessDouble = ChildProcess & {
 
 function createChildProcess(): ChildProcessDouble {
   const child = new EventEmitter() as ChildProcessDouble;
+  child.stdin = new PassThrough();
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
   child.kill = vi.fn((_signal?: NodeJS.Signals | number) => true);
@@ -141,6 +143,52 @@ describe("runVercel", () => {
     await expect(result).resolves.toBe(true);
     expectSpawnedVercel(["deploy", "--prod", "--yes", "--non-interactive"], {
       stdio: ["ignore", "pipe", "pipe"],
+    });
+  });
+
+  test("writes supplied stdin without exposing it in argv", async () => {
+    const child = createChildProcess();
+    mockSpawnReturn(child);
+    const inputChunks: Buffer[] = [];
+    child.stdin.on("data", (chunk: Buffer) => inputChunks.push(chunk));
+
+    const result = runVercelCaptureStdout(
+      ["connect", "create", "photon", "--data", "@-", "-F", "json"],
+      {
+        cwd: "/tmp/eve-agent",
+        nonInteractive: true,
+        stdin: '{"values":[{"value":"secret"}]}',
+      },
+    );
+    child.emit("close", 0);
+
+    await expect(result).resolves.toEqual({ ok: true, stdout: "" });
+    expectSpawnedVercel(
+      ["connect", "create", "photon", "--data", "@-", "-F", "json", "--non-interactive"],
+      { stdio: ["pipe", "pipe", "inherit"] },
+    );
+    expect(Buffer.concat(inputChunks).toString("utf8")).toBe('{"values":[{"value":"secret"}]}');
+  });
+
+  test("settles as a failure when the child closes stdin before secrets are written", async () => {
+    const child = createChildProcess();
+    mockSpawnReturn(child);
+    const onOutput = vi.fn();
+
+    const result = runVercelCaptureStdout(["connect", "create", "photon", "--data", "@-"], {
+      cwd: "/tmp/eve-agent",
+      nonInteractive: true,
+      stdin: '{"projectSecret":"secret"}',
+      onOutput,
+    });
+    const error: NodeJS.ErrnoException = new Error("write EPIPE");
+    error.code = "EPIPE";
+    child.stdin.emit("error", error);
+
+    await expect(result).resolves.toEqual({ ok: false, stdout: "" });
+    expect(onOutput).toHaveBeenCalledWith({
+      stream: "stderr",
+      text: "vercel connect create photon --data @- stdin failed: write EPIPE",
     });
   });
 
@@ -313,6 +361,26 @@ describe("captureVercel", () => {
     });
     // stderr is always piped so the reason survives without a live renderer.
     expectSpawnedVercel(["whoami"], { stdio: ["ignore", "pipe", "pipe"] });
+  });
+
+  test("treats a signal-killed exit as a failure rather than an empty success", async () => {
+    const child = createChildProcess();
+    mockSpawnReturn(child);
+
+    // Ctrl-C reaches the whole process group: the CLI dies without a status
+    // code, so its stdout is truncated and cannot be parsed as a result.
+    const result = captureVercel(["connect", "list", "-F", "json"], { cwd: "/tmp/eve-agent" });
+    child.emit("close", null);
+
+    await expect(result).resolves.toEqual({
+      ok: false,
+      failure: {
+        code: null,
+        stdout: "",
+        stderr: "",
+        message: "vercel connect list -F json was aborted.",
+      },
+    });
   });
 
   test("reports a missing CLI as a spawn error", async () => {

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentInfoResult, AgentInfoToolEntry } from "#client/index.js";
+import { stripAnsi } from "#cli/ui/terminal-text.js";
 
 import { AGENT_HEADER_TIPS, buildAgentHeader, pickAgentHeaderTip } from "./agent-header.js";
-import { stripAnsi } from "#cli/ui/terminal-text.js";
 import { createTheme } from "./theme.js";
 
 const FRAMEWORK_TOOL: AgentInfoToolEntry = {
@@ -45,6 +45,7 @@ const INFO: AgentInfoResult = {
     appRoot: "/tmp/weather-agent",
     model: {
       id: "anthropic/claude-opus-4.7",
+      routing: { kind: "gateway", target: "anthropic" },
     },
     name: "Weather Agent",
   },
@@ -65,12 +66,15 @@ const INFO: AgentInfoResult = {
   hooks: [],
   instructions: {
     dynamic: [],
-    static: {
-      logicalPath: "instructions.md",
-      markdown: "You are a weather assistant.",
-      name: "instructions",
-      sourceKind: "markdown",
-    },
+    static: [
+      {
+        content: "You are a weather assistant.",
+        logicalPath: "instructions.md",
+        name: "instructions",
+        role: "system",
+        sourceKind: "markdown",
+      },
+    ],
   },
   kind: "eve-agent-info",
   mode: "development",
@@ -99,7 +103,7 @@ const INFO: AgentInfoResult = {
     ],
     reserved: [],
   },
-  version: 1,
+  version: 2,
   workflow: {
     enabled: false,
     toolName: "Workflow",
@@ -134,11 +138,11 @@ describe("buildAgentHeader", () => {
     expect(remote.join("\n")).not.toContain("/channels");
   });
 
-  it("renders the /connect tip with a blue command", () => {
+  it("renders the /add tip with a blue command", () => {
     const colorTheme = createTheme({ color: true, unicode: false });
-    const tip = AGENT_HEADER_TIPS.find((candidate) => candidate.includes("/connect"));
+    const tip = AGENT_HEADER_TIPS.find((candidate) => candidate.includes("/add"));
 
-    expect(tip).toBe("Tip: /connect to seamlessly add MCP Connections to your agent");
+    expect(tip).toBe("Use /add to install integrations from the registry.");
     if (tip === undefined) return;
 
     const line = buildAgentHeader({
@@ -150,7 +154,7 @@ describe("buildAgentHeader", () => {
     }).at(-1);
 
     expect(stripAnsi(line ?? "")).toBe(` ${tip}`);
-    expect(line).toContain(colorTheme.colors.blue("/connect"));
+    expect(line).toContain(colorTheme.colors.blue("/add"));
   });
 
   it("keeps the discovery-diagnostics line when the compiler reported problems", () => {

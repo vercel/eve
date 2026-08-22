@@ -1,4 +1,4 @@
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 
 export const WEB_SEARCH_TOOL_NAME = "web_search";
 
@@ -7,7 +7,7 @@ interface WebSearchEventOrder {
   readonly resultIndex: number;
 }
 
-export function narratedWebSearchOrder(events: readonly HandleMessageStreamEvent[]): boolean {
+export function narratedWebSearchOrder(events: readonly MessageStreamEvent[]): boolean {
   const order = webSearchEventOrder(events);
   return (
     order !== undefined &&
@@ -16,7 +16,7 @@ export function narratedWebSearchOrder(events: readonly HandleMessageStreamEvent
   );
 }
 
-export function unNarratedWebSearchOrder(events: readonly HandleMessageStreamEvent[]): boolean {
+export function unNarratedWebSearchOrder(events: readonly MessageStreamEvent[]): boolean {
   const order = webSearchEventOrder(events);
   return (
     order !== undefined &&
@@ -26,7 +26,7 @@ export function unNarratedWebSearchOrder(events: readonly HandleMessageStreamEve
 }
 
 function webSearchEventOrder(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
 ): WebSearchEventOrder | undefined {
   const requests = events.flatMap((event, eventIndex) => {
     if (event.type !== "actions.requested") return [];
@@ -58,7 +58,7 @@ function webSearchEventOrder(
 }
 
 function preToolNarrationExists(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
   requestIndex: number,
 ): boolean {
   return events
@@ -73,7 +73,7 @@ function preToolNarrationExists(
 }
 
 function finalMessageFollowsResult(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
   resultIndex: number,
 ): boolean {
   return events

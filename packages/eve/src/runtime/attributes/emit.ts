@@ -39,7 +39,7 @@ let WARNED_ABOUT_TAG_FAILURE = false;
  * - `undefined` entries are dropped so callers can build attribute
  *   maps with optional fields (`$eve.subagent` is only present on
  *   subagent roots, for example).
- * - Numbers are stringified (the runtime stores all values as strings).
+ * - Numbers and booleans are stringified (the runtime stores all values as strings).
  * - Strings are truncated to {@link EVE_ATTRIBUTE_VALUE_MAX_BYTES} via
  *   {@link truncateForTag} so a long free-form value (e.g. `$eve.title`)
  *   can never trip the runtime's per-value byte budget.
@@ -68,6 +68,7 @@ export async function setEveAttributes(attrs: Record<string, EveAttributeValue>)
     const { setAttributes } = await import("#compiled/@workflow/core/index.js");
     await setAttributes(normalized, { allowReservedAttributes: true });
   } catch (error) {
+    if (isTerminalRunAttributeError(error)) return;
     if (!WARNED_ABOUT_TAG_FAILURE) {
       WARNED_ABOUT_TAG_FAILURE = true;
       console.warn("[eve] setEveAttributes failed; suppressing further warnings this process.", {
@@ -76,4 +77,11 @@ export async function setEveAttributes(attrs: Record<string, EveAttributeValue>)
       });
     }
   }
+}
+
+function isTerminalRunAttributeError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.startsWith("Cannot set attributes on run in terminal state")
+  );
 }

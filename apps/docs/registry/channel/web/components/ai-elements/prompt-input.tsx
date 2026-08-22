@@ -33,7 +33,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { ChatStatus, FileUIPart, SourceDocumentUIPart } from "ai";
-import { ArrowUpIcon, ImageIcon, Monitor, PlusIcon, SquareIcon, XIcon } from "lucide-react";
+import { ArrowUpIcon, ImageIcon, Monitor, PlusIcon, XIcon } from "lucide-react";
 import { nanoid } from "nanoid";
 import type {
   ChangeEvent,
@@ -1142,7 +1142,7 @@ export const PromptInputSubmit = ({
   if (status === "submitted") {
     Icon = <Spinner />;
   } else if (status === "streaming") {
-    Icon = <SquareIcon className="size-4" />;
+    Icon = <span aria-hidden className="size-2.5 rounded-[2px] bg-current" />;
   } else if (status === "error") {
     Icon = <XIcon className="size-4" />;
   }

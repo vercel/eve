@@ -11,11 +11,9 @@
     "test:e2e": "eve eval --strict"
   },
   "dependencies": {
-    "@opentelemetry/core": "catalog:",
-    "@opentelemetry/sdk-trace-base": "catalog:",
-    "@vercel/otel": "catalog:",
-    "eve": "workspace:*",
-    "zod": "catalog:"
+    "@eve-e2e/config": "workspace:*",
+    "@workflow/world-postgres": "catalog:",
+    "eve": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",

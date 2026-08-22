@@ -1,3 +1,5 @@
+import { asSchema } from "ai";
+
 import type {
   StandardJSONSchemaV1,
   StandardSchemaV1,
@@ -16,11 +18,12 @@ export type ToolSchema<Input = unknown, Output = Input> = StandardSchemaV1<Input
   StandardJSONSchemaV1<Input, Output>;
 
 /**
- * Any value accepted at a schema boundary: a live {@link ToolSchema}, a
- * JSON-Schema-capable Standard Schema, or plain JSON Schema data. Plain data
- * is runtime-validated by {@link parseJsonObject} during conversion.
+ * Any value accepted at a schema boundary: a live {@link ToolSchema}, a Zod 3
+ * Standard Schema, a JSON-Schema-capable Standard Schema, or plain JSON Schema
+ * data. Plain data is runtime-validated by {@link parseJsonObject} during
+ * conversion.
  */
-export type ToolSchemaSource = StandardJSONSchemaV1 | Record<string, unknown>;
+export type ToolSchemaSource = StandardJSONSchemaV1 | StandardSchemaV1 | Record<string, unknown>;
 
 type SchemaDirection = "input" | "output";
 
@@ -88,14 +91,9 @@ export function serializeOutputSchema<T extends ToolSchemaSource | null | undefi
  * Standard Schema validation plus JSON Schema emission.
  */
 export function isToolSchema(value: unknown): value is ToolSchema {
-  if (typeof value !== "object" || value === null || !("~standard" in value)) {
-    return false;
-  }
+  const properties = getStandardSchemaProperties(value);
+  if (properties === undefined) return false;
 
-  const standard = (value as Record<string, unknown>)["~standard"];
-  if (typeof standard !== "object" || standard === null) return false;
-
-  const properties = standard as Record<string, unknown>;
   const jsonSchema = properties.jsonSchema;
   return (
     typeof properties.validate === "function" &&
@@ -195,13 +193,48 @@ function serializeSchema(
  * wire form.
  */
 function toJsonObject(source: ToolSchemaSource, direction: SchemaDirection): JsonObject {
-  const raw = isStandardJsonSchema(source)
-    ? parseJsonObject(source["~standard"].jsonSchema[direction]({ target: JSON_SCHEMA_TARGET }))
-    : parseJsonObject(source);
+  const standard = getStandardSchemaProperties(source);
+  const jsonSchema = standard?.jsonSchema;
+  const emit =
+    typeof jsonSchema === "object" && jsonSchema !== null
+      ? (jsonSchema as Record<string, unknown>)[direction]
+      : undefined;
+  const vendor = typeof standard?.vendor === "string" ? standard.vendor : "unknown";
+  if (standard !== undefined && typeof emit !== "function" && vendor === "zod") {
+    if (direction === "input") {
+      const schema = asSchema(source as Parameters<typeof asSchema>[0]);
+      const { $schema: _schemaVersion, ...canonical } = parseJsonObject(schema.jsonSchema);
+      return canonical;
+    }
+
+    throw new Error(
+      "Zod 3 cannot emit an output JSON Schema. Upgrade to Zod 4 or provide a plain JSON Schema object.",
+    );
+  }
+
+  if (standard !== undefined && typeof emit !== "function") {
+    throw new Error(
+      `Standard Schema vendor "${vendor}" does not support JSON Schema conversion. Provide a Standard Schema implementation with JSON Schema conversion or a plain JSON Schema object.`,
+    );
+  }
+
+  const raw =
+    standard === undefined
+      ? parseJsonObject(source)
+      : parseJsonObject(
+          (emit as StandardJSONSchemaV1.Converter[SchemaDirection])({
+            target: JSON_SCHEMA_TARGET,
+          }),
+        );
   const { $schema: _schemaVersion, ...canonical } = raw;
   return canonical;
 }
 
-function isStandardJsonSchema(value: unknown): value is StandardJSONSchemaV1 {
-  return value !== null && typeof value === "object" && "~standard" in value;
+function getStandardSchemaProperties(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== "object" || value === null || !("~standard" in value)) return undefined;
+
+  const standard = (value as Record<string, unknown>)["~standard"];
+  return typeof standard === "object" && standard !== null
+    ? (standard as Record<string, unknown>)
+    : undefined;
 }

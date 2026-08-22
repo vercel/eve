@@ -4,7 +4,7 @@ import { join, posix as pathPosix } from "node:path";
 
 import type {
   CompiledAgentManifest,
-  CompiledAgentNodeManifest,
+  CompiledAgentResources,
   CompiledSkillDefinition,
   CompiledWorkspaceResourceRoot,
 } from "#compiler/manifest.js";
@@ -38,14 +38,27 @@ export async function materializeWorkspaceResources(input: {
     manifest: input.manifest,
   });
   const subagents = await Promise.all(
-    input.manifest.subagents.map(async (subagent) => ({
-      ...subagent,
-      agent: await materializeNode({
-        nodeId: subagent.nodeId,
-        resourcesRoot,
-        manifest: subagent.agent,
-      }),
-    })),
+    input.manifest.subagents.map(async (subagent) => {
+      if (subagent.configResolver === undefined) {
+        return {
+          ...subagent,
+          agent: await materializeNode({
+            nodeId: subagent.nodeId,
+            resourcesRoot,
+            manifest: subagent.agent,
+          }),
+        };
+      }
+      return {
+        ...subagent,
+        agent: await materializeNode({
+          nodeId: subagent.nodeId,
+          resourcesRoot,
+          manifest: subagent.agent,
+        }),
+        configResolver: subagent.configResolver,
+      };
+    }),
   );
 
   return {
@@ -59,7 +72,7 @@ export async function materializeWorkspaceResources(input: {
 }
 
 function createResourceRoot(
-  manifest: CompiledAgentNodeManifest,
+  manifest: CompiledAgentResources,
   nodeId: string,
   contentHash: string | undefined,
 ): CompiledWorkspaceResourceRoot {
@@ -73,11 +86,11 @@ function createResourceRoot(
   };
 }
 
-async function materializeNode(input: {
-  readonly manifest: CompiledAgentNodeManifest;
+async function materializeNode<TManifest extends CompiledAgentResources>(input: {
+  readonly manifest: TManifest;
   readonly nodeId: string;
   readonly resourcesRoot: string;
-}): Promise<CompiledAgentNodeManifest> {
+}): Promise<TManifest> {
   const nodeRoot = join(input.resourcesRoot, input.nodeId);
   await mkdir(nodeRoot, { recursive: true });
 

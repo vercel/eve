@@ -7,17 +7,17 @@
  */
 
 import type { PromptCommandSpec } from "./prompt-commands.js";
+import { PROMPT_COMMANDS } from "./prompt-commands.js";
 import { sliceVisible, visibleLength } from "#cli/ui/terminal-text.js";
 import type { Theme } from "./theme.js";
 import { renderCursorRow } from "#setup/cli/option-row.js";
 
 /**
  * The typeahead keeps the list scannable; extra matches window around the
- * cursor. Sized to hold the full command registry so a bare `/` never scrolls
- * a command (e.g. `/exit`) out of view — windowing is for longer future lists.
- * Keep this >= the number of entries in `PROMPT_COMMANDS`.
+ * cursor. Derived from the registry so a bare `/` never scrolls a command
+ * (e.g. `/exit`) out of view — windowing is for longer future lists.
  */
-const MAX_VISIBLE_SUGGESTIONS = 10;
+const MAX_VISIBLE_SUGGESTIONS = PROMPT_COMMANDS.length;
 
 export interface CommandTypeaheadState {
   /** The prompt text the matches were derived from. */

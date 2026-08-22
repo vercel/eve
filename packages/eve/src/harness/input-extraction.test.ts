@@ -12,7 +12,7 @@ describe("extractQuestionInputRequests", () => {
       toolCalls: [
         {
           input: {
-            options: [{ id: "yes", label: "Yes" }],
+            options: [{ id: "yes", label: "Approve" }],
             prompt: "Continue?",
           },
           toolCallId: "call-1",
@@ -27,14 +27,15 @@ describe("extractQuestionInputRequests", () => {
         action: {
           callId: "call-1",
           input: {
-            options: [{ id: "yes", label: "Yes" }],
+            options: [{ id: "yes", label: "Approve" }],
             prompt: "Continue?",
           },
           kind: "tool-call",
           toolName: "ask_question",
         },
         display: "select",
-        options: [{ id: "yes", label: "Yes" }],
+        kind: "question",
+        options: [{ id: "yes", label: "Approve" }],
         prompt: "Continue?",
         requestId: "call-1",
       },
@@ -117,9 +118,10 @@ describe("extractToolApprovalInputRequests", () => {
         },
         allowFreeform: false,
         display: "confirmation",
+        kind: "tool-approval",
         options: [
-          { id: "approve", label: "Yes" },
-          { id: "deny", label: "No" },
+          { id: "approve", label: "Approve" },
+          { id: "cancel", label: "Cancel" },
         ],
         prompt: "Approve tool call: bash",
         requestId: "approval-1",
@@ -154,9 +156,10 @@ describe("extractToolApprovalInputRequests", () => {
         },
         allowFreeform: false,
         display: "confirmation",
+        kind: "tool-approval",
         options: [
-          { id: "approve", label: "Yes" },
-          { id: "deny", label: "No" },
+          { id: "approve", label: "Approve" },
+          { id: "cancel", label: "Cancel" },
         ],
         prompt: "Approve tool call: bash",
         requestId: "approval-1",

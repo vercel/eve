@@ -132,6 +132,7 @@ function createPreparedHost(): PreparedDevelopmentApplicationHost {
       manifest: {
         channels: [],
         config: { name: "weather-agent" },
+        extensionMounts: [],
         sandbox: null,
         subagents: [],
       },
@@ -215,6 +216,7 @@ describe("application Nitro creation", () => {
     const { createDevelopmentApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
     const preparedHost = createPreparedHost();
+    preparedHost.compiledArtifacts.instrumentationLayout = { kind: "file" };
     preparedHost.compiledArtifacts.instrumentationPluginPath = "/app/instrumentation.mjs";
 
     await createDevelopmentApplicationNitro(preparedHost);
@@ -224,6 +226,29 @@ describe("application Nitro creation", () => {
     expect(plugins).not.toEqual(
       expect.arrayContaining([expect.stringContaining("local-tracing-runtime-plugin.ts")]),
     );
+  });
+
+  it("lets the provider pipeline own default local tracing", async () => {
+    const { createDevelopmentApplicationNitro } =
+      await import("#internal/nitro/host/create-application-nitro.js");
+
+    for (const slots of ["rows", "local"] as const) {
+      const nitroStub = createNitroStub();
+      createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
+      const preparedHost = createPreparedHost();
+      preparedHost.compiledArtifacts.instrumentationLayout = {
+        kind: "directory",
+        slots: [slots],
+      };
+      preparedHost.compiledArtifacts.instrumentationPluginPath = "/app/instrumentation.mjs";
+
+      await createDevelopmentApplicationNitro(preparedHost);
+
+      const plugins = createNitroMock.mock.calls.at(-1)?.[0].plugins as string[];
+      expect(plugins).not.toEqual(
+        expect.arrayContaining([expect.stringContaining("local-tracing-runtime-plugin.ts")]),
+      );
+    }
   });
 
   it("preserves workflow bundle side effects and skips workflow transform for cached bundles", async () => {
@@ -543,6 +568,47 @@ describe("application Nitro creation", () => {
       1,
     );
     expect(traceDeps).not.toContain("eve");
+  });
+
+  it("fully traces dependencies requested by mounted extensions", async () => {
+    const nitroStub = createNitroStub();
+    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
+
+    const { createProductionApplicationNitro } =
+      await import("#internal/nitro/host/create-application-nitro.js");
+    const preparedHost = createPreparedHost();
+    preparedHost.compileResult.manifest.extensionMounts = [
+      {
+        externalDependencies: ["zod", "sharp"],
+        mountLogicalPath: "extensions/layout.ts",
+        mountSourceId: "extensions/layout.ts",
+        namespace: "layout",
+        packageName: "layout-extension",
+        packageNamespace: "layout-extension",
+        sourceRoot: process.cwd(),
+      },
+    ];
+    preparedHost.compileResult.manifest.config = {
+      ...preparedHost.compileResult.manifest.config,
+      build: { externalDependencies: ["sharp"] },
+    } as typeof preparedHost.compileResult.manifest.config;
+
+    await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
+
+    const traceDeps = createNitroMock.mock.calls[0]?.[0].traceDeps;
+    expect(traceDeps).toEqual(expect.arrayContaining(["zod*", "sharp", "sharp*"]));
+    const plugins = createNitroMock.mock.calls[0]?.[0].rolldownConfig.plugins;
+    const externalPlugin = plugins.find(
+      (plugin: { name?: string }) => plugin.name === "eve-extension-external-dependency",
+    );
+    expect(externalPlugin.resolveId("zod")).toEqual({
+      external: true,
+      id: "zod",
+    });
+    expect(createNitroMock.mock.calls[0]?.[0].traceOpts.nft.paths).toEqual({
+      zod: expect.stringMatching(/zod[/\\].*index\.(?:c?js|mjs)$/),
+      sharp: expect.stringMatching(/sharp[/\\]lib[/\\]index\.js$/),
+    });
   });
 
   it("traces configured hosted dependencies from subagent configs", async () => {

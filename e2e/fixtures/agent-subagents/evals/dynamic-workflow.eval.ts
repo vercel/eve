@@ -17,6 +17,7 @@ function isFanOutProgram(input: unknown): boolean {
 
 /** Dynamic Workflow smoke: sandboxed JavaScript fans out durable children. */
 export default defineEval({
+  tags: ["real-model"],
   description:
     "Dynamic Workflow smoke: model-authored JavaScript fans out two local subagent calls and combines their results.",
   async test(t) {

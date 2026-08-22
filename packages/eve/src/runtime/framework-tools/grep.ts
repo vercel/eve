@@ -44,7 +44,7 @@ export const GREP_INPUT_SCHEMA = z.strictObject({
     .string()
     .describe(
       "The directory or file to search in. Defaults to /workspace. " +
-        "Must be an absolute path. Omit to use the default.",
+        "Must be an absolute path or begin with $HOME/. Omit to use the default.",
     )
     .optional(),
   pattern: z
@@ -84,8 +84,6 @@ export const GREP_TOOL_DEFINITION: ResolvedToolDefinition = {
     '- Supports full regex syntax (e.g. "log.*Error", "function\\s+\\w+").',
     '- Filter files by pattern with the glob parameter (e.g. "*.js", "*.{ts,tsx}").',
     "- Returns matching lines with file paths and line numbers.",
-    "- Use this tool when you need to find files containing specific patterns.",
-    "- Use the glob tool instead if you only need to find files by name.",
     "- Call this tool in parallel when you have multiple independent searches.",
     "- Any line longer than 2000 characters is truncated.",
   ].join("\n"),

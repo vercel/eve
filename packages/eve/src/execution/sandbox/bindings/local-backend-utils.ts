@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 
 import { bufferToStream, streamToBuffer } from "#execution/sandbox/stream-utils.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
-import { resolveSandboxSeedFilePath } from "#shared/skill-paths.js";
+import { resolveSandboxModelPath } from "#shared/skill-paths.js";
 import type { SandboxSeedFile } from "#shared/sandbox-backend.js";
 import type {
   InternalSandboxSession,
@@ -116,7 +116,7 @@ export async function writeSandboxSeedFiles(
   seedFiles: ReadonlyArray<SandboxSeedFile>,
 ): Promise<void> {
   for (const file of seedFiles) {
-    const path = await resolveSandboxSeedFilePath({
+    const path = await resolveSandboxModelPath({
       path: file.path,
       sandbox: session,
     });

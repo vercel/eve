@@ -1,115 +1,91 @@
 "use client";
 
 import type { UserContent } from "ai";
-import { Client, type HandleMessageStreamEvent } from "eve/client";
 import { useEveAgent } from "eve/react";
-import { AlertCircleIcon } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { AlertCircleIcon, BrainIcon, PlusIcon, SquareIcon } from "lucide-react";
+import { useState } from "react";
 import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
+import { Message, MessageContent } from "@/components/ai-elements/message";
 import {
   PromptInput,
+  PromptInputButton,
   type PromptInputMessage,
   PromptInputSubmit,
   PromptInputTextarea,
 } from "@/components/ai-elements/prompt-input";
+import { Shimmer } from "@/components/ai-elements/shimmer";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { AgentMessage } from "./agent-message";
 
 const AGENT_NAME = "eve-agent";
 
-type AgentStatus = ReturnType<typeof useEveAgent>["status"];
-type CancellationState = "idle" | "requested" | "cancelling";
-
-type Cancellation = {
-  requested: boolean;
-  sentTurnId?: string;
-  turnId?: string;
-};
-
-export function AgentChat() {
-  const [session] = useState(() =>
-    new Client({ host: "", preserveCompletedSessions: true }).session(),
-  );
-  const cancellationRef = useRef<Cancellation>({ requested: false });
+export function AgentChat({
+  sessionId,
+  sessionless = false,
+}: {
+  readonly sessionId?: string;
+  readonly sessionless?: boolean;
+}) {
   const [cancellationError, setCancellationError] = useState<string>();
-  const [cancellationState, setCancellationState] = useState<CancellationState>("idle");
-
-  const cancelTurn = useCallback(
-    (turnId: string) => {
-      const cancellation = cancellationRef.current;
-      if (!cancellation.requested || cancellation.sentTurnId === turnId) {
-        return;
+  const agent = useEveAgent({
+    initialSession:
+      sessionId === undefined
+        ? undefined
+        : {
+            sessionId,
+            streamIndex: 0,
+          },
+    resume: sessionId !== undefined,
+    onSessionChange(session) {
+      if (sessionId === undefined && session !== undefined) {
+        // Next patches window.history to navigate, which would detach the active stream.
+        History.prototype.replaceState.call(
+          window.history,
+          window.history.state,
+          "",
+          `/s/${encodeURIComponent(session.sessionId)}`,
+        );
       }
-
-      cancellation.sentTurnId = turnId;
-      setCancellationState("cancelling");
-
-      void session.cancel({ turnId }).catch((error: unknown) => {
-        if (cancellationRef.current !== cancellation) {
-          return;
-        }
-
-        cancellation.requested = false;
-        cancellation.sentTurnId = undefined;
-        setCancellationError(toErrorMessage(error));
-        setCancellationState("idle");
-      });
     },
-    [session],
-  );
+  });
 
-  const handleEvent = useCallback(
-    (event: HandleMessageStreamEvent) => {
-      if (event.type !== "turn.started") {
-        return;
-      }
-
-      const cancellation = cancellationRef.current;
-      cancellation.turnId = event.data.turnId;
-      cancelTurn(event.data.turnId);
-    },
-    [cancelTurn],
-  );
-
-  const agent = useEveAgent({ onEvent: handleEvent, session });
   const isBusy = agent.status === "submitted" || agent.status === "streaming";
+  const isRestoring = sessionId !== undefined && agent.events.length === 0 && isBusy;
   const isEmpty = agent.data.messages.length === 0;
-  const errorMessage = cancellationError ?? agent.error?.message;
-  const submitStatus = isBusy && cancellationState !== "idle" ? "submitted" : agent.status;
-
-  const prepareTurn = () => {
-    cancellationRef.current = { requested: false };
-    setCancellationError(undefined);
-    setCancellationState("idle");
-  };
+  const lastMessage = agent.data.messages.at(-1);
+  const isPendingAssistantShell =
+    lastMessage?.role === "assistant" &&
+    lastMessage.parts.every((part) => part.type === "step-start");
+  const showPendingThinking =
+    isBusy &&
+    (agent.status === "submitted" || lastMessage?.role !== "assistant" || isPendingAssistantShell);
+  const turnFailure = isBusy ? undefined : getLatestTurnFailure(agent.events);
+  const errorMessage = cancellationError ?? agent.error?.message ?? turnFailure;
+  const hasConversationContent = sessionless || !isEmpty || errorMessage !== undefined;
+  const showConversationLayout = isRestoring || hasConversationContent;
+  const activeSessionId = sessionId ?? agent.session?.sessionId;
 
   const requestCancellation = () => {
-    if (!isBusy || cancellationState !== "idle") {
-      return;
-    }
-
-    const cancellation = cancellationRef.current;
-    cancellation.requested = true;
     setCancellationError(undefined);
-    setCancellationState("requested");
-
-    if (cancellation.turnId !== undefined) {
-      cancelTurn(cancellation.turnId);
-    }
+    void agent.cancel().catch((error: unknown) => {
+      setCancellationError(toErrorMessage(error));
+    });
   };
 
   const handleSubmit = async (message: PromptInputMessage) => {
     const text = message.text.trim();
-    if ((text.length === 0 && message.files.length === 0) || isBusy) return;
+    if ((text.length === 0 && message.files.length === 0) || isRestoring) return;
 
-    prepareTurn();
+    setCancellationError(undefined);
+    const options = isBusy ? { turnPolicy: "steer" as const } : undefined;
 
     if (message.files.length === 0) {
-      await agent.send({ message: text });
+      await agent.send(text, options);
       return;
     }
 
@@ -126,77 +102,140 @@ export function AgentChat() {
       });
     }
 
-    await agent.send({ message: parts });
+    await agent.send(parts, options);
   };
 
   const composer = (
     <PromptInput onSubmit={handleSubmit}>
-      <PromptInputTextarea placeholder="Send a message…" />
-      <PromptInputSubmit onStop={requestCancellation} status={submitStatus} />
+      <PromptInputTextarea disabled={isRestoring} placeholder="Send a message…" />
+      {isBusy && !isRestoring ? (
+        <PromptInputButton
+          aria-label="Stop"
+          className="absolute right-12 bottom-2.5 rounded-full"
+          onClick={requestCancellation}
+          variant="default"
+        >
+          <SquareIcon className="size-3 fill-current" />
+        </PromptInputButton>
+      ) : null}
+      <PromptInputSubmit disabled={isRestoring} status={isBusy ? undefined : agent.status} />
     </PromptInput>
   );
 
   return (
     <main className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-      {isEmpty ? null : (
-        <header className="flex h-14 shrink-0 items-center justify-center gap-3 pl-4 pr-2">
-          <span className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-muted-foreground text-sm">{AGENT_NAME}</span>
-            <StatusDot status={agent.status} />
-          </span>
-        </header>
-      )}
-
-      {errorMessage ? (
-        <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-2 sm:px-6">
-          <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm">
-            <AlertCircleIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
-            <div>
-              <p className="font-medium">Request failed</p>
-              <p className="mt-0.5 text-muted-foreground">{errorMessage}</p>
-            </div>
-          </div>
-        </div>
+      {showConversationLayout ? (
+        <ChatHeader canStartNewChat={activeSessionId !== undefined} />
       ) : null}
 
-      {isEmpty ? null : (
-        <Conversation className="min-h-0 flex-1">
-          <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 py-6 sm:px-6">
-            {agent.data.messages.map((message, index) => (
-              <AgentMessage
-                canRespond={!isBusy}
-                isStreaming={
-                  agent.status === "streaming" && index === agent.data.messages.length - 1
-                }
-                key={message.id}
-                message={message}
-                onInputResponses={(inputResponses) => {
-                  prepareTurn();
-                  return agent.send({ inputResponses });
-                }}
-              />
-            ))}
+      {showConversationLayout ? (
+        <Conversation
+          className="min-h-0 flex-1"
+          initial={sessionId === undefined ? undefined : false}
+          resize={activeSessionId === undefined ? "smooth" : "instant"}
+          scrollRestorationKey={
+            isEmpty || activeSessionId === undefined
+              ? undefined
+              : `eve:web-chat-scroll:${activeSessionId}`
+          }
+        >
+          <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-20 pb-36 sm:px-6">
+            {agent.data.messages.map((message, index) =>
+              showPendingThinking &&
+              isPendingAssistantShell &&
+              message.id === lastMessage.id ? null : (
+                <AgentMessage
+                  canRespond={!isBusy}
+                  isStreaming={
+                    agent.status === "streaming" && index === agent.data.messages.length - 1
+                  }
+                  key={message.id}
+                  message={message}
+                  onInputResponses={(inputResponses) => {
+                    setCancellationError(undefined);
+                    return agent.respond(inputResponses);
+                  }}
+                />
+              ),
+            )}
+            {showPendingThinking ? <PendingThinking /> : null}
+            {errorMessage ? <ErrorMessage message={errorMessage} /> : null}
           </ConversationContent>
           <ConversationScrollButton />
         </Conversation>
-      )}
+      ) : null}
 
       <div
         className={cn(
           "mx-auto w-full px-4 sm:px-6",
-          isEmpty
-            ? "flex max-w-xl flex-1 flex-col items-center justify-center gap-8 pb-[10vh]"
-            : "max-w-3xl shrink-0 pb-6",
+          showConversationLayout
+            ? "fixed bottom-0 left-1/2 z-20 max-w-3xl -translate-x-1/2 bg-gradient-to-t from-background via-background to-transparent pt-4 pb-6"
+            : "flex max-w-xl flex-1 flex-col items-center justify-center gap-8 pb-[10vh]",
         )}
       >
-        {isEmpty ? (
+        {showConversationLayout ? null : (
           <div className="flex flex-col items-center gap-3 text-center">
             <h1 className="font-medium text-5xl tracking-tighter">{AGENT_NAME}</h1>
           </div>
-        ) : null}
+        )}
         <div className="w-full">{composer}</div>
       </div>
     </main>
+  );
+}
+
+function ErrorMessage({ message }: { readonly message: string }) {
+  return (
+    <Message className="max-w-full" from="assistant">
+      <MessageContent>
+        <div
+          className="flex w-full items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm"
+          role="alert"
+        >
+          <AlertCircleIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
+          <div>
+            <p className="font-medium">Request failed</p>
+            <p className="mt-0.5 text-muted-foreground">{message}</p>
+          </div>
+        </div>
+      </MessageContent>
+    </Message>
+  );
+}
+
+function ChatHeader({ canStartNewChat }: { readonly canStartNewChat: boolean }) {
+  return (
+    <header className="pointer-events-none fixed top-0 right-0 left-0 z-20 h-14">
+      <div className="relative mx-auto flex h-full w-full max-w-3xl items-center justify-center bg-background px-24">
+        <span className="truncate text-muted-foreground text-sm">{AGENT_NAME}</span>
+        {canStartNewChat ? (
+          <Button
+            aria-label="Start a new chat"
+            className="pointer-events-auto fixed top-2 right-6"
+            onClick={() => window.location.assign("/s")}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <PlusIcon className="size-4" />
+            <span className="hidden sm:inline">New chat</span>
+          </Button>
+        ) : null}
+      </div>
+    </header>
+  );
+}
+
+function PendingThinking() {
+  return (
+    <Message aria-live="polite" from="assistant">
+      <MessageContent>
+        <div className="mb-4 flex w-full items-center gap-2 text-muted-foreground text-sm">
+          <BrainIcon className="size-4" />
+          <Shimmer duration={1}>Thinking</Shimmer>
+        </div>
+      </MessageContent>
+    </Message>
   );
 }
 
@@ -204,28 +243,26 @@ function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unable to cancel the response.";
 }
 
-function StatusDot({ status }: { readonly status: AgentStatus }) {
-  const isLive = status === "submitted" || status === "streaming";
-  const tone =
-    status === "error"
-      ? "bg-destructive"
-      : isLive
-        ? "bg-emerald-500"
-        : status === "ready"
-          ? "bg-muted-foreground"
-          : "bg-muted-foreground/50";
+function getLatestTurnFailure(
+  events: ReturnType<typeof useEveAgent>["events"],
+): string | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
 
-  return (
-    <span className="relative flex size-1">
-      {isLive ? (
-        <span
-          className={cn(
-            "absolute inline-flex size-full animate-ping rounded-full opacity-75",
-            tone,
-          )}
-        />
-      ) : null}
-      <span className={cn("relative inline-flex size-1 rounded-full transition-colors", tone)} />
-    </span>
-  );
+    if (event.type === "turn.failed") {
+      return event.data.code === "MODEL_CALL_FAILED"
+        ? "The model is temporarily unavailable. Please try again."
+        : event.data.message;
+    }
+
+    if (event.type === "turn.completed" || event.type === "turn.cancelled") {
+      return undefined;
+    }
+
+    if (event.type === "message.received") {
+      return undefined;
+    }
+  }
+
+  return undefined;
 }

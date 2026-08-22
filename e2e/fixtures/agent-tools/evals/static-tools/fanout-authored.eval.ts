@@ -17,6 +17,7 @@ const LABELS = [
 ] as const;
 
 export default defineEval({
+  tags: ["real-model"],
   description: "Static tools smoke: ten authored tool calls begin concurrently.",
   async test(t) {
     const turn = await t.send(

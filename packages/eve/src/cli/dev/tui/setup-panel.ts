@@ -27,7 +27,7 @@ import {
   type SearchActionOption,
   type SelectState,
 } from "#setup/cli/select-state.js";
-import type { SelectNotice } from "#setup/prompter.js";
+import type { SelectMetadata, SelectNotice } from "#setup/prompter.js";
 import type { ModelSettingsRequest } from "#setup/flows/model.js";
 
 import {
@@ -56,6 +56,10 @@ export type SetupPanelOption = PromptOption<string>;
 
 interface SetupQuestionPanelBase {
   message: string;
+  /** Inert context rendered beneath the heading and above the controls. */
+  description?: string;
+  /** Labeled facts rendered beneath the description and above the controls. */
+  metadata?: readonly SelectMetadata[];
   error?: string;
   /** Outcome lines from earlier menu laps, shown beneath the options. */
   notices?: readonly SelectNotice[];
@@ -293,7 +297,9 @@ function renderFlowPanelStatus(status: FlowPanelStatus, theme: Theme): string {
  */
 export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: number): string[] {
   const c = theme.colors;
-  const rows: string[] = [c.dim(theme.glyph.hrule.repeat(Math.max(1, width)))];
+  // Avoid the terminal's final column: writing into it can trigger an implicit
+  // wrap that the live-region row counter cannot observe, leaking old frames.
+  const rows: string[] = [c.dim(theme.glyph.hrule.repeat(Math.max(1, width - 1)))];
   if (state.title.length > 0) {
     rows.push(`  ${c.bold(state.title)}`);
   }
@@ -301,8 +307,12 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
 
   const recent = state.lines.slice(-FLOW_PANEL_LINE_CAP);
   for (const line of recent) {
-    const body = line.tone === "info" ? c.dim(line.text) : line.text;
-    rows.push(`  ${toneGlyph(line.tone, theme)} ${body}`);
+    const text = line.text.split("\n");
+    for (const [index, part] of text.entries()) {
+      const body = line.tone === "info" ? c.dim(part) : part;
+      const prefix = index === 0 ? `${toneGlyph(line.tone, theme)} ` : "  ";
+      rows.push(`  ${prefix}${body}`);
+    }
   }
   if (recent.length > 0) {
     rows.push("");
@@ -319,14 +329,17 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
     case "status":
       rows.push(`  ${renderFlowPanelStatus(state.content.status, theme)}`);
       if (state.content.preview !== undefined) {
-        rows.push(`    ${c.dim(state.content.preview)}`);
+        for (const line of state.content.preview.split("\n")) {
+          rows.push(`    ${c.dim(line)}`);
+        }
       }
       break;
-    case "preview":
-      rows.push(
-        `  ${renderIndicator(state.content.indicator, theme)} ${c.dim(state.content.text)}`,
-      );
+    case "preview": {
+      const [first, ...rest] = state.content.text.split("\n");
+      rows.push(`  ${renderIndicator(state.content.indicator, theme)} ${c.dim(first ?? "")}`);
+      for (const line of rest) rows.push(`    ${c.dim(line)}`);
       break;
+    }
     case "idle":
       // A flow between phases must never look dead: boxes run subprocesses
       // without narrating every gap, so the panel keeps a live pulse.
@@ -797,6 +810,23 @@ export function renderSelectQuestion(
 
   const railed = isRailedSearch(presentation);
   const rows = selectMessageRows(state.message, presentation.layout, theme);
+  if (state.description !== undefined || state.metadata !== undefined) {
+    if (rows.at(-1) === "") rows.pop();
+    if (state.description !== undefined) {
+      for (const line of wrapVisibleLine(state.description, Math.max(1, width - 4))) {
+        rows.push(`  ${c.dim(line)}`);
+      }
+    }
+    for (const { label, value } of state.metadata ?? []) {
+      const prefix = `${label}: `;
+      const wrapped = wrapVisibleLine(value, Math.max(1, width - 4 - prefix.length));
+      rows.push(`  ${c.dim(`${prefix}${wrapped[0] ?? ""}`)}`);
+      for (const line of wrapped.slice(1)) {
+        rows.push(`  ${c.dim(`${" ".repeat(prefix.length)}${line}`)}`);
+      }
+    }
+    rows.push("");
+  }
 
   if (presentation.filter !== undefined) {
     // The railed filter line indents one extra cell so its rail sits in the

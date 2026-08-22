@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
 import type { InputRequest } from "#runtime/input/types.js";
-import { createRuntimeToolCallActionFromToolCall } from "#harness/input-requests.js";
+import { createRuntimeToolCallActionFromToolCall } from "#harness/tool-call-action.js";
 
 // Persisted history parts lose AI SDK typing on the storage round trip. The
 // schemas are the single source for the runtime narrowing and the static
@@ -67,12 +67,14 @@ function extractQuestionRequests(input: {
       action: InputRequest["action"];
       allowFreeform?: InputRequest["allowFreeform"];
       display?: InputRequest["display"];
+      kind: InputRequest["kind"];
       options?: InputRequest["options"];
       prompt: InputRequest["prompt"];
       requestId: InputRequest["requestId"];
     } = {
       action,
       display: "text",
+      kind: "question",
       prompt: String(toolInput.prompt),
       requestId: action.callId,
     };
@@ -156,9 +158,10 @@ function extractApprovalRequests(input: {
       action: createRuntimeToolCallActionFromToolCall({ toolCall }),
       allowFreeform: false,
       display: "confirmation",
+      kind: "tool-approval",
       options: [
-        { id: "approve", label: "Yes" },
-        { id: "deny", label: "No" },
+        { id: "approve", label: "Approve" },
+        { id: "cancel", label: "Cancel" },
       ],
       prompt: `Approve tool call: ${toolCall.toolName}`,
       requestId: approval.approvalId,

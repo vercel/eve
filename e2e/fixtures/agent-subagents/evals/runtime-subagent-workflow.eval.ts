@@ -7,6 +7,7 @@ const CHILD_TOKEN = "CHILD_WORKFLOW_TOOL_NOT_AVAILABLE";
  * `agent` child, which should not receive the root-only `Workflow` wrapper.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "Runtime subagent sessions do not receive the root-only Workflow tool.",
   async test(t) {
     await t.send(

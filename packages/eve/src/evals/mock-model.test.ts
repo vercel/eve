@@ -66,6 +66,39 @@ describe("mockModel", () => {
     ]);
   });
 
+  it("keeps framework scaffolding out of authored user messages", async () => {
+    const requests: MockModelRequest[] = [];
+    const agents = "[Agents]\n<agents>\n</agents>";
+    const notice = [
+      "[Pending approvals]",
+      "The following tool calls are awaiting approval and have not executed:",
+      '{"requestId":"approval-1","toolName":"gate"}',
+    ].join("\n");
+    const result = await generateText({
+      messages: [
+        { content: "Run the mixed approval flow.", role: "user" },
+        { content: agents, role: "user" },
+        { content: notice, role: "user" },
+      ],
+      model: mockModel((request) => {
+        requests.push(request);
+        return request.lastUserMessage ?? "missing";
+      }),
+    });
+
+    expect(result.text).toBe("Run the mixed approval flow.");
+    expect(requests[0]).toMatchObject({
+      lastUserMessage: "Run the mixed approval flow.",
+      messages: [
+        { role: "user", text: "Run the mixed approval flow." },
+        { role: "user", text: agents },
+        { role: "user", text: notice },
+      ],
+      userMessageCount: 1,
+      userMessages: ["Run the mixed approval flow."],
+    });
+  });
+
   it("supports deterministic tool-call loops", async () => {
     const execute = vi.fn(async ({ city }: { city: string }) => ({ city, condition: "sunny" }));
     const requests: MockModelRequest[] = [];

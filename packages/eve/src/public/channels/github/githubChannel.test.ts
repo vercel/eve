@@ -6,8 +6,9 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SandboxKey, SessionKey } from "#context/keys.js";
+import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockSandbox, type MockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   clearGitHubInstallationTokenCache,
   seedGitHubInstallationTokenForTests,
@@ -81,21 +82,21 @@ const stubAlsContext = createAlsContext();
 
 function callEvent(
   adapter: ChannelAdapter,
-  event: HandleMessageStreamEvent,
+  event: UnstampedMessageStreamEvent,
   ctx: any,
   sandbox?: MockSandbox,
-): Promise<HandleMessageStreamEvent> {
+): Promise<UnstampedMessageStreamEvent> {
   return contextStorage.run(
     sandbox === undefined ? stubAlsContext : createAlsContext(sandbox),
     () => callAdapterEventHandler(adapter, event, ctx),
   );
 }
 
-function makeEvent<T extends HandleMessageStreamEvent["type"]>(
+function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
   type: T,
   data: unknown,
-): HandleMessageStreamEvent {
-  return { data, type } as HandleMessageStreamEvent;
+): UnstampedMessageStreamEvent {
+  return { data, type } as UnstampedMessageStreamEvent;
 }
 
 function signedRequest(event: string, payload: Record<string, unknown>): Request {
@@ -167,18 +168,15 @@ async function firePost(
   if (!post || !isHttpRouteDefinition(post)) {
     throw new Error("Expected github channel to define a POST route.");
   }
-  const send = vi.fn().mockResolvedValue({ continuationToken: "github:test", id: "s1" });
+  const send = vi.fn().mockResolvedValue({ id: "s1" });
   const waitUntil = vi.fn();
 
   const response = await post.handler(request, {
-    cancel: vi.fn(),
-    reset: vi.fn(),
-    resolveActiveSession: async () => undefined,
-    getSession: vi.fn() as any,
+    attachSession: vi.fn() as any,
+    ...mockChannelContext(send),
     params: {},
-    receive: vi.fn() as any,
+    to: vi.fn() as any,
     requestIp: null,
-    send,
     waitUntil,
   });
 
@@ -213,6 +211,7 @@ describe("githubChannel", () => {
     const channel = githubChannel({
       botName: "testbot",
       credentials: { webhookSecret: SECRET },
+      onComment: (ctx) => ({ auth: defaultGitHubAuth(ctx), title: "GitHub run" }),
     });
     const { send } = await firePost(
       channel,
@@ -232,11 +231,12 @@ describe("githubChannel", () => {
     );
 
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    expect(payload.message).toContain("<github_context>");
-    expect(payload.message).toContain("help me");
-    expect(payload.inputResponses).toBeUndefined();
-    expect(options).toMatchObject({
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(input.message).toBe("help me");
+    expect(input.context).toEqual([expect.stringContaining("<github_context>")]);
+    expect(input.inputResponses).toBeUndefined();
+    expect(continuationToken).toBe("repo:123:issue:5");
+    expect(input).toMatchObject({
       auth: {
         attributes: {
           conversation_kind: "issue",
@@ -248,7 +248,6 @@ describe("githubChannel", () => {
         authenticator: "github-webhook",
         principalId: "github:1",
       },
-      continuationToken: "repo:123:issue:5",
       state: {
         conversationKind: "issue",
         issueNumber: 5,
@@ -256,7 +255,123 @@ describe("githubChannel", () => {
         repo: "eve",
         triggeringCommentId: 10,
       },
+      title: "GitHub run",
     });
+  });
+
+  it("resolves a lazy botName on first dispatch and caches it", async () => {
+    const resolveBotName = vi.fn().mockResolvedValue("testbot");
+    const channel = githubChannel({
+      botName: resolveBotName,
+      credentials: { webhookSecret: SECRET },
+    });
+    const commentRequest = () =>
+      signedRequest(
+        "issue_comment",
+        basePayload({
+          action: "created",
+          comment: {
+            body: "@testbot help me",
+            html_url: "https://github.test/vercel/eve/issues/5#issuecomment-10",
+            id: 10,
+            user: { id: 1, login: "octocat", type: "User" },
+          },
+          issue: { number: 5 },
+        }),
+      );
+
+    const first = await firePost(channel, commentRequest());
+    const second = await firePost(channel, commentRequest());
+
+    expect(first.send).toHaveBeenCalledTimes(1);
+    expect(second.send).toHaveBeenCalledTimes(1);
+    expect(first.send.mock.calls[0]![1].message).toBe("help me");
+    expect(resolveBotName).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a failed botName resolver on the next delivery instead of pinning", async () => {
+    const resolveBotName = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("no request context"))
+      .mockRejectedValueOnce(new Error("no request context"))
+      .mockResolvedValue("testbot");
+    const channel = githubChannel({
+      botName: resolveBotName,
+      credentials: { webhookSecret: SECRET },
+    });
+    const commentRequest = () =>
+      signedRequest(
+        "issue_comment",
+        basePayload({
+          action: "created",
+          comment: {
+            body: "@testbot help me",
+            html_url: "https://github.test/vercel/eve/issues/5#issuecomment-10",
+            id: 10,
+            user: { id: 1, login: "octocat", type: "User" },
+          },
+          issue: { number: 5 },
+        }),
+      );
+
+    const first = await firePost(channel, commentRequest());
+    const second = await firePost(channel, commentRequest());
+
+    expect(first.send).not.toHaveBeenCalled();
+    expect(second.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the credentials' appSlug when botName is not configured", async () => {
+    const channel = githubChannel({
+      credentials: { appSlug: "testbot", webhookSecret: SECRET },
+    });
+    const { send } = await firePost(
+      channel,
+      signedRequest(
+        "issue_comment",
+        basePayload({
+          action: "created",
+          comment: {
+            body: "@testbot help me",
+            html_url: "https://github.test/vercel/eve/issues/5#issuecomment-10",
+            id: 10,
+            user: { id: 1, login: "octocat", type: "User" },
+          },
+          issue: { number: 5 },
+        }),
+      ),
+    );
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]![1].message).toBe("help me");
+  });
+
+  it("keeps GitHub metadata separate from the comment text", async () => {
+    const channel = githubChannel({
+      botName: "testbot",
+      credentials: { webhookSecret: SECRET },
+    });
+    const { send } = await firePost(
+      channel,
+      signedRequest(
+        "issue_comment",
+        basePayload({
+          action: "created",
+          comment: {
+            body: "@testbot Yes",
+            html_url: "https://github.test/vercel/eve/issues/5#issuecomment-10",
+            id: 10,
+            user: { id: 1, login: "octocat", type: "User" },
+          },
+          issue: { number: 5 },
+        }),
+      ),
+    );
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [, input] = send.mock.calls[0]!;
+    expect(input.message).toBe("Yes");
+    expect(input.context).toEqual([expect.stringContaining("<github_context>")]);
   });
 
   it("dispatches Connect-forwarded issue comments without GitHub event headers", async () => {
@@ -282,16 +397,18 @@ describe("githubChannel", () => {
     );
 
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    expect(payload.message).toContain("delivery_id: inferred:issue_comment:10:created");
-    expect(payload.message).toContain("help me");
-    expect(options).toMatchObject({
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(input.message).toBe("help me");
+    expect(input.context).toEqual([
+      expect.stringContaining("delivery_id: inferred:issue_comment:10:created"),
+    ]);
+    expect(continuationToken).toBe("repo:123:issue:5");
+    expect(input).toMatchObject({
       auth: {
         attributes: {
           delivery_id: "inferred:issue_comment:10:created",
         },
       },
-      continuationToken: "repo:123:issue:5",
     });
     expect(warn).toHaveBeenCalledWith(
       "[eve:github.channel] GitHub webhook missing standard headers; inferred metadata from payload",
@@ -405,9 +522,10 @@ describe("githubChannel", () => {
     );
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe("https://github.test/repos/vercel/eve/pulls/7");
-    const [payload] = send.mock.calls[0]!;
-    expect(payload.context?.[0]).toContain("title: Add GitHub context");
-    expect(payload.context?.[0]).toContain("head_sha: head-sha");
+    const [, input] = send.mock.calls[0]!;
+    expect(input.context?.[0]).toContain("<github_context>");
+    expect(input.context?.[1]).toContain("title: Add GitHub context");
+    expect(input.context?.[1]).toContain("head_sha: head-sha");
   });
 
   it("dispatches inline review comments to the review-thread token", async () => {
@@ -433,8 +551,8 @@ describe("githubChannel", () => {
       ),
     );
 
+    expect(send.mock.calls[0]?.[0]).toBe("repo:123:pull:7:review-comment:99");
     expect(send.mock.calls[0]?.[1]).toMatchObject({
-      continuationToken: "repo:123:pull:7:review-comment:99",
       state: {
         conversationKind: "review_thread",
         headSha: "abc123",
@@ -496,10 +614,10 @@ describe("githubChannel", () => {
       expect.objectContaining({ action: "opened", issueNumber: 5 }),
     );
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    expect(payload.message).toContain("Issue opened: #5 Track webhook issue events");
-    expect(options).toMatchObject({
-      continuationToken: "repo:123:issue:5",
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(input.message).toContain("Issue opened: #5 Track webhook issue events");
+    expect(continuationToken).toBe("repo:123:issue:5");
+    expect(input).toMatchObject({
       state: {
         conversationKind: "issue",
         issueNumber: 5,
@@ -547,10 +665,10 @@ describe("githubChannel", () => {
       expect.objectContaining({ action: "opened", headSha, pullRequestNumber: 7 }),
     );
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    expect(payload.message).toContain("Pull request opened: #7 Add webhook PR handling");
-    expect(options).toMatchObject({
-      continuationToken: "repo:123:pull:7",
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(input.message).toContain("Pull request opened: #7 Add webhook PR handling");
+    expect(continuationToken).toBe("repo:123:pull:7");
+    expect(input).toMatchObject({
       state: {
         baseRef: "main",
         baseSha,
@@ -633,10 +751,10 @@ describe("githubChannel", () => {
       }),
     );
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    expect(payload.message).toContain(`${testCase.label} completed: 9001 (failure)`);
-    expect(options).toMatchObject({
-      continuationToken: "repo:123:pull:7",
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(input.message).toContain(`${testCase.label} completed: 9001 (failure)`);
+    expect(continuationToken).toBe("repo:123:pull:7");
+    expect(input).toMatchObject({
       state: {
         conversationKind: "pull_request",
         headSha,
@@ -772,6 +890,183 @@ describe("githubChannel", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "https://github.test/repos/vercel/eve/issues/5/comments",
     );
+  });
+
+  it("posts input requests through the issue comments API", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 77 })));
+    const adapter = withState(
+      getAdapter(
+        githubChannel({
+          api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
+          botName: "testbot",
+          credentials: {
+            appId: "test-app",
+            webhookSecret: SECRET,
+          },
+        }),
+      ),
+      {
+        conversationKind: "issue",
+        installationId: 55,
+        issueNumber: 5,
+        owner: "vercel",
+        repo: "eve",
+        repositoryId: 123,
+      },
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", {
+        requests: [
+          {
+            action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "deploy" },
+            options: [
+              { id: "approve", label: "Yes" },
+              { id: "deny", label: "No" },
+            ],
+            prompt: "Approve this change?",
+            requestId: "call_1",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body))).toEqual({
+      body: "Approve this change?\n\n1. Yes\n2. No\n\nAnswer by mentioning me in a reply, e.g. `@testbot Yes`.",
+    });
+  });
+
+  it("renders the mention instruction from a lazy botName resolver", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 79 })));
+    const adapter = withState(
+      getAdapter(
+        githubChannel({
+          api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
+          botName: () => Promise.resolve("testbot"),
+          credentials: { appId: "test-app", webhookSecret: SECRET },
+        }),
+      ),
+      {
+        conversationKind: "issue",
+        installationId: 55,
+        issueNumber: 5,
+        owner: "vercel",
+        repo: "eve",
+        repositoryId: 123,
+      },
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", {
+        requests: [
+          {
+            action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "deploy" },
+            options: [
+              { id: "approve", label: "Yes" },
+              { id: "deny", label: "No" },
+            ],
+            prompt: "Approve this change?",
+            requestId: "call_1",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body))).toEqual({
+      body: "Approve this change?\n\n1. Yes\n2. No\n\nAnswer by mentioning me in a reply, e.g. `@testbot Yes`.",
+    });
+  });
+
+  it("omits the mention instruction when no bot name is configured", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 78 })));
+    const adapter = withState(
+      getAdapter(
+        githubChannel({
+          api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
+          credentials: { appId: "test-app", webhookSecret: SECRET },
+        }),
+      ),
+      {
+        conversationKind: "issue",
+        installationId: 55,
+        issueNumber: 5,
+        owner: "vercel",
+        repo: "eve",
+        repositoryId: 123,
+      },
+    );
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", {
+        requests: [
+          {
+            action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "deploy" },
+            options: [
+              { id: "approve", label: "Yes" },
+              { id: "deny", label: "No" },
+            ],
+            prompt: "Approve this change?",
+            requestId: "call_1",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      buildAdapterContext(adapter, stubAccessor()),
+    );
+
+    expect(JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body))).toEqual({
+      body: "Approve this change?\n\n1. Yes\n2. No",
+    });
+  });
+
+  it("does not post an empty input request comment", async () => {
+    const fetchMock = vi.fn();
+    const adapter = withState(
+      getAdapter(
+        githubChannel({
+          api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
+          credentials: { appId: "test-app", webhookSecret: SECRET },
+        }),
+      ),
+      {
+        conversationKind: "issue",
+        installationId: 55,
+        issueNumber: 5,
+        owner: "vercel",
+        repo: "eve",
+        repositoryId: 123,
+      },
+    );
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", {
+        requests: [],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      buildAdapterContext(adapter, stubAccessor()),
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("turn.started adds an eyes reaction to the triggering comment", async () => {

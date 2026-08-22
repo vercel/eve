@@ -25,6 +25,12 @@ describe("integration catalog", () => {
     ).toBe(INTEGRATIONS.length);
   });
 
+  it("makes every scaffoldable integration available through the registry", () => {
+    for (const entry of INTEGRATIONS.filter((candidate) => candidate.surfaces.scaffoldable)) {
+      expect(entry.surfaces.registry).toBe(true);
+    }
+  });
+
   it("gives every connection a transport and description", () => {
     for (const entry of connectionEntries()) {
       expect(entry.connection).toBeDefined();
@@ -69,6 +75,13 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("vercel")!.connection!.mcp!.url).toBe("https://mcp.vercel.com");
   });
 
+  it("uses Agentcard's streamable HTTP MCP endpoint", () => {
+    const agentcard = getIntegrationEntry("agentcard")!;
+
+    expect(agentcard.tagline).toBe("let agents buy online");
+    expect(agentcard.connection!.mcp!.url).toBe("https://mcp.agentcard.sh/mcp");
+  });
+
   it("uses Linear's streamable HTTP MCP endpoint", () => {
     expect(getIntegrationEntry("linear")!.connection!.mcp!.url).toBe("https://mcp.linear.app/mcp");
   });
@@ -93,6 +106,23 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("upstash-agentkit")?.connection).toBeUndefined();
   });
 
+  it("exposes Kybernesis Arcana as an extension", () => {
+    expect(getIntegrationEntry("arcana")?.kind).toBe("extension");
+    expect(getIntegrationEntry("arcana")?.connection).toBeUndefined();
+  });
+
+  it("exposes Hindsight as an extension", () => {
+    expect(getIntegrationEntry("hindsight")?.kind).toBe("extension");
+    expect(getIntegrationEntry("hindsight")?.connection).toBeUndefined();
+  });
+
+  it("exposes Buzz as a gallery-only channel", () => {
+    expect(getIntegrationEntry("buzz")).toMatchObject({
+      kind: "channel",
+      surfaces: { scaffoldable: false, registry: false, gallery: true },
+    });
+  });
+
   it("exposes GitHub Tools as an extension distinct from the GitHub channel", () => {
     expect(getIntegrationEntry("github")?.kind).toBe("channel");
     expect(getIntegrationEntry("github-tools")?.kind).toBe("extension");
@@ -102,6 +132,12 @@ describe("integration catalog", () => {
   it("uses Browser Use's streamable HTTP MCP endpoint", () => {
     expect(getIntegrationEntry("browser-use")!.connection!.mcp!.url).toBe(
       "https://api.browser-use.com/v3/mcp",
+    );
+  });
+
+  it("uses Natural's streamable HTTP MCP endpoint", () => {
+    expect(getIntegrationEntry("natural")!.connection!.mcp!.url).toBe(
+      "https://mcp.natural.com/mcp",
     );
   });
 });

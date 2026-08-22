@@ -51,6 +51,8 @@ export interface ConnectionIdentity {
 export interface IntegrationSurfaces {
   /** eve's interactive setup flow can provision and scaffold this integration. */
   scaffoldable: boolean;
+  /** Available as an `eve add` registry item. */
+  registry: boolean;
   /** Listed in the docs integrations gallery. */
   gallery: boolean;
 }
@@ -81,12 +83,6 @@ export function connectionProtocols(connection: ConnectionIdentity): ConnectionP
  * The canonical set of eve integrations. Order is display order. Each entry
  * carries only shared identity; the scaffolder and docs overlay their own
  * surface-specific data keyed by {@link IntegrationEntry.slug}.
- *
- * `surfaces.scaffoldable` reflects what eve's interactive setup flow can
- * provision and scaffold today: Slack and Web Chat for channels, plus its
- * curated connections. Registry installation is independent of this flag.
- * The remaining channels are runtime modules configured by hand, so they
- * appear in the gallery but not the setup picker.
  */
 export const INTEGRATIONS: readonly IntegrationEntry[] = [
   {
@@ -94,203 +90,212 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Slack",
     kind: "channel",
     tagline: "Mention your agent in channels and DMs, with Connect-managed auth.",
-    surfaces: { scaffoldable: true, gallery: true },
+    surfaces: { scaffoldable: true, registry: true, gallery: true },
   },
   {
     slug: "discord",
     name: "Discord",
     kind: "channel",
     tagline: "Run your agent as a Discord bot across servers and threads.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "teams",
     name: "Microsoft Teams",
     kind: "channel",
     tagline: "Bring your agent into Teams chats and channels.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "telegram",
     name: "Telegram",
     kind: "channel",
     tagline: "Connect your agent to a Telegram bot for 1:1 and group chats.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "twilio",
     name: "Twilio",
     kind: "channel",
     tagline: "Put your agent on a phone number: SMS and speech-transcribed calls.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "github",
     name: "GitHub",
     kind: "channel",
-    tagline: "Drive your agent from issues, pull requests, and comments.",
-    surfaces: { scaffoldable: false, gallery: true },
+    tagline:
+      "Drive your agent from issues, pull requests, and comments, with guided Connect setup.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "linear-agent",
     name: "Linear Agent",
     kind: "channel",
-    tagline: "Delegate Linear issues and comments to your agent through Linear's Agent Sessions.",
-    surfaces: { scaffoldable: false, gallery: true },
+    tagline:
+      "Delegate Linear issues and comments through Agent Sessions, with guided Connect setup.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "eve",
     name: "Web Chat",
     kind: "channel",
     tagline: "Embed a first-party web chat UI backed by your agent.",
-    surfaces: { scaffoldable: true, gallery: true },
+    surfaces: { scaffoldable: true, registry: true, gallery: true },
+  },
+  {
+    slug: "buzz",
+    name: "Buzz",
+    kind: "channel",
+    tagline: "Talk to your eve agent from Buzz through its ACP desktop harness.",
+    surfaces: { scaffoldable: false, registry: false, gallery: true },
   },
   {
     slug: "chat-sdk-gchat",
     name: "Google Chat",
     kind: "channel",
     tagline: "Google Chat spaces and DMs via the Chat SDK.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "chat-sdk-whatsapp",
     name: "WhatsApp",
     kind: "channel",
     tagline: "Customer messaging through WhatsApp Business Cloud via the Chat SDK.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "chat-sdk-x",
     name: "X",
     kind: "channel",
     tagline: "Public mentions and DMs on X via the Chat SDK.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "chat-sdk-messenger",
     name: "Messenger",
     kind: "channel",
     tagline: "Facebook Messenger bots with templates, buttons, and reactions via the Chat SDK.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "chat-sdk-zernio",
     name: "Zernio",
     kind: "channel",
     tagline: "Reach seven social and messaging platforms through one Zernio integration.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "chat-sdk-velt",
     name: "Velt",
     kind: "channel",
     tagline: "Add agents to anchored comments across documents, canvases, PDFs, and video.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "chat-sdk-sendblue",
     name: "Sendblue",
     kind: "channel",
     tagline: "Send and receive iMessage, SMS, and RCS through Sendblue.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "chat-sdk-novu",
     name: "Novu",
     kind: "channel",
     tagline: "Reach Slack, Teams, WhatsApp, Telegram, and email through Novu.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "chat-sdk-liveblocks",
     name: "Liveblocks",
     kind: "channel",
     tagline: "Bring your agent into Liveblocks comment threads, mentions, and reactions.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
-    slug: "chat-sdk-linq",
+    slug: "linq",
     name: "Linq",
     kind: "channel",
-    tagline: "iMessage and SMS conversations, media, and tapbacks through Linq.",
-    surfaces: { scaffoldable: false, gallery: true },
+    tagline: "iMessage and SMS conversations through Linq, with guided Connect or portable setup.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "chat-sdk-kapso",
     name: "Kapso",
     kind: "channel",
     tagline: "Managed WhatsApp conversations, media, buttons, and history through Kapso.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
-    slug: "chat-sdk-photon",
+    slug: "photon",
     name: "Photon",
     kind: "channel",
-    tagline: "Cloud, self-hosted, and local iMessage messaging through Photon.",
-    surfaces: { scaffoldable: false, gallery: true },
+    tagline: "iMessage through Photon, with guided project and phone setup.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "chat-sdk-dial",
     name: "Dial",
     kind: "channel",
     tagline: "Give your agent a phone number for SMS, MMS, iMessage, and voice transcripts.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "chat-sdk-agentphone",
     name: "AgentPhone",
     kind: "channel",
     tagline: "SMS, MMS, iMessage, and voice conversations through AgentPhone.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "chat-sdk-lark",
     name: "Lark / Feishu",
     kind: "channel",
     tagline: "Lark and Feishu chats with native card streaming via the Chat SDK.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "chat-sdk-beeper",
     name: "Beeper",
     kind: "channel",
     tagline: "Matrix rooms and bridged messaging networks through Beeper.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "chat-sdk-resend",
     name: "Resend",
     kind: "channel",
     tagline: "Send and receive threaded email through Resend via the Chat SDK.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "agent-browser",
     name: "agent-browser",
     kind: "extension",
     tagline: "Add browser automation tools backed by agent-browser to an eve agent.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "browserbase",
     name: "Browserbase",
     kind: "extension",
     tagline: "Search, fetch, and automate the web with Browserbase and Stagehand.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "github-tools",
     name: "GitHub Tools",
     kind: "extension",
     tagline: "Add scoped GitHub tools with Vercel Connect authentication and approval rules.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "jetty",
     name: "Jetty",
     kind: "extension",
     tagline: "Grade agent turns, compare experiments, and store durable evaluation trajectories.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "kernel",
@@ -298,21 +303,36 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     kind: "extension",
     tagline:
       "Let your eve agent use the Internet with KERNEL browser infra, o11y, and stealth. Integrated natively with Vercel Connect and AI Gateway.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "upstash-agentkit",
     name: "Upstash AgentKit",
     kind: "extension",
     tagline: "Add long-term memory, Redis Search, and durable chat history with Upstash Redis.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "arcana",
+    name: "Kybernesis Arcana",
+    kind: "extension",
+    tagline:
+      "Give your agent workspace-scoped long-term memory with recall, storage, and brain notes.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "hindsight",
+    name: "Hindsight",
+    kind: "extension",
+    tagline: "Recall relevant context before every turn and retain each exchange automatically.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "browser-use",
     name: "Browser Use",
     kind: "connection",
     tagline: "Run managed browser automation tasks through Browser Use's MCP server.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description:
         "Browser Use: run browser automation tasks, inspect sessions, and manage browser profiles.",
@@ -324,7 +344,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Vercel",
     kind: "connection",
     tagline: "Manage Vercel projects, deployments, and logs through Vercel's MCP server.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description:
         "Vercel: manage projects and deployments, inspect logs, and search documentation.",
@@ -336,7 +356,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Linear",
     kind: "connection",
     tagline: "Issues, projects, cycles, and comments via Linear's MCP server.",
-    surfaces: { scaffoldable: true, gallery: true },
+    surfaces: { scaffoldable: true, registry: true, gallery: true },
     connection: {
       description: "Linear workspace: issues, projects, cycles, and comments.",
       mcp: { url: "https://mcp.linear.app/mcp" },
@@ -347,7 +367,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Notion",
     kind: "connection",
     tagline: "Search and edit Notion pages and databases over MCP or OpenAPI.",
-    surfaces: { scaffoldable: true, gallery: true },
+    surfaces: { scaffoldable: true, registry: true, gallery: true },
     connection: {
       description: "Notion workspace: search and edit pages and databases.",
       mcp: { url: "https://mcp.notion.com/mcp" },
@@ -363,7 +383,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Datadog",
     kind: "connection",
     tagline: "Query metrics, monitors, and logs through Datadog's MCP server.",
-    surfaces: { scaffoldable: true, gallery: true },
+    surfaces: { scaffoldable: true, registry: true, gallery: true },
     connection: {
       description: "Datadog: query metrics, monitors, logs, and incidents.",
       mcp: { url: "https://mcp.datadoghq.com/api/mcp" },
@@ -374,10 +394,22 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Honeycomb",
     kind: "connection",
     tagline: "Explore traces and run queries through Honeycomb's MCP server.",
-    surfaces: { scaffoldable: true, gallery: true },
+    surfaces: { scaffoldable: true, registry: true, gallery: true },
     connection: {
       description: "Honeycomb: explore traces, run queries, and inspect datasets.",
       mcp: { url: "https://mcp.honeycomb.io/mcp" },
+    },
+  },
+  {
+    slug: "agentcard",
+    name: "Agentcard",
+    kind: "connection",
+    tagline: "let agents buy online",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Agentcard: the agent's wallet. Shop and check out at real merchants (DoorDash, Good Eggs, flights) with the conversational `buy` tool (thread conversation_id on follow-ups), issue a single-use virtual card to pay at any checkout, let the user add their own card, and manage the cash that funds it: balance, top-ups, transactions, KYC, human support.",
+      mcp: { url: "https://mcp.agentcard.sh/mcp" },
     },
   },
   {
@@ -385,7 +417,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Airtable",
     kind: "connection",
     tagline: "Bases, tables, and records through Airtable's MCP server.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Airtable: bases, tables, and records.",
       mcp: { url: "https://mcp.airtable.com/mcp" },
@@ -396,7 +428,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Bitly",
     kind: "connection",
     tagline: "Shorten links, generate QR Codes, and track performance.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Bitly: shorten links, generate QR Codes, and track link performance.",
       mcp: { url: "https://api-ssl.bitly.com/v4/mcp" },
@@ -407,7 +439,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Brex",
     kind: "connection",
     tagline: "Expenses, cards, and cash through Brex's finance automation.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Brex: expenses, cards, budgets, and cash.",
       mcp: { url: "https://api.brex.com/mcp" },
@@ -418,7 +450,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Candid",
     kind: "connection",
     tagline: "Research nonprofits and funders using Candid's data.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Candid: research nonprofits, funders, and grants.",
       mcp: { url: "https://mcp.candid.org/mcp" },
@@ -429,7 +461,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "ClickHouse",
     kind: "connection",
     tagline: "Query and explore your ClickHouse Cloud data.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "ClickHouse Cloud: query and explore databases and tables.",
       mcp: { url: "https://mcp.clickhouse.cloud/mcp" },
@@ -440,7 +472,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Cloudinary",
     kind: "connection",
     tagline: "Manage, transform, and deliver your images and videos.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Cloudinary: manage, transform, and deliver image and video assets.",
       mcp: { url: "https://asset-management.mcp.cloudinary.com/sse" },
@@ -451,10 +483,22 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Coda",
     kind: "connection",
     tagline: "Create, search, and update docs and tables.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Coda: create, search, and update docs and tables.",
       mcp: { url: "https://coda.io/apis/mcp" },
+    },
+  },
+  {
+    slug: "context",
+    name: "context.dev",
+    kind: "connection",
+    tagline: "search, scrape, extract, and monitor live web data.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "context.dev: search the live web, scrape and crawl sites, extract structured data, parse files, retrieve brand intelligence, monitor changes, and run batch jobs.",
+      mcp: { url: "https://mcp.context.dev/mcp" },
     },
   },
   {
@@ -462,7 +506,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Egnyte",
     kind: "connection",
     tagline: "Securely access and analyze Egnyte content.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Egnyte: search, access, and analyze governed content.",
       mcp: { url: "https://mcp-server.egnyte.com/mcp" },
@@ -473,7 +517,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Embat",
     kind: "connection",
     tagline: "Ask Embat about cash, debt, payments, and accounting.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Embat: cash, debt, payments, and accounting.",
       mcp: { url: "https://tellme.embat.io/mcp" },
@@ -484,7 +528,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Hugging Face",
     kind: "connection",
     tagline: "Access the Hugging Face Hub and thousands of Gradio apps.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Hugging Face: models, datasets, Spaces, and Gradio apps on the Hub.",
       mcp: { url: "https://huggingface.co/mcp?login&gradio=none" },
@@ -495,7 +539,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Local Falcon",
     kind: "connection",
     tagline: "AI visibility and local search intelligence.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Local Falcon: local search rankings and AI visibility reports.",
       mcp: { url: "https://mcp.localfalcon.com" },
@@ -506,7 +550,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Make",
     kind: "connection",
     tagline: "Run Make scenarios and manage your Make account.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Make: run scenarios and manage automations.",
       mcp: { url: "https://mcp.make.com" },
@@ -517,7 +561,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Manufact",
     kind: "connection",
     tagline: "Deploy and monitor MCP servers with Manufact.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Manufact: deploy and monitor MCP servers.",
       mcp: { url: "https://mcp.manufact.com/mcp" },
@@ -528,7 +572,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Mem0",
     kind: "connection",
     tagline: "Persistent memory for AI agents and assistants.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Mem0: store and retrieve persistent agent memory.",
       mcp: { url: "https://mcp.mem0.ai/mcp" },
@@ -539,7 +583,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Miro",
     kind: "connection",
     tagline: "Access and create content on Miro boards.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Miro: read and create content on boards.",
       mcp: { url: "https://mcp.miro.com/" },
@@ -550,10 +594,22 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Mixpanel",
     kind: "connection",
     tagline: "Analyze, query, and manage your Mixpanel data.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Mixpanel: analyze, query, and manage analytics data.",
       mcp: { url: "https://mcp.mixpanel.com/mcp" },
+    },
+  },
+  {
+    slug: "natural",
+    name: "Natural",
+    kind: "connection",
+    tagline: "Send, request, and manage payments with Natural.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Natural: agentic payments — send and request payments, check balances, and move funds.",
+      mcp: { url: "https://mcp.natural.com/mcp" },
     },
   },
   {
@@ -561,7 +617,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Netlify",
     kind: "connection",
     tagline: "Create, deploy, manage, and secure websites on Netlify.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Netlify: create, deploy, manage, and secure sites.",
       mcp: { url: "https://netlify-mcp.netlify.app/mcp" },
@@ -572,7 +628,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "O'Reilly",
     kind: "connection",
     tagline: "Discover O'Reilly's expert learning content.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "O'Reilly: search books, courses, and learning content.",
       mcp: { url: "https://api.oreilly.com/api/content-discovery/v1/mcp/" },
@@ -583,7 +639,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "PlanetScale",
     kind: "connection",
     tagline: "Authenticated access to your PlanetScale Postgres and MySQL databases.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "PlanetScale: query Postgres and MySQL databases.",
       mcp: { url: "https://mcp.pscale.dev/mcp/planetscale" },
@@ -594,7 +650,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "PostHog",
     kind: "connection",
     tagline: "Query, analyze, and manage your PostHog insights.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "PostHog: insights, events, and feature flags.",
       mcp: { url: "https://mcp.posthog.com/mcp" },
@@ -605,7 +661,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Postman",
     kind: "connection",
     tagline: "Give API context to your coding agents with Postman.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Postman: APIs, collections, and workspaces.",
       mcp: { url: "https://mcp.postman.com/minimal" },
@@ -616,7 +672,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Razorpay",
     kind: "connection",
     tagline: "Razorpay payments, settlements, and dashboard data.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Razorpay: payments, settlements, and dashboard data.",
       mcp: { url: "https://mcp.razorpay.com/mcp" },
@@ -627,7 +683,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Sentry",
     kind: "connection",
     tagline: "Search, query, and debug errors intelligently.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Sentry: search, query, and debug errors and issues.",
       mcp: { url: "https://mcp.sentry.dev/mcp" },
@@ -638,7 +694,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Similarweb",
     kind: "connection",
     tagline: "Real-time web, mobile app, and market data.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Similarweb: web traffic, app, and market intelligence data.",
       mcp: { url: "https://mcp.similarweb.com" },
@@ -649,7 +705,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Stripe",
     kind: "connection",
     tagline: "Payment processing and financial infrastructure tools.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Stripe: payments, customers, billing, and financial infrastructure.",
       mcp: { url: "https://mcp.stripe.com" },
@@ -660,7 +716,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Supabase",
     kind: "connection",
     tagline: "Manage databases, authentication, and storage.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Supabase: databases, authentication, and storage.",
       mcp: { url: "https://mcp.supabase.com/mcp" },
@@ -671,7 +727,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Ticket Tailor",
     kind: "connection",
     tagline: "Manage tickets, orders, and events with Ticket Tailor.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Ticket Tailor: events, tickets, and orders.",
       mcp: { url: "https://mcp.tickettailor.ai/mcp" },
@@ -682,10 +738,22 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "TickTick",
     kind: "connection",
     tagline: "Search, create, and manage your tasks and habits in TickTick.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "TickTick: tasks, habits, and lists.",
       mcp: { url: "https://mcp.ticktick.com" },
+    },
+  },
+  {
+    slug: "tinybird",
+    name: "Tinybird",
+    kind: "connection",
+    tagline: "Query pipes and data sources in your Tinybird Workspace.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Tinybird: query pipes and data sources, and run SQL. A token grants one Workspace, so add a connection per Workspace.",
+      mcp: { url: "https://mcp.tinybird.co" },
     },
   },
   {
@@ -693,7 +761,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Todoist",
     kind: "connection",
     tagline: "Search, complete, and manage your tasks in Todoist.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Todoist: search, complete, and manage tasks.",
       mcp: { url: "https://ai.todoist.net/mcp" },
@@ -704,7 +772,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Webflow",
     kind: "connection",
     tagline: "Manage Webflow CMS, pages, assets, and sites.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Webflow: CMS items, pages, assets, and sites.",
       mcp: { url: "https://mcp.webflow.com/mcp" },
@@ -715,7 +783,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Wix",
     kind: "connection",
     tagline: "Manage and build sites and apps on Wix.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Wix: manage and build sites and apps.",
       mcp: { url: "https://mcp.wix.com/mcp" },
@@ -726,7 +794,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Zapier",
     kind: "connection",
     tagline: "Automate workflows across thousands of apps.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Zapier: run and manage automations across apps.",
       mcp: { url: "https://mcp.zapier.com/api/v1/connect" },
@@ -737,7 +805,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Zomato",
     kind: "connection",
     tagline: "Online food ordering and delivery through Zomato.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "Zomato: food ordering and delivery.",
       mcp: { url: "https://mcp-server.zomato.com/mcp" },
@@ -751,42 +819,49 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Braintrust",
     kind: "instrumentation",
     tagline: "Export AI SDK spans to Braintrust for tracing, evals, and monitoring.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "posthog-instrumentation",
+    name: "PostHog",
+    kind: "instrumentation",
+    tagline: "Send agent traces and generations to PostHog AI Observability.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "sentry-instrumentation",
     name: "Sentry",
     kind: "instrumentation",
     tagline: "Send agent traces to Sentry's OTLP endpoint for tracing and debugging.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "datadog-instrumentation",
     name: "Datadog",
     kind: "instrumentation",
     tagline: "Export agent traces to Datadog APM alongside the rest of your stack.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "honeycomb-instrumentation",
     name: "Honeycomb",
     kind: "instrumentation",
     tagline: "Send OpenTelemetry traces to Honeycomb and query every agent turn.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "arize",
     name: "Arize",
     kind: "instrumentation",
     tagline: "Export traces to Arize AX for LLM observability and evaluation.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "raindrop",
     name: "Raindrop",
     kind: "instrumentation",
     tagline: "Send agent traces to Raindrop to detect and debug AI product issues.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "telemetry-dev",
@@ -800,7 +875,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Jaeger",
     kind: "instrumentation",
     tagline: "Trace your agent with a local or self-hosted Jaeger OTLP backend.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
 ];
 

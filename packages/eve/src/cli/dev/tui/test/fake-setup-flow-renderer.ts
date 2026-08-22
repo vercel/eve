@@ -21,6 +21,7 @@ export function createFakeSetupFlowRenderer(
     setStatus: () => {},
     renderLine: () => {},
     renderOutput: () => {},
+    withInheritedStdio: (task) => task(),
     waitForInterrupt: () => ({
       promise: new Promise<void>(() => {}),
       dispose: () => {},

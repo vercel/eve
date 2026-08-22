@@ -1,4 +1,5 @@
-import { defineConfig, type GeistdocsNavbarOssProduct } from "@vercel/geistdocs/config";
+import { defineConfig } from "@vercel/geistdocs/config";
+import { LogoEve } from "@vercel/geistdocs/assets/logos/logo-eve";
 import {
   agent,
   basePath,
@@ -12,31 +13,17 @@ import {
   title,
   translations,
 } from "@/geistdocs";
-
-// geistdocs' default OSS products, minus eve (this site).
-const navbarOssProducts: GeistdocsNavbarOssProduct[] = [
-  { href: "https://nextjs.org/", label: "Next.js", section: "Frameworks" },
-  { href: "https://svelte.dev/", label: "Svelte", section: "Frameworks" },
-  { href: "https://nuxt.com/", label: "Nuxt", section: "Frameworks" },
-  { href: "https://nitro.build/", label: "Nitro", section: "Frameworks" },
-  { href: "https://ai-sdk.dev/", label: "AI SDK", section: "SDKs" },
-  { href: "https://chat-sdk.dev/", label: "Chat SDK", section: "SDKs" },
-  { href: "https://flags-sdk.dev/", label: "Flags SDK", section: "SDKs" },
-  { href: "https://workflow-sdk.dev/", label: "Workflow SDK", section: "SDKs" },
-  { href: "https://turborepo.dev/", label: "Turborepo", section: "Other" },
-  { href: "https://ui.shadcn.com/", label: "Shadcn", section: "Other" },
-  { href: "https://swr.vercel.app/", label: "SWR", section: "Other" },
-  { href: "https://justbash.dev/", label: "just-bash", section: "Other" },
-];
+import { defaultLanguage } from "./languages";
 
 export const config = defineConfig({
   title,
   agent,
-  defaultLanguage: "en",
+  defaultLanguage,
   logo: <Logo />,
   github,
   nav,
-  navbarOssProducts,
+  // Drops eve (this site) from geistdocs' default OSS products menu.
+  navbarActiveProduct: "eve",
   basePath,
   siteId,
   translations,
@@ -49,5 +36,18 @@ export const config = defineConfig({
     // Used only if eveAgent is removed and chat falls back to gateway mode.
     prompt,
     suggestions,
+    // Ask AI is answered by an agent built on eve (help-eve).
+    footer: (
+      <div className="flex justify-center">
+        <a
+          aria-label="Powered by eve"
+          className="inline-flex items-center gap-1.5 text-gray-700 text-label-12 transition-colors hover:text-gray-900"
+          href="https://eve.dev"
+        >
+          <span>Powered by</span>
+          <LogoEve height={10} />
+        </a>
+      </div>
+    ),
   },
 });

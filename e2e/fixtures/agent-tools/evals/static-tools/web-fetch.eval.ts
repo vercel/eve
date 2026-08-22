@@ -5,6 +5,7 @@ const TARGET_URL = "https://example.com/";
 const CONTENT_MARKER = "Example Domain";
 
 export default defineEval({
+  tags: ["real-model"],
   description: "Framework tools smoke: web_fetch retrieves an HTTPS page.",
   async test(t) {
     const turn = await t.send(

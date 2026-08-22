@@ -1,35 +1,35 @@
 import { Feed } from "feed";
+import { cacheLife } from "next/cache";
 import type { NextRequest } from "next/server";
 import { title } from "@/geistdocs";
+import { supportedLanguages } from "@/lib/geistdocs/languages";
+import { getFeedUpdatedAt, selectDatedFeedPages } from "@/lib/geistdocs/rss";
 import { source } from "@/lib/geistdocs/source";
 import { getSiteOrigin } from "@/lib/geistdocs/url";
 
 const baseUrl = getSiteOrigin();
 
-export const revalidate = false;
+const getFeed = async (lang: string) => {
+  "use cache";
+  cacheLife("max");
 
-const getLastModified = (data: object) =>
-  "lastModified" in data && data.lastModified instanceof Date ? data.lastModified : undefined;
-
-export const GET = async (_req: NextRequest, { params }: RouteContext<"/[lang]/rss.xml">) => {
-  const { lang } = await params;
+  const pages = selectDatedFeedPages(source.getPages(lang));
   const feed = new Feed({
     title,
     id: baseUrl,
     link: baseUrl,
     language: lang,
+    updated: getFeedUpdatedAt(pages),
     copyright: `All rights reserved ${new Date().getFullYear()}, Vercel`,
   });
 
-  for (const page of source.getPages(lang)) {
-    const lastModified = getLastModified(page.data);
-
+  for (const { lastModified, page } of pages) {
     feed.addItem({
       id: page.url,
       title: page.data.title ?? page.url,
       description: page.data.description,
       link: `${baseUrl}${page.url}`,
-      date: lastModified ?? new Date(),
+      date: lastModified,
       author: [
         {
           name: "Vercel",
@@ -38,7 +38,12 @@ export const GET = async (_req: NextRequest, { params }: RouteContext<"/[lang]/r
     });
   }
 
-  const rss = feed.rss2();
+  return feed.rss2();
+};
+
+export const GET = async (_req: NextRequest, { params }: RouteContext<"/[lang]/rss.xml">) => {
+  const { lang } = await params;
+  const rss = await getFeed(lang);
 
   return new Response(rss, {
     headers: {
@@ -46,3 +51,5 @@ export const GET = async (_req: NextRequest, { params }: RouteContext<"/[lang]/r
     },
   });
 };
+
+export const generateStaticParams = () => supportedLanguages.map((lang) => ({ lang }));

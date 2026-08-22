@@ -134,6 +134,45 @@ describe("getAdvertisedTools for definition arrays", () => {
 
     expect(advertisedTools.map((tool) => tool.name)).toEqual(["add", "delegate"]);
   });
+
+  it("keeps the task tools in the root session", () => {
+    const tools = new Map([
+      ["add", createTool("add")],
+      ["task_cancel", createTaskControlTool("task_cancel")],
+      ["task_update", createTaskControlTool("task_update")],
+    ]) satisfies HarnessToolMap;
+
+    const advertisedTools = getAdvertisedTools({ session: {}, tools });
+
+    expect([...advertisedTools.keys()]).toEqual(["add", "task_cancel"]);
+  });
+
+  it("keeps only task_update in delegated sessions", () => {
+    const tools = new Map([
+      ["add", createTool("add")],
+      ["task_cancel", createTaskControlTool("task_cancel")],
+      ["task_update", createTaskControlTool("task_update")],
+    ]) satisfies HarnessToolMap;
+
+    const advertisedTools = getAdvertisedTools({
+      delegatedCaller: true,
+      session: { rootSessionId: "root-session", subagentDepth: 1 },
+      tools,
+    });
+
+    expect([...advertisedTools.keys()]).toEqual(["add", "task_update"]);
+  });
+
+  it("removes task_update from sessions without a delegated caller", () => {
+    const tools = new Map([
+      ["add", createTool("add")],
+      ["task_update", createTaskControlTool("task_update")],
+    ]) satisfies HarnessToolMap;
+
+    const advertisedTools = getAdvertisedTools({ session: {}, tools });
+
+    expect([...advertisedTools.keys()]).toEqual(["add"]);
+  });
 });
 
 function createTool(name: string): HarnessToolDefinition {
@@ -152,6 +191,7 @@ function createSubagentTool(name: string): HarnessToolDefinition {
       nodeId: "workers",
       subagentName: name,
     },
+    workflowCallable: true,
   };
 }
 
@@ -163,6 +203,13 @@ function createBuiltInAgentTool(): HarnessToolDefinition {
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
       subagentName: "agent",
     },
+  };
+}
+
+function createTaskControlTool(name: string): HarnessToolDefinition {
+  return {
+    ...createTool(name),
+    runtimeAction: { kind: "task-control" },
   };
 }
 

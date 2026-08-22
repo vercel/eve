@@ -7,6 +7,10 @@ import type {
   EveEvalRunSummary,
   EveEvalTarget,
 } from "#evals/types.js";
+import {
+  formatAssertionFailureDetailLines,
+  formatAssertionFailureHeadline,
+} from "#evals/runner/reporters/assertion-diagnostics.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 
 /**
@@ -70,8 +74,10 @@ class ConsoleReporter implements EvalReporter {
 
     for (const assertion of assertions) {
       if (assertion.passed) continue;
-      const detail = assertion.message === undefined ? "" : `: ${assertion.message}`;
-      this.#log(`  ${this.#colors.red(`✗ ${assertion.name}${detail}`)}`);
+      this.#log(`  ${this.#colors.red(`✗ ${formatAssertionFailureHeadline(assertion)}`)}`);
+      for (const detailLine of formatAssertionFailureDetailLines(assertion)) {
+        this.#log(`    ${this.#colors.red(detailLine)}`);
+      }
     }
 
     if (error) {

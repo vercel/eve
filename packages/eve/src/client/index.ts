@@ -10,6 +10,7 @@ export { defaultMessageReducer } from "#client/message-reducer.js";
 export { createDataUrlFilePart, createTextWithFileContent } from "#client/file-parts.js";
 export { MessageResponse } from "#client/message-response.js";
 export { ClientSession } from "#client/session.js";
+export { ClientSessions, type CreatedClientSession } from "#client/sessions.js";
 
 // ---------------------------------------------------------------------------
 // Client types
@@ -43,17 +44,21 @@ export type {
   AgentInfoToolEntry,
   AgentInfoTools,
   CancelSessionResult,
+  ClearResult,
+  CompactResult,
   ClientAuth,
   ClientOptions,
   ClientRedirectPolicy,
   HeadersValue,
   HealthResult,
   MessageResult,
+  RespondTurnOptions,
   ResetResult,
   ResolvedStreamReconnectPolicy,
   SendTurnInput,
-  SendTurnPayload,
-  SessionState,
+  SendTurnOptions,
+  SessionSnapshot,
+  ClientSessionState,
   StreamOptions,
   StreamReconnectPolicy,
   StreamReconnectRetryPolicy,
@@ -87,6 +92,7 @@ export type {
 // ---------------------------------------------------------------------------
 
 export type {
+  ActionPartialStreamEvent,
   ActionResultStreamEvent,
   ActionsRequestedStreamEvent,
   AssistantStepFinishReason,
@@ -97,6 +103,10 @@ export type {
   ConnectionAuthorizationOutcome,
   AuthorizationRequiredStreamEvent,
   HandleMessageStreamEvent,
+  MessageStreamEventMeta,
+  InputResolution,
+  InputResolutionOutcome,
+  InputResolvedStreamEvent,
   InputRequestedStreamEvent,
   MessageAppendedStreamEvent,
   MessageCompletedStreamEvent,
@@ -105,10 +115,12 @@ export type {
   ReasoningAppendedStreamEvent,
   ReasoningCompletedStreamEvent,
   ResultCompletedStreamEvent,
+  RuntimeTraceContext,
   SessionCompletedStreamEvent,
   SessionFailedStreamEvent,
   SessionStartedStreamEvent,
   SessionWaitingStreamEvent,
+  MessageStreamEvent,
   StepCompletedStreamEvent,
   StepFailedStreamEvent,
   StepStartedStreamEvent,
@@ -125,13 +137,21 @@ export type {
 
 export { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
 
-export type { InputOption, InputRequest, InputResponse } from "#runtime/input/types.js";
+export type {
+  InputOption,
+  InputRequest,
+  InputRequestKind,
+  InputResponse,
+} from "#runtime/input/types.js";
 export {
   inputOptionSchema,
+  inputRequestKindSchema,
   inputRequestSchema,
   inputResponseSchema,
   isInputRequest,
   isInputResponse,
+  parseInputResponse,
+  parseInputResponses,
 } from "#runtime/input/types.js";
 
 export { resolveTextToResponse, resolveTextToResponses } from "#channel/resolve-text.js";

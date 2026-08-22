@@ -68,17 +68,18 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
     if (registered === null) {
       return null;
     }
-    const definition = registered.definition;
+    const inheritance = registered.inheritance;
+    const definition = inheritance?.definition ?? registered.definition;
     const backend = definition.backend;
     const templatePlan = createRuntimeSandboxTemplatePlan({
       definition,
-      workspaceResourceRoot: registered.workspaceResourceRoot,
+      workspaceResourceRoot: inheritance?.workspaceResourceRoot ?? registered.workspaceResourceRoot,
     });
 
     const keys = await createRuntimeSandboxKeys({
       backendName: backend.name,
       compiledArtifactsSource: input.compiledArtifactsSource,
-      nodeId: input.nodeId,
+      nodeId: inheritance?.nodeId ?? input.nodeId,
       sessionId: input.sessionId,
       sourceId: definition.sourceId,
       templatePlan,
@@ -178,7 +179,15 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
     },
     async get(): Promise<SandboxSession | null> {
       const handle = await getHandle();
-      return handle?.session ?? null;
+      if (handle === null) return null;
+      return handle.session;
+    },
+    async stop(): Promise<void> {
+      const handle = await getHandle();
+      if (handle === null) {
+        throw new Error("The sandbox is not available in the current authored runtime context.");
+      }
+      await handle.stop();
     },
   };
 }

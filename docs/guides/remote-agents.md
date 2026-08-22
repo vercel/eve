@@ -1,6 +1,6 @@
 ---
 title: "Remote Agents"
-description: "Call another eve deployment as a subagent with defineRemoteAgent: same lowered tool shape, outbound auth, durable callback dispatch."
+description: "Call another eve deployment as a subagent with defineRemoteAgent: same tool call as a local subagent, outbound auth, durable callback dispatch."
 ---
 
 `defineRemoteAgent` calls a separately deployed eve agent as if it were a local subagent. Reach for it when the specialist you delegate to is a separately owned agent behind its own URL rather than a directory in your repo.
@@ -20,15 +20,48 @@ export default defineRemoteAgent({
 
 `defineRemoteAgent` accepts:
 
-| Parameter          | Type                                          | Required | Default           | Description                                                                                                                                              |
-| ------------------ | --------------------------------------------- | -------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `url`              | `string \| (() => string \| Promise<string>)` | Yes      | n/a               | Base URL of the remote eve deployment to call. A string is baked at compile time; a function is resolved at runtime (see [Runtime URLs](#runtime-urls)). |
-| `description`      | `string`                                      | Yes      | n/a               | Model-visible delegation description.                                                                                                                    |
-| `auth`             | `OutboundAuthFn`                              | No       | none              | Outbound auth hook from `eve/agents/auth`.                                                                                                               |
-| `forwardPrincipal` | `boolean`                                     | No       | `false`           | Forward the dispatching turn's session principal to the remote deployment (see [Forwarding the caller identity](#forwarding-the-caller-identity)).       |
-| `headers`          | `HeadersValue`                                | No       | none              | Static or lazily resolved request headers.                                                                                                               |
-| `path`             | `string`                                      | No       | `/eve/v1/session` | Route appended to `url` for the create-session request.                                                                                                  |
-| `outputSchema`     | `StandardSchema \| JSON Schema`               | No       | none              | Structured return type the caller requires. Lowered to JSON Schema at compile time and enforced by the remote like any task-mode output schema.          |
+| Parameter          | Type                                          | Required | Default           | Description                                                                                                                                                                          |
+| ------------------ | --------------------------------------------- | -------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `url`              | `string \| (() => string \| Promise<string>)` | Yes      | n/a               | Base URL of the remote eve deployment to call. A string is baked at compile time; a function is resolved at runtime (see [Runtime URLs](#runtime-urls)).                             |
+| `description`      | `string`                                      | Yes      | n/a               | Model-visible delegation description.                                                                                                                                                |
+| `auth`             | `OutboundAuthFn`                              | No       | none              | Outbound auth hook from `eve/agents/auth`.                                                                                                                                           |
+| `forwardPrincipal` | `boolean`                                     | No       | `false`           | Forward the dispatching turn's session principal to the remote deployment (see [Forwarding the caller identity](#forwarding-the-caller-identity)).                                   |
+| `headers`          | `HeadersValue`                                | No       | none              | Static or lazily resolved request headers.                                                                                                                                           |
+| `path`             | `string`                                      | No       | `/eve/v1/session` | Route appended to `url` for the create-session request.                                                                                                                              |
+| `outputSchema`     | `StandardSchema \| JSON Schema`               | No       | none              | Structured return type the caller requires. Enforced by the remote agent like any task-mode output schema. Set it on the definition to apply to every call, or override it per call. |
+
+## Dynamic remote agents
+
+Wrap the file in `defineDynamic` when the target or its availability depends on
+the current session. Return `defineRemoteAgent(...)` to expose it and nil to
+omit it:
+
+```ts title="agent/subagents/weather.ts"
+import { defineDynamic, defineRemoteAgent } from "eve";
+
+export default defineDynamic({
+  events: {
+    "session.started": (_event, ctx) =>
+      ctx.session.auth.current?.attributes.region === "us"
+        ? defineRemoteAgent({
+            description: "Answers weather questions for US customers.",
+            url: "https://us-weather-agent.example.com",
+          })
+        : null,
+  },
+});
+```
+
+Dynamic remote subagents support `session.started` and `turn.started`. The
+returned definition may select different remote settings at either scope. eve
+resolves function-valued URLs when the event handler runs. Auth and headers
+remain lazy and resolve before each outbound request without entering durable
+workflow state.
+
+Author `auth` and `headers` directly in the `defineRemoteAgent({ ... })` object
+and keep their functions self-contained with module imports or environment
+variables. They are rehydrated outside the event handler, so they cannot close
+over `_event`, `ctx`, or handler-local values.
 
 ## Runtime URLs
 
@@ -45,9 +78,11 @@ export default defineRemoteAgent({
 
 The function may be async and must return a non-empty string. `auth` and `headers` are resolved at runtime the same way.
 
-## The lowered tool
+## Calling a remote agent
 
-A remote agent lowers to the same `{ message, outputSchema? }` tool shape as a local subagent. The parent packs everything the remote needs into `message`. The remote never sees the parent's history. Set `outputSchema` (here or per call) and the remote runs in task mode (a single-shot delegation that returns one structured result instead of an open conversation; see [Subagents](../subagents)), returning structured output as the tool result.
+To the model, a remote agent is another subagent tool. You call it the same way you call a local subagent, with a `message` and an optional `outputSchema`. The message must carry the full task, including any context the remote agent needs, because it never receives the parent's conversation history.
+
+To get one structured result back instead of an open-ended reply, set an `outputSchema` on the agent definition or on an individual call. The remote agent then runs in task mode, a single-shot delegation that returns structured output as the tool result. See [Subagents](../subagents) for how task mode works.
 
 ## Outbound auth
 
@@ -79,9 +114,17 @@ export default defineRemoteAgent({
 });
 ```
 
-The create-session request then carries the parent turn's `session.auth.current` and `session.auth.initiator` as a `forwardedPrincipal` body field (`initiator` is optional on the wire; when absent, the receiver seeds both from `current`). Only principal metadata crosses the wire — never tokens or credentials. The receiving deployment mints its own per-user credentials through its own connections.
+The create-session request carries the parent turn's `session.auth.current` and `session.auth.initiator` as a `forwardedPrincipal` body field (`initiator` is optional on the wire; when absent, the receiver seeds both from `current`). Every continuation carries only that turn's `session.auth.current`; the remote session keeps its original `auth.initiator`. Only principal metadata crosses the wire — never tokens or credentials. The receiving deployment resolves its own per-user credentials through its own connections.
 
-Forwarding is explicit on both sides. The receiver names which forwarders it trusts with `eveChannel({ trustedForwarders })` (see [Auth & route protection](./auth-and-route-protection#accepting-forwarded-identity-from-another-deployment)); a receiver that refuses the forwarder — or has no `trustedForwarders` at all — rejects with a 403 and the dispatch fails. One caveat: a receiver on an eve version that predates principal forwarding drops the unknown field and runs the session as your app's service identity (per-user connections there fail with `principal_required`), so upgrade both deployments together when enabling forwarding. When the dispatching turn has no auth at all, the field is omitted and the call proceeds on transport trust alone.
+This makes caller authority turn-scoped even when the remote child session is persistent. If Alice starts the child and Bob later continues it, the follow-up runs with Bob as `auth.current`, not Alice. If the parent turn's auth is `null`, a local child clears `auth.current`, while a remote child uses the freshly verified transport principal; neither inherits Alice. eve's in-step bearer cache is also keyed by the resolved principal and is not serialized across steps. The external authorization provider may preserve each user's server-side OAuth grant, but a later turn can resolve only the grant belonging to its own `auth.current` principal.
+
+Identity forwarding does not make a persistent session private to one caller. Conversation history, tool outputs, and other child-session state still persist. If those values must not be visible across users, give each user a distinct child session or enforce that ownership at the application boundary.
+
+Forwarding is explicit on both sides. The receiver names which forwarders it trusts with `eveChannel({ trustedForwarders })` (see [Auth & route protection](./auth-and-route-protection#accepting-forwarded-identity-from-another-deployment)); a receiver that refuses the forwarder — or has no `trustedForwarders` at all — rejects with a 403 and the dispatch fails.
+
+> ⚠️ **Upgrade both deployments before resuming persistent remote sessions.** A sender with continuation forwarding includes `forwardedPrincipal` on each authenticated follow-up. A receiver that supports forwarding only on session creation rejects that continuation with HTTP 400. eve does not retry without the field because that would run the follow-up as the transport service principal and silently change caller authority. The parent retains the child handle after this failure, so you can retry the same session after upgrading the receiver.
+
+A receiver on an eve version that predates all principal forwarding may instead drop the unknown field and run the session as your app's service identity; per-user connections there fail with `principal_required`. On remote requests where the dispatching turn has no auth, the field is omitted and the call proceeds on transport trust alone.
 
 ## How remote dispatch and callbacks work
 
@@ -100,5 +143,5 @@ Both failure paths surface to the parent as a failed tool result, so the caller 
 ## What to read next
 
 - Local delegation and the isolation boundary → [Subagents](../subagents)
-- Have the model orchestrate remote agents programmatically → [Dynamic workflows](./dynamic-workflows)
+- Have the model orchestrate remote agents programmatically → [Workflow tool](../concepts/built-in-tools#workflow-tool)
 - Securing the receiving deployment → [Auth & route protection](./auth-and-route-protection)

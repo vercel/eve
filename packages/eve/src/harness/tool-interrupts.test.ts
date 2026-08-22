@@ -15,13 +15,16 @@ import {
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { readToolInterrupt, stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { wrapToolExecute } from "#harness/tools.js";
+import { ToolOutputSerializationError } from "#harness/tool-output-serialization.js";
 
 function signalWithVerifier(): AuthorizationSignal {
   return requestAuthorization([
     {
+      attemptId: "attempt-linear",
       name: "linear",
       challenge: { url: "https://idp.example/auth" },
       hookUrl: "https://app.example/cb",
+      principal: { id: "user-1", type: "user" },
       resume: { verifier: "pkce-secret" },
     },
   ]);
@@ -65,11 +68,13 @@ describe("redactSignalResume", () => {
     const redacted = redactSignalResume(signalWithVerifier());
     expect(isAuthorizationSignal(redacted)).toBe(true);
     expect(redacted.challenges[0]).toEqual({
+      attemptId: "attempt-linear",
       name: "linear",
       challenge: { url: "https://idp.example/auth" },
       hookUrl: "https://app.example/cb",
     });
     expect(redacted.challenges[0]).not.toHaveProperty("resume");
+    expect(redacted.challenges[0]).not.toHaveProperty("principal");
   });
 });
 
@@ -115,7 +120,87 @@ describe("wrapToolExecute", () => {
     expect(readToolInterrupt(ctx, "call_3")).toBeUndefined();
   });
 
+  it("preserves generators and normalizes every yielded result", async () => {
+    const wrapped = wrapToolExecute({
+      ...baseDef,
+      async *execute() {
+        yield { phase: "starting" };
+        yield { phase: "complete" };
+      },
+    })!;
+    const ctx = new ContextContainer();
+
+    const outputs = await contextStorage.run(ctx, async () => {
+      const output = wrapped({}, { messages: [], toolCallId: "call_4" });
+      if (!isAsyncIterable(output)) {
+        throw new TypeError("Expected an async iterable.");
+      }
+
+      const values: unknown[] = [];
+      for await (const value of output) values.push(value);
+      return values;
+    });
+
+    expect(outputs).toEqual([{ phase: "starting" }, { phase: "complete" }]);
+  });
+
+  it("stashes authorization signals yielded from a generator", async () => {
+    const signal = signalWithVerifier();
+    const wrapped = wrapToolExecute({
+      ...baseDef,
+      async *execute() {
+        yield signal;
+      },
+    })!;
+    const ctx = new ContextContainer();
+
+    const outputs = await contextStorage.run(ctx, async () => {
+      const output = wrapped({}, { messages: [], toolCallId: "call_5" });
+      if (!isAsyncIterable(output)) {
+        throw new TypeError("Expected an async iterable.");
+      }
+
+      const values: unknown[] = [];
+      for await (const value of output) values.push(value);
+      return values;
+    });
+
+    expect(outputs).toEqual([modelFacingAuthorizationOutput(signal)]);
+    expect(readToolInterrupt(ctx, "call_5")).toBe(signal);
+  });
+
+  it("applies execute serialization checks to every yielded result", async () => {
+    const circular: { self?: unknown } = {};
+    circular.self = circular;
+    const wrapped = wrapToolExecute({
+      ...baseDef,
+      async *execute() {
+        yield circular;
+      },
+    })!;
+    const ctx = new ContextContainer();
+
+    await expect(
+      contextStorage.run(ctx, async () => {
+        const output = wrapped({}, { messages: [], toolCallId: "call_6" });
+        if (!isAsyncIterable(output)) {
+          throw new TypeError("Expected an async iterable.");
+        }
+        for await (const _value of output) void _value;
+      }),
+    ).rejects.toBeInstanceOf(ToolOutputSerializationError);
+  });
+
   it("returns undefined for client-side tools (no execute)", () => {
     expect(wrapToolExecute(baseDef)).toBeUndefined();
   });
 });
+
+function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Symbol.asyncIterator in value &&
+    typeof value[Symbol.asyncIterator] === "function"
+  );
+}

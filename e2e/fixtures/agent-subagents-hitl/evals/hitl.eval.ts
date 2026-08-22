@@ -10,6 +10,7 @@ const GOOG_PRICE = "178.92";
  * Parking is server-side.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "Subagent tool approval proxied through the parent session.",
 
   async test(t) {

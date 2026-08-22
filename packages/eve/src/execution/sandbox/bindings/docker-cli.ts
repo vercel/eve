@@ -104,27 +104,29 @@ function resolveDockerExecutable(): string {
   return fromEnv !== undefined && fromEnv.length > 0 ? fromEnv : "docker";
 }
 
-let cachedDockerAvailability: boolean | undefined;
+let cachedLinuxDockerAvailability: boolean | undefined;
 
 /**
- * Synchronously probes whether a Docker daemon is reachable, for
- * `defaultSandbox()`'s availability chain. The result is cached for the
- * process lifetime: backend selection must be stable, and the probe
- * costs a subprocess round-trip.
+ * Synchronously probes whether a reachable Docker daemon runs Linux
+ * containers, for `defaultSandbox()`'s availability chain. eve's Docker
+ * sandbox image is Linux-only, so a Windows-container daemon is not a
+ * compatible default even though it answers the Docker CLI. The result is
+ * cached for the process lifetime: backend selection must be stable, and
+ * the probe costs a subprocess round-trip.
  */
-export function isDockerDaemonAvailableSync(): boolean {
-  cachedDockerAvailability ??= probeDockerDaemonSync();
-  return cachedDockerAvailability;
+export function isLinuxDockerDaemonAvailableSync(): boolean {
+  cachedLinuxDockerAvailability ??= probeLinuxDockerDaemonSync();
+  return cachedLinuxDockerAvailability;
 }
 
-function probeDockerDaemonSync(): boolean {
+function probeLinuxDockerDaemonSync(): boolean {
   try {
-    const result = spawnSync(
-      resolveDockerExecutable(),
-      ["version", "--format", "{{.Server.Version}}"],
-      { stdio: "ignore", timeout: 5_000 },
-    );
-    return result.status === 0;
+    const result = spawnSync(resolveDockerExecutable(), ["version", "--format", "{{.Server.Os}}"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5_000,
+    });
+    return result.status === 0 && result.stdout.trim().toLowerCase() === "linux";
   } catch {
     return false;
   }

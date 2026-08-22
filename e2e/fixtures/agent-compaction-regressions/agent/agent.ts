@@ -1,3 +1,4 @@
+import { e2eAgentConfig, e2eModel } from "@eve-e2e/config";
 import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest } from "eve/evals";
 
@@ -223,10 +224,13 @@ const taskModel = mockModel({
 });
 
 export default defineAgent({
+  // Harness config wires the workflow world; the task model stays the
+  // fixture's scripted mock regardless of the matrix model.
+  ...e2eAgentConfig(),
   model: taskModel,
   modelContextWindowTokens: TEST_CONTEXT_WINDOW_TOKENS,
   compaction: {
-    model: process.env.EVE_E2E_MODEL ?? "openai/gpt-5.6-sol",
+    model: e2eModel(),
     modelContextWindowTokens: TEST_CONTEXT_WINDOW_TOKENS,
     thresholdPercent: 0.02,
   },

@@ -1,4 +1,4 @@
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 
 /**
  * Returns true when an error looks like a stream socket disconnection that
@@ -27,7 +27,7 @@ export function isStreamDisconnectError(error: unknown): boolean {
 /**
  * Reads newline-delimited JSON events from a `ReadableStream<Uint8Array>`.
  *
- * Yields one parsed {@link HandleMessageStreamEvent} per complete NDJSON line.
+ * Yields one parsed {@link MessageStreamEvent} per complete NDJSON line.
  * Handles partial lines across chunks via an internal buffer.
  *
  * All read errors — including socket disconnections — propagate to the caller.
@@ -35,7 +35,8 @@ export function isStreamDisconnectError(error: unknown): boolean {
  */
 export async function* readNdjsonStream(
   body: ReadableStream<Uint8Array>,
-): AsyncGenerator<HandleMessageStreamEvent> {
+  options?: { readonly idleTimeoutMs?: number },
+): AsyncGenerator<MessageStreamEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -43,7 +44,7 @@ export async function* readNdjsonStream(
 
   try {
     while (true) {
-      const result = await reader.read();
+      const result = await readWithIdleTimeout(reader, options?.idleTimeoutMs);
 
       if (result.done) {
         reachedEof = true;
@@ -63,7 +64,7 @@ export async function* readNdjsonStream(
         buffer = buffer.slice(newlineIndex + 1);
 
         if (line.length > 0) {
-          yield JSON.parse(line) as HandleMessageStreamEvent;
+          yield JSON.parse(line) as MessageStreamEvent;
         }
 
         newlineIndex = buffer.indexOf("\n");
@@ -73,7 +74,7 @@ export async function* readNdjsonStream(
     // Yield any trailing content without a final newline.
     const trailing = buffer.trim();
     if (trailing.length > 0) {
-      yield JSON.parse(trailing) as HandleMessageStreamEvent;
+      yield JSON.parse(trailing) as MessageStreamEvent;
     }
   } finally {
     if (!reachedEof) {
@@ -82,5 +83,27 @@ export async function* readNdjsonStream(
       await reader.cancel().catch(() => {});
     }
     reader.releaseLock();
+  }
+}
+
+async function readWithIdleTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  idleTimeoutMs: number | undefined,
+): ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]> {
+  if (idleTimeoutMs === undefined) return await reader.read();
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new DOMException("Session stream was idle.", "AbortError")),
+          idleTimeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
   }
 }

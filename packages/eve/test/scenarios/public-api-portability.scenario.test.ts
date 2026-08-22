@@ -46,7 +46,7 @@ const PORTABILITY_CASES: readonly PortabilityCase[] = [
 import { docker } from "eve/sandbox/docker";
 import { justbash } from "eve/sandbox/just-bash";
 import { microsandbox } from "eve/sandbox/microsandbox";
-import { vercel } from "eve/sandbox/vercel";
+import { Drive, vercel } from "eve/sandbox/vercel";
 
 const fallback = defaultBackend({
   docker: { image: "ghcr.io/vercel/eve:latest" },
@@ -54,6 +54,7 @@ const fallback = defaultBackend({
   microsandbox: {},
   vercel: { resources: { vcpus: 2 } },
 });
+void Drive;
 
 void docker;
 void justbash;

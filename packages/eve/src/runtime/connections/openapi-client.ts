@@ -4,6 +4,10 @@ import { createLogger } from "#internal/logging.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { passesToolFilter, resolveHeaders } from "#runtime/connections/mcp-client.js";
 import {
+  omitProvidedArgumentsFromSchema,
+  resolveProvidedArguments,
+} from "#runtime/connections/provided-arguments.js";
+import {
   HTTP_METHODS,
   type OpenApiOperation,
   operationDescription,
@@ -157,11 +161,16 @@ export class OpenApiConnectionClient implements ConnectionClient {
     const metadata: ConnectionToolMetadata[] = [];
     const operationMap = new Map<string, OpenApiOperation>();
     const tools: ToolSet = {};
+    const providedArgumentNames = Object.keys(this.#connection.toolCall?.providedArguments ?? {});
 
     for (const operation of selected) {
+      const projectedInputSchema = omitProvidedArgumentsFromSchema(
+        operation.inputSchema,
+        providedArgumentNames,
+      );
       let inputSchema: ToolSchema;
       try {
-        inputSchema = toInputSchema(operation.inputSchema);
+        inputSchema = toInputSchema(projectedInputSchema);
       } catch (error) {
         log.warn("omitting OpenAPI operation with an invalid input schema", {
           connectionName: this.#connection.connectionName,
@@ -174,7 +183,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
       operationMap.set(operation.toolName, operation);
       metadata.push({
         description: operation.description,
-        inputSchema: operation.inputSchema,
+        inputSchema: projectedInputSchema,
         name: operation.toolName,
       });
       tools[operation.toolName] = tool({
@@ -418,6 +427,11 @@ export class OpenApiConnectionClient implements ConnectionClient {
     args: Record<string, unknown>,
     options?: ConnectionToolExecuteOptions,
   ): Promise<OpenApiToolResult> {
+    const resolvedArgs = await resolveProvidedArguments({
+      args,
+      connection: this.#connection,
+      toolName: operation.toolName,
+    });
     const headers = await resolveHeaders(this.#connection);
 
     let path = operation.pathTemplate;
@@ -425,7 +439,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
     const cookies: string[] = [];
 
     for (const param of operation.parameters) {
-      const value = args[param.name];
+      const value = resolvedArgs[param.name];
       if (value === undefined || value === null) {
         continue;
       }
@@ -452,8 +466,8 @@ export class OpenApiConnectionClient implements ConnectionClient {
     url.search = query.toString();
 
     let body: string | undefined;
-    if (operation.requestBody !== undefined && args.body !== undefined) {
-      body = JSON.stringify(args.body);
+    if (operation.requestBody !== undefined && resolvedArgs.body !== undefined) {
+      body = JSON.stringify(resolvedArgs.body);
       headers["content-type"] = operation.requestBody.contentType;
     }
 

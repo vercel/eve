@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import { buildApprovalResponseAuth, createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
 import { loadContext } from "#context/container.js";
 import { AuthKey, SessionIdKey } from "#context/keys.js";
@@ -52,6 +52,12 @@ function seedUserPrincipal(): void {
   });
 }
 
+const TEST_USER_PRINCIPAL = {
+  id: "user-1",
+  issuer: "test-idp",
+  type: "user",
+} as const;
+
 function authoredTool(input: {
   readonly name: string;
   readonly execute: (toolInput: unknown, ctx: ToolContext) => unknown;
@@ -70,6 +76,83 @@ function authoredTool(input: {
     sourceKind: "module",
   };
 }
+
+describe("approval response authorization", () => {
+  it("keeps distinct connector tokens separate within one response policy", async () => {
+    const github: AuthorizationDefinition = {
+      principalType: "user",
+      vercelConnect: { connector: "github/approver" },
+      async getToken(): Promise<TokenResult> {
+        return { token: "github-token" };
+      },
+    };
+    const linear: AuthorizationDefinition = {
+      principalType: "user",
+      vercelConnect: { connector: "linear/approver" },
+      async getToken(): Promise<TokenResult> {
+        return { token: "linear-token" };
+      },
+    };
+    const runtime = createTestRuntime({ tools: [] });
+
+    const tokens = await runtime.runAsSession(undefined, async () => {
+      const auth = buildApprovalResponseAuth({
+        responder: {
+          attributes: {},
+          authenticator: "test-idp",
+          principalId: "bound-U1",
+          principalType: "user",
+        },
+        scope: "candidate-1",
+      });
+      return {
+        github: (await auth.getToken(github)).token,
+        linear: (await auth.getToken(linear)).token,
+      };
+    });
+
+    expect(tokens).toEqual({ github: "github-token", linear: "linear-token" });
+  });
+
+  it("resolves user tokens for the explicitly bound responder instead of ambient auth", async () => {
+    let resolvedPrincipal: ConnectionPrincipal | undefined;
+    const provider: AuthorizationDefinition = {
+      principalType: "user",
+      async getToken({ principal }): Promise<TokenResult> {
+        resolvedPrincipal = principal;
+        return { token: "bound-responder-token" };
+      },
+    };
+    const runtime = createTestRuntime({ tools: [] });
+
+    await runtime.runAsSession(undefined, async () => {
+      loadContext().set(AuthKey, {
+        attributes: {},
+        authenticator: "test-idp",
+        principalId: "ambient-U2",
+        principalType: "user",
+      });
+      return await buildApprovalResponseAuth({
+        responder: {
+          attributes: { role: ["approver"] },
+          authenticator: "test-idp",
+          issuer: "test-idp",
+          principalId: "bound-U1",
+          principalType: "user",
+          subject: "bound-subject-U1",
+        },
+        scope: "candidate-1",
+      }).getToken(provider);
+    });
+
+    expect(resolvedPrincipal).toMatchObject({
+      attributes: { role: ["approver"] },
+      id: "bound-U1",
+      issuer: "test-idp",
+      type: "user",
+    });
+  });
+});
 
 describe("tool-hosted authorization", () => {
   it("resolves and caches the bearer through ctx.getToken(provider)", async () => {
@@ -283,7 +366,7 @@ describe("tool-hosted authorization", () => {
     expect(isAuthorizationSignal(result)).toBe(true);
     if (!isAuthorizationSignal(result)) throw new Error("expected signal");
     expect(receivedCallbackUrl).toBe(
-      "http://localhost:2000/eve/v1/connections/search_notion__mcp.notion.com_notion/callback/session_auth%3Aauth",
+      `http://localhost:2000/eve/v1/connections/search_notion__mcp.notion.com_notion/callback/${result.challenges[0]?.attemptId}/session_auth%3Aauth`,
     );
     expect(result.challenges[0]?.hookUrl).toBe(receivedCallbackUrl);
   });
@@ -459,8 +542,10 @@ describe("tool-hosted authorization", () => {
       loadContext().set(CallbackBaseUrlKey, "https://app.example");
       loadContext().set(PendingAuthorizationResultKey, [
         {
+          attemptId: "attempt-list-groups",
           name: "list_groups__inline_auth",
           hookUrl: "https://app.example/callback",
+          principal: TEST_USER_PRINCIPAL,
           callback: {
             params: { code: "abc" },
             method: "GET",
@@ -503,8 +588,10 @@ describe("tool-hosted authorization", () => {
       loadContext().set(CallbackBaseUrlKey, "https://app.example");
       loadContext().set(PendingAuthorizationResultKey, [
         {
+          attemptId: "attempt-sync-ticket",
           name: "sync_ticket__oauth_linear",
           hookUrl: "https://app.example/callback",
+          principal: TEST_USER_PRINCIPAL,
           callback: {
             params: { code: "abc" },
             method: "GET",
@@ -591,8 +678,10 @@ describe("tool-hosted authorization", () => {
         loadContext().set(CallbackBaseUrlKey, "https://app.example");
         loadContext().set(PendingAuthorizationResultKey, [
           {
+            attemptId: "attempt-list-groups",
             name: "list_groups__inline_auth",
             hookUrl: "https://app.example/callback",
+            principal: TEST_USER_PRINCIPAL,
             callback: {
               params: { code: "abc" },
               method: "GET",
@@ -638,8 +727,10 @@ describe("tool-hosted authorization", () => {
         loadContext().set(CallbackBaseUrlKey, "https://app.example");
         loadContext().set(PendingAuthorizationResultKey, [
           {
+            attemptId: "attempt-sync-ticket",
             name: "sync_ticket__oauth_github",
             hookUrl: "https://app.example/callback",
+            principal: TEST_USER_PRINCIPAL,
             callback: {
               params: { code: "abc" },
               method: "GET",

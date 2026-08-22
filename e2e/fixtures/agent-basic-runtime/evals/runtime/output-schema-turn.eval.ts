@@ -10,11 +10,11 @@ const StructuredOutput = z.object({ count: z.number().int(), title: z.string() }
  * data; the next plain turn must not leak another `result.completed`.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "Session runtime smoke: output schema.",
 
   async test(t) {
-    const structured = await t.send({
-      message: "Summarize this turn as structured output.",
+    const structured = await t.send("Summarize this turn as structured output.", {
       outputSchema: {
         properties: { count: { type: "integer" }, title: { type: "string" } },
         required: ["title", "count"],

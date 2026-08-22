@@ -54,12 +54,12 @@ describe("buildStatusLine", () => {
     const line = buildStatusLine({
       model: "anthropic/claude-sonnet-5",
       endpoint: connected,
-      vercel: { identity, pendingDeploy: true },
+      vercel: { identity },
       theme: plain,
       width: 120,
     });
 
-    expect(line).toBe("anthropic/claude-sonnet-5 via ai-gateway(oidc:my-agent)  /deploy pending");
+    expect(line).toBe("anthropic/claude-sonnet-5 via ai-gateway(oidc:my-agent)");
   });
 
   it("folds the reasoning level and Fast mode marker into the model segment", () => {
@@ -68,7 +68,7 @@ describe("buildStatusLine", () => {
       reasoning: "xhigh",
       fastMode: true,
       endpoint: connected,
-      vercel: { identity, pendingDeploy: false },
+      vercel: { identity },
       theme: plain,
       width: 120,
     });
@@ -112,25 +112,23 @@ describe("buildStatusLine", () => {
     ).toBe(" ↗ vpoke.playground-vercel.tools  openai/gpt-5@high ↯");
   });
 
-  it("dims every segment except the yellow pending-deploy marker", () => {
+  it("dims the model segment", () => {
     const line = buildStatusLine({
       model: "anthropic/claude-sonnet-5",
       endpoint: connected,
-      vercel: { identity, pendingDeploy: true },
+      vercel: { identity },
       theme,
       width: 120,
     });
 
     expect(line).toContain("\x1b[2manthropic/claude-sonnet-5\x1b[22m");
-    expect(line).toContain("\x1b[33m/deploy pending\x1b[39m");
-    expect(line).not.toContain("\x1b[2m/deploy pending");
   });
 
   it("folds the linked project name into the connected gateway label", () => {
     const withProject = buildStatusLine({
       model: "m",
       endpoint: connected,
-      vercel: { identity, pendingDeploy: false },
+      vercel: { identity },
       theme: plain,
       width: 120,
     });
@@ -146,21 +144,12 @@ describe("buildStatusLine", () => {
     expect(noProject).toBe("m via ai-gateway(oidc)");
   });
 
-  it("renders the pending marker even when no segment else resolved", () => {
-    const line = buildStatusLine({
-      vercel: { pendingDeploy: true },
-      theme: plain,
-      width: 120,
-    });
-    expect(line).toBe("/deploy pending");
-  });
-
   it("leads with the transient logs hint and keeps it as width narrows", () => {
     const input = {
       logLevel: "sandbox",
       model: "anthropic/claude-sonnet-5",
       endpoint: connected,
-      vercel: { identity, pendingDeploy: true },
+      vercel: { identity },
       theme: plain,
     } as const;
 
@@ -177,16 +166,14 @@ describe("buildStatusLine", () => {
 
   it("returns undefined when every segment is empty", () => {
     expect(buildStatusLine({ theme: plain, width: 120 })).toBeUndefined();
-    expect(
-      buildStatusLine({ vercel: { pendingDeploy: false }, theme: plain, width: 120 }),
-    ).toBeUndefined();
+    expect(buildStatusLine({ vercel: {}, theme: plain, width: 120 })).toBeUndefined();
   });
 
   it("drops the endpoint, then the model, as the width narrows", () => {
     const input = {
       model: "anthropic/claude-sonnet-5",
       endpoint: connected,
-      vercel: { identity, pendingDeploy: true },
+      vercel: { identity },
       theme: plain,
     };
     const full = buildStatusLine({ ...input, width: 200 })!;
@@ -197,7 +184,7 @@ describe("buildStatusLine", () => {
     expect(noEndpoint).toContain("anthropic/claude-sonnet-5");
 
     const noModel = buildStatusLine({ ...input, width: visibleLength(noEndpoint) - 1 })!;
-    expect(noModel).toBe("/deploy pending");
+    expect(noModel).not.toContain("ai-gateway");
   });
 
   it("renders the three model-endpoint states", () => {
@@ -212,7 +199,7 @@ describe("buildStatusLine", () => {
     const linked = buildStatusLine({
       model: "m",
       endpoint: connected,
-      vercel: { identity, pendingDeploy: false },
+      vercel: { identity },
       theme: plain,
       width: 120,
     });
@@ -223,7 +210,7 @@ describe("buildStatusLine", () => {
       endpoint: { kind: "gateway", connected: true, credential: "api-key" },
       // A linked project must NOT surface here: the key is what
       // authenticates, and the bar reports the credential in use.
-      vercel: { identity, pendingDeploy: false },
+      vercel: { identity },
       theme: plain,
       width: 120,
     });
@@ -231,11 +218,19 @@ describe("buildStatusLine", () => {
 
     const chatgpt = buildStatusLine({
       model: "openai/gpt-5.6-sol",
-      endpoint: { kind: "external", provider: "codex" },
+      endpoint: { kind: "chatgpt", state: "ready" },
       theme: plain,
       width: 120,
     });
     expect(chatgpt).toBe("openai/gpt-5.6-sol via chatgpt-sub⌝");
+
+    const chatgptLogin = buildStatusLine({
+      model: "openai/gpt-5.6-sol",
+      endpoint: { kind: "chatgpt", state: "reauth-required" },
+      theme: plain,
+      width: 120,
+    });
+    expect(chatgptLogin).toBe("openai/gpt-5.6-sol  ⚠ chatgpt-sub login · codex login");
 
     const notConnected = buildStatusLine({
       model: "m",
@@ -277,13 +272,21 @@ describe("buildStatusLine", () => {
   });
 
   it("renders ASCII glyphs when unicode is unavailable", () => {
-    const line = buildStatusLine({
+    const gateway = buildStatusLine({
       model: "m",
       endpoint: { kind: "gateway", connected: false },
       theme: ascii,
       width: 120,
     });
-    expect(stripAnsi(line!)).toBe("m  ! ai-gateway");
+    expect(stripAnsi(gateway!)).toBe("m  ! ai-gateway");
+
+    const chatgpt = buildStatusLine({
+      model: "openai/gpt-5.6-sol",
+      endpoint: { kind: "chatgpt", state: "ready" },
+      theme: ascii,
+      width: 120,
+    });
+    expect(stripAnsi(chatgpt!)).toBe("openai/gpt-5.6-sol via chatgpt-sub^");
   });
 
   it("renders the remote badge first and projects each authentication state", () => {

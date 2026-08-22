@@ -1,36 +1,52 @@
 import { defineEval } from "eve/evals";
-import { satisfies } from "eve/evals/expect";
+import { equals, satisfies } from "eve/evals/expect";
 
 import { postChannel } from "./shared";
 
+type MessageResponse = { ok: boolean; sessionId?: string };
+
 /**
- * Custom-channel eval for cross-channel `args.receive` handoff.
+ * Custom-channel eval for cross-channel `ctx.to(...).send(...)` handoff and
+ * same-address continuation.
  *
  * The `/webhook` route does not start a session itself; it hands the
- * message to the target channel via `args.receive` and returns the new
- * session id, which we attach to and drive to a turn boundary.
+ * message to the target channel via `ctx.to(...).send(...)`. Reusing the
+ * channel address must resume the same durable session.
  */
 export default defineEval({
-  description: "Custom channel smoke: cross-channel receive.",
+  description: "Custom channel smoke: cross-channel receive and continuation.",
 
   async test(t) {
-    const payload = await postChannel<{ ok: boolean; sessionId?: string }>(t.target, "/webhook", {
-      message: "Reply with the single word: hello.",
+    const sessionRef = crypto.randomUUID();
+    const first = await postChannel<MessageResponse>(t.target, "/webhook", {
+      message: "Reply with exactly: first-turn",
+      sessionRef,
     });
     await t.require(
-      payload,
+      first,
       satisfies(
-        (value: { ok: boolean; sessionId?: string }) =>
-          value.ok === true && typeof value.sessionId === "string",
-        "webhook returns a session id",
+        (value: MessageResponse) => value.ok === true && typeof value.sessionId === "string",
+        "initial channel delivery creates a session",
       ),
     );
 
-    const session = await t.target.attachSession(payload.sessionId!);
-    session.succeeded();
-    session.event("message.completed");
-    session.messageIncludes("hello");
+    const initialTurn = await t.target.watchTurn(first.sessionId!).result();
+    initialTurn.succeeded();
+    initialTurn.event("message.completed");
+    initialTurn.messageIncludes("first-turn");
 
-    t.succeeded();
+    const followUpTurn = t.target.watchTurn(first.sessionId!, {
+      startIndex: initialTurn.events.length,
+    });
+    const second = await postChannel<MessageResponse>(t.target, "/webhook", {
+      message: "Reply with exactly: second-turn",
+      sessionRef,
+    });
+    await t.require(second.sessionId, equals(first.sessionId));
+
+    const followUp = await followUpTurn.result();
+    followUp.succeeded();
+    followUp.event("message.completed");
+    followUp.messageIncludes("second-turn");
   },
 });

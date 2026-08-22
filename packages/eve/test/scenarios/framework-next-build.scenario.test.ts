@@ -128,7 +128,7 @@ async function readVercelOutputRoutes(outputRoot: string): Promise<readonly unkn
 }
 
 describe("framework-next build", () => {
-  it("builds the Next.js framework fixture after regenerating eve dist", async () => {
+  it("builds the Next.js framework fixture against the workspace eve dist", async () => {
     await runPnpmCommand({
       args: ["--filter", "framework-next", "build"],
       cwd: REPO_ROOT,

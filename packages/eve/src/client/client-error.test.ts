@@ -14,6 +14,7 @@ describe("ClientError", () => {
     );
 
     expect(error.message).toBe("Production auth is not configured.");
+    expect(error.code).toBe("eve_production_auth_not_configured");
     expect(error.status).toBe(401);
   });
 

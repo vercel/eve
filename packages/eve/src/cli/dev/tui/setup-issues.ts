@@ -51,7 +51,7 @@ type ModelProviderAccess =
  * loaded credential is usable even when an earlier `/info` response says
  * disconnected.
  */
-export function resolveModelProviderState(
+export function normalizeLocalModelEndpoint(
   info: AgentInfoResult | undefined,
   env: Record<string, string | undefined>,
 ): AgentInfoResult | undefined {
@@ -62,18 +62,29 @@ export function resolveModelProviderState(
   const { credential } = access.runtime;
 
   const model = info.agent.model;
+  if (model.id === undefined || model.routing.kind !== "gateway") return info;
   const endpoint = model.endpoint;
   if (endpoint?.kind === "gateway" && endpoint.connected && endpoint.credential === credential) {
     return info;
   }
+  const connectedEndpoint = {
+    connected: true as const,
+    credential,
+    kind: "gateway" as const,
+  };
 
   return {
     ...info,
     agent: {
       ...info.agent,
       model: {
-        ...model,
-        endpoint: { kind: "gateway", connected: true, credential },
+        contextWindowTokens: model.contextWindowTokens,
+        endpoint: connectedEndpoint,
+        id: model.id,
+        providerOptions: model.providerOptions,
+        reasoning: model.reasoning,
+        routing: model.routing,
+        source: model.source,
       },
     },
   };

@@ -37,6 +37,7 @@ export interface TestAppDescriptor {
     readonly limits?: {
       readonly maxInputTokensPerSession?: number | false;
       readonly maxOutputTokensPerSession?: number | false;
+      readonly sessionTimeoutMs?: number | false;
     };
     readonly model?: string;
     readonly name?: string;
@@ -139,6 +140,7 @@ export function createTestRuntime(descriptor: TestAppDescriptor = {}): TestRunti
     limits?: {
       readonly maxInputTokensPerSession?: number | false;
       readonly maxOutputTokensPerSession?: number | false;
+      readonly sessionTimeoutMs?: number | false;
     };
     outputSchema?: JsonObject;
     tools?: readonly {

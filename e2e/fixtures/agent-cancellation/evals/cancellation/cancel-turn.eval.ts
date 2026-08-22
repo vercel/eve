@@ -9,10 +9,10 @@ const TOOL_NAME = "wait-for-cancellation";
  * Flow: start a turn that hangs mid-tool, request cooperative cancellation,
  * and assert the turn settles as `turn.cancelled` followed by
  * `session.waiting` with zero failure events. Then prove the session accepts a
- * follow-up normally and a late duplicate cancel reports the benign
- * `no_active_turn` outcome.
+ * follow-up normally and a late duplicate cancel is accepted as a benign no-op.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "Cancel an in-flight turn over the eve HTTP cancel route.",
   timeoutMs: 240_000,
 
@@ -31,7 +31,7 @@ export default defineEval({
       cancelled,
       satisfies(
         (value: typeof cancelled) =>
-          value.sessionId === live.sessionId && value.status === "accepted",
+          value.status === "accepted" && value.sessionId === live.sessionId,
         "cancel request is accepted with status 'accepted'",
       ),
     );
@@ -50,19 +50,21 @@ export default defineEval({
     followUp.notEvent("session.failed");
     followUp.messageIncludes(/CANCELLATION-FOLLOW-UP-OK/i);
 
-    let lateStatus: "accepted" | "no_active_turn" | undefined;
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      lateStatus = (await t.cancel()).status;
-      if (lateStatus === "no_active_turn") break;
-      await t.sleep(500);
-    }
+    const late = await t.cancel();
     await t.require(
-      lateStatus,
+      late,
       satisfies(
-        (value: typeof lateStatus) => value === "no_active_turn",
-        "a late cancel reports no_active_turn",
+        (value: typeof late) => value.status === "accepted" && value.sessionId === live.sessionId,
+        "a live parked session accepts a late cancel as a no-op",
       ),
     );
+
+    const afterLateCancel = await t.send("Reply with exactly CANCELLATION-LATE-NOOP-OK.");
+    afterLateCancel.expectOk();
+    afterLateCancel.notEvent("turn.cancelled");
+    afterLateCancel.notEvent("turn.failed");
+    afterLateCancel.notEvent("session.failed");
+    afterLateCancel.messageIncludes(/CANCELLATION-LATE-NOOP-OK/i);
 
     t.event("turn.cancelled", { count: 1 });
   },

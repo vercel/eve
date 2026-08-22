@@ -1,4 +1,4 @@
-import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter.js";
+import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 import {
   formatSubagentInput,
   normalizeRequestedOutputSchema,
@@ -9,6 +9,7 @@ import type {
   RunSessionLimits,
   SessionAuthContext,
   SessionCapabilities,
+  SessionTraceContext,
 } from "#channel/types.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js";
@@ -46,6 +47,23 @@ export interface SubagentRunInputBuild {
 }
 
 /**
+ * Runtime graph shape needed to answer sandbox-inheritance questions for
+ * one declared child node. Partial test bundles may omit the graph.
+ */
+export interface SubagentSandboxGraph {
+  readonly nodesByNodeId: ReadonlyMap<
+    string,
+    {
+      readonly sandboxRegistry: {
+        readonly sandbox: {
+          readonly definition: { readonly inheritsParent?: boolean };
+        } | null;
+      };
+    }
+  >;
+}
+
+/**
  * Builds the {@link RunInput} for one delegated subagent child run.
  */
 export function buildSubagentRunInput(input: {
@@ -67,8 +85,23 @@ export function buildSubagentRunInput(input: {
    */
   readonly fanoutSize?: number;
   readonly initiatorAuth: SessionAuthContext | null;
+  /**
+   * Runtime graph used to detect whether this declared child selected the
+   * dispatching parent's sandbox. Absence means no inheritance.
+   */
+  readonly graph?: SubagentSandboxGraph;
+  /** Durable session identity of the sandbox currently used by the parent. */
+  readonly sandboxSessionId?: string;
   /** Hook token owned by the workflow currently waiting for this child. */
   readonly parentContinuationToken?: string;
+  readonly parentTraceContext?: SessionTraceContext;
+  /**
+   * Whether the parent agent opted into
+   * `experimental.subagentPersistentSessions`. Persistent children run in
+   * conversation mode so their sessions survive the first answer; otherwise
+   * children run as one-shot task sessions.
+   */
+  readonly persistentSessions?: boolean;
   readonly session: HarnessSession;
   readonly source: SubagentInputSource;
 }): SubagentRunInputBuild {
@@ -100,21 +133,28 @@ export function buildSubagentRunInput(input: {
     -readonly [K in keyof RunSessionLimits]: RunSessionLimits[K];
   } = resolveRemainingSessionTokenLimits(session, input.fanoutSize);
   const requestedOutputSchema = normalizeRequestedOutputSchema(action.input.outputSchema);
+  const adapterState: Record<string, unknown> = {
+    callId: action.callId,
+    parentContinuationToken: input.parentContinuationToken ?? session.continuationToken,
+    parentSessionId: session.sessionId,
+    subagentName: action.subagentName,
+  };
+  const sharesSandbox =
+    input.graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox?.definition
+      .inheritsParent === true || action.subagentName === "agent";
+  if (sharesSandbox) {
+    if (session.sandboxState !== undefined) {
+      adapterState.parentSandboxState = session.sandboxState;
+    }
+    adapterState.sandboxSessionId = input.sandboxSessionId ?? session.sessionId;
+  }
 
   const runInput: {
     -readonly [K in keyof RunInput]: RunInput[K];
   } = {
     adapter: {
       kind: SUBAGENT_ADAPTER_KIND,
-      state: {
-        callId: action.callId,
-        parentContinuationToken: input.parentContinuationToken ?? session.continuationToken,
-        parentSessionId: session.sessionId,
-        subagentName: action.subagentName,
-        ...(action.subagentName === "agent" && session.sandboxState
-          ? { parentSandboxState: session.sandboxState, sandboxSessionId: session.sessionId }
-          : {}),
-      },
+      state: adapterState,
     },
     auth,
     capabilities,
@@ -122,11 +162,15 @@ export function buildSubagentRunInput(input: {
     continuationToken: childContinuationToken,
     initiatorAuth,
     input: {
-      message: formatSubagentCallInputMessage({ action, source }),
+      message: formatSubagentCallInputMessage({
+        action,
+        persistentSession: input.persistentSessions,
+        source,
+      }),
       outputSchema: requestedOutputSchema,
     },
     limits: inheritedLimits,
-    mode: "task",
+    mode: input.persistentSessions === true ? "conversation" : "task",
     parent: {
       callId: action.callId,
       rootSessionId,
@@ -136,6 +180,7 @@ export function buildSubagentRunInput(input: {
         sequence: batchEvent.sequence,
       },
     },
+    parentTraceContext: input.parentTraceContext,
     subagentDepth: subagentDepth.nextChildDepth,
   };
 
@@ -147,6 +192,7 @@ export function buildSubagentRunInput(input: {
  */
 function formatSubagentCallInputMessage(input: {
   readonly action: Pick<RuntimeSubagentCallActionRequest, "input" | "subagentName">;
+  readonly persistentSession?: boolean;
   readonly source: SubagentInputSource;
 }): string {
   const { message } = input.action.input as { message: string };
@@ -157,12 +203,14 @@ function formatSubagentCallInputMessage(input: {
         description: input.source.description,
         message,
         name: input.action.subagentName,
+        persistentSession: input.persistentSession,
         type: "local",
       }).message;
     case "runtime":
       return formatSubagentInput({
         message,
         name: input.action.subagentName,
+        persistentSession: input.persistentSession,
         type: "runtime",
       }).message;
     default: {

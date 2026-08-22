@@ -52,6 +52,8 @@ export interface MockSandboxInput {
   readonly run?: (
     options: SandboxRunOptions,
   ) => Promise<SandboxCommandResult> | SandboxCommandResult;
+  /** Callback invoked when authored runtime code stops this sandbox. */
+  readonly stop?: () => Promise<void> | void;
 }
 
 /**
@@ -174,7 +176,7 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
     }
   }
 
-  const session: SandboxSession = {
+  const baseSession: SandboxSession = {
     id: sandboxId,
     resolvePath(path: string): string {
       return resolveWorkspacePath(path);
@@ -241,6 +243,7 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
       fileBytes.set(resolved, Buffer.from(options.content, "utf8"));
     },
   };
+  const session = baseSession;
 
   const access: SandboxAccess = {
     async captureState(): Promise<SandboxState> {
@@ -251,6 +254,9 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
     },
     async get(): Promise<SandboxSession> {
       return session;
+    },
+    async stop(): Promise<void> {
+      await input.stop?.();
     },
   };
 

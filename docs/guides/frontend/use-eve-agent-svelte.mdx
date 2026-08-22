@@ -1,42 +1,15 @@
 ---
 title: "useEveAgent (Svelte)"
-description: "Svelte 5 binding that drives an eve agent session from the browser."
+description: "Use the eve Svelte binding and its Svelte-specific reactive interface."
 ---
 
-`useEveAgent()` from `eve/svelte` is the browser side of an eve session in a Svelte 5 app. Call it once for a long-lived session you can send turns to, with every stream event projected into rune-friendly reactive data. On SvelteKit, the [Vite plugin](./sveltekit) wires up the routes. The [frontend overview](./overview) covers the model shared across frameworks.
+`useEveAgent()` from `eve/svelte` exposes the shared eve frontend client through Svelte 5 reactive getters and methods. Read the [frontend overview](./overview) for session behavior, messages, human input, authorization, callbacks, reducers, and persistence. This page covers the Svelte-specific interface.
+
+On SvelteKit, register the [`eveSvelteKit` Vite plugin](./sveltekit) to mount the agent routes on the application origin.
 
 ## Basic usage
 
-Import from `eve/svelte` and read the reactive getters directly. No `$` prefix:
-
-```svelte
-<script lang="ts">
-  import { useEveAgent } from "eve/svelte";
-
-  const agent = useEveAgent();
-</script>
-
-{#each agent.data.messages as message}
-  <p>{message.role}: {JSON.stringify(message.parts)}</p>
-{/each}
-```
-
-## What it returns
-
-| Property  | Type                                        | Description                                                               |
-| --------- | ------------------------------------------- | ------------------------------------------------------------------------- |
-| `data`    | `TData`                                     | Projected state. With the default reducer, `EveMessageData` (`messages`). |
-| `status`  | `UseEveAgentStatus`                         | `"ready"`, `"submitted"`, `"streaming"`, or `"error"`.                    |
-| `error`   | `Error \| undefined`                        | Last transport-level error.                                               |
-| `events`  | `readonly HandleMessageStreamEvent[]`       | Raw server events for this session.                                       |
-| `session` | `SessionState`                              | Snapshot of session state.                                                |
-| `send`    | `(input: SendTurnPayload) => Promise<void>` | Send text or a full turn (multi-part, attachments, HITL responses).       |
-| `stop`    | `() => void`                                | Abort the client's in-flight stream.                                      |
-| `reset`   | `() => void`                                | Clear state and start a new session.                                      |
-
-These state fields are reactive getters, so read them straight from templates, `$derived`, or `$effect`. They are not stores, so don't prefix them with `$`.
-
-## Send a message
+Call the binding once for a conversation and read its reactive getters directly. The returned object is not a Svelte store, so its fields do not use the `$` prefix:
 
 ```svelte
 <script lang="ts">
@@ -44,157 +17,115 @@ These state fields are reactive getters, so read them straight from templates, `
 
   const agent = useEveAgent();
   let message = $state("");
+  let isBusy = $derived(agent.status === "submitted" || agent.status === "streaming");
 
   async function handleSubmit() {
     const text = message.trim();
-    if (!text) return;
+    if (!text || isBusy) return;
     message = "";
-    await agent.send({ message: text });
+    await agent.send(text);
   }
 </script>
+
+{#each agent.data.messages as item}
+  <p>{item.role}: {JSON.stringify(item.parts)}</p>
+{/each}
 
 <form onsubmit={(event) => {
   event.preventDefault();
   void handleSubmit();
 }}>
-  <input bind:value={message} placeholder="Type a message..." />
-  <button type="submit">Send</button>
+  <input bind:value={message} disabled={isBusy} />
+  <button type="submit" disabled={isBusy}>Send</button>
 </form>
 ```
 
-When a turn is more than plain text, reach for `send()`. Attachments follow the AI SDK `UserContent` format. Send file data as a base64 `data:` URL so it survives the JSON transport:
+## What it returns
 
-```ts
-const bytes = new Uint8Array(await file.arrayBuffer());
-const base64 = btoa(String.fromCodePoint(...bytes));
+The state fields are reactive getters; the commands are ordinary methods:
 
-await agent.send({
-  message: [
-    { type: "text", text: "Describe this image." },
-    { type: "file", data: `data:${file.type};base64,${base64}`, mediaType: file.type },
-  ],
-});
-```
+| Property                                       | Svelte shape                      |
+| ---------------------------------------------- | --------------------------------- |
+| `data`                                         | `TData`                           |
+| `status`                                       | `UseEveAgentStatus`               |
+| `error`                                        | `Error \| undefined`              |
+| `events`                                       | `readonly MessageStreamEvent[]`   |
+| `session`                                      | `ClientSessionState \| undefined` |
+| `send`, `respond`, `resume`, `cancel`, `reset` | Methods                           |
+
+Read the getters directly in templates, `$derived`, or `$effect`. The [shared returned-state reference](./overview#returned-state) describes what each value and command does.
+
+## Send a message
+
+Call `agent.send(text)` for text or pass content parts for attachments. The API and transport behavior match the [shared sending guide](./overview#sending-and-streaming); only reactive access differs in Svelte.
 
 ## Human-in-the-loop prompts
 
-A tool opts into approval with `approval` ([Tools](../../tools)). When one fires, the pending request rides along on a `dynamic-tool` part of the latest message at `part.toolMetadata?.eve?.inputRequest`. Read it, then answer through the same session with `agent.send({ inputResponses })`:
+Pending requests appear in `agent.data.messages`. Use the Svelte exports when narrowing message parts, then answer through `agent.respond()`:
 
-```ts
-import type { EveDynamicToolPart, EveMessagePart } from "eve/svelte";
+```svelte
+<script lang="ts">
+  import { useEveAgent } from "eve/svelte";
 
-const isDynamicToolPart = (part: EveMessagePart): part is EveDynamicToolPart =>
-  part.type === "dynamic-tool";
+  const agent = useEveAgent();
+  const pendingRequests = $derived(
+    agent.data.messages.flatMap((message) =>
+      message.parts.flatMap((part) => {
+        if (part.type !== "dynamic-tool" || part.state !== "approval-requested") return [];
+        const request = part.toolMetadata?.eve?.inputRequest;
+        return request ? [request] : [];
+      }),
+    ),
+  );
+</script>
 
-const request = agent.data.messages
-  .at(-1)
-  ?.parts.filter(isDynamicToolPart)
-  .map((part) => part.toolMetadata?.eve?.inputRequest)
-  .find((value) => value !== undefined);
-
-if (request) {
-  await agent.send({
-    inputResponses: [{ requestId: request.requestId, optionId: "approve" }],
-  });
-}
+{#each pendingRequests as request (request.requestId)}
+  <fieldset>
+    <legend>
+      {request.kind === "tool-approval"
+        ? "Approval required"
+        : request.kind === "question"
+          ? "Question"
+          : "Session limit"}
+    </legend>
+    <p>{request.prompt}</p>
+    {#each request.options ?? [] as option (option.id)}
+      <button
+        type="button"
+        onclick={() =>
+          void agent.respond([{ requestId: request.requestId, optionId: option.id }])}
+      >
+        {option.label}
+      </button>
+    {/each}
+  </fieldset>
+{/each}
 ```
 
-The find-and-answer flow is identical across frameworks. The [React hook reference](./overview) covers the longer walkthrough.
+See [Human-in-the-loop prompts](./overview#human-in-the-loop-prompts) for request semantics and rendering guidance.
 
-## Stop, reset, and resume
+## Cancel, reset, and resume
 
-`stop()` aborts the in-flight stream; the server-side turn keeps running and remains attachable — to stop the turn itself, POST the session's [cancel route](../../channels/eve#routes). `reset()` wipes state and starts a fresh session. To resume across reloads, hand `initialSession` the state you saved earlier and use `onSessionChange` to persist the cursor as it advances:
-
-```ts
-const agent = useEveAgent({
-  initialSession: savedSessionState,
-  initialEvents: savedEvents,
-  onSessionChange: (session) => {
-    localStorage.setItem("eve-session", JSON.stringify(session));
-  },
-});
-```
+Call `agent.cancel()` to stop the durable server-side turn while the binding remains attached through settlement. Destroying the component only disconnects its local stream; it does not cancel server execution. Call `agent.reset()` to clear local state and start a new session. Pass `initialSession`, `initialEvents`, and `resume: true` to restore a saved conversation and follow an in-flight turn. Use `agent.resume()` directly when restoration is controlled imperatively. See [Resumable sessions](./overview#resumable-sessions) for the persistence contract and [Sending and streaming](./overview#sending-and-streaming) for cancellation behavior.
 
 ## Custom host and credentials
 
-Point `host` at an eve server on a different origin, and pass credentials through `auth` or `headers`. When you supply a function, it re-resolves before every request:
-
-```ts
-const agent = useEveAgent({
-  host: "https://agent.example.com",
-  headers: async () => ({
-    authorization: `Bearer ${await getAccessToken()}`,
-  }),
-});
-```
+Pass `host`, `auth`, or `headers` to the binding using the same options as the other frontend bindings. See [Custom hosts and headers](./overview#custom-hosts-and-headers).
 
 ## Attach page context per turn
 
-`clientContext` adds ephemeral context for the next model call and nothing more. Strings (or an array of strings) become user-role context messages; an object is JSON-serialized into one. It rides along with a message or HITL response, never dispatches a turn on its own, and never lands in durable session history. Pass it to `send()`:
-
-```ts
-await agent.send({
-  message: "What should I do on this screen?",
-  clientContext: { route: "/billing", plan: "pro", seatsUsed: 4 },
-});
-```
-
-To attach the same context to every turn without threading it through each call site, pass `prepareSend`. It runs right before each send and returns the (possibly augmented) turn:
-
-```ts
-const agent = useEveAgent({
-  prepareSend: (input) => ({
-    ...input,
-    clientContext: { route: location.pathname },
-  }),
-});
-```
+Pass `clientContext` to `send()` or `respond()`, or use `prepareSend` to add context before every turn. See [Attach page context per turn](./overview#attach-page-context-per-turn).
 
 ## Lifecycle callbacks
 
-The binding takes a few per-turn callbacks:
-
-- `onEvent(event)`: fires for each eve stream event as it arrives.
-- `onError(error)`: fires with the last `Error` when a turn fails.
-- `onFinish(snapshot)`: fires with the final snapshot once a turn settles.
-- `onSessionChange(session)`: fires when the session cursor advances. Persist it to resume across reloads.
-
-```ts
-const agent = useEveAgent({
-  onEvent: (event) => console.debug(event.type),
-  onError: (error) => console.error(error.message),
-  onFinish: (snapshot) => console.log(snapshot.status),
-});
-```
-
-The `optimistic` option (default `true`) projects submitted user messages into `data` before eve confirms them with a `message.received` event. These are reducer-facing projection events only; `events` stays the authoritative eve stream.
+Pass `onEvent`, `onError`, `onFinish`, or `onSessionChange` when the application needs lifecycle notifications. See [Lifecycle callbacks](./overview#lifecycle-callbacks) for callback timing and optimistic projection behavior.
 
 ## Custom reducer
 
-The default reducer projects events into `{ messages }` (`EveMessageData`). To shape `data` differently, pass a `reducer` implementing `EveAgentReducer<TData>`:
-
-```ts
-import { useEveAgent } from "eve/svelte";
-import type { EveAgentReducer } from "eve/svelte";
-
-interface ToolLog {
-  readonly toolCalls: number;
-}
-
-const toolCounter: EveAgentReducer<ToolLog> = {
-  initial: () => ({ toolCalls: 0 }),
-  reduce: (data, event) =>
-    event.type === "actions.requested" ? { toolCalls: data.toolCalls + 1 } : data,
-};
-
-const agent = useEveAgent({ reducer: toolCounter });
-// agent.data is ToolLog
-```
-
-`reduce(data, event)` receives both authoritative eve stream events and client projection events (`client.message.submitted`, `client.message.failed`, `client.input.responded`). Handle the client events too if you want optimistic and HITL state in your projection. Otherwise, return `data` unchanged for them.
+Import `EveAgentReducer` from `eve/svelte` when projecting events into application-specific state. The resulting `agent.data` uses the reducer's `TData` type. See [Custom reducer](./overview#custom-reducer) for the reducer contract and client projection events.
 
 ## What to read next
 
-- [SvelteKit](./sveltekit): Vite plugin setup
-- [Frontend overview](./overview): the shared integration model
-- [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming)
+- [SvelteKit](./sveltekit): register the Vite plugin and mount the eve runtime.
+- [Frontend overview](./overview): use the shared frontend API.
+- [Sessions, runs, and streaming](../../concepts/sessions-runs-and-streaming): understand the underlying session protocol.

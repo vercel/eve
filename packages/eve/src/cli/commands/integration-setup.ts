@@ -1,42 +1,41 @@
-import { interactiveAsker } from "#setup/ask.js";
-import type { AddChannelsDeps } from "#setup/boxes/add-channels.js";
-import type { DeployProjectDeps } from "#setup/boxes/deploy-project.js";
-import { deployChannelSetup } from "#setup/channel-setup-deployment.js";
 import {
-  channelSetupEnvironment,
-  describeChannelSetupEnvironment,
-} from "#setup/channel-setup-environment.js";
-import {
-  channelSetupIntegration,
-  createChannelSetupUi,
-} from "#setup/channel-setup-integrations.js";
-import { detectDeployment, projectResolutionFromDeployment } from "#setup/project-resolution.js";
+  headlessAsker,
+  InteractionRequired,
+  interactiveAsker,
+  InvalidAnswerError,
+  withAnswers,
+  withPolicy,
+} from "#setup/ask.js";
+import { ensureVercelProject } from "#setup/flows/ensure-vercel-project.js";
+import { createHeadlessPrompter } from "#setup/headless.js";
+import { SetupPrerequisiteRequired } from "#setup/integrations/shared/prerequisite.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
-import { isEveProject, type ChannelKind } from "#setup/scaffold/index.js";
-import { createDefaultSetupState, type SetupState } from "#setup/state.js";
-import { getVercelAuthStatus } from "#setup/vercel-project.js";
+import { createRegistrySetupClient, type SetupProcess } from "#setup/registry-setup-client.js";
+import {
+  runIntegrationSetup,
+  type IntegrationSetupRunnerDeps,
+} from "#setup/integrations/runner.js";
+import { setupQuestionToWire } from "#setup/setup-question-wire.js";
 
-import { NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
 import type { RegistryCommandLogger } from "./registry.js";
+import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 
 export interface IntegrationSetupOptions {
   yes?: boolean;
+  nonInteractive?: boolean;
+  answers?: Record<string, unknown>;
+  signal?: AbortSignal;
 }
 
 export interface IntegrationSetupDependencies {
   createPrompter?: () => Prompter;
-  detectDeployment: typeof detectDeployment;
-  getVercelAuthStatus: typeof getVercelAuthStatus;
-  addChannelsDeps?: AddChannelsDeps;
-  deployProjectDeps?: DeployProjectDeps;
+  runnerDeps?: IntegrationSetupRunnerDeps;
+  setupProcess?: SetupProcess;
 }
 
-const defaultIntegrationSetupDependencies: IntegrationSetupDependencies = {
-  detectDeployment,
-  getVercelAuthStatus,
-};
+const defaultIntegrationSetupDependencies: IntegrationSetupDependencies = {};
 
-/** Runs a built-in integration setup after its registry payload is installed. */
+/** Runs built-in integration setup after its registry payload is installed. */
 export async function runIntegrationSetupCommand(
   logger: RegistryCommandLogger,
   appRoot: string,
@@ -44,67 +43,111 @@ export async function runIntegrationSetupCommand(
   options: IntegrationSetupOptions = {},
   dependencies: IntegrationSetupDependencies = defaultIntegrationSetupDependencies,
 ): Promise<void> {
-  if (!(await isEveProject(appRoot))) {
-    logger.error(NOT_AN_AGENT_MESSAGE);
-    process.exitCode = 1;
-    return;
-  }
-
+  const client = createRegistrySetupClient({
+    process: dependencies.setupProcess,
+    signal: options.signal,
+  });
   try {
-    if (kind !== "slack" && kind !== "web") {
-      throw new Error(
-        `Integration setup "${kind}" is not available in this version of eve. Upgrade eve and try again.`,
-      );
-    }
-    const channelKind: ChannelKind = kind;
-    const prompter = dependencies.createPrompter?.() ?? createPrompter();
-    prompter.intro(`Set up ${channelSetupIntegration(channelKind).label}`);
-    prompter.log.message("Checking Vercel setup...");
-    const [deployment, authStatus] = await Promise.all([
-      dependencies.detectDeployment(appRoot),
-      dependencies.getVercelAuthStatus(appRoot),
-    ]);
-    const project = projectResolutionFromDeployment(deployment);
-    const environment = channelSetupEnvironment(authStatus, project);
-    prompter.log.info(describeChannelSetupEnvironment(environment));
-    const state: SetupState = {
-      ...createDefaultSetupState(),
-      project,
-      projectPath: { kind: "resolved", inPlace: true, path: appRoot },
-      channelSelection: [channelKind],
-    };
-    const result = await channelSetupIntegration(channelKind).setup({
-      environment,
-      state,
-      ui: createChannelSetupUi({ asker: interactiveAsker(prompter), prompter }),
-      presetCreateSlackbot: options.yes ? true : undefined,
-      presetPortableCredentials: options.yes ? true : undefined,
-      skipDependencyMutation: true,
-      deps: dependencies.addChannelsDeps,
-    });
-    if (result.kind === "cancelled") return;
-    let finalState = result.state;
-    const addedVercelChannel =
-      finalState.slackbotAttached ||
-      (environment.vercel.kind === "available" && finalState.channels.includes("web"));
-    if (addedVercelChannel) {
-      finalState = await deployChannelSetup({
-        state: finalState,
-        ui: createChannelSetupUi({ asker: interactiveAsker(prompter), prompter }),
-        presetDeploy:
-          options.yes === true
-            ? true
-            : !process.stdin.isTTY || !process.stdout.isTTY
-              ? false
-              : undefined,
-        deps: dependencies.deployProjectDeps,
-      });
-    }
-    prompter.outro(
-      finalState.channels.includes(channelKind) ? "Integration set up." : "No changes made.",
+    const nonInteractive = options.nonInteractive === true;
+    const prompter =
+      client?.prompter ??
+      dependencies.createPrompter?.() ??
+      (nonInteractive ? createHeadlessPrompter(() => {}) : createPrompter());
+    const base = nonInteractive ? headlessAsker() : interactiveAsker(prompter);
+    const policy = options.yes ? withPolicy("assume")(base) : base;
+    const asker = withAnswers(options.answers ?? {})(policy);
+    const result = await runIntegrationSetup(
+      kind,
+      {
+        appRoot,
+        prompter,
+        asker,
+        resolveVercelProject: nonInteractive
+          ? undefined
+          : () =>
+              ensureVercelProject({
+                appRoot,
+                prompter,
+                signal: client?.signal ?? options.signal,
+              }),
+        signal: client?.signal ?? options.signal,
+        beginExternalAction: nonInteractive
+          ? (action) => {
+              const id = `external-action-${crypto.randomUUID()}`;
+              logger.log(
+                serializeHeadlessSetupEvent({
+                  version: 1,
+                  type: "external_action",
+                  id,
+                  blocking: true,
+                  ...action,
+                }),
+              );
+              return {
+                complete() {
+                  logger.log(
+                    serializeHeadlessSetupEvent({
+                      version: 1,
+                      type: "external_action_resolved",
+                      id,
+                    }),
+                  );
+                },
+              };
+            }
+          : undefined,
+      },
+      dependencies.runnerDeps,
     );
+    if (result.kind === "cancelled") {
+      client?.cancel();
+      if (process.env.EVE_SETUP === "1") process.exitCode = 130;
+      else if (nonInteractive)
+        logger.error(serializeHeadlessSetupEvent({ version: 1, type: "cancelled", item: kind }));
+      return;
+    }
+    prompter.outro("Integration set up.");
+    client?.complete(result.completion);
+    if (nonInteractive && client === undefined) {
+      logger.log(serializeHeadlessSetupEvent({ version: 1, type: "completed", item: kind }));
+    }
   } catch (error) {
-    logger.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
+    client?.fail(error);
+    if (client !== undefined) return;
+    if (options.nonInteractive && error instanceof InteractionRequired) {
+      logger.error(
+        serializeHeadlessSetupEvent({
+          version: 1,
+          type: "blocked",
+          status: "input_required",
+          question: setupQuestionToWire(error.question),
+        }),
+      );
+      process.exitCode = 2;
+    } else if (options.nonInteractive && error instanceof InvalidAnswerError) {
+      logger.error(
+        serializeHeadlessSetupEvent({
+          version: 1,
+          type: "blocked",
+          status: "input_required",
+          question: setupQuestionToWire(error.question),
+          issue: { code: "invalid_answer", message: error.message },
+        }),
+      );
+      process.exitCode = 2;
+    } else if (options.nonInteractive && error instanceof SetupPrerequisiteRequired) {
+      logger.error(
+        serializeHeadlessSetupEvent({
+          version: 1,
+          type: "blocked",
+          status: "prerequisite_required",
+          prerequisite: error.prerequisite,
+        }),
+      );
+      process.exitCode = 2;
+    } else {
+      logger.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    }
   }
 }

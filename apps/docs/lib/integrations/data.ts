@@ -6,13 +6,13 @@ import {
   connectionProtocols as protocolsForIdentity,
   extensionEntries,
   instrumentationEntries,
-} from "@vercel/eve-catalog";
+} from "@eve/catalog";
 import type { LogoKey } from "./logos";
 
 /**
  * The docs integration gallery layers presentation (logo, keywords, setup
  * markdown, auth modes) on top of the shared identity catalog
- * (`@vercel/eve-catalog`). Identity — slug, name, kind, tagline, and a
+ * (`@eve/catalog`). Identity — slug, name, kind, tagline, and a
  * connection's transport + model-facing description — comes from the catalog
  * and is never re-declared here; this module owns only the docs-facing overlay,
  * keyed by slug.
@@ -21,8 +21,8 @@ import type { LogoKey } from "./logos";
 export type IntegrationType = "channel" | "connection" | "extension" | "instrumentation";
 
 /** Wire protocol and transport identity types are owned by the shared catalog. */
-export type { ConnectionProtocol, McpTransport, OpenApiTransport } from "@vercel/eve-catalog";
-import type { ConnectionProtocol } from "@vercel/eve-catalog";
+export type { ConnectionProtocol, McpTransport, OpenApiTransport } from "@eve/catalog";
+import type { ConnectionProtocol } from "@eve/catalog";
 
 /**
  * How a connection authenticates. A mode uses either Vercel Connect (`user`,
@@ -41,13 +41,17 @@ export interface ApiKeySpec {
  * Structured description of a connection consumed by the detail page to
  * generate Install, Quick start, and Configure content. Transport (`mcp`,
  * `openapi`) and `description` are filled from the shared catalog identity;
- * `authModes`, `connector`, and `configureNote` are the docs-only overlay.
+ * Auth modes, connectors, and configure notes are the docs-only overlay.
  */
 export interface ConnectionSpec {
   /** Vercel Connect connector UID; defaults to the integration slug. */
   connector?: string;
+  /** Auth-mode-specific connector UIDs when one service needs separate connectors. */
+  connectors?: Partial<Record<AuthMode, string>>;
   /** Service passed to `vercel connect create` when it differs from the connector UID. */
   connectorService?: string;
+  /** Auth-mode-specific services passed to `vercel connect create`. */
+  connectorServices?: Partial<Record<AuthMode, string>>;
   /** Supported auth modes in display order; the first is the default. */
   authModes: AuthMode[];
   /** API-key wiring when `authModes` includes `apiKey`. */
@@ -56,8 +60,10 @@ export interface ConnectionSpec {
   description?: string;
   mcp?: ConnectionIdentity["mcp"];
   openapi?: ConnectionIdentity["openapi"];
-  /** Optional one-line, provider-specific configure note. Keep it short. */
+  /** Optional provider-specific configure guidance, rendered as markdown. */
   configureNote?: string;
+  /** Auth-mode-specific configure guidance, rendered as markdown. */
+  configureNotes?: Partial<Record<AuthMode, string>>;
 }
 
 export interface Integration {
@@ -116,8 +122,11 @@ interface ConnectionPresentation extends Presentation {
   authModes: AuthMode[];
   apiKey?: ApiKeySpec;
   connector?: string;
+  connectors?: Partial<Record<AuthMode, string>>;
   connectorService?: string;
+  connectorServices?: Partial<Record<AuthMode, string>>;
   configureNote?: string;
+  configureNotes?: Partial<Record<AuthMode, string>>;
 }
 
 const channelPresentations: Record<string, ChannelPresentation> = {
@@ -125,10 +134,10 @@ const channelPresentations: Record<string, ChannelPresentation> = {
     logo: "slack",
     docsHref: "/docs/channels/slack",
     keywords: ["chat", "messaging", "bot", "webhook"],
-    install: `The eve CLI scaffolds the channel for you. \`eve channels add slack\` writes \`agent/channels/slack.ts\`, adds \`@vercel/connect\`, and runs the Connect setup flow:
+    install: `The eve CLI scaffolds the channel for you. \`eve add channel/slack\` writes \`agent/channels/slack.ts\`, adds \`@vercel/connect\`, and runs the Connect setup flow:
 
 \`\`\`bash
-eve channels add slack
+eve add channel/slack
 \`\`\`
 
 To wire it up by hand instead, install the framework and the Connect SDK. Slack channels use [Vercel Connect](https://vercel.com/docs/connect) for both the outbound bot token and inbound webhook verification:
@@ -262,62 +271,69 @@ TWILIO_AUTH_TOKEN=...      # required for inbound signature verification
     logo: "github",
     docsHref: "/docs/channels/github",
     keywords: ["issues", "pull requests", "app", "webhook", "code"],
-    install: `Add this channel from eve's registry. This writes \`agent/channels/github.ts\`:
+    install: `Add this channel from eve's registry to create a Vercel Connect GitHub App, route verified webhooks, and write \`agent/channels/github.ts\`:
 
 \`\`\`bash
 eve add channel/github
 \`\`\``,
-    quickStart: `Create \`agent/channels/github.ts\`:
+    quickStart: `The guided setup writes \`agent/channels/github.ts\`:
 
 \`\`\`ts
 // agent/channels/github.ts
+import { connectGitHubCredentials } from "@vercel/connect/eve";
 import { githubChannel } from "eve/channels/github";
 
 export default githubChannel({
-  credentials: {
-    appId: () => process.env.GITHUB_APP_ID!,
-    privateKey: () => process.env.GITHUB_APP_PRIVATE_KEY!,
-    webhookSecret: () => process.env.GITHUB_WEBHOOK_SECRET!,
-  },
+  credentials: connectGitHubCredentials("github/my-agent"),
 });
 \`\`\``,
-    configure: `Create a GitHub App, subscribe to issue and pull-request events, and set the webhook URL to eve's route (\`/eve/v1/github\`). Provide the app ID, private key, and webhook secret through environment variables. See the [GitHub channel docs](/docs/channels/github) for required permissions.`,
+    configure: `Sign in to Vercel, then let the guided flow create or link a project, provision the GitHub App, and attach its verified webhook trigger to \`/eve/v1/github\`. Deploy, install the app from Vercel Connect, then add its \`@handle\` invocation token to a new issue, pull request, or review comment. GitHub may not autocomplete or render the token as a linked mention. See the [GitHub channel docs](/docs/channels/github) for permissions and events.`,
   },
   "linear-agent": {
     logo: "linear",
     docsHref: "/docs/channels/linear",
     keywords: ["issues", "comments", "agent sessions", "developer preview", "webhook"],
-    install: `Add this channel from eve's registry. This writes \`agent/channels/linear.ts\`:
+    install: `Add this channel from eve's registry to create a Vercel Connect client, route verified Agent Session events, and write \`agent/channels/linear.ts\`:
 
 \`\`\`bash
 eve add channel/linear-agent
 \`\`\``,
-    quickStart: `Create \`agent/channels/linear.ts\`:
+    quickStart: `The guided setup writes \`agent/channels/linear.ts\`:
 
 \`\`\`ts
 // agent/channels/linear.ts
+import { connectLinearCredentials } from "@vercel/connect/eve";
 import { linearChannel } from "eve/channels/linear";
 
 export default linearChannel({
-  credentials: {
-    accessToken: () => process.env.LINEAR_AGENT_ACCESS_TOKEN!,
-    webhookSecret: () => process.env.LINEAR_WEBHOOK_SECRET!,
-  },
+  credentials: connectLinearCredentials("linear/my-agent"),
 });
 \`\`\``,
-    configure: `Create a Linear OAuth app with Agent Session events enabled, make the app assignable and mentionable, and point the webhook at eve's route (\`/eve/v1/linear\`). Provide the app access token and webhook secret through environment variables. See the [Linear channel docs](/docs/channels/linear) for scopes and Agent Activity behavior.`,
+    configure: `Sign in to Vercel, then let the guided flow create or link a project, provision the Linear app, and attach its verified AgentSessionEvent trigger to \`/eve/v1/linear\`. Deploy, install the app in your Linear workspace from Vercel Connect, then delegate an issue or mention the agent. See the [Linear channel docs](/docs/channels/linear) for Agent Activity behavior.`,
   },
   eve: {
     logo: "eve",
     docsHref: "/docs/channels/eve",
-    keywords: ["web", "chat", "ui", "embed", "frontend"],
+    keywords: [
+      "web",
+      "chat",
+      "ui",
+      "embed",
+      "frontend",
+      "next.js",
+      "svelte",
+      "sveltekit",
+      "nuxt",
+      "vue",
+      "react",
+    ],
     install: `The eve CLI scaffolds the full Next.js web chat app alongside \`agent/channels/eve.ts\`:
 
 \`\`\`bash
-eve channels add web
+eve add channel/web
 \`\`\`
 
-To wire it up by hand instead, install the framework:
+To wire it up by hand instead — including into a Svelte or Nuxt app you already have — install the framework:
 
 \`\`\`bash
 npm install eve@latest
@@ -331,8 +347,50 @@ import { eveChannel } from "eve/channels/eve";
 export default eveChannel();
 \`\`\`
 
-Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and stream responses with the eve web client.`,
-    configure: `The eve channel is the lowest-friction way to talk to your agent, with no third-party provisioning required. Layer in auth and route protection as needed. See the [eve channel docs](/docs/channels/eve) and the [Frontend guide](/docs/guides/frontend/overview).`,
+Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and stream responses with the eve web client. Next.js, Nuxt, and Svelte each have an integration that mounts those routes on your app's own origin, so there's no CORS to configure and no URL env var to keep in sync:
+
+- **Next.js.** Wrap \`next.config.ts\` with \`withEve()\` from \`eve/next\`, then call \`useEveAgent()\` from \`eve/react\`. See the [Next.js guide](/docs/guides/frontend/nextjs).
+- **Nuxt.** Add \`"eve/nuxt"\` to \`modules\` in \`nuxt.config.ts\`; the \`useEveAgent()\` composable from \`eve/vue\` is auto-imported. See the [Nuxt guide](/docs/guides/frontend/nuxt).
+- **Svelte.** Add the \`eveSvelteKit()\` Vite plugin before \`sveltekit()\` in \`vite.config.ts\`, then call \`useEveAgent()\` from \`eve/svelte\`. See the [SvelteKit guide](/docs/guides/frontend/sveltekit).
+
+On any other stack, wire it up by hand: run the agent as its own service and proxy \`/eve/v1/**\` to it, or pass its origin as \`host\` to \`useEveAgent()\` and enable \`cors\` on the channel. Server-side code and custom UIs can call the routes through \`Client\` from \`eve/client\`.`,
+    configure: `The eve channel is the lowest-friction way to talk to your agent, with no third-party provisioning required. Layer in auth and route protection as needed, and enable \`cors\` only when a browser reaches the channel from another origin. See the [eve channel docs](/docs/channels/eve), the [Frontend guide](/docs/guides/frontend/overview), and the per-framework guides for [Next.js](/docs/guides/frontend/nextjs), [Nuxt](/docs/guides/frontend/nuxt), and [SvelteKit](/docs/guides/frontend/sveltekit).`,
+  },
+  buzz: {
+    logo: "buzz",
+    docsHref: "https://github.com/vercel/eve/tree/main/packages/eve-buzz-acp-adapter#readme",
+    badge: "ACP",
+    keywords: ["chat", "messaging", "desktop", "acp", "nostr", "agents"],
+    install: `Install [Buzz Desktop](https://buzz.xyz), then install eve's compatibility adapter globally:
+
+\`\`\`bash
+npm install --global @eve/buzz-acp-adapter
+\`\`\`
+
+The adapter must be installed globally because Buzz uses it whenever it interfaces with eve.`,
+    quickStart: `From an eve application directory, run the interactive installer:
+
+\`\`\`bash
+eve-buzz-acp-adapter install
+\`\`\`
+
+You can also provide a local application or deployed URL explicitly:
+
+\`\`\`bash
+eve-buzz-acp-adapter install ./path/to/eve-app
+eve-buzz-acp-adapter install https://agent.example.com
+\`\`\`
+
+The installer registers **eve** as a custom harness with Buzz.`,
+    configure: `Reopen Buzz, then create or edit an agent:
+
+1. Enter an **Agent name** and, optionally, **Agent instructions** for Buzz-specific behavior.
+2. Under **AI configuration**, choose **Customize for this agent**.
+3. Set **Agent harness** to **eve**. Buzz currently requires a **Model** value but does not prefill one for custom harnesses.
+4. Open **Advanced**. Leave **Who can talk to this agent** on its default owner-only selection. For a local application, set **Parallelism** to \`1\` and add any credentials that the application does not already load from an env file, such as \`AI_GATEWAY_API_KEY\`.
+5. Save the agent and start it.
+
+Accepted senders share one eve identity and its capabilities.`,
   },
   "chat-sdk-gchat": {
     logo: "googlechat",
@@ -628,6 +686,7 @@ export const { bot, channel, send } = chatSdkChannel({
     sendblue: createSendblueAdapter(),
   },
   state: createMemoryState(),
+  streaming: false,
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
@@ -751,50 +810,27 @@ export default channel;
 See the [Liveblocks adapter documentation](https://chat-sdk.dev/adapters/vendor-official/liveblocks) for supported events, capabilities, and credentials.`,
     configure: `Create a Liveblocks webhook, set \`LIVEBLOCKS_SECRET_KEY\` and \`LIVEBLOCKS_WEBHOOK_SECRET\`, and send comment events to \`/eve/v1/liveblocks\`. The adapter maps rooms to channels, comment threads to threads, and comments to messages. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
-  "chat-sdk-linq": {
+  linq: {
     logo: "linq",
-    docsHref: "/docs/channels/chat-sdk",
-    badge: "Provider official",
-    keywords: ["chat sdk", "linq", "imessage", "sms", "apple messages", "tapbacks", "phone"],
-    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/linq.ts\` and installs Chat SDK and its adapter dependencies:
+    docsHref: "/docs/channels/linq",
+    badge: "First-party",
+    keywords: ["linq", "imessage", "sms", "apple messages", "tapbacks", "phone"],
+    install: `Add Linq from eve's registry, then follow the guided Connect or portable credential setup:
 
 \`\`\`bash
-eve add channel/chat-sdk-linq
+eve add channel/linq
 \`\`\``,
     quickStart: `Create \`agent/channels/linq.ts\`:
 
 \`\`\`ts
-// agent/channels/linq.ts
-import { createLinqAdapter } from "@linqapp/chat-sdk-adapter";
-import { createMemoryState } from "@chat-adapter/state-memory";
-import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { connectLinqCredentials } from "@vercel/connect/eve";
+import { linqChannel } from "eve/channels/linq";
 
-export const { bot, channel, send } = chatSdkChannel({
-  userName: "My Agent",
-  adapters: {
-    linq: createLinqAdapter({
-      apiKey: process.env.LINQ_API_KEY!,
-      signingSecret: process.env.LINQ_WEBHOOK_SECRET!,
-    }),
-  },
-  state: createMemoryState(),
+export default linqChannel({
+  credentials: connectLinqCredentials("linq/my-agent"),
 });
-
-bot.onNewMention(async (thread: Thread, message: Message) => {
-  await thread.subscribe();
-  await send(message.text, { thread });
-});
-
-bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
-});
-
-export default channel;
-\`\`\`
-
-See the [Linq adapter documentation](https://chat-sdk.dev/adapters/vendor-official/linq) for supported events, capabilities, and credentials.`,
-    configure: `Create a Linq account, set \`LINQ_API_KEY\` and \`LINQ_WEBHOOK_SECRET\`, then point its signed webhook at \`/eve/v1/linq\`. Linq supports iMessage and SMS DMs and group chats, media, buffered streaming, and tapbacks. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+\`\`\``,
+    configure: `The guided setup can provision a managed Linq line with Vercel Connect or collect portable credentials. Connect-backed setup creates a native Linq connector and routes verified triggers to \`/eve/v1/linq\`; with portable credentials, deploy first, then create a signed Linq webhook for that route.`,
   },
   "chat-sdk-kapso": {
     logo: "kapso",
@@ -842,64 +878,29 @@ export default channel;
 See the [Kapso adapter documentation](https://chat-sdk.dev/adapters/vendor-official/kapso) for supported events, capabilities, and credentials.`,
     configure: `Connect a WhatsApp number in Kapso, set \`KAPSO_API_KEY\`, \`KAPSO_PHONE_NUMBER_ID\`, and \`KAPSO_WEBHOOK_SECRET\`, then point the Kapso webhook at \`/eve/v1/kapso\`. Use this provider-managed option when you do not want to integrate directly with the WhatsApp Cloud API. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
-  "chat-sdk-photon": {
+  photon: {
     logo: "photon",
-    docsHref: "/docs/channels/chat-sdk",
-    badge: "Provider official",
-    keywords: [
-      "chat sdk",
-      "imessage",
-      "apple messages",
-      "sms",
-      "mms",
-      "rcs",
-      "photon",
-      "sendblue",
-      "linq",
-      "agentphone",
-      "dial",
-    ],
-    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/imessage.ts\` and installs Chat SDK and its adapter dependencies:
+    docsHref: "/docs/channels/photon",
+    badge: "First-party",
+    keywords: ["imessage", "apple messages", "photon", "sms", "phone"],
+    install: `Add Photon from eve's registry, then follow the guided project, phone, and deployment setup:
 
 \`\`\`bash
-eve add channel/chat-sdk-photon
+eve add channel/photon-imessage
 \`\`\``,
-    quickStart: `Create \`agent/channels/imessage.ts\`:
+    quickStart: `Create \`agent/channels/photon.ts\`:
 
 \`\`\`ts
-// agent/channels/imessage.ts
-import { createiMessageAdapter } from "@photon-ai/chat-adapter-imessage";
-import { createMemoryState } from "@chat-adapter/state-memory";
-import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { connectPhotonCredentials } from "@vercel/connect/eve";
+import { photonIMessageChannel } from "eve/channels/photon";
 
-export const { bot, channel, send } = chatSdkChannel({
-  userName: "My Agent",
-  adapters: {
-    imessage: createiMessageAdapter({
-      local: false,
-      projectId: process.env.IMESSAGE_PROJECT_ID,
-      projectSecret: process.env.IMESSAGE_PROJECT_SECRET,
-    }),
+export default photonIMessageChannel({
+  credentials: connectPhotonCredentials("photon/my-agent"),
+});
+\`\`\``,
+    configure: `The guided setup can create a dedicated Photon project or use existing credentials, register your phone, and choose Vercel Connect or portable environment credentials. Connect-backed setup creates a native Photon connector and routes verified triggers to \`/eve/v1/photon\`; portable setup registers a signed Photon webhook directly.`,
   },
-  state: createMemoryState(),
-});
 
-bot.onNewMention(async (thread: Thread, message: Message) => {
-  await thread.subscribe();
-  await send(message.text, { thread });
-});
-
-bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
-});
-
-export default channel;
-\`\`\`
-
-See the [Photon adapter documentation](https://chat-sdk.dev/adapters/vendor-official/photon) for all supported events and credentials.`,
-    configure: `Set \`IMESSAGE_PROJECT_ID\` and \`IMESSAGE_PROJECT_SECRET\`, then point Photon’s signed webhook at \`/eve/v1/imessage\`. Photon supports cloud, self-hosted, and local macOS deployments. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
-  },
   "chat-sdk-dial": {
     logo: "dial",
     docsHref: "/docs/channels/chat-sdk",
@@ -1417,6 +1418,123 @@ export default githubExtension({
 
 For local or non-Vercel deployments, omit \`connector\` and set \`GITHUB_TOKEN\`; the extension also accepts an explicit \`token\`. Prefer fine-grained credentials, expose only the presets the agent needs, and keep approval enabled for writes. See the [GitHub Tools eve documentation](https://github-tools.com/frameworks/eve#eve-extension) for token authentication, per-tool overrides, commit attribution, and the complete tool catalog.`,
   },
+  arcana: {
+    logo: "arcana",
+    docsHref: "https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme",
+    keywords: [
+      "memory",
+      "long-term memory",
+      "mcp",
+      "semantic search",
+      "entity graph",
+      "timeline",
+      "brain notes",
+      "Kybernesis",
+    ],
+    install: `Install Kybernesis Arcana for eve:
+
+\`\`\`bash
+eve add extension/arcana
+\`\`\`
+
+This installs \`@kybernesis/arcana\` and writes an extension mount. The package requires Node.js 24 or later.`,
+    quickStart: `Create an Arcana workspace and workspace-scoped API key, then add both values to the agent's environment:
+
+\`\`\`bash title=".env.local"
+ARCANA_API_KEY=kb_your_api_key_here
+ARCANA_WORKSPACE=your-workspace
+\`\`\`
+
+The registry creates this mount:
+
+\`\`\`ts title="agent/extensions/arcana.ts"
+import arcana from "@kybernesis/arcana";
+
+export default arcana({
+  apiKey: process.env.ARCANA_API_KEY!,
+  workspace: process.env.ARCANA_WORKSPACE!,
+});
+\`\`\`
+
+The filename supplies the \`arcana\` namespace. The extension adds an MCP memory connection, recall, remember, and brain-note skills, and instructions that tell the model to search the workspace before it claims not to know something.`,
+    configure: `An Arcana key is scoped to a workspace. Keep the key in a sensitive environment variable and use a separate workspace and key when people or tenants must not share memory. The model can choose what to store and retrieve, but it cannot choose the configured key or default workspace.
+
+You can select a workspace per session with \`resolveWorkspace\`. Derive it only from verified session context, and only return workspaces that the configured key can access:
+
+\`\`\`ts title="agent/extensions/arcana.ts"
+import arcana from "@kybernesis/arcana";
+
+export default arcana({
+  apiKey: process.env.ARCANA_API_KEY!,
+  workspace: process.env.ARCANA_WORKSPACE!,
+  resolveWorkspace: (ctx) =>
+    ctx.session.auth.current?.attributes.surface === "dm"
+      ? process.env.ARCANA_DM_WORKSPACE
+      : undefined,
+});
+\`\`\`
+
+Arcana stores memories, embeddings, timeline entries, and brain notes in the selected workspace. The shipped instructions tell the model not to store passwords, access tokens, payment data, private keys, or one-time codes; add approval rules to memory-write tools when you need an enforced control. See the [Arcana package documentation](https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme) for the full configuration and tool reference.`,
+  },
+  hindsight: {
+    logo: "hindsight",
+    docsHref: "https://hindsight.vectorize.io/sdks/integrations/eve",
+    keywords: [
+      "memory",
+      "long-term memory",
+      "automatic recall",
+      "retention",
+      "user profile",
+      "context",
+      "Hindsight Cloud",
+      "self-hosted",
+      "Vectorize",
+    ],
+    install: `Install Hindsight memory for eve:
+
+\`\`\`bash
+eve add extension/hindsight
+\`\`\`
+
+This installs \`@vectorize-io/hindsight-eve\` and writes \`agent/instructions/hindsight.ts\` for recall plus \`agent/hooks/hindsight.ts\` for retention. The package requires Node.js 24 or later.`,
+    quickStart: `Create a Hindsight Cloud API key and add it to the agent's environment. The API URL defaults to Hindsight Cloud, and the bank defaults to \`default\`:
+
+\`\`\`bash title=".env.local"
+HINDSIGHT_API_KEY=...
+HINDSIGHT_BANK_ID=my-agent
+\`\`\`
+
+The registry creates both capability files:
+
+\`\`\`ts title="agent/instructions/hindsight.ts"
+import { hindsightMemory } from "@vectorize-io/hindsight-eve";
+
+export default hindsightMemory();
+\`\`\`
+
+\`\`\`ts title="agent/hooks/hindsight.ts"
+import { hindsightRetainHook } from "@vectorize-io/hindsight-eve";
+
+export default hindsightRetainHook();
+\`\`\`
+
+Before each turn, the dynamic instructions resolver recalls the user's ambient profile and working context. After the turn, the hook retains the user message and assistant reply. Neither path depends on the model choosing to call a tool.`,
+    configure: `Recall uses a fixed broad query rather than the live user message. Tune the profile context and response budget in the instructions file when needed:
+
+\`\`\`ts title="agent/instructions/hindsight.ts"
+import { hindsightMemory } from "@vectorize-io/hindsight-eve";
+
+export default hindsightMemory({
+  recallQuery: "user preferences, identity, projects, and working context",
+  budget: "high",
+  maxTokens: 2048,
+});
+\`\`\`
+
+For a self-hosted server, set \`HINDSIGHT_API_URL\` and pass \`apiKey: null\` to both factories when the server has no authentication. Other shared options include \`bankId\`, \`context\`, \`includeAssistantReply\`, \`timeoutMs\`, and \`onError\`.
+
+A bank is one isolated memory store, and both files must use the same bank. Do not share the default bank across untrusted users; use separate agent deployments with distinct \`HINDSIGHT_BANK_ID\` values for separate users or tenants. See the [Hindsight eve integration guide](https://hindsight.vectorize.io/sdks/integrations/eve) for Cloud, self-hosted, and factory configuration.`,
+  },
   "agent-browser": {
     logo: "agent-browser",
     docsHref:
@@ -1469,7 +1587,7 @@ The extension also supports inline screenshots, session naming, proxies, and pro
 
 /**
  * Connection presentation overlay, keyed by catalog slug. Transport (`mcp`,
- * `openapi`) and the model-facing description come from `@vercel/eve-catalog`;
+ * `openapi`) and the model-facing description come from `@eve/catalog`;
  * this carries the docs-only auth modes, optional connector UID, and configure
  * note.
  */
@@ -1486,15 +1604,25 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     configureNote:
       "Browser Use runs tasks in managed cloud browsers. Add approval gates or tool filters before allowing unattended browser actions.",
   },
+  agentcard: {
+    logo: "agentcard",
+    docsHref: "/docs/connections/mcp",
+    keywords: ["mcp", "shopping", "checkout", "payments", "virtual cards", "commerce", "connect"],
+    authModes: ["user"],
+  },
   vercel: {
     logo: "vercel",
     docsHref: "https://vercel.com/docs/agent-resources/vercel-mcp",
     keywords: ["mcp", "projects", "deployments", "logs", "oauth", "connect"],
-    authModes: ["user"],
+    authModes: ["user", "app"],
     connector: "vercel",
+    connectors: { app: "vercel/your-connector" },
     connectorService: "vercel",
-    configureNote:
-      "When the Connect form asks for a token authentication method, select None. Vercel MCP completes OAuth when the agent first calls an authenticated tool.",
+    connectorServices: { app: "api-key" },
+    configureNotes: {
+      user: "Select None when prompted for a token authentication method. Each user completes OAuth when needed.",
+      app: "Enter a team-scoped [Vercel token](https://vercel.com/kb/guide/how-do-i-use-a-vercel-api-access-token) when prompted, then copy the returned connector UID into the App example. This avoids per-user OAuth, though the Vercel token still belongs to the user who created it.",
+    },
   },
   linear: {
     logo: "linear",
@@ -1566,6 +1694,25 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     keywords: ["mcp", "docs", "tables", "pages", "oauth", "connect"],
     authModes: ["user"],
   },
+  context: {
+    logo: "context",
+    docsHref: "https://docs.context.dev/install-mcp",
+    connectorService: "mcp.context.dev",
+    keywords: [
+      "mcp",
+      "web search",
+      "web scraping",
+      "crawl",
+      "extract",
+      "parse",
+      "brand intelligence",
+      "monitoring",
+      "batches",
+      "oauth",
+      "connect",
+    ],
+    authModes: ["user"],
+  },
   egnyte: {
     logo: "egnyte",
     docsHref: "/docs/connections/mcp",
@@ -1619,6 +1766,14 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "events", "funnels", "insights", "analytics", "oauth", "connect"],
     authModes: ["user"],
+  },
+  natural: {
+    logo: "natural",
+    docsHref: "/docs/connections/mcp",
+    keywords: ["mcp", "payments", "wallets", "transfers", "oauth", "connect"],
+    authModes: ["user"],
+    configureNote:
+      "Natural moves real money. Add an approval gate or tool filters before allowing unattended payment actions.",
   },
   netlify: {
     logo: "netlify",
@@ -1691,6 +1846,12 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "tasks", "habits", "todo", "oauth", "connect"],
     authModes: ["user"],
+  },
+  tinybird: {
+    logo: "tinybird",
+    docsHref: "/docs/connections/mcp",
+    keywords: ["mcp", "sql", "analytics", "pipes", "datasources", "queries", "connect"],
+    authModes: ["app"],
   },
   todoist: {
     logo: "todoist",
@@ -1779,6 +1940,55 @@ export default defineInstrumentation(
 );
 \`\`\``,
     configure: `Create an API key in the Braintrust dashboard and expose it as \`BRAINTRUST_API_KEY\`. Replace the hook's \`app\` metadata with your app name. Spans land in the Braintrust project named after your agent. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+  },
+  "posthog-instrumentation": {
+    logo: "posthog",
+    docsHref: "/docs/guides/instrumentation",
+    keywords: ["otel", "opentelemetry", "tracing", "observability", "generations", "analytics"],
+    install: `Add PostHog AI Observability from eve's registry:
+
+\`\`\`bash
+eve add instrumentation/posthog
+\`\`\``,
+
+    quickStart: `eve installs \`agent/instrumentation.ts\` with PostHog's trace exporter. It also links spans to the user who initiated the session when an authenticated principal is available:
+
+\`\`\`ts
+// agent/instrumentation.ts
+import { trace } from "@opentelemetry/api";
+import { SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { PostHogTraceExporter } from "@posthog/ai/otel";
+import { registerOTel } from "@vercel/otel";
+import { defineInstrumentation } from "eve/instrumentation";
+
+export default defineInstrumentation({
+  setup: ({ agentName }) =>
+    registerOTel({
+      serviceName: agentName,
+      spanProcessors: [
+        new SimpleSpanProcessor(
+          new PostHogTraceExporter({
+            projectToken: process.env.POSTHOG_PROJECT_TOKEN!,
+            host: process.env.POSTHOG_HOST,
+          }),
+        ),
+      ],
+    }),
+  events: {
+    "step.started"(input) {
+      const distinctId =
+        input.session.auth.initiator?.principalId ??
+        input.session.auth.current?.principalId;
+
+      if (!distinctId) return undefined;
+
+      trace.getActiveSpan()?.setAttribute("posthog.distinct_id", distinctId);
+      return { runtimeContext: { posthog_distinct_id: distinctId } };
+    },
+  },
+});
+\`\`\``,
+    configure: `Copy your project token and client API host from PostHog's project settings and expose them as \`POSTHOG_PROJECT_TOKEN\` and \`POSTHOG_HOST\`. Remove the \`events\` handler to capture generations anonymously. PostHog groups turns using \`eve.session.id\` and preserves eve's trace hierarchy. See [PostHog's eve installation guide](https://posthog.com/docs/ai-observability/installation/eve) for verification steps and the [instrumentation guide](/docs/guides/instrumentation) for input and output capture controls.`,
   },
   "sentry-instrumentation": {
     logo: "sentry",
@@ -2062,12 +2272,17 @@ function buildConnection(entry: IntegrationEntry): Integration {
   };
   if (presentation.apiKey !== undefined) spec.apiKey = presentation.apiKey;
   if (presentation.connector !== undefined) spec.connector = presentation.connector;
+  if (presentation.connectors !== undefined) spec.connectors = presentation.connectors;
   if (presentation.connectorService !== undefined) {
     spec.connectorService = presentation.connectorService;
+  }
+  if (presentation.connectorServices !== undefined) {
+    spec.connectorServices = presentation.connectorServices;
   }
   if (identity.mcp !== undefined) spec.mcp = identity.mcp;
   if (identity.openapi !== undefined) spec.openapi = identity.openapi;
   if (presentation.configureNote !== undefined) spec.configureNote = presentation.configureNote;
+  if (presentation.configureNotes !== undefined) spec.configureNotes = presentation.configureNotes;
   return {
     slug: entry.slug,
     name: entry.name,

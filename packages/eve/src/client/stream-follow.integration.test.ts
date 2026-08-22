@@ -45,7 +45,10 @@ describe("stream following over real sockets", () => {
       { type: "step.started", data: {} },
       { type: "step.completed", data: {} },
       { type: "step.started", data: {} },
-      { type: "session.waiting", data: { wait: "next-user-message", continuationToken: "eve:x" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      },
     ];
     let connections = 0;
     const host = await listen(
@@ -64,7 +67,7 @@ describe("stream following over real sockets", () => {
     );
 
     const client = new Client({ host });
-    const session = client.session({ sessionId: "s1", streamIndex: 0 });
+    const session = client.sessions.attach("s1");
 
     const received: string[] = [];
     for await (const event of session.stream()) {
@@ -84,6 +87,44 @@ describe("stream following over real sockets", () => {
     ]);
     expect(connections).toBe(6);
     expect(session.state).toMatchObject({ sessionId: "s1", streamIndex: 6 });
+  });
+
+  it("reconnects an open stream that goes idle and continues from its cursor", async () => {
+    const events = [
+      { type: "step.started", data: {} },
+      { type: "message.appended", data: { messageDelta: "hello" } },
+      { type: "session.completed", data: {} },
+    ];
+    let connections = 0;
+    const host = await listen(
+      createServer((req, res) => {
+        connections += 1;
+        const index = startIndexOf(req.url);
+        res.writeHead(200, { "content-type": "application/x-ndjson" });
+        if (connections === 1) {
+          res.write(`${JSON.stringify(events[0])}\n`);
+          return;
+        }
+        for (const event of events.slice(index)) {
+          res.write(`${JSON.stringify(event)}\n`);
+        }
+      }),
+    );
+
+    const received: string[] = [];
+    for await (const event of followStreamIterable({
+      host,
+      resolveHeaders: () => Promise.resolve(new Headers()),
+      sessionId: "s",
+      startIndex: 0,
+      streamReadIdleTimeoutMs: 50,
+    })) {
+      received.push(event.type);
+      if (event.type === "session.completed") break;
+    }
+
+    expect(received).toEqual(["step.started", "message.appended", "session.completed"]);
+    expect(connections).toBe(2);
   });
 
   it("gives up after the idle-reconnect budget when a settled run's stream ends boundary-less", async () => {
@@ -142,7 +183,7 @@ describe("stream following over real sockets", () => {
     );
 
     const client = new Client({ host });
-    const session = client.session({ sessionId: "s1", streamIndex: 0 });
+    const session = client.sessions.attach("s1");
 
     const received: string[] = [];
     for await (const event of session.stream({ follow: false })) {

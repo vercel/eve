@@ -5,6 +5,7 @@ import { DYNAMIC_ECHO_TOKEN, ECHO_TOOL } from "./shared";
 // defineDynamic resolves at session.started; the tool is called and
 // returns the fixture token.
 export default defineEval({
+  tags: ["real-model"],
   description: "Dynamic tools smoke: resolver registers the echo tool and it returns the token.",
   async test(t) {
     await t.send(

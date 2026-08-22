@@ -6,27 +6,34 @@ export {
   PATCH,
   DELETE,
   WS,
-  type CancelFn,
-  type CancelOptions,
+  type AttachSessionFn,
   type CancelTurnResult,
+  type ClearSessionResult,
+  type CompactSessionResult,
+  type ResetSessionResult,
   type Channel,
+  type ChannelAudience,
+  type ChannelAudienceMetadata,
+  type ChannelFrom,
+  type ChannelReceiveContext,
+  type ChannelResolveSession,
+  type ChannelRespondOptions,
+  type ChannelSendOptions,
+  type ChannelSource,
   type ChannelCors,
   type ChannelCorsOptions,
   type ChannelDefinition,
-  type ChannelSessionOps,
+  type ChannelContinuationOps,
   type ChannelEvents,
   type InferChannelMetadata,
   type Session,
+  type SessionCallback,
   type SessionHandle,
+  type SessionRespondOptions,
+  type SessionSendOptions,
+  type TurnPolicy,
   type RouteDefinition,
   type RouteHandlerArgs,
-  type ResetFn,
-  type ResetOptions,
-  type ResetResult,
-  type SendFn,
-  type SendOptions,
-  type SendPayload,
-  type GetSessionFn,
   type HttpRouteDefinition,
   type WebSocketMessage,
   type WebSocketPeer,
@@ -43,11 +50,14 @@ export {
 
 import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
 import type { Channel, InferChannelMetadata } from "#public/definitions/channel.js";
+import type { ChannelAudienceMetadata } from "#shared/channel-audience.js";
 
 /**
  * Base channel metadata shape used by framework channel kinds.
  */
-export type InstrumentationChannelMetadata = Readonly<Record<string, unknown>>;
+export type InstrumentationChannelMetadata = Readonly<
+  Record<string, unknown> & ChannelAudienceMetadata
+>;
 
 /**
  * Kind discriminator exposed to instrumentation and dynamic resolvers.

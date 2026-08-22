@@ -4,7 +4,6 @@ import { resolveInvokeOperation, runInvoke, type RunInvokeInput } from "./invoke
 import { parseInvokeResumeInput } from "./result.js";
 
 const cursor = {
-  continuationToken: "eve:test",
   sessionId: "ses_1",
   streamIndex: 3,
 };
@@ -17,6 +16,7 @@ const localTarget = {
 const resume = { session: cursor, target };
 const request = {
   action: { callId: "call-1", input: {}, kind: "tool-call" as const, toolName: "bash" },
+  kind: "tool-approval" as const,
   display: "confirmation" as const,
   options: [
     { id: "approve", label: "Approve" },
@@ -50,9 +50,7 @@ describe("parseInvokeResumeInput", () => {
 describe("runInvoke", () => {
   it("preserves an accepted session when its stream later rejects authorization", async () => {
     vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        Response.json({ continuationToken: "eve:test", sessionId: "ses_1" }, { status: 202 }),
-      )
+      .mockResolvedValueOnce(Response.json({ sessionId: "ses_1" }, { status: 202 }))
       .mockResolvedValueOnce(
         Response.json(
           {
@@ -81,7 +79,7 @@ describe("runInvoke", () => {
       { type: "input.requested", data: { requests: [request] } },
       {
         type: "session.waiting",
-        data: { continuationToken: "eve:rekeyed", wait: "next-user-message" },
+        data: { continuationToken: "session-id", wait: "next-user-message" },
       },
     ]);
 
@@ -95,7 +93,7 @@ describe("runInvoke", () => {
         },
       ],
       resume: {
-        session: { continuationToken: "eve:rekeyed", sessionId: "ses_1", streamIndex: 2 },
+        session: { sessionId: "ses_1", streamIndex: 2 },
       },
     });
     if (result.status !== "input-required") throw new Error("Expected input-required result.");
@@ -112,14 +110,14 @@ describe("runInvoke", () => {
         },
         {
           type: "session.waiting",
-          data: { continuationToken: "eve:retry", wait: "next-user-message" },
+          data: { continuationToken: "session-id", wait: "next-user-message" },
         },
       ]),
     ).resolves.toMatchObject({
       status: "ready",
       outcome: { status: "failed", message: "Model unavailable" },
       resume: {
-        session: { continuationToken: "eve:retry", sessionId: "ses_1", streamIndex: 2 },
+        session: { sessionId: "ses_1", streamIndex: 2 },
       },
     });
   });
@@ -134,7 +132,7 @@ describe("runInvoke", () => {
           },
           {
             type: "session.waiting",
-            data: { continuationToken: "eve:authorized", wait: "next-user-message" },
+            data: { continuationToken: "session-id", wait: "next-user-message" },
           },
         ],
         {
@@ -145,7 +143,7 @@ describe("runInvoke", () => {
     ).resolves.toMatchObject({
       status: "authorization-required",
       authorizations: [{ name: "linear" }],
-      resume: { session: { continuationToken: "eve:authorized", streamIndex: 2 } },
+      resume: { session: { sessionId: "ses_1", streamIndex: 2 } },
     });
   });
 
@@ -163,7 +161,7 @@ describe("runInvoke", () => {
           },
           {
             type: "session.waiting",
-            data: { continuationToken: "eve:authorized", wait: "next-user-message" },
+            data: { continuationToken: "session-id", wait: "next-user-message" },
           },
         ],
         {
@@ -190,7 +188,7 @@ describe("runInvoke", () => {
         },
         {
           type: "session.waiting",
-          data: { continuationToken: "eve:authorized", wait: "next-user-message" },
+          data: { continuationToken: "session-id", wait: "next-user-message" },
         },
       ]),
     ).resolves.toEqual({
@@ -210,7 +208,7 @@ describe("runInvoke", () => {
         },
         {
           type: "session.waiting",
-          data: { continuationToken: "eve:next", wait: "next-user-message" },
+          data: { continuationToken: "session-id", wait: "next-user-message" },
         },
       ]),
     );
@@ -240,8 +238,18 @@ describe("resolveInvokeOperation", () => {
     const previous = parseInvokeResumeInput({
       status: "input-required",
       requests: [
-        { options: request.options, prompt: request.prompt, requestId: request.requestId },
-        { options: request.options, prompt: request.prompt, requestId: "approval-2" },
+        {
+          kind: request.kind,
+          options: request.options,
+          prompt: request.prompt,
+          requestId: request.requestId,
+        },
+        {
+          kind: request.kind,
+          options: request.options,
+          prompt: request.prompt,
+          requestId: "approval-2",
+        },
       ],
       resume,
     });
@@ -293,9 +301,7 @@ async function runStreamedInvocation(
   overrides: Partial<RunInvokeInput> = {},
 ): Promise<Awaited<ReturnType<typeof runInvoke>>> {
   vi.spyOn(globalThis, "fetch")
-    .mockResolvedValueOnce(
-      Response.json({ continuationToken: "eve:test", sessionId: "ses_1" }, { status: 202 }),
-    )
+    .mockResolvedValueOnce(Response.json({ sessionId: "ses_1" }, { status: 202 }))
     .mockResolvedValueOnce(streamResponse(events));
   return runInvoke({
     operation: { kind: "send", payload: { message: "do foo" } },

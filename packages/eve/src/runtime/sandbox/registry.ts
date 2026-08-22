@@ -27,6 +27,12 @@ export const DEFAULT_SANDBOX_SOURCE_ID = "eve:default-sandbox";
 export interface RuntimeRegisteredSandbox {
   readonly definition: ResolvedSandboxDefinition;
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
+  /** Parent-owned sandbox identity used by a child that selects parent.sandbox. */
+  readonly inheritance?: {
+    readonly definition: ResolvedSandboxDefinition;
+    readonly nodeId: string;
+    readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
+  };
 }
 
 /**
@@ -53,6 +59,15 @@ export function createRuntimeSandboxRegistry(input: {
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
 }): RuntimeSandboxRegistry {
   const definition = input.authoredSandbox ?? createFrameworkSandboxDefinition();
+  if (
+    definition.inheritsParent === true &&
+    (input.workspaceResourceRoot.contentHash !== undefined ||
+      input.workspaceResourceRoot.rootEntries.length > 0)
+  ) {
+    throw new Error(
+      `Sandbox "${definition.logicalPath}" selects parent.sandbox but has managed workspace resources. Remove the child workspace or give the child its own sandbox.`,
+    );
+  }
   return {
     sandbox: {
       definition,

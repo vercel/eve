@@ -316,7 +316,10 @@ describe("loadAuthoredModuleNamespace", () => {
         JSON.stringify(
           {
             exports: {
-              "./exa-linkedin": "./src/exa-linkedin.ts",
+              "./exa-linkedin": {
+                "eve-source": "./src/exa-linkedin.ts",
+                default: "./dist/exa-linkedin.js",
+              },
             },
             name: "@repo/enrichment",
             type: "module",
@@ -504,6 +507,40 @@ describe("loadAuthoredModuleNamespace", () => {
       expect(moduleNamespace.result).toBe("package-local-paths");
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("loads a linked package tsconfig from its real workspace location", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-linked-package-tsconfig-"));
+
+    try {
+      const workspaceRoot = join(root, "workspace");
+      const packageRoot = join(workspaceRoot, "packages", "extension");
+      const linkedPackageRoot = join(root, "app", "node_modules", "@repo", "extension");
+      await mkdir(join(packageRoot, "dist"), { recursive: true });
+      await mkdir(join(linkedPackageRoot, ".."), { recursive: true });
+      await writeFile(
+        join(workspaceRoot, "tsconfig.json"),
+        JSON.stringify({ compilerOptions: { target: "ES2024" } }),
+      );
+      await writeFile(
+        join(packageRoot, "tsconfig.json"),
+        JSON.stringify({ extends: "../../tsconfig.json" }),
+      );
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify({ name: "@repo/extension", type: "module" }),
+      );
+      await writeFile(join(packageRoot, "dist", "entry.mjs"), 'export const result = "linked";\n');
+      await symlink(packageRoot, linkedPackageRoot, "junction");
+
+      const moduleNamespace = await loadAuthoredModuleNamespace(
+        join(linkedPackageRoot, "dist", "entry.mjs"),
+      );
+
+      expect(moduleNamespace.result).toBe("linked");
+    } finally {
+      await rm(root, { force: true, recursive: true });
     }
   });
 
@@ -1119,12 +1156,14 @@ describe("loadAuthoredModuleNamespace", () => {
         appRoot: app.appRoot,
       });
       const manifest = await compileAgentManifest(discovered.manifest);
+      const subagent = manifest.subagents[0];
+      if (subagent?.configResolver !== undefined) {
+        throw new Error("expected a static subagent");
+      }
 
       expect(manifest.config.build?.externalDependencies).toEqual(["external-only"]);
-      expect(manifest.subagents[0]?.agent.config.build?.externalDependencies).toEqual([
-        "external-only",
-      ]);
-      expect(manifest.subagents[0]?.agent.tools).toHaveLength(1);
+      expect(subagent?.agent.config.build?.externalDependencies).toEqual(["external-only"]);
+      expect(subagent?.agent.tools).toHaveLength(1);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }

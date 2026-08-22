@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   deriveTeamsInputResponses,
+  isTeamsToolApprovalResponseActivity,
   readTeamsInputReplyToActivityId,
   renderInputRequestMessage,
   TEAMS_HITL_CHOICE_INPUT_ID,
   TEAMS_HITL_DATA_KEY,
   TEAMS_HITL_FREEFORM_INPUT_ID,
+  TEAMS_HITL_PROMPT_KEY,
+  TEAMS_HITL_REQUEST_KIND_KEY,
 } from "#public/channels/teams/hitl.js";
 import { parseTeamsActivity } from "#public/channels/teams/inbound.js";
 import type { InputRequest } from "#runtime/input/types.js";
@@ -37,7 +40,11 @@ describe("Teams HITL helpers", () => {
     };
 
     expect(card.actions?.[0]?.data).toMatchObject({
-      [TEAMS_HITL_DATA_KEY]: { replyToActivityId: "ROOT" },
+      [TEAMS_HITL_DATA_KEY]: {
+        [TEAMS_HITL_PROMPT_KEY]: "Approve deploy?",
+        [TEAMS_HITL_REQUEST_KIND_KEY]: "tool-approval",
+        replyToActivityId: "ROOT",
+      },
     });
   });
 
@@ -52,13 +59,13 @@ describe("Teams HITL helpers", () => {
       activityWithValue({
         [TEAMS_HITL_DATA_KEY]: {
           replyToActivityId: "ROOT",
-          optionId: "deny",
+          optionId: "cancel",
           requestId: "REQ",
         },
       }),
     );
     expect(message ? deriveTeamsInputResponses(message) : []).toEqual([
-      { optionId: "deny", requestId: "REQ" },
+      { optionId: "cancel", requestId: "REQ" },
     ]);
     expect(message ? readTeamsInputReplyToActivityId(message) : null).toBe("ROOT");
 
@@ -78,6 +85,21 @@ describe("Teams HITL helpers", () => {
     expect(invoke ? deriveTeamsInputResponses(invoke) : []).toEqual([
       { requestId: "REQ", text: "freeform" },
     ]);
+    expect(invoke ? isTeamsToolApprovalResponseActivity(invoke) : false).toBe(false);
+  });
+
+  it("identifies tool approval submissions", () => {
+    const activity = parseTeamsActivity(
+      activityWithValue({
+        [TEAMS_HITL_DATA_KEY]: {
+          [TEAMS_HITL_REQUEST_KIND_KEY]: "tool-approval",
+          optionId: "approve",
+          requestId: "REQ",
+        },
+      }),
+    );
+
+    expect(activity ? isTeamsToolApprovalResponseActivity(activity) : false).toBe(true);
   });
 });
 
@@ -85,9 +107,10 @@ function request(): InputRequest {
   return {
     action: { callId: "TC", input: {}, kind: "tool-call", toolName: "deploy" },
     display: "confirmation",
+    kind: "tool-approval",
     options: [
       { id: "approve", label: "Approve", style: "primary" },
-      { id: "deny", label: "Deny", style: "danger" },
+      { id: "cancel", label: "Cancel", style: "danger" },
     ],
     prompt: "Approve deploy?",
     requestId: "REQ",

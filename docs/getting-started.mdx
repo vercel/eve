@@ -1,23 +1,185 @@
 ---
 title: "Getting Started"
-description: "Create an eve project, learn its filesystem layout, and start adding capabilities."
-contentType: "Landing"
+description: "Create an eve project, configure a model, understand its filesystem layout, and run your first agent."
+contentType: "How-to"
 ---
 
-eve agents are TypeScript projects. You describe an agent with files under `agent/`, then eve runs it as a durable service.
+## Prerequisites
 
-## Start in order
-
-1. [Install eve](/docs/installation): create a project, configure a model credential, and run it locally
-2. [Learn the project structure](/docs/project-structure): see which files eve discovers and where each capability belongs
-3. [Build your first agent](/docs/tutorial/first-agent): add tools, state, and an interface for a useful workflow
-
-## What you need
+You need:
 
 - Node.js 24 or newer
 - npm, which Node.js includes
-- A model credential for the model your agent uses
+- A credential for the model your agent uses
 
-## Choose your next step
+The default scaffolded model routes through the Vercel AI Gateway. Set `AI_GATEWAY_API_KEY`, or link a Vercel project to use `VERCEL_OIDC_TOKEN`. To use a model provider directly, install its AI SDK provider package and set the provider's API key.
 
-Start with [Installation](/docs/installation) when you need a new project. Read [Project structure](/docs/project-structure) when you already have an eve project or want to add a capability.
+Choose a model, provider, and channel that meet your data-processing and compliance requirements.
+
+## Create a project
+
+Run `eve init` with a project name:
+
+```bash
+npx eve@latest init my-agent
+```
+
+The command creates the project, installs dependencies, and initializes Git. After scaffolding, eve offers to start the development server or, if a supported coding agent is installed, to open the project in the coding agent.
+
+To add eve to a project that already has a `package.json`, run this command from its root before you create any `agent/` files:
+
+```bash
+npx eve@latest init .
+```
+
+eve adds the missing `eve`, `ai`, and `zod` dependencies without changing files the project already owns.
+
+### Customize initialization
+
+To initialize the agent with a different AI Gateway model or reasoning effort, pass `--model` or `--reasoning`:
+
+```bash
+npx eve@latest init my-agent --model openai/gpt-5.6-terra --reasoning high
+```
+
+## Run the agent
+
+Choose **Start eve dev** after scaffolding, or run this from the project root:
+
+```bash
+npm run dev
+```
+
+This starts an interactive session where you can send messages to your agent.
+
+## Project layout
+
+eve builds an agent by walking the filesystem under `agent/`. Each directory is an authored slot, and the slot a file lands in determines how eve loads it.
+
+### Naming from paths
+
+eve derives names from file paths, so you do not configure them separately.
+
+| Path                                  | Resolves to           |
+| ------------------------------------- | --------------------- |
+| `agent/tools/get_weather.ts`          | tool `get_weather`    |
+| `agent/connections/linear.ts`         | connection `linear`   |
+| `agent/skills/summarize.md`           | skill `summarize`     |
+| `agent/subagents/researcher/agent.ts` | subagent `researcher` |
+
+The root agent uses its `package.json` `name`, or its app directory name if none is set. A subagent uses its directory name.
+
+### Recommended layout
+
+A minimal agent needs `instructions.md`; `agent.ts` is optional when the defaults are sufficient. Add other slots as the agent needs them:
+
+```text
+my-agent/
+├── package.json
+├── tsconfig.json
+├── agent/
+│   ├── agent.ts
+│   ├── instructions.md
+│   ├── instrumentation.ts
+│   ├── channels/
+│   ├── connections/
+│   ├── hooks/
+│   ├── skills/
+│   ├── lib/
+│   ├── sandbox/
+│   ├── tools/
+│   ├── schedules/
+│   └── subagents/
+└── evals/
+```
+
+Evals live beside `agent/`, not inside it.
+
+### Agent files and directories
+
+Each path under `agent/` has a specific purpose. Root agents can use every path below. A subagent has its own files and can use only the paths marked **Yes**.
+
+| Path                                                    | Use                                       | Available to subagents | Notes                                                                                                                                                                             |
+| ------------------------------------------------------- | ----------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent.ts`                                              | Runtime config                            | Yes                    | Model, model options, compaction, build, and experimental settings. See [Agents](./agent-config).                                                                                 |
+| `instructions.md` / `instructions.ts` / `instructions/` | Base system prompt                        | Optional               | A flat file or directory of `.md` and `.ts` files. Static sources compose at build time. Dynamic sources resolve at runtime. Required on the root, optional on subagents.         |
+| `instrumentation.ts`                                    | Telemetry config                          | No                     | OTel exporter and AI SDK span settings, auto-discovered and run before agent code. Root-only.                                                                                     |
+| `channels/`                                             | HTTP and messaging entry points           | No                     | Root-only.                                                                                                                                                                        |
+| `connections/`                                          | External MCP and OpenAPI services         | Yes                    | One connection per file; its name comes from the filename.                                                                                                                        |
+| `hooks/`                                                | Lifecycle and stream-event subscribers    | Yes                    | Module-backed only. Recursive directories are supported.                                                                                                                          |
+| `skills/`                                               | On-demand procedures and capability packs | Yes                    | Flat markdown, module-backed skills, or packaged skills. Runtime files are seeded under `$HOME/.agents/skills/`, with `/workspace/skills/` as a fallback.                         |
+| `lib/`                                                  | Shared authored helper code               | Yes                    | Import-only; not mounted into the workspace.                                                                                                                                      |
+| `sandbox.ts` or `sandbox/sandbox.ts`                    | The agent's single sandbox                | Yes                    | Use `sandbox.ts` for a definition-only override; use `sandbox/sandbox.ts` with `sandbox/workspace/**` to also seed files. The framework default applies when neither is authored. |
+| `sandbox/workspace/**`                                  | Files seeded into the sandbox             | Yes                    | Mirrored into `/workspace/` when a session starts.                                                                                                                                |
+| `tools/`                                                | Typed executable integrations             | Yes                    | Module-backed only.                                                                                                                                                               |
+| `schedules/`                                            | Recurring jobs                            | No                     | Each schedule is a default-exported `defineSchedule` module or a markdown prompt with `cron` frontmatter. Recursive nesting is supported. Root-only.                              |
+| `subagents/`                                            | Specialist child agents                   | Yes                    | Each child is a local package under `subagents/<id>/`. Nested subagents are supported.                                                                                            |
+
+### Files available in the sandbox
+
+Files under `agent/` define your agent; only files in `agent/sandbox/workspace/` are copied to `/workspace/` when a session starts.
+
+### Local subagents
+
+A local subagent uses the same `agent.ts` shape as the root:
+
+```text
+agent/subagents/researcher/
+├── agent.ts
+├── instructions.md
+├── connections/
+├── hooks/
+├── skills/
+├── lib/
+├── sandbox/
+├── tools/
+└── subagents/
+```
+
+A subagent's `agent.ts` is required and must provide a description, while its instructions are optional. Connections, hooks, skills, shared code, sandboxes, tools, and nested subagents are supported. Channels and schedules remain root-only. See [Subagents](./subagents) for inheritance and isolation behavior.
+
+### Flat layout
+
+When the app root is also the agent root, eve supports this layout:
+
+```text
+my-agent/
+├── package.json
+├── agent.ts
+├── instructions.md
+├── tools/
+└── skills/
+```
+
+Prefer the nested layout because it keeps application files separate from the authored agent surface.
+
+### Debug file discovery
+
+Run `eve info` when eve does not discover a file. It lists the discovered surface and diagnostics so you can check the authored slot and root-versus-subagent boundary. eve also writes inspectable artifacts under `.eve/`; see [Observability](./guides/instrumentation) and the [CLI](./reference/cli) reference.
+
+## Install manually
+
+If you do not want to use the scaffold, install the runtime dependencies:
+
+```bash
+npm install eve@latest ai zod
+```
+
+Declare Node.js 24 in `package.json`, then create `agent/instructions.md` and, when you need runtime configuration, `agent/agent.ts`.
+
+## Continue with the tutorial
+
+The [Tutorial](/docs/tutorial/first-agent) builds a data analytics agent step by step. It adds tools, state, sandboxed analysis, reusable skills, and human approval before deploying the result.
+
+After the tutorial, continue with the task you need:
+
+| Goal                                                    | Read                                                                                                          |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Give the model an action it can call                    | [Tools](/docs/tools)                                                                                          |
+| Connect an MCP server or OpenAPI service                | [Connections](/docs/connections)                                                                              |
+| Reach users through Slack, Discord, or another platform | [Channels](/docs/channels/overview)                                                                           |
+| Build a browser interface                               | [Frontend Frameworks](/docs/guides/frontend/overview)                                                         |
+| Test agent behavior                                     | [Evals](/docs/evals/overview)                                                                                 |
+| Secure and deploy the agent                             | [Authentication](/docs/guides/auth-and-route-protection), then [Deployment](/docs/guides/deployment/overview) |
+
+Read [Execution Model and Durability](/docs/concepts/execution-model-and-durability) for the mental model behind sessions, turns, durable steps, and parked work.

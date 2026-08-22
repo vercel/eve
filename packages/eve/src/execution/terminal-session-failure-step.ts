@@ -6,7 +6,7 @@ import { createLogger, formatError } from "#internal/logging.js";
 import {
   createSessionFailedEvent,
   encodeMessageStreamEvent,
-  timestampHandleMessageStreamEvent,
+  stampMessageStreamEvent,
 } from "#protocol/message.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -71,7 +71,7 @@ export async function emitTerminalSessionFailureStep(input: {
   try {
     const writer = input.parentWritable.getWriter();
     try {
-      await writer.write(encodeMessageStreamEvent(timestampHandleMessageStreamEvent(event)));
+      await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(event)));
     } finally {
       writer.releaseLock();
     }

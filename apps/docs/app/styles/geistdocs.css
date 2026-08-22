@@ -1,5 +1,3 @@
-@source "../../node_modules/@vercel/geistdocs/dist/**/*.js";
-@source "../../node_modules/streamdown/dist/*.js";
 @source "../**/*.{ts,tsx,mdx}";
 @source "../../components/**/*.{ts,tsx}";
 @source "../../../docs/**/*.{md,mdx}";
@@ -15,10 +13,42 @@ body {
   background-color: var(--ds-background-200);
 }
 
+:root {
+  --shiki-token-parameter: var(--shiki-color-text);
+}
+
 /* Tint the global footer to match the landing background, but only on the
    home route (`/`), which renders the [data-home-route] marker. */
 body:has([data-home-route]) footer {
   @apply bg-background-200;
+}
+
+/* Nights is an intentionally immersive standalone route. */
+body:has([data-nights-route]) {
+  background: #000;
+  color-scheme: dark;
+}
+
+@keyframes eve-nights-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+[data-nights-route][data-shader-state="loading"] [data-nights-animated] {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body:has([data-nights-route]) [data-nights-animated] {
+    animation: none;
+  }
 }
 
 /* On home routes the navbar starts borderless and fades its bottom border in
@@ -42,7 +72,7 @@ html[data-scrolled] body:has([data-home-route]) header {
     @apply px-6;
   }
 
-  #nd-page > .text-fd-muted-foreground:first-child {
+  #nd-page > .text-gray-900:first-child {
     @apply hidden;
   }
 }

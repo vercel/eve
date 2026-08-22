@@ -12,6 +12,8 @@
 
   let isBusy = $derived(agent.status === "submitted" || agent.status === "streaming");
   let isEmpty = $derived(agent.data.messages.length === 0);
+  let cancellationError = $state<string>();
+  let errorMessage = $derived(cancellationError ?? agent.error?.message);
 
   let messagesEl = $state<HTMLDivElement>();
   let isNearBottom = $state(true);
@@ -44,8 +46,19 @@
   function submitMessage() {
     const text = messageText.trim();
     if (!text || isBusy) return;
+    cancellationError = undefined;
     messageText = "";
-    void agent.send({ message: text });
+    void agent.send(text);
+  }
+
+  async function requestCancellation() {
+    cancellationError = undefined;
+    try {
+      await agent.cancel();
+    } catch (cause) {
+      cancellationError =
+        cause instanceof Error ? cause.message : "The cancellation request failed.";
+    }
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -62,7 +75,8 @@
       readonly text?: string;
     }[],
   ) {
-    void agent.send({ inputResponses: responses });
+    cancellationError = undefined;
+    void agent.respond(responses);
   }
 
   function partKey(part: EveMessagePart, index: number): string {
@@ -103,14 +117,14 @@
   </header>
 
   <section class="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-4 sm:px-6">
-    {#if agent.error}
+    {#if errorMessage}
       <div
         class="mt-4 flex items-start gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm"
       >
         <div>
           <p class="font-medium">Request failed</p>
           <p class="mt-0.5 text-muted-foreground">
-            {agent.error.message}
+            {errorMessage}
           </p>
         </div>
       </div>
@@ -254,7 +268,7 @@
             type="button"
             aria-label="Stop response"
             class="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
-            onclick={() => agent.stop()}
+            onclick={requestCancellation}
           >
             <svg class="size-3.5" fill="currentColor" viewBox="0 0 24 24">
               <rect x="4" y="4" width="16" height="16" rx="2" />

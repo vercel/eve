@@ -4,6 +4,7 @@ const CHILD_TOKEN = "RECURSIVE_AGENT_NOT_AVAILABLE";
 
 /** Runtime copies do not receive the root-only built-in `agent` tool. */
 export default defineEval({
+  tags: ["real-model"],
   description: "The built-in recursive agent tool is exposed only to the root session.",
   async test(t) {
     await t.send(

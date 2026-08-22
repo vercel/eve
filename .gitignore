@@ -16,6 +16,10 @@ coverage/
 
 # Test artifacts
 .vitest/
+apps/benchmarks/experiments/
+apps/benchmarks/results/
+apps/benchmarks/evals/*/PROMPT.md
+apps/benchmarks/evals/*/package.json
 .extension-contracts-cache/
 packages/eve/.workflow-vitest/
 packages/eve/.generated/
@@ -26,6 +30,8 @@ test-results/
 packages/eve/docs/
 packages/eve/LICENSE
 packages/eve/NOTICE
+packages/eve-buzz-acp-adapter/LICENSE
+packages/eve-buzz-acp-adapter/NOTICE
 
 # Logs
 *.log
@@ -45,6 +51,7 @@ Thumbs.db
 
 # IDE/editor
 .codex/
+.githooks/
 .vscode/
 .idea/
 

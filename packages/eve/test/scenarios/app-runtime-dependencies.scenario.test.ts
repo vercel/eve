@@ -847,11 +847,12 @@ describe("app runtime dependency tracing", () => {
     expect(vercelFunctionsSource).not.toContain("chokidar");
     expect(vercelFunctionsSource).not.toContain("[eve:dev]");
     expect(vercelFunctionsSource).not.toContain("rollup:reload");
-    // The world-local canary is its config env var, not its error-class
-    // names: the semantic-error catalog legitimately embeds names like
-    // `DataDirAccessError` as matcher strings without bundling any
-    // world-local code.
-    expect(vercelFunctionsSource).not.toContain("WORKFLOW_LOCAL_DATA_DIR");
+    // The world-local canary is its log prefix, not names other packages
+    // legitimately mention without bundling world-local code: the
+    // semantic-error catalog embeds error-class names like
+    // `DataDirAccessError`, and @workflow/core's runtime world factory
+    // (stubbed out at vendor time) names `WORKFLOW_LOCAL_DATA_DIR`.
+    expect(vercelFunctionsSource).not.toContain("[world-local]");
   }, 30_000);
 
   it("loads instrumentation runtime dependencies from hosted Vercel output", async () => {

@@ -67,7 +67,8 @@ describe("discoverSubagents (memory)", () => {
         instructions: [
           {
             definition: {
-              markdown: "Research tasks thoroughly.",
+              content: "Research tasks thoroughly.",
+              role: "system",
             },
             sourceKind: "markdown",
             logicalPath: "instructions.md",
@@ -91,7 +92,7 @@ describe("discoverSubagents (memory)", () => {
             sourceId: "tools/search.js",
           },
         ],
-        version: 12,
+        version: 13,
       },
       rootPath: researcherRoot,
       sourceId: "subagents/researcher",
@@ -119,7 +120,8 @@ describe("discoverSubagents (memory)", () => {
         instructions: [
           {
             definition: {
-              markdown: "Review drafts for clarity.",
+              content: "Review drafts for clarity.",
+              role: "system",
             },
             sourceKind: "markdown",
             logicalPath: "instructions.md",
@@ -136,11 +138,63 @@ describe("discoverSubagents (memory)", () => {
           logicalPath: "agent.js",
           sourceId: "agent.js",
         },
-        version: 12,
+        version: 13,
       },
       rootPath: reviewerRoot,
       sourceId: "subagents/reviewer",
       subagentId: "reviewer",
+    });
+  });
+
+  it("discovers extension mounts inside local subagent packages", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/research/package.json": JSON.stringify({
+          name: "@acme/research",
+          eve: { extension: { dist: "extension" } },
+        }),
+        "node_modules/@acme/research/extension/_manifest.json": JSON.stringify({
+          kind: "eve-extension",
+          formatVersion: 1,
+          builtWithEve: "test",
+          requires: { extension: 1, tool: 1 },
+        }),
+        "node_modules/@acme/research/extension/tools/search.ts": "export default {};",
+      },
+      agentFiles: {
+        "instructions.md": "Route research tasks.",
+        "subagents/researcher/agent.ts": "export default {};",
+        "subagents/researcher/extensions/research.ts": 'export { default } from "@acme/research";',
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.manifest.resolvedExtensions).toEqual([]);
+    expect(result.manifest.subagents[0]?.manifest.extensions).toEqual([
+      {
+        sourceKind: "module",
+        logicalPath: "extensions/research.ts",
+        sourceId: "extensions/research.ts",
+      },
+    ]);
+    expect(result.manifest.subagents[0]?.manifest.resolvedExtensions[0]).toMatchObject({
+      namespace: "research",
+      packageName: "@acme/research",
+      specifier: "@acme/research",
+      manifest: {
+        tools: [
+          {
+            logicalPath: "tools/search.ts",
+            sourceId: "tools/search.ts",
+          },
+        ],
+      },
     });
   });
 
@@ -163,7 +217,8 @@ describe("discoverSubagents (memory)", () => {
     expect(result.manifest.subagents[0]?.manifest.instructions).toEqual([
       {
         definition: {
-          markdown: "Research carefully.",
+          content: "Research carefully.",
+          role: "system",
         },
         sourceKind: "markdown",
         logicalPath: "instructions.md",

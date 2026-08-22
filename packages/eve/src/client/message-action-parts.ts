@@ -24,6 +24,7 @@ export function toMessageInputRequest(request: InputRequest): EveMessageInputReq
   return {
     allowFreeform: request.allowFreeform,
     display: request.display,
+    kind: request.kind,
     options: request.options,
     prompt: request.prompt,
     requestId: request.requestId,

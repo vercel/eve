@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { byokProviderEnvVar, modelProviderSlug } from "./project.js";
+import { agentTemplateFiles, byokProviderEnvVar, modelProviderSlug } from "./project.js";
+
+describe("agent templates", () => {
+  it("authors a ChatGPT subscription model with the stable API", () => {
+    expect(agentTemplateFiles("chatgpt/gpt-5.6-sol")["agent/agent.ts"]).toContain(
+      'model: chatgpt("gpt-5.6-sol")',
+    );
+    expect(agentTemplateFiles("chatgpt/gpt-5.6-sol")["agent/agent.ts"]).toContain(
+      'import { chatgpt } from "eve/models/openai"',
+    );
+  });
+});
 
 describe("byok provider derivation", () => {
   it("derives the provider slug from the model id prefix", () => {

@@ -8,7 +8,7 @@ import { formatValidationError } from "#runtime/validation.js";
 export const EXTENSION_COMPATIBILITY_MANIFEST_KIND = "eve-extension";
 
 /** Current compatibility-manifest JSON format. */
-export const EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION = 1;
+export const EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION = 2;
 
 /** Filename emitted at the root of an extension's agent-shaped dist tree. */
 export const EXTENSION_COMPATIBILITY_MANIFEST_FILENAME = "_manifest.json";
@@ -21,16 +21,45 @@ interface ExtensionCapabilityContract {
 
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
-  tool: { current: 3, supported: [1, 2, 3], dropped: {} },
-  dynamicTool: { current: 4, supported: [1, 2, 3, 4], dropped: {} },
-  connection: { current: 2, supported: [1, 2], dropped: {} },
-  hook: { current: 2, supported: [1, 2], dropped: {} },
+  tool: {
+    current: 17,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17],
+    dropped: { 15: "TaskExec replaces stageEffect with send" },
+  },
+  dynamicTool: {
+    current: 18,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
+    dropped: {},
+  },
+  channel: { current: 7, supported: [1, 2, 3, 4, 5, 6, 7], dropped: {} },
+  schedule: { current: 3, supported: [1, 2, 3], dropped: {} },
+  subagent: { current: 2, supported: [1, 2], dropped: {} },
+  connection: { current: 5, supported: [1, 2, 3, 4, 5], dropped: {} },
+  hook: {
+    current: 14,
+    supported: [10, 11, 12, 13, 14],
+    dropped: {
+      1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
+      2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
+      3: "Model identity moved from session.started runtime metadata to step.started call attribution.",
+      4: "Model identity moved from session.started runtime metadata to step.started call attribution.",
+      5: "Model identity moved from session.started runtime metadata to step.started call attribution.",
+      6: "Model identity moved from session.started runtime metadata to step.started call attribution.",
+      7: "Model identity moved from session.started runtime metadata to step.started call attribution.",
+      8: "Model identity moved from session.started runtime metadata to step.started call attribution.",
+      9: "Model identity moved from session.started runtime metadata to step.started call attribution.",
+    },
+  },
   skill: { current: 1, supported: [1], dropped: {} },
-  dynamicSkill: { current: 1, supported: [1], dropped: {} },
-  instructions: { current: 1, supported: [1], dropped: {} },
-  dynamicInstructions: { current: 1, supported: [1], dropped: {} },
+  dynamicSkill: { current: 12, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], dropped: {} },
+  instructions: { current: 2, supported: [1, 2], dropped: {} },
+  dynamicInstructions: {
+    current: 13,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+    dropped: {},
+  },
   config: { current: 1, supported: [1], dropped: {} },
-  state: { current: 2, supported: [1, 2], dropped: {} },
+  state: { current: 3, supported: [1, 2, 3], dropped: {} },
 } as const satisfies Record<string, ExtensionCapabilityContract>;
 
 /** One independently versioned extension-facing contract. */
@@ -43,7 +72,9 @@ export const EXTENSION_CAPABILITY_VERSIONS = Object.fromEntries(
     contract.current,
   ]),
 ) as {
-  readonly [TCapability in ExtensionCapability]: (typeof EXTENSION_CAPABILITY_CONTRACTS)[TCapability]["current"];
+  readonly [
+    TCapability in ExtensionCapability
+  ]: (typeof EXTENSION_CAPABILITY_CONTRACTS)[TCapability]["current"];
 };
 
 /** Capability requirements stamped by one extension build. */
@@ -68,10 +99,13 @@ export type ExtensionCapabilitySupport = Readonly<Record<string, readonly number
 /** Compatibility-only metadata emitted by `eve extension build`. */
 export interface ExtensionCompatibilityManifest {
   readonly kind: typeof EXTENSION_COMPATIBILITY_MANIFEST_KIND;
-  readonly formatVersion: typeof EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION;
+  readonly formatVersion: 1 | typeof EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION;
   /** Diagnostic producer version; capability requirements decide compatibility. */
   readonly builtWithEve: string;
   readonly requires: Readonly<Record<string, number>>;
+  readonly build?: {
+    readonly externalDependencies: readonly string[];
+  };
 }
 
 /** One requirement the consuming eve cannot satisfy. */
@@ -81,14 +115,27 @@ export interface UnsupportedExtensionCapability {
   readonly supportedVersions: readonly number[];
 }
 
-const extensionCompatibilityManifestSchema: z.ZodType<ExtensionCompatibilityManifest> = z
+const extensionCompatibilityManifestV1Schema = z
   .object({
     kind: z.literal(EXTENSION_COMPATIBILITY_MANIFEST_KIND),
-    formatVersion: z.literal(EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION),
+    formatVersion: z.literal(1),
     builtWithEve: z.string().min(1),
     requires: z.record(z.string(), z.number().int().positive()),
   })
   .strict();
+const extensionCompatibilityManifestV2Schema = extensionCompatibilityManifestV1Schema.extend({
+  formatVersion: z.literal(EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION),
+  build: z
+    .object({
+      externalDependencies: z.array(z.string().min(1)).readonly(),
+    })
+    .strict()
+    .optional(),
+});
+const extensionCompatibilityManifestSchema: z.ZodType<ExtensionCompatibilityManifest> = z.union([
+  extensionCompatibilityManifestV1Schema,
+  extensionCompatibilityManifestV2Schema,
+]);
 
 /** Serializes a compatibility manifest deterministically. */
 export function serializeExtensionCompatibilityManifest(

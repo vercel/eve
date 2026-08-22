@@ -13,6 +13,7 @@ import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import type { RuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createExecutionNodeStep, createNodeHarnessTools } from "#execution/node-step.js";
+import { countLocalSubagentCalls } from "#runtime/framework-tools/subagent/local.js";
 import { createSession } from "#execution/session.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
 import { toInputSchema } from "#shared/tool-schema.js";
@@ -177,7 +178,9 @@ function createEmptyToolRegistry(): RuntimeToolRegistry {
   };
 }
 
-function createTestTurnAgent(overrides?: Partial<RuntimeTurnAgent>): RuntimeTurnAgent {
+type StaticRuntimeTurnAgent = Extract<RuntimeTurnAgent, { readonly model: unknown }>;
+
+function createTestTurnAgent(overrides?: Partial<StaticRuntimeTurnAgent>): RuntimeTurnAgent {
   return {
     id: "test-agent",
     instructions: ["You are a test agent."],
@@ -204,6 +207,8 @@ function createTestNode(
     nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
     sandboxRegistry: createStubSandboxRegistry(),
     subagentRegistry: {
+      dynamicNodeIds: new Set(),
+      dynamicResolvers: [],
       preparedTools: [],
       subagentsByName: new Map(),
       subagentsByNodeId: new Map(),
@@ -216,17 +221,18 @@ function createTestNode(
 
 function createNoopRuntime(): Runtime {
   return {
-    cancelTurn: vi.fn(),
-    deliver: vi.fn(),
-    resolveSession: vi.fn(),
-    run: vi.fn().mockRejectedValue(new Error("runtime.run should not be called in this test")),
+    createSession: vi
+      .fn()
+      .mockRejectedValue(new Error("runtime.createSession should not be called in this test")),
+    dispatchContinuation: vi.fn(),
+    dispatchSession: vi.fn(),
     getEventStream: vi
       .fn()
       .mockRejectedValue(new Error("runtime.getEventStream should not be called in this test")),
     getStreamTailIndex: vi
       .fn()
       .mockRejectedValue(new Error("runtime.getStreamTailIndex should not be called in this test")),
-    terminateSession: vi.fn(),
+    resolveContinuation: vi.fn(),
   };
 }
 
@@ -268,6 +274,109 @@ describe("createNodeHarnessTools", () => {
     });
 
     expect(tools.has("agent")).toBe(false);
+  });
+
+  it("does not inject task tools without experimental.tasks", () => {
+    const tools = createNodeHarnessTools({ node: createTestNode() });
+
+    for (const name of ["task_cancel", "task_update"]) {
+      expect(tools.has(name)).toBe(false);
+    }
+  });
+
+  it("injects the task tools when experimental.tasks is on", () => {
+    const node = createTestNode();
+    const tools = createNodeHarnessTools({
+      node: {
+        ...node,
+        agent: {
+          ...node.agent,
+          config: { experimental: { tasks: true }, model: { id: "test-model" }, name: "test" },
+        },
+      },
+    });
+
+    for (const name of ["task_cancel", "task_update"]) {
+      expect(tools.get(name)?.runtimeAction).toEqual({ kind: "task-control" });
+      expect(tools.get(name)?.execute).toBeUndefined();
+    }
+    expect(tools.has("task_sleep")).toBe(false);
+  });
+
+  it("executes local and remote subagents as background tools only with experimental.tasks", () => {
+    const delegationTools: StaticRuntimeTurnAgent["tools"] = [
+      {
+        description: "Delegate local research.",
+        inputSchema: { type: "object" },
+        kind: "subagent",
+        logicalPath: "subagents/research",
+        name: "research",
+        nodeId: "subagents/research",
+        sourceId: "subagents/research",
+      },
+      {
+        description: "Delegate remote review.",
+        inputSchema: { type: "object" },
+        kind: "remote",
+        logicalPath: "remote-agents/reviewer",
+        name: "reviewer",
+        nodeId: "remote-agents/reviewer",
+        sourceId: "remote-agents/reviewer",
+      },
+    ];
+    const createNode = (tasks: boolean) => {
+      const node = createTestNode(createTestTurnAgent({ tools: delegationTools }));
+      return {
+        ...node,
+        agent: {
+          ...node.agent,
+          config: {
+            experimental: { tasks },
+            model: { id: "test-model" },
+            name: "test",
+          },
+        },
+      };
+    };
+
+    const legacy = createNodeHarnessTools({ node: createNode(false) });
+    expect(legacy.get("research")?.runtimeAction?.kind).toBe("subagent-call");
+    expect(legacy.get("reviewer")?.runtimeAction?.kind).toBe("remote-agent-call");
+    expect(legacy.get("research")?.execution).toBeUndefined();
+    expect(legacy.get("reviewer")?.execution).toBeUndefined();
+
+    const background = createNodeHarnessTools({ node: createNode(true) });
+    for (const name of ["agent", "research", "reviewer"]) {
+      expect(background.get(name)?.execution).toBe("background");
+      expect(background.get(name)?.execute).toBeDefined();
+      expect(background.get(name)?.runtimeAction).toBeUndefined();
+    }
+    expect(
+      countLocalSubagentCalls(
+        ["agent", "research", "reviewer"].map((name) => {
+          const execute = background.get(name)?.execute;
+          if (execute === undefined) throw new Error(`Missing background executor for ${name}.`);
+          return { definition: { execute } };
+        }),
+      ),
+    ).toBe(2);
+  });
+
+  it("respects disableTool for individual task tools", () => {
+    const node = createTestNode();
+    const tools = createNodeHarnessTools({
+      node: {
+        ...node,
+        agent: {
+          ...node.agent,
+          config: { experimental: { tasks: true }, model: { id: "test-model" }, name: "test" },
+          disabledFrameworkTools: ["task_cancel"],
+        },
+      },
+    });
+
+    expect(tools.has("task_update")).toBe(true);
+    expect(tools.has("task_cancel")).toBe(false);
   });
 });
 

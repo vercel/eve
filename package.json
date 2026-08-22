@@ -12,6 +12,8 @@
   ],
   "type": "module",
   "scripts": {
+    "benchmark": "pnpm --filter @eve-internal/benchmarks benchmark",
+    "benchmark:publish": "node apps/benchmarks/publish.mjs",
     "build": "turbo run build --filter='./packages/*'",
     "changeset": "changeset",
     "check:deps": "syncpack lint",
@@ -21,16 +23,15 @@
     "fmt": "oxfmt",
     "guard:fixtures": "node ./scripts/guard-test-fixtures.mjs",
     "guard:invariants": "node ./scripts/guard-invariants.mjs",
-    "konsistent": "konsistent",
     "lint": "oxlint --fix",
-    "prepare": "simple-git-hooks",
+    "prepare": "node ./scripts/install-git-hooks.mjs",
     "test": "pnpm test:unit && pnpm test:integration",
     "test:e2e": "turbo run test:e2e --concurrency=1",
     "test:integration": "turbo run test:integration",
     "test:scenario": "turbo run test:scenario",
     "test:unit": "turbo run test:unit",
     "typecheck": "turbo run typecheck",
-    "version-packages": "changeset version",
+    "version-packages": "changeset version && node ./scripts/materialize-registry-release-requirements.mjs",
     "release": "pnpm build && node ./scripts/assert-changeset-publish-packages.mjs && changeset publish",
     "test:tui": "pnpm --filter eve run test:tui",
     "update:extension-contracts": "node ./scripts/extension-capability-contracts.mjs"
@@ -39,23 +40,16 @@
     "@changesets/cli": "2.31.0",
     "@microsoft/api-extractor": "7.58.10",
     "@types/node": "catalog:",
-    "ai": "catalog:",
     "gray-matter": "4.0.3",
-    "konsistent": "1.0.0-beta.1",
-    "oxfmt": "0.58.0",
-    "oxlint": "1.73.0",
-    "simple-git-hooks": "2.13.1",
+    "oxfmt": "0.63.0",
+    "oxlint": "1.78.0",
     "syncpack": "15.3.2",
     "turbo": "2.9.18",
     "typescript": "catalog:",
-    "vercel": "54.14.2",
-    "vitest": "catalog:"
-  },
-  "simple-git-hooks": {
-    "pre-commit": "node ./scripts/pre-commit-fmt.mjs"
+    "vercel": "58.5.1"
   },
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@11.15.0"
+  "packageManager": "pnpm@11.21.0"
 }

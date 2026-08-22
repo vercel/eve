@@ -40,11 +40,32 @@ describe("renderFlowPanel", () => {
     );
     const text = rows.join("\n");
 
-    expect(rows[0]).toBe("▔".repeat(60));
+    expect(rows[0]).toBe("▔".repeat(59));
     expect(rows[1]).toBe("   /deploy");
     expect(text).toContain("   · Creating Vercel project…");
     expect(text).toContain("   ✓ Linked");
     expect(text).toContain("   ▷ Create a new project");
+  });
+
+  it("renders multiline diagnostics as separate terminal rows", () => {
+    const rows = renderFlowPanel(
+      {
+        title: "Add to your agent",
+        lines: [
+          {
+            text: "Linear connector creation failed:\nError: connector already exists.",
+            tone: "error",
+          },
+        ],
+        content: { kind: "idle", indicator: { glyph: "▪", color: "green" } },
+      },
+      theme,
+      60,
+    );
+
+    expect(rows).toContain("   ⨯ Linear connector creation failed:");
+    expect(rows).toContain("     Error: connector already exists.");
+    expect(rows.every((row) => !row.includes("\n"))).toBe(true);
   });
 
   it("keeps only the freshest progress lines in view", () => {
@@ -138,6 +159,42 @@ describe("renderFlowPanel", () => {
 });
 
 describe("renderSelectQuestion", () => {
+  it("renders question context beneath the heading and above compact actions", () => {
+    const rows = renderSelectQuestion(
+      {
+        kind: "single",
+        message: "extension/agent-browser",
+        description: "Add browser automation tools backed by agent-browser to an eve agent.",
+        metadata: [
+          { label: "Source", value: "Official eve registry" },
+          { label: "Packages", value: "@agent-browser/eve" },
+        ],
+        options: [
+          { value: "add", label: "Add to project" },
+          { value: "back", label: "Back" },
+        ],
+        select: initialSelectState({
+          options: [
+            { value: "add", label: "Add to project" },
+            { value: "back", label: "Back" },
+          ],
+        }),
+      },
+      theme,
+      100,
+    );
+
+    expect(rows.slice(0, 7)).toEqual([
+      "  extension/agent-browser",
+      "  Add browser automation tools backed by agent-browser to an eve agent.",
+      "  Source: Official eve registry",
+      "  Packages: @agent-browser/eve",
+      "",
+      "   ▶ Add to project ",
+      "     Back",
+    ]);
+  });
+
   it("shows a stacked menu's selected-row description beneath that option", () => {
     const options: SetupPanelOption[] = [
       { value: "model", label: "Change model", description: "The model your agent uses" },
@@ -512,7 +569,7 @@ describe("renderSelectQuestion", () => {
   it("keeps a long masked key's inline failure visible within a narrow panel", () => {
     const options = [
       {
-        value: "own-key",
+        value: "ai-gateway-key",
         label: "AI Gateway via AI_GATEWAY_API_KEY",
         hint: ">  type your key",
       },
@@ -526,7 +583,7 @@ describe("renderSelectQuestion", () => {
         options,
         select: initialSelectState({ options }),
         edit: {
-          optionValue: "own-key",
+          optionValue: "ai-gateway-key",
           caretVisible: false,
           editor: {
             kind: "key",
@@ -589,7 +646,7 @@ describe("renderSelectQuestion", () => {
   it("stacks hints under labels with separators and trailing notices", () => {
     const options = [
       { value: "model", label: "Change model", hint: "anthropic/claude-sonnet-5" },
-      { value: "provider", label: "Change provider", hint: "AI Gateway (Linked to my-agent)" },
+      { value: "provider", label: "Change provider", hint: "AI Gateway via Project" },
     ];
     const rows = renderSelectQuestion(
       {
@@ -610,7 +667,7 @@ describe("renderSelectQuestion", () => {
       "     anthropic/claude-sonnet-5",
       "",
       "   ◦ Change provider",
-      "     AI Gateway (Linked to my-agent)",
+      "     AI Gateway via Project",
       "",
       "  ✓ Model changed to openai/gpt-5.5",
       "",
@@ -653,7 +710,7 @@ describe("renderSelectQuestion", () => {
       {
         value: "provider",
         label: "Change provider",
-        hint: "AI Gateway (Linked to \x1b[1mmy-agent\x1b[22m)",
+        hint: "Selected (\x1b[1mvalue\x1b[22m)",
       },
     ];
     const text = renderSelectQuestion(
@@ -669,7 +726,7 @@ describe("renderSelectQuestion", () => {
 
     // Bold's close (SGR 22) also ends dim — the renderer re-opens dim so the
     // hint's tail does not pop to full brightness.
-    expect(text).toContain("\x1b[1mmy-agent\x1b[22m\x1b[2m)");
+    expect(text).toContain("\x1b[1mvalue\x1b[22m\x1b[2m)");
   });
 
   it("uses the terminal foreground for a selected yellow hint and dims it otherwise", () => {
@@ -757,7 +814,7 @@ describe("renderSelectQuestion", () => {
   it("renders each line of a stacked hint beneath its option", () => {
     const options = [
       {
-        value: "project",
+        value: "ai-gateway-project",
         label: "AI Gateway via Project",
         hint: "Authenticates with AI Gateway automatically\nin a new or existing project. No keys to manage.",
       },

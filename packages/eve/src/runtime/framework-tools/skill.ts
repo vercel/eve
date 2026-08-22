@@ -88,7 +88,6 @@ const SKILL_TOOL_METADATA = {
   description: [
     "Load the full instructions for one available skill by name or id.",
     "Use this tool when the request clearly matches a listed skill description or when the user explicitly asks for that skill.",
-    "This is not for MCP connections; use connection_search to access an installed connection.",
     "Loading adds the skill instructions to the current turn.",
     'Choose the "skill" value from the Available skills block.',
   ].join(" "),

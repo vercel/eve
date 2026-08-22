@@ -90,7 +90,7 @@ describe("remote agent auth forwarding", () => {
         // Accepted: the trusted transport principal asserts a forwarded user.
         // The receiver's onMessage (which throws on any other caller) proves
         // the principal replacement happened.
-        const childSessionId = await startRemoteAgentSession({
+        const child = await startRemoteAgentSession({
           action: createAction(),
           auth: FORWARDED_USER,
           callbackBaseUrl: "https://caller.example.com",
@@ -98,7 +98,7 @@ describe("remote agent auth forwarding", () => {
           remote: createRemote({ token: ROUTER_TOKEN, url: receiver.url }),
           session: createParentSession(),
         });
-        expect(childSessionId.length).toBeGreaterThan(0);
+        expect(child.sessionId.length).toBeGreaterThan(0);
 
         // Mismatch: an authenticated caller outside the forwarder allow-list
         // fails loud at the hop instead of downgrading to service identity.

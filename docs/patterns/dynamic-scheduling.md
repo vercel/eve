@@ -1,5 +1,5 @@
 ---
-title: "Dynamic scheduling"
+title: "Dynamic Scheduling"
 description: "Compose one minute-level eve schedule, proactive channel handoff, and CRUD tools into application-managed schedules."
 ---
 
@@ -35,7 +35,7 @@ import { scheduleStore } from "../lib/schedule-store";
 
 export default defineSchedule({
   cron: "* * * * *",
-  run({ receive, waitUntil }) {
+  run({ to, waitUntil }) {
     waitUntil(
       (async () => {
         const jobs = await scheduleStore.claimDue({
@@ -47,25 +47,26 @@ export default defineSchedule({
         await Promise.all(
           jobs.map(async (job) => {
             try {
-              await receive(slack, {
-                message: [
+              await to(slack, { channelId: job.channelId }).send(
+                [
                   `Run dynamic schedule ${job.id}.`,
                   "Complete this tenant-owned task:",
                   job.prompt,
                 ].join("\n\n"),
-                target: { channelId: job.channelId },
-                auth: {
-                  attributes: {
-                    tenantId: job.tenantId,
-                    role: job.ownerRole,
-                    scheduleId: job.id,
+                {
+                  auth: {
+                    attributes: {
+                      tenantId: job.tenantId,
+                      role: job.ownerRole,
+                      scheduleId: job.id,
+                    },
+                    authenticator: job.authenticator,
+                    ...(job.issuer ? { issuer: job.issuer } : {}),
+                    principalId: job.ownerId,
+                    principalType: "user",
                   },
-                  authenticator: job.authenticator,
-                  ...(job.issuer ? { issuer: job.issuer } : {}),
-                  principalId: job.ownerId,
-                  principalType: "user",
                 },
-              });
+              );
               await scheduleStore.complete(job);
             } catch (error) {
               await scheduleStore.release(job, { error, retryAt: new Date(Date.now() + 300_000) });
@@ -78,7 +79,7 @@ export default defineSchedule({
 });
 ```
 
-`waitUntil` keeps the cron invocation alive until claiming and handoff settle. `receive` starts the same durable runtime used by inbound channel messages.
+`waitUntil` keeps the cron invocation alive until claiming and handoff settle. `to(...).send(...)` starts the same durable runtime used by inbound channel messages.
 
 This example uses Slack because it has a proactive target of `{ channelId }`. Any channel that implements `receive` can replace it.
 
@@ -243,7 +244,7 @@ Implement that adapter with whichever durable store already belongs to your appl
 - `complete` disables one-time rows or computes the next recurring run;
 - expired leases are recoverable.
 
-Delivery is at least once. A crash after `receive` succeeds but before `complete` can dispatch again, so side-effecting tasks need application-level idempotency.
+Delivery is at least once. A crash after `receive` succeeds but before `complete` can dispatch again, so side-effecting tasks need application-level idempotency. When the destination should receive a provider message without another agent turn, use the outbox pattern in [Durable cross-channel notifications](./durable-cross-channel-notifications) instead of `to(...).send(...)`.
 
 ## Scheduling instructions
 

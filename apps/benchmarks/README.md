@@ -1,0 +1,133 @@
+# eve benchmarks
+
+This private workspace measures how coding agents create and modify eve projects. It uses
+`@vercel/agent-eval`, Vercel Sandbox, and deterministic Vitest graders. These benchmarks do not
+run in CI or as part of `pnpm test`.
+
+## Run
+
+The default subject is the current working tree, including uncommitted and untracked files that
+Git does not ignore:
+
+```sh
+pnpm benchmark author-000-imessage
+pnpm benchmark
+pnpm benchmark author-000-imessage --runs 3
+pnpm benchmark author-000-imessage --model kimi-k3
+pnpm benchmark author-000-imessage --treatment baseline
+pnpm benchmark author-000-imessage --dry
+pnpm benchmark author-000-imessage --verbose
+pnpm benchmark author-000-imessage --keep-failures
+```
+
+`--keep-failures` keeps a run the runner judged an infrastructure failure — a stalled turn, a
+sandbox error — as the final result instead of discarding it. Use it while iterating on the
+harness, when the failure itself is what you want to read.
+
+Set `EVE_BENCHMARK_TRACE_PARTS=1` to print every stream part the harness receives with the gap
+since the previous one. The harness decides a turn is over by reading those parts, so this is what
+to reach for when a turn ends too early or hangs past its closing message.
+
+Use `--base` to compare a local Git revision with the working tree:
+
+```sh
+pnpm benchmark author-000-imessage --base origin/main --runs 3
+```
+
+Pass `--head` to compare two local revisions instead:
+
+```sh
+pnpm benchmark author-000-imessage \
+  --base origin/main \
+  --head feature-branch \
+  --runs 3
+```
+
+The runner archives each subject locally and uploads it to the sandbox. Revisions and local-only
+commits do not need to be pushed. It maintains two persistent snapshot layers: a dependency
+snapshot keyed by package-manager inputs, and a subject snapshot keyed by the source tree,
+starting point, setup IDs, and bootstrap version. Source-only changes reuse the dependency snapshot
+but create a new subject snapshot. For one eval and one run, `--verbose` streams setup phases,
+assistant text, tool calls, grading, and build progress.
+
+Local runs use the `guided` treatment by default, which keeps the `AGENTS.md` and aliases generated
+by `eve init`. Pass `--treatment baseline` to remove those files before the coding agent starts.
+
+Results are written under `apps/benchmarks/results/`. Each run includes the transcript,
+grader output, summary, copied project files, and `project/benchmark/timings.json`. The timing
+artifact records the snapshot-cache outcome, source installation and build phases, workspace setup,
+each user turn with token and tool-call counts, and grading and validation durations. Use it to
+separate sandbox setup time from agent time when comparing runs. Print a compact local report with:
+
+```sh
+pnpm benchmark:timings results/current/<timestamp>/<case>/run-1
+```
+
+Pass `--json` to print the original timing artifact. Vercel Sandbox and AI Gateway credentials are
+required.
+
+To read a whole results directory at once — pass/fail, agent time against setup time, turn and tool
+counts, tokens, and any stalled turns:
+
+```sh
+node scripts/analyze.mjs results/current/<timestamp>
+```
+
+Pass `--docs` to also list, per run, which docs page the agent entered at and every page it went on
+to read. That is the fastest way to see whether a documentation change moved agents toward the page
+that answers the task or sent them spidering.
+
+## Publish canonical results
+
+Canonical publication compares the `baseline` and `guided` treatments with the same eve revision,
+model, harness, cases, and graders. The matrix holds the harness constant at OpenCode and varies
+only the model, so rows are comparable. A model ID is selected independently from the coding-agent
+harness; adding Claude Code, Codex, or Gemini CLI belongs to a separate harness comparison. Publication
+requires a clean working tree and defaults to `origin/main`:
+
+```sh
+pnpm benchmark:publish --dry
+pnpm benchmark:publish
+pnpm benchmark:publish --revision <commit>
+pnpm benchmark:publish --models kimi-k3,gpt-5-6-sol
+```
+
+Pass `--allow-dirty` only for a local, noncanonical run. It bypasses the clean-tree check, so its
+results cannot be reproduced from committed source and should not be committed as published data.
+
+Without `--models`, publication covers the complete configured model matrix. Use `--models` to
+publish or refresh selected model rows. The published suite currently includes weather-tool,
+new-project, OpenAPI connection, packaged skill, conditional approval, custom channel, and digest
+schedule cases. The iMessage case remains available for local runs but is excluded from the
+published matrix. Each
+cell runs three times. Completed cells are memoized by `@vercel/agent-eval`; pass `--force` only
+when every cell should run again. A successful run writes aggregate results to
+`apps/docs/lib/evals/benchmark-results.json`. The public file contains outcomes and timing, not
+transcripts, generated files, command logs, or synthetic world events.
+
+Changed and newly added cases export as unavailable until they run. The exporter does not carry an
+older measurement forward as current.
+
+## Add a case
+
+Create the next `evals/author-NNN-*` directory with:
+
+- `CASE.ts` for the starting point, setup, and user interaction
+- `EVAL.ts` for deterministic assertions
+- any case-specific support files
+
+The runner generates the `PROMPT.md` and `package.json` files required by agent-eval. A one-turn
+case can be as small as:
+
+```ts
+export default defineAuthoringCase({
+  startingPoint: simpleProject,
+  async interact({ send }) {
+    await send("Add a weather tool to this agent.");
+  },
+});
+```
+
+Use `simpleProject` for the selected subject's `eve init` output and `emptyProject` for an empty
+directory with the subject CLI installed. Put reusable setup under `lib/setups/`. Prefer source
+and event assertions over an LLM judge.

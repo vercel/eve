@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   EVE_CONNECTION_CALLBACK_ROUTE_PATTERN,
+  EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN,
   createEveConnectionCallbackRoutePath,
 } from "#protocol/routes.js";
 import type { RouteContext } from "#public/definitions/channel.js";
@@ -20,7 +21,6 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
 
 function buildRouteContext(params: Readonly<Record<string, string>>): RouteContext {
   return {
-    agent: {} as RouteContext["agent"],
     waitUntil: () => {},
     params,
     requestIp: null,
@@ -30,15 +30,20 @@ function buildRouteContext(params: Readonly<Record<string, string>>): RouteConte
 describe("getConnectionCallbackChannelDefinitions", () => {
   it("registers GET and POST entries at the framework callback route pattern", () => {
     const definitions = getConnectionCallbackChannelDefinitions();
-    expect(definitions).toHaveLength(2);
+    expect(definitions).toHaveLength(4);
     const methods = definitions.map((d) => d.method);
     expect(methods).toEqual(expect.arrayContaining(["GET", "POST"]));
     for (const def of definitions) {
-      expect(def.urlPath).toBe(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN);
+      expect([
+        EVE_CONNECTION_CALLBACK_ROUTE_PATTERN,
+        EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN,
+      ]).toContain(def.urlPath);
       expect(def.name.startsWith(HTTP_CONNECTION_CALLBACK_CHANNEL_NAME_PREFIX)).toBe(true);
       expect(def.name).not.toContain(".well-known");
       expect(def.sourceKind).toBe("module");
-      expect(def.fetch).toBe(handleConnectionCallbackRequest);
+      if (def.urlPath === EVE_CONNECTION_CALLBACK_ROUTE_PATTERN) {
+        expect(def.fetch).toBe(handleConnectionCallbackRequest);
+      }
     }
   });
 
@@ -83,21 +88,33 @@ describe("handleConnectionCallbackRequest", () => {
     expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
+  it("rejects requests with a missing authorization attempt ID with 400", async () => {
+    const response = await handleConnectionCallbackRequest(
+      new Request("https://app.example.com/eve/v1/connections/linear/callback/tok"),
+      buildRouteContext({ name: "linear", token: "tok" }),
+    );
+    expect(response.status).toBe(400);
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
   it("forwards a GET callback into resumeHook as parsed params with no request headers", async () => {
     resumeHookMock.mockResolvedValueOnce(undefined);
-    const url = `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "tok123")}?code=abc&state=xyz`;
+    const url = `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", "tok123")}?code=abc&state=xyz`;
     const response = await handleConnectionCallbackRequest(
       new Request(url, {
         headers: { "x-probe": "1" },
         method: "GET",
       }),
-      buildRouteContext({ name: "linear", token: "tok123" }),
+      buildRouteContext({ attemptId: "attempt-1", name: "linear", token: "tok123" }),
     );
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/html");
     const body = await response.text();
     expect(body).toContain("Authorization complete");
+    expect(body).toContain("You can close this tab and return to your app.");
+    expect(body).toContain('aria-labelledby="authorization-title"');
+    expect(body).toContain('class="icon" aria-hidden="true"');
 
     expect(resumeHookMock).toHaveBeenCalledTimes(1);
     const [token, payload] = resumeHookMock.mock.calls[0] ?? [];
@@ -109,6 +126,7 @@ describe("handleConnectionCallbackRequest", () => {
       payloads: [
         {
           authorizationCallback: {
+            attemptId: "attempt-1",
             connectionName: "linear",
             callback: {
               params: { code: "abc", state: "xyz" },
@@ -120,16 +138,45 @@ describe("handleConnectionCallbackRequest", () => {
     });
   });
 
+  it("keeps pre-attempt callback URLs resumable for pinned workflows", async () => {
+    resumeHookMock.mockResolvedValueOnce(undefined);
+    const legacy = getConnectionCallbackChannelDefinitions().find(
+      (definition) =>
+        definition.method === "GET" &&
+        definition.urlPath === EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN,
+    );
+    if (legacy?.fetch === undefined) throw new Error("Missing legacy callback route.");
+
+    const response = await legacy.fetch(
+      new Request("https://app.example.com/eve/v1/connections/linear/callback/tok123?code=abc"),
+      buildRouteContext({ name: "linear", token: "tok123" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
+      kind: "deliver",
+      payloads: [
+        {
+          authorizationCallback: {
+            callback: { method: "GET", params: { code: "abc" } },
+            connectionName: "linear",
+            legacy: true,
+          },
+        },
+      ],
+    });
+  });
+
   it("captures form-encoded POST bodies before resuming the hook", async () => {
     resumeHookMock.mockResolvedValueOnce(undefined);
-    const url = `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "tok123")}`;
+    const url = `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", "tok123")}`;
     await handleConnectionCallbackRequest(
       new Request(url, {
         body: "code=abc&state=xyz",
         headers: { "content-type": "application/x-www-form-urlencoded" },
         method: "POST",
       }),
-      buildRouteContext({ name: "linear", token: "tok123" }),
+      buildRouteContext({ attemptId: "attempt-1", name: "linear", token: "tok123" }),
     );
 
     const [, payload] = resumeHookMock.mock.calls[0] ?? [];
@@ -138,6 +185,7 @@ describe("handleConnectionCallbackRequest", () => {
       payloads: [
         {
           authorizationCallback: {
+            attemptId: "attempt-1",
             connectionName: "linear",
             callback: {
               params: { code: "abc", state: "xyz" },
@@ -157,9 +205,9 @@ describe("handleConnectionCallbackRequest", () => {
     resumeHookMock.mockRejectedValueOnce(new Error("hook not found"));
     const response = await handleConnectionCallbackRequest(
       new Request(
-        `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "tok")}`,
+        `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", "tok")}`,
       ),
-      buildRouteContext({ name: "linear", token: "tok" }),
+      buildRouteContext({ attemptId: "attempt-1", name: "linear", token: "tok" }),
     );
     expect(response.status).toBe(404);
     const body = await response.json();

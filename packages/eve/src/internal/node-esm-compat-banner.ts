@@ -36,6 +36,9 @@ const BANNER_LINES: readonly BannerLine[] = [
   },
 ];
 
+const FILENAME_BANNER_LINE = BANNER_LINES[0]!;
+const DIRNAME_BANNER_LINE = BANNER_LINES[1]!;
+
 const REQUIRE_LINE: BannerLine = {
   importLine: 'import { createRequire as __eveCreateRequire } from "node:module";',
   declarationLine: "const require = __eveCreateRequire(import.meta.url);",
@@ -62,6 +65,8 @@ export function buildNodeEsmCompatBanner(
 
   const imports: string[] = [];
   const declarations: string[] = [];
+  const chunkProvidesFilename = FILENAME_BANNER_LINE.bindingPattern.test(code);
+  const chunkProvidesDirname = DIRNAME_BANNER_LINE.bindingPattern.test(code);
 
   for (const line of lines) {
     if (line.bindingPattern.test(code)) {
@@ -69,7 +74,16 @@ export function buildNodeEsmCompatBanner(
     }
 
     imports.push(line.importLine);
-    declarations.push(line.declarationLine);
+    declarations.push(
+      line === DIRNAME_BANNER_LINE && chunkProvidesFilename
+        ? "const __dirname = __eveDirname(__eveFileURLToPath(import.meta.url));"
+        : line.declarationLine,
+    );
+  }
+
+  if (chunkProvidesFilename && !chunkProvidesDirname) {
+    // The chunk's binding is initialized after this prepended banner.
+    imports.unshift(FILENAME_BANNER_LINE.importLine);
   }
 
   if (declarations.length === 0) {

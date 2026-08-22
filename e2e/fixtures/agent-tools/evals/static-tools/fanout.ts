@@ -1,10 +1,10 @@
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 
 export const FANOUT_SIZE = 10;
 
 /** A serialized executor cannot release the fixture tool's concurrency barrier. */
 export function fanoutExecutionsReachBarrier(input: {
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly labels: readonly string[];
   readonly toolName: string;
 }): boolean {

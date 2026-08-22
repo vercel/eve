@@ -6,18 +6,37 @@ description: "How users reach your agent: the channel contract, the base eve HTT
 A channel is the edge adapter between a platform and your agent. It does three things:
 
 - Normalizes platform input into a user message.
-- Owns the `continuationToken`, the resume handle for a conversation on that surface.
+- Owns the channel-local address that maps a platform conversation to its current durable session.
 - Decides delivery, meaning how, where, and whether a response goes back.
 
-eve ships a base HTTP channel plus first-class platform channels, and you can author your own. Browse the full set in the [Integrations](/integrations?filter=channel) gallery.
+eve ships a base HTTP channel plus first-class platform channels, and you can author your own. Browse the full set in the [Integrations](/integrations) gallery and choose the Channels filter.
 
 After a channel normalizes input, eve runs the same agent runtime regardless of where the message came from. Tools and instructions do not need channel-specific logic.
+
+## Overlapping messages
+
+Channels default to `turnPolicy: "steer"`. When an accepted message arrives while a turn is active, eve first durably buffers the message, then cooperatively cancels the active turn and starts a replacement turn. The cancelled turn emits `turn.cancelled` followed by `session.waiting`; the replacement starts with a new turn ID. Output already streamed and completed side effects are not rolled back.
+
+Set `turnPolicy: "queue"` on any built-in or custom channel when each turn must finish before the next message starts:
+
+```ts
+export default defineChannel({
+  turnPolicy: "queue",
+  routes: [
+    // ...
+  ],
+});
+```
+
+`from(address).send(...)`, fixed `Session.send(...)`, cross-channel sends, and Chat SDK bridge sends also accept a per-send `turnPolicy` override. Pure `inputResponses` deliveries answer their pending request without steering. Explicit `cancel()` remains the stop-without-replacement operation.
+
+Channel admission still runs first. Ignored mentions, rejected signatures, duplicates, and any other dropped platform events never affect the active turn.
 
 Each channel has its own provider terms, data flow, auth model, and user-consent expectations. Before sending non-public, sensitive, regulated, or production data through a channel, confirm that the channel provider and your configured scopes, signature checks, route auth, and delivery behavior are appropriate for your use case.
 
 ## Where channels live
 
-Channel files live under `agent/channels/` in the root agent. The file stem is the channel id: `agent/channels/intake.ts` is addressed as `intake`. Export the channel as the module's default export. Local subagents do not declare channels.
+Channel files live under `agent/channels/` in the root agent or come from an [extension](../extensions) mounted there. The file stem is the channel id: `agent/channels/intake.ts` is addressed as `intake`. An extension mount prefixes its contributed channel IDs but does not change their route paths. Local subagents do not declare channels.
 
 ```text
 agent/
@@ -28,7 +47,7 @@ agent/
     intake.ts
 ```
 
-Scaffold a channel file with `eve channels add` (interactive), or pass a kind: `eve channels add slack` or `eve channels add web`. You can also author the file by hand.
+Install a channel from the registry with `eve add channel/<name>`, such as `eve add channel/slack` or `eve add channel/web`. You can also author the file by hand.
 
 ## The eve HTTP channel (default)
 
@@ -36,38 +55,49 @@ The eve channel is the framework's default HTTP session API, the routes the term
 
 ## Custom channels
 
-When eve doesn't ship a channel for your surface, build one with `defineChannel` from `eve/channels`. A custom channel declares route handlers (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `WS`), an `events` map, and a `send` call inside a handler to start or resume a session. See [Custom channels](./custom) for the full walkthrough, including WebSocket routes, cross-channel hand-off, channel metadata, continuation tokens, and file uploads.
+When eve doesn't ship a channel for your surface, build one with `defineChannel` from `eve/channels`. A custom channel declares route handlers (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `WS`), an `events` map, and uses `send(address, input)` to start or resume a session. See [Custom channels](./custom) for the full walkthrough, including WebSocket routes, cross-channel agent hand-off, channel metadata, address tokens, and file uploads.
+
+A cross-channel `send(...)` supplies input to the agent and invokes the model on the destination channel. eve does not currently provide a direct cross-channel provider-message queue. To post without starting a turn, use the provider API. See [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications) when delivery also needs application-managed retries and deduplication.
 
 ## Relationship to the Chat SDK
 
-eve uses the Chat SDK's **card-builder components** (Cards, Buttons, Actions, etc.) for composing rich Slack messages. When you build a card with the [Slack channel](./slack), the underlying primitives come from the Chat SDK and get converted to Slack Block Kit at post time.
+eve uses the [Chat SDK's card-builder components](https://chat-sdk.dev/docs/api/cards) (Cards, Buttons, Actions, etc.) for composing rich Slack messages. When you build a card with the [Slack channel](./slack), the underlying primitives come from the Chat SDK and get converted to Slack Block Kit at post time.
 
-eve does **not** use the Chat SDK's runtime. The `Chat`, `Adapter`, and `Thread` primitives are never imported or reachable through eve's public API. eve implements its own channel layer (webhook handling, signature verification, event parsing, and thread management). Building Slack messages works like Chat SDK cards, but wiring a channel means authoring against eve's `defineChannel(...)` API, not a Chat SDK adapter.
+eve's first-class channels use eve-owned runtimes for webhook handling, verification, event parsing, and thread management. The optional [Chat SDK channel](./chat-sdk) is the exception: it accepts a Chat SDK adapter and exposes its `Chat` and `Thread` primitives. Use `slackChannel` for eve's first-class Slack integration, `defineChannel(...)` for an eve-native custom channel, or `chatSdkChannel` when you intentionally want a Chat SDK adapter and runtime.
 
 ## Which channel?
 
 | You want…                                   | Use                                                        |
 | ------------------------------------------- | ---------------------------------------------------------- |
 | A web app / browser chat UI                 | eve channel + [`useEveAgent`](../guides/frontend/overview) |
-| Local tooling, SDK clients, `curl`          | eve channel (default)                                      |
+| Local tooling, SDK clients, `curl`          | [eve HTTP channel](./eve) (default)                        |
+| MCP clients delegating durable work         | [MCP](./mcp)                                               |
 | Slack mentions, DMs, buttons                | [Slack](./slack)                                           |
+| iMessage and SMS                            | [Linq](./linq)                                             |
+| iMessage                                    | [Photon](./photon)                                         |
 | Discord slash commands, components          | [Discord](./discord)                                       |
 | Microsoft Teams messages + Adaptive Cards   | [Teams](./teams)                                           |
 | Telegram bot messages                       | [Telegram](./telegram)                                     |
 | SMS or speech-transcribed phone calls       | [Twilio](./twilio)                                         |
 | GitHub @mentions, PR review with checkout   | [GitHub](./github)                                         |
 | Linear issue delegation and Agent Sessions  | [Linear](./linear)                                         |
-| Anything else (internal webhook, WebSocket) | Custom channel (`defineChannel`, above)                    |
+| Another Chat SDK-supported service          | [Chat SDK adapters](./chat-sdk)                            |
+| Anything else (internal webhook, WebSocket) | [Custom channel](./custom) (`defineChannel`, above)        |
 
 ## Disclaimer
 
 As the deployer, it is your responsibility to ensure your agent complies with applicable laws.
 
-Where an eve agent communicates with people, you may be required to disclose that they are interacting with an automated AI system where law requires it. eve does not add this disclosure automatically; configure it in your instructions and/or channel responses.
+Where an eve agent communicates with people, you may be required to disclose that they are interacting with an automated AI system where law requires it. eve does not add this disclosure automatically; configure it in your instructions and/or channel responses. See [Responsible use](../responsible-use) for the full deployer responsibilities.
 
 ## What to read next
 
+- [eve HTTP channel](./eve): the default session API behind the TUI, SDK clients, and browser UIs
 - [Slack](./slack): the most common platform channel, end to end
+- [MCP](./mcp): expose the agent as a durable invocation service
+- [Linq](./linq), [Photon](./photon), [Discord](./discord), [Teams](./teams), [Telegram](./telegram), [Twilio](./twilio), [GitHub](./github), and [Linear](./linear): the other first-class platform channels
+- [Chat SDK adapters](./chat-sdk): reach services eve has no first-class channel for
 - [Custom channels](./custom): build a channel for any surface with `defineChannel`
+- [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications): post to another platform without starting an agent turn
 - [Frontend](../guides/frontend/overview): browser chat on the eve channel with `useEveAgent`
-- [Integrations](/integrations?filter=channel): browse every built-in channel in one gallery
+- [Integrations](/integrations): browse every built-in channel in one gallery using the Channels filter

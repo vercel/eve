@@ -474,8 +474,21 @@ function renderFlow(block: Block, width: number, theme: Theme): string[] {
  * nests under the echoed command's text rather than its `│` marker.
  */
 function renderResult(block: Block, width: number, theme: Theme): string[] {
-  const marker = theme.colors.dim(theme.glyph.elbow);
   const lines = wrap(block.body ?? "", width - 7);
+  if (block.status === "done") {
+    const elbow = theme.colors.dim(theme.glyph.elbow);
+    const success = theme.colors.green(theme.glyph.success);
+    const rule = theme.colors.dim(theme.glyph.rule);
+    const corner = theme.colors.dim(theme.glyph.corner);
+    if (lines.length === 0) return [`   ${elbow}  ${success}`];
+    return lines.map((line, index) => {
+      if (index === 0) return `   ${elbow}  ${success} ${line}`;
+      const marker = index === lines.length - 1 ? corner : rule;
+      return `      ${marker} ${line}`;
+    });
+  }
+
+  const marker = theme.colors.dim(theme.glyph.elbow);
   if (lines.length === 0) return [`   ${marker}`];
   // SGR 22 closes bold and dim together, so a result that bolds a span (the
   // /model reply's model name) would drop the rest of the line out of dim;

@@ -4,6 +4,7 @@ import { defineEval } from "eve/evals";
 // `shared` wins over the session-scoped one, while `session_only`
 // remains available from session scope.
 export default defineEval({
+  tags: ["real-model"],
   description: "Dynamic tools smoke: turn-scoped resolver tools win merges over session-scoped.",
   async test(t) {
     const first = await t.send("Call the `shared` tool and report the source and turn values.");

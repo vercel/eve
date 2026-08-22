@@ -1,4 +1,4 @@
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const TOOL_NAME = "render-stripes";
@@ -6,8 +6,10 @@ const TOOL_NAME = "render-stripes";
 // The stripe colors are randomized per run, so a blind model cannot pass by
 // guessing; the eval stays self-contained by validating the reply against
 // the answer key the tool records on action.result. The pixels reach the
-// model exclusively through `toModelOutput` content parts.
+// model exclusively through `toModelOutput` content parts. Color recognition
+// remains tracked rather than gated because live vision quality varies.
 export default defineEval({
+  tags: ["real-model"],
   description: "Static tools smoke: toModelOutput content parts deliver an image to the model.",
   async test(t) {
     await t.send(
@@ -21,7 +23,7 @@ export default defineEval({
     t.eventsSatisfy("a reply names the rendered colors in order", (events) => {
       const answer = assistantAnswers(events)[0];
       return answer !== undefined && namesColorsInOrder(events, answer);
-    });
+    }).soft();
 
     // The content part is baked into persisted history, so a follow-up turn
     // must answer from replay without re-running the tool.
@@ -34,7 +36,7 @@ export default defineEval({
     t.eventsSatisfy("the replayed image still answers the follow-up", (events) => {
       const answer = assistantAnswers(events).at(-1);
       return answer !== undefined && namesColorsInOrder(events, answer);
-    });
+    }).soft();
   },
 });
 
@@ -50,7 +52,7 @@ function isRenderStripesOutput(value: unknown): boolean {
   );
 }
 
-function renderedColors(events: readonly HandleMessageStreamEvent[]): readonly string[] {
+function renderedColors(events: readonly MessageStreamEvent[]): readonly string[] {
   for (const event of events) {
     if (event.type !== "action.result" || event.data.result.kind !== "tool-result") continue;
     if (event.data.result.toolName !== TOOL_NAME) continue;
@@ -63,7 +65,7 @@ function renderedColors(events: readonly HandleMessageStreamEvent[]): readonly s
 }
 
 /** Final (non-tool-call) assistant messages, in turn order. */
-function assistantAnswers(events: readonly HandleMessageStreamEvent[]): readonly string[] {
+function assistantAnswers(events: readonly MessageStreamEvent[]): readonly string[] {
   return events.flatMap((event) =>
     event.type === "message.completed" &&
     event.data.finishReason !== "tool-calls" &&
@@ -74,7 +76,7 @@ function assistantAnswers(events: readonly HandleMessageStreamEvent[]): readonly
   );
 }
 
-function namesColorsInOrder(events: readonly HandleMessageStreamEvent[], answer: string): boolean {
+function namesColorsInOrder(events: readonly MessageStreamEvent[], answer: string): boolean {
   const colors = renderedColors(events);
   if (colors.length === 0) return false;
   const pattern = new RegExp(colors.map((color) => `\\b${color}\\b`).join("[\\s\\S]*"), "iu");

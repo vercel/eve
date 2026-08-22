@@ -3,7 +3,7 @@ title: "Hooks"
 description: "Subscribe to runtime stream events from agent/hooks/."
 ---
 
-Hooks are eve's authored extension points for the runtime event stream. A hook subscribes to stream events and runs side effects after each event is durably recorded, such as audit logging, metrics and alerting, or persisting every session and message to your own database for analytics. Reach for one to observe what the agent does without writing a tool, a context provider (a value made available across a step), or a channel adapter handler (a handler defined on a channel's adapter; see [Channels](../channels)).
+Hooks are eve's authored extension points for the runtime event stream. A hook subscribes to stream events and runs side effects after each event is durably recorded, such as audit logging, metrics and alerting, or persisting every session and message to your own database for analytics. Reach for one to observe what the agent does without writing a tool, a context provider (a value made available across a step), or a channel adapter handler (a handler defined on a channel's adapter; see [Channels](../channels/overview)).
 
 ## Define a hook
 
@@ -26,19 +26,65 @@ The slug is the path-relative basename. `agent/hooks/audit.ts` becomes `"audit"`
 
 `defineHook`, `HookDefinition`, and `HookContext` live on `eve/hooks`.
 
-A hook file declares stream-event subscribers under the `events` map, keyed by event type, with `*` matching every event. Subscribe to any event in the runtime stream vocabulary documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), including the lifecycle events `session.started`, `turn.completed`, `message.completed`, and `action.result`. Handlers are observe-only. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
+A hook file declares stream-event subscribers under the `events` map, keyed by event type, with `*` matching every event. Subscribe to any event in the runtime stream vocabulary documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), including the lifecycle events `session.started`, `turn.completed`, `message.completed`, `action.partial`, and `action.result`. Handlers are observe-only. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
+
+## Scope side effects to a channel
+
+A hook under `agent/hooks/` observes matching events from every channel on the root agent. `defineHook` has no channel filter. Use a channel's `events` configuration when a handler assumes a specific platform or should run only for sessions owned by that channel:
+
+```ts title="agent/channels/github.ts"
+import { githubChannel } from "eve/channels/github";
+
+export default githubChannel({
+  events: {
+    async "turn.completed"(event, channel, ctx) {
+      console.info("GitHub turn completed", {
+        repository: channel.repository.fullName,
+        sessionId: ctx.session.id,
+        turnId: event.turnId,
+      });
+    },
+  },
+});
+```
+
+A GitHub channel event handler cannot fire for a Slack-owned session, so platform-specific side effects do not depend on an early-return guard. On a built-in channel, an authored handler replaces that channel's default handler for the same event key. Check the channel page before overriding events that deliver replies, progress, errors, or human-input prompts.
+
+Use `ctx.channel.kind` inside a global hook only when the operation is otherwise agent-wide and conditional handling is intentional. For typed channel metadata in dynamic resolvers or instrumentation, import the channel definition and narrow with `isChannel`; see [Instrumentation](./instrumentation#runtime-context).
 
 ## Hook structure and context
 
-Every handler receives the same `HookContext`:
+Every handler receives the same `HookContext`, including the shared session
+helpers documented in [Session context](./session-context):
 
 ```ts
-interface HookContext {
+interface HookContext extends SessionContext {
   readonly agent: { readonly name: string; readonly nodeId?: string };
   readonly channel: { readonly kind?: string; readonly continuationToken?: string };
-  readonly session: { readonly id: string };
 }
 ```
+
+That means a hook can access the current sandbox and release its backing
+compute at an application-defined boundary:
+
+```ts title="agent/hooks/stop-after-turn.ts"
+import { defineHook } from "eve/hooks";
+
+export default defineHook({
+  events: {
+    async "turn.completed"(_event, ctx) {
+      const sandbox = await ctx.getSandbox();
+      await sandbox.stop();
+    },
+  },
+});
+```
+
+Every built-in backend stops its underlying compute while preserving the
+durable session and filesystem for the next callback. On Vercel, the current
+handle can also automatically resume on later I/O. A hook failure, including a
+failed stop, follows the normal
+[hook failure behavior](#what-happens-when-a-hook-throws).
 
 ### Narrowing tool results
 
@@ -80,15 +126,53 @@ import { search } from "@acme/crm/tools";
 const crmSearch = toolResultFrom(event.data.result, search); // typed; matches crm__search
 ```
 
+### Persist events to your own database
+
+Every event carries a `meta` envelope with `meta.id`, a unique, sortable identifier for that event. It makes a natural primary key for an events table:
+
+```ts title="agent/hooks/persist.ts"
+import { defineHook } from "eve/hooks";
+
+export default defineHook({
+  events: {
+    async "*"(event, ctx) {
+      await db.query(
+        `insert into agent_events (id, session_id, type, data, emitted_at)
+         values ($1, $2, $3, $4, $5)
+         on conflict (id) do nothing`,
+        [
+          event.meta.id,
+          ctx.session.id,
+          event.type,
+          "data" in event ? event.data : null,
+          event.meta.at,
+        ],
+      );
+    },
+  },
+});
+```
+
+`meta.id` is stable for the life of the persisted event, so a consumer that re-reads the stream can ingest the same event twice safely. It is not a retry guard for the hook itself: if a step is interrupted and re-runs, the turn re-emits its events as _new_ events with new ids, and your hook runs again for each one.
+
+What to key on instead depends on what you are protecting:
+
+- **A side effect that must happen once per turn or step** — a charge, an email, a ticket — keys well on the coordinates in `event.data` (`turnId`, `stepIndex`, `sequence`). A retry restores those from the step's input, so the second attempt computes the same key and your gate holds.
+- **Stored content should not key on those coordinates.** The retry re-invokes the model, so one coordinate can carry different text on each attempt. `on conflict (turn_id, step_index, sequence) do nothing` would keep the abandoned attempt and drop the one that finished. Key on `meta.id`, and accept that an interrupted turn leaves both attempts in the table.
+
+Behind that split is an asymmetry worth knowing: durable history keeps only the attempt that completed, while the event stream keeps every attempt, and no field marks which is which. Hooks are at-least-once, and no key collapses a retry.
+
+See [the event envelope](../concepts/sessions-runs-and-streaming#the-event-envelope) for the full contract.
+
 ## Execution order
 
 When a stream event fires, three things happen in order:
 
-1. Emit. The channel adapter handler runs, then the event is written to the durable stream.
+1. Emit. The channel adapter handler runs, the event is stamped with its `meta` envelope, then it is written to the durable stream.
 2. Hooks. Stream-event hooks fire (typed handlers first, then the `*` wildcard). Return values are ignored.
 3. Dynamic tool resolvers. Resolvers subscribed to the event type run and update the tool set.
 
-Hooks always run after the event is durably recorded, so if a hook throws, the stream stays consistent.
+Hooks always run after the event is durably recorded, so if a hook throws, the stream stays consistent. The persisted event and every hook observe the same `meta.id`.
 
 ## What happens when a hook throws
 

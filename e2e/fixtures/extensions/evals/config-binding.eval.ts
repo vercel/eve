@@ -1,6 +1,7 @@
 import { defineEval } from "eve/evals";
 
 export default defineEval({
+  tags: ["real-model"],
   description: "Mounted extension tool returns the config bound at the mount site.",
   async test(t) {
     await t.send(

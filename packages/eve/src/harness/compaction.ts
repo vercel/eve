@@ -184,11 +184,13 @@ export async function compactMessages(
   telemetry?: TelemetryOptions,
   headers?: Record<string, string>,
   abortSignal?: AbortSignal,
+  forceSummary = false,
 ): Promise<ModelMessage[]> {
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
-  let keep = selectRecentWindowSize(conversation, config);
+  const recentConfig = forceSummary ? { ...config, recentWindowSize: 1 } : config;
+  let keep = selectRecentWindowSize(conversation, recentConfig);
 
-  {
+  if (!forceSummary) {
     const { older, recent } = splitMessagesForCompaction(conversation, keep);
     if (older.length === 0 && previousCheckpoint === undefined) {
       return keepNonToolResultMessages(recent);

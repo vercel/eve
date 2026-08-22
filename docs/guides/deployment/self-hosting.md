@@ -1,5 +1,5 @@
 ---
-title: "Self-host eve"
+title: "Self-Host eve"
 description: "Run an eve agent as a Node service with your own workflow storage, sandbox backend, and routing."
 ---
 
@@ -22,7 +22,7 @@ Run this process under the same process manager or container platform you use fo
 
 Set `AI_GATEWAY_API_KEY` to use a string model ID through the Vercel AI Gateway from a non-Vercel host. To call a provider directly, install its [AI SDK provider package](https://ai-sdk.dev/docs/foundations/providers-and-models). Then pass its model object in `agent.ts` and set its API key. See [Agent configuration](../../agent-config#set-the-model) for examples.
 
-Don’t rely on `vercelOidc()` as the only production authenticator outside Vercel. Configure Basic auth, JSON Web Token (JWT) verification, generic OpenID Connect (OIDC), or a custom verifier that your host can validate. See [Auth and route protection](../auth-and-route-protection).
+Don’t rely on `vercelOidc()` as the only production authenticator outside Vercel. Configure Basic auth, JSON Web Token (JWT) verification, generic OpenID Connect (OIDC), or a custom verifier that your host can validate. See [Authentication](../auth-and-route-protection).
 
 ## Persist workflow state
 
@@ -83,6 +83,6 @@ eve dev https://your_agent.example.com
 
 Use these guides to secure and observe the deployed agent:
 
-- [Auth and route protection](../auth-and-route-protection): configure the host’s route policy
+- [Authentication](../auth-and-route-protection): configure the host’s route policy
 - [Observability](../instrumentation): export traces and diagnose runtime failures
 - [Sandbox](../../sandbox): select and secure a sandbox backend

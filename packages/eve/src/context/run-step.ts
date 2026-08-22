@@ -34,35 +34,59 @@ export async function withContextScope<T>(
   ctx: ContextContainer,
   harnessSession: HarnessSession,
   callback: (session: HarnessSession) => Promise<ContextScopeResult<T>>,
+  additionalProviders: readonly FrameworkContextProvider<any>[] = [],
 ): Promise<ContextScopeResult<T>> {
   let session = harnessSession;
+  const providers = [...frameworkProviders, ...additionalProviders];
+  const createdProviders: FrameworkContextProvider<any>[] = [];
 
   ctx.clearVirtualContext();
 
-  for (const provider of frameworkProviders) {
-    const result = await provider.create(ctx, session);
-    if (result !== undefined) {
-      ctx.setVirtualContext(provider.key, result.value);
-      if (result.session !== undefined) {
-        session = result.session;
+  try {
+    for (const provider of providers) {
+      const result = await provider.create(ctx, session);
+      if (result !== undefined) {
+        ctx.setVirtualContext(provider.key, result.value);
+        createdProviders.push(provider);
+        if (result.session !== undefined) {
+          session = result.session;
+        }
       }
     }
-  }
 
-  const scopeResult = await contextStorage.run(ctx, () => callback(session));
+    const scopeResult = await contextStorage.run(ctx, () => callback(session));
 
-  let committed = scopeResult.session;
-  for (const provider of frameworkProviders) {
-    if (provider.commit && ctx.has(provider.key)) {
-      committed = await provider.commit(ctx.require(provider.key), committed);
+    let committed = scopeResult.session;
+    for (const provider of createdProviders) {
+      if (provider.commit !== undefined) {
+        committed = await provider.commit(ctx.require(provider.key), committed);
+      }
     }
-  }
 
-  if (committed === scopeResult.session) {
-    return scopeResult;
-  }
+    if (committed === scopeResult.session) {
+      return scopeResult;
+    }
 
-  return { result: scopeResult.result, session: committed };
+    return { result: scopeResult.result, session: committed };
+  } catch (error) {
+    const rollbackErrors: unknown[] = [];
+    for (const provider of createdProviders.toReversed()) {
+      if (provider.rollback === undefined) continue;
+      try {
+        await provider.rollback(ctx.require(provider.key), error);
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError);
+      }
+    }
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError(
+        [error, ...rollbackErrors],
+        "Framework context rollback did not complete.",
+        { cause: error },
+      );
+    }
+    throw error;
+  }
 }
 
 /**
@@ -75,11 +99,23 @@ export async function runStep(
   ctx: ContextContainer,
   harnessSession: HarnessSession,
   callback: (session: HarnessSession) => Promise<StepResult>,
+  additionalProviders: readonly FrameworkContextProvider<any>[] = [],
 ): Promise<StepResult> {
-  const { result, session } = await withContextScope(ctx, harnessSession, async (enriched) => {
-    const stepResult = await callback(enriched);
-    return { result: stepResult.next, session: stepResult.session };
-  });
+  const scoped = await withContextScope(
+    ctx,
+    harnessSession,
+    async (enriched) => {
+      const result = await callback(enriched);
+      return { result, session: result.session };
+    },
+    additionalProviders,
+  );
 
-  return { next: result, session };
+  let result = { ...scoped.result, session: scoped.session };
+  for (const provider of [...frameworkProviders, ...additionalProviders]) {
+    if (provider.decorateStepResult !== undefined && ctx.has(provider.key)) {
+      result = await provider.decorateStepResult(ctx.require(provider.key), result);
+    }
+  }
+  return result;
 }

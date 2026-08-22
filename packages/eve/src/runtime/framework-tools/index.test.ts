@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   getAllFrameworkToolDefinitions,
   getAllFrameworkToolNames,
+  getFrameworkDynamicToolResolvers,
   getFrameworkToolDefinitions,
+  getOptInFrameworkToolNames,
 } from "#runtime/framework-tools/index.js";
 import { isToolSchema } from "#shared/tool-schema.js";
 
@@ -21,6 +23,9 @@ describe("framework-tools/index", () => {
     expect(names.has("load_skill")).toBe(true);
     expect(names.has("ask_question")).toBe(true);
     expect(names.has("agent")).toBe(true);
+    expect(names.has("task_update")).toBe(true);
+    expect(names.has("task_sleep")).toBe(false);
+    expect(names.has("task_send")).toBe(false);
     // connection_search is now a dynamic tool resolver, not a framework tool
     expect(names.has("connection_search")).toBe(false);
   });
@@ -36,7 +41,20 @@ describe("framework-tools/index", () => {
     }
 
     expect(names).toContain("agent");
-    expect(getFrameworkToolDefinitions().map((tool) => tool.name)).not.toContain("agent");
+    const defaultNames = getFrameworkToolDefinitions().map((tool) => tool.name);
+    expect(defaultNames).not.toContain("agent");
+    expect(defaultNames).not.toContain("glob");
+    expect(defaultNames).not.toContain("grep");
+  });
+
+  it("identifies framework tools that require explicit authoring", () => {
+    expect([...getOptInFrameworkToolNames()].sort()).toEqual(["glob", "grep"]);
+  });
+
+  it("does not direct default tools to opt-in tools", () => {
+    const readFile = getFrameworkToolDefinitions().find((tool) => tool.name === "read_file");
+
+    expect(readFile?.description).not.toMatch(/\b(?:glob|grep)\b/u);
   });
 
   it("uses one validated runtime schema for every framework-defined input", () => {
@@ -61,12 +79,14 @@ describe("framework-tools/index", () => {
     }
   });
 
-  it("returns the same registered tools regardless of hasConnections", () => {
-    const withConnections = getFrameworkToolDefinitions({ hasConnections: true });
-    const withoutConnections = getFrameworkToolDefinitions({ hasConnections: false });
-
-    expect(withConnections.map((tool) => tool.name)).toEqual(
-      withoutConnections.map((tool) => tool.name),
-    );
+  it("registers connection search through the framework dynamic tool registry", () => {
+    expect(getFrameworkDynamicToolResolvers()).toMatchObject([
+      {
+        eventNames: ["step.started"],
+        logicalPath: "eve:framework/connection-search-dynamic",
+        slug: "connection",
+        sourceId: "eve:connection-search-dynamic",
+      },
+    ]);
   });
 });

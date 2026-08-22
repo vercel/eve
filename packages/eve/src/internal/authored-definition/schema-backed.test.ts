@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z as z3 } from "zod/v3";
 import { z } from "#compiled/zod/index.js";
 
 import {
@@ -8,6 +9,7 @@ import {
   experimental_workflow,
 } from "#public/definitions/tool.js";
 import { once } from "#public/tools/approval/approval-helpers.js";
+import { webSearch } from "#public/tools/web-search.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
 
 const FAILURE_MESSAGE = "Expected the tool export to match the public eve shape.";
@@ -32,6 +34,47 @@ describe("normalizeToolDefinition", () => {
     expect(typeof entry.definition.execute).toBe("function");
   });
 
+  it("preserves the background execution discriminator", () => {
+    const tool = defineTool({
+      description: "Starts an export.",
+      execution: "background",
+      inputSchema: z.object({ exportId: z.string() }),
+      execute(input, _ctx, task) {
+        return task.delegated({
+          executor: { data: { exportId: input.exportId }, kind: "export" },
+          receipt: { exportId: input.exportId },
+        });
+      },
+    });
+
+    const entry = normalizeToolDefinition(tool, FAILURE_MESSAGE);
+
+    expect(entry.kind).toBe("tool");
+    if (entry.kind !== "tool") throw new Error("expected tool kind");
+    expect(entry.definition.execution).toBe("background");
+  });
+
+  it("normalizes a tool with a Zod 3 input schema", () => {
+    const tool = defineTool({
+      description: "Gets weather for a city.",
+      inputSchema: z3.object({ city: z3.string() }),
+      execute(input) {
+        return input.city;
+      },
+    });
+
+    const entry = normalizeToolDefinition(tool, FAILURE_MESSAGE);
+
+    expect(entry.kind).toBe("tool");
+    if (entry.kind !== "tool") throw new Error("expected tool kind");
+    expect(entry.definition.inputSchema).toEqual({
+      additionalProperties: false,
+      properties: { city: { type: "string" } },
+      required: ["city"],
+      type: "object",
+    });
+  });
+
   it("returns a disabled entry for a disableTool sentinel", () => {
     const sentinel = disableTool();
 
@@ -47,6 +90,19 @@ describe("normalizeToolDefinition", () => {
     );
 
     expect(entry).toEqual({ kind: "workflow-tool", maxSubagents: 6 });
+  });
+
+  it("returns a configured entry for the provider-managed web search tool", () => {
+    expect(normalizeToolDefinition(webSearch({ provider: "exa" }), FAILURE_MESSAGE)).toEqual({
+      kind: "web-search-tool",
+      provider: "exa",
+    });
+  });
+
+  it("rejects an unsupported web search provider", () => {
+    expect(() =>
+      normalizeToolDefinition({ kind: "eve:web-search-tool", provider: "other" }, FAILURE_MESSAGE),
+    ).toThrow('Expected "provider" to be one of: exa, parallel');
   });
 
   it.each([0, 1.5, -1, "6"])("rejects invalid workflow max subagents %j", (maxSubagents) => {
@@ -144,6 +200,20 @@ describe("normalizeToolDefinition", () => {
     expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
   });
 
+  it("accepts explicit request and response approval policies", () => {
+    const tool = defineTool({
+      approval: {
+        request: () => "user-approval",
+        response: () => ({ status: "allowed" }),
+      },
+      description: "Uses response authorization.",
+      execute: () => null,
+      inputSchema: z.object({ city: z.string() }),
+    });
+
+    expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
+  });
+
   it("accepts generic approval helpers on schema-typed tools", () => {
     const tool = defineTool({
       description: "Uses a reusable approval helper.",
@@ -226,15 +296,17 @@ describe("normalizeToolDefinition", () => {
   });
 
   it("rejects a defineDynamic tool export carrying a fallback", () => {
-    const dynamicTools = defineDynamic({
+    const dynamicTools = {
+      ...defineDynamic({
+        events: {
+          "session.started": async () => ({}),
+        },
+      }),
       fallback: "not-supported-here",
-      events: {
-        "session.started": async () => ({}),
-      },
-    });
+    } as never;
 
     expect(() => normalizeToolDefinition(dynamicTools, FAILURE_MESSAGE)).toThrow(
-      '"fallback" is only supported on a dynamic agent model',
+      "Unknown key(s): fallback",
     );
   });
 

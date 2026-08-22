@@ -11,6 +11,7 @@ export const ASK_QUESTION_TOOL_NAME = "ask_question";
 export const ASK_QUESTION_INPUT_SCHEMA = inputRequestSchema.omit({
   action: true,
   display: true,
+  kind: true,
   requestId: true,
 });
 export const ASK_QUESTION_OUTPUT_SCHEMA = z

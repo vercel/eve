@@ -17,8 +17,13 @@ import {
 } from "#setup/package-manager.js";
 import { pathExists } from "#setup/path-exists.js";
 import { parseProjectName } from "#setup/project-name.js";
-import { runPackageManagerInstall } from "#setup/primitives/index.js";
+import {
+  packageManagerInstallFailureMessage,
+  packageManagerInstallSucceeded,
+  runPackageManagerInstall,
+} from "#setup/primitives/index.js";
 import type { ProcessOutputLine } from "#setup/primitives/process-output.js";
+import { blockingCreateInPlaceEntries } from "#setup/scaffold/create-in-place.js";
 import {
   DEFAULT_EVE_PACKAGE_CONTRACT,
   type EvePackageContract,
@@ -55,7 +60,6 @@ const defaultDependencies: ExtensionInitCommandDependencies = {
 };
 
 const CURRENT_DIRECTORY_PROJECT_NAME = ".";
-const ALLOWED_CREATE_IN_PLACE_ENTRIES = new Set([".DS_Store", ".git", ".gitkeep", ".hg"]);
 /** Same override env as agent `eve init` so CI can pin the eve package specifier. */
 export const EVE_INIT_PACKAGE_SPEC_ENV = "EVE_INIT_PACKAGE_SPEC";
 
@@ -76,7 +80,7 @@ async function resolveTargetDirectory(
 
 async function assertCanScaffoldInPlace(targetRoot: string): Promise<void> {
   const entries = await readdir(targetRoot);
-  const blocking = entries.filter((entry) => !ALLOWED_CREATE_IN_PLACE_ENTRIES.has(entry));
+  const blocking = blockingCreateInPlaceEntries(entries);
   if (blocking.length === 0) {
     return;
   }
@@ -280,8 +284,7 @@ export async function runExtensionInitCommand(
     const installStartedAt = dependencies.now();
     const installFailureOutput: string[] = [];
     const recentInstallOutput: string[] = [];
-    const installed = await dependencies.runPackageManagerInstall(packageManager, projectPath, {
-      bypassMinimumReleaseAge: true,
+    const installResult = await dependencies.runPackageManagerInstall(packageManager, projectPath, {
       progressDetails: process.stdout.isTTY === true && !debug,
       onOutput: (line) => {
         if (line.text.trim() !== "") {
@@ -299,12 +302,16 @@ export async function runExtensionInitCommand(
       },
     });
     installElapsedMs = dependencies.now() - installStartedAt;
-    if (!installed) {
+    if (!packageManagerInstallSucceeded(installResult)) {
       initLog.debug("dependency installation failed", { ms: installElapsedMs });
       progress.stop();
       const failureOutput =
         installFailureOutput.length > 0 ? installFailureOutput : recentInstallOutput;
       for (const line of failureOutput) logger.error(line);
+      if (failureOutput.length === 0) {
+        const message = packageManagerInstallFailureMessage(installResult);
+        if (message !== undefined) logger.error(message);
+      }
       throw new Error(`Failed to install dependencies in "${projectPath}".`);
     }
     initLog.debug("dependencies installed", { ms: installElapsedMs });

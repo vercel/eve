@@ -1,6 +1,7 @@
 const WORKFLOW_CONTEXT_SYMBOL = Symbol.for("WORKFLOW_CONTEXT");
 const WORKFLOW_CREATE_HOOK = Symbol.for("WORKFLOW_CREATE_HOOK");
 const WORKFLOW_GET_STREAM_ID = Symbol.for("WORKFLOW_GET_STREAM_ID");
+const WORKFLOW_SLEEP = Symbol.for("WORKFLOW_SLEEP");
 const WORKFLOW_USE_STEP = Symbol.for("WORKFLOW_USE_STEP");
 const STREAM_NAME_SYMBOL = Symbol.for("WORKFLOW_STREAM_NAME");
 const workflowGlobal = globalThis as typeof globalThis & Record<symbol, unknown>;
@@ -96,8 +97,16 @@ export function defineHook<T = unknown>(): {
 /**
  * Sleeps from inside workflow-body code.
  */
-export function sleep(): never {
-  throw new Error("`sleep()` is not available in eve workflow body bundles");
+export function sleep(duration: string | number | Date): Promise<void> {
+  const sleepFn = workflowGlobal[WORKFLOW_SLEEP] as
+    | ((sleepDuration: string | number | Date) => Promise<void>)
+    | undefined;
+
+  if (sleepFn === undefined) {
+    throw new Error("`sleep()` can only be called inside a workflow function");
+  }
+
+  return sleepFn(duration);
 }
 
 /**

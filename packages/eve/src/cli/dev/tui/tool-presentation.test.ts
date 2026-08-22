@@ -178,6 +178,8 @@ describe("presentTool", () => {
       grep: { pattern: "useEve" },
       load_skill: { skill: "commit" },
       read_file: { filePath: "/workspace/a.ts" },
+      task_cancel: { taskIds: ["task_abc"] },
+      task_update: { message: "Finished the next region." },
       todo: { todos: [] },
       web_fetch: { url: "https://example.com" },
       web_search: { query: "eve framework" },
@@ -199,6 +201,10 @@ describe("presentTool", () => {
 
     expect(presentation.title).toBe("web_fetch");
     expect(presentation.subtitle).toContain('format="markdown"');
+  });
+
+  it("does not retain semantic copy for the removed task_sleep tool", () => {
+    expect(presentTool("task_sleep", { seconds: 30 }).title).toBe("task_sleep");
   });
 
   it("presents a named subagent dispatch as a delegation", () => {

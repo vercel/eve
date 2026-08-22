@@ -13,22 +13,59 @@ export type DynamicToolAstNode = {
   declarations?: DynamicToolAstNode[];
   end?: number;
   expression?: DynamicToolAstNode | null;
+  generator?: boolean;
   id?: { name?: string; start?: number; end?: number } | null;
   init?: DynamicToolAstNode | null;
+  imported?: { name?: string; value?: unknown } | null;
   key?: DynamicToolAstNode | null;
   kind?: string;
   left?: DynamicToolAstNode | null;
+  local?: { name?: string } | null;
   method?: boolean;
   name?: string;
   params?: DynamicToolAstNode[];
   properties?: DynamicToolAstNode[];
   right?: DynamicToolAstNode | null;
+  source?: { value?: unknown } | null;
+  specifiers?: DynamicToolAstNode[];
   start?: number;
   type?: string;
   value?: DynamicToolAstNode | unknown;
+  elements?: Array<DynamicToolAstNode | null>;
 };
 
 type IdentifierContext = "binding" | "reference";
+
+export function findProperty(
+  object: DynamicToolAstNode,
+  name: string,
+): DynamicToolAstNode | undefined {
+  return object.properties?.find(
+    (property) =>
+      property.type === "Property" &&
+      !property.computed &&
+      (property.key?.type === "Identifier"
+        ? property.key.name === name
+        : property.key?.value === name),
+  );
+}
+
+export function walkNode(
+  node: DynamicToolAstNode,
+  visitor: (node: DynamicToolAstNode) => boolean,
+): void {
+  if (!visitor(node)) return;
+
+  for (const value of Object.values(node)) {
+    if (Array.isArray(value)) {
+      for (const child of value) {
+        if (isAstNode(child)) walkNode(child, visitor);
+      }
+    } else if (isAstNode(value)) {
+      walkNode(value, visitor);
+    }
+  }
+}
 
 /**
  * Collects identifiers used as runtime references in a function body AST.

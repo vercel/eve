@@ -20,7 +20,7 @@ export const WRITE_FILE_INPUT_SCHEMA = z.strictObject({
   content: z.string().describe("Complete replacement file contents."),
   filePath: z
     .string()
-    .describe("The absolute path to the file to write (must be absolute, not relative)."),
+    .describe("The absolute path to the file to write. A leading $HOME is supported."),
 });
 
 /**
