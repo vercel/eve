@@ -29,6 +29,11 @@ import type {
 } from "#shared/agent-definition.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
+import {
+  compiledModuleBindingSchema,
+  createFilesystemModuleBindings,
+  type CompiledModuleBinding,
+} from "#compiler/module-binding.js";
 
 /**
  * Stable manifest kind emitted by the compiler for runtime loading.
@@ -43,7 +48,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 41;
+export const COMPILED_AGENT_MANIFEST_VERSION = 42;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -689,6 +694,7 @@ const compiledExtensionMountSchema: z.ZodType<CompiledExtensionMount> = z
 const compiledAgentResourceFields = {
   agentRoot: z.string(),
   appRoot: z.string(),
+  bindings: z.record(z.string(), compiledModuleBindingSchema).readonly(),
   channels: z.array(compiledChannelEntrySchema),
   connections: z.array(compiledConnectionDefinitionSchema),
   diagnosticsSummary: discoverDiagnosticsSummarySchema,
@@ -797,6 +803,7 @@ export const compiledAgentManifestSchema = z
   .object({
     agentRoot: z.string(),
     appRoot: z.string(),
+    bindings: z.record(z.string(), compiledModuleBindingSchema).readonly(),
     extensionMounts: z.array(compiledExtensionMountSchema).default([]),
     channels: z.array(compiledChannelEntrySchema),
     config: compiledAgentConfigSchema,
@@ -827,6 +834,7 @@ export const compiledAgentManifestSchema = z
 export interface CreateCompiledAgentResourcesInput {
   readonly agentRoot: string;
   readonly appRoot: string;
+  readonly bindings?: Readonly<Record<string, CompiledModuleBinding>>;
   readonly channels?: readonly CompiledChannelEntry[];
   readonly connections?: readonly CompiledConnectionDefinition[];
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
@@ -855,6 +863,7 @@ export function createCompiledAgentResources(
   const resources: CompiledAgentResources = {
     agentRoot: input.agentRoot,
     appRoot: input.appRoot,
+    bindings: { ...input.bindings },
     channels: [...(input.channels ?? [])],
     connections: [...(input.connections ?? [])],
     diagnosticsSummary: input.diagnosticsSummary ?? {
@@ -888,16 +897,34 @@ export function createCompiledAgentResources(
     },
   };
 
-  return resources;
+  if (input.bindings !== undefined) return resources;
+
+  return {
+    ...resources,
+    bindings: createFilesystemModuleBindings({
+      agentRoot: resources.agentRoot,
+      manifest: resources,
+    }),
+  };
 }
 
 /** Creates a compiled authored agent payload with stable defaults. */
 export function createCompiledAgentNodeManifest(
   input: CreateCompiledAgentResourcesInput & { readonly config: CompiledAgentDefinition },
 ): CompiledAgentNodeManifest {
-  return {
+  const manifest = {
     ...createCompiledAgentResources(input),
     config: cloneCompiledAgentDefinition(input.config),
+  };
+  if (input.bindings !== undefined) return manifest;
+
+  return {
+    ...manifest,
+    bindings: createFilesystemModuleBindings({
+      agentRoot: manifest.agentRoot,
+      externalDependencies: manifest.config.build?.externalDependencies,
+      manifest,
+    }),
   };
 }
 

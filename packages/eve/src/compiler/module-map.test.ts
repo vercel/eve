@@ -12,6 +12,17 @@ function createManifestWithTool(agentRoot: string): CompiledAgentManifest {
   return {
     agentRoot,
     appRoot: agentRoot,
+    bindings: {
+      "tools/echo.ts": {
+        backing: {
+          externalDependencies: [],
+          kind: "filesystem",
+          sourcePath: `${agentRoot}/tools/echo.ts`,
+        },
+        logicalPath: "tools/echo.ts",
+        owner: { kind: "application" },
+      },
+    },
     config: {
       compaction: {},
       model: {
@@ -62,6 +73,29 @@ function createManifestWithTool(agentRoot: string): CompiledAgentManifest {
 }
 
 describe("createCompiledModuleMapSource", () => {
+  it("imports the physical binding instead of reconstructing it from logical identity", () => {
+    const manifest = createManifestWithTool("/consumer/agent");
+    const source = createCompiledModuleMapSource({
+      manifest: {
+        ...manifest,
+        bindings: {
+          "tools/echo.ts": {
+            ...manifest.bindings["tools/echo.ts"]!,
+            backing: {
+              externalDependencies: [],
+              kind: "filesystem",
+              sourcePath: "/packages/framework/tools/echo.ts",
+            },
+          },
+        },
+      },
+      moduleMapPath: "/consumer/.eve/compile/module-map.mjs",
+    });
+
+    expect(source).toContain('from "../../../packages/framework/tools/echo.ts";');
+    expect(source).not.toContain("/consumer/agent/tools/echo.ts");
+  });
+
   it("emits ESM-safe file URLs for Windows absolute imports", () => {
     const source = createCompiledModuleMapSource({
       importSpecifierStyle: "absolute",
@@ -89,6 +123,17 @@ describe("createCompiledModuleMapSource", () => {
           agent: createCompiledAgentResources({
             agentRoot: "/agent/subagents/researcher",
             appRoot: "/agent",
+            bindings: {
+              "agent.ts": {
+                backing: {
+                  externalDependencies: [],
+                  kind: "filesystem",
+                  sourcePath: "/agent/subagents/researcher/agent.ts",
+                },
+                logicalPath: "agent.ts",
+                owner: { kind: "application" },
+              },
+            },
           }),
           configResolver: {
             eventNames: ["turn.started"],

@@ -1,12 +1,13 @@
 import { z } from "#compiled/zod/index.js";
-import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type {
   CompiledAgentManifest,
   CompiledAgentNodeManifest,
   CompiledAgentResources,
-  CompiledExtensionMount,
 } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
+import { assertTotalModuleBindings } from "#compiler/module-binding.js";
+import { collectModuleRefsForManifest } from "#compiler/module-references.js";
+import type { ModuleSourceRef } from "#shared/source-ref.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 
 /**
@@ -69,7 +70,6 @@ export function createCompiledModuleMapSource(input: CreateCompiledModuleMapSour
   let nextBindingIndex = 0;
   const collectedScopes: CollectedModuleNodeScope[] = [
     collectModuleNodeScope({
-      agentRoot: input.manifest.agentRoot,
       importSpecifierStyle,
       manifest: input.manifest,
       moduleMapDirectory,
@@ -82,7 +82,6 @@ export function createCompiledModuleMapSource(input: CreateCompiledModuleMapSour
       .sort((left, right) => left.nodeId.localeCompare(right.nodeId))
       .map((subagent) =>
         collectModuleNodeScope({
-          agentRoot: subagent.agent.agentRoot,
           importSpecifierStyle,
           manifest: subagent.agent,
           additionalModuleRef: subagent.configResolver,
@@ -115,13 +114,19 @@ export function createCompiledModuleMapSource(input: CreateCompiledModuleMapSour
 
 function collectModuleNodeScope(input: {
   readonly additionalModuleRef?: ModuleSourceRef;
-  readonly agentRoot: string;
   readonly importSpecifierStyle: "absolute" | "relative";
   readonly manifest: CompiledAgentNodeManifest | CompiledAgentResources;
   readonly moduleMapDirectory: string;
   readonly nextBindingName: () => string;
   readonly nodeId: string;
 }): CollectedModuleNodeScope {
+  assertTotalModuleBindings({
+    additionalRefs: input.additionalModuleRef === undefined ? [] : [input.additionalModuleRef],
+    bindings: input.manifest.bindings,
+    manifest: input.manifest,
+    nodeId: input.nodeId,
+  });
+
   return {
     modules: [
       ...collectModuleRefsForManifest(input.manifest),
@@ -133,7 +138,11 @@ function collectModuleNodeScope(input: {
         importSpecifier: createImportSpecifier({
           fromDirectory: input.moduleMapDirectory,
           importSpecifierStyle: input.importSpecifierStyle,
-          targetPath: joinFilesystemPath(input.agentRoot, moduleSourceRef.logicalPath),
+          targetPath: readFilesystemSourcePath(
+            input.manifest.bindings[moduleSourceRef.sourceId]!,
+            input.nodeId,
+            moduleSourceRef.sourceId,
+          ),
         }),
         sourceId: moduleSourceRef.sourceId,
       })),
@@ -141,143 +150,19 @@ function collectModuleNodeScope(input: {
   };
 }
 
-/**
- * Collects every module-backed source reference from a single compiled
- * agent node manifest. Used by both the compiler (to generate the static
- * module-map artifact) and the runtime loader (to hydrate a module map
- * from the manifest when the pre-built artifact is unavailable).
- */
-export function collectModuleRefsForManifest(
-  manifest: CompiledAgentNodeManifest | CompiledAgentResources,
-): ModuleSourceRef[] {
-  const moduleSourceRefs = new Map<string, ModuleSourceRef>();
+export { collectModuleRefsForManifest } from "#compiler/module-references.js";
 
-  if ("config" in manifest && manifest.config.source !== undefined) {
-    moduleSourceRefs.set(manifest.config.source.sourceId, manifest.config.source);
+function readFilesystemSourcePath(
+  binding: CompiledAgentResources["bindings"][string],
+  nodeId: string,
+  sourceId: string,
+): string {
+  if (binding.backing.kind !== "filesystem") {
+    throw new Error(
+      `Cannot generate a static filesystem import for programmatic binding "${sourceId}" on compiled node "${nodeId}".`,
+    );
   }
-
-  if ("config" in manifest && manifest.config.model?.source !== undefined) {
-    moduleSourceRefs.set(manifest.config.model.source.sourceId, manifest.config.model.source);
-  }
-
-  for (const channel of manifest.channels) {
-    // Disabled channel entries don't have a source module — they're a
-    // marker that the matching framework default should be removed.
-    if (channel.kind === "disabled") {
-      continue;
-    }
-    moduleSourceRefs.set(channel.sourceId, {
-      exportName: channel.exportName,
-      sourceKind: "module",
-      logicalPath: channel.logicalPath,
-      sourceId: channel.sourceId,
-    });
-  }
-
-  for (const connection of manifest.connections) {
-    moduleSourceRefs.set(connection.sourceId, {
-      exportName: connection.exportName,
-      sourceKind: "module",
-      logicalPath: connection.logicalPath,
-      sourceId: connection.sourceId,
-    });
-  }
-
-  for (const tool of manifest.tools) {
-    moduleSourceRefs.set(tool.sourceId, {
-      exportName: tool.exportName,
-      sourceKind: "module",
-      logicalPath: tool.logicalPath,
-      sourceId: tool.sourceId,
-    });
-  }
-
-  for (const dynamicInstruction of manifest.dynamicInstructions) {
-    moduleSourceRefs.set(dynamicInstruction.sourceId, {
-      exportName: dynamicInstruction.exportName,
-      sourceKind: "module",
-      logicalPath: dynamicInstruction.logicalPath,
-      sourceId: dynamicInstruction.sourceId,
-    });
-  }
-
-  for (const dynamicSkill of manifest.dynamicSkills) {
-    moduleSourceRefs.set(dynamicSkill.sourceId, {
-      exportName: dynamicSkill.exportName,
-      sourceKind: "module",
-      logicalPath: dynamicSkill.logicalPath,
-      sourceId: dynamicSkill.sourceId,
-    });
-  }
-
-  for (const dynamicTool of manifest.dynamicTools) {
-    moduleSourceRefs.set(dynamicTool.sourceId, {
-      exportName: dynamicTool.exportName,
-      sourceKind: "module",
-      logicalPath: dynamicTool.logicalPath,
-      sourceId: dynamicTool.sourceId,
-    });
-  }
-
-  for (const remoteAgent of manifest.remoteAgents) {
-    moduleSourceRefs.set(remoteAgent.sourceId, {
-      exportName: remoteAgent.exportName,
-      sourceKind: "module",
-      logicalPath: remoteAgent.logicalPath,
-      sourceId: remoteAgent.sourceId,
-    });
-  }
-
-  for (const hook of manifest.hooks) {
-    moduleSourceRefs.set(hook.sourceId, {
-      exportName: hook.exportName,
-      sourceKind: "module",
-      logicalPath: hook.logicalPath,
-      sourceId: hook.sourceId,
-    });
-  }
-
-  for (const schedule of manifest.schedules) {
-    // Only `run`-handler schedules need their source loaded at dispatch
-    // time. Markdown schedules execute from `manifest.markdown`.
-    if (schedule.sourceKind !== "module" || !schedule.hasRun) {
-      continue;
-    }
-    moduleSourceRefs.set(schedule.sourceId, {
-      sourceKind: "module",
-      logicalPath: schedule.logicalPath,
-      sourceId: schedule.sourceId,
-    });
-  }
-
-  if (manifest.sandbox !== null) {
-    moduleSourceRefs.set(manifest.sandbox.sourceId, {
-      exportName: manifest.sandbox.exportName,
-      sourceKind: "module",
-      logicalPath: manifest.sandbox.logicalPath,
-      sourceId: manifest.sandbox.sourceId,
-    });
-  }
-
-  // Extension mount modules (root manifest only). Their top-level factory call
-  // binds config, so they must be evaluated at module-map load.
-  const extensionMounts = (manifest as { extensionMounts?: readonly CompiledExtensionMount[] })
-    .extensionMounts;
-  if (extensionMounts !== undefined) {
-    for (const mount of extensionMounts) {
-      moduleSourceRefs.set(mount.mountSourceId, {
-        sourceKind: "module",
-        logicalPath: mount.mountLogicalPath,
-        sourceId: mount.mountSourceId,
-      });
-    }
-  }
-
-  // Authored system modules execute once at build time. The compiled markdown
-  // is captured into the manifest, so there is no need to include them in the
-  // runtime module map.
-
-  return [...moduleSourceRefs.values()];
+  return binding.backing.sourcePath;
 }
 
 function createImportSpecifier(input: {
@@ -361,17 +246,6 @@ function dirnameFilesystemPath(path: string): string {
   }
 
   return createFilesystemPath(parsed.root, parsed.segments.slice(0, -1));
-}
-
-function joinFilesystemPath(base: string, next: string): string {
-  const parsedBase = splitFilesystemPath(base);
-  const parsedNext = splitFilesystemPath(next);
-
-  if (parsedNext.root.length > 0) {
-    return createFilesystemPath(parsedNext.root, parsedNext.segments);
-  }
-
-  return createFilesystemPath(parsedBase.root, [...parsedBase.segments, ...parsedNext.segments]);
 }
 
 function relativeFilesystemPath(fromDirectory: string, targetPath: string): string {

@@ -8,11 +8,9 @@ import type {
 } from "#compiler/manifest.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import {
-  collectModuleRefsForManifest,
-  compiledModuleMapSchema,
-  type CompiledModuleMap,
-} from "#compiler/module-map.js";
+import { compiledModuleMapSchema, type CompiledModuleMap } from "#compiler/module-map.js";
+import { collectModuleRefsForManifest } from "#compiler/module-references.js";
+import { assertTotalModuleBindings } from "#compiler/module-binding.js";
 import type { RuntimeDiskCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { formatValidationError } from "#runtime/validation.js";
@@ -68,14 +66,10 @@ async function hydrateCompiledModuleMapFromManifest(
   const nodes: CompiledModuleMap["nodes"] = {};
   const nodeManifests: Array<{
     additionalModuleRef?: ModuleSourceRef;
-    agentRoot: string;
-    externalDependencies: readonly string[];
     manifest: CompiledAgentNodeManifest | CompiledAgentResources;
     nodeId: string;
   }> = [
     {
-      agentRoot: manifest.agentRoot,
-      externalDependencies: manifest.config.build?.externalDependencies ?? [],
       manifest,
       nodeId: ROOT_COMPILED_AGENT_NODE_ID,
     },
@@ -83,11 +77,6 @@ async function hydrateCompiledModuleMapFromManifest(
       .sort((left, right) => left.nodeId.localeCompare(right.nodeId))
       .map((subagent) => ({
         additionalModuleRef: subagent.configResolver,
-        agentRoot: subagent.agent.agentRoot,
-        externalDependencies:
-          subagent.configResolver === undefined
-            ? (subagent.agent.config.build?.externalDependencies ?? [])
-            : (subagent.configResolver.build?.externalDependencies ?? []),
         manifest: subagent.agent,
         nodeId: subagent.nodeId,
       })),
@@ -124,10 +113,9 @@ async function hydrateCompiledModuleMapFromManifest(
     };
     nodes[nodeManifest.nodeId] = {
       modules: await hydrateCompiledNodeScope({
-        agentRoot: nodeManifest.agentRoot,
         additionalModuleRef: nodeManifest.additionalModuleRef,
-        externalDependencies: nodeManifest.externalDependencies,
         manifest: nodeManifest.manifest,
+        nodeId: nodeManifest.nodeId,
         scopeIndex,
       }),
     };
@@ -173,9 +161,8 @@ function extensionNamespaceForSourceId(
 
 async function hydrateCompiledNodeScope(input: {
   additionalModuleRef?: ModuleSourceRef;
-  agentRoot: string;
-  externalDependencies: readonly string[];
   manifest: CompiledAgentNodeManifest | CompiledAgentResources;
+  nodeId: string;
   scopeIndex: ExtensionScopeIndex;
 }): Promise<CompiledModuleMap["nodes"][string]["modules"]> {
   const refs = [
@@ -184,10 +171,24 @@ async function hydrateCompiledNodeScope(input: {
   ].sort((left, right) => left.sourceId.localeCompare(right.sourceId));
   const container = globalThis as Record<symbol, unknown>;
   const modules: CompiledModuleMap["nodes"][string]["modules"] = {};
+  assertTotalModuleBindings({
+    additionalRefs: input.additionalModuleRef === undefined ? [] : [input.additionalModuleRef],
+    bindings: input.manifest.bindings,
+    manifest: input.manifest,
+    nodeId: input.nodeId,
+  });
 
   for (const ref of refs) {
-    const modulePath = join(input.agentRoot, ref.logicalPath);
-    const extensionScopeNamespace = extensionNamespaceForSourceId(ref.sourceId, input.scopeIndex);
+    const binding = input.manifest.bindings[ref.sourceId]!;
+    if (binding.backing.kind !== "filesystem") {
+      throw new Error(
+        `Cannot hydrate programmatic binding "${ref.sourceId}" from authored filesystem source.`,
+      );
+    }
+    const modulePath = binding.backing.sourcePath;
+    const extensionScopeNamespace =
+      binding.backing.extensionScope?.namespace ??
+      extensionNamespaceForSourceId(ref.sourceId, input.scopeIndex);
 
     // A mount module (e.g. `agent/extensions/crm.ts`) imports the extension
     // package cross-package, so its config handle loads unbundled and the
@@ -200,7 +201,7 @@ async function hydrateCompiledNodeScope(input: {
     }
     try {
       modules[ref.sourceId] = await loadAuthoredModuleNamespace(modulePath, {
-        externalDependencies: input.externalDependencies,
+        externalDependencies: binding.backing.externalDependencies,
         extensionScopeNamespace,
       });
     } finally {

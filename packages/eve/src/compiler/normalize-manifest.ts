@@ -34,6 +34,7 @@ import { compileScheduleDefinition } from "#compiler/normalize-schedule.js";
 import { compileSkillSource } from "#compiler/normalize-skill.js";
 import { compileSubagentGraph } from "#compiler/normalize-subagent.js";
 import { compileToolEntry } from "#compiler/normalize-tool.js";
+import { createFilesystemModuleBindings } from "#compiler/module-binding.js";
 
 /**
  * Compiles one discovery manifest into the normalized manifest loaded by the runtime.
@@ -65,13 +66,21 @@ export async function compileAgentManifest(
     );
   }
 
-  return createCompiledAgentManifest({
+  const compiledManifest = createCompiledAgentManifest({
     ...compiledNode,
     extensionMounts: compiledNode.extensionMounts,
     remoteAgents: subagentGraph.remoteAgents,
     subagentEdges: subagentGraph.edges,
     subagents: subagentGraph.nodes,
   });
+  return {
+    ...compiledManifest,
+    bindings: createFilesystemModuleBindings({
+      agentRoot: compiledManifest.agentRoot,
+      externalDependencies: compiledManifest.config.build?.externalDependencies,
+      manifest: compiledManifest,
+    }),
+  };
 }
 
 async function compileAgentNodeManifest(
@@ -114,7 +123,15 @@ async function compileAgentNodeManifest(
           },
         };
   const resources = await compileAgentResources(manifest, context, { externalDependencies });
-  return createCompiledAgentNodeManifest({ ...resources, config });
+  const compiledNode = createCompiledAgentNodeManifest({ ...resources, config });
+  return {
+    ...compiledNode,
+    bindings: createFilesystemModuleBindings({
+      agentRoot: compiledNode.agentRoot,
+      externalDependencies: config.build?.externalDependencies,
+      manifest: compiledNode,
+    }),
+  };
 }
 
 async function compileAgentResources(
@@ -253,7 +270,7 @@ async function compileAgentResources(
 
   const instructions = [...staticInstructions, ...extensionInstructions];
 
-  return createCompiledAgentResources({
+  const resources = createCompiledAgentResources({
     agentRoot: manifest.agentRoot,
     appRoot: manifest.appRoot,
     channels: compiledChannels,
@@ -284,6 +301,14 @@ async function compileAgentResources(
     instructions,
     tools,
   });
+  return {
+    ...resources,
+    bindings: createFilesystemModuleBindings({
+      agentRoot: resources.agentRoot,
+      externalDependencies,
+      manifest: resources,
+    }),
+  };
 }
 
 function compileExtensionMounts(manifest: AgentSourceManifest): CompiledExtensionMount[] {

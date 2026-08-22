@@ -30,6 +30,7 @@ import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import { serializeOutputSchema, type ToolSchemaSource } from "#shared/tool-schema.js";
 import type { JsonObject } from "#shared/json.js";
 import { isDynamicSentinel, type DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
+import { createFilesystemModuleBindings } from "#compiler/module-binding.js";
 
 const ALLOWED_DYNAMIC_SUBAGENT_EVENTS = new Set<DynamicToolEventName>([
   "session.started",
@@ -251,11 +252,19 @@ async function compileSubagent(input: {
       parentNodeId: nodeId,
       subagents: composeAgentSubagentSources(input.source.manifest),
     });
+    const compiledAgent = { ...agent, remoteAgents: [...descendants.remoteAgents] };
     return {
       descendants,
       node: {
         ...nodeBase,
-        agent: { ...agent, remoteAgents: [...descendants.remoteAgents] },
+        agent: {
+          ...compiledAgent,
+          bindings: createFilesystemModuleBindings({
+            agentRoot: compiledAgent.agentRoot,
+            externalDependencies: compiledAgent.config.build?.externalDependencies,
+            manifest: compiledAgent,
+          }),
+        },
         description,
       },
     };
@@ -274,11 +283,20 @@ async function compileSubagent(input: {
     parentNodeId: nodeId,
     subagents: composeAgentSubagentSources(input.source.manifest),
   });
+  const compiledResources = { ...resources, remoteAgents: [...descendants.remoteAgents] };
   return {
     descendants,
     node: {
       ...nodeBase,
-      agent: { ...resources, remoteAgents: [...descendants.remoteAgents] },
+      agent: {
+        ...compiledResources,
+        bindings: createFilesystemModuleBindings({
+          additionalRefs: [input.configResolver],
+          agentRoot: compiledResources.agentRoot,
+          externalDependencies: inheritedExternalDependencies,
+          manifest: compiledResources,
+        }),
+      },
       configResolver: input.configResolver,
     },
   };
