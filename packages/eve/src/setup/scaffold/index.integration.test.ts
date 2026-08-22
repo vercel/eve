@@ -255,6 +255,10 @@ describe("ensureChannel", () => {
     const packageJson = await readFile(join(projectRoot, "package.json"), "utf8");
     expect(packageJson).not.toContain('"better-auth"');
     expect(packageJson).toContain('"next": "16.2.6"');
+    expect(packageJson).toContain('"shiki": "3.23.0"');
+    expect(packageJson).toContain('"@shikijs/core": "3.23.0"');
+    expect(packageJson).toContain('"@shikijs/engine-javascript": "3.23.0"');
+    expect(packageJson).toContain('"@shikijs/engine-oniguruma": "3.23.0"');
     expect(packageJson).toContain('"build:eve": "eve build"');
     expect(packageJson).toContain('"dev": "next dev"');
     expect(packageJson).toContain('"dev:eve": "eve dev"');
