@@ -9,6 +9,7 @@ import type { ChannelAdapter } from "#channel/adapter.js";
 import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TaskView } from "#tasks/types.js";
+import type { InstrumentationControls } from "#shared/instrumentation-controls.js";
 
 export type { ContextAccessor } from "#context/key.js";
 export type { ChannelInstrumentationProjection } from "#channel/instrumentation.js";
@@ -162,6 +163,8 @@ export interface DeliverPayload {
   readonly message?: string | UserContent;
   readonly context?: readonly string[];
   readonly outputSchema?: JsonObject;
+  /** Framework-only instrumentation ceiling ferried to local child sessions. */
+  readonly instrumentationControls?: InstrumentationControls;
   /** Framework-only task envelopes consumed before adapter/model delivery. */
   readonly task?: {
     /** Task HITL input-request batches for the parent's pre-model router. */
@@ -470,6 +473,8 @@ export interface RunInput {
    * (root session behavior).
    */
   readonly initiatorAuth?: SessionAuthContext | null;
+  /** Framework-owned instrumentation ceiling inherited by local subagents. */
+  readonly instrumentationControls?: InstrumentationControls;
   readonly input: {
     readonly message: string | UserContent;
     readonly context?: readonly string[];

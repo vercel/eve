@@ -23,6 +23,7 @@ import {
   AuthKey,
   CapabilitiesKey,
   HandleEventKey,
+  InstrumentationControlsKey,
   ModeKey,
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicToolRuntimeRevisionKey,
@@ -57,11 +58,9 @@ import {
   isWorkflowRuntimeActionInterrupt,
 } from "#harness/workflow-runtime-action-state.js";
 import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
-import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import type { DurableStepResult } from "#execution/next-driver-action.js";
-import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
 import {
   createAuthorizationCompletedEvent,
   createSessionStartedEvent,
@@ -98,9 +97,15 @@ import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { createExecutionHistoryView } from "#execution/history-view.js";
+import {
+  consumeDeliveryInstrumentationControls,
+  prepareDeliveryInstrumentation,
+} from "#execution/instrumentation-controls.js";
+import { preserveSerializedInstrumentationControls } from "#execution/serialized-instrumentation-controls.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { isTaskToolAvailable, TASK_UPDATE_TOOL_NAME } from "#runtime/framework-tools/tasks.js";
+import { derivePendingState } from "#execution/pending-turn-state.js";
 
 const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
   "Task mode cannot complete while input requests remain pending.";
@@ -117,6 +122,12 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
 
   let durableSession = await readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
+  if (input.input?.kind === "deliver") {
+    input = {
+      ...input,
+      input: consumeDeliveryInstrumentationControls(ctx, input.input),
+    };
+  }
   if (rawInput.input?.kind === "deliver") {
     ctx.set(TurnTaskDeliveryKey, "none");
   }
@@ -191,6 +202,15 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const history = createExecutionHistoryView(initialSession);
   const instrumentation = getInstrumentationRuntime();
   const initialEmissionState = getHarnessEmissionState(initialSession.state);
+  const preparedInstrumentation = prepareDeliveryInstrumentation({
+    adapter,
+    agentName: bundle.turnAgent.id,
+    ctx,
+    delivery: rawInput.input,
+    instrumentation,
+    rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
+    sessionId: initialSession.sessionId,
+  });
 
   if (rawInput.input?.kind === "deliver") {
     await contextStorage.run(ctx, () =>
@@ -198,7 +218,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         agentName: bundle.turnAgent.id,
         ctx,
         delivery: rawInput.input as DeliverHookPayload,
-        hooks: instrumentation?.hooks,
+        hooks: preparedInstrumentation.instrumentation?.hooks,
         rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
         sequence: initialEmissionState.sequence,
         sessionId: initialSession.sessionId,
@@ -213,7 +233,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         ctx,
         error,
         errorCode: channelDeliveryErrorCode(error),
-        hooks: instrumentation?.hooks,
+        hooks: preparedInstrumentation.instrumentation?.hooks,
         includeTurn: false,
         outcome: "failed",
       }),
@@ -229,9 +249,14 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     const results: StepInput[] = [];
     try {
       for (const payload of input.input.payloads) {
-        const result = adapter.deliver
-          ? await adapter.deliver(payload, adapterCtx)
-          : defaultDeliverResult(payload);
+        const deliver = async () =>
+          await (adapter.deliver
+            ? adapter.deliver(payload, adapterCtx)
+            : defaultDeliverResult(payload));
+        const result =
+          preparedInstrumentation.instrumentation?.runWithTracingSuppressed === undefined
+            ? await deliver()
+            : await preparedInstrumentation.instrumentation.runWithTracingSuppressed(deliver);
 
         if (result !== undefined && result !== null) {
           results.push(result);
@@ -243,7 +268,9 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     }
     resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
   } else if (input.input?.kind === "runtime-action-result") {
-    recordSubagentUsageSpans(input.input.results);
+    if (ctx.get(InstrumentationControlsKey)?.action !== "drop") {
+      recordSubagentUsageSpans(input.input.results);
+    }
     if (input.input.acceptedAtMsByCallId !== undefined) {
       ctx.set(RuntimeActionSettlementTimesKey, input.input.acceptedAtMsByCallId);
     }
@@ -279,7 +306,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     await contextStorage.run(ctx, () =>
       instrumentChannelDelivery({
         ctx,
-        hooks: instrumentation?.hooks,
+        hooks: preparedInstrumentation.instrumentation?.hooks,
         includeTurn: false,
         outcome: "completed",
       }),
@@ -432,6 +459,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           const traceContext = await prepareWorkflowPreambleTrace({
             ctx,
             emissionState,
+            instrumentation: preparedInstrumentation.instrumentation,
             runtimeIdentity,
             session: schemaSession,
           });
@@ -498,6 +526,8 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           handleEvent,
           historyProjector: history.projector,
           historyView: history.prepare(modelSession),
+          instrumentation: preparedInstrumentation.instrumentation,
+          instrumentationChannel: preparedInstrumentation.channel,
           mode,
           modelResolutionScope: {
             moduleMap: bundle.moduleMap,
@@ -533,9 +563,12 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
             }),
             backgroundTasks: retained.backgroundTasks,
           }),
-      serializedContext: preserveSerializedInstrumentationState(
-        preserveSerializedAgentTraceState(
-          preserveSerializedSessionDynamicModelSelection(input.serializedContext, interrupted),
+      serializedContext: preserveSerializedInstrumentationControls(
+        preserveSerializedInstrumentationState(
+          preserveSerializedAgentTraceState(
+            preserveSerializedSessionDynamicModelSelection(input.serializedContext, interrupted),
+            interrupted,
+          ),
           interrupted,
         ),
         interrupted,
@@ -649,34 +682,4 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     serializedContext: nextSerializedContext,
     sessionState: nextState,
   };
-}
-
-/**
- * Derives the pending-state fields the turn workflow needs to choose
- * the right `NextDriverAction` arm at the park boundary.
- */
-function derivePendingState(session: HarnessSession): {
-  readonly authorizationAttemptIds?: readonly string[];
-  readonly authorizationNames?: readonly string[];
-  readonly hasPendingAuthorization: boolean;
-  readonly hasPendingInputBatch: boolean;
-  readonly pendingRuntimeActionKeys?: readonly string[];
-} {
-  const batch = getPendingRuntimeActionBatch(session.state);
-  const pendingAuth = getPendingAuthorization(session.state);
-  const base = {
-    authorizationAttemptIds: pendingAuth?.challenges.flatMap((challenge) =>
-      challenge.attemptId === undefined ? [] : [challenge.attemptId],
-    ),
-    authorizationNames: pendingAuth?.challenges.map((c) => c.name),
-    hasPendingAuthorization: pendingAuth !== undefined,
-    hasPendingInputBatch: hasPendingInputBatch(session.state),
-  };
-  if (batch !== undefined) {
-    return {
-      ...base,
-      pendingRuntimeActionKeys: batch.actions.map((action) => getRuntimeActionRequestKey(action)),
-    };
-  }
-  return base;
 }

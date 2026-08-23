@@ -26,7 +26,7 @@ describe("buildResolveContext", () => {
     ctx.set(ChannelKey, { kind: "http" });
     ctx.set(ChannelInstrumentationKey, {
       kind: "channel:slack",
-      metadata: { threadTs: "1234.5678", userId: "U123" },
+      metadata: { audience: "private", threadTs: "1234.5678", userId: "U123" },
     });
 
     const resolveCtx = buildResolveContext(ctx, []);

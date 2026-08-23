@@ -8,7 +8,7 @@
  * dead (handle deleted) or retryable (handle restored to `parked`).
  */
 
-import type { SessionAuthContext } from "#channel/types.js";
+import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#harness/agent-handle-errors.js";
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
 import {
@@ -106,6 +106,7 @@ export async function dispatchToAgentHandle(input: {
   readonly auth: SessionAuthContext | null;
   readonly bundle: CompiledBundle;
   readonly currentSession: RuntimeSession;
+  readonly instrumentationControls?: DeliverPayload["instrumentationControls"];
   readonly parentToken: string;
   readonly parentTurnId: string;
 }): Promise<DispatchOutcome> {
@@ -185,6 +186,7 @@ export async function dispatchToAgentHandle(input: {
     auth: input.auth,
     bundle,
     identity: handle.identity,
+    instrumentationControls: input.instrumentationControls,
     parentToken: input.parentToken,
   });
   if (!delivery.ok) {
@@ -233,6 +235,7 @@ export async function dispatchToTaskAgentAddress(input: {
   readonly auth: SessionAuthContext | null;
   readonly bundle: CompiledBundle;
   readonly currentSession: RuntimeSession;
+  readonly instrumentationControls?: DeliverPayload["instrumentationControls"];
   readonly parentToken: string;
 }): Promise<DispatchOutcome> {
   const { action, agentId } = input;
@@ -271,6 +274,7 @@ export async function dispatchToTaskAgentAddress(input: {
     auth: input.auth,
     bundle: input.bundle,
     identity: record.identity,
+    instrumentationControls: input.instrumentationControls,
     parentToken: input.parentToken,
   });
   if (!delivery.ok) {
@@ -324,6 +328,7 @@ async function deliverToAgentAddress(input: {
   readonly auth: SessionAuthContext | null;
   readonly bundle: CompiledBundle;
   readonly identity: AgentIdentity;
+  readonly instrumentationControls?: DeliverPayload["instrumentationControls"];
   readonly parentToken: string;
 }): Promise<
   Result<
@@ -390,6 +395,7 @@ async function deliverToAgentAddress(input: {
         },
         kind: "send",
         payload: {
+          instrumentationControls: input.instrumentationControls,
           message: readSubagentMessage(action),
           outputSchema: normalizeRequestedOutputSchema(action.input.outputSchema),
         },

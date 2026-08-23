@@ -11,8 +11,10 @@ import { ContextContainer, contextStorage, loadContext } from "#context/containe
 import { ContextKey } from "#context/key.js";
 import {
   AuthKey,
+  ChannelInstrumentationKey,
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
+  InstrumentationControlsKey,
   ModeKey,
   SessionCallbackKey,
   SessionDynamicSubagentRuntimeRevisionKey,
@@ -57,6 +59,7 @@ import { appendTaskAgentAnnouncement } from "#execution/tasks/parent/agent-views
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
 import { turnStep } from "#execution/workflow-steps.js";
+import { registerInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import {
   LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
@@ -233,6 +236,7 @@ function createSerializedContext(
 }
 
 afterEach(() => {
+  delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.instrumentation-runtime")];
   getRunMock.mockReset();
   resumeHookMock.mockReset();
   startMock.mockReset();
@@ -247,6 +251,95 @@ afterEach(() => {
   vi.mocked(appendTaskAgentAnnouncement).mockImplementation(async (session) => session);
   mockIdentityHistoryViewProjector.mockReset();
   mockIdentityHistoryViewProjector.mockImplementation(({ messages }) => messages);
+});
+
+describe("delivery instrumentation controls", () => {
+  it("maps audience before delivery publication and injects only bound controls", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
+      },
+      hookRegistry: createEmptyHookRegistry(),
+      moduleMap: { nodes: {} },
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never);
+    const resolveControls = vi.fn(() => ({
+      action: "record" as const,
+      recordInputs: false,
+      recordOutputs: true,
+    }));
+    let controlsAtDelivery: unknown;
+    registerInstrumentationRuntime({
+      forceFlush: async () => undefined,
+      hooks: {
+        capturesContent: true,
+        publish: async (event) => {
+          if (event.type === "channel.delivery.started") {
+            controlsAtDelivery = loadContext().get(InstrumentationControlsKey);
+          }
+        },
+      },
+      otelSettings: undefined,
+      resolveControls,
+      runInContext: (_operation, execute) => execute(),
+      runWithTracingSuppressed: (execute) => execute(),
+      shutdown: async () => undefined,
+    });
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockReturnValue(async (stepSession) => ({
+      next: { done: true, output: "ok" },
+      session: stepSession,
+    }));
+    const serializedContext = createSerializedContext();
+    serializedContext[ChannelInstrumentationKey.name] = {
+      kind: "channel:test",
+      metadata: { audience: "private" },
+    };
+
+    const result = await turnStep({
+      input: {
+        deliveryMetadata: [
+          {
+            channelKind: "channel:test",
+            channelName: "test",
+            deliveryId: "delivery-1",
+            payloadIndex: 0,
+          },
+        ],
+        kind: "deliver",
+        payloads: [{ message: "secret" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext,
+      sessionState: createStubSessionState(),
+    });
+
+    expect(resolveControls).toHaveBeenCalledWith(
+      expect.objectContaining({ audience: "private", sessionId: session.sessionId }),
+    );
+    expect(controlsAtDelivery).toEqual({
+      action: "record",
+      recordInputs: false,
+      recordOutputs: true,
+    });
+    expect(result.serializedContext[InstrumentationControlsKey.name]).toEqual(controlsAtDelivery);
+    expect(
+      vi.mocked(createExecutionNodeStep).mock.calls[0]?.[0].instrumentation,
+    ).not.toHaveProperty("resolveControls");
+    expect(vi.mocked(createExecutionNodeStep).mock.calls[0]?.[0].instrumentationChannel).toEqual({
+      kind: "channel:test",
+      metadata: {},
+    });
+  });
 });
 
 describe("routeProxiedDeliverStep", () => {

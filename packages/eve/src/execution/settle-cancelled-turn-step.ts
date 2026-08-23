@@ -3,7 +3,7 @@ import { callAdapterEventHandler } from "#channel/adapter.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { ChannelInstrumentationKey } from "#context/keys.js";
+import { ChannelInstrumentationKey, InstrumentationControlsKey } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import {
   createDurableSessionState,
@@ -28,7 +28,10 @@ import {
 import { abandonRunningAgentTurns } from "#harness/handles/transitions.js";
 import { clearPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { createInstrumentationHandleEvent } from "#harness/instrumentation/native-events.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
+import {
+  bindInstrumentationRuntime,
+  getInstrumentationRuntime,
+} from "#harness/instrumentation/runtime.js";
 import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
 import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import {
@@ -66,6 +69,11 @@ export async function settleCancelledTurnStep(input: {
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
   const instrumentation = getInstrumentationRuntime();
+  const controls = ctx.get(InstrumentationControlsKey);
+  const harnessInstrumentation =
+    instrumentation === undefined || controls === undefined
+      ? instrumentation
+      : bindInstrumentationRuntime(instrumentation, controls);
 
   let session = hydrateDurableSession({
     compactionOverrides: {
@@ -91,33 +99,39 @@ export async function settleCancelledTurnStep(input: {
   if (!alreadyEpilogued) {
     const writer = input.parentWritable.getWriter();
     try {
-      const scoped = await withContextScope(ctx, session, async (enrichedSession) => {
-        const baseEmit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
-          const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
-          setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-          // Stamp once: the persisted chunk and the hooks must agree on the id.
-          const stamped = stampMessageStreamEvent(transformed);
-          await writer.write(encodeMessageStreamEvent(stamped));
-          await dispatchStreamEventHooks({
-            ctx,
-            event: stamped,
-            registry: bundle.hookRegistry,
-          });
-        };
-        const emit =
-          createInstrumentationHandleEvent({
-            agentName: bundle.turnAgent.id,
-            channelKind: ctx.get(ChannelInstrumentationKey)?.kind,
-            handleEvent: baseEmit,
-            hooks: instrumentation?.hooks,
-            sessionId: session.sessionId,
-            turnId: activeTurnId(emissionState),
-          }) ?? baseEmit;
-        return {
-          result: await emitCancelledTurn(emit, emissionState),
-          session: enrichedSession,
-        };
-      });
+      const settle = () =>
+        withContextScope(ctx, session, async (enrichedSession) => {
+          const baseEmit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
+            const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
+            setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
+            // Stamp once: the persisted chunk and the hooks must agree on the id.
+            const stamped = stampMessageStreamEvent(transformed);
+            await writer.write(encodeMessageStreamEvent(stamped));
+            await dispatchStreamEventHooks({
+              ctx,
+              event: stamped,
+              registry: bundle.hookRegistry,
+            });
+          };
+          const emit =
+            createInstrumentationHandleEvent({
+              agentName: bundle.turnAgent.id,
+              channelKind: ctx.get(ChannelInstrumentationKey)?.kind,
+              handleEvent: baseEmit,
+              hooks: harnessInstrumentation?.hooks,
+              sessionId: session.sessionId,
+              turnId: activeTurnId(emissionState),
+            }) ?? baseEmit;
+          return {
+            result: await emitCancelledTurn(emit, emissionState),
+            session: enrichedSession,
+          };
+        });
+      const runWithTracingSuppressed = harnessInstrumentation?.runWithTracingSuppressed;
+      const scoped =
+        runWithTracingSuppressed === undefined
+          ? await settle()
+          : await runWithTracingSuppressed(settle);
       emissionState = scoped.result;
       session = scoped.session;
     } finally {

@@ -306,6 +306,11 @@ export interface ToolLoopHarnessConfig {
   readonly historyProjector?: HistoryViewProjector;
   /** Execution-prepared view of the history supplied to the first harness step. */
   readonly historyView?: PreparedHistoryView;
+  /** Execution-sanitized channel projection exposed to instrumentation callbacks. */
+  readonly instrumentationChannel?: {
+    readonly kind?: string;
+    readonly metadata: Readonly<Record<string, unknown>>;
+  };
   /**
    * Internal lifecycle hooks injected into each actual model attempt.
    * Omitted in production until an instrumentation runtime opts in.

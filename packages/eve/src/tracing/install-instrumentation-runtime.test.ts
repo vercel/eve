@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { InstrumentationControlsKey } from "#context/keys.js";
 import { turnIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
 import { installInstrumentationRuntime } from "#tracing/install-instrumentation-runtime.js";
-import { otelIntegration, collectOtelPipeline } from "#tracing/otel-declaration.js";
+import { otel, otelIntegration, collectOtelPipeline } from "#tracing/otel-declaration.js";
 
 const { forceFlush, internalTerminalState, shutdown } = vi.hoisted(() => ({
   forceFlush: vi.fn(async () => undefined),
@@ -117,5 +118,117 @@ describe("installInstrumentationRuntime", () => {
 
     expect(internalTerminalState).toHaveBeenCalledExactlyOnceWith("framework");
     expect(authoredTerminalState).toHaveBeenCalledExactlyOnceWith("authored");
+  });
+
+  it("maps audience to controls before the harness", () => {
+    const runtime = installInstrumentationRuntime({
+      collected: collectOtelPipeline([otelIntegration()]),
+      frameworkVersion: "test",
+      providers: [],
+      serviceName: "weather",
+    });
+    const context = { rootSessionId: "session-1", sessionId: "session-1" };
+
+    expect(runtime.resolveControls({ ...context, audience: "public" })).toEqual({
+      action: "record",
+      recordInputs: true,
+      recordOutputs: true,
+    });
+    expect(runtime.resolveControls({ ...context, audience: "private" })).toEqual({
+      action: "drop",
+      recordInputs: false,
+      recordOutputs: false,
+    });
+  });
+
+  it("uses the controls returned by a custom trace policy", () => {
+    const runtime = installInstrumentationRuntime({
+      collected: collectOtelPipeline([
+        otel({
+          tracePolicy: () => ({
+            action: "record",
+            recordInputs: false,
+            recordOutputs: true,
+          }),
+        }),
+        otelIntegration(),
+      ]),
+      frameworkVersion: "test",
+      providers: [],
+      serviceName: "weather",
+    });
+
+    expect(
+      runtime.resolveControls({
+        audience: "private",
+        rootSessionId: "session-1",
+        sessionId: "session-1",
+      }),
+    ).toEqual({ action: "record", recordInputs: false, recordOutputs: true });
+  });
+
+  it("fails closed when a trace policy throws", () => {
+    const runtime = installInstrumentationRuntime({
+      collected: collectOtelPipeline([
+        otel({
+          tracePolicy: () => {
+            throw new Error("policy failed");
+          },
+        }),
+        otelIntegration(),
+      ]),
+      frameworkVersion: "test",
+      providers: [],
+      serviceName: "weather",
+    });
+
+    expect(
+      runtime.resolveControls({
+        audience: "public",
+        rootSessionId: "session-1",
+        sessionId: "session-1",
+      }),
+    ).toEqual({ action: "drop", recordInputs: false, recordOutputs: false });
+  });
+
+  it("suppresses only the internal OTel provider for dropped deliveries", async () => {
+    const authoredTurnStarted = vi.fn();
+    const runtime = installInstrumentationRuntime({
+      collected: collectOtelPipeline([otelIntegration()]),
+      frameworkVersion: "test",
+      providers: [
+        {
+          events: { "turn.started": authoredTurnStarted },
+          name: "authored",
+        },
+      ],
+      serviceName: "weather",
+    });
+    const ctx = new ContextContainer();
+    ctx.set(InstrumentationControlsKey, {
+      action: "drop",
+      recordInputs: false,
+      recordOutputs: false,
+    });
+
+    await contextStorage.run(ctx, async () => {
+      await runtime.hooks.publish({
+        idempotencyKey: "turn-1",
+        rootSessionId: "session-1",
+        sequence: 0,
+        sessionId: "session-1",
+        turnId: "turn-1",
+        type: "turn.started",
+      });
+      await runtime.hooks.publish({
+        idempotencyKey: "turn-1",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        type: "turn.completed",
+      });
+    });
+
+    expect(authoredTurnStarted).toHaveBeenCalledOnce();
+    expect(internalTerminalState).not.toHaveBeenCalled();
   });
 });

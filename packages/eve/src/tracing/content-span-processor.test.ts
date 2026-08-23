@@ -242,26 +242,25 @@ describe("contentFilteringProcessor", () => {
   });
 
   it.each([
-    ["public", true],
-    ["private", false],
-    ["unknown", false],
-  ] as const)("retains content for the %s audience: %s", (audience, retained) => {
+    ["visible", true],
+    ["hidden", false],
+  ] as const)("retains content when the span is %s: %s", (visibility, retained) => {
     const downstream = recordingProcessor();
     contentFilteringProcessor(
       downstream,
       composeSpanExportPolicies(
-        redactSpanInputs(({ audience }) => audience !== "public"),
-        redactSpanOutputs(({ audience }) => audience !== "public"),
+        redactSpanInputs(({ attributes }) => attributes["visibility"] !== "visible"),
+        redactSpanOutputs(({ attributes }) => attributes["visibility"] !== "visible"),
       ),
     ).onEnd(
       span({
-        "agent.channel.audience": audience,
+        visibility,
         "ai.prompt.messages": "input",
         "ai.response.text": "output",
       }) as never,
     );
 
-    const expected: Record<string, unknown> = { "agent.channel.audience": audience };
+    const expected: Record<string, unknown> = { visibility };
     if (retained) {
       expected["ai.prompt.messages"] = "input";
       expected["ai.response.text"] = "output";
@@ -269,27 +268,6 @@ describe("contentFilteringProcessor", () => {
     expect((downstream.ended[0] as { attributes: Record<string, unknown> }).attributes).toEqual(
       expected,
     );
-  });
-
-  it("fails closed when audience attributes disagree", () => {
-    const downstream = recordingProcessor();
-    contentFilteringProcessor(
-      downstream,
-      composeSpanExportPolicies(
-        redactSpanInputs(({ audience }) => audience !== "public"),
-        redactSpanOutputs(({ audience }) => audience !== "public"),
-      ),
-    ).onEnd(
-      span({
-        "agent.channel.audience": "public",
-        "ai.prompt.messages": "private",
-        "ai.settings.context.eve.channel.audience": "private",
-      }) as never,
-    );
-
-    expect(
-      (downstream.ended[0] as { attributes: Record<string, unknown> }).attributes,
-    ).not.toHaveProperty("ai.prompt.messages");
   });
 
   it("can drop an individual span", () => {

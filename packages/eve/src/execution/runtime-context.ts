@@ -10,6 +10,7 @@ import {
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
   InitiatorAuthKey,
+  InstrumentationControlsKey,
   ModeKey,
   ParentSessionKey,
   ParentTraceContextKey,
@@ -48,6 +49,9 @@ export function buildRunContext(input: {
   ctx.set(ModeKey, run.mode);
   ctx.set(AuthKey, auth);
   ctx.set(InitiatorAuthKey, run.initiatorAuth ?? auth);
+  if (run.instrumentationControls !== undefined) {
+    ctx.set(InstrumentationControlsKey, run.instrumentationControls);
+  }
 
   if (input.dynamicSubagentAgentConfig !== undefined) {
     ctx.set(DynamicSubagentAgentConfigKey, input.dynamicSubagentAgentConfig);

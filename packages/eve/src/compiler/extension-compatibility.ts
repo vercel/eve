@@ -31,7 +31,13 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
     dropped: {},
   },
-  channel: { current: 7, supported: [1, 2, 3, 4, 5, 6, 7], dropped: {} },
+  channel: {
+    current: 8,
+    supported: [1, 2, 3, 4, 5, 6, 8],
+    dropped: {
+      7: "Instrumentation callbacks no longer expose channel audience; eve maps it to internal controls at delivery.",
+    },
+  },
   schedule: { current: 3, supported: [1, 2, 3], dropped: {} },
   subagent: { current: 2, supported: [1, 2], dropped: {} },
   connection: { current: 5, supported: [1, 2, 3, 4, 5], dropped: {} },

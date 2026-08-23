@@ -6,14 +6,12 @@ import type {
 } from "#harness/instrumentation/lifecycle.js";
 import { sessionIdempotencyKey, turnIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
 import type { HarnessInstrumentation } from "#harness/instrumentation/runtime.js";
-import type { ChannelAudience } from "#shared/channel-audience.js";
 
 const log = createLogger("harness.prepare-trace-context");
 
 /** Prepares native session/turn tracing before their durable stream events. */
 export async function prepareTurnTraceContext(input: {
   readonly agentName?: string;
-  readonly channelAudience?: ChannelAudience;
   readonly instrumentation?: HarnessInstrumentation;
   readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
@@ -30,7 +28,6 @@ export async function prepareTurnTraceContext(input: {
     try {
       prepared = await input.instrumentation.prepareSessionTrace({
         agentName: input.agentName,
-        channelAudience: input.channelAudience,
         idempotencyKey: sessionIdempotencyKey(input.sessionId),
         parentTraceContext: input.parentTraceContext,
         rootSessionId: input.rootSessionId,

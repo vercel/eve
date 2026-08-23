@@ -25,6 +25,8 @@ import {
   startSubagent,
 } from "#execution/dispatch-runtime-actions-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
+import { runWithInstrumentationControls } from "#execution/instrumentation-controls.js";
+import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 
 export async function dispatchRuntimeActionsStep(
@@ -42,6 +44,7 @@ export async function dispatchRuntimeActionsStep(
   }
 
   const { batch, bundle, session } = prepared;
+  const instrumentation = getInstrumentationRuntime();
   const persistentSessions =
     bundle.resolvedAgent.config?.experimental?.subagentPersistentSessions === true;
   // Acquired only once preflight can no longer throw, so a planning failure
@@ -65,40 +68,52 @@ export async function dispatchRuntimeActionsStep(
       let outcome: DispatchOutcome;
       switch (entry.kind) {
         case "resume":
-          outcome = await dispatchToAgentHandle({
-            action: entry.action,
-            agentId: entry.agentId,
-            auth: prepared.auth,
-            bundle: createAgentContinuationBundle({
-              action: entry.action,
-              bundle,
-              dynamicRemoteAgent: entry.dynamicRemoteAgent,
-            }),
-            currentSession: nextSession,
-            parentToken: input.parentContinuationToken ?? session.continuationToken,
-            parentTurnId: batch.event.turnId,
-          });
+          outcome = await runWithInstrumentationControls(
+            prepared.instrumentationControls,
+            instrumentation,
+            () =>
+              dispatchToAgentHandle({
+                action: entry.action,
+                agentId: entry.agentId,
+                auth: prepared.auth,
+                bundle: createAgentContinuationBundle({
+                  action: entry.action,
+                  bundle,
+                  dynamicRemoteAgent: entry.dynamicRemoteAgent,
+                }),
+                currentSession: nextSession,
+                instrumentationControls: prepared.instrumentationControls,
+                parentToken: input.parentContinuationToken ?? session.continuationToken,
+                parentTurnId: batch.event.turnId,
+              }),
+          );
           break;
         case "start":
-          outcome = await startSubagent({
-            auth: prepared.auth,
-            batchEvent: batch.event,
-            bundle,
-            callbackBaseUrl: input.callbackBaseUrl,
-            capabilities: prepared.capabilities,
-            channelMetadata: prepared.channelMetadata,
-            currentSession: nextSession,
-            fanoutSize: prepared.fanoutSize,
-            initiatorAuth: prepared.initiatorAuth,
-            parentContinuationToken: input.parentContinuationToken,
-            parentTraceContext: prepared.parentTraceContext,
-            persistentSessions,
-            sandboxSessionId: prepared.sandboxSessionId,
-            serializedContext: prepared.serializedContext,
-            session,
-            taskOwned: false,
-            target: entry.target,
-          });
+          outcome = await runWithInstrumentationControls(
+            prepared.instrumentationControls,
+            instrumentation,
+            () =>
+              startSubagent({
+                auth: prepared.auth,
+                batchEvent: batch.event,
+                bundle,
+                callbackBaseUrl: input.callbackBaseUrl,
+                capabilities: prepared.capabilities,
+                channelMetadata: prepared.channelMetadata,
+                currentSession: nextSession,
+                fanoutSize: prepared.fanoutSize,
+                initiatorAuth: prepared.initiatorAuth,
+                instrumentationControls: prepared.instrumentationControls,
+                parentContinuationToken: input.parentContinuationToken,
+                parentTraceContext: prepared.parentTraceContext,
+                persistentSessions,
+                sandboxSessionId: prepared.sandboxSessionId,
+                serializedContext: prepared.serializedContext,
+                session,
+                taskOwned: false,
+                target: entry.target,
+              }),
+          );
           break;
       }
 
@@ -108,15 +123,17 @@ export async function dispatchRuntimeActionsStep(
         continue;
       }
 
-      await emitSubagentCalled({
-        adapter: prepared.adapter,
-        adapterCtx: prepared.adapterCtx,
-        batchEvent: batch.event,
-        entry,
-        outcome,
-        sessionId: session.sessionId,
-        writer,
-      });
+      await runWithInstrumentationControls(prepared.instrumentationControls, instrumentation, () =>
+        emitSubagentCalled({
+          adapter: prepared.adapter,
+          adapterCtx: prepared.adapterCtx,
+          batchEvent: batch.event,
+          entry,
+          outcome,
+          sessionId: session.sessionId,
+          writer,
+        }),
+      );
     }
   } finally {
     writer.releaseLock();

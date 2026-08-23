@@ -12,3 +12,11 @@ export function normalizeChannelAudience(value: unknown): ChannelAudience {
     ? (value as ChannelAudience)
     : "unknown";
 }
+
+export function withoutChannelAudience(
+  metadata: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  if (!("audience" in metadata)) return metadata;
+  const { audience: _audience, ...visible } = metadata;
+  return visible;
+}

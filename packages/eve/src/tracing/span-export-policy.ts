@@ -1,8 +1,5 @@
-import type { ChannelAudience } from "#shared/channel-audience.js";
-
 export interface SpanExportContext {
   readonly attributes: Readonly<Record<string, unknown>>;
-  readonly audience: ChannelAudience;
   readonly name: string;
   readonly spanId: string;
   readonly traceId: string;

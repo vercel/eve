@@ -18,6 +18,7 @@ import {
   CapabilitiesKey,
   ChannelInstrumentationKey,
   InitiatorAuthKey,
+  InstrumentationControlsKey,
   SandboxKey,
 } from "#context/keys.js";
 import { type AlsContext, ContextContainer } from "#context/container.js";
@@ -154,6 +155,9 @@ export interface PreparedRuntimeActionDispatch {
    */
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
+  readonly instrumentationControls: Parameters<
+    typeof buildSubagentRunInput
+  >[0]["instrumentationControls"];
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
@@ -280,6 +284,7 @@ async function prepareActionDispatch(input: {
       input.fanoutSize ??
       plan.filter((entry) => entry.kind === "start" && entry.target.kind === "local").length,
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
+    instrumentationControls: ctx.get(InstrumentationControlsKey),
     parentTraceContext: readSessionTraceContext(input.serializedContext, session.sessionId),
     plan,
     sandboxSessionId,
@@ -542,6 +547,9 @@ export async function startSubagent(input: {
   readonly currentSession: RuntimeSession;
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
+  readonly instrumentationControls: Parameters<
+    typeof buildSubagentRunInput
+  >[0]["instrumentationControls"];
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly persistentSessions: boolean;
@@ -572,6 +580,7 @@ export async function startSubagent(input: {
         dynamicSubagentAgentConfig: input.target.dynamicSubagentAgentConfig,
         fanoutSize: input.fanoutSize,
         initiatorAuth: input.initiatorAuth,
+        instrumentationControls: input.instrumentationControls,
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext,
         persistentSessions: input.persistentSessions,

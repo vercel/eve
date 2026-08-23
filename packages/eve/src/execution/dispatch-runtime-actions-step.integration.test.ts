@@ -29,6 +29,7 @@ import {
   CapabilitiesKey,
   ChannelInstrumentationKey,
   InitiatorAuthKey,
+  InstrumentationControlsKey,
   SessionIdKey,
   SessionKey,
 } from "#context/keys.js";
@@ -41,6 +42,7 @@ import type {
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import type { ResolvedSandboxDefinition } from "#runtime/types.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
+import type { InstrumentationControls } from "#shared/instrumentation-controls.js";
 
 const mocks = vi.hoisted(() => ({
   continueRemoteAgentSession: vi.fn(),
@@ -850,7 +852,11 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
       handle: LOCAL_PARKED_HANDLE,
       agentId: LOCAL_PARKED_HANDLE.identity.id,
     });
-    installContext(session);
+    installContext(session, undefined, false, null, {
+      action: "drop",
+      recordInputs: false,
+      recordOutputs: false,
+    });
     const writes: Uint8Array[] = [];
 
     const result = await dispatchRuntimeActionsStep({
@@ -871,6 +877,11 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
         kind: "send",
         auth: null,
         payload: {
+          instrumentationControls: {
+            action: "drop",
+            recordInputs: false,
+            recordOutputs: false,
+          },
           message: "continue with raw input",
           outputSchema: undefined,
         },
@@ -1271,6 +1282,7 @@ function installContext(
   remote?: { readonly definition: unknown; readonly nodeId: string },
   tasks = false,
   auth: SessionAuthContext | null = null,
+  instrumentationControls?: InstrumentationControls,
 ): void {
   const subagentsByNodeId = new Map<string, { definition: unknown }>();
   if (remote !== undefined) {
@@ -1295,6 +1307,7 @@ function installContext(
     [CapabilitiesKey, undefined],
     [ChannelInstrumentationKey, undefined],
     [InitiatorAuthKey, null],
+    [InstrumentationControlsKey, instrumentationControls],
     [ChannelKey, ADAPTER],
   ]);
   mocks.deserializeContext.mockResolvedValue({

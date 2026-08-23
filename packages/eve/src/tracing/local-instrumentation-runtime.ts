@@ -13,7 +13,9 @@ import {
 
 /** Zero-config local tracing keeps unclassified HTTP/TUI sessions observable. @internal */
 export const localTracePolicy: TraceCapturePolicy = ({ audience }) =>
-  audience === "public" || audience === "unknown";
+  audience === "public" || audience === "unknown"
+    ? { action: "record", recordInputs: true, recordOutputs: true }
+    : { action: "drop" };
 
 /** Installs the zero-config local OTel runtime once in an `eve dev` worker. */
 export function installLocalInstrumentationRuntime(input: {

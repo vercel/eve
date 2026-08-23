@@ -33,7 +33,6 @@ import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { contextStorage } from "#context/container.js";
 import {
   AuthKey,
-  ChannelInstrumentationKey,
   ParentSessionKey,
   ParentTraceContextKey,
   SessionCallbackKey,
@@ -55,7 +54,6 @@ import {
 import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.js";
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import {
   createActionResultEvent,
   createApprovalCandidateEvent,
@@ -170,7 +168,6 @@ import {
   dropStaleSessionLimitContinuationResponses,
 } from "#harness/stale-input-responses.js";
 import { getInstrumentationConfig } from "#harness/instrumentation/config.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 import type { OtelHarnessSettings } from "#tracing/otel-declaration.js";
 import {
   normalizeModelMessages,
@@ -334,16 +331,26 @@ function enrichTelemetry(
   for (const key of Object.keys(runtimeContext ?? {})) {
     includeRuntimeContext[key] = true;
   }
+  const includeRegisteredIntegrations =
+    settings?.enabled !== false &&
+    settings?.recordInputs !== false &&
+    settings?.recordOutputs !== false;
+  const integrations =
+    bridgeIntegration === undefined
+      ? includeRegisteredIntegrations
+        ? undefined
+        : []
+      : [
+          bridgeIntegration,
+          ...(includeRegisteredIntegrations ? getRegisteredTelemetryIntegrations() : []),
+        ];
 
   return {
     functionId: settings?.functionId ?? agentName,
     includeRuntimeContext,
     // Passing integrations replaces the registered ones for this call, so the
     // bridge has to be composed with them rather than handed over on its own.
-    integrations:
-      bridgeIntegration === undefined
-        ? undefined
-        : [bridgeIntegration, ...getRegisteredTelemetryIntegrations()],
+    integrations,
     isEnabled: true,
     recordInputs: settings?.recordInputs ?? false,
     recordOutputs: settings?.recordOutputs ?? false,
@@ -575,17 +582,19 @@ function buildHarnessToolsWithDynamicSubagents(
 
 export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   const baseEmit = config.handleEvent;
-  const instrumentationRuntime = getInstrumentationRuntime();
-  const otelSettings = instrumentationRuntime?.otelSettings;
+  const otelSettings = config.instrumentation?.otelSettings;
   // The legacy single-file layout reads its runtime-context resolver from the
   // authored config object; the provider directory collects resolvers at install
   // time onto the runtime. Both paths feed buildTelemetryRuntimeContext.
   const authoredConfig = getInstrumentationConfig();
-  const providerRuntimeContextResolvers = instrumentationRuntime?.runtimeContextResolvers;
-  if (otelSettings !== undefined) {
+  const providerRuntimeContextResolvers = config.instrumentation?.runtimeContextResolvers;
+  if (otelSettings !== undefined && otelSettings.enabled !== false) {
     ensureOtelIntegration();
   }
-  const tracer = otelSettings !== undefined ? trace.getTracer("eve") : undefined;
+  const tracer =
+    otelSettings !== undefined && otelSettings.enabled !== false
+      ? trace.getTracer("eve")
+      : undefined;
   const agentName = config.runtimeIdentity?.agentName;
 
   async function runStep(
@@ -615,14 +624,20 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const parentContext = resolveStepOtelContext(tracer, turnSpan, initialSession);
     const executeStep = () => executeStepBody(initialSession, input, turnSpan);
 
-    try {
-      if (parentContext) {
-        return await otelContext.with(parentContext, executeStep);
+    const execute = async (): Promise<StepResult> => {
+      try {
+        if (parentContext) {
+          return await otelContext.with(parentContext, executeStep);
+        }
+        return await executeStep();
+      } finally {
+        turnSpan?.end();
       }
-      return await executeStep();
-    } finally {
-      turnSpan?.end();
-    }
+    };
+    const runWithTracingSuppressed = config.instrumentation?.runWithTracingSuppressed;
+    return runWithTracingSuppressed === undefined
+      ? await execute()
+      : await runWithTracingSuppressed(execute);
   }
 
   async function executeStepBody(
@@ -649,7 +664,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     let emissionState = getHarnessEmissionState(session.state);
     const store = contextStorage.getStore();
-    const channelInstrumentation = store?.get(ChannelInstrumentationKey);
     const parent = store?.get(ParentSessionKey);
     const channel = store?.get(ChannelKey);
     const callback = store?.get(SessionCallbackKey);
@@ -663,8 +677,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     let activeAttemptScope: InstrumentationAttemptScope | undefined;
     const emit = createInstrumentationHandleEvent({
       agentName: config.runtimeIdentity?.agentName,
-      channelAudience: normalizeChannelAudience(channelInstrumentation?.metadata.audience),
-      channelKind: channelInstrumentation?.kind,
+      channelKind: config.instrumentationChannel?.kind,
       getAttemptScope: () => activeAttemptScope,
       handleEvent: baseEmit,
       hooks: config.instrumentation?.hooks,
@@ -721,7 +734,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           : undefined;
       return await prepareTurnTraceContext({
         agentName: config.runtimeIdentity?.agentName,
-        channelAudience: normalizeChannelAudience(channelInstrumentation?.metadata.audience),
         instrumentation: config.instrumentation,
         parentLineage,
         parentTraceContext,
@@ -1371,13 +1383,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       return {
         instructions,
         telemetryRuntimeContext: buildTelemetryRuntimeContext({
+          channel: config.instrumentationChannel,
           eveVersion,
           authored: authoredConfig,
           emissionState,
           environment,
           modelInput: {
-            instructions,
-            messages: modelMessages,
+            instructions: otelSettings?.recordInputs === false ? undefined : instructions,
+            messages: otelSettings?.recordInputs === false ? [] : modelMessages,
           },
           providerResolvers: providerRuntimeContextResolvers,
           session,
@@ -1501,7 +1514,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           : {
               attemptId: `${session.sessionId}:${instrumentationTurnId}:${emissionState.stepIndex}:${opts.attemptIndex}`,
               attemptIndex: opts.attemptIndex,
-              channelAudience: normalizeChannelAudience(channelInstrumentation?.metadata.audience),
               functionId: otelSettings?.functionId ?? agentName,
               rootSessionId: parent?.rootSessionId ?? session.sessionId,
               sessionId: session.sessionId,

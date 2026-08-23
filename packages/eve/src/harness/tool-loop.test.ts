@@ -16,7 +16,6 @@ import { DynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js"
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
 import {
   AuthKey,
-  ChannelInstrumentationKey,
   InitiatorAuthKey,
   LiveStepDynamicModelSelectionKey,
   ParentSessionKey,
@@ -39,6 +38,7 @@ import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
 import type { DynamicResolveContext } from "#shared/dynamic-tool-definition.js";
 import { registerDurableDynamicCallback } from "#shared/durable-dynamic-tool-callbacks.js";
 import type { RunMode } from "#shared/run-mode.js";
+import type { OtelHarnessSettings } from "#tracing/otel-declaration.js";
 import { compactMessages, shouldCompact } from "#harness/compaction.js";
 import { getHarnessEmissionState, isHarnessBetweenTurns } from "#harness/emission.js";
 import {
@@ -125,8 +125,17 @@ vi.mock("./instrumentation/runtime.js", () => ({
  * Registering an authored config writes both stores, so the tests toggle
  * telemetry through one call rather than keeping two mocks in step by hand.
  */
+let declaredOtelSettings: OtelHarnessSettings | undefined;
+
 function declareTelemetry(config: Readonly<Record<string, unknown>> | undefined): void {
   mockGetInstrumentationConfig.mockReturnValue(config);
+  declaredOtelSettings =
+    config === undefined
+      ? undefined
+      : {
+          ...config,
+          traceChannelRequests: config["traceChannelRequests"] === true,
+        };
   mockGetInstrumentationRuntime.mockReturnValue(
     config === undefined
       ? undefined
@@ -182,6 +191,15 @@ function createTestConfig(
   emit?: HarnessEmitFn,
   overrides?: Partial<ToolLoopHarnessConfig>,
 ): ToolLoopHarnessConfig {
+  const instrumentation =
+    overrides?.instrumentation === undefined
+      ? declaredOtelSettings === undefined
+        ? undefined
+        : { otelSettings: declaredOtelSettings }
+      : {
+          ...overrides.instrumentation,
+          otelSettings: overrides.instrumentation.otelSettings ?? declaredOtelSettings,
+        };
   return {
     handleEvent: emit,
     mode,
@@ -198,6 +216,7 @@ function createTestConfig(
       ],
     ]),
     ...overrides,
+    instrumentation,
   };
 }
 
@@ -10588,6 +10607,35 @@ describe("createToolLoopHarness", () => {
   });
 
   describe("telemetry metadata", () => {
+    it("disables registered integrations for dropped compaction", async () => {
+      vi.mocked(compactMessages).mockResolvedValue([{ content: "summary", role: "assistant" }]);
+      mockGetRegisteredTelemetryIntegrations.mockReturnValue([registeredAuthorIntegration]);
+      const tracingSuppressed = vi.fn();
+      const runWithTracingSuppressed = <T>(execute: () => PromiseLike<T>): PromiseLike<T> => {
+        tracingSuppressed();
+        return execute();
+      };
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          compactOnly: true,
+          instrumentation: {
+            otelSettings: {
+              enabled: false,
+              recordInputs: false,
+              recordOutputs: false,
+              traceChannelRequests: false,
+            },
+            runWithTracingSuppressed,
+          },
+        }),
+      );
+
+      await runStep(createTestSession({ history: [{ content: "private", role: "user" }] }));
+
+      expect(vi.mocked(compactMessages).mock.calls[0]?.[4]).toMatchObject({ integrations: [] });
+      expect(tracingSuppressed).toHaveBeenCalledOnce();
+    });
+
     it("emits the authored turn trace with the session and turn preamble", async () => {
       const authoredTrace = {
         spanId: "0123456789abcdef",
@@ -10709,6 +10757,57 @@ describe("createToolLoopHarness", () => {
       );
     });
 
+    it("suppresses tracing and registered integrations for a dropped model call", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      mockGetRegisteredTelemetryIntegrations.mockReturnValue([registeredAuthorIntegration]);
+      const hooks = createInstrumentationHooks([
+        { capture: "content", events: {}, name: "content" },
+      ]);
+      const tracingSuppressed = vi.fn();
+      const runWithTracingSuppressed = <T>(execute: () => PromiseLike<T>): PromiseLike<T> => {
+        tracingSuppressed();
+        return execute();
+      };
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          instrumentation: {
+            hooks,
+            otelSettings: {
+              enabled: false,
+              recordInputs: false,
+              recordOutputs: false,
+              traceChannelRequests: false,
+            },
+            runInContext: (_operation, execute) => runWithTracingSuppressed(execute),
+            runWithTracingSuppressed,
+          },
+        }),
+      );
+
+      await runStep(createTestSession(), { message: "private" });
+
+      const bridge = mockCreateAiSdkHookBridge.mock.results[0]!.value;
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: {
+          integrations?: unknown[];
+          recordInputs?: boolean;
+          recordOutputs?: boolean;
+        };
+      };
+      expect(agentCall.telemetry).toMatchObject({
+        integrations: [bridge],
+        recordInputs: false,
+        recordOutputs: false,
+      });
+      expect(tracingSuppressed).toHaveBeenCalled();
+    });
+
     it("publishes a delegation action when the AI SDK skips execution callbacks", async () => {
       setupMockAgent({
         finishReason: "tool-calls",
@@ -10763,7 +10862,7 @@ describe("createToolLoopHarness", () => {
       );
     });
 
-    it("composes the bridge with every registered integration", async () => {
+    it("withholds partial-content calls from unfilterable registered integrations", async () => {
       setupMockAgent({
         finishReason: "stop",
         response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -10798,7 +10897,7 @@ describe("createToolLoopHarness", () => {
         };
       };
       expect(agentCall.telemetry).toMatchObject({
-        integrations: [bridge, registeredOtelIntegration, registeredAuthorIntegration],
+        integrations: [bridge],
         recordInputs: true,
         recordOutputs: false,
       });
@@ -10842,16 +10941,13 @@ describe("createToolLoopHarness", () => {
       });
 
       const ctx = new ContextContainer();
-      ctx.set(ChannelInstrumentationKey, {
-        kind: "channel:support",
-        metadata: {
-          triggeringUserId: "U123",
-        },
-      });
-
       const hidden = { content: "HIDE_FROM_INSTRUMENTATION", role: "user" as const };
       const config = createTestConfig("conversation", emit, {
         historyProjector: ({ messages }) => messages.filter((message) => message !== hidden),
+        instrumentationChannel: {
+          kind: "channel:support",
+          metadata: { triggeringUserId: "U123" },
+        },
       });
       const runStep = createToolLoopHarness(config);
       await contextStorage.run(ctx, () =>

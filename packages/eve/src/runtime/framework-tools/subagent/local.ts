@@ -225,6 +225,7 @@ async function dispatchSubagent(input: SubagentDispatchInput): Promise<SubagentD
             dynamicRemoteAgent: entry.dynamicRemoteAgent,
           }),
           currentSession: prepared.session,
+          instrumentationControls: prepared.instrumentationControls,
           parentToken: input.task.taskInboxToken,
         })
       : await startSubagent({
@@ -237,6 +238,7 @@ async function dispatchSubagent(input: SubagentDispatchInput): Promise<SubagentD
           currentSession: prepared.session,
           fanoutSize: prepared.fanoutSize,
           initiatorAuth: prepared.initiatorAuth,
+          instrumentationControls: prepared.instrumentationControls,
           parentContinuationToken: input.task.taskInboxToken,
           parentTraceContext: prepared.parentTraceContext,
           persistentSessions: true,

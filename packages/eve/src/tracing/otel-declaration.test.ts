@@ -104,7 +104,7 @@ describe("managed export policy", () => {
     if (spanProcessor === undefined || spanProcessor === "auto") throw new Error("Expected policy");
     spanProcessor.onEnd(
       testSpan({
-        "agent.channel.audience": "private",
+        visibility: "private",
         "ai.prompt.messages": "private input",
       }),
     );
@@ -116,7 +116,7 @@ describe("managed export policy", () => {
     let visibleAttributes: Readonly<Record<string, unknown>> | undefined;
     const integration = managedOtelIntegration({
       exportPolicy: composeSpanExportPolicies(
-        redactSpanInputs(({ audience }) => audience !== "public"),
+        redactSpanInputs(({ attributes }) => attributes["visibility"] !== "public"),
         {
           span: ({ attributes }) => {
             visibleAttributes = attributes;
@@ -131,12 +131,12 @@ describe("managed export policy", () => {
     if (spanProcessor === undefined || spanProcessor === "auto") throw new Error("Expected policy");
     spanProcessor.onEnd(
       testSpan({
-        "agent.channel.audience": "private",
+        visibility: "private",
         "ai.prompt.messages": "private input",
       }),
     );
 
-    expect(visibleAttributes).toEqual({ "agent.channel.audience": "private" });
+    expect(visibleAttributes).toEqual({ visibility: "private" });
   });
 
   it("applies deprecated content switches before the configured export policy", () => {

@@ -29,12 +29,10 @@ import type { ResolvedInputBatch } from "#harness/input-requests.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
-import type { ChannelAudience } from "#shared/channel-audience.js";
 
 export interface CreateInstrumentationHandleEventInput {
   readonly agentName?: string;
   readonly channelKind?: string;
-  readonly channelAudience?: ChannelAudience;
   readonly getAttemptScope?: () => InstrumentationAttemptScope | undefined;
   readonly handleEvent?: HandleEventFn;
   readonly hooks?: InstrumentationHooks;
@@ -294,7 +292,6 @@ function toLifecycleEvent(
     case "session.started":
       return {
         agentName: input.agentName,
-        channelAudience: input.channelAudience,
         channelKind: input.channelKind,
         idempotencyKey: sessionIdempotencyKey(input.sessionId),
         parentTraceContext: input.parentTraceContext,

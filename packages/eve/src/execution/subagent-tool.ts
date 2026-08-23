@@ -16,6 +16,7 @@ import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js
 import { mintSubagentContinuationToken } from "#execution/session.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 import { resolveRemainingSessionTokenLimits } from "#harness/subagent-token-budget.js";
+import type { InstrumentationControls } from "#shared/instrumentation-controls.js";
 
 /**
  * Pending runtime-action batch event metadata needed for child run lineage.
@@ -85,6 +86,7 @@ export function buildSubagentRunInput(input: {
    */
   readonly fanoutSize?: number;
   readonly initiatorAuth: SessionAuthContext | null;
+  readonly instrumentationControls?: InstrumentationControls;
   /**
    * Runtime graph used to detect whether this declared child selected the
    * dispatching parent's sandbox. Absence means no inheritance.
@@ -112,6 +114,7 @@ export function buildSubagentRunInput(input: {
     capabilities,
     channelMetadata,
     initiatorAuth,
+    instrumentationControls,
     session,
     source,
   } = input;
@@ -161,6 +164,7 @@ export function buildSubagentRunInput(input: {
     channelMetadata,
     continuationToken: childContinuationToken,
     initiatorAuth,
+    instrumentationControls,
     input: {
       message: formatSubagentCallInputMessage({
         action,

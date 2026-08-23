@@ -11,6 +11,7 @@ import {
 } from "#context/keys.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getAdapterKind } from "#channel/adapter.js";
+import { withoutChannelAudience } from "#shared/channel-audience.js";
 
 type ReadableContext = Pick<AlsContext, "get">;
 
@@ -42,7 +43,10 @@ export function buildResolveContext(
     channel: {
       kind: channelAdapter !== undefined ? getAdapterKind(channelAdapter) : undefined,
       continuationToken,
-      metadata: channelInstrumentation?.metadata,
+      metadata:
+        channelInstrumentation === undefined
+          ? undefined
+          : withoutChannelAudience(channelInstrumentation.metadata),
     },
     messages,
   };

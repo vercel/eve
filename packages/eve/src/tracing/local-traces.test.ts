@@ -101,16 +101,16 @@ describe("resolveLocalTracesContent", () => {
 
 describe("localTracePolicy", () => {
   it.each([
-    ["public", true],
-    ["unknown", true],
-    ["private", false],
-  ] as const)("accepts the %s audience: %s", (audience, accepted) => {
+    ["public", "record"],
+    ["unknown", "record"],
+    ["private", "drop"],
+  ] as const)("maps the %s audience to %s", (audience, action) => {
     expect(
       localTracePolicy({
         audience,
         rootSessionId: "session-1",
         sessionId: "session-1",
       }),
-    ).toBe(accepted);
+    ).toMatchObject({ action });
   });
 });

@@ -50,14 +50,11 @@ export {
 
 import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
 import type { Channel, InferChannelMetadata } from "#public/definitions/channel.js";
-import type { ChannelAudienceMetadata } from "#shared/channel-audience.js";
 
 /**
  * Base channel metadata shape used by framework channel kinds.
  */
-export type InstrumentationChannelMetadata = Readonly<
-  Record<string, unknown> & ChannelAudienceMetadata
->;
+export type InstrumentationChannelMetadata = Readonly<Record<string, unknown>>;
 
 /**
  * Kind discriminator exposed to instrumentation and dynamic resolvers.
@@ -90,7 +87,7 @@ export type InstrumentationChannelForChannel<TChannel extends Channel<any, any, 
   InstrumentationChannelForKind<`channel:${string}`>,
   "metadata"
 > & {
-  readonly metadata: InferChannelMetadata<TChannel>;
+  readonly metadata: Omit<InferChannelMetadata<TChannel>, "audience">;
 };
 
 /**

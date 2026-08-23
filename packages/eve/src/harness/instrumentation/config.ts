@@ -55,7 +55,13 @@ export async function registerInstrumentationConfig(
       recordOutputs: config.recordOutputs === true,
       traceChannelRequests: config.traceChannelRequests === true,
     },
+    resolveControls: () => ({
+      action: "record",
+      recordInputs: config.recordInputs === true,
+      recordOutputs: config.recordOutputs === true,
+    }),
     runInContext: (_operation, execute) => execute(),
+    runWithTracingSuppressed: (execute) => execute(),
     shutdown: async () => undefined,
   });
   await config.setup?.(createInstrumentationSetupContext(input.agentName));

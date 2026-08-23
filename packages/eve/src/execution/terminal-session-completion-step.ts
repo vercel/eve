@@ -2,6 +2,7 @@ import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler } from "#channel/adapter.js";
 import { deserializeContext } from "#context/serialize.js";
 import { createLogger } from "#internal/logging.js";
+import { runWithSerializedInstrumentationControls } from "#execution/instrumentation-controls.js";
 import {
   createSessionCompletedEvent,
   encodeMessageStreamEvent,
@@ -26,7 +27,9 @@ export async function emitTerminalSessionCompletionStep(input: {
     const adapter = ctx.get(ChannelKey);
     if (adapter !== undefined) {
       const adapterCtx = buildAdapterContext(adapter, ctx);
-      await callAdapterEventHandler(adapter, event, adapterCtx);
+      await runWithSerializedInstrumentationControls(input.serializedContext, () =>
+        callAdapterEventHandler(adapter, event, adapterCtx),
+      );
     }
   } catch (notificationError) {
     log.error("adapter failed to handle terminal session.completed event", {

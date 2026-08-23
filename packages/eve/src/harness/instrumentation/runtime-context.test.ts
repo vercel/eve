@@ -2,7 +2,7 @@ import type { ModelMessage } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { AuthKey, ChannelInstrumentationKey } from "#context/keys.js";
+import { AuthKey } from "#context/keys.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
 import {
   buildTelemetryRuntimeContext,
@@ -160,33 +160,26 @@ describe("buildTelemetryRuntimeContext", () => {
   });
 
   it("reflects the active channel kind and exposes channel metadata to the resolver", () => {
-    const ctx = new ContextContainer();
-    ctx.set(ChannelInstrumentationKey, {
-      kind: "channel:support",
-      metadata: { triggeringUserId: "U999" },
-    });
-
-    const runtimeContext = contextStorage.run(ctx, () =>
-      build({
-        authored: {
-          events: {
-            "step.started": (
-              input: InstrumentationStepStartedEventInput,
-            ): InstrumentationStepStartedEventResult =>
-              input.channel.kind === "channel:support"
-                ? {
-                    runtimeContext: {
-                      "slack.user_id":
-                        typeof input.channel.metadata["triggeringUserId"] === "string"
-                          ? input.channel.metadata["triggeringUserId"]
-                          : "",
-                    },
-                  }
-                : { runtimeContext: {} },
-          },
+    const runtimeContext = build({
+      channel: { kind: "channel:support", metadata: { triggeringUserId: "U999" } },
+      authored: {
+        events: {
+          "step.started": (
+            input: InstrumentationStepStartedEventInput,
+          ): InstrumentationStepStartedEventResult =>
+            input.channel.kind === "channel:support"
+              ? {
+                  runtimeContext: {
+                    "slack.user_id":
+                      typeof input.channel.metadata["triggeringUserId"] === "string"
+                        ? input.channel.metadata["triggeringUserId"]
+                        : "",
+                  },
+                }
+              : { runtimeContext: {} },
         },
-      }),
-    );
+      },
+    });
 
     expect(runtimeContext).toMatchObject({
       "eve.channel.kind": "channel:support",
@@ -198,10 +191,6 @@ describe("buildTelemetryRuntimeContext", () => {
     const roles = ["admin"];
     const channelMetadata = { nested: { value: "original" }, triggeringUserId: "U999" };
     const ctx = new ContextContainer();
-    ctx.set(ChannelInstrumentationKey, {
-      kind: "channel:support",
-      metadata: channelMetadata,
-    });
     ctx.set(AuthKey, {
       attributes: { roles },
       authenticator: "jwt",
@@ -212,6 +201,7 @@ describe("buildTelemetryRuntimeContext", () => {
     let captured: InstrumentationStepStartedEventInput | undefined;
     contextStorage.run(ctx, () =>
       build({
+        channel: { kind: "channel:support", metadata: channelMetadata },
         authored: {
           events: {
             "step.started": (input: InstrumentationStepStartedEventInput) => {

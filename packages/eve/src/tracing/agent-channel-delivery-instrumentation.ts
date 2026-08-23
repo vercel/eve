@@ -17,14 +17,13 @@ import type {
 } from "#harness/instrumentation/lifecycle.js";
 import { sessionIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
 import type { JsonValue } from "#shared/json.js";
-import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
+import { vercelSessionIdAttribute } from "#tracing/agent-otel-attributes.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { AgentSessionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 
 interface ChannelDeliverySpanState {
-  readonly channelAudience: ChannelAudience;
   readonly inputAttribute?: string;
   readonly parent: SpanContext;
   readonly requestTraceContext?: SpanContext;
@@ -58,7 +57,6 @@ export function createAgentChannelDeliveryInstrumentation(input: {
   ): Promise<void> => {
     const session = await input.ensureSessionContext({
       agentName: event.agentName,
-      channelAudience: event.delivery.channelAudience,
       channelKind: event.delivery.channelKind,
       idempotencyKey: sessionIdempotencyKey(event.sessionId),
       parentTraceContext: event.parentTraceContext,
@@ -69,7 +67,6 @@ export function createAgentChannelDeliveryInstrumentation(input: {
     if (!isSampledTrace(session.context)) return;
     const inputAttribute = input.recordInputs ? contentAttribute(event.input, false) : undefined;
     const state: Record<string, JsonValue> = {
-      channelAudience: normalizeChannelAudience(event.delivery.channelAudience),
       parent: {
         isRemote: session.context.isRemote ?? false,
         spanId: session.context.spanId,
@@ -132,9 +129,7 @@ export function createAgentChannelDeliveryInstrumentation(input: {
             "agent.session.window": session?.window ?? state.window,
             "agent.turn.id": event.turnId,
             "agent.turn.sequence": event.sequence,
-            ...(emitVercelSessionId
-              ? { "vercel.session_id": event.rootSessionId }
-              : {}),
+            ...vercelSessionIdAttribute(emitVercelSessionId, event.rootSessionId),
           },
           kind: SpanKind.CONSUMER,
           links:
@@ -189,7 +184,6 @@ function readState(value: unknown): ChannelDeliverySpanState | undefined {
     ? value.requestTraceContext
     : undefined;
   return {
-    channelAudience: normalizeChannelAudience(value.channelAudience),
     inputAttribute: typeof value.inputAttribute === "string" ? value.inputAttribute : undefined,
     parent: value.parent,
     requestTraceContext,

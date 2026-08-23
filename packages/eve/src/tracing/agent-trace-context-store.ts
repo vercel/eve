@@ -9,7 +9,6 @@ import type {
   AgentTraceStateStore,
   AgentTurnTraceState,
 } from "#tracing/agent-trace-state.js";
-import { normalizeChannelAudience } from "#shared/channel-audience.js";
 
 interface AgentTraceContextState {
   readonly actions: Readonly<Record<string, AgentActionTraceState>>;
@@ -192,7 +191,6 @@ function deserializeState(data: unknown): AgentTraceContextState {
     if (!isRecord(value) || !isSpanContext(value.context)) return undefined;
     return {
       agentName: typeof value.agentName === "string" ? value.agentName : undefined,
-      channelAudience: normalizeChannelAudience(value.channelAudience),
       channelKind: typeof value.channelKind === "string" ? value.channelKind : undefined,
       context: value.context,
       rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
@@ -239,7 +237,6 @@ function deserializeAction(value: unknown): AgentActionTraceState | undefined {
   return {
     attemptIndex: value.attemptIndex,
     callId: value.callId,
-    channelAudience: normalizeChannelAudience(value.channelAudience),
     inputAttribute: typeof value.inputAttribute === "string" ? value.inputAttribute : undefined,
     kind: value.kind,
     name: value.name,

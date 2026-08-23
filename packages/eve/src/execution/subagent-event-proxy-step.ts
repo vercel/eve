@@ -5,7 +5,7 @@ import type {
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import type { ContextContainer } from "#context/container.js";
-import { ModeKey } from "#context/keys.js";
+import { InstrumentationControlsKey, ModeKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -25,6 +25,8 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { encodeMessageStreamEvent, stampMessageStreamEvent } from "#protocol/message.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
+import { runWithInstrumentationControls } from "#execution/instrumentation-controls.js";
+import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 
 type SubagentEventHookPayload =
   | SubagentAuthorizationEventHookPayload
@@ -125,7 +127,11 @@ export async function emitProxiedSubagentEvent(input: {
     // A re-emitted child event is a distinct event on the parent stream, so it
     // gets its own id rather than the child's.
     const emit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
-      const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
+      const transformed = await runWithInstrumentationControls(
+        ctx.get(InstrumentationControlsKey),
+        getInstrumentationRuntime(),
+        () => callAdapterEventHandler(adapter, event, adapterCtx),
+      );
       await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(transformed)));
     };
 

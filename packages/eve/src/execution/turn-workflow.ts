@@ -30,6 +30,7 @@ import { TurnExecutionCursor } from "#execution/turn-execution-cursor.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { turnStep } from "#execution/workflow-steps.js";
+import { preserveSerializedInstrumentationControls } from "#execution/serialized-instrumentation-controls.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { getRuntimeActionResultKey } from "#runtime/actions/keys.js";
 import { resolveRuntimeActionResultsForKeys } from "#runtime/actions/results.js";
@@ -145,8 +146,11 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         // normally after the workflow observes cancellation. Roll that result
         // back except for a session model selected by its one-time preamble.
         await cursor.adopt({
-          serializedContext: preserveSerializedSessionDynamicModelSelection(
-            beforeStep.serializedContext,
+          serializedContext: preserveSerializedInstrumentationControls(
+            preserveSerializedSessionDynamicModelSelection(
+              beforeStep.serializedContext,
+              result.serializedContext,
+            ),
             result.serializedContext,
           ),
           sessionState: cursor.sessionState,
