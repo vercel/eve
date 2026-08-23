@@ -29,6 +29,37 @@ steers its replacement turn.
 
 Set `turnPolicy: "queue"` when every response should finish before Photon starts the next message.
 
+## Durable state and retry deduplication
+
+The channel uses in-memory Chat SDK state by default. That default is convenient
+for local development, but its subscriptions and inbound-message deduplication do
+not survive a process restart.
+
+For production or multi-instance hosts, install a durable Chat SDK state adapter
+and pass it through `state`. `dedupeTtlMs` controls how long Chat SDK remembers an
+inbound Photon `message.id`; Photon keeps that identifier stable across retries.
+
+```sh
+pnpm add @chat-adapter/state-redis
+```
+
+```ts title="agent/channels/photon.ts"
+import { createRedisState } from "@chat-adapter/state-redis";
+import { connectPhotonCredentials } from "@vercel/connect/eve";
+import { photonIMessageChannel } from "eve/channels/photon";
+
+const PHOTON_DEDUPE_TTL_MS = 48 * 60 * 60 * 1_000;
+
+export default photonIMessageChannel({
+  credentials: connectPhotonCredentials("photon/my-agent"),
+  dedupeTtlMs: PHOTON_DEDUPE_TTL_MS,
+  state: createRedisState({ keyPrefix: "my-agent:photon" }),
+});
+```
+
+`createRedisState` reads `REDIS_URL` when no explicit URL is supplied. Use a
+dedicated key prefix when multiple agents share one Redis database.
+
 Customize inbound dispatch with `onMessage`. Return `null` to ignore a message, or return `title` alongside `auth` to set the title when the dispatch starts a run:
 
 ```ts

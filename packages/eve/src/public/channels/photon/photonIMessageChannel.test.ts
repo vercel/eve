@@ -1,13 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { directMessage, newMessage, send } = vi.hoisted(() => ({
-  directMessage: vi.fn(),
-  newMessage: vi.fn(),
-  send: vi.fn(),
-}));
-
-vi.mock("#public/channels/chat-sdk/index.js", () => ({
-  chatSdkChannel: () => ({
+const { chatSdkChannel, directMessage, newMessage, send } = vi.hoisted(() => ({
+  chatSdkChannel: vi.fn(() => ({
     bot: {
       getAdapter: () => ({ markRead: vi.fn() }),
       onDirectMessage: directMessage,
@@ -15,23 +9,63 @@ vi.mock("#public/channels/chat-sdk/index.js", () => ({
     },
     channel: { routes: [] },
     send,
-  }),
+  })),
+  directMessage: vi.fn(),
+  newMessage: vi.fn(),
+  send: vi.fn(),
+}));
+
+vi.mock("#public/channels/chat-sdk/index.js", () => ({
+  chatSdkChannel,
   messageToUserContent: (message: Message) => message.text,
 }));
 vi.mock("#compiled/@chat-adapter/state-memory/index.js", () => ({
-  createMemoryState: vi.fn(),
+  createMemoryState: vi.fn(() => ({ kind: "memory" })),
 }));
 vi.mock("#compiled/@photon-ai/chat-adapter-imessage/index.js", () => ({
   createiMessageAdapter: vi.fn(),
 }));
 vi.mock("#public/channels/auth.js", () => ({ vercelOidc: vi.fn() }));
 
-import { photonIMessageChannel } from "#public/channels/photon/photonIMessageChannel.js";
+import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js";
 import { Message } from "#compiled/chat/index.js";
+import { photonIMessageChannel } from "#public/channels/photon/photonIMessageChannel.js";
 
 describe("photonIMessageChannel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("uses memory state by default", () => {
+    photonIMessageChannel({
+      credentials: async () => ({ projectId: "project-id", projectSecret: "project-secret" }),
+    });
+
+    expect(createMemoryState).toHaveBeenCalledOnce();
+    expect(chatSdkChannel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: vi.mocked(createMemoryState).mock.results[0]?.value,
+      }),
+    );
+  });
+
+  it("forwards injected state and deduplication TTL", () => {
+    const state = createMemoryState();
+    vi.mocked(createMemoryState).mockClear();
+
+    photonIMessageChannel({
+      credentials: async () => ({ projectId: "project-id", projectSecret: "project-secret" }),
+      dedupeTtlMs: 48 * 60 * 60 * 1_000,
+      state,
+    });
+
+    expect(createMemoryState).not.toHaveBeenCalled();
+    expect(chatSdkChannel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dedupeTtlMs: 48 * 60 * 60 * 1_000,
+        state,
+      }),
+    );
   });
 
   it("inherits the shared steering default for a direct message", async () => {

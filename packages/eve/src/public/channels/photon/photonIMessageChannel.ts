@@ -6,7 +6,7 @@ import {
   type ChatSdkChannelBridge,
   type ChatSdkChannelEvents,
 } from "#public/channels/chat-sdk/index.js";
-import type { Message, Thread } from "#compiled/chat/index.js";
+import type { Message, StateAdapter, Thread } from "#compiled/chat/index.js";
 import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js";
 import {
   createiMessageAdapter,
@@ -40,6 +40,8 @@ export type PhotonInboundResultOrPromise = PhotonInboundResult | Promise<PhotonI
 export interface PhotonIMessageChannelConfig {
   /** Lazy Photon project credentials, such as `connectPhotonCredentials(...)`. */
   readonly credentials: PhotonIMessageChannelCredentials;
+  /** TTL for Chat SDK inbound-message deduplication entries, in milliseconds. */
+  readonly dedupeTtlMs?: number;
   /** Per-event overrides for the underlying Chat SDK channel. */
   readonly events?: ChatSdkChannelEvents<{ imessage: iMessageAdapter }>;
   /** Inbound message policy. Defaults to dispatching every message with no user auth. */
@@ -49,6 +51,8 @@ export interface PhotonIMessageChannelConfig {
   ) => PhotonInboundResultOrPromise;
   /** Override the default webhook route (`/eve/v1/photon`). */
   readonly route?: string;
+  /** Chat SDK state adapter. Defaults to in-memory state for local development. */
+  readonly state?: StateAdapter;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
   /** Display name used by the Chat SDK runtime. Defaults to `"eve"`. */
@@ -88,9 +92,10 @@ export function photonIMessageChannel(config: PhotonIMessageChannelConfig): Phot
   const bridge = chatSdkChannel({
     adapters: { imessage },
     concurrency: "concurrent",
+    dedupeTtlMs: config.dedupeTtlMs,
     events: config.events,
     routes: { imessage: config.route ?? "/eve/v1/photon" },
-    state: createMemoryState(),
+    state: config.state ?? createMemoryState(),
     streaming: false,
     turnPolicy: config.turnPolicy,
     userName: config.userName ?? "eve",
