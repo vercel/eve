@@ -2,7 +2,12 @@ import { defaultBackend, defineSandbox } from "eve/sandbox";
 import { vercel } from "eve/sandbox/vercel";
 import { getVercelOidcToken } from "@vercel/oidc";
 
-import { CREDENTIAL_PROBE_PATH, CREDENTIAL_PROBE_TOKEN } from "../credential-probe.js";
+import {
+  CREDENTIAL_PROBE_PATH,
+  CREDENTIAL_PROBE_TOKEN,
+  ON_REQUEST_PROBE_PATH,
+  ON_REQUEST_PROBE_TOKEN,
+} from "../credential-probe.js";
 
 /**
  * Sandbox lifecycle fixture exercising the surfaces an agent author relies
@@ -136,12 +141,20 @@ const FANOUT_SERVER_SCRIPT = [
 ].join("\n");
 
 const authorSnapshotId = process.env.EVE_TEST_AUTHOR_SNAPSHOT_ID;
-const credentialProbeHost = process.env.VERCEL_URL;
+// `.env.local` pulled from the shared project can carry an empty VERCEL_URL
+// in local runs; treat it as absent.
+const credentialProbeHost =
+  process.env.VERCEL_URL === undefined || process.env.VERCEL_URL.length === 0
+    ? undefined
+    : process.env.VERCEL_URL;
 const backend =
   authorSnapshotId !== undefined
     ? vercel({ source: { snapshotId: authorSnapshotId, type: "snapshot" } })
     : process.env.VERCEL === "1" && credentialProbeHost !== undefined
       ? vercel({
+          // The egress proxy must live on this exact deployment: preview
+          // deploys must not fall back to the project's production URL.
+          authProxyBaseUrl: `https://${credentialProbeHost}`,
           networkPolicy: {
             allow: {
               [credentialProbeHost]: [
@@ -154,6 +167,21 @@ const backend =
                     {
                       headers: {
                         authorization: `Bearer ${CREDENTIAL_PROBE_TOKEN}`,
+                        "x-vercel-trusted-oidc-idp-token": token,
+                      },
+                    },
+                  ],
+                },
+                {
+                  auth: {
+                    getToken: async () => ({ token: await getVercelOidcToken() }),
+                  },
+                  credentialResolution: "on-request",
+                  match: { path: { exact: ON_REQUEST_PROBE_PATH } },
+                  transform: ({ token }) => [
+                    {
+                      headers: {
+                        authorization: `Bearer ${ON_REQUEST_PROBE_TOKEN}`,
                         "x-vercel-trusted-oidc-idp-token": token,
                       },
                     },

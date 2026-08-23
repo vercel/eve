@@ -76,12 +76,16 @@ pins credentials open, inverting the failure mode to the dangerous side.
 
 ## Remaining work before merge
 
-- **Proxy failures are application responses.** Credential lookup, OIDC acquisition, and sandbox
-  lookup can return 403/500 instead of 428; the body must stay precise enough for the model to
-  recover. The public `authProxyBaseUrl` contract (deployment rollovers, sandbox-name reuse) needs
-  explicit guarantees.
-- **End-to-end coverage.** An eval that crosses a real interactive-authorization park/resume, plus
-  real-sandbox coverage of proxy authentication, policy updates, and demand settlement.
+- **Interactive park-crossing e2e coverage.** The `on-request-egress` eval in `agent-tools-sandbox`
+  covers the non-interactive loop end to end on a real deployment (forwardURL → proxy → attested
+  demand → settle → authorized retry). An eval that crosses a real interactive-authorization
+  park/resume is still missing.
+
+Proxy failure responses are part of the contract: every 403/500 body states what happened and
+what the caller can do, failures leave the route closed, and `authProxyBaseUrl` documents that
+the origin is baked into firewall rules per attach — mid-step rollovers fail closed until the
+next attach rebuilds the policy. Sandbox-name reuse is covered by the proxy's session-identity
+check (OIDC sandbox session id must match the named sandbox's current session).
 
 ## Rejected alternatives
 

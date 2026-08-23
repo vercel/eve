@@ -3,6 +3,7 @@ import type { MockModelRequest, MockModelResponse } from "eve/evals";
 const SUBAGENT_DIRECTIVE = /ask the `([^`]+)` subagent with message:\s*([\s\S]+)/iu;
 const BASH_DIRECTIVE = /run the bash command `([^`]+)`/iu;
 const SKILL_DIRECTIVE = /load the `([^`]+)` skill/iu;
+const USE_TOOL_DIRECTIVE = /use the `([^`]+)` tool/iu;
 
 /**
  * Scripted mock for the world suites: sandbox evals phrase every prompt as an
@@ -42,6 +43,14 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
     // Loaded skills instruct an exact reply whose text is the skill body's
     // final line (see the redeploy eval's deploy-note skill).
     return lastNonEmptyLine(toolOutput(request, "load_skill"));
+  }
+
+  const useTool = USE_TOOL_DIRECTIVE.exec(message);
+  if (useTool?.[1] !== undefined) {
+    if (!turnHasToolResult) {
+      return { toolCalls: [{ input: {}, name: useTool[1] }] };
+    }
+    return toolOutput(request, useTool[1]);
   }
 
   return `Mock reply: ${message}`;

@@ -108,7 +108,14 @@ type VercelSandboxCreateOptionsWithAuth<T> = T extends unknown
       /**
        * Public HTTPS origin used by on-request rules and their interactive
        * authorization callbacks. Required locally; hosted Vercel deployments
-       * derive their public origin from the environment.
+       * derive their public origin from the environment (production URL
+       * first, then the deployment URL).
+       *
+       * The origin must serve this eve app and stay reachable while a
+       * sandbox is attached: it is baked into the sandbox's firewall rules
+       * for the duration of a step. If the origin rotates mid-step (e.g. a
+       * deployment rollover), unresolved routes fail closed until the next
+       * step attaches and rebuilds the policy.
        */
       readonly authProxyBaseUrl?: string;
       /** Static policy whose individual rules may declare `auth`. */

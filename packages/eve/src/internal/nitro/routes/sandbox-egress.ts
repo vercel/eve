@@ -29,7 +29,10 @@ export default async function sandboxEgressRoute(event: {
         const createOptions = {};
         const credentials = await getVercelSandboxCredentials(createOptions);
         if (credentials.projectId !== meta.projectId || credentials.teamId !== meta.teamId) {
-          return new Response("Forbidden", { status: 403 });
+          return new Response(
+            "eve: this egress route only serves sandboxes of the project that deployed it.",
+            { status: 403 },
+          );
         }
 
         stage = "sandbox_lookup";
@@ -40,7 +43,10 @@ export default async function sandboxEgressRoute(event: {
           resume: false,
         } as never);
         if (sandbox.currentSession().sessionId !== meta.sandboxId) {
-          return new Response("Forbidden", { status: 403 });
+          return new Response(
+            "eve: this egress route only serves requests from the sandbox it was issued for.",
+            { status: 403 },
+          );
         }
 
         stage = "marker_write";
@@ -66,12 +72,22 @@ export default async function sandboxEgressRoute(event: {
           stage,
         });
         return Response.json(
-          { error: "Sandbox egress proxy failed.", errorId, stage },
+          {
+            error:
+              "eve: the egress proxy could not record this authorization request; " +
+              "the route stays closed. Re-run the command to request authorization again.",
+            errorId,
+            stage,
+          },
           { status: 500 },
         );
       }
     },
-    () => new Response("Forbidden", { status: 403 }),
+    () =>
+      new Response(
+        "eve: this endpoint only serves requests forwarded by a Vercel Sandbox firewall rule.",
+        { status: 403 },
+      ),
   );
   return await handleProxyRequest(event.req);
 }

@@ -123,7 +123,7 @@ describe("sandbox egress proxy route", () => {
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({
-      error: "Sandbox egress proxy failed.",
+      error: expect.stringContaining("the route stays closed"),
       errorId: "error-id",
       stage: "sandbox_lookup",
     });
