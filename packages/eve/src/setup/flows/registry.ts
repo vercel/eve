@@ -12,7 +12,7 @@ import type { RegistrySetupFact } from "#setup/registry-setup-protocol.js";
 import { WizardCancelledError } from "#setup/step.js";
 import { withSpinner } from "#setup/with-spinner.js";
 
-import { createRegistrySession } from "./registry-session.js";
+import { createRegistrySession, type RegistrySession } from "./registry-session.js";
 
 const ADDRESS_PREFIX = "address:";
 const BACK = "action:back";
@@ -268,11 +268,46 @@ async function resolveAddressItem(
   return { item, manifest: record };
 }
 
-/** Runs the categorized interactive registry catalog used by the dev TUI's `/add`. */
+/**
+ * Confirms, installs, and settles one resolved item. `undefined` means the flow
+ * keeps browsing — the user backed out of the item, or asked to add more.
+ */
+async function offerItem(
+  input: { appRoot: string; prompter: Prompter; signal?: AbortSignal },
+  deps: RegistryFlowDeps,
+  session: RegistrySession,
+  item: RegistryCatalogItem,
+  manifest?: Record<string, unknown>,
+): Promise<RegistryFlowResult | undefined> {
+  const inspected = await inspectItem(
+    input.prompter,
+    deps,
+    input.appRoot,
+    item,
+    manifest,
+    input.signal,
+  );
+  if (inspected.kind !== "added") return undefined;
+  session.add(item.address, itemLabel(item), inspected.output, inspected.setup);
+  const next = await session.continueAfterInstall({
+    appRoot: input.appRoot,
+    prompter: input.prompter,
+    signal: input.signal,
+  });
+  return next === "add-more" ? undefined : next;
+}
+
+/**
+ * Runs the categorized interactive registry catalog used by the dev TUI's
+ * `/add`. `initialAddress` — `/add channel/slack` — skips the category and
+ * search screens and opens that item's confirmation directly; backing out of it
+ * lands on the same category hub the browser starts from.
+ */
 export async function runRegistryFlow(input: {
   appRoot: string;
   prompter: Prompter;
   signal?: AbortSignal;
+  initialAddress?: string;
   deps?: Partial<RegistryFlowDeps>;
 }): Promise<RegistryFlowResult> {
   let loaded: typeof import("#cli/commands/registry.js") | undefined;
@@ -292,10 +327,20 @@ export async function runRegistryFlow(input: {
   };
   let notices: SelectNotice[] = [];
   const session = createRegistrySession(deps);
+  const initialAddress = input.initialAddress?.trim();
+  let pendingAddress = initialAddress === "" ? undefined : initialAddress;
 
   try {
     while (true) {
       input.signal?.throwIfAborted();
+      if (pendingAddress !== undefined) {
+        const address = pendingAddress;
+        pendingAddress = undefined;
+        const resolved = await resolveAddressItem(input.prompter, deps, input.appRoot, address);
+        const settled = await offerItem(input, deps, session, resolved.item, resolved.manifest);
+        if (settled !== undefined) return settled;
+        continue;
+      }
       const catalog = await withSpinner(input.prompter, "Loading registry…", () =>
         deps.browseRegistryCatalog(input.appRoot),
       );
@@ -341,29 +386,14 @@ export async function runRegistryFlow(input: {
       if (resolved.item === undefined) {
         throw new Error("The selected registry item is no longer available.");
       }
-      const inspected = await inspectItem(
-        input.prompter,
+      const settled = await offerItem(
+        input,
         deps,
-        input.appRoot,
+        session,
         resolved.item,
         "manifest" in resolved ? resolved.manifest : undefined,
-        input.signal,
       );
-      if (inspected.kind !== "added") continue;
-
-      session.add(
-        resolved.item.address,
-        itemLabel(resolved.item),
-        inspected.output,
-        inspected.setup,
-      );
-      const next = await session.continueAfterInstall({
-        appRoot: input.appRoot,
-        prompter: input.prompter,
-        signal: input.signal,
-      });
-      if (next === "add-more") continue;
-      return next;
+      if (settled !== undefined) return settled;
     }
   } catch (error) {
     if (error instanceof WizardCancelledError) return { kind: "cancelled" };
