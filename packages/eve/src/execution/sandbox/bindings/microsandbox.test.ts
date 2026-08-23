@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createMicrosandboxSandboxBackend } from "#execution/sandbox/bindings/microsandbox.js";
 import {
+  applyMicrosandboxNetwork,
   createMicrosandboxNetworkPlan,
   createTransformBrokerEnvironment,
   serializeMicrosandboxNetworkPolicyJson,
@@ -225,3 +226,81 @@ describe.skipIf(onWindows)("createMicrosandboxNetworkPlan", () => {
     });
   });
 });
+
+describe("applyMicrosandboxNetwork", () => {
+  it("enables verified TLS interception for brokered header transforms", () => {
+    const tls = createFluentMock(["interceptedPorts", "verifyUpstream"]);
+    const secret = createFluentMock([
+      "allowAnyHostDangerous",
+      "allowHost",
+      "allowHostPattern",
+      "env",
+      "injectBasicAuth",
+      "injectBody",
+      "injectHeaders",
+      "injectQuery",
+      "placeholder",
+      "requireTlsIdentity",
+      "value",
+    ]);
+    const network = {
+      enabled: vi.fn(() => network),
+      policyJson: vi.fn(() => network),
+      secret: vi.fn((configure: (builder: typeof secret) => unknown) => {
+        configure(secret);
+        return network;
+      }),
+      tls: vi.fn((configure: (builder: typeof tls) => unknown) => {
+        configure(tls);
+        return network;
+      }),
+      trustHostCAs: vi.fn(() => network),
+    };
+    const sandbox = {
+      disableNetwork: vi.fn(),
+      network: vi.fn((configure: (builder: typeof network) => unknown) => {
+        configure(network);
+        return sandbox;
+      }),
+    };
+
+    applyMicrosandboxNetwork(sandbox as never, {
+      allow: {
+        "api.example.com": [{ transform: [{ headers: { authorization: "Bearer real-secret" } }] }],
+      },
+    });
+
+    expect(network.tls).toHaveBeenCalledOnce();
+    expect(tls.interceptedPorts).toHaveBeenCalledWith([443]);
+    expect(tls.verifyUpstream).toHaveBeenCalledWith(true);
+  });
+
+  it("does not enable TLS interception without brokered header transforms", () => {
+    const network = {
+      enabled: vi.fn(() => network),
+      policyJson: vi.fn(() => network),
+      secret: vi.fn(),
+      tls: vi.fn(),
+      trustHostCAs: vi.fn(() => network),
+    };
+    const sandbox = {
+      disableNetwork: vi.fn(),
+      network: vi.fn((configure: (builder: typeof network) => unknown) => {
+        configure(network);
+        return sandbox;
+      }),
+    };
+
+    applyMicrosandboxNetwork(sandbox as never, { allow: ["api.example.com"] });
+
+    expect(network.tls).not.toHaveBeenCalled();
+  });
+});
+
+function createFluentMock<const Method extends string>(methods: readonly Method[]) {
+  const builder = {} as Record<Method, ReturnType<typeof vi.fn>>;
+  for (const method of methods) {
+    builder[method] = vi.fn(() => builder);
+  }
+  return builder;
+}
