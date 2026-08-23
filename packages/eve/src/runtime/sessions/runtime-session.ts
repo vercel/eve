@@ -2,6 +2,14 @@ import { AsyncLocalStorage } from "node:async_hooks";
 
 import type { BundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import type { ConnectionRegistry } from "#runtime/connections/types.js";
+import type { ResolvedConnectionDefinition } from "#runtime/types.js";
+
+export interface RuntimeConnectionRegistryCacheEntry {
+  readonly connections: readonly ResolvedConnectionDefinition[];
+  readonly registry: ConnectionRegistry;
+  readonly scopeKey: string;
+}
 
 /**
  * Process-scoped container for mutable runtime state owned by one eve
@@ -33,6 +41,8 @@ export interface RuntimeSession {
    * changes.
    */
   readonly bundleCacheKeyBySourceKey: Map<string, string>;
+  /** Live connection registries keyed by durable session id. */
+  connectionRegistryCache?: Map<string, readonly RuntimeConnectionRegistryCacheEntry[]>;
 }
 
 /**
@@ -43,6 +53,7 @@ export function createRuntimeSession(id: string = "test-session"): RuntimeSessio
     bundleCache: new Map(),
     bundleCacheKeyBySourceKey: new Map(),
     compiledArtifacts: null,
+    connectionRegistryCache: new Map(),
     id,
   };
 }

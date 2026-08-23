@@ -8,6 +8,7 @@ import {
   stampMessageStreamEvent,
 } from "#protocol/message.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { disposeSessionConnectionRegistry } from "#runtime/connections/registry-cache.js";
 
 const log = createLogger("execution.workflow-entry");
 
@@ -48,4 +49,6 @@ export async function emitTerminalSessionCompletionStep(input: {
       sessionId,
     });
   }
+
+  await disposeSessionConnectionRegistry(sessionId);
 }

@@ -36,6 +36,7 @@ interface McpToolCache {
 export class McpConnectionClient implements ConnectionClient {
   #clientPromise: Promise<MCPClient> | undefined;
   #client: MCPClient | undefined;
+  #httpFetch = createMcpHttpFetch();
   #toolsPromise: Promise<McpToolCache> | undefined;
   #tools: McpToolCache | undefined;
   #connection: ResolvedConnectionDefinition;
@@ -76,7 +77,7 @@ export class McpConnectionClient implements ConnectionClient {
 
     try {
       return await createMCPClient({
-        transport: { type: "http", url, headers },
+        transport: { type: "http", url, headers, fetch: this.#httpFetch },
       });
     } catch (error) {
       if (!isMcpHttpFallbackRetryableError(error)) {
@@ -113,8 +114,9 @@ export class McpConnectionClient implements ConnectionClient {
   }
 
   /**
-   * Executes a named tool through the AI SDK's tool executor, which
-   * handles the JSON-RPC `tools/call` internally.
+   * Executes a named tool directly through the MCP client. Discovery already
+   * supplied the schema used to generate the durable callback, so execution
+   * does not fetch the server's complete tool list again.
    *
    * A `401`/`invalid_token` from the remote server is translated into
    * {@link ConnectionAuthorizationRequiredError} via {@link #rethrowClassified}
@@ -127,10 +129,9 @@ export class McpConnectionClient implements ConnectionClient {
     options?: ConnectionToolExecuteOptions,
   ): Promise<unknown> {
     try {
-      const { tools } = await this.#ensureTools();
+      options?.abortSignal?.throwIfAborted();
 
-      const sdkTool = tools[toolName];
-      if (sdkTool?.execute === undefined) {
+      if (!passesToolFilter(toolName, this.#connection.tools)) {
         throw new Error(
           `Tool "${toolName}" not found in connection "${this.#connection.connectionName}".`,
         );
@@ -142,7 +143,12 @@ export class McpConnectionClient implements ConnectionClient {
         toolName,
       });
 
-      return await sdkTool.execute(resolvedArgs, { abortSignal: options?.abortSignal } as never);
+      const client = await this.connect();
+      return await client.callTool({
+        arguments: resolvedArgs,
+        name: toolName,
+        options: { signal: options?.abortSignal },
+      });
     } catch (error) {
       return await this.#rethrowClassified(error);
     }
@@ -260,6 +266,28 @@ export class McpConnectionClient implements ConnectionClient {
       scope: this.#connection.connectionName,
     });
   }
+}
+
+/**
+ * Remembers when a Streamable HTTP endpoint rejects the optional standalone
+ * GET stream. The upstream transport asks again before every request; returning
+ * the same 405 locally preserves its behavior without another network hop.
+ */
+function createMcpHttpFetch(): typeof globalThis.fetch {
+  let standaloneGetUnsupported = false;
+
+  return async (input, init) => {
+    const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+    if (method.toUpperCase() === "GET" && standaloneGetUnsupported) {
+      return new Response(null, { status: 405 });
+    }
+
+    const response = await globalThis.fetch(input, init);
+    if (method.toUpperCase() === "GET" && response.status === 405) {
+      standaloneGetUnsupported = true;
+    }
+    return response;
+  };
 }
 
 /**

@@ -74,9 +74,11 @@ describe("McpConnectionClient", () => {
   });
 
   it("hides provided arguments from schemas and adds resolved values at execution", async () => {
+    const callTool = vi.fn().mockResolvedValue({ ok: true });
     const execute = vi.fn().mockResolvedValue({ ok: true });
     const toolsFromDefinitions = vi.fn().mockReturnValue({ lookup: { execute } });
     const client = {
+      callTool,
       close: vi.fn(),
       listTools: vi.fn().mockResolvedValue({
         tools: [
@@ -136,16 +138,68 @@ describe("McpConnectionClient", () => {
       ],
     });
     expect(resolver).toHaveBeenCalledWith(expect.objectContaining({ toolName: "lookup" }));
-    expect(execute).toHaveBeenCalledWith(
-      {
+    expect(callTool).toHaveBeenCalledWith({
+      arguments: {
         context: {
           sessionId: "session-1",
           toolName: "lookup",
         },
         query: "boots",
       },
-      expect.any(Object),
+      name: "lookup",
+      options: { signal: undefined },
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("calls a named tool without listing the server's tools first", async () => {
+    const callTool = vi.fn().mockResolvedValue({
+      content: [{ text: "boots", type: "text" }],
+    });
+    const listTools = vi.fn().mockResolvedValue({
+      tools: [
+        {
+          description: "Look up a product",
+          inputSchema: { properties: { query: { type: "string" } }, type: "object" },
+          name: "lookup",
+        },
+      ],
+    });
+    const execute = vi.fn((args, options) =>
+      callTool({ arguments: args, name: "lookup", options: { signal: options.abortSignal } }),
     );
+    const client = {
+      callTool,
+      close: vi.fn(),
+      listTools,
+      toolsFromDefinitions: vi.fn().mockReturnValue({ lookup: { execute } }),
+    };
+    createMCPClient.mockResolvedValue(client);
+
+    const mcpClient = new McpConnectionClient(makeConnection({ authorization: undefined }));
+
+    await expect(mcpClient.executeTool("lookup", { query: "boots" })).resolves.toEqual({
+      content: [{ text: "boots", type: "text" }],
+    });
+
+    expect(callTool).toHaveBeenCalledWith({
+      arguments: { query: "boots" },
+      name: "lookup",
+      options: { signal: undefined },
+    });
+    expect(listTools).not.toHaveBeenCalled();
+  });
+
+  it("rejects an aborted named call before connecting", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const mcpClient = new McpConnectionClient(makeConnection({ authorization: undefined }));
+
+    await expect(
+      mcpClient.executeTool("lookup", { query: "boots" }, { abortSignal: controller.signal }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(createMCPClient).not.toHaveBeenCalled();
   });
 
   it("creates an HTTP MCP client with resolved connection headers", async () => {
@@ -166,6 +220,7 @@ describe("McpConnectionClient", () => {
     expect(createMCPClient).toHaveBeenCalledTimes(1);
     expect(createMCPClient).toHaveBeenCalledWith({
       transport: {
+        fetch: expect.any(Function),
         headers: {
           Authorization: "Bearer test-token",
           "X-Api-Key": "key123",
@@ -192,6 +247,7 @@ describe("McpConnectionClient", () => {
     await expect(mcpClient.connect()).resolves.toBe(client);
     expect(createMCPClient).toHaveBeenNthCalledWith(1, {
       transport: {
+        fetch: expect.any(Function),
         headers: { Authorization: "Bearer test-token" },
         type: "http",
         url: "https://mcp.example.com",
@@ -288,6 +344,7 @@ describe("McpConnectionClient", () => {
     expect(createMCPClient).toHaveBeenCalledTimes(1);
     expect(createMCPClient).toHaveBeenCalledWith({
       transport: {
+        fetch: expect.any(Function),
         headers: { Authorization: "Bearer test-token" },
         type: "http",
         url: "https://mcp.example.com",
@@ -378,13 +435,10 @@ describe("McpConnectionClient authorization recovery", () => {
 
   it("maps a 401 from executeTool into ConnectionAuthorizationRequiredError", async () => {
     const client = {
+      callTool: vi.fn().mockRejectedValue(unauthorized()),
       close: vi.fn(),
-      listTools: vi.fn().mockResolvedValue({
-        tools: [{ name: "do_thing", description: "", inputSchema: {} }],
-      }),
-      toolsFromDefinitions: vi.fn().mockReturnValue({
-        do_thing: { execute: vi.fn().mockRejectedValue(unauthorized()) },
-      }),
+      listTools: vi.fn(),
+      toolsFromDefinitions: vi.fn(),
     };
     createMCPClient.mockResolvedValue(client);
 
