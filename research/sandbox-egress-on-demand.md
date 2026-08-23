@@ -78,8 +78,12 @@ pins credentials open, inverting the failure mode to the dangerous side.
 
 - **Interactive park-crossing e2e coverage.** The `on-request-egress` eval in `agent-tools-sandbox`
   covers the non-interactive loop end to end on a real deployment (forwardURL → proxy → attested
-  demand → settle → authorized retry). An eval that crosses a real interactive-authorization
-  park/resume is still missing.
+  demand → settle → authorized retry). The interactive park/resume crossing has been validated
+  manually (the `egress-demo` fixture: eager interactive rule → park → local consent callback →
+  resume → authorized request, ~5s click-to-resume against a real Vercel Sandbox), but automating
+  it as an eval is blocked: interactive authorization is user-scoped in v1 and eval sessions carry
+  the synthetic `local-dev` principal, so the flow fails terminally before parking. The eval
+  harness needs a way to run a user-authenticated session.
 
 Proxy failure responses are part of the contract: every 403/500 body states what happened and
 what the caller can do, failures leave the route closed, and `authProxyBaseUrl` documents that

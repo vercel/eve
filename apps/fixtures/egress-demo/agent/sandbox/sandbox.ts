@@ -21,6 +21,13 @@ import { acmeOAuth } from "../lib/acme-oauth.js";
 export const DEMO_PUBLIC_URL = readPublicUrl();
 export const NO_TUNNEL_TARGET_URL = "https://api.github.com/zen";
 
+console.log(
+  DEMO_PUBLIC_URL === undefined
+    ? `egress-demo: no-tunnel mode — interactive consent guards ${NO_TUNNEL_TARGET_URL}`
+    : `egress-demo: on-request mode — egress proxy at ${DEMO_PUBLIC_URL.origin} ` +
+        "(unset EVE_DEMO_PUBLIC_URL if this origin is stale; challenge URLs derive from it)",
+);
+
 const backend =
   DEMO_PUBLIC_URL === undefined
     ? vercel({
