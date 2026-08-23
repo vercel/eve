@@ -206,28 +206,30 @@ describe("McpConnectionClient", () => {
     });
   });
 
-  it("falls back to SSE when HTTP transport reports bad request", async () => {
-    const client = {
-      close: vi.fn(),
-      listTools: vi.fn(),
-      toolsFromDefinitions: vi.fn(),
-    };
-    createMCPClient.mockRejectedValueOnce(
-      new Error("MCP HTTP Transport Error: POSTing to endpoint (HTTP 400): bad request"),
+  it("preserves the HTTP failure when the SSE fallback also fails", async () => {
+    const httpError = new Error(
+      "MCP HTTP Transport Error: POSTing to endpoint (HTTP 400): unsupported protocol version",
     );
-    createMCPClient.mockResolvedValueOnce(client);
+    const sseError = new Error("MCP SSE Transport Error: 405 Method Not Allowed");
+    createMCPClient.mockRejectedValueOnce(httpError).mockRejectedValueOnce(sseError);
 
     const mcpClient = new McpConnectionClient(makeConnection());
 
-    await expect(mcpClient.connect()).resolves.toBe(client);
+    await expect(mcpClient.connect()).rejects.toBe(httpError);
     expect(createMCPClient).toHaveBeenCalledTimes(2);
-    expect(createMCPClient).toHaveBeenNthCalledWith(2, {
-      transport: {
-        headers: { Authorization: "Bearer test-token" },
-        type: "sse",
-        url: "https://mcp.example.com",
-      },
-    });
+  });
+
+  it("propagates a non-transport SSE fallback failure", async () => {
+    const httpError = new Error(
+      "MCP HTTP Transport Error: POSTing to endpoint (HTTP 400): bad request",
+    );
+    const sseError = new Error("MCP SSE Transport Error: Connection closed unexpectedly");
+    createMCPClient.mockRejectedValueOnce(httpError).mockRejectedValueOnce(sseError);
+
+    const mcpClient = new McpConnectionClient(makeConnection());
+
+    await expect(mcpClient.connect()).rejects.toBe(sseError);
+    expect(createMCPClient).toHaveBeenCalledTimes(2);
   });
 
   it("falls back to SSE when HTTP transport reports method not allowed", async () => {
