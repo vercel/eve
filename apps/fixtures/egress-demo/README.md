@@ -10,7 +10,7 @@ Swap `acmeOAuth` for `connect("...")` from `@vercel/connect/eve` to make the
 consent a real Vercel Connect-brokered OAuth grant — it is the same `auth:`
 slot.
 
-## Mode 1 — no tunnel, fully local CLI (start here)
+## Mode 1 — fully local CLI (start here)
 
 The protected route is a real public API (`api.github.com`), resolved
 eagerly: opening the sandbox parks the agent on the consent, and the
@@ -38,13 +38,13 @@ In the TUI:
 4. Follow-up: `curl https://example.com` — blocked; egress is
    deny-by-default.
 
-## Mode 2 — on-request 428 flow (needs a public origin)
+## Mode 2 — on-request 428 flow (runs on a Vercel deployment)
 
 The full fail-fast loop — first request answered 428 by the egress proxy,
 demand settled after the command exits — requires the Vercel firewall to
-reach this app's own public HTTPS origin. **Tunnels do not work**: the
-proxy verifies the firewall's OIDC token with the request URL as audience,
-and a tunneled server sees a localhost origin. Deploy instead:
+reach this app's own public HTTPS origin: the proxy verifies the
+firewall's OIDC token with the request URL as its audience, so the proxy
+must serve on the exact origin it is addressed by. Deploy the app:
 
 ```sh
 vercel deploy        # this app; note the deployment URL

@@ -1,6 +1,6 @@
 import { defineInstructions } from "eve/instructions";
 
-import { DEMO_PUBLIC_URL, NO_TUNNEL_TARGET_URL } from "./sandbox/sandbox.js";
+import { DEMO_PUBLIC_URL, LOCAL_TARGET_URL } from "./sandbox/sandbox.js";
 
 const content =
   DEMO_PUBLIC_URL === undefined
@@ -8,7 +8,7 @@ const content =
         "You are a demo agent running commands in a locked-down Vercel Sandbox",
         "with deny-by-default network egress.",
         "When asked for GitHub zen, fetch it with the bash tool:",
-        `  curl -sS -w '\\nHTTP %{http_code}' ${NO_TUNNEL_TARGET_URL}`,
+        `  curl -sS -w '\\nHTTP %{http_code}' ${LOCAL_TARGET_URL}`,
         "The first attempt may pause for the user to authorize sandbox egress;",
         "once authorization completes, run the exact same curl again.",
         "Any other domain is blocked by the sandbox firewall; if asked to fetch",

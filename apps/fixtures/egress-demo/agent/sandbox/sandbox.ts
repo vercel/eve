@@ -7,23 +7,22 @@ import { acmeOAuth } from "../lib/acme-oauth.js";
  * Two modes, both real Vercel Sandboxes with deny-by-default egress and an
  * interactive consent that parks the agent:
  *
- * - **No tunnel (default, run from your laptop):** the protected route is a
+ * - **Local mode (default, run from your laptop):** the protected route is a
  *   real public API (`api.github.com`) with `credentialResolution: "eager"`.
  *   Opening the sandbox parks the agent on the consent; the callback is your
  *   local dev server. No inbound traffic needed.
  *
- * - **On-request 428 mode (requires a public origin):** set
- *   `EVE_DEMO_PUBLIC_URL` to this app's own public HTTPS origin (a Vercel
- *   deployment of this app — tunnels cannot pass the egress proxy's OIDC
- *   audience check). The first request fails fast with the proxy's 428 and
- *   demand resolves after the command exits.
+ * - **On-request 428 mode (runs on a Vercel deployment of this app):** the
+ *   egress proxy must live on this app's own public HTTPS origin, verified
+ *   by the proxy's OIDC audience check. The first request fails fast with
+ *   the proxy's 428 and demand resolves after the command exits.
  */
 export const DEMO_PUBLIC_URL = readPublicUrl();
-export const NO_TUNNEL_TARGET_URL = "https://api.github.com/zen";
+export const LOCAL_TARGET_URL = "https://api.github.com/zen";
 
 console.log(
   DEMO_PUBLIC_URL === undefined
-    ? `egress-demo: no-tunnel mode — interactive consent guards ${NO_TUNNEL_TARGET_URL}`
+    ? `egress-demo: local mode — interactive consent guards ${LOCAL_TARGET_URL}`
     : `egress-demo: on-request mode — egress proxy at ${DEMO_PUBLIC_URL.origin} ` +
         "(unset EVE_DEMO_PUBLIC_URL if this origin is stale; challenge URLs derive from it)",
 );
