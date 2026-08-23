@@ -38,6 +38,11 @@ export type VercelSandboxCredentialResolution = "eager" | "on-request";
  * Interactive providers can initiate authorization when an authored tool's
  * `execute` first opens the sandbox. Hooks and channel events can reuse an
  * already-authorized provider but cannot initiate this interactive flow.
+ *
+ * Authorizing a rule grants the whole sandbox session access to the route
+ * for the lifetime of the authorization: every process in the sandbox —
+ * including subagents sharing it — can use the route while a step is
+ * active. eve deactivates the credentials in the policy between steps.
  */
 export interface VercelSandboxAuthNetworkPolicyRule {
   /** Static authorization provider resolved for the active principal. */

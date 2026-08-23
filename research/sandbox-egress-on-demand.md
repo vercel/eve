@@ -54,13 +54,28 @@ policy, exactly as it already is for connection tools.
 Failed attempts are ordinary command failures. There is no replay counter, no output buffering or
 rollback, and no process kill/restart machinery.
 
+## Consent scope
+
+Consent is scoped to the sandbox session. Approving a rule grants that sandbox session access to
+the route for the lifetime of the underlying authorization: the grant is stored per
+`(sandbox session key, rule)`, so later steps resolve it non-interactively — the same model as
+connections, where one approval covers every subsequent tool call. Activation is sandbox-wide by
+construction (the firewall policy is the enforcement primitive), so a subagent sharing its
+parent's sandbox shares its authorized egress; credential isolation inside a shared sandbox would
+be theater, since the sandbox already shares filesystem, processes, and env.
+
+Step-end revocation (`revokeStepCredentials` on commit/rollback) is exposure hygiene, not a
+consent boundary: it guarantees no credential stays active in the policy once no step is
+supervising the sandbox. Concurrent steps sharing one sandbox may revoke under each other;
+because every step ends with an idempotent clear and a clear can only remove access, races fail
+closed and the policy is always cleared once the last sharing step settles. The cost is
+availability only — a sibling command can lose the route mid-flight, fails, and self-heals
+through the ordinary fail → retry loop. Reference counting was rejected: parent and subagent
+steps run in different workflows with no shared durable home for a counter, and a leaked count
+pins credentials open, inverting the failure mode to the dangerous side.
+
 ## Remaining work before merge
 
-- **Credential activation is sandbox-wide.** Once a demanded credential resolves, every process in
-  the sandbox can use the route. With `inheritsParent` or a shared sandbox session id, concurrent
-  steps share one sandbox, and one step's commit revokes the sandbox-wide brokered policy (via the
-  optional `revokeStepCredentials` hook on `SandboxBackendHandle`) under the other. Decide:
-  reference counting, or document sandbox-wide scope as the consent unit.
 - **Proxy failures are application responses.** Credential lookup, OIDC acquisition, and sandbox
   lookup can return 403/500 instead of 428; the body must stay precise enough for the model to
   recover. The public `authProxyBaseUrl` contract (deployment rollovers, sandbox-name reuse) needs

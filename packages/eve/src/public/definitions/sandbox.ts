@@ -74,6 +74,11 @@ export type SandboxDefinition<BO = Record<string, never>, SO = Record<string, ne
  * `defineSandbox` opts into sharing: return `parent.sandbox` to select the
  * dispatching parent's exact durable sandbox. It is intended for child-only
  * definitions; throw when `parent` is `null`.
+ *
+ * Sharing a sandbox shares everything in it — filesystem, processes, env,
+ * and any egress routes the parent's session has authorized. Authorized
+ * network credentials are scoped to the sandbox session, not to the agent
+ * that requested them.
  */
 export function defineSandbox(definition: SandboxParentDefinition): SandboxParentDefinition;
 export function defineSandbox<BO = Record<string, never>, SO = Record<string, never>>(

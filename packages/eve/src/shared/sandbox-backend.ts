@@ -29,6 +29,11 @@ export interface SandboxBackendHandle<SO = Record<string, never>> {
    * Revokes step-scoped brokered credentials (e.g. authenticated egress
    * routes) at the end of a step without stopping the underlying compute.
    * Backends that broker no step-scoped credentials may omit this.
+   *
+   * Concurrent steps sharing one sandbox may revoke under each other, so
+   * implementations must be idempotent and only ever remove access: races
+   * then fail closed, and the credentials are guaranteed inactive once the
+   * last sharing step has committed or rolled back.
    */
   revokeStepCredentials?(): Promise<void>;
 }
