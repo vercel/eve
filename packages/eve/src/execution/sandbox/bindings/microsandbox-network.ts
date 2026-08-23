@@ -27,7 +27,13 @@ interface MicrosandboxNetworkBuilderShape {
   secret(
     configure: (secret: MicrosandboxSecretBuilderShape) => MicrosandboxSecretBuilderShape,
   ): this;
+  tls(configure: (tls: MicrosandboxTlsBuilderShape) => MicrosandboxTlsBuilderShape): this;
   trustHostCAs(enabled: boolean): this;
+}
+
+interface MicrosandboxTlsBuilderShape {
+  interceptedPorts(ports: number[]): this;
+  verifyUpstream(enabled: boolean): this;
 }
 
 interface MicrosandboxTransformHeaderRule {
@@ -90,7 +96,7 @@ export function applyMicrosandboxNetwork(
       return next;
     }
 
-    next = next.trustHostCAs(true);
+    next = next.trustHostCAs(true).tls((tls) => tls.interceptedPorts([443]).verifyUpstream(true));
     for (const rule of networkPlan.transformHeaderRules) {
       for (const [headerName, headerValue] of Object.entries(rule.headers)) {
         const placeholder = rule.placeholderHeaders[headerName];
