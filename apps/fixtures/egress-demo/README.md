@@ -27,10 +27,22 @@ vercel link          # link to any project on your team
 vercel env pull      # writes VERCEL_OIDC_TOKEN into .env.local
 
 # 2. Public HTTPS origin for the egress proxy + consent callback.
-ngrok http 2000      # or: cloudflared tunnel --url http://localhost:2000
+#    Pin the port: `eve dev` silently bumps to the next free port, and a
+#    tunnel pointing at some other app on 2000 yields confusing 404s.
+ngrok http 2400      # or: cloudflared tunnel --url http://localhost:2400
 
-# 3. Start the agent.
-EVE_DEMO_PUBLIC_URL=https://<tunnel-host> pnpm dev
+# 3. Start the agent on that exact port.
+EVE_DEMO_PUBLIC_URL=https://<tunnel-host> pnpm exec eve dev --port 2400
+```
+
+Verify the tunnel reaches _this_ app before chatting (a wrong target answers
+with a foreign 404 instead):
+
+```sh
+curl https://<tunnel-host>/eve/v1/health
+# {"ok":true,...}
+curl https://<tunnel-host>/eve/v1/sandbox/egress/r0-0/x/$(printf 'a%.0s' {1..43})
+# "eve: this endpoint only serves requests forwarded by a Vercel Sandbox firewall rule."
 ```
 
 Then, in the TUI:
