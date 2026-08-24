@@ -5,6 +5,7 @@ import {
   type LanguageModelCallEndEvent,
   type LanguageModel,
   type ModelMessage,
+  type Telemetry,
   ToolLoopAgent,
   type UserContent,
 } from "ai";
@@ -39,6 +40,7 @@ import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
 import type { DynamicResolveContext } from "#shared/dynamic-tool-definition.js";
 import { registerDurableDynamicCallback } from "#shared/durable-dynamic-tool-callbacks.js";
 import type { RunMode } from "#shared/run-mode.js";
+import type { OtelHarnessSettings } from "#tracing/otel-declaration.js";
 import { compactMessages, shouldCompact } from "#harness/compaction.js";
 import { getHarnessEmissionState, isHarnessBetweenTurns } from "#harness/emission.js";
 import {
@@ -97,7 +99,7 @@ const {
   registeredOtelIntegration,
 } = vi.hoisted(() => ({
   mockCreateAiSdkHookBridge: vi.fn((..._args: unknown[]) => ({ onStart: vi.fn() })),
-  mockGetRegisteredTelemetryIntegrations: vi.fn((): unknown[] => []),
+  mockGetRegisteredTelemetryIntegrations: vi.fn((): Telemetry[] => []),
   registeredAuthorIntegration: { onStart: vi.fn() },
   registeredOtelIntegration: { onStart: vi.fn() },
 }));
@@ -125,8 +127,17 @@ vi.mock("./instrumentation/runtime.js", () => ({
  * Registering an authored config writes both stores, so the tests toggle
  * telemetry through one call rather than keeping two mocks in step by hand.
  */
+let declaredOtelSettings: OtelHarnessSettings | undefined;
+
 function declareTelemetry(config: Readonly<Record<string, unknown>> | undefined): void {
   mockGetInstrumentationConfig.mockReturnValue(config);
+  declaredOtelSettings =
+    config === undefined
+      ? undefined
+      : {
+          ...config,
+          traceChannelRequests: config["traceChannelRequests"] === true,
+        };
   mockGetInstrumentationRuntime.mockReturnValue(
     config === undefined
       ? undefined
@@ -182,6 +193,24 @@ function createTestConfig(
   emit?: HarnessEmitFn,
   overrides?: Partial<ToolLoopHarnessConfig>,
 ): ToolLoopHarnessConfig {
+  const instrumentation =
+    overrides?.instrumentation === undefined
+      ? declaredOtelSettings === undefined
+        ? undefined
+        : {
+            authoredConfig: mockGetInstrumentationConfig() as never,
+            otelSettings: declaredOtelSettings,
+            telemetryIntegrations: mockGetRegisteredTelemetryIntegrations(),
+          }
+      : {
+          ...overrides.instrumentation,
+          authoredConfig:
+            overrides.instrumentation.authoredConfig ?? (mockGetInstrumentationConfig() as never),
+          otelSettings: overrides.instrumentation.otelSettings ?? declaredOtelSettings,
+          telemetryIntegrations:
+            overrides.instrumentation.telemetryIntegrations ??
+            mockGetRegisteredTelemetryIntegrations(),
+        };
   return {
     handleEvent: emit,
     mode,
@@ -198,6 +227,7 @@ function createTestConfig(
       ],
     ]),
     ...overrides,
+    instrumentation,
   };
 }
 
@@ -4894,6 +4924,7 @@ describe("createToolLoopHarness", () => {
       });
       const config: ToolLoopHarnessConfig = {
         instrumentation: {
+          authoredConfig: mockGetInstrumentationConfig() as never,
           hooks: createInstrumentationHooks([]),
           runInContext: (_operation, execute) => execute(),
         },
@@ -10652,7 +10683,7 @@ describe("createToolLoopHarness", () => {
       expect(runtimeContext?.["eve.version"]).not.toBe("");
       expect(runtimeContext?.["eve.session.id"]).toBe("test-session");
       expect(agentCall?.telemetry?.isEnabled).toBe(true);
-      expect(agentCall?.telemetry?.integrations).toBeUndefined();
+      expect(agentCall?.telemetry?.integrations).toEqual([]);
     });
 
     it("injects one provider-neutral bridge when lifecycle hooks opt in", async () => {

@@ -69,7 +69,14 @@ describe("installInstrumentationRuntime", () => {
 
     expect(forceFlush).toHaveBeenCalledOnce();
     expect(providerFlush).toHaveBeenCalledOnce();
-    expect(runtime.otelSettings).toEqual({
+    expect(runtime.traceChannelRequests).toBe(false);
+    expect(
+      runtime.construct({
+        action: "record",
+        recordInputs: true,
+        recordOutputs: true,
+      }).harness?.otelSettings,
+    ).toMatchObject({
       functionId: undefined,
       recordInputs: true,
       recordOutputs: true,
@@ -97,9 +104,14 @@ describe("installInstrumentationRuntime", () => {
       serviceName: "weather",
     });
     const idempotencyKey = turnIdempotencyKey("session-1", "turn-1");
+    const instrumentation = runtime.construct({
+      action: "record",
+      recordInputs: true,
+      recordOutputs: true,
+    }).harness!;
 
     await contextStorage.run(new ContextContainer(), async () => {
-      await runtime.hooks.publish({
+      await instrumentation.hooks!.publish({
         idempotencyKey,
         rootSessionId: "session-1",
         sequence: 0,
@@ -107,7 +119,7 @@ describe("installInstrumentationRuntime", () => {
         turnId: "turn-1",
         type: "turn.started",
       });
-      await runtime.hooks.publish({
+      await instrumentation.hooks!.publish({
         idempotencyKey,
         sessionId: "session-1",
         turnId: "turn-1",
@@ -117,5 +129,24 @@ describe("installInstrumentationRuntime", () => {
 
     expect(internalTerminalState).toHaveBeenCalledExactlyOnceWith("framework");
     expect(authoredTerminalState).toHaveBeenCalledExactlyOnceWith("authored");
+  });
+
+  it("resolves audience before constructing harness instrumentation", () => {
+    const runtime = installInstrumentationRuntime({
+      collected: collectOtelPipeline([otelIntegration()]),
+      frameworkVersion: "test",
+      providers: [],
+      serviceName: "weather",
+    });
+    const context = { rootSessionId: "session-1", sessionId: "session-1" };
+
+    expect(runtime.resolveDecision({ ...context, audience: "public" })).toEqual({
+      action: "record",
+      recordInputs: true,
+      recordOutputs: true,
+    });
+    expect(runtime.resolveDecision({ ...context, audience: "private" })).toEqual({
+      action: "drop",
+    });
   });
 });

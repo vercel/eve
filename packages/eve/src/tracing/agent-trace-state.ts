@@ -7,13 +7,11 @@ import type {
   InstrumentationTurnFailedEvent,
   InstrumentationTurnSettledEvent,
 } from "#harness/instrumentation/lifecycle.js";
-import type { ChannelAudience } from "#shared/channel-audience.js";
 
 /** Sized so an ordinary session stays one trace and only an outsized one rolls. */
 export const SESSION_WINDOW_TURN_LIMIT = 200;
 
 export interface AgentSessionTraceState {
-  readonly channelAudience?: ChannelAudience;
   readonly agentName?: string;
   readonly channelKind?: string;
   readonly context: SpanContext;
@@ -38,7 +36,6 @@ export interface AgentTurnTraceState {
 export interface AgentActionTraceState {
   readonly attemptIndex: number;
   readonly callId: string;
-  readonly channelAudience?: ChannelAudience;
   readonly inputAttribute?: string;
   readonly kind: InstrumentationActionKind;
   readonly name: string;

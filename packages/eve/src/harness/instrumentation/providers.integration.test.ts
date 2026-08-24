@@ -69,7 +69,12 @@ describe("authored instrumentation provider dispatch", () => {
     expect(order).toEqual(["first:setup", "first:setup-complete", "second:setup"]);
 
     const runtime = finalizeInstrumentationProviders({ serviceName: "weather" });
-    const publication = runtime.hooks.publish({
+    const instrumentation = runtime.construct({
+      action: "record",
+      recordInputs: true,
+      recordOutputs: true,
+    }).harness!;
+    const publication = instrumentation.hooks!.publish({
       idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
       rootSessionId: "session-1",
       sequence: 0,

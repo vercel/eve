@@ -208,7 +208,13 @@ describe("finalizeInstrumentationProviders", () => {
     await register("rows", defineInstrumentation({ events: { "turn.started": started } }));
 
     const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
-    await runtime.hooks.publish(turnStarted);
+    await runtime
+      .construct({
+        action: "record",
+        recordInputs: true,
+        recordOutputs: true,
+      })
+      .harness!.hooks!.publish(turnStarted);
 
     expect(started).toHaveBeenCalledOnce();
     expect(started.mock.calls[0]?.[0]).toMatchObject({ turnId: "turn-1" });
@@ -221,7 +227,11 @@ describe("finalizeInstrumentationProviders", () => {
     await register("rows", defineInstrumentation({}));
 
     const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
-    const result = await runtime.runInContext(
+    const result = await runtime.construct({
+      action: "record",
+      recordInputs: true,
+      recordOutputs: true,
+    }).harness!.runInContext!(
       {
         idempotencyKey: "tool:session-1:turn-1:0:0:call-1:0",
         scope: {

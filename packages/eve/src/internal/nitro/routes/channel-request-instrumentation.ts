@@ -69,7 +69,7 @@ export async function traceChannelRequest<T extends Response>(
   input: TraceChannelRequestInput,
   handler: (span: Span | undefined) => Promise<T>,
 ): Promise<T> {
-  if (getInstrumentationRuntime()?.otelSettings?.traceChannelRequests !== true) {
+  if (getInstrumentationRuntime()?.traceChannelRequests !== true) {
     return await handler(undefined);
   }
 

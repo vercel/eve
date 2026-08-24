@@ -5,6 +5,7 @@ import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { ChannelInstrumentationKey } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
+import { reconstructInstrumentation } from "#execution/delivery-instrumentation.js";
 import {
   createDurableSessionState,
   type DurableSessionState,
@@ -28,7 +29,6 @@ import {
 import { abandonRunningAgentTurns } from "#harness/handles/transitions.js";
 import { clearPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { createInstrumentationHandleEvent } from "#harness/instrumentation/native-events.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
 import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import {
@@ -65,7 +65,7 @@ export async function settleCancelledTurnStep(input: {
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const instrumentation = getInstrumentationRuntime();
+  const instrumentation = reconstructInstrumentation(input.serializedContext);
 
   let session = hydrateDurableSession({
     compactionOverrides: {
@@ -109,7 +109,7 @@ export async function settleCancelledTurnStep(input: {
             agentName: bundle.turnAgent.id,
             channelKind: ctx.get(ChannelInstrumentationKey)?.kind,
             handleEvent: baseEmit,
-            hooks: instrumentation?.hooks,
+            hooks: instrumentation.harness?.hooks,
             sessionId: session.sessionId,
             turnId: activeTurnId(emissionState),
           }) ?? baseEmit;
@@ -121,7 +121,7 @@ export async function settleCancelledTurnStep(input: {
       emissionState = scoped.result;
       session = scoped.session;
     } finally {
-      await instrumentation?.forceFlush();
+      await instrumentation.harness?.forceFlush?.();
       writer.releaseLock();
     }
   }

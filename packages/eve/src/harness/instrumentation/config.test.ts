@@ -83,7 +83,15 @@ describe("instrumentation-config chunk-isolation regression", () => {
       { agentName: "test-agent" },
     );
 
-    expect(getInstrumentationRuntime()?.otelSettings).toEqual({
+    const runtime = getInstrumentationRuntime()!;
+    expect(runtime.traceChannelRequests).toBe(true);
+    expect(
+      runtime.construct({
+        action: "record",
+        recordInputs: true,
+        recordOutputs: false,
+      }).harness?.otelSettings,
+    ).toMatchObject({
       functionId: "weather",
       recordInputs: true,
       recordOutputs: false,
@@ -97,7 +105,15 @@ describe("instrumentation-config chunk-isolation regression", () => {
 
     await registerInstrumentationConfig({}, { agentName: "test-agent" });
 
-    expect(getInstrumentationRuntime()?.otelSettings).toEqual({
+    const runtime = getInstrumentationRuntime()!;
+    expect(runtime.traceChannelRequests).toBe(false);
+    expect(
+      runtime.construct({
+        action: "record",
+        recordInputs: false,
+        recordOutputs: false,
+      }).harness?.otelSettings,
+    ).toMatchObject({
       functionId: undefined,
       recordInputs: false,
       recordOutputs: false,

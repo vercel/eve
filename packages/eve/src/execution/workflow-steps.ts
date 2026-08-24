@@ -98,6 +98,7 @@ import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { createExecutionHistoryView } from "#execution/history-view.js";
+import { prepareDeliveryInstrumentation } from "#execution/delivery-instrumentation.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { isTaskToolAvailable, TASK_UPDATE_TOOL_NAME } from "#runtime/framework-tools/tasks.js";
@@ -191,6 +192,14 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const history = createExecutionHistoryView(initialSession);
   const instrumentation = getInstrumentationRuntime();
   const initialEmissionState = getHarnessEmissionState(initialSession.state);
+  const constructedInstrumentation = prepareDeliveryInstrumentation({
+    agentName: bundle.turnAgent.id,
+    ctx,
+    delivery: rawInput.input,
+    instrumentation,
+    rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
+    sessionId: initialSession.sessionId,
+  });
 
   if (rawInput.input?.kind === "deliver") {
     await contextStorage.run(ctx, () =>
@@ -198,7 +207,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         agentName: bundle.turnAgent.id,
         ctx,
         delivery: rawInput.input as DeliverHookPayload,
-        hooks: instrumentation?.hooks,
+        hooks: constructedInstrumentation.harness?.hooks,
         rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
         sequence: initialEmissionState.sequence,
         sessionId: initialSession.sessionId,
@@ -213,12 +222,12 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         ctx,
         error,
         errorCode: channelDeliveryErrorCode(error),
-        hooks: instrumentation?.hooks,
+        hooks: constructedInstrumentation.harness?.hooks,
         includeTurn: false,
         outcome: "failed",
       }),
     );
-    await instrumentation?.forceFlush();
+    await constructedInstrumentation.harness?.forceFlush?.();
   };
   const adapterCtx = buildAdapterContext(adapter, ctx);
 
@@ -279,12 +288,12 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     await contextStorage.run(ctx, () =>
       instrumentChannelDelivery({
         ctx,
-        hooks: instrumentation?.hooks,
+        hooks: constructedInstrumentation.harness?.hooks,
         includeTurn: false,
         outcome: "completed",
       }),
     );
-    await instrumentation?.forceFlush();
+    await constructedInstrumentation.harness?.forceFlush?.();
     const rekeyed = reconcileSessionContinuationToken(ctx, initialSession);
     const nextSerializedContext = serializeContext(ctx);
     const nextState =
@@ -432,6 +441,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           const traceContext = await prepareWorkflowPreambleTrace({
             ctx,
             emissionState,
+            instrumentation: constructedInstrumentation.harness,
             runtimeIdentity,
             session: schemaSession,
           });
@@ -498,6 +508,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           handleEvent,
           historyProjector: history.projector,
           historyView: history.prepare(modelSession),
+          instrumentation: constructedInstrumentation.harness,
           mode,
           modelResolutionScope: {
             moduleMap: bundle.moduleMap,
@@ -506,7 +517,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           node: effectiveNode,
           workflowMaxSubagents: refreshedSession.workflowMaxSubagents,
         });
-        return step(modelSession, stepInput);
+        return constructedInstrumentation.run(() => step(modelSession, stepInput));
       };
 
       return runHarnessStep(schemaSession, resolved);

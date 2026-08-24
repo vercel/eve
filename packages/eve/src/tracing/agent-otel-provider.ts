@@ -26,10 +26,9 @@ import { createAgentApprovalInstrumentation } from "#tracing/agent-approval-inst
 import { createAgentChannelDeliveryInstrumentation } from "#tracing/agent-channel-delivery-instrumentation.js";
 import { createAgentToolInstrumentation } from "#tracing/agent-tool-instrumentation.js";
 import { setAgentUsage } from "#tracing/agent-otel-usage.js";
+import { vercelSessionIdAttribute } from "#tracing/agent-otel-attributes.js";
 import { createAgentOtelSessionContext } from "#tracing/agent-otel-session-context.js";
-import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
-import { withChannelAudience } from "#tracing/channel-audience-context.js";
 import { suppressTracing } from "#tracing/suppress-tracing.js";
 import type {
   InstrumentationStepAttemptMetadataEvent,
@@ -72,7 +71,6 @@ export interface AgentOtelInstrumentationInput {
   readonly idGenerator: AgentSpanIdGenerator;
   readonly stateStore: AgentTraceStateStore;
   readonly tracer: Tracer;
-  readonly tracePolicy?: TraceCapturePolicy;
   /**
    * When true, every agent span also carries `vercel.session_id` set to the
    * root session id. The VDP trace ingestion materialized view extracts this
@@ -159,10 +157,7 @@ export function createAgentOtelInstrumentation(
   const onStepStarted = async (event: InstrumentationStepAttemptStartedEvent): Promise<void> => {
     const turn = await input.stateStore.getTurn(event.scope.sessionId, event.scope.turnId);
     if (turn === undefined || !isSampledTrace(turn.context)) return;
-    const turnContext = withChannelAudience(
-      contextFromSpanContext(turn.context),
-      event.scope.channelAudience,
-    );
+    const turnContext = contextFromSpanContext(turn.context);
     const activeSpanContext = trace.getSpan(context.active())?.spanContext();
     const stepSpan = input.idGenerator.withSpanId(
       input.idGenerator.deriveSpanId(attemptIdempotencyKey(event.scope)),
@@ -288,9 +283,7 @@ export function createAgentOtelInstrumentation(
                   "agent.session.window": session?.window,
                   "agent.turn.id": event.turnId,
                   "agent.turn.sequence": turn.sequence,
-                  ...(emitVercelSessionId
-                    ? { "vercel.session_id": turn.rootSessionId }
-                    : {}),
+                  ...vercelSessionIdAttribute(emitVercelSessionId, turn.rootSessionId),
                 },
                 startTime: turn.startTimeMs,
               },
@@ -499,10 +492,7 @@ export function createAgentOtelInstrumentation(
           operation.scope.turnId,
         );
         if (turn !== undefined) {
-          parent = withChannelAudience(
-            contextFromSpanContext(turn.context),
-            operation.scope.channelAudience,
-          );
+          parent = contextFromSpanContext(turn.context);
           if (!isSampledTrace(turn.context)) parent = suppressTracing(parent);
         }
       }

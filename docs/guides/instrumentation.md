@@ -60,6 +60,8 @@ The third configurable surface, [runtime context events](#runtime-context), atta
 
 Built-in messaging channels classify their instrumentation metadata with an `audience`: `public`, `private`, or `unknown`. Slack public channels and Chat SDK workspace-visible threads are public; direct and private conversations are private; platform surfaces without enough visibility evidence remain unknown.
 
+With instrumentation providers enabled, `otel({ tracePolicy })` maps that classification to a decision before the harness runs. eve constructs the harness instrumentation from that decision. Return `{ action: "drop" }` to omit the trace, or `{ action: "record", recordInputs, recordOutputs }` to create it with an explicit content ceiling. The harness receives neither audience nor the decision.
+
 ## Channel delivery traces
 
 Instrumentation providers receive `channel.delivery.started` followed by

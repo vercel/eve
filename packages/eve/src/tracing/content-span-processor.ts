@@ -5,15 +5,12 @@ import {
   type ResolvedContentOptions,
 } from "#tracing/content-attributes.js";
 import { hasSessionRelease, type LocalTracesProcessor } from "#tracing/local-traces.js";
-import { normalizeChannelAudience } from "#shared/channel-audience.js";
-import type { ChannelAudience } from "#shared/channel-audience.js";
 import {
   contentRedactionForSpan,
   spanExportPolicyStages,
   type SpanExportContext,
   type SpanExportPolicy,
 } from "#tracing/span-export-policy.js";
-import { channelAudienceFromContext } from "#tracing/channel-audience-context.js";
 
 /**
  * Puts one destination's content policy in front of it.
@@ -74,12 +71,7 @@ function policyFilteringProcessor(
       if (typeof span !== "object" || span === null) {
         return;
       }
-      const scoped = facadeFor(
-        span,
-        exportPolicy,
-        facades,
-        channelAudienceFromContext(parentContext),
-      );
+      const scoped = facadeFor(span, exportPolicy, facades);
       if (!scoped.exported) {
         dropped.add(span);
         return;
@@ -108,12 +100,11 @@ function facadeFor(
   span: object,
   exportPolicy: SpanExportPolicy,
   facades: WeakMap<object, SpanFacade>,
-  inheritedAudience?: ChannelAudience,
 ): SpanFacade {
   const existing = facades.get(span);
   if (existing !== undefined) return existing;
 
-  const context = spanExportContext(span, inheritedAudience);
+  const context = spanExportContext(span);
   const effectiveContent = contentForSpan(context, exportPolicy);
   const attributes: Record<string, unknown> = {};
   const events: unknown[] = [];
@@ -212,26 +203,12 @@ function refreshAttributes(
   }
 }
 
-function spanExportContext(
-  span: object,
-  inheritedAudience: ChannelAudience = "unknown",
-): SpanExportContext {
+function spanExportContext(span: object): SpanExportContext {
   const attributes = (span as { readonly attributes?: unknown }).attributes;
   const record =
     typeof attributes === "object" && attributes !== null
       ? (attributes as Readonly<Record<string, unknown>>)
       : {};
-  const candidates = [
-    record["agent.channel.audience"],
-    record["ai.settings.context.eve.channel.audience"],
-  ].filter((value) => value !== undefined);
-  const normalized = candidates.map(normalizeChannelAudience);
-  const audience =
-    normalized.length > 0 && normalized.every((value) => value === normalized[0])
-      ? normalized[0]!
-      : normalized.length > 0
-        ? "unknown"
-        : inheritedAudience;
   const spanContext = (span as { readonly spanContext?: () => unknown }).spanContext?.();
   const ids =
     typeof spanContext === "object" && spanContext !== null
@@ -240,7 +217,6 @@ function spanExportContext(
   const name = (span as { readonly name?: unknown }).name;
   return {
     attributes: record,
-    audience,
     name: typeof name === "string" ? name : "",
     spanId: typeof ids["spanId"] === "string" ? ids["spanId"] : "",
     traceId: typeof ids["traceId"] === "string" ? ids["traceId"] : "",

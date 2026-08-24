@@ -10,8 +10,8 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
+import type { HarnessInstrumentation } from "#harness/instrumentation/runtime.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
 import { UNSPECIFIED_INPUT_SCHEMA } from "#shared/tool-schema.js";
@@ -81,6 +81,7 @@ export interface CreateExecutionNodeStepInput {
   readonly handleEvent?: HandleEventFn;
   readonly historyProjector?: HistoryViewProjector;
   readonly historyView?: PreparedHistoryView;
+  readonly instrumentation?: HarnessInstrumentation;
   readonly mode: RunMode;
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
@@ -105,7 +106,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
           input.node.turnAgent.dynamicModel,
         );
   const tools = createNodeHarnessTools({ node: input.node });
-  const instrumentation = getInstrumentationRuntime();
+  const instrumentation = input.instrumentation;
   const step = createToolLoopHarness({
     abortSignal: input.abortSignal,
     capabilities: input.capabilities,
@@ -133,7 +134,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     try {
       return await step(session, stepInput);
     } finally {
-      await instrumentation.forceFlush();
+      await instrumentation.forceFlush?.();
     }
   };
 }

@@ -9,6 +9,7 @@ import type {
 import { PROVIDER, type InstrumentationProvider } from "#public/instrumentation/provider.js";
 import type { InstrumentationRuntimeContextInput } from "#public/instrumentation/index.js";
 import type { JsonObject } from "#shared/json.js";
+import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { batchSpanProcessor } from "#tracing/batch-span-processor.js";
 import type { ResolvedContentOptions } from "#tracing/content-attributes.js";
 import { contentFilteringProcessor } from "#tracing/content-span-processor.js";
@@ -111,7 +112,9 @@ export interface TraceCaptureContext {
   readonly sessionId: string;
 }
 
-export type TraceCapturePolicy = (trace: TraceCaptureContext) => boolean;
+export type TraceCaptureDecision = InstrumentationDecision;
+
+export type TraceCapturePolicy = (trace: TraceCaptureContext) => TraceCaptureDecision;
 
 /** Where one `otelIntegration()` sends spans. */
 export interface OtelIntegrationOptions extends ContentOptions {
@@ -276,10 +279,14 @@ export interface OtelPipeline {
 export interface OtelHarnessSettings {
   readonly functionId?: string;
   readonly traceChannelRequests: boolean;
-  readonly tracePolicy?: TraceCapturePolicy;
   /** Legacy `defineInstrumentation()` capture settings. Provider destinations capture fully. */
   readonly recordInputs?: boolean;
   readonly recordOutputs?: boolean;
+}
+
+/** Process settings retained outside the harness until channel delivery. @internal */
+export interface OtelRuntimeSettings extends OtelHarnessSettings {
+  readonly tracePolicy?: TraceCapturePolicy;
 }
 
 /** @internal */
@@ -296,7 +303,7 @@ export interface CollectedOtel {
   readonly declared: boolean;
   readonly pipeline: OtelPipeline;
   readonly runtimeContextResolvers: readonly RuntimeContextResolver[];
-  readonly settings: OtelHarnessSettings;
+  readonly settings: OtelRuntimeSettings;
 }
 
 /**
@@ -337,7 +344,7 @@ export function collectOtelPipeline(values: readonly unknown[]): CollectedOtel {
   }
 
   const options = declaration?.options ?? {};
-  const settings: OtelHarnessSettings = {
+  const settings: OtelRuntimeSettings = {
     functionId: options.functionId,
     recordInputs: capturesContent,
     recordOutputs: capturesContent,

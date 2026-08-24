@@ -27,6 +27,7 @@ import type { SandboxAccess } from "#sandbox/state.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
+import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 
 // Re-export so consumers don't need a direct channel/ import.
 export type { SessionAuthContext, SessionParent, SessionTurn } from "#channel/types.js";
@@ -88,6 +89,9 @@ export const ActiveChannelDeliveriesKey = new ContextKey<readonly ActiveChannelD
 );
 export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationProjection>(
   "eve.channelInstrumentation",
+);
+export const InstrumentationDecisionKey = new ContextKey<InstrumentationDecision>(
+  "eve.instrumentationDecision",
 );
 export const ModeKey = new ContextKey<RunMode>("eve.mode");
 export const ParentSessionKey = new ContextKey<SessionParent>("eve.parentSession");

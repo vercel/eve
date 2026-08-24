@@ -43,11 +43,21 @@ describe("local instrumentation runtime", () => {
     const authoredTracer = (
       require("@opentelemetry/api") as typeof import("@opentelemetry/api")
     ).trace.getTracer("test-user");
-    const runtime = installLocalInstrumentationRuntime({
+    const installedRuntime = installLocalInstrumentationRuntime({
       appRoot,
       frameworkVersion: "test",
       serviceName: "test-agent",
     });
+    const runtime = installedRuntime.construct({
+      action: "record",
+      recordInputs: true,
+      recordOutputs: true,
+    }).harness!;
+    const hooks = runtime.hooks;
+    const runInContext = runtime.runInContext;
+    if (hooks === undefined || runInContext === undefined) {
+      throw new Error("Expected constructed local instrumentation.");
+    }
     const scope: InstrumentationAttemptScope = {
       attemptId: "session-1:turn-1:0:0",
       attemptIndex: 0,
@@ -61,14 +71,14 @@ describe("local instrumentation runtime", () => {
     const activeContext = runtimeTrace.setSpan(COMPILED_ROOT_CONTEXT, delivery);
 
     const exerciseRuntime = async () => {
-      await runtime.hooks.publish({
+      await hooks.publish({
         agentName: "weather",
         idempotencyKey: sessionIdempotencyKey("session-1"),
         rootSessionId: "session-1",
         sessionId: "session-1",
         type: "session.started",
       });
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
         rootSessionId: "session-1",
         sequence: 0,
@@ -76,7 +86,7 @@ describe("local instrumentation runtime", () => {
         turnId: "turn-1",
         type: "turn.started",
       });
-      const bridge = createAiSdkHookBridge(scope, runtime.hooks, runtime.runInContext);
+      const bridge = createAiSdkHookBridge(scope, hooks, runInContext);
       Reflect.apply(bridge.onStart!, bridge, [
         {
           callId: "call-1",
@@ -115,7 +125,7 @@ describe("local instrumentation runtime", () => {
         },
       ]);
       const actionKey = actionIdempotencyKey("session-1", "turn-1", "tool-1");
-      await runtime.hooks.publish({
+      await hooks.publish({
         callId: "tool-1",
         idempotencyKey: actionKey,
         input: {},
@@ -149,26 +159,26 @@ describe("local instrumentation runtime", () => {
           toolOutput: { output: { temperature: 72 }, type: "tool-result" },
         },
       ]);
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey: actionKey,
         outcome: "completed",
         output: { output: { temperature: 72 }, type: "result" },
         scope,
         type: "action.completed",
       });
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey: attemptIdempotencyKey(scope),
         scope,
         type: "step.attempt.completed",
       });
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
         sessionId: "session-1",
         turnId: "turn-1",
         type: "turn.completed",
       });
       // Settling the turn emits the turn span with the pre-allocated id.
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey: sessionIdempotencyKey("session-1"),
         sessionId: "session-1",
         turnId: "turn-1",
@@ -179,7 +189,7 @@ describe("local instrumentation runtime", () => {
       contextStorage.run(new ContextContainer(), exerciseRuntime),
     );
     delivery.end();
-    await runtime.forceFlush();
+    await runtime.forceFlush?.();
 
     const traceRoot = join(appRoot, ".eve", "traces", "v1");
     const [traceId] = await readdir(traceRoot);

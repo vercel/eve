@@ -1,4 +1,4 @@
-import { trace } from "#compiled/@opentelemetry/api/index.js";
+import { context, trace } from "#compiled/@opentelemetry/api/index.js";
 import type { SpanProcessor } from "#compiled/@vercel/otel/index.js";
 
 import {
@@ -6,7 +6,9 @@ import {
   type InstrumentationProviderDefinition,
 } from "#harness/instrumentation/lifecycle.js";
 import {
+  createInstrumentationRuntime,
   registerInstrumentationRuntime,
+  type HarnessInstrumentation,
   type InstrumentationRuntime,
 } from "#harness/instrumentation/runtime.js";
 import { createLogger, formatError } from "#internal/logging.js";
@@ -15,6 +17,8 @@ import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.
 import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js";
 import { hasSessionRelease, type LocalTracesProcessor } from "#tracing/local-traces.js";
 import type { CollectedOtel, RuntimeContextResolver } from "#tracing/otel-declaration.js";
+import { DROP_INSTRUMENTATION } from "#shared/instrumentation-decision.js";
+import { suppressTracing } from "#tracing/suppress-tracing.js";
 import { registerOtelPipeline, type RegisteredOtelPipeline } from "#tracing/otel-registration.js";
 
 const log = createLogger("tracing.install-instrumentation-runtime");
@@ -39,9 +43,10 @@ export function installInstrumentationRuntime(input: {
   const serialBefore: InstrumentationProviderDefinition[] = [];
   const serialAfter: InstrumentationProviderDefinition[] = [];
   let otelRuntime: RegisteredOtelPipeline | undefined;
-  let prepareSessionTrace: InstrumentationRuntime["prepareSessionTrace"];
-  let prepareTurnTrace: InstrumentationRuntime["prepareTurnTrace"];
-  let runInContext: InstrumentationRuntime["runInContext"] = (_operation, execute) => execute();
+  let prepareSessionTrace: HarnessInstrumentation["prepareSessionTrace"];
+  let prepareTurnTrace: HarnessInstrumentation["prepareTurnTrace"];
+  let runInContext: NonNullable<HarnessInstrumentation["runInContext"]> = (_operation, execute) =>
+    execute();
 
   if (input.collected.declared) {
     otelRuntime = registerOtelPipeline({
@@ -56,7 +61,6 @@ export function installInstrumentationRuntime(input: {
       recordOutputs: input.collected.settings.recordOutputs,
       stateStore: new ContextAgentTraceStateStore(),
       tracer: trace.getTracer("eve.agent", input.frameworkVersion),
-      tracePolicy: input.collected.settings.tracePolicy,
     });
     // The span must exist before authored providers observe the lifecycle event.
     serialBefore.push({ ...agentOtel.hook, stateNamespace: "internal:otel" });
@@ -71,31 +75,53 @@ export function installInstrumentationRuntime(input: {
   }
 
   const allProviders = [...serialBefore, ...input.providers, ...serialAfter];
-  let shutdown: Promise<void> | undefined;
-  return registerInstrumentationRuntime({
-    forceFlush: () =>
-      settleAll([
-        ...(otelRuntime === undefined ? [] : [otelRuntime.forceFlush]),
-        ...allProviders.map((provider) => () => provider.flush?.()),
-      ]),
-    hooks: createInstrumentationHooks({
-      parallel: input.providers,
-      serialAfter,
-      serialBefore,
-    }),
-    otelSettings: input.collected.declared ? input.collected.settings : undefined,
-    prepareSessionTrace,
-    prepareTurnTrace,
-    runtimeContextResolvers: input.runtimeContextResolvers,
-    runInContext,
-    shutdown: () => {
-      shutdown ??= settleAll([
-        ...(otelRuntime === undefined ? [] : [otelRuntime.shutdown]),
-        ...allProviders.map((provider) => () => provider.shutdown?.()),
-      ]);
-      return shutdown;
-    },
+  const hooks = createInstrumentationHooks({
+    parallel: input.providers,
+    serialAfter,
+    serialBefore,
   });
+  const otelSettings = input.collected.declared ? input.collected.settings : undefined;
+  let shutdown: Promise<void> | undefined;
+  return registerInstrumentationRuntime(
+    createInstrumentationRuntime({
+      forceFlush: () =>
+        settleAll([
+          ...(otelRuntime === undefined ? [] : [otelRuntime.forceFlush]),
+          ...allProviders.map((provider) => () => provider.flush?.()),
+        ]),
+      hooks,
+      otelSettings,
+      prepareSessionTrace,
+      prepareTurnTrace,
+      resolveDecision: (traceContext) => {
+        if (!input.collected.declared) {
+          return { action: "record", recordInputs: true, recordOutputs: true };
+        }
+        try {
+          return (
+            input.collected.settings.tracePolicy?.(traceContext) ??
+            (traceContext.audience === "public"
+              ? { action: "record", recordInputs: true, recordOutputs: true }
+              : DROP_INSTRUMENTATION)
+          );
+        } catch {
+          return DROP_INSTRUMENTATION;
+        }
+      },
+      runtimeContextResolvers: input.runtimeContextResolvers,
+      runInContext,
+      runWithTracingSuppressed: (execute) =>
+        context.with(suppressTracing(context.active()), execute),
+      shutdown: () => {
+        shutdown ??= settleAll([
+          ...(otelRuntime === undefined ? [] : [otelRuntime.shutdown]),
+          ...allProviders.map((provider) => () => provider.shutdown?.()),
+        ]);
+        return shutdown;
+      },
+    }),
+    otelSettings,
+  );
 }
 
 function isSpanProcessor(processor: SpanProcessor | "auto"): processor is SpanProcessor {

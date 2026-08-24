@@ -37,6 +37,7 @@ export {
   type SpanExportPolicy,
   type SpanExportPredicate,
   type TraceCaptureContext,
+  type TraceCaptureDecision,
   type TraceCapturePolicy,
 } from "#tracing/otel-declaration.js";
 

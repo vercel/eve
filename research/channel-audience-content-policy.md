@@ -22,7 +22,7 @@ type ChannelAudience = "public" | "private" | "unknown";
 
 The field is optional for authored channels. Eve normalizes absent, malformed, and unsupported values to `unknown`. Built-in channel metadata interfaces require the field and classify only from platform evidence already captured during dispatch; ambiguous and proactive destinations remain `unknown` rather than performing observability-only network requests.
 
-The normalized audience is persisted with session trace state and exported as `agent.channel.audience` only on each `agent.session` window. Durable Eve state and an internal OpenTelemetry context key make the same value available to descendant export policies without duplicating a public attribute onto every span. Local subagents inherit the parent audience. Remote agents classify their receiving channel independently rather than trusting opaque metadata across deployment boundaries.
+At channel delivery, eve evaluates the process-wide trace policy and persists only its generic decision for that turn. eve constructs the harness hooks, telemetry, and trace context from that decision. The harness, lifecycle providers, trace state, and export policies never receive the audience classification or branch on the decision.
 
 ## Public tracing API
 
@@ -38,7 +38,15 @@ interface TraceCaptureContext {
   readonly sessionId: string;
 }
 
-type TraceCapturePolicy = (trace: TraceCaptureContext) => boolean;
+type TraceCaptureDecision =
+  | { readonly action: "drop" }
+  | {
+      readonly action: "record";
+      readonly recordInputs: boolean;
+      readonly recordOutputs: boolean;
+    };
+
+type TraceCapturePolicy = (trace: TraceCaptureContext) => TraceCaptureDecision;
 
 interface OtelOptions {
   // Other process-wide OTel settings are unchanged.
@@ -53,7 +61,6 @@ Agent Runs and local traces expose the managed export policy:
 ```ts
 interface SpanExportContext {
   readonly attributes: Readonly<Record<string, unknown>>;
-  readonly audience: ChannelAudience;
   readonly name: string;
   readonly spanId: string;
   readonly traceId: string;
@@ -106,20 +113,19 @@ For example, this admits public and private conversations at the head gate while
 ```ts
 // agent/instrumentation/otel.ts
 export default otel({
-  tracePolicy: ({ audience }) => audience === "public" || audience === "private",
+  tracePolicy: ({ audience }) =>
+    audience === "public"
+      ? { action: "record", recordInputs: true, recordOutputs: true }
+      : { action: "drop" },
 });
 
 // agent/instrumentation/agent-runs.ts
 export default agentRuns({
-  exportPolicy: composeSpanExportPolicies(
-    redactSpanInputs(({ audience }) => audience !== "public"),
-    redactSpanOutputs(({ audience }) => audience !== "public"),
-    {
-      span: ({ name }) => name !== "internal.cache.refresh",
-      attribute: ({ key }) =>
-        key === "user.email" ? { action: "replace", value: "[redacted]" } : { action: "keep" },
-    },
-  ),
+  exportPolicy: composeSpanExportPolicies({
+    span: ({ name }) => name !== "internal.cache.refresh",
+    attribute: ({ key }) =>
+      key === "user.email" ? { action: "replace", value: "[redacted]" } : { action: "keep" },
+  }),
 });
 ```
 
@@ -128,7 +134,10 @@ export default agentRuns({
 The default authored and production head policy is equivalent to:
 
 ```ts
-({ audience }) => audience === "public";
+({ audience }) =>
+  audience === "public"
+    ? { action: "record", recordInputs: true, recordOutputs: true }
+    : { action: "drop" };
 ```
 
 | Audience  | Trace created by default | Content when admitted by a custom trace policy |
@@ -140,20 +149,21 @@ The default authored and production head policy is equivalent to:
 The default policy for local tracing for `eve dev` is equivalent to:
 
 ```ts
-({ audience }) => audience === "public" || audience === "unknown";
+({ audience }) =>
+  audience === "public" || audience === "unknown"
+    ? { action: "record", recordInputs: true, recordOutputs: true }
+    : { action: "drop" };
 ```
 
 This keeps unclassified local HTTP/TUI sessions observable while still rejecting channels classified as `private`.
 
 The runtime order is:
 
-1. Derive and normalize the channel audience.
-2. Evaluate the process-wide `tracePolicy` before creating `agent.session`.
-3. For accepted traces, capture complete Eve and AI SDK spans.
+1. Derive and normalize the channel audience at delivery.
+2. Evaluate `tracePolicy`, persist its decision, and construct the harness instrumentation.
+3. Capture only the inputs and outputs admitted by that constructed capability.
 4. Run each managed destination's composed export policies in declaration order. Custom integrations run their declared span processors.
 5. Hand the resulting facade to that destination's processors or exporter.
-
-There is no implicit content redaction after a custom trace policy admits an audience. Redaction occurs only when the export pipeline includes `redactSpanInputs()` or `redactSpanOutputs()` (or when a retained compatibility option explicitly requests the equivalent redaction).
 
 Policies fail closed at their boundary: a throwing trace policy rejects the trace, a throwing span policy drops the span, a throwing attribute policy drops the attribute, and a throwing content-redaction predicate redacts that content direction. Missing, malformed, or conflicting audience evidence normalizes to `unknown`.
 
