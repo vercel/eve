@@ -18,6 +18,7 @@ import {
   CapabilitiesKey,
   ChannelInstrumentationKey,
   InitiatorAuthKey,
+  ParentSessionKey,
   SandboxKey,
 } from "#context/keys.js";
 import { type AlsContext, ContextContainer } from "#context/container.js";
@@ -52,7 +53,14 @@ import type {
   RuntimeSubagentCallActionRequest,
   RuntimeSubagentDispatchFailure,
   RuntimeToolCallActionRequest,
+  RuntimeToolResultActionResult,
+  RuntimeWorkflowToolCallActionRequest,
 } from "#shared/action-types.js";
+import type { SessionParent } from "#channel/types.js";
+import { startToolRun } from "#execution/tool-run/start.js";
+import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
+import { recordToolRun } from "#harness/tool-runs.js";
+import { toError } from "#shared/errors.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import {
   createRecursiveAgentRootOnlyResult,
@@ -96,7 +104,8 @@ export type DispatchPlanEntry =
     }
   | { readonly kind: "reject"; readonly result: RuntimeSubagentDispatchFailure }
   | { readonly kind: "start"; readonly target: DispatchStartTarget }
-  | { readonly kind: "task-control"; readonly action: RuntimeToolCallActionRequest };
+  | { readonly kind: "task-control"; readonly action: RuntimeToolCallActionRequest }
+  | { readonly kind: "workflow-tool"; readonly action: RuntimeWorkflowToolCallActionRequest };
 
 export type DispatchStartTarget =
   | {
@@ -154,6 +163,8 @@ export interface PreparedRuntimeActionDispatch {
    */
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
+  /** Lineage of the session running this dispatch, when it is itself a delegated child. */
+  readonly parentSession: SessionParent | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
@@ -280,6 +291,7 @@ async function prepareActionDispatch(input: {
       input.fanoutSize ??
       plan.filter((entry) => entry.kind === "start" && entry.target.kind === "local").length,
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
+    parentSession: ctx.get(ParentSessionKey),
     parentTraceContext: readSessionTraceContext(input.serializedContext, session.sessionId),
     plan,
     sandboxSessionId,
@@ -403,6 +415,9 @@ function planDispatch(input: {
   return input.actions.map((action): DispatchPlanEntry => {
     if (input.taskControls && isTaskControlAction(action)) {
       return { action, kind: "task-control" };
+    }
+    if (action.kind === "workflow-tool-call") {
+      return { action, kind: "workflow-tool" };
     }
 
     const rawAgentId = action.input.agentId;
@@ -605,6 +620,67 @@ export async function startSubagent(input: {
       const _exhaustive: never = input.target;
       return _exhaustive;
     }
+  }
+}
+
+/**
+ * Starts the durable run behind one workflow tool call and records it on the
+ * session so the turn can bind the run's result, route its input requests,
+ * and cancel it. A start failure settles the call immediately with an error
+ * result; nothing else is recorded, so nothing is left to cancel.
+ */
+export async function startWorkflowTool(input: {
+  readonly action: RuntimeWorkflowToolCallActionRequest;
+  readonly batchEvent: {
+    readonly sequence: number;
+    readonly stepIndex: number;
+    readonly turnId: string;
+  };
+  readonly parentContinuationToken: string;
+  readonly prepared: Pick<
+    PreparedRuntimeActionDispatch,
+    "auth" | "initiatorAuth" | "parentSession"
+  >;
+  readonly session: RuntimeSession;
+}): Promise<{ readonly result?: RuntimeToolResultActionResult; readonly session: RuntimeSession }> {
+  const { action, batchEvent, prepared, session } = input;
+  try {
+    const started = await startToolRun({
+      callId: action.callId,
+      input: action.input,
+      replyTo: { inboxToken: input.parentContinuationToken, kind: "turn" },
+      session: {
+        auth: { current: prepared.auth, initiator: prepared.initiatorAuth },
+        id: session.sessionId,
+        parent: prepared.parentSession,
+        turn: { id: batchEvent.turnId, sequence: batchEvent.sequence },
+      },
+      stepIndex: batchEvent.stepIndex,
+      toolName: action.toolName,
+      workflowId: action.workflowId,
+    });
+    return {
+      session: recordToolRun(session, {
+        callId: action.callId,
+        hookToken: started.hookToken,
+        runId: started.runId,
+        toolName: action.toolName,
+      }),
+    };
+  } catch (error) {
+    logError(log, "workflow tool run failed to start", error, {
+      callId: action.callId,
+      toolName: action.toolName,
+    });
+    return {
+      result: createRuntimeToolResultFromValue({
+        callId: action.callId,
+        isError: true,
+        output: toError(error),
+        toolName: action.toolName,
+      }),
+      session,
+    };
   }
 }
 

@@ -8,6 +8,8 @@ import {
 import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
+import { isToolRunAnswerToken } from "#execution/tool-run/messages.js";
 import type { InputResponse } from "#shared/input.js";
 import { findSessionTaskEntry } from "#tasks/session-index.js";
 import {
@@ -168,6 +170,22 @@ export async function routeProxiedDeliverStep(
       // Hand-off to the task run succeeded. Retire the parent-visible
       // routes so a later click cannot re-enter the same batch after the
       // run has already accepted (or no-op'd) this answer.
+      durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);
+      retired = true;
+      continue;
+    }
+
+    if (isToolRunAnswerToken(child.childContinuationToken)) {
+      // A workflow tool run's answer hook is a plain hook, not a child session:
+      // resume it with the input response directly so the body can await or
+      // race the hook the SDK recognizes, not a session-inbox delivery.
+      const response = coalesceDeliverPayloads(child.payloads).inputResponses?.[0];
+      if (response !== undefined) {
+        await resumeHook(child.childContinuationToken, {
+          optionId: response.optionId,
+          text: response.text,
+        });
+      }
       durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);
       retired = true;
       continue;

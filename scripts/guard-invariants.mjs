@@ -302,6 +302,10 @@ const WORKFLOW_QUEUE_NAMESPACE_MODULE = "packages/eve/src/internal/workflow/queu
  * @param {Violation[]} violations
  */
 function checkRule33(posix, lines, violations) {
+  // The single-runtime-identity boundary is eve's own source. Application code
+  // (fixtures, templates) legitimately imports the public `workflow/api`
+  // surface, which eve's bundler resolves to its own runtime.
+  if (!posix.startsWith("packages/eve/src/")) return;
   lines.forEach((line, idx) => {
     const isTypeOnlyImport = /^\s*(?:import|export)\s+type\b/.test(line);
     const isRuntimeImport =

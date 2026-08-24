@@ -7,6 +7,8 @@ import type {
 } from "#channel/types.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
+import { isToolRunAnswerToken } from "#execution/tool-run/messages.js";
 import { createLogger } from "#internal/logging.js";
 import type { JsonValue } from "#shared/json.js";
 import {
@@ -207,6 +209,16 @@ export async function deliverTaskInputResponsesStep(input: {
       if (response.status === 404) return "unreachable";
       if (!response.ok)
         throw new Error(`Remote task input delivery failed with HTTP ${response.status}.`);
+    } else if (isToolRunAnswerToken(input.answer.childContinuationToken)) {
+      // A background workflow tool run's answer hook is a plain hook: resume it
+      // with the input response directly so the body can await or race it.
+      const response = command.payload.inputResponses?.[0];
+      if (response !== undefined) {
+        await resumeHook(input.answer.childContinuationToken, {
+          optionId: response.optionId,
+          text: response.text,
+        });
+      }
     } else {
       await resumeSessionInbox(input.answer.childContinuationToken, command);
     }

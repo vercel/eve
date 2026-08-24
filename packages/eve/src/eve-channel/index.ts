@@ -8,6 +8,10 @@ import {
 } from "#execution/connections/callback-route.js";
 import { handleSessionCallbackRequest } from "#execution/session-callback-route.js";
 import { handleTaskInputResponseRequest } from "#execution/task-input-response-route.js";
+import {
+  handleWorkflowWebhookRequest,
+  WORKFLOW_WEBHOOK_ROUTE_PATTERN,
+} from "#execution/workflow-webhook-route.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
   readAgentInfoRouteResponse,
@@ -46,7 +50,7 @@ import type { ResetResponse } from "#protocol/reset-session.js";
 import { parseTraceparent } from "#protocol/traceparent.js";
 import { routeAuth } from "#public/channels/auth.js";
 import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
-import { defineChannel, GET, HEAD, POST } from "#public/definitions/channel.js";
+import { defineChannel, DELETE, GET, HEAD, PATCH, POST, PUT } from "#public/definitions/channel.js";
 import {
   checkUploadPolicy,
   createSessionStreamResponse,
@@ -115,6 +119,11 @@ export function eveChannel(input: EveChannelInput): EveChannel {
       POST(EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN, handleLegacyConnectionCallbackRequest),
       POST(EVE_CALLBACK_ROUTE_PATTERN, handleSessionCallbackRequest),
       POST(EVE_TASK_INPUT_ROUTE_PATTERN, handleTaskInputResponseRequest),
+      GET(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
+      POST(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
+      PUT(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
+      PATCH(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
+      DELETE(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
 
       POST(EVE_SESSION_ROUTE_PATH, async (req, args) => {
         const authResult = await routeAuth(req, input.auth);

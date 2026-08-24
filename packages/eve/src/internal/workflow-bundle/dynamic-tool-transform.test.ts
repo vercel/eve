@@ -1971,6 +1971,38 @@ export default defineDynamic({
 `;
     expect(await transformDynamicToolExecute("tools/null.ts", source)).toBeNull();
   });
+
+  it("leaves workflow-bodied executes to the directive transform", async () => {
+    const source = `
+import { defineTool } from "eve/tools";
+
+async function deploy(input) {
+  "use workflow";
+  return input;
+}
+
+export default defineTool({
+  description: "Inline body",
+  inputSchema: {},
+  async execute(input) {
+    "use workflow";
+    return input;
+  },
+  async toModelOutput(output) { return String(output); },
+});
+
+export const referenced = defineTool({
+  description: "Referenced body",
+  inputSchema: {},
+  execute: deploy,
+});
+`;
+    const result = await transformDynamicToolExecute("agent/tools/deploy.ts", source);
+    expect(result).not.toBeNull();
+    expect(result?.code).not.toContain("__eve_dynamic_exec_");
+    expect(result?.code).toContain('"use workflow"');
+    expect(result?.code).toContain("toModelOutput: __eveStampDynamicCallback(");
+  });
 });
 
 // ===========================================================================

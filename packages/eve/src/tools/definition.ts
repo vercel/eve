@@ -10,6 +10,7 @@ import { stampDefinitionKey } from "#internal/authored-definition/source-identit
 import type { JsonObject } from "#shared/json.js";
 import type { TokenResult } from "#shared/connection-types.js";
 import type { ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
+import type { InputOption, InputRequestKind } from "#shared/input.js";
 import {
   collectDurableDynamicToolCallbacks,
   stampDurableDynamicToolCallbacks,
@@ -99,20 +100,70 @@ export interface PublicToolDefinitionWithExecuteFn<
 }
 
 /**
+ * A question a workflow tool asks the human on the session's channel, sent
+ * with `ask` from `eve/workflow`. Channels render it the way they render
+ * `ask_question` and tool approvals.
+ */
+export interface ToolInputRequest {
+  /**
+   * Whether the user may answer with free text instead of one of the
+   * {@link options}.
+   */
+  readonly allowFreeform?: boolean;
+  /** Rendering hint: confirmation buttons, a selection list, or a text field. */
+  readonly display?: "confirmation" | "select" | "text";
+  /**
+   * How the owner resolves, routes, and renders the request. Defaults to
+   * `"question"`; a forwarded child request keeps its own kind.
+   */
+  readonly kind?: InputRequestKind;
+  /** Selectable answers. */
+  readonly options?: readonly InputOption[];
+  readonly prompt: string;
+}
+
+/** The human's answer to a {@link ToolInputRequest}. */
+export interface ToolInputResponse {
+  /** The selected option's `id`, when the user picked one. */
+  readonly optionId?: string;
+  /** Free text, when the user typed an answer. */
+  readonly text?: string;
+}
+
+/**
  * Authored tool context. Passed as the last argument to
  * {@link ToolDefinition.execute}.
  *
  * Extends {@link SessionContext} with token accessors. Passing a provider
  * resolves that provider inline, which lets one tool use multiple credentials.
+ *
+ * A tool whose `execute` is a workflow (`"use workflow"`) receives the same
+ * context inside its durable body, with two differences: `getSandbox`,
+ * `getSkill`, `getToken`, and `requireAuth` are unavailable there and throw
+ * when touched — read credentials inside a `"use step"` function instead —
+ * and {@link replyTo} becomes available.
  */
 export type ToolContext = SessionContext & {
-  /** Aborts when the active turn is cancelled. */
+  /**
+   * Aborts when the work this tool is doing is cancelled: the active turn
+   * for an ordinary tool, the durable run for a workflow tool. In a workflow
+   * body the signal is durable — it survives replay, steps that receive it
+   * observe the abort, and `finally` blocks run before the run ends.
+   */
   readonly abortSignal: AbortSignal;
   /**
    * Id of the current tool call — the same `callId` carried by the call's
    * stream events and its {@link ApprovalContext}.
    */
   readonly callId: string;
+  /**
+   * The owner's hook token. Everything a workflow body says to the turn or
+   * task that started it — progress, a question, the outcome — is a
+   * `RunMessage` resumed on this token; `tell` and `ask` from `eve/workflow`
+   * do exactly that. Only available in a workflow body; an ordinary tool
+   * throws when it reads this.
+   */
+  readonly replyTo: string;
   /**
    * Final runtime name of the current tool, including any namespace
    * qualification. This is the same `toolName` carried by stream events and
@@ -227,11 +278,7 @@ export function defineTool<
     unknown,
     BackgroundToolOutputFromExecuteReturn<TReturn>
   >["outputSchema"];
-  execute(
-    input: StandardSchemaV1.InferOutput<TSchema>,
-    ctx: ToolContext,
-    task: TaskExec,
-  ): TReturn extends AsyncIterable<unknown> ? never : TReturn;
+  execute(input: StandardSchemaV1.InferOutput<TSchema>, ctx: ToolContext, task: TaskExec): TReturn;
   approval?: BackgroundToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approval"];
   toModelOutput?: BackgroundToolDefinition<
     unknown,

@@ -27,6 +27,7 @@ import {
   type RuntimeActionDispatchInput,
   type RuntimeActionDispatchResult,
   startSubagent,
+  startWorkflowTool,
 } from "#execution/dispatch-runtime-actions-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import {
@@ -71,6 +72,18 @@ export async function dispatchTaskStep(
     for (const entry of prepared.plan) {
       if (entry.kind === "reject") {
         results.push(entry.result);
+        continue;
+      }
+      if (entry.kind === "workflow-tool") {
+        const started = await startWorkflowTool({
+          action: entry.action,
+          batchEvent: batch.event,
+          parentContinuationToken: input.parentContinuationToken ?? session.continuationToken,
+          prepared,
+          session: nextSession,
+        });
+        nextSession = started.session;
+        if (started.result !== undefined) results.push(started.result);
         continue;
       }
 

@@ -161,6 +161,16 @@
       "import": "./dist/src/public/tools/workflow.js",
       "default": "./dist/src/public/tools/workflow.js"
     },
+    "./workflow": {
+      "eve-source": "./src/public/workflow/index.ts",
+      "types": "./dist/src/public/workflow/index.d.ts",
+      "import": "./dist/src/public/workflow/index.js",
+      "default": "./dist/src/public/workflow/index.js"
+    },
+    "./workflow-modules": {
+      "eve-source": "./src/public/workflow-modules.d.ts",
+      "types": "./dist/src/public/workflow-modules.d.ts"
+    },
     "./models/openai": {
       "types": "./dist/src/public/models/openai/index.d.ts",
       "import": "./dist/src/public/models/openai/index.js",

@@ -15,6 +15,8 @@ import {
   readTaskView,
 } from "#execution/tasks/parent/control-shared.js";
 import { executeTaskUpdate } from "#execution/tasks/child/update.js";
+import { readWorkflowToolExecutor } from "#execution/tool-run/background.js";
+import { cancelToolRun } from "#execution/tool-run/cancel.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { DelegatedTask } from "#execution/tasks/parent/delegate.js";
 import { sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
@@ -155,6 +157,7 @@ export async function cancelOwnedTask(input: {
     await propagateTaskCancel({
       bundle: input.bundle,
       serializedContext: input.serializedContext,
+      entry,
       session: input.session,
       view: settledView,
     });
@@ -172,9 +175,29 @@ export async function cancelOwnedTask(input: {
 async function propagateTaskCancel(input: {
   readonly bundle: CompiledBundle;
   readonly serializedContext?: Record<string, unknown>;
+  readonly entry: SessionTaskIndexEntry;
   readonly session: RuntimeSession;
   readonly view: TaskView;
 }): Promise<void> {
+  const toolRun = readWorkflowToolExecutor(input.view.executor?.binding);
+  if (toolRun !== undefined) {
+    // The run cannot report its own end once cancelled, so settle the
+    // executor here; that is what lets the task run finish and release
+    // its hook.
+    await cancelToolRun({
+      callId: input.entry.taskId,
+      hookToken: toolRun.hookToken,
+      reason: `Task ${input.entry.taskId} was cancelled.`,
+      runId: toolRun.runId,
+      toolName: input.entry.metadata.name,
+    });
+    await sendTaskCommand({
+      command: { kind: "settle-executor" },
+      taskInboxToken: input.entry.taskInboxToken,
+    });
+    return;
+  }
+
   const metadata = readSubagentTaskMetadata(input.view);
   if (metadata === undefined) return;
   const executor =

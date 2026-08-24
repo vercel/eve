@@ -14,6 +14,9 @@ import type { TaskExec } from "#tools/task.js";
  * (`task_cancel`, `task_update`): they carry no child
  * address of their own — the dispatch step resolves targets through the
  * session task index by tool name.
+ *
+ * `workflow-tool` marks an authored tool whose `execute` is a `"use workflow"`
+ * body: the dispatch step starts the run and the turn waits for its result.
  */
 export type HarnessRuntimeActionDefinition =
   | {
@@ -22,7 +25,9 @@ export type HarnessRuntimeActionDefinition =
       readonly remoteAgentName?: string;
       readonly subagentName: string;
     }
-  | { readonly kind: "task-control" };
+  | { readonly kind: "task-control" }
+  /** An authored tool whose `execute` is a workflow; the runtime starts it as a durable run. */
+  | { readonly kind: "workflow-tool"; readonly workflowId: string };
 
 /**
  * Unified harness-owned tool definition.

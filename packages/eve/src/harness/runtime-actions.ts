@@ -9,6 +9,9 @@ import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import { findRunningAgentHandle, isResultBoundToRunningHandle } from "#harness/handles/query.js";
 import { settleAgentTurn } from "#harness/handles/transitions.js";
 import { clearProxyInputRequestsForChild } from "#harness/proxy-input-requests.js";
+import { findToolRun, removeToolRun } from "#harness/tool-runs.js";
+import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
   accumulateSessionUsage,
   getTurnUsageState,
@@ -187,6 +190,8 @@ export async function resolvePendingRuntimeActions(input: {
   readonly emit?: HarnessEmitFn;
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;
+  /** Definitions whose `toModelOutput` projects a workflow tool's result for the model. */
+  readonly tools?: HarnessToolMap;
 }): Promise<ResolvePendingRuntimeActionsResult> {
   const batch = getPendingRuntimeActionBatch(input.session.state);
 
@@ -275,6 +280,19 @@ export async function resolvePendingRuntimeActions(input: {
     }
   }
 
+  // A workflow tool run that reported its result is finished: forget the
+  // run and drop the routes for any question it left unanswered, so a late
+  // click cannot reach a hook that no longer exists.
+  for (const result of readyResults) {
+    if (result.kind !== "tool-result") continue;
+    const record = findToolRun(nextSession.state, result.callId);
+    if (record === undefined) continue;
+    nextSession = removeToolRun(
+      clearProxyInputRequestsForChild(nextSession, record.hookToken),
+      record.callId,
+    );
+  }
+
   const state = { ...nextSession.state };
   delete state[PENDING_RUNTIME_ACTION_BATCH_KEY];
   nextSession = {
@@ -306,33 +324,37 @@ export async function resolvePendingRuntimeActions(input: {
     );
   }
 
-  const toolResults = readyResults.map((result) => {
+  const toolResults: ToolResultPart[] = [];
+  for (const result of readyResults) {
     switch (result.kind) {
       case "load-skill-result":
-        return {
+        toolResults.push({
           output: toToolResultOutput(result),
           toolCallId: result.callId,
           toolName: "load_skill",
-          type: "tool-result" as const,
-        };
+          type: "tool-result",
+        });
+        continue;
       case "subagent-result":
-        return {
+        toolResults.push({
           output: toToolResultOutput(result),
           toolCallId: result.callId,
           toolName: result.subagentName,
-          type: "tool-result" as const,
-        };
+          type: "tool-result",
+        });
+        continue;
       case "tool-result":
-        return {
-          output: toToolResultOutput(result),
+        toolResults.push({
+          output: await projectToolResultOutput(result, input.tools?.get(result.toolName)),
           toolCallId: result.callId,
           toolName: result.toolName,
-          type: "tool-result" as const,
-        };
+          type: "tool-result",
+        });
+        continue;
     }
 
     throw new Error(`Unsupported runtime action result kind "${String(result)}".`);
-  });
+  }
 
   const messages = [...nextSession.history, ...batch.responseMessages];
 
@@ -387,6 +409,19 @@ export function createRuntimeActionRequestFromToolCall(input: {
       name: definition.name,
       nodeId: definition.runtimeAction.nodeId,
       subagentName: definition.runtimeAction.subagentName,
+    };
+  }
+
+  if (definition?.runtimeAction?.kind === "workflow-tool") {
+    return {
+      callId: input.toolCall.toolCallId,
+      input: resolveToolCallInputObject(input.toolCall.input, {
+        callId: input.toolCall.toolCallId,
+        toolName: input.toolCall.toolName,
+      }),
+      kind: "workflow-tool-call",
+      toolName: input.toolCall.toolName,
+      workflowId: definition.runtimeAction.workflowId,
     };
   }
 
@@ -453,6 +488,26 @@ export function resolveToolCallInputObject(
 
 function parseJsonStringInput(value: string): unknown {
   return JSON.parse(value);
+}
+
+/**
+ * A workflow tool's result reaches the model the way a locally executed
+ * tool's would: through the author's `toModelOutput` when the tool declares
+ * one, otherwise as the raw JSON. Errors bypass the projection, as they do
+ * for local execution.
+ */
+async function projectToolResultOutput(
+  result: Extract<RuntimeActionResult, { kind: "tool-result" }>,
+  definition: HarnessToolDefinition | undefined,
+): Promise<ToolResultPart["output"]> {
+  if (result.isError === true || definition?.toModelOutput === undefined) {
+    return toToolResultOutput(result);
+  }
+  return normalizeToolModelOutput({
+    output: await definition.toModelOutput(result.output),
+    toolCallId: result.callId,
+    toolName: result.toolName,
+  });
 }
 
 function toToolResultOutput(result: RuntimeActionResult): ToolResultPart["output"] {

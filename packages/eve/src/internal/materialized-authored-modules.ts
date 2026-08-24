@@ -40,13 +40,16 @@ type PreparedMaterializedInstrumentation =
 export interface PreparedMaterializedAuthoredModules {
   readonly instrumentation?: PreparedMaterializedInstrumentation;
   readonly moduleMapCode: string;
+  /** See `AuthoredModuleMapBundle.workflowSourceFingerprint`. */
+  readonly workflowSourceFingerprint: string | undefined;
 }
 
 export async function prepareMaterializedAuthoredModules(input: {
   readonly manifest: CompiledAgentManifest;
   readonly moduleMapPath: string;
 }): Promise<PreparedMaterializedAuthoredModules> {
-  const moduleMapCode = await bundleAuthoredModuleMapForGeneration(input);
+  const { code: moduleMapCode, workflowSourceFingerprint } =
+    await bundleAuthoredModuleMapForGeneration(input);
   const providersEnabled = input.manifest.config.experimental?.instrumentationProviders ?? false;
   const layout = providersEnabled
     ? resolveInstrumentationLayout({ agentRoot: input.manifest.agentRoot, providersEnabled: true })
@@ -64,7 +67,9 @@ export async function prepareMaterializedAuthoredModules(input: {
     instrumentation = { kind: "directory", moduleCodeBySlot };
   }
 
-  return instrumentation === undefined ? { moduleMapCode } : { instrumentation, moduleMapCode };
+  return instrumentation === undefined
+    ? { moduleMapCode, workflowSourceFingerprint }
+    : { instrumentation, moduleMapCode, workflowSourceFingerprint };
 }
 
 export async function writeMaterializedAuthoredModules(input: {

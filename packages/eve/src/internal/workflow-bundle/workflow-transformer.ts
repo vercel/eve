@@ -52,6 +52,7 @@ type AstNode = {
   argument?: AstNode | null;
   async?: boolean;
   body?: AstNode[] | { body?: AstNode[] };
+  callee?: AstNode | null;
   declaration?: AstNode | null;
   declarations?: AstNode[];
   directive?: string;
@@ -72,7 +73,29 @@ type AstNode = {
   value?: unknown;
 };
 
+/**
+ * Lists the top-level async function declarations in `source` that open
+ * with a Workflow directive. Discovery reads the syntax tree rather than
+ * the text, so a directive quoted in a string or comment never turns a
+ * module into a bundle entry.
+ */
+export async function findWorkflowDirectiveFunctions(
+  filename: string,
+  source: string,
+): Promise<readonly { readonly directive: "use workflow" | "use step"; readonly name: string }[]> {
+  const ast = await parseWorkflowSource(filename, source);
+  return findDirectiveFunctions(ast).map((fn) => ({ directive: fn.directive, name: fn.name }));
+}
+
 export async function transformWorkflowDirectives(input: {
+  /**
+   * `true` for an authored application module. In workflow mode the module
+   * body is preserved (step bodies become proxies in place, never the
+   * eve-internal proxy-only rewrite) and a default export built by an eve
+   * definer such as `defineTool(...)` is dropped, so the driver bundle
+   * never evaluates the tool definition or its schema dependencies.
+   */
+  authored?: boolean;
   filename: string;
   mode: WorkflowDirectiveMode;
   moduleSpecifier: string | undefined;
@@ -87,7 +110,7 @@ export async function transformWorkflowDirectives(input: {
   /**
    * Workflow function names whose bundled id should be emitted without
    * the package version stamp. See `STABLE_WORKFLOW_NAMES` in
-   * `workflow-runtime.ts` for the canonical set eve itself uses.
+   * `stable-workflow-names.ts` for the canonical set eve itself uses.
    */
   stableWorkflowNames?: ReadonlySet<string>;
 }): Promise<{
@@ -171,11 +194,15 @@ export async function transformWorkflowDirectives(input: {
   const manifestComment = `/**__internal_workflows${JSON.stringify(manifest)}*/;`;
   const hasWorkflowDirective = functions.some((fn) => fn.directive === "use workflow");
 
-  if (input.mode === "workflow" && !hasWorkflowDirective) {
+  if (input.mode === "workflow" && !hasWorkflowDirective && input.authored !== true) {
     return {
       code: `${manifestComment}\n${createWorkflowStepProxySource(input.source, ast, functions, defaultIdBase)}`,
       workflowManifest: manifest,
     };
+  }
+
+  if (input.mode === "workflow" && input.authored === true) {
+    replacements.push(...removeEveDefinerDefaultExport(ast));
   }
 
   const replacedSource = applySourceReplacements(input.source, replacements);
@@ -382,6 +409,42 @@ function applySourceReplacements(
   }
 
   return result + source.slice(cursor);
+}
+
+/**
+ * Removes `export default <eveDefiner>(...)` from an authored module bound for
+ * the workflow driver. The driver only needs the module's workflow and step
+ * functions; the definition object exists for the server-side registry, and
+ * evaluating it there would pull the definer (and the schema library behind
+ * `inputSchema`) into a bundle that rejects their Node.js dependencies.
+ */
+function removeEveDefinerDefaultExport(
+  ast: AstProgram,
+): { end: number; start: number; text: string }[] {
+  const eveBindings = new Set<string>();
+
+  for (const node of ast.body ?? []) {
+    if (node.type !== "ImportDeclaration" || node.importKind === "type") continue;
+    const source = node.source?.value;
+    if (typeof source !== "string" || !/^eve(?:\/|$)/.test(source)) continue;
+    for (const specifier of node.specifiers ?? []) {
+      if (specifier.importKind === "type") continue;
+      const name = specifier.local?.name;
+      if (name !== undefined) eveBindings.add(name);
+    }
+  }
+
+  const removals: { end: number; start: number; text: string }[] = [];
+  for (const node of ast.body ?? []) {
+    if (node.type !== "ExportDefaultDeclaration" || node.start === undefined) continue;
+    const call = node.declaration;
+    if (call?.type !== "CallExpression" || node.end === undefined) continue;
+    const callee = call.callee;
+    if (callee?.type !== "Identifier" || !eveBindings.has(callee.name ?? "")) continue;
+    removals.push({ end: node.end, start: node.start, text: "" });
+  }
+
+  return removals;
 }
 
 async function stripUnusedValueImports(filename: string, source: string): Promise<string> {

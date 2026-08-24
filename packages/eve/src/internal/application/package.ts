@@ -429,7 +429,11 @@ export function resolveWorkflowModulePath(specifier: string): string {
     return resolvePackageSourceFilePath("src/internal/workflow/index.ts");
   }
 
-  if (specifier === "workflow/api" || specifier === "workflow/runtime") {
+  if (specifier === "workflow/api") {
+    return resolvePackageSourceFilePath("src/execution/tool-run/workflow-api.ts");
+  }
+
+  if (specifier === "workflow/runtime") {
     return resolvePackageSourceFilePath("src/internal/workflow/runtime.ts");
   }
 

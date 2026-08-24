@@ -35,6 +35,8 @@ import {
   type BackgroundTask,
 } from "#execution/tasks/parent/delegate.js";
 import { propagateSubagentExecutorCancel } from "#execution/tasks/parent/dispatch.js";
+import { readWorkflowToolExecutor } from "#execution/tool-run/background.js";
+import { cancelToolRun } from "#execution/tool-run/cancel.js";
 import { sendTaskCommand, sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 
 interface BackgroundToolExecutionRecord {
@@ -338,7 +340,7 @@ async function compensateBackgroundToolExecution(
       failures.push(error);
     }
     // Reject first so the task is terminal and a late child result cannot
-    // revive it, then best-effort abort the already-dispatched child using
+    // revive it, then best-effort abort the already-dispatched executor using
     // the address carried on its durable executor binding.
     const subagent = readSubagentExecutor(record.task.executor);
     if (subagent !== undefined) {
@@ -346,6 +348,16 @@ async function compensateBackgroundToolExecution(
         bundle,
         executor: subagent,
         taskId: record.task.taskId,
+      });
+    }
+    const toolRun = readWorkflowToolExecutor(record.task.executor);
+    if (toolRun !== undefined) {
+      await cancelToolRun({
+        callId: record.task.taskId,
+        hookToken: toolRun.hookToken,
+        reason: "The step that started the tool failed.",
+        runId: toolRun.runId,
+        toolName: record.task.metadata.name,
       });
     }
   }

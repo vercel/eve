@@ -215,6 +215,12 @@ function buildToolContext(input: {
         },
       ]);
     },
+    get replyTo(): string {
+      throw new Error(
+        `ctx.replyTo: Tool "${scope}" runs inside one model step and has no owner to report to. ` +
+          `Make "execute" a workflow ("use workflow") so the tool can send progress, ask a person, and suspend.`,
+      );
+    },
   };
 }
 

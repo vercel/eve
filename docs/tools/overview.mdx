@@ -76,6 +76,13 @@ Later task-triggered parent turns receive fresh state for the same cohort. The m
 to keep related intermediate results silent while any task remains pending. Once every related
 task is terminal, the state includes their outputs so the model can combine the useful results.
 
+### Durable tools
+
+A tool whose `execute` starts with `"use workflow"` runs as a durable Workflow run instead of
+inside the model step. It can wait for a person, a webhook, or a timer for as long as it takes, with
+nothing running in between, and its return value still settles the tool call. See
+[Durable tools](/docs/tools/workflows).
+
 ### The `ctx` parameter
 
 `execute` gets a `ctx` carrying the runtime accessors:

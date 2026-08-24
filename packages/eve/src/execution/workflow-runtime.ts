@@ -58,33 +58,19 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 import { evaluateTracePolicy } from "#tracing/sampled-trace.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
+import {
+  SESSION_TIMEOUT_WORKFLOW_NAME,
+  TASK_RUN_WORKFLOW_NAME,
+  TOOL_RUN_WORKFLOW_NAME,
+  TURN_WORKFLOW_NAME,
+  WORKFLOW_ENTRY_NAME,
+} from "#execution/stable-workflow-names.js";
 
-const WORKFLOW_ENTRY_NAME = "workflowEntry";
-const TURN_WORKFLOW_NAME = "turnWorkflow";
-const SESSION_TIMEOUT_WORKFLOW_NAME = "sessionTimeoutWorkflow";
-const TASK_RUN_WORKFLOW_NAME = "taskRunWorkflow";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const COMMAND_HOOK_READY_TIMEOUT_MS = 30_000;
 
 export const LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE =
   "deploymentId 'latest' requires a World that implements resolveLatestDeploymentId()";
-
-/**
- * Workflow function names whose bundled id is stable across deployments
- * (no `@<pkg.version>` stamp). The bundler reads this set when emitting
- * the workflow id so cross-deployment routing — `start(ref, args, {
- * deploymentId: "latest" })` — finds the same workflow on a newer
- * deployment even when the eve version differs.
- *
- * Both halves of the contract (bundler output and runtime reference
- * template) read this single set so they cannot drift.
- */
-export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
-  WORKFLOW_ENTRY_NAME,
-  TURN_WORKFLOW_NAME,
-  SESSION_TIMEOUT_WORKFLOW_NAME,
-  TASK_RUN_WORKFLOW_NAME,
-]);
 
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
 
@@ -123,6 +109,11 @@ export const sessionTimeoutWorkflowReference = {
 /** Stable workflow reference for durable task runs (`experimental.tasks`). */
 export const taskRunWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${TASK_RUN_WORKFLOW_NAME}`,
+};
+
+/** Stable workflow reference for authored workflow tool runs. */
+export const toolRunWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${TOOL_RUN_WORKFLOW_NAME}`,
 };
 
 /**

@@ -657,4 +657,107 @@ describe("WorkflowBundleBuilder", () => {
       await rm(tempRoot, { force: true, recursive: true });
     }
   });
+
+  it("bundles authored workflow tools from the application root", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-authored-"));
+    const appRoot = join(tempRoot, "app");
+    const outDir = join(tempRoot, "workflow-build");
+    const flowFilePath = join(tempRoot, "flow.ts");
+    const compiledArtifactsBootstrapPath = join(tempRoot, "compiled-artifacts-bootstrap.mjs");
+    const toolPath = join(appRoot, "agent", "tools", "deploy.ts");
+    const stepsPath = join(appRoot, "agent", "lib", "steps.ts");
+
+    try {
+      await mkdir(join(appRoot, "agent", "tools"), { recursive: true });
+      await mkdir(join(appRoot, "agent", "lib"), { recursive: true });
+      await mkdir(join(appRoot, "node_modules", "vendored"), { recursive: true });
+      await Promise.all([
+        writeFile(compiledArtifactsBootstrapPath, "export {};\n"),
+        writeFile(
+          flowFilePath,
+          ["export async function flow() {", '  "use workflow";', "  return 1;", "}", ""].join(
+            "\n",
+          ),
+        ),
+        writeFile(
+          join(appRoot, "package.json"),
+          `${JSON.stringify({ dependencies: { eve: "*" }, name: "authored-app", version: "0.0.0" })}\n`,
+        ),
+        // Dependency trees are never authored modules, even with directives.
+        writeFile(
+          join(appRoot, "node_modules", "vendored", "index.js"),
+          'export async function vendored() {\n  "use step";\n}\n',
+        ),
+        writeFile(
+          stepsPath,
+          [
+            'import { createHash } from "node:crypto";',
+            "",
+            "export function describePlan(service: string): string {",
+            "  return `deploy ${service}`;",
+            "}",
+            "",
+            "export async function hashPlan(plan: string): Promise<string> {",
+            '  "use step";',
+            '  return createHash("sha256").update(plan).digest("hex");',
+            "}",
+            "",
+          ].join("\n"),
+        ),
+        writeFile(
+          toolPath,
+          [
+            'import { defineTool } from "eve/tools";',
+            'import { sleep } from "workflow";',
+            'import { describePlan, hashPlan } from "../lib/steps";',
+            "",
+            "export default defineTool({",
+            '  description: "Deploy a service.",',
+            '  inputSchema: { type: "object", properties: { service: { type: "string" } } },',
+            "  async execute({ service }: { service: string }) {",
+            '    "use workflow";',
+            "    const digest = await hashPlan(describePlan(service));",
+            '    await sleep("1s");',
+            "    return { digest };",
+            "  },",
+            "});",
+            "",
+          ].join("\n"),
+        ),
+      ]);
+
+      const builder = new FixtureWorkflowBundleBuilder(
+        {
+          agentName: "test-agent",
+          appRoot,
+          compiledArtifactsBootstrapPath,
+          outDir,
+          rootDir: resolvePackageRoot(),
+          watch: false,
+        },
+        [flowFilePath],
+      );
+
+      await builder.build();
+
+      const stepsSource = await readFile(join(outDir, "steps.mjs"), "utf8");
+      expect(stepsSource).toContain("agent/tools/deploy.ts");
+      expect(stepsSource).toContain("agent/lib/steps.ts");
+      expect(stepsSource).not.toContain("vendored");
+
+      const workflowsSource = await readFile(join(outDir, "workflows.mjs"), "utf8");
+      const encodedChunksMatch = workflowsSource.match(
+        /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
+      );
+      const encodedChunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
+      const workflowCode = Buffer.from(encodedChunks.join(""), "base64").toString("utf8");
+      expect(workflowCode).toContain('"workflow//./agent/tools/deploy//execute"');
+      expect(workflowCode).toContain('"step//./agent/lib/steps//hashPlan"');
+      expect(workflowCode).toContain("deploy ${service}");
+      expect(workflowCode).not.toContain("defineTool");
+      expect(workflowCode).not.toContain("node:crypto");
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
 });

@@ -71,6 +71,25 @@ export const runtimeRemoteAgentCallActionRequestSchema = z
   .strict();
 
 /**
+ * Call to an authored tool whose `execute` is a workflow. The harness parks
+ * the call and the runtime starts the durable run named by `workflowId`;
+ * the run's result settles the call as a `tool-result`.
+ */
+export type RuntimeWorkflowToolCallActionRequest = z.infer<
+  typeof runtimeWorkflowToolCallActionRequestSchema
+>;
+
+const runtimeWorkflowToolCallActionRequestSchema = z
+  .object({
+    callId: z.string(),
+    input: jsonObjectSchema,
+    kind: z.literal("workflow-tool-call"),
+    toolName: z.string(),
+    workflowId: z.string(),
+  })
+  .strict();
+
+/**
  * Eve-owned `load-skill` action requested by the model.
  */
 type RuntimeLoadSkillActionRequest = z.infer<typeof runtimeLoadSkillActionRequestSchema>;
@@ -96,7 +115,8 @@ export type RuntimeActionRequest =
   | RuntimeLoadSkillActionRequest
   | RuntimeRemoteAgentCallActionRequest
   | RuntimeSubagentCallActionRequest
-  | RuntimeToolCallActionRequest;
+  | RuntimeToolCallActionRequest
+  | RuntimeWorkflowToolCallActionRequest;
 
 /**
  * Zod schema for one runtime action request.
@@ -106,6 +126,7 @@ export const runtimeActionRequestSchema = z.discriminatedUnion("kind", [
   runtimeRemoteAgentCallActionRequestSchema,
   runtimeSubagentCallActionRequestSchema,
   runtimeToolCallActionRequestSchema,
+  runtimeWorkflowToolCallActionRequestSchema,
 ]);
 
 /**

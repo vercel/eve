@@ -12,6 +12,7 @@ import {
 } from "#execution/tasks/child/steps.js";
 import { applyTaskTransition } from "#tasks/transitions.js";
 import { translateTaskInboundPayload } from "#tasks/wire.js";
+import { isRunMessage, runMessageToTaskPayload } from "#execution/tool-run/owner-inbox.js";
 import {
   isReadyTaskStatus,
   isTerminalTaskStatus,
@@ -93,15 +94,17 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     let pendingAuthorizationEvents: TaskInboundAuthorizationEvent[] = [];
     let pendingUpdates: TaskInboundUpdate[] = [];
     let dispatchAcknowledged = false;
+    let runUpdateIndex = 0;
     await appendTaskViewStep({ view });
 
     while (!isTaskRunFinished(view, dispatchAcknowledged)) {
       const next = await iterator.next();
       if (next.done === true) return;
+      const raw = isRunMessage(next.value)
+        ? runMessageToTaskPayload(next.value, view.taskId, () => runUpdateIndex++)
+        : next.value;
       const payload: TaskRunInboundPayload =
-        next.value.kind === "subagent-authorization-event"
-          ? { ...next.value, kind: "authorization-event" }
-          : next.value;
+        raw.kind === "subagent-authorization-event" ? { ...raw, kind: "authorization-event" } : raw;
       // Approval lifecycle events (`approval.candidate`/`approval.settled`)
       // are intra-child responder bookkeeping, not task blockers: only
       // `authorization.required`/`authorization.completed` may block or

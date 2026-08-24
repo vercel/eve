@@ -51,8 +51,68 @@ export async function transformDynamicToolExecute(
   if (defineToolAliases.size === 0) return null;
 
   const callbacks: CallbackInfo[] = [];
-  walkForCallbacks(source, ast, callbacks, [], defineToolAliases);
+  walkForCallbacks(source, ast, callbacks, [], {
+    defineToolAliases,
+    workflowFunctions: findWorkflowFunctionNames(ast),
+  });
   return callbacks.length === 0 ? null : applyTransform(source, callbacks);
+}
+
+interface WalkContext {
+  readonly defineToolAliases: ReadonlySet<string>;
+  /**
+   * Top-level functions that are workflow bodies. A tool whose `execute` is
+   * one of these never runs as a callback — the runtime starts it as a
+   * durable run — so it must keep its identity and is not stamped.
+   */
+  readonly workflowFunctions: ReadonlySet<string>;
+}
+
+/**
+ * Workflow functions are recognizable in both shapes this transform may see:
+ * the authored `"use workflow"` directive, and — after the directive
+ * transform has run — the `name.workflowId = "..."` stamp it leaves behind.
+ */
+function findWorkflowFunctionNames(program: AstNode): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const statement of (program.body as AstNode[] | undefined) ?? []) {
+    const declaration =
+      statement.type === "ExportNamedDeclaration"
+        ? (statement.declaration as AstNode | null | undefined)
+        : statement;
+    if (declaration?.type === "FunctionDeclaration") {
+      const name = (declaration.id as AstNode | undefined)?.name;
+      if (name !== undefined && hasWorkflowDirective(declaration)) names.add(name);
+      continue;
+    }
+    if (statement.type !== "ExpressionStatement") continue;
+    const expression = statement.expression as AstNode | undefined;
+    if (expression?.type !== "AssignmentExpression") continue;
+    const left = expression.left as AstNode | undefined;
+    const object = left?.object as AstNode | undefined;
+    const property = left?.property as AstNode | undefined;
+    if (
+      left?.type === "MemberExpression" &&
+      object?.type === "Identifier" &&
+      object.name !== undefined &&
+      property?.type === "Identifier" &&
+      property.name === "workflowId"
+    ) {
+      names.add(object.name);
+    }
+  }
+  return names;
+}
+
+function hasWorkflowDirective(fn: AstNode): boolean {
+  const body = fn.body as AstNode | undefined;
+  const statement = ((body?.body as AstNode[] | undefined) ?? [])[0];
+  const directive =
+    statement?.directive ??
+    (statement?.type === "ExpressionStatement"
+      ? ((statement.expression as AstNode | undefined)?.value as unknown)
+      : undefined);
+  return directive === "use workflow";
 }
 
 // Keep the old export name for backward compatibility with the plugin.
@@ -85,7 +145,7 @@ function walkForCallbacks(
   node: AstNode | null | undefined,
   results: CallbackInfo[],
   nestedScopes: readonly ScopeEntry[],
-  defineToolAliases: ReadonlySet<string>,
+  context: WalkContext,
 ): void {
   if (!node) return;
 
@@ -99,7 +159,7 @@ function walkForCallbacks(
         vars: collectScopeVarDeclarations(bodyNode),
       },
     ];
-    walkForCallbacks(source, bodyNode, results, extended, defineToolAliases);
+    walkForCallbacks(source, bodyNode, results, extended, context);
     return;
   }
 
@@ -107,11 +167,11 @@ function walkForCallbacks(
     node.type === "CallExpression" &&
     node.callee?.type === "Identifier" &&
     node.callee.name !== undefined &&
-    defineToolAliases.has(node.callee.name) &&
+    context.defineToolAliases.has(node.callee.name) &&
     node.arguments?.length === 1 &&
     node.arguments[0]?.type === "ObjectExpression"
   ) {
-    collectToolCallbacks(source, node.arguments[0], results, nestedScopes);
+    collectToolCallbacks(source, node.arguments[0], results, nestedScopes, context);
     return;
   }
 
@@ -119,13 +179,24 @@ function walkForCallbacks(
     if (Array.isArray(value)) {
       for (const child of value) {
         if (isAstNode(child)) {
-          walkForCallbacks(source, child, results, nestedScopes, defineToolAliases);
+          walkForCallbacks(source, child, results, nestedScopes, context);
         }
       }
     } else if (isAstNode(value)) {
-      walkForCallbacks(source, value, results, nestedScopes, defineToolAliases);
+      walkForCallbacks(source, value, results, nestedScopes, context);
     }
   }
+}
+
+function isWorkflowExecute(property: AstNode | undefined, context: WalkContext): boolean {
+  const value = property?.value as AstNode | undefined;
+  if (value === undefined) return false;
+  if (isFunction(value) || property?.method === true) return hasWorkflowDirective(value);
+  return (
+    value.type === "Identifier" &&
+    value.name !== undefined &&
+    context.workflowFunctions.has(value.name)
+  );
 }
 
 function collectToolCallbacks(
@@ -133,15 +204,12 @@ function collectToolCallbacks(
   tool: AstNode,
   results: CallbackInfo[],
   nestedScopes: readonly ScopeEntry[],
+  context: WalkContext,
 ): void {
-  collectCallbackProperty(
-    source,
-    findProperty(tool, "execute"),
-    "execute",
-    "execute",
-    results,
-    nestedScopes,
-  );
+  const execute = findProperty(tool, "execute");
+  if (!isWorkflowExecute(execute, context)) {
+    collectCallbackProperty(source, execute, "execute", "execute", results, nestedScopes);
+  }
   collectCallbackProperty(
     source,
     findProperty(tool, "toModelOutput"),
