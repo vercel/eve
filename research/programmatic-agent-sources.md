@@ -579,12 +579,14 @@ materialization remains the `provider-tool` effect described below.
 
 Workflow follows the same pattern with no framework default: the authored
 `experimental_workflow()` sentinel at `tools/workflow.ts` composes at that
-canonical slot and declares the `workflow-host` effect. The kernel owns its
-advertisement (root sessions below the depth limit), sandbox materialization
-over `agent-dispatch`-eligible tools, and interrupt dispatch. The Workflow
-world configuration stays in `defineAgent({ experimental: { workflow } })`,
-and its transport stays in the closed host inventory; neither is a tool
-identity.
+canonical slot, declares the `workflow-host` effect, and carries the tool's
+complete configuration in its arguments. The kernel owns its advertisement
+(root sessions below the depth limit), sandbox materialization over
+`agent-dispatch`-eligible tools, and interrupt dispatch. Despite the shared
+name, `defineAgent({ experimental: { workflow } })` is unrelated to the
+tool: it selects the durable-runtime world backing the agent's own
+execution. That world selection and the workflow transport in the closed
+host inventory are not tool identities.
 
 ### `connection_search`
 
