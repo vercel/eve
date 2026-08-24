@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Reuse pending authorization challenges when multi-connection turns resume. Existing device codes remain valid and no longer appear as failed attempts.
+Resume completed authorization callbacks with the current pending connection batch so unrelated sign-in requests stay active.

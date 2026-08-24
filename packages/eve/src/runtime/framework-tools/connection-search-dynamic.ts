@@ -6,6 +6,7 @@ import {
   type AuthorizationChallenge,
   type AuthorizationSignal,
   consumeAuthorizationResult,
+  createAuthorizationAttempt,
   requestAuthorization,
 } from "#harness/authorization.js";
 import {
@@ -26,7 +27,10 @@ import { stampDurableDynamicToolCallbacks } from "#shared/durable-dynamic-tool-c
 import { writeCachedToken } from "#runtime/connections/authorization-tokens.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
-import { startScopedAuthorization } from "#runtime/connections/scoped-authorization.js";
+import {
+  resolveAuthorizationCallbackUrl,
+  stampChallengeDisplayName,
+} from "#runtime/connections/scoped-authorization.js";
 import {
   type ConnectionRegistry,
   type ConnectionToolMetadata,
@@ -231,27 +235,40 @@ async function executeConnectionSearch(
 
         const auth = await resolveInteractiveAuth(registry, conn.connectionName);
         if (auth) {
-          try {
-            const signal = await startScopedAuthorization({
+          const attempt = createAuthorizationAttempt(conn.connectionName);
+          if (attempt) {
+            const principal = resolveConnectionPrincipal(conn.connectionName, auth);
+            const callbackUrl = resolveAuthorizationCallbackUrl({
               authorization: auth,
-              connection: { url: conn.url ?? "" },
-              scope: conn.connectionName,
+              callbackUrl: attempt.hookUrl,
             });
-            if (signal !== undefined) {
-              authChallenges.push(...signal.challenges);
+            try {
+              const { challenge, resume } = await auth.startAuthorization({
+                callbackUrl,
+                connection: { url: conn.url ?? "" },
+                principal,
+              });
+              authChallenges.push({
+                attemptId: attempt.attemptId,
+                name: conn.connectionName,
+                challenge: stampChallengeDisplayName(challenge, auth),
+                hookUrl: callbackUrl,
+                principal,
+                resume,
+              });
+            } catch (startErr) {
+              const error = toError(startErr);
+              logger.warn("startAuthorization failed", {
+                connection: conn.connectionName,
+                error,
+              });
+              failedConnections.push({
+                connection: conn.connectionName,
+                description: conn.description,
+                error: `Failed to start authorization for "${conn.connectionName}": ${error.message}`,
+              });
+              continue;
             }
-          } catch (startErr) {
-            const error = toError(startErr);
-            logger.warn("startAuthorization failed", {
-              connection: conn.connectionName,
-              error,
-            });
-            failedConnections.push({
-              connection: conn.connectionName,
-              description: conn.description,
-              error: `Failed to start authorization for "${conn.connectionName}": ${error.message}`,
-            });
-            continue;
           }
         }
         failedConnections.push({
@@ -447,13 +464,28 @@ async function executeDiscoveredConnectionTool(
       });
     }
 
-    const signal = await startScopedAuthorization({
+    const attempt = createAuthorizationAttempt(connectionName);
+    if (!attempt) throw error;
+    const principal = resolveConnectionPrincipal(connectionName, interactiveAuth);
+    const callbackUrl = resolveAuthorizationCallbackUrl({
       authorization: interactiveAuth,
-      connection: { url: conn?.url ?? "" },
-      scope: connectionName,
+      callbackUrl: attempt.hookUrl,
     });
-    if (signal === undefined) throw error;
-    return signal;
+    const { challenge, resume } = await interactiveAuth.startAuthorization({
+      callbackUrl,
+      connection: { url: conn?.url ?? "" },
+      principal,
+    });
+    return requestAuthorization([
+      {
+        attemptId: attempt.attemptId,
+        name: connectionName,
+        challenge: stampChallengeDisplayName(challenge, interactiveAuth),
+        hookUrl: callbackUrl,
+        principal,
+        resume,
+      },
+    ]);
   }
 }
 

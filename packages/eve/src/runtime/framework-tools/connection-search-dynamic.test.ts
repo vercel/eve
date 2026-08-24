@@ -7,7 +7,6 @@ import {
   CallbackBaseUrlKey,
   isAuthorizationSignal,
   PendingAuthorizationResultKey,
-  PendingAuthorizationStateKey,
 } from "#harness/authorization.js";
 import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";
 import type { ToolContext } from "#public/definitions/tool.js";
@@ -393,98 +392,6 @@ describe("connection_search", () => {
         challenge: { url: "https://idp.example.com/authorize" },
       },
     ]);
-  });
-
-  it("reuses another connection's pending challenge after one authorization completes", async () => {
-    let notionCompletions = 0;
-    let dataHubStarts = 0;
-    const principal = { id: "user-1", issuer: "test-idp", type: "user" } as const;
-    const notion: ResolvedConnectionDefinition = {
-      ...connection("notion"),
-      authorization: {
-        completeAuthorization: async () => {
-          notionCompletions += 1;
-          return { token: "notion-token" };
-        },
-        getToken: async () => ({ token: "notion-token" }),
-        principalType: "user",
-        startAuthorization: async () => ({
-          challenge: { url: "https://idp.example.com/notion" },
-        }),
-      },
-    };
-    const dataHub: ResolvedConnectionDefinition = {
-      ...connection("data-hub"),
-      authorization: {
-        completeAuthorization: async () => ({ token: "data-hub-token" }),
-        getToken: async () => {
-          throw new ConnectionAuthorizationRequiredError("data-hub");
-        },
-        principalType: "user",
-        startAuthorization: async () => {
-          dataHubStarts += 1;
-          return {
-            challenge: {
-              url: "https://idp.example.com/data-hub/new",
-              userCode: "NEW-CODE",
-            },
-          };
-        },
-      },
-    };
-    const pendingDataHubChallenge = {
-      attemptId: "attempt-data-hub",
-      challenge: {
-        url: "https://idp.example.com/data-hub/existing",
-        userCode: "OLD-CODE",
-      },
-      hookUrl: "https://agent.example.com/eve/v1/connections/data-hub/callback/attempt-data-hub",
-      name: "data-hub",
-      principal,
-    };
-    const connectionRegistry = registry({
-      connections: [notion, dataHub],
-      loadTools: {
-        notion: async () => [],
-        "data-hub": async () => {
-          throw new ConnectionAuthorizationRequiredError("data-hub");
-        },
-      },
-    });
-
-    const result = await executeConnectionSearch(
-      connectionRegistry,
-      { keywords: "search records" },
-      (ctx) => {
-        ctx.set(SessionIdKey, "session-auth");
-        ctx.set(CallbackBaseUrlKey, "https://agent.example.com");
-        ctx.set(AuthKey, {
-          attributes: {},
-          authenticator: "test-idp",
-          issuer: "test-idp",
-          principalId: "user-1",
-          principalType: "user",
-        });
-        ctx.set(PendingAuthorizationResultKey, [
-          {
-            attemptId: "attempt-notion",
-            callback: { method: "GET", params: {} },
-            hookUrl: "https://agent.example.com/eve/v1/connections/notion/callback/attempt-notion",
-            name: "notion",
-            principal,
-          },
-        ]);
-        ctx.set(PendingAuthorizationStateKey, {
-          challenges: [pendingDataHubChallenge],
-        });
-      },
-    );
-
-    expect(notionCompletions).toBe(1);
-    expect(dataHubStarts).toBe(0);
-    expect(isAuthorizationSignal(result)).toBe(true);
-    if (!isAuthorizationSignal(result)) throw new Error("expected authorization signal");
-    expect(result.challenges).toEqual([pendingDataHubChallenge]);
   });
 
   it("replays authorization from the step-scoped durable execute descriptor", async () => {

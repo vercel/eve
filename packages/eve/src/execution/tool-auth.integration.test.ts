@@ -559,6 +559,50 @@ describe("tool-hosted authorization", () => {
     expect(result).toEqual({ token: "minted" });
   });
 
+  it("does not serve an already-expired token minted by a callback", async () => {
+    const auth: AuthorizationDefinition = {
+      principalType: "user",
+      async getToken(): Promise<TokenResult> {
+        throw requiredError();
+      },
+      async startAuthorization() {
+        return { challenge: { url: "https://idp.example/auth" }, state: {} };
+      },
+      async completeAuthorization(): Promise<TokenResult> {
+        return { expiresAt: Date.now() - 1, token: "expired" };
+      },
+    };
+    const tool = authoredTool({
+      name: "list_groups",
+      async execute(_input, ctx) {
+        return await ctx.getToken(auth);
+      },
+    });
+    const runtime = createTestRuntime({ tools: [tool] });
+
+    const result = await runtime.runAsSession({ sessionId: "session_expired_resume" }, async () => {
+      seedUserPrincipal();
+      loadContext().set(CallbackBaseUrlKey, "https://app.example");
+      loadContext().set(PendingAuthorizationResultKey, [
+        {
+          attemptId: "attempt-list-groups",
+          name: "list_groups__inline_auth",
+          hookUrl: "https://app.example/callback",
+          principal: TEST_USER_PRINCIPAL,
+          callback: {
+            params: { code: "abc" },
+            method: "GET",
+          },
+        },
+      ]);
+      return runtime.executeTool(tool, {});
+    });
+
+    expect(isAuthorizationSignal(result)).toBe(true);
+    if (!isAuthorizationSignal(result)) throw new Error("expected signal");
+    expect(result.challenges[0]).toMatchObject({ name: "list_groups__inline_auth" });
+  });
+
   it("completes an inline provider callback on resume and serves the minted token", async () => {
     let completeCalls = 0;
     const inlineAuth: AuthorizationDefinition = {

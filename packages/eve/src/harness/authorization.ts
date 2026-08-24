@@ -283,24 +283,17 @@ export interface PendingAuthorizationState {
   readonly challenges: readonly AuthorizationChallenge[];
 }
 
-/** Active challenges rebuilt from session state for each harness step. */
-export const PendingAuthorizationStateKey = new ContextKey<PendingAuthorizationState>(
-  "eve.pendingAuthorizationState",
-);
-
 export function setPendingAuthorization(
   sessionState: Record<string, unknown> | undefined,
   value: PendingAuthorizationState,
 ): Record<string, unknown> {
   const previous = getPendingAuthorization(sessionState)?.challenges ?? [];
-  const replaced = previous.filter((candidate) =>
-    value.challenges.some((replacement) => sameAuthorizationScope(candidate, replacement)),
-  );
+  const superseded = getSupersededAuthorizationChallenges(sessionState, value.challenges);
   return {
     ...sessionState,
     [PENDING_AUTHORIZATION_KEY]: {
       challenges: [
-        ...previous.filter((challenge) => !replaced.includes(challenge)),
+        ...previous.filter((challenge) => !superseded.includes(challenge)),
         ...value.challenges,
       ],
     },
@@ -316,40 +309,10 @@ export function getSupersededAuthorizationChallenges(
   return previous.filter((candidate) =>
     replacements.some(
       (replacement) =>
-        sameAuthorizationScope(candidate, replacement) &&
-        !sameAuthorizationAttempt(candidate, replacement),
+        candidate.name === replacement.name &&
+        samePrincipal(candidate.principal, replacement.principal),
     ),
   );
-}
-
-/** Whether this exact attempt is already pending in durable session state. */
-export function isPendingAuthorizationChallenge(
-  sessionState: Record<string, unknown> | undefined,
-  challenge: AuthorizationChallenge,
-): boolean {
-  return (
-    getPendingAuthorization(sessionState)?.challenges.some((pending) =>
-      sameAuthorizationAttempt(pending, challenge),
-    ) ?? false
-  );
-}
-
-function sameAuthorizationScope(
-  left: AuthorizationChallenge,
-  right: AuthorizationChallenge,
-): boolean {
-  return left.name === right.name && samePrincipal(left.principal, right.principal);
-}
-
-function sameAuthorizationAttempt(
-  left: AuthorizationChallenge,
-  right: AuthorizationChallenge,
-): boolean {
-  if (!sameAuthorizationScope(left, right)) return false;
-  if (left.attemptId !== undefined || right.attemptId !== undefined) {
-    return left.attemptId !== undefined && left.attemptId === right.attemptId;
-  }
-  return left.hookUrl === right.hookUrl;
 }
 
 function samePrincipal(
@@ -399,27 +362,6 @@ export function getPendingAuthorization(
   const v = sessionState[PENDING_AUTHORIZATION_KEY];
   if (typeof v !== "object" || v === null) return undefined;
   return v as PendingAuthorizationState;
-}
-
-/** Returns a still-valid pending challenge for the same scope and principal. */
-export function getReusableAuthorizationChallenge(
-  name: string,
-  principal: ConnectionPrincipal,
-): AuthorizationChallenge | undefined {
-  return loadContext()
-    .get(PendingAuthorizationStateKey)
-    ?.challenges.find(
-      (challenge) =>
-        challenge.name === name &&
-        samePrincipal(challenge.principal, principal) &&
-        !authorizationChallengeExpired(challenge.challenge),
-    );
-}
-
-function authorizationChallengeExpired(challenge: ConnectionAuthorizationChallenge): boolean {
-  if (challenge.expiresAt === undefined) return false;
-  const expiresAt = Date.parse(challenge.expiresAt);
-  return Number.isNaN(expiresAt) || expiresAt <= Date.now();
 }
 
 export function hasPendingAuthorization(

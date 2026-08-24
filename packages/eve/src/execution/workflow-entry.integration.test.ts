@@ -401,31 +401,14 @@ describe("workflowEntry integration", () => {
           outcome: "authorized",
         });
 
-        // The granted authorization serves the next explicit tool request.
-        // (No waitForHook here: it only reports never-received hooks, and
-        // the continuation hook already received the intervening message.)
-        await resumeHook(continuationToken, {
-          auth: {
-            attributes: {},
-            authenticator: "test-idp",
-            issuer: "test-idp",
-            principalId: "user-1",
-            principalType: "user",
-          },
-          kind: "send",
-          payload: { message: "Use the get_weather tool to check the weather in Lisbon." },
-        });
-
-        const toolTurn = await stream.nextUntil(
-          "post-authorization tool turn",
-          (event) => event.type === "session.waiting",
-        );
+        // The callback resumes the model with the completed authorization and
+        // the current pending batch, so it can continue the original request.
         expect(completeCalls()).toBe(1);
         expect(completedPrincipals()).toEqual([
           expect.objectContaining({ id: "user-1", type: "user" }),
         ]);
         expect(
-          toolTurn.some(
+          callbackTurn.some(
             (event) =>
               event.type === "message.completed" &&
               event.data.message?.includes("Used local weather tool for Lisbon") === true &&

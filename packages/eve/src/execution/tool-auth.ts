@@ -229,8 +229,12 @@ async function resolveInlineToken(input: {
 }): Promise<TokenResult> {
   const { justAuthorizedScopes } = input;
   const scoped = buildInlineScopedAuthorization(input);
-  if (!justAuthorizedScopes.has(scoped.scope) && (await completeScopedAuthorization(scoped))) {
+  const authorizedToken = justAuthorizedScopes.has(scoped.scope)
+    ? undefined
+    : await completeScopedAuthorization(scoped);
+  if (authorizedToken !== undefined) {
     justAuthorizedScopes.add(scoped.scope);
+    return authorizedToken;
   }
 
   try {

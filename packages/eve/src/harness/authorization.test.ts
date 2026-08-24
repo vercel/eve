@@ -8,11 +8,7 @@ import {
   consumeAuthorizationResult,
   getPendingAuthorization,
   getHookUrl,
-  getReusableAuthorizationChallenge,
-  getSupersededAuthorizationChallenges,
-  isPendingAuthorizationChallenge,
   PendingAuthorizationResultKey,
-  PendingAuthorizationStateKey,
   setPendingAuthorization,
 } from "#harness/authorization.js";
 import type { ConnectionPrincipal } from "#runtime/connections/types.js";
@@ -164,64 +160,5 @@ describe("pending authorization attempts", () => {
     expect(
       getPendingAuthorization(clearPendingAuthorization(state, ["linear-2"]))?.challenges,
     ).toEqual([challenge("github", "github-1")]);
-  });
-
-  it("reuses a still-valid challenge for the same principal", () => {
-    const ctx = new ContextContainer();
-    const principal = { id: "user-a", issuer: "idp", type: "user" } as const;
-    const pending = challenge("linear", "linear-1", principal);
-    ctx.set(PendingAuthorizationStateKey, { challenges: [pending] });
-
-    expect(
-      contextStorage.run(ctx, () => getReusableAuthorizationChallenge("linear", principal)),
-    ).toBe(pending);
-
-    const state = setPendingAuthorization(undefined, { challenges: [pending] });
-    expect(
-      getPendingAuthorization(setPendingAuthorization(state, { challenges: [pending] }))
-        ?.challenges,
-    ).toEqual([pending]);
-  });
-
-  it("does not reuse an expired challenge", () => {
-    const ctx = new ContextContainer();
-    const principal = { id: "user-a", issuer: "idp", type: "user" } as const;
-    ctx.set(PendingAuthorizationStateKey, {
-      challenges: [
-        {
-          ...challenge("linear", "linear-1", principal),
-          challenge: {
-            expiresAt: "2000-01-01T00:00:00.000Z",
-            url: "https://idp.example/linear-1",
-          },
-        },
-      ],
-    });
-
-    expect(
-      contextStorage.run(ctx, () => getReusableAuthorizationChallenge("linear", principal)),
-    ).toBeUndefined();
-  });
-
-  it("treats a reusable legacy challenge without an attempt ID as the same attempt", () => {
-    const ctx = new ContextContainer();
-    const pending = {
-      challenge: { url: "https://idp.example/linear" },
-      hookUrl: "https://agent.example/linear",
-      name: "linear",
-      principal: { type: "app" } as const,
-    };
-    const state = setPendingAuthorization(undefined, { challenges: [pending] });
-    ctx.set(PendingAuthorizationStateKey, { challenges: [pending] });
-
-    expect(
-      contextStorage.run(ctx, () => getReusableAuthorizationChallenge("linear", pending.principal)),
-    ).toBe(pending);
-    expect(getSupersededAuthorizationChallenges(state, [pending])).toEqual([]);
-    expect(isPendingAuthorizationChallenge(state, pending)).toBe(true);
-
-    const replacement = { ...pending, hookUrl: "https://agent.example/linear-replacement" };
-    expect(getSupersededAuthorizationChallenges(state, [replacement])).toEqual([pending]);
-    expect(isPendingAuthorizationChallenge(state, replacement)).toBe(false);
   });
 });

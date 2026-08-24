@@ -46,7 +46,6 @@ import {
   getPendingAuthorization,
   modelFacingAuthorizationOutput,
   requestAuthorization,
-  setPendingAuthorization,
 } from "#harness/authorization.js";
 import {
   getPendingInputRequestIds,
@@ -5870,15 +5869,15 @@ describe("createToolLoopHarness", () => {
   });
 
   describe("authorization signal detection", () => {
-    function createAuthSignals(attemptId = "attempt-protected-action", userCode = "GFI-QLM") {
+    function createAuthSignals() {
       const full = requestAuthorization([
         {
-          attemptId,
+          attemptId: "attempt-protected-action",
           name: "protected_action",
           challenge: {
             url: "https://idp.example/auth",
             instructions: "Sign in to continue",
-            userCode,
+            userCode: "GFI-QLM",
           },
           hookUrl: "https://app.example/callback",
           principal: { type: "app" },
@@ -5955,8 +5954,17 @@ describe("createToolLoopHarness", () => {
       expect(actionResults).toHaveLength(0);
     });
 
-    it("still parks on authorization without emitting action.result when interactive auth fires in the same step", async () => {
+    it("parks every authorization signal from the step without emitting action.result", async () => {
       const { full, modelFacing } = createAuthSignals();
+      const otherFull = requestAuthorization([
+        {
+          ...full.challenges[0]!,
+          attemptId: "attempt-other-action",
+          hookUrl: "https://app.example/other/callback",
+          name: "other_action",
+        },
+      ]);
+      const otherModelFacing = modelFacingAuthorizationOutput(otherFull);
 
       setupMockAgent({
         finishReason: "tool-calls",
@@ -5973,6 +5981,18 @@ describe("createToolLoopHarness", () => {
             toolName: "protected_action",
             type: "tool-result",
           },
+          {
+            input: { action: "run" },
+            toolCallId: "call-2",
+            toolName: "other_action",
+            type: "tool-call",
+          },
+          {
+            output: otherModelFacing,
+            toolCallId: "call-2",
+            toolName: "other_action",
+            type: "tool-result",
+          },
           { finishReason: "tool-calls", type: "finish-step" },
         ],
         response: {
@@ -5985,8 +6005,31 @@ describe("createToolLoopHarness", () => {
                   toolName: "protected_action",
                   type: "tool-call",
                 },
+                {
+                  input: { action: "run" },
+                  toolCallId: "call-2",
+                  toolName: "other_action",
+                  type: "tool-call",
+                },
               ],
               role: "assistant",
+            },
+            {
+              content: [
+                {
+                  output: modelFacing,
+                  toolCallId: "call-1",
+                  toolName: "protected_action",
+                  type: "tool-result",
+                },
+                {
+                  output: otherModelFacing,
+                  toolCallId: "call-2",
+                  toolName: "other_action",
+                  type: "tool-result",
+                },
+              ],
+              role: "tool",
             },
           ],
         },
@@ -5998,12 +6041,24 @@ describe("createToolLoopHarness", () => {
             toolName: "protected_action",
             type: "tool-call",
           },
+          {
+            input: { action: "run" },
+            toolCallId: "call-2",
+            toolName: "other_action",
+            type: "tool-call",
+          },
         ],
         toolResults: [
           {
             output: modelFacing,
             toolCallId: "call-1",
             toolName: "protected_action",
+            type: "tool-result",
+          },
+          {
+            output: otherModelFacing,
+            toolCallId: "call-2",
+            toolName: "other_action",
             type: "tool-result",
           },
         ],
@@ -6022,11 +6077,21 @@ describe("createToolLoopHarness", () => {
                 name: "protected_action",
               },
             ],
+            [
+              "other_action",
+              {
+                description: "Run another protected action",
+                execute: vi.fn(),
+                inputSchema: jsonSchema({ type: "object" }),
+                name: "other_action",
+              },
+            ],
           ]),
         }),
       );
       const ctx = new ContextContainer();
       stashToolInterrupt(ctx, "call-1", full);
+      stashToolInterrupt(ctx, "call-2", otherFull);
 
       const result = await contextStorage.run(ctx, () =>
         runStep(createTestSession(), { message: "run protected action" }),
@@ -6035,103 +6100,21 @@ describe("createToolLoopHarness", () => {
       expect(result.next).toBeNull();
       expect(result.settledTurn).toBeUndefined();
       expect(getPendingAuthorization(result.session.state)).toEqual({
-        challenges: full.challenges,
+        challenges: [...full.challenges, ...otherFull.challenges],
       });
+      expect(result.session.history.slice(-2).map((message) => message.role)).toEqual([
+        "assistant",
+        "tool",
+      ]);
 
       const authRequired = events.filter((event) => event.type === "authorization.required");
-      expect(authRequired).toHaveLength(1);
+      expect(authRequired.map((event) => event.data.name)).toEqual([
+        "protected_action",
+        "other_action",
+      ]);
 
       const actionResults = events.filter((event) => event.type === "action.result");
       expect(actionResults).toHaveLength(0);
-    });
-
-    it("does not report or re-emit a reused pending authorization", async () => {
-      const { full, modelFacing } = createAuthSignals("attempt-existing", "OLD-CODE");
-
-      setupMockAgent({
-        finishReason: "tool-calls",
-        fullStreamParts: [
-          {
-            input: { action: "run" },
-            toolCallId: "call-1",
-            toolName: "protected_action",
-            type: "tool-call",
-          },
-          {
-            output: modelFacing,
-            toolCallId: "call-1",
-            toolName: "protected_action",
-            type: "tool-result",
-          },
-          { finishReason: "tool-calls", type: "finish-step" },
-        ],
-        response: {
-          messages: [
-            {
-              content: [
-                {
-                  input: { action: "run" },
-                  toolCallId: "call-1",
-                  toolName: "protected_action",
-                  type: "tool-call",
-                },
-              ],
-              role: "assistant",
-            },
-          ],
-        },
-        text: "",
-        toolCalls: [
-          {
-            input: { action: "run" },
-            toolCallId: "call-1",
-            toolName: "protected_action",
-            type: "tool-call",
-          },
-        ],
-        toolResults: [
-          {
-            output: modelFacing,
-            toolCallId: "call-1",
-            toolName: "protected_action",
-            type: "tool-result",
-          },
-        ],
-      });
-
-      const { emit, events } = createEventCollector();
-      const runStep = createToolLoopHarness(
-        createTestConfig("conversation", emit, {
-          tools: new Map([
-            [
-              "protected_action",
-              {
-                description: "Run a protected action",
-                execute: vi.fn(),
-                inputSchema: jsonSchema({ type: "object" }),
-                name: "protected_action",
-              },
-            ],
-          ]),
-        }),
-      );
-      const ctx = new ContextContainer();
-      stashToolInterrupt(ctx, "call-1", full);
-      const session = createTestSession({
-        state: setPendingAuthorization(undefined, { challenges: full.challenges }),
-      });
-
-      const result = await contextStorage.run(ctx, () =>
-        runStep(session, { message: "run protected action" }),
-      );
-
-      expect(
-        events.filter(
-          (event) => event.type === "authorization.completed" && event.data.outcome === "failed",
-        ),
-      ).toHaveLength(0);
-      expect(events.filter((event) => event.type === "authorization.required")).toHaveLength(0);
-      expect(getPendingAuthorization(result.session.state)?.challenges).toEqual(full.challenges);
     });
   });
 

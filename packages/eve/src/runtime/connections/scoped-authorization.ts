@@ -16,7 +16,6 @@ import {
   type AuthorizationSignal,
   consumeAuthorizationResult,
   createAuthorizationAttempt,
-  getReusableAuthorizationChallenge,
   requestAuthorization,
 } from "#harness/authorization.js";
 import type { JsonValue } from "#public/types/json.js";
@@ -131,20 +130,21 @@ export async function evictScopedToken(input: ScopedAuthorization): Promise<void
  * Completes an authorization whose callback arrived this turn, caching
  * the freshly minted token under the scope.
  *
- * Returns `true` when a token was minted. Callers use the boolean as a
- * loop guard: a scope authorized this turn that still reports `Required`
- * on the immediately following call has a token the server itself
- * rejected, so it must fail terminally rather than re-challenge forever.
+ * Returns the minted token when a callback is completed. Callers can use it
+ * immediately under the callback's principal, even when the surrounding
+ * session context currently belongs to a different responder.
  *
- * No-op (returns `false`) when the strategy is not interactive or no
+ * No-op (returns `undefined`) when the strategy is not interactive or no
  * callback arrived for the scope.
  */
-export async function completeScopedAuthorization(input: ScopedAuthorization): Promise<boolean> {
+export async function completeScopedAuthorization(
+  input: ScopedAuthorization,
+): Promise<TokenResult | undefined> {
   const { scope, authorization, connection } = input;
-  if (!supportsInteractiveAuthorization(authorization)) return false;
+  if (!supportsInteractiveAuthorization(authorization)) return undefined;
 
   const result = consumeAuthorizationResult(scope);
-  if (result === undefined) return false;
+  if (result === undefined) return undefined;
 
   const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
   const ctx: AlsContext = loadContext();
@@ -156,8 +156,11 @@ export async function completeScopedAuthorization(input: ScopedAuthorization): P
     resume: result.resume,
     callback: result.callback,
   });
+  if (token.expiresAt !== undefined && token.expiresAt <= Date.now()) {
+    return undefined;
+  }
   writeCachedToken(ctx, scope, principalKey(principal), token);
-  return true;
+  return token;
 }
 
 /**
@@ -174,14 +177,11 @@ export async function startScopedAuthorization(
   const { scope, authorization, connection } = input;
   if (!supportsInteractiveAuthorization(authorization)) return undefined;
 
-  const principal = resolveScopedPrincipal(input);
-  const pending = getReusableAuthorizationChallenge(scope, principal);
-  if (pending !== undefined) return requestAuthorization([pending]);
-
   const attempt = createAuthorizationAttempt(scope);
   if (attempt === undefined) return undefined;
 
   const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
+  const principal = resolveScopedPrincipal(input);
   const callbackUrl = resolveAuthorizationCallbackUrl({
     authorization,
     callbackUrl: attempt.hookUrl,

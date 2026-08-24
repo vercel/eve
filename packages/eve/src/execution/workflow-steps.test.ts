@@ -30,9 +30,14 @@ import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { AGENT_HANDLES_STATE_KEY, getAgentHandleStore } from "#harness/handles/store.js";
 import { requestTurnSleep } from "#harness/turn-sleep.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
-import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
+import {
+  getPendingAuthorization,
+  PendingAuthorizationResultKey,
+  setPendingAuthorization,
+} from "#harness/authorization.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { renderAuthorizationResumeSnippet } from "#harness/hitl/authorization-prompt.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import { createInputRequestedEvent } from "#protocol/message.js";
@@ -2913,7 +2918,7 @@ describe("turnStep", () => {
     expect(getPendingAuthorization(persistedSession?.state)).toBeUndefined();
   });
 
-  it("clears pending authorization after a matching callback resumes the turn", async () => {
+  it("keeps unrelated authorizations pending and renders their batch on callback resume", async () => {
     const challenge = {
       attemptId: "attempt-statuspage",
       challenge: {
@@ -2925,6 +2930,20 @@ describe("turnStep", () => {
       principal: { type: "app" } as const,
       resume: { nonce: "n1" },
     };
+    const datadogChallenge = {
+      ...challenge,
+      attemptId: "attempt-datadog",
+      hookUrl: "https://app.example/eve/v1/connections/datadog/callback/attempt-datadog",
+      name: "datadog",
+      resume: { nonce: "n2" },
+    };
+    const slackChallenge = {
+      ...challenge,
+      attemptId: "attempt-slack",
+      hookUrl: "https://app.example/eve/v1/connections/slack/callback/attempt-slack",
+      name: "slack",
+      resume: { nonce: "n3" },
+    };
     const hidden = { content: "HIDE_FROM_AUTH_CONTINUATION", role: "user" as const };
     mockIdentityHistoryViewProjector.mockImplementation(({ messages }) =>
       messages.filter((message) => message !== hidden),
@@ -2932,14 +2951,24 @@ describe("turnStep", () => {
     const instructionHandler = vi.fn(
       (_event: unknown, _context: { readonly messages: readonly ModelMessage[] }) => null,
     );
+    const authorizationCompletedEvents: unknown[] = [];
+    const callbackAdapter: ChannelAdapter = {
+      ...threadContextAdapter,
+      "authorization.completed"(data) {
+        authorizationCompletedEvents.push(data);
+      },
+    };
     const session = createStubSession({
       history: [{ content: "visible", role: "user" }, hidden],
-      state: setPendingAuthorization({ retained: "yes" }, { challenges: [challenge] }),
+      state: setPendingAuthorization(
+        { retained: "yes" },
+        { challenges: [challenge, datadogChallenge, slackChallenge] },
+      ),
     });
     installSessionStoreMocks([session]);
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       adapterRegistry: {
-        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+        adaptersByKind: new Map([[callbackAdapter.kind, callbackAdapter]]),
       },
       compiledArtifactsSource: {} as never,
       graph: {
@@ -2973,10 +3002,12 @@ describe("turnStep", () => {
     } as never);
 
     let observedPendingAuth: unknown;
+    let observedAuthorizationResults: unknown;
     let observedStepInput: unknown = "not-called";
     vi.mocked(createExecutionNodeStep).mockImplementation(() => {
       return async (session, stepInput): Promise<StepResult> => {
         observedPendingAuth = getPendingAuthorization(session.state);
+        observedAuthorizationResults = loadContext().get(PendingAuthorizationResultKey);
         observedStepInput = stepInput;
         return { next: null, session };
       };
@@ -3000,18 +3031,36 @@ describe("turnStep", () => {
       sessionState: createStubSessionState(),
     });
 
-    expect(observedPendingAuth).toBeUndefined();
+    expect(observedPendingAuth).toEqual({
+      challenges: [datadogChallenge, slackChallenge],
+    });
+    expect(observedAuthorizationResults).toMatchObject([
+      {
+        attemptId: "attempt-statuspage",
+        callback: { code: "oauth-code" },
+        name: "statuspage",
+      },
+    ]);
+    expect(authorizationCompletedEvents).toMatchObject([
+      {
+        name: "statuspage",
+        outcome: "authorized",
+      },
+    ]);
     expect(observedStepInput).toBeUndefined();
     expect(result).toMatchObject({
       action: "park",
-      hasPendingAuthorization: false,
+      authorizationNames: ["datadog", "slack"],
+      hasPendingAuthorization: true,
     });
     if (result.action === "park") {
-      expect(result.authorizationNames).toBeUndefined();
+      expect(result.authorizationNames).toEqual(["datadog", "slack"]);
     }
     const persistedSession = vi.mocked(createDurableSessionState).mock.calls.at(-1)?.[0].session;
     expect(persistedSession?.state?.retained).toBe("yes");
-    expect(getPendingAuthorization(persistedSession?.state)).toBeUndefined();
+    expect(getPendingAuthorization(persistedSession?.state)).toEqual({
+      challenges: [datadogChallenge, slackChallenge],
+    });
     expect(instructionHandler).toHaveBeenCalledTimes(2);
     for (const call of instructionHandler.mock.calls) {
       expect(call[1]).toMatchObject({
@@ -3019,6 +3068,13 @@ describe("turnStep", () => {
       });
     }
     expect(persistedSession?.history).toContain(hidden);
+    expect(persistedSession?.history.at(-1)).toEqual({
+      content: renderAuthorizationResumeSnippet({
+        authorized: ["statuspage"],
+        pending: ["datadog", "slack"],
+      }),
+      role: "user",
+    });
   });
 });
 
