@@ -1,11 +1,6 @@
-import type { SessionAuthContext } from "#channel/types.js";
 import { vercelOidc } from "#public/channels/auth.js";
 import type { Channel } from "#public/definitions/channel.js";
-import {
-  chatSdkChannel,
-  type ChatSdkChannelBridge,
-  type ChatSdkChannelEvents,
-} from "#public/channels/chat-sdk/index.js";
+import { chatSdkChannel, type ChatSdkChannelBridge } from "#public/channels/chat-sdk/index.js";
 import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js";
 import {
   createSendblueAdapter,
@@ -31,32 +26,10 @@ export type SendblueChannelCredentialsProvider = () =>
   | SendblueChannelCredentials
   | Promise<SendblueChannelCredentials>;
 
-/** Context passed to {@link SendblueChannelConfig.onMessage}. */
-export interface SendblueInboundMessageContext {
-  /** Low-level Chat SDK thread for Sendblue-specific operations. */
-  readonly thread: Thread;
-}
-
-/** Result of {@link SendblueChannelConfig.onMessage}. Return `null` to drop the message. */
-export type SendblueInboundResult = {
-  readonly auth: SessionAuthContext | null;
-  readonly context?: readonly string[];
-} | null;
-
-/** Sync or async {@link SendblueInboundResult}. */
-export type SendblueInboundResultOrPromise = SendblueInboundResult | Promise<SendblueInboundResult>;
-
 /** Configuration for {@link sendblueChannel}. */
 export interface SendblueChannelConfig {
   /** Direct Sendblue credentials or a lazy provider such as `connectSendblueCredentials(...)`. */
   readonly credentials: SendblueChannelCredentials | SendblueChannelCredentialsProvider;
-  /** Per-event overrides for the underlying Chat SDK channel. */
-  readonly events?: ChatSdkChannelEvents<{ sendblue: SendblueAdapter }>;
-  /** Inbound message policy. Defaults to dispatching every Sendblue message with no user auth. */
-  readonly onMessage?: (
-    ctx: SendblueInboundMessageContext,
-    message: Message,
-  ) => SendblueInboundResultOrPromise;
   /** Override the default webhook route (`/eve/v1/sendblue`). */
   readonly route?: string;
   /** Display name used by the Chat SDK runtime. Defaults to `"eve"`. */
@@ -64,7 +37,7 @@ export interface SendblueChannelConfig {
 }
 
 /** First-class eve channel backed by Sendblue iMessage, SMS, and RCS. */
-export interface SendblueChannel extends Channel {}
+export interface SendblueChannel extends Channel<any, any, any> {}
 
 /**
  * Creates an eve channel for Sendblue conversations.
@@ -97,18 +70,15 @@ export function sendblueChannel(config: SendblueChannelConfig): SendblueChannel 
   const bridge = chatSdkChannel({
     adapters: { sendblue },
     concurrency: "concurrent",
-    events: config.events,
     routes: { sendblue: config.route ?? "/eve/v1/sendblue" },
     state: createMemoryState(),
     streaming: false,
     userName: config.userName ?? "eve",
   });
-  const onMessage = config.onMessage ?? defaultOnMessage;
-
   // Sendblue marks every inbound message as a mention. A phone conversation is
   // already one durable eve session, so it intentionally has no Chat SDK subscription state.
   bridge.bot.onNewMention(async (thread: Thread, message: Message) => {
-    await dispatchMessage(bridge, onMessage, thread, message);
+    await dispatchMessage(bridge, thread, message);
   });
 
   return bridge.channel;
@@ -146,24 +116,17 @@ function createCredentialWebhookVerifier(
   };
 }
 
-async function defaultOnMessage(): Promise<SendblueInboundResult> {
-  return { auth: null };
-}
-
 async function dispatchMessage(
   bridge: ChatSdkChannelBridge<{ sendblue: SendblueAdapter }>,
-  onMessage: NonNullable<SendblueChannelConfig["onMessage"]>,
   thread: Thread,
   message: Message,
 ): Promise<void> {
-  const result = await onMessage({ thread }, message);
-  if (result === null) return;
   await markReadBestEffort(bridge.bot.getAdapter("sendblue"), thread);
   const content = sendblueInboundContent(message);
   if (content === undefined) return;
   await bridge.send(
-    { context: [...(result.context ?? [])], message: content },
-    { auth: result.auth, thread, turnPolicy: "experimental-steer" },
+    { context: [], message: content },
+    { auth: null, thread, turnPolicy: "experimental-steer" },
   );
 }
 

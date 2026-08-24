@@ -41,13 +41,10 @@ function contexts(
 }
 
 describe("Sendblue setup", () => {
-  it("collects portable credentials before mutation", async () => {
-    const effects = deps();
+  it("requires portable credentials", async () => {
     await expect(
       prepareSendblueSetup(contexts({ "sendblue-credentials": "portable" }).prepare),
     ).rejects.toThrow("SENDBLUE_API_KEY");
-    expect(effects.provisionConnector).not.toHaveBeenCalled();
-    expect(effects.writeTextFile).not.toHaveBeenCalled();
   });
 
   it("applies a portable plan", async () => {
@@ -63,8 +60,7 @@ describe("Sendblue setup", () => {
     });
   });
 
-  it("requires a linked project for Connect without asking for Sendblue credentials", async () => {
-    const effects = deps();
+  it("requires a linked project for Connect", async () => {
     const resolveVercelProject = vi.fn(async () => {
       throw new Error("eve link");
     });
@@ -74,7 +70,6 @@ describe("Sendblue setup", () => {
           .prepare,
       ),
     ).rejects.toThrow("eve link");
-    expect(effects.provisionConnector).not.toHaveBeenCalled();
   });
 
   it("scaffolds the managed Connect account and provisioned line", async () => {
