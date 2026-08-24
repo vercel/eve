@@ -427,10 +427,8 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 });
 
 export default channel;
-\`\`\`
-
-Credentials come from the \`createGoogleChatAdapter\` config or the adapter's environment variables; see the [Google Chat adapter docs](https://chat-sdk.dev/adapters/official/gchat).`,
-    configure: `The adapter mounts its webhook at \`/eve/v1/gchat\`. Point your Google Chat app's HTTP endpoint at it. The adapter owns provider auth, verification, and delivery, while eve owns session dispatch, streaming, typing, and human-in-the-loop. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for routes, streaming, and state options.`,
+\`\`\``,
+    configure: `Follow the [Google Chat adapter documentation](https://chat-sdk.dev/adapters/official/gchat) to authenticate and configure the app. Set its HTTP endpoint to \`/eve/v1/gchat\`. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve route and state options.`,
   },
   "chat-sdk-whatsapp": {
     logo: "whatsapp",
@@ -467,10 +465,8 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 });
 
 export default channel;
-\`\`\`
-
-Credentials come from the \`createWhatsAppAdapter\` config or the adapter's environment variables; see the [WhatsApp adapter docs](https://chat-sdk.dev/adapters/official/whatsapp).`,
-    configure: `The adapter mounts its webhook at \`/eve/v1/whatsapp\`. Point your WhatsApp Business Cloud webhook at it. The adapter owns provider auth, verification, and delivery, while eve owns session dispatch, streaming, typing, and human-in-the-loop. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for routes, streaming, and state options.`,
+\`\`\``,
+    configure: `Follow the [WhatsApp adapter documentation](https://chat-sdk.dev/adapters/official/whatsapp) to authenticate and configure the app. Set its webhook URL to \`/eve/v1/whatsapp\`. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve route and state options.`,
   },
   "chat-sdk-x": {
     logo: "x",
@@ -516,21 +512,7 @@ export default channel;
 \`\`\`
 
 For a DM-only agent, keep \`bot.onDirectMessage\` and remove the \`bot.onNewMention\` and \`bot.onSubscribedMessage\` handlers. Configure the app's credentials and webhook before deploying.`,
-    configure: `### Authenticate with X
-
-1. In the [X developer portal](https://developer.x.com), create a Project and App.
-2. Under **Keys and tokens**, copy the app's **API Key Secret** into \`X_CONSUMER_SECRET\`.
-3. Enable OAuth 2.0 user authentication with \`dm.read\` and \`dm.write\`. Also add \`users.read\`, or set \`X_USER_ID\` explicitly so the adapter can identify the bot account. Add \`tweet.read\` and \`tweet.write\` for public mentions and replies, \`like.write\` for likes, and \`media.write\` for image uploads. Add \`offline.access\` only when the adapter manages token refresh.
-4. Authorize the app as the bot account. Set \`X_CLIENT_ID\` and \`X_REFRESH_TOKEN\` so the adapter can refresh the short-lived OAuth 2.0 access token. In production, use a durable state adapter and set \`X_ENCRYPTION_KEY\` to a base64-encoded 32-byte key to encrypt persisted tokens. Alternatively, set a static OAuth 2.0 user token as \`X_USER_ACCESS_TOKEN\`.
-
-### Set up the webhook
-
-1. Deploy the agent. For a production deployment at \`https://your-domain.com\`, its X webhook URL is \`https://your-domain.com/eve/v1/x\`.
-2. In the [X developer console](https://console.x.com), register that URL as the Activity API webhook URL. The URL must be publicly accessible HTTPS without a port.
-3. Allow X to complete its CRC \`GET\` challenge. The adapter answers it automatically, including later revalidation requests. Signed event deliveries arrive as \`POST\` requests on the same URL.
-4. Create a \`dm.received\` subscription for a DM-only agent. Add \`post.mention.create\` to receive public mentions. \`dm.sent\` is optional; subscribe to it only when your app needs events for outgoing DMs. These are private events, so authorize the app as the bot account before creating the subscriptions.
-
-The adapter owns X authentication, CRC handling, signature verification, and delivery; eve owns session dispatch and replies. See the [X adapter docs](https://chat-sdk.dev/adapters/official/x) for the complete credential reference and the [Chat SDK channel docs](/docs/channels/chat-sdk) for route and state options.`,
+    configure: `Follow the [X adapter authentication guide](https://chat-sdk.dev/adapters/official/x#authentication) and [webhook setup](https://chat-sdk.dev/adapters/official/x#2-register-a-webhook-and-subscriptions). Register the deployed agent's \`/eve/v1/x\` route as the Activity API webhook URL. The adapter handles X's CRC \`GET\` challenge and signed \`POST\` event deliveries. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve route and state options.`,
   },
   "chat-sdk-messenger": {
     logo: "messenger",
@@ -567,10 +549,8 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 });
 
 export default channel;
-\`\`\`
-
-Credentials come from the \`createMessengerAdapter\` config or the adapter's environment variables; see the [Messenger adapter docs](https://chat-sdk.dev/adapters/official/messenger).`,
-    configure: `The adapter mounts its webhook at \`/eve/v1/messenger\`. Point your Messenger webhook at it. The adapter owns provider auth, verification, and delivery, while eve owns session dispatch, streaming, typing, and human-in-the-loop. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for routes, streaming, and state options.`,
+\`\`\``,
+    configure: `Follow the [Messenger adapter documentation](https://chat-sdk.dev/adapters/official/messenger) to authenticate and configure the app. Set its webhook URL to \`/eve/v1/messenger\`. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve route and state options.`,
   },
   "chat-sdk-zernio": {
     logo: "zernio",
@@ -620,10 +600,8 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 });
 
 export default channel;
-\`\`\`
-
-See the [Zernio adapter documentation](https://chat-sdk.dev/adapters/vendor-official/zernio) for supported events, capabilities, and credentials.`,
-    configure: `Set \`ZERNIO_API_KEY\` and \`ZERNIO_WEBHOOK_SECRET\`, then point Zernio webhooks at \`/eve/v1/zernio\`. Zernio provides one adapter for Instagram, Facebook, X, Telegram, WhatsApp, Bluesky, and Reddit. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+\`\`\``,
+    configure: `Follow the [Zernio adapter documentation](https://chat-sdk.dev/adapters/vendor-official/zernio) to authenticate and configure webhooks. Point Zernio webhooks at \`/eve/v1/zernio\`. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve route and state options.`,
   },
   "chat-sdk-velt": {
     logo: "velt",
@@ -676,10 +654,8 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 });
 
 export default channel;
-\`\`\`
-
-See the [Velt adapter documentation](https://chat-sdk.dev/adapters/vendor-official/velt) for supported events, capabilities, and credentials.`,
-    configure: `Create a Velt bot user and webhook, set \`VELT_API_KEY\` and \`VELT_WEBHOOK_SECRET\`, then send comment events to \`/eve/v1/velt\`. The adapter maps documents to channels, annotations to threads, and comments to messages. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+\`\`\``,
+    configure: `Follow the [Velt adapter documentation](https://chat-sdk.dev/adapters/vendor-official/velt) to create a bot user and configure its webhook. Send comment events to \`/eve/v1/velt\`. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve route and state options.`,
   },
   "chat-sdk-sendblue": {
     logo: "sendblue",
@@ -719,10 +695,8 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 });
 
 export default channel;
-\`\`\`
-
-See the [Sendblue adapter documentation](https://chat-sdk.dev/adapters/vendor-official/sendblue) for supported events, capabilities, and credentials.`,
-    configure: `Set \`SENDBLUE_API_KEY\`, \`SENDBLUE_API_SECRET\`, and \`SENDBLUE_FROM_NUMBER\`, then point Sendblue webhooks at \`/eve/v1/sendblue\`. The adapter also supports tapbacks, typing indicators, delivery callbacks, and number lookup. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+\`\`\``,
+    configure: `Follow the [Sendblue adapter documentation](https://chat-sdk.dev/adapters/vendor-official/sendblue) to authenticate and configure webhooks. Point Sendblue webhooks at \`/eve/v1/sendblue\`. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve route and state options.`,
   },
   "chat-sdk-novu": {
     logo: "novu",
@@ -770,10 +744,8 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 });
 
 export default channel;
-\`\`\`
-
-See the [Novu adapter documentation](https://chat-sdk.dev/adapters/vendor-official/novu) for supported events, capabilities, and credentials.`,
-    configure: `Run \`npx novu connect --runtime chat-sdk\` to authenticate Novu, choose a channel, and create the required environment variables. Novu manages provider credentials, identity, delivery, and conversation history across its supported channels. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+\`\`\``,
+    configure: `Follow the [Novu adapter documentation](https://chat-sdk.dev/adapters/vendor-official/novu) to authenticate, choose a channel, and configure provider delivery. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve route and state options.`,
   },
   "chat-sdk-liveblocks": {
     logo: "liveblocks",
@@ -825,10 +797,8 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 });
 
 export default channel;
-\`\`\`
-
-See the [Liveblocks adapter documentation](https://chat-sdk.dev/adapters/vendor-official/liveblocks) for supported events, capabilities, and credentials.`,
-    configure: `Create a Liveblocks webhook, set \`LIVEBLOCKS_SECRET_KEY\` and \`LIVEBLOCKS_WEBHOOK_SECRET\`, and send comment events to \`/eve/v1/liveblocks\`. The adapter maps rooms to channels, comment threads to threads, and comments to messages. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+\`\`\``,
+    configure: `Follow the [Liveblocks adapter documentation](https://chat-sdk.dev/adapters/vendor-official/liveblocks) to authenticate and configure its webhook. Send comment events to \`/eve/v1/liveblocks\`. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve route and state options.`,
   },
   linq: {
     logo: "linq",
@@ -893,10 +863,8 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 });
 
 export default channel;
-\`\`\`
-
-See the [Kapso adapter documentation](https://chat-sdk.dev/adapters/vendor-official/kapso) for supported events, capabilities, and credentials.`,
-    configure: `Connect a WhatsApp number in Kapso, set \`KAPSO_API_KEY\`, \`KAPSO_PHONE_NUMBER_ID\`, and \`KAPSO_WEBHOOK_SECRET\`, then point the Kapso webhook at \`/eve/v1/kapso\`. Use this provider-managed option when you do not want to integrate directly with the WhatsApp Cloud API. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+\`\`\``,
+    configure: `Follow the [Kapso adapter documentation](https://chat-sdk.dev/adapters/vendor-official/kapso) to connect a WhatsApp number and configure its webhook. Point the Kapso webhook at \`/eve/v1/kapso\`. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve route and state options.`,
   },
   photon: {
     logo: "photon",
@@ -962,10 +930,8 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 });
 
 export default channel;
-\`\`\`
-
-See the [Dial adapter documentation](https://chat-sdk.dev/adapters/vendor-official/dial) for supported events, capabilities, and credentials.`,
-    configure: `Create a Dial number, set \`DIAL_API_KEY\`, \`DIAL_FROM_NUMBER_ID\`, and \`DIAL_WEBHOOK_SECRET\`, then point its webhook at \`/eve/v1/dial\`. Dial maps each phone-number pair to a thread and delivers SMS, MMS, iMessage, and voice transcripts. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+\`\`\``,
+    configure: `Follow the [Dial adapter documentation](https://chat-sdk.dev/adapters/vendor-official/dial) to authenticate, provision a number, and configure its webhook. Point the webhook at \`/eve/v1/dial\`. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve route and state options.`,
   },
   "chat-sdk-agentphone": {
     logo: "agentphone",
@@ -1008,10 +974,8 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 });
 
 export default channel;
-\`\`\`
-
-See the [AgentPhone adapter documentation](https://chat-sdk.dev/adapters/vendor-official/agentphone) for supported events, capabilities, and credentials.`,
-    configure: `Create an AgentPhone agent, set \`AGENTPHONE_API_KEY\`, \`AGENTPHONE_AGENT_ID\`, and \`AGENTPHONE_WEBHOOK_SECRET\`, then point its webhook at \`/eve/v1/agentphone\`. The adapter handles SMS, MMS, iMessage, and completed voice-call transcripts. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+\`\`\``,
+    configure: `Follow the [AgentPhone adapter documentation](https://chat-sdk.dev/adapters/vendor-official/agentphone) to create an agent and configure its webhook. Point the webhook at \`/eve/v1/agentphone\`. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve route and state options.`,
   },
   "chat-sdk-lark": {
     logo: "lark",
@@ -1052,10 +1016,8 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 await bot.initialize();
 
 export default channel;
-\`\`\`
-
-See the [Lark / Feishu adapter documentation](https://chat-sdk.dev/adapters/vendor-official/lark) for all supported events and credentials.`,
-    configure: `Create a Lark or Feishu app and set \`LARK_APP_ID\` and \`LARK_APP_SECRET\`. The adapter uses Lark’s WebSocket long connection rather than an HTTP webhook, so call \`bot.initialize()\` and run eve in a long-lived Node.js process. This is a vendor-official Chat SDK adapter built on the official Lark Node SDK. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+\`\`\``,
+    configure: `Follow the [Lark / Feishu adapter documentation](https://chat-sdk.dev/adapters/vendor-official/lark) to create and authenticate the app. It uses a WebSocket long connection rather than an HTTP webhook, so call \`bot.initialize()\` and run eve in a long-lived Node.js process. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve route and state options.`,
   },
   "chat-sdk-beeper": {
     logo: "beeper",
@@ -1096,10 +1058,8 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 await bot.initialize();
 
 export default channel;
-\`\`\`
-
-See the [Beeper Matrix adapter documentation](https://chat-sdk.dev/adapters/vendor-official/matrix) for all supported events and credentials.`,
-    configure: `Set the Matrix homeserver, access token, and bot identity environment variables documented by Beeper. This adapter consumes Matrix sync rather than webhooks, so call \`bot.initialize()\` and run eve in a long-lived Node.js process. It requires Node.js 22 or newer and a durable state adapter in production. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+\`\`\``,
+    configure: `Follow the [Beeper Matrix adapter documentation](https://chat-sdk.dev/adapters/vendor-official/matrix) to configure credentials and Matrix sync. It uses Matrix sync rather than webhooks, so call \`bot.initialize()\` and run eve in a long-lived Node.js process. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve route and state options.`,
   },
   "chat-sdk-resend": {
     logo: "resend",
@@ -1148,10 +1108,8 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 });
 
 export default channel;
-\`\`\`
-
-See the [Email (Resend) adapter documentation](https://chat-sdk.dev/adapters/vendor-official/resend) for all supported events and credentials.`,
-    configure: `Verify a sending domain in Resend, set \`RESEND_API_KEY\`, \`RESEND_WEBHOOK_SECRET\`, and \`RESEND_FROM_ADDRESS\`, then point the Resend inbound webhook at \`/eve/v1/resend\`. This is a vendor-official Chat SDK adapter. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+\`\`\``,
+    configure: `Follow the [Email (Resend) adapter documentation](https://chat-sdk.dev/adapters/vendor-official/resend) to authenticate, verify a sending domain, and configure inbound email. Point the inbound webhook at \`/eve/v1/resend\`. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve route and state options.`,
   },
 };
 const extensionPresentations: Record<string, ExtensionPresentation> = {
