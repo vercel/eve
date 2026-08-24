@@ -203,6 +203,67 @@ describe("resolveSlackInboundMrkdwn", () => {
     expect(result).toBe("cc <@U123> in <#C456> <!here> due Nov 14th");
   });
 
+  it("extracts card title, subtitle, body, subtext, and action labels", () => {
+    const result = resolveSlackInboundMrkdwn("", {
+      blocks: [
+        {
+          type: "card",
+          title: { type: "mrkdwn", text: "INC-42" },
+          subtitle: { type: "plain_text", text: "Sev-2" },
+          body: { type: "mrkdwn", text: "Latency regression in checkout" },
+          subtext: { type: "plain_text", text: "Opened 5m ago" },
+          actions: [{ type: "button", text: { type: "plain_text", text: "Acknowledge" } }],
+        },
+      ],
+    });
+
+    expect(result).toBe(
+      "INC-42\nSev-2\nLatency regression in checkout\nOpened 5m ago\n[Acknowledge]",
+    );
+  });
+
+  it("extracts every card in a carousel", () => {
+    const result = resolveSlackInboundMrkdwn("", {
+      blocks: [
+        {
+          type: "carousel",
+          elements: [
+            { type: "card", title: { type: "mrkdwn", text: "Option A" } },
+            { type: "card", title: { type: "mrkdwn", text: "Option B" } },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toBe("Option A\nOption B");
+  });
+
+  it("extracts container title and recurses into child blocks", () => {
+    const result = resolveSlackInboundMrkdwn("", {
+      blocks: [
+        {
+          type: "container",
+          title: { type: "plain_text", text: "Bulk update" },
+          subtitle: { type: "mrkdwn", text: "3 records changed" },
+          child_blocks: [
+            { type: "section", text: { type: "mrkdwn", text: "api: deployed" } },
+            {
+              type: "table",
+              rows: [
+                [
+                  { type: "raw_text", text: "web" },
+                  { type: "raw_text", text: "pending" },
+                ],
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toBe("Bulk update\n3 records changed\napi: deployed\nweb | pending");
+  });
+
   it("extracts legacy attachment pretext, title, text, fields, and footer", () => {
     const result = resolveSlackInboundMrkdwn("", {
       attachments: [

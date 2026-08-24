@@ -60,6 +60,21 @@ function extractBlockKitLines(blocks: unknown): string[] {
       case "data_table":
         appendTableLines(lines, block);
         break;
+      case "card":
+        appendCardLines(lines, block);
+        break;
+      case "carousel":
+        if (Array.isArray(block.elements)) {
+          for (const card of block.elements) {
+            if (isObject(card)) appendCardLines(lines, card);
+          }
+        }
+        break;
+      case "container":
+        appendTextObjectLine(lines, block.title);
+        appendTextObjectLine(lines, block.subtitle);
+        lines.push(...extractBlockKitLines(block.child_blocks));
+        break;
       case "context":
         appendElementLines(lines, block.elements);
         break;
@@ -135,6 +150,14 @@ function appendElementLines(lines: string[], elements: unknown): void {
   for (const element of elements) {
     appendTextObjectLine(lines, element);
   }
+}
+
+function appendCardLines(lines: string[], card: Record<string, unknown>): void {
+  appendTextObjectLine(lines, card.title);
+  appendTextObjectLine(lines, card.subtitle);
+  appendTextObjectLine(lines, card.body);
+  appendTextObjectLine(lines, card.subtext);
+  appendActionsLine(lines, card.actions);
 }
 
 function appendTableLines(lines: string[], block: Record<string, unknown>): void {
