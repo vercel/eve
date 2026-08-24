@@ -50,9 +50,10 @@ self-contained composition entry. No second winner-owner index or out-of-band
 origin table may exist.
 
 Every ordinary framework default is a first-class eve primitive at a canonical
-logical path, including the default `agent.ts`, sandbox, home page, and public
-health endpoint. Native execution may implement a selected primitive, but it
-may not create that primitive's presence independently of the source graph.
+logical path, including the default `agent.ts`, sandbox, home page, and the
+eve channel carrying the public health and info endpoints. Native execution
+may implement a selected primitive, but it may not create that primitive's
+presence independently of the source graph.
 Model-visible kernel behavior is keyed by a closed set of typed effect kinds —
 never by tool name — and host registrations that cannot be ordinary sources
 live in a separate, typed, exhaustive inventory.
@@ -115,9 +116,10 @@ This work will:
   once, including local subagent source nodes;
 - compile one effective manifest consumed by runtime, Nitro, bundling, and
   inspection;
-- migrate ordinary and effectful framework tools, `connection_search`,
-  framework channels, home, health, the default sandbox, and the default
-  `agent.ts` to programmatic eve modules;
+- migrate ordinary and effectful framework tools, `connection_search`, the
+  eve channel (carrying the callbacks, health, and info), the home channel,
+  the default sandbox, and the default `agent.ts` to programmatic eve
+  modules;
 - separate public primitive definitions, execution implementations, and native
   kernel code so each ordinary default has one definition value;
 - replace scattered native-tool knowledge — name checks, source-ID prefixes,
@@ -576,45 +578,41 @@ remain filesystem resources and are not virtualized.
 Register a root-only zero-argument factory returning
 `eveChannel({ auth: [vercelOidc(), localDev(), placeholderAuth()] })` at
 `channels/eve.ts`. A factory preserves the current per-resolution lifecycle.
-An authored channel or disable sentinel at that identity replaces or removes
-the complete default channel.
+The channel value owns the complete `/eve/v1` surface as ordinary channel
+routes: the session protocol, the connection callbacks (GET and POST plus
+their legacy forms), the workflow callback, task input, the public health
+protocol at `/eve/v1/health`, and the agent-info route at `/eve/v1/info`.
+There is exactly one framework identity for that surface; no framework
+channel registers at a deeper logical path.
 
-Register the six callback handlers as root-only, one-route `defineChannel`
-factories at exact paths:
+URLs, legacy support, authorization, status codes, and response bodies do not
+change. Route definitions carry per-route authorization so current behavior
+survives inside one channel: health stays publicly reachable while info, the
+callbacks, and the protocol routes keep the resolved channel auth policy. The
+definitions carry truthful HTTP adapter metadata and use the ordinary channel
+handler path, eliminating framework-only route construction and fetch
+dispatch. Data needed by the info handler comes from an eve-owned context
+provider — the effective compiled graph, binding owners, composition
+diagnostics, and kernel plan — not a special source kind or build-time native
+route.
 
-- `channels/eve/v1/connections/callback/get.ts`;
-- `channels/eve/v1/connections/callback/post.ts`;
-- `channels/eve/v1/connections/callback/legacy/get.ts`;
-- `channels/eve/v1/connections/callback/legacy/post.ts`;
-- `channels/eve/v1/callback/post.ts`;
-- `channels/eve/v1/task-input/post.ts`.
+Add a root framework channel module at `channels/home.ts` using ordinary
+`defineChannel`, `GET`, and `HEAD` values for the home page at `/`. Its
+metadata also comes from an eve-owned context provider, and the default
+preserves the current response body, status codes, and authentication
+behavior.
 
-The six identities remain independently replaceable and disableable. URLs,
-legacy support, authorization, status codes, and response bodies do not change.
-The definitions carry truthful HTTP adapter metadata and use the ordinary
-channel handler path, eliminating framework-only route construction and fetch
-dispatch.
-
-Add root framework channel modules at `channels/home.ts`,
-`channels/eve/v1/health.ts`, and `channels/eve/v1/info.ts`. They use ordinary
-`defineChannel`, `GET`, and `HEAD` values for the home page, the public health
-protocol, and the agent-info route. Data needed by the home and info handlers
-comes from eve-owned context providers — for info, the effective compiled
-graph, binding owners, composition diagnostics, and kernel plan — not a
-special source kind or build-time native route. The default modules preserve
-the current response bodies, status codes, and authentication behavior,
-including the resolved eve channel auth policy guarding `GET /eve/v1/info`.
-
-Home, health, and info are replaceable and disableable through ordinary
-source composition at those exact paths. This is an intentional pre-1.0
-breaking change. A replacement for health or info owns its implementation but
-must return the public payload on a successful response. `Client.health()`
-validates successful JSON with `HealthResultSchema`; a non-success response
-throws `ClientError`, and a successful response with an invalid payload
-throws `HealthResponseError`. `Client.info()` validates with
-`AgentInfoResultSchema` and throws `AgentInfoResponseError` for an unusable
-authorized payload. No client or host code reaches a hidden native fallback
-for any of the three.
+The eve channel and home compose as two slots. An authored `channels/eve.ts`
+— typically another `eveChannel(...)` call with different auth — replaces the
+complete default surface, and a disable sentinel removes it; health, info,
+and the callbacks are not independently replaceable. This is an intentional
+pre-1.0 breaking change. A replacement owns its implementation, but the
+public payload contracts remain client-enforced: `Client.health()` validates
+successful JSON with `HealthResultSchema` — a non-success response throws
+`ClientError` and an invalid successful payload throws `HealthResponseError`
+— and `Client.info()` validates with `AgentInfoResultSchema` and throws
+`AgentInfoResponseError` for an unusable authorized payload. No client or
+host code reaches a hidden native fallback.
 
 #### One compiled route plan
 
@@ -656,10 +654,9 @@ path must have identical normalized options or fail with
 `compile/channel-cors-conflict`; identical options produce one derived
 `OPTIONS` record.
 
-Replacing or disabling `channels/home.ts`, `channels/eve/v1/health.ts`, or
-`channels/eve/v1/info.ts` is source-slot composition. An unrelated channel
-that declares the same concrete route follows route ordering and does not gain
-source precedence.
+Replacing or disabling `channels/home.ts` or `channels/eve.ts` is source-slot
+composition. An unrelated channel that declares the same concrete route
+follows route ordering and does not gain source precedence.
 
 #### Closed native host inventory
 
@@ -804,10 +801,10 @@ visibility rules in tool advertisement.
 Replace agent-info v2 instead of preserving fields whose meanings no longer
 fit. The `/eve/v1/info` payload becomes version 3 and has one projector from the
 effective compiled graph, binding owners, composition diagnostics, and kernel
-plan, served by the framework channel source at `channels/eve/v1/info.ts`
-rather than a native Nitro route. All in-repository clients, TUI views, eval
-targeting, and tests migrate in the same change; there is no v2 fallback
-before 1.0.
+plan, served as an ordinary route of the framework eve channel at
+`channels/eve.ts` rather than a native Nitro route. All in-repository
+clients, TUI views, eval targeting, and tests migrate in the same change;
+there is no v2 fallback before 1.0.
 
 Version 3 reports:
 
@@ -936,9 +933,9 @@ magic-string list survives PR 1 — the `sourceId.startsWith("eve:")` calling
 convention dies with the catalog — and no new name-based dispatch may be
 added.
 
-PR 1 includes the `minor` changeset — it breaks the agent-info schema and the
-replaceable health and info contracts — and updates tool, config, channel,
-health, sandbox, and agent-info documentation.
+PR 1 includes the `minor` changeset — it breaks the agent-info schema and
+moves the health and info routes into the replaceable eve channel — and
+updates tool, config, channel, health, sandbox, and agent-info documentation.
 
 ### PR 2 — kernel effects
 
@@ -1048,9 +1045,9 @@ The implementation is complete only when:
    children receive `task_update`. No harness or execution code branches on a
    tool name or source ID.
 8. Connection search preserves filtering, auth, approval, failure, long-name,
-   durable callback, and restart behavior without history scanning; home,
-   health, and info replacement, client payload validation, and internal
-   process readiness agree without a native fallback.
+   durable callback, and restart behavior without history scanning; home and
+   eve-channel replacement, client payload validation for health and info,
+   and internal process readiness agree without a native fallback.
 9. Agent-info explains the owner and replacement history of every config,
    primitive, route, local subagent, remote agent, and dynamic resolver
    without parsing identifiers; `AgentInfoResultSchema` validates exact unique
