@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: proposed
-last_updated: "2026-08-21"
+last_updated: "2026-08-24"
 ---
 
 # Vercel Connect build manifest
@@ -13,9 +13,10 @@ Connect-backed credentials. The manifest declares the integrations the deploymen
 requires, including enough provider configuration for Connect to create or reconcile
 native connectors. It contains no secrets and does not authorize side effects.
 
-A requirement identifies a project-local logical reference such as `"slack"`. eve is
-opaque to Connect connector IDs and UIDs. Connect owns the mapping from the reference
-to a connector, installation, credentials, and trigger destinations:
+The steady-state model identifies a requirement by a project-local logical reference
+such as `"slack"`. eve is opaque to Connect connector IDs and UIDs. Connect owns the
+mapping from the reference to a connector, installation, credentials, and trigger
+destinations:
 
 ```text
 eve reference "slack"
@@ -45,7 +46,8 @@ import { connectSlackCredentials } from "@vercel/connect/eve";
 import { slackChannel } from "eve/channels/slack";
 
 export default slackChannel({
-  credentials: connectSlackCredentials("slack", {
+  credentials: connectSlackCredentials({
+    reference: "slack",
     capabilities: {
       publicChannelMessages: true,
       privateChannelMessages: true,
@@ -56,11 +58,25 @@ export default slackChannel({
 });
 ```
 
-The reference is a logical name in the project's Connect namespace, not a connector
-UID. Runtime token selection remains separate from static provisioning requirements:
+The object form is intentionally distinct from the existing string form. A reference
+is a logical name in the project's Connect namespace, while a string retains its
+current meaning as a direct Connect locator:
 
 ```ts
-connectSlackCredentials("slack", {
+// Existing behavior: use this exact connector UID or ID.
+connectSlackCredentials("slack/my-agent");
+
+// New behavior: resolve the project/environment binding named "slack".
+connectSlackCredentials({ reference: "slack" });
+```
+
+Connect and its API requests must preserve this distinction structurally rather than
+inferring it from string syntax. Runtime token selection remains separate from static
+provisioning requirements:
+
+```ts
+connectSlackCredentials({
+  reference: "slack",
   capabilities: { publicChannelMessages: true },
   token: { installationId: process.env.SLACK_INSTALLATION_ID },
 });
@@ -88,7 +104,10 @@ A representative artifact is:
   },
   "requirements": [
     {
-      "reference": "slack",
+      "target": {
+        "mode": "binding",
+        "reference": "slack"
+      },
       "connector": {
         "type": "slack",
         "configuration": {
@@ -122,7 +141,10 @@ A representative artifact is:
       ]
     },
     {
-      "reference": "linear",
+      "target": {
+        "mode": "binding",
+        "reference": "linear"
+      },
       "connector": {
         "type": "oauth",
         "configuration": {
@@ -156,6 +178,76 @@ The artifact is emitted only when at least one compiled definition declares a Co
 requirement. Installing or importing `@vercel/connect` without using a helper does not
 emit it. A successful build that removes the final requirement also removes the prior
 artifact; a failed build leaves the prior successful output untouched.
+
+## Staged delivery and migration
+
+The manifest can ship before project-local references. The first stage preserves the
+semantics of current `@vercel/connect` calls and records their explicit connector
+locator:
+
+```ts
+connectSlackCredentials("slack/my-agent");
+```
+
+```json
+{
+  "target": {
+    "mode": "direct",
+    "locator": "slack/my-agent"
+  },
+  "connector": {
+    "type": "slack"
+  }
+}
+```
+
+This stage still enables capability validation, drift reporting, trigger setup, and
+reconciliation of the exact connector named in code. It does not solve source
+portability: copied projects retain the same locator, separate connectors still need
+distinct UIDs in source, and an opaque connector ID cannot serve as a create-if-missing
+declaration. A named UID may support creation when Connect defines that behavior, but
+UID collisions and ownership remain Connect concerns.
+
+The second stage adds the explicit binding form:
+
+```ts
+connectSlackCredentials({ reference: "slack" });
+```
+
+Its manifest target is unambiguous:
+
+```json
+{
+  "target": {
+    "mode": "binding",
+    "reference": "slack"
+  },
+  "connector": {
+    "type": "slack"
+  }
+}
+```
+
+Existing string arguments continue to resolve the exact connector. They are never
+silently reinterpreted as references, and Connect never guesses from whether a string
+looks like a UID or an `scl_...` ID. This discriminated target shape should exist in
+the first manifest schema even if the first implementation accepts only `"direct"`,
+so adding `"binding"` does not change existing wire semantics.
+
+Migrating an existing project is a coordinated operation:
+
+1. Connect verifies the direct connector and creates the project/environment binding.
+2. The setup UI or `eve` migration flow changes the source to `{ reference: "slack" }`.
+3. Subsequent builds declare only the binding target.
+
+The binding must exist before code relies on it. Missing bindings do not implicitly
+fall back to global connector lookup. If the source edit and binding creation cannot be
+coordinated, a future explicit migration hint may identify the prior direct locator;
+it must be temporary and must not become permanent fallback behavior.
+
+Stage one is therefore independently useful but does not deliver the proposal's full
+portable-template or per-environment naming benefits. New scaffolds should switch to
+references only after Connect can resolve bindings and the setup UI can create them.
 
 ## Requirement and capability semantics
 
@@ -273,14 +365,17 @@ If several frameworks need a canonical serializer, eve may conditionally load a 
 Connect manifest builder after discovering at least one requirement, while retaining
 all filesystem ownership.
 
-Initial delivery should support native Slack, GitHub, Linear, and Discord declarations;
-OAuth MCP and OpenAPI connections; generic API-key requirements; existing-connector
-selection through Connect's setup UI; and binding-owned trigger destinations. Dynamic
-runtime-selected references are outside the initial provisioning contract.
+The first delivery may support direct targets for native Slack, GitHub, Linear, and
+Discord declarations; OAuth MCP and OpenAPI connections; generic API-key requirements;
+capability drift; and trigger destinations. A later binding stage adds project-local
+references, binding creation, reusable connector selection, and environment-aware
+inheritance. Dynamic runtime-selected references remain outside the provisioning
+contract.
 
 ## Invariants
 
 - The manifest contains requirements and source metadata, never secrets.
+- Direct locator and logical binding targets are structurally distinct and never inferred from string shape.
 - A logical reference is not a Connect connector ID, UID, or mutable display name.
 - Manifest ingestion never grants authority or performs provider mutations by itself.
 - Connector reuse is explicit or covered by a previously approved environment policy.
