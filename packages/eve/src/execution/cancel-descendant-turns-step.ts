@@ -7,7 +7,9 @@ import {
   isRetryableRemoteAgentCancelError,
   resolveRemoteAgentForAction,
 } from "#execution/remote-agent-dispatch.js";
+import { cancelToolRun } from "#execution/tool-run/cancel.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
+import { getToolRuns, type ToolRunRecord } from "#harness/tool-runs.js";
 import { getAgentHandleStore, type AgentHandle } from "#harness/handles/store.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
@@ -24,7 +26,10 @@ const log = createLogger("execution.cancel-descendant-turns");
 
 type RunningAgentHandle = Extract<AgentHandle, { phase: "running" }>;
 
-/** Cancels every running delegated child recorded in the agent handle store. */
+/**
+ * Cancels every running delegated child recorded in the agent handle store
+ * and every workflow tool run the turn is waiting on.
+ */
 export async function cancelDescendantTurnsStep(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -32,11 +37,13 @@ export async function cancelDescendantTurnsStep(input: {
   "use step";
 
   let running: readonly RunningAgentHandle[];
+  let toolRuns: readonly ToolRunRecord[];
   try {
     const session = await readDurableSession(input.sessionState);
     running = (getAgentHandleStore(session.state)?.handles ?? []).filter(
       (handle): handle is RunningAgentHandle => handle.phase === "running",
     );
+    toolRuns = getToolRuns(session.state);
   } catch (error) {
     logError(log, "failed to read pending descendants during cancellation", error, {
       sessionId: input.sessionState.sessionId,
@@ -44,6 +51,11 @@ export async function cancelDescendantTurnsStep(input: {
     return;
   }
 
+  await Promise.all(
+    toolRuns.map((record) =>
+      cancelToolRun({ ...record, reason: "The turn that called the tool was cancelled." }),
+    ),
+  );
   if (running.length === 0) return;
 
   let remoteContext:

@@ -8,7 +8,7 @@
  */
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import type { ActivityObserverConfig } from "#channel/types.js";
+import type { ActivityObserverConfig, SessionParent } from "#channel/types.js";
 import {
   callAdapterEventHandler,
   type ChannelAdapter,
@@ -20,6 +20,7 @@ import {
   CapabilitiesKey,
   ChannelInstrumentationKey,
   InitiatorAuthKey,
+  ParentSessionKey,
   SandboxKey,
   type LocalDevRequestProvenance,
 } from "#context/keys.js";
@@ -59,6 +60,7 @@ import type {
   PendingAgentDispatchAction,
   PendingDispatchAction,
   PendingTaskControlAction,
+  PendingWorkflowToolAction,
 } from "#shared/dispatch-action.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import {
@@ -77,6 +79,7 @@ import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { isTaskControlAction } from "#execution/tasks/parent/dispatch.js";
+import { isWorkflowToolAction } from "#execution/tool-run/dispatch.js";
 import { isSubagentDelegationAction } from "#harness/subagent-depth.js";
 import { resolvePreparedAgentAction } from "#execution/prepared-agent-action.js";
 
@@ -105,7 +108,8 @@ export type DispatchPlanEntry =
     }
   | { readonly kind: "reject"; readonly result: RuntimeSubagentDispatchFailure }
   | { readonly kind: "start"; readonly target: DispatchStartTarget }
-  | { readonly kind: "task-control"; readonly action: PendingTaskControlAction };
+  | { readonly kind: "task-control"; readonly action: PendingTaskControlAction }
+  | { readonly kind: "workflow-tool"; readonly action: PendingWorkflowToolAction };
 
 export type DispatchStartTarget =
   | {
@@ -165,6 +169,8 @@ export interface PreparedRuntimeActionDispatch {
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly localDevRequest?: LocalDevRequestProvenance;
+  /** Lineage of the session running this dispatch, when it is itself a delegated child. */
+  readonly parentSession: SessionParent | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly activityObserver?: ActivityObserverConfig & {
     readonly workIdentity: ActivityWorkIdentityV1;
@@ -295,6 +301,7 @@ async function prepareActionDispatch(input: {
       plan.filter((entry) => entry.kind === "start" && entry.target.kind === "local").length,
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     localDevRequest: ctx.localDevRequest,
+    parentSession: ctx.get(ParentSessionKey),
     parentTraceContext: readSessionTraceContext(input.serializedContext, session.sessionId),
     plan,
     activityObserver: resolvePreparedActivity(
@@ -438,6 +445,9 @@ function planDispatch(input: {
   return input.actions.map((action): DispatchPlanEntry => {
     if (input.taskControls && isTaskControlAction(action)) {
       return { action, kind: "task-control" };
+    }
+    if (isWorkflowToolAction(action)) {
+      return { action, kind: "workflow-tool" };
     }
 
     if (!isSubagentDelegationAction(action)) {

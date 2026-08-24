@@ -1,4 +1,5 @@
 import { isInboxSubagentResultFromRunningHandle } from "#harness/handles/query.js";
+import { isInboxToolResultFromRecordedRun } from "#harness/tool-runs.js";
 import {
   createHook,
   getWorkflowMetadata,
@@ -22,6 +23,12 @@ import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
+import { emitRunReportStep } from "#execution/tool-run/emit-run-report-step.js";
+import {
+  isRunMessage,
+  runOutcomeToToolResult,
+  runRequestToInputRequestPayload,
+} from "#execution/tool-run/owner-inbox.js";
 import {
   createTurnCancellationControl,
   type TurnCancellationControl,
@@ -388,18 +395,47 @@ async function waitForRuntimeActionResults(input: {
     if (next.done) throw new Error("Turn inbox closed before runtime actions completed.");
 
     const value = next.value;
+    if (isRunMessage(value)) {
+      if (value.kind === "outcome") {
+        const result = runOutcomeToToolResult(value);
+        const sessionSnapshotState = input.cursor.sessionState.snapshot?.session.state;
+        if (isInboxToolResultFromRecordedRun(sessionSnapshotState, result)) {
+          const acceptedAtMs = Date.now();
+          results.push(result);
+          acceptedAtMsByKey.set(getRuntimeActionResultKey(result), acceptedAtMs);
+        }
+        continue;
+      }
+      if (value.kind === "request") {
+        const proxyResult = await runProxySubagentEventStep({
+          hookPayload: runRequestToInputRequestPayload(value),
+          parentWritable: input.cursor.parentWritable,
+          serializedContext: input.cursor.serializedContext,
+          sessionState: input.cursor.sessionState,
+        });
+        await input.cursor.adopt(proxyResult);
+        continue;
+      }
+      await emitRunReportStep({
+        from: value.from,
+        parentWritable: input.cursor.parentWritable,
+        update: value.update,
+      });
+      continue;
+    }
     if (value.kind === "runtime-action-result") {
       // The inbox token is shared by every callee in the batch, so an inbox
-      // subagent result must bind to a running agent handle in the adopted
-      // session snapshot: its callId on the handle's operation and, when it
-      // claims a sessionId, that session on the handle's address (older eve
-      // deployments claim none and bind by callId alone). Anything else — a
-      // callee settling a sibling's call, or a result for a callId whose
-      // dispatch failed — is dropped; the genuine child's result (or the
-      // dispatch error already in `results`) still resolves the wait.
+      // result must bind to the adopted session snapshot: a subagent result
+      // to a running agent handle carrying its callId, a tool result to the
+      // tool run recorded for its callId. Anything else — a callee settling a
+      // sibling's call, or a result for a callId whose dispatch failed — is
+      // dropped; the genuine result (or the dispatch error already in
+      // `results`) still resolves the wait.
       const sessionSnapshotState = input.cursor.sessionState.snapshot?.session.state;
       const accepted = value.results.filter((result) =>
-        isInboxSubagentResultFromRunningHandle(sessionSnapshotState, result),
+        result.kind === "tool-result"
+          ? isInboxToolResultFromRecordedRun(sessionSnapshotState, result)
+          : isInboxSubagentResultFromRunningHandle(sessionSnapshotState, result),
       );
       if (accepted.length > 0) {
         const acceptedAtMs = Date.now();

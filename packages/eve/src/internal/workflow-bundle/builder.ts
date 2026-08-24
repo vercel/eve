@@ -10,6 +10,9 @@ import {
   writeEveVersionedCacheMetadata,
 } from "#internal/application/cache-metadata.js";
 import { runQueuedWorkflowBuild } from "#internal/workflow-bundle/build-queue.js";
+import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-package-tsconfig-paths.js";
+import { createAuthoredRelativeExtensionResolverPlugin } from "#internal/authored-relative-extension-resolver.js";
+import { discoverAuthoredWorkflowModules } from "#internal/workflow-bundle/authored-workflow-modules.js";
 import {
   bundleFinalWorkflowOutput,
   collectWorkflowInputFiles,
@@ -19,6 +22,7 @@ import {
   createEvePackageImportsPlugin,
   createWorkflowImport,
   createWorkflowNodeBuiltinGuardPlugin,
+  createWorkflowDriverAliasPlugin,
   createWorkflowPseudoPackagePlugin,
   createWorkflowTransformPlugin,
   createWorkflowVirtualEntryPlugin,
@@ -40,6 +44,8 @@ import {
   type WorkflowManifest,
 } from "#internal/workflow-bundle/workflow-builders.js";
 import { deriveEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
+
+const AUTHORED_RESOLVE_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
 
 export class WorkflowBundleBuilder {
   readonly #compiledArtifactsBootstrapPath: string;
@@ -211,7 +217,7 @@ export class WorkflowBundleBuilder {
 
     for (const filePath of inputs) {
       const source = await readFile(filePath, "utf8");
-      const patterns = detectWorkflowPatterns(source);
+      const patterns = await detectWorkflowPatterns(filePath, source);
 
       if (patterns.hasUseStep) {
         discovered.discoveredSteps.push(filePath);
@@ -224,6 +230,19 @@ export class WorkflowBundleBuilder {
       if (patterns.hasSerde) {
         discovered.discoveredSerdeFiles.push(filePath);
       }
+    }
+
+    // Authored modules join both outputs: the driver bundle needs their
+    // workflow bodies, and the step entrypoint needs every module whose
+    // steps the server must register.
+    const authored = await discoverAuthoredWorkflowModules(this.transformProjectRoot);
+    const steps = new Set(discovered.discoveredSteps);
+    const workflows = new Set(discovered.discoveredWorkflows);
+    for (const filePath of authored.directiveModules) {
+      if (!steps.has(filePath)) discovered.discoveredSteps.push(filePath);
+    }
+    for (const filePath of authored.workflowModules) {
+      if (!workflows.has(filePath)) discovered.discoveredWorkflows.push(filePath);
     }
 
     this.#discoveredEntries.set(inputs, discovered);
@@ -259,6 +278,14 @@ export class WorkflowBundleBuilder {
         plugins: [
           createWorkflowVirtualEntryPlugin(virtualEntrySource),
           createWorkflowPseudoPackagePlugin(),
+          createWorkflowDriverAliasPlugin(this.config.workingDir),
+          createAuthoredRelativeExtensionResolverPlugin({
+            extensions: AUTHORED_RESOLVE_EXTENSIONS,
+          }),
+          createAuthoredPackageTsConfigPathsPlugin({
+            appPackageRoot: this.transformProjectRoot,
+            extensions: AUTHORED_RESOLVE_EXTENSIONS,
+          }),
           createEvePackageImportsPlugin(this.config.workingDir, { workflowCondition: true }),
           createWorkflowTransformPlugin({
             manifest: workflowManifest,

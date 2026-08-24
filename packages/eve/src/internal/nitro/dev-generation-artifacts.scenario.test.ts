@@ -549,7 +549,81 @@ describe("development generation artifacts", () => {
     expect(changedResources.fingerprint).not.toBe(changed.fingerprint);
   });
 
-  it("rejects only authored workflow directives", async () => {
+  it("compiles authored workflow tools for the development runtime", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/instructions.md": "Use the available tools.",
+        "agent/lib/plan.mjs": 'export const PLAN_PREFIX = "plan:";\n',
+        "agent/tools/deploy.mjs": [
+          'import { PLAN_PREFIX } from "../lib/plan.mjs";',
+          "",
+          "export default {",
+          '  description: "Deploy a service.",',
+          '  inputSchema: { type: "object", properties: { service: { type: "string" } } },',
+          "  async execute({ service }) {",
+          '    "use workflow";',
+          "    return { plan: await planDeploy(service) };",
+          "  },",
+          "};",
+          "",
+          "async function planDeploy(service) {",
+          '  "use step";',
+          "  return `${PLAN_PREFIX}${service}`;",
+          "}",
+          "",
+        ].join("\n"),
+        "agent/tools/plain.mjs": [
+          'export default { description: "Plain tool.", execute: () => "plain" };',
+          "",
+        ].join("\n"),
+      },
+      name: "authored-workflow-tools-generation",
+    });
+
+    const compileResult = await compileAgent({ startPath: app.appRoot });
+    const generation = await stageDevelopmentGeneration(compileResult);
+    expect(generation.workflowSourceFingerprint).toEqual(expect.any(String));
+
+    const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
+      compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
+        generation.runtimeAppRoot,
+      ),
+    });
+    const deploySourceId = compileResult.manifest.tools.find(
+      (tool) => tool.name === "deploy",
+    )?.sourceId;
+    const deploy = moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules[deploySourceId!] as {
+      default: { execute: { (input: unknown): Promise<unknown>; workflowId?: string } };
+    };
+    expect(deploy.default.execute.workflowId).toBe("workflow//./agent/tools/deploy//execute");
+    await expect(deploy.default.execute({ service: "api" })).rejects.toThrow(
+      /use start\(execute\) from workflow\/api/u,
+    );
+
+    // A helper the step imports is part of the workflow source graph; an
+    // unrelated tool is not.
+    await writeFile(
+      join(app.appRoot, "agent", "lib", "plan.mjs"),
+      'export const PLAN_PREFIX = "plan v2:";\n',
+    );
+    const helperChanged = await stageDevelopmentGeneration(
+      await compileAgent({ startPath: app.appRoot }),
+    );
+    expect(helperChanged.workflowSourceFingerprint).not.toBe(generation.workflowSourceFingerprint);
+
+    await writeFile(
+      join(app.appRoot, "agent", "tools", "plain.mjs"),
+      'export default { description: "Plain tool.", execute: () => "plain v2" };\n',
+    );
+    const plainChanged = await stageDevelopmentGeneration(
+      await compileAgent({ startPath: app.appRoot }),
+    );
+    expect(plainChanged.workflowSourceFingerprint).toBe(helperChanged.workflowSourceFingerprint);
+    expect(plainChanged.fingerprint).not.toBe(helperChanged.fingerprint);
+  });
+
+  it("rejects module-level authored workflow directives", async () => {
     const app = await scenarioApp({
       files: {
         "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
@@ -578,10 +652,8 @@ describe("development generation artifacts", () => {
         "",
       ].join("\n"),
     );
-    const invalidCompile = await compileAgent({ startPath: app.appRoot });
-
-    await expect(stageDevelopmentGeneration(invalidCompile)).rejects.toThrow(
-      /actual "use step" directive/u,
+    await expect(compileAgent({ startPath: app.appRoot })).rejects.toThrow(
+      /module-level "use step" directive/u,
     );
     await expect(readdir(snapshotsRoot)).resolves.toEqual(stagedGenerations);
   });

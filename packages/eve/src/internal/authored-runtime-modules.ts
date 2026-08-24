@@ -13,6 +13,8 @@ interface PreparedAuthoredRuntimeInstrumentation {
 export interface PreparedAuthoredRuntimeModules {
   readonly instrumentation?: PreparedAuthoredRuntimeInstrumentation;
   readonly moduleMapCode: string;
+  /** Identity of authored sources shared by the workflow driver and step registrations. */
+  readonly workflowSourceFingerprint: string | undefined;
 }
 
 /** Builds the authored runtime graph before a development or production host packages it. */
@@ -20,7 +22,8 @@ export async function prepareAuthoredRuntimeModules(input: {
   readonly manifest: CompiledAgentManifest;
   readonly moduleMapPath: string;
 }): Promise<PreparedAuthoredRuntimeModules> {
-  const moduleMapCode = await bundleAuthoredModuleMapForGeneration(input);
+  const { code: moduleMapCode, workflowSourceFingerprint } =
+    await bundleAuthoredModuleMapForGeneration(input);
   const providersEnabled = input.manifest.config.experimental?.instrumentationProviders ?? false;
   const layout = providersEnabled
     ? resolveInstrumentationLayout({ agentRoot: input.manifest.agentRoot, providersEnabled: true })
@@ -38,5 +41,7 @@ export async function prepareAuthoredRuntimeModules(input: {
     instrumentation = { kind: "directory", moduleCodeBySlot };
   }
 
-  return instrumentation === undefined ? { moduleMapCode } : { instrumentation, moduleMapCode };
+  return instrumentation === undefined
+    ? { moduleMapCode, workflowSourceFingerprint }
+    : { instrumentation, moduleMapCode, workflowSourceFingerprint };
 }

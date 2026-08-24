@@ -14,6 +14,8 @@ import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
+import type { PreparedDispatchTarget } from "#tools/behavior.js";
+import type { ToolExecution } from "#tools/definition.js";
 import { UNSPECIFIED_INPUT_SCHEMA } from "#tools/schema.js";
 import type { RunMode } from "#shared/run-mode.js";
 import {
@@ -28,6 +30,7 @@ import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { preserveFrameworkStateOnCompaction } from "#execution/compaction.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import { createWorkflowToolBackgroundExecute } from "#execution/tool-run/background.js";
 
 const log = createLogger("execution.node-step");
 
@@ -262,6 +265,8 @@ function resolveHarnessToolDefinition(input: {
     description: def.description,
     execution: def.execution,
     execute: resolveAuthoredExecute({
+      dispatchTarget,
+      execution: def.execution,
       rawExecute,
       scope: def.name,
     }),
@@ -280,12 +285,24 @@ function resolveHarnessToolDefinition(input: {
  *   which builds a token-aware context. Providers passed to
  *   `ctx.getToken(provider)` use tool-qualified auth scopes.
  * - Tools without `execute` (provider-managed) stay `undefined`.
+ * - A workflow body never runs inside the model step: a background one is
+ *   started from the harness, a waiting one is dispatched by the turn.
  */
 function resolveAuthoredExecute(input: {
+  readonly dispatchTarget: PreparedDispatchTarget | undefined;
+  readonly execution: ToolExecution | undefined;
   readonly rawExecute: ResolvedToolDefinition["execute"];
   readonly scope: string;
 }): HarnessToolDefinition["execute"] {
   const { rawExecute, scope } = input;
+  if (input.dispatchTarget?.kind === "workflow-tool-call") {
+    return input.execution === "background"
+      ? createWorkflowToolBackgroundExecute({
+          toolName: scope,
+          workflowId: input.dispatchTarget.workflowId,
+        })
+      : undefined;
+  }
   if (rawExecute === undefined) {
     return undefined;
   }

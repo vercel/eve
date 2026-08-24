@@ -66,7 +66,7 @@ async function discoverWorkflowEntries(): Promise<WorkflowBundleDiscoveredEntrie
 
   for (const filePath of inputFiles) {
     const source = await readFile(filePath, "utf8");
-    const patterns = detectWorkflowPatterns(source);
+    const patterns = await detectWorkflowPatterns(filePath, source);
 
     if (patterns.hasUseStep) {
       discovered.discoveredSteps.push(filePath);

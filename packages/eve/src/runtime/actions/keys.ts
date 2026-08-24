@@ -14,6 +14,7 @@ export function getRuntimeActionRequestKey(action: RuntimeActionRequest): string
     case "subagent-call":
       return `subagent-call:${action.subagentName}:${action.callId}`;
     case "tool-call":
+    case "workflow-tool-call":
       return `tool-call:${action.toolName}:${action.callId}`;
   }
 }

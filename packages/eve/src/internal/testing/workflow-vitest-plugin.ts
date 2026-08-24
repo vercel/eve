@@ -1,9 +1,6 @@
 import { join, relative } from "node:path";
 
-import {
-  applyWorkflowTransform,
-  detectWorkflowPatterns,
-} from "#internal/workflow-bundle/workflow-builders.js";
+import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
 
 const WORKFLOW_TEST_OUTPUT_DIR = ".workflow-vitest";
 
@@ -48,12 +45,6 @@ function createWorkflowTransformPlugin(): Plugin {
         return null;
       }
 
-      const patterns = detectWorkflowPatterns(code);
-
-      if (!patterns.hasUseStep && !patterns.hasUseWorkflow && !patterns.hasSerde) {
-        return null;
-      }
-
       const workingDir = process.cwd();
       const transformed = await applyWorkflowTransform(
         createRelativeTransformFilename(workingDir, id),
@@ -63,10 +54,7 @@ function createWorkflowTransformPlugin(): Plugin {
         workingDir,
       );
 
-      return {
-        code: transformed.code,
-        map: null,
-      };
+      return transformed.code === code ? null : { code: transformed.code, map: null };
     },
   };
 }

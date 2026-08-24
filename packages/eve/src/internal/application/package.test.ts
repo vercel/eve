@@ -9,7 +9,7 @@ describe("resolveWorkflowModulePath", () => {
   it("resolves historical workflow specifiers to narrowed runtime modules", () => {
     expect(resolveWorkflowModulePath("workflow")).toMatch(/\/src\/internal\/workflow\/index\.ts$/);
     expect(resolveWorkflowModulePath("workflow/api")).toMatch(
-      /\/src\/internal\/workflow\/runtime\.ts$/,
+      /\/src\/execution\/tool-run\/workflow-api\.ts$/,
     );
     expect(resolveWorkflowModulePath("workflow/internal/builtins")).toMatch(
       /\/src\/internal\/workflow\/builtins\.ts$/,

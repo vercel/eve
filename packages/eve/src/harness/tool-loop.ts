@@ -636,6 +636,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       emit,
       session,
       stepInput: stepInput.input,
+      tools: config.tools,
     });
     if (resolvedRuntimeActions.outcome === "unresolved") {
       return { next: null, session: resolvedRuntimeActions.session };

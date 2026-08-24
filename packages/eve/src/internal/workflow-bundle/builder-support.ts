@@ -222,6 +222,39 @@ export function createWorkflowRuntimeAliasPlugin(): WorkflowRolldownPlugin {
   };
 }
 
+/**
+ * Resolves the public `workflow` surface inside the driver bundle. Authored
+ * workflow bodies import `workflow` for hooks, sleeps, and streams; the
+ * driver provides those through eve's body-side shim, while the runtime API
+ * (`workflow/api`) resolves to a stand-in that fails with the rule when a
+ * body calls it.
+ */
+export function createWorkflowDriverAliasPlugin(workingDir: string): WorkflowRolldownPlugin {
+  return {
+    name: "eve-workflow-driver-aliases",
+    resolveId(source: string) {
+      if (
+        source === "workflow/errors" ||
+        source === "workflow/api" ||
+        source === "workflow/runtime"
+      ) {
+        // `workflow/api` resolves to eve's step wrappers so a body can start
+        // runs and resume hooks without the runtime entering its replayed code.
+        return resolveWorkflowModulePath(source === "workflow/runtime" ? "workflow/api" : source);
+      }
+
+      if (source !== "workflow") {
+        return undefined;
+      }
+
+      return resolveFirstExistingPath([
+        join(workingDir, "src", "internal", "workflow-bundle", "workflow-core-shim.ts"),
+        join(workingDir, "dist", "src", "internal", "workflow-bundle", "workflow-core-shim.js"),
+      ]);
+    },
+  };
+}
+
 export function createEvePackageImportsPlugin(
   workingDir: string,
   options: { workflowCondition?: boolean } = {},
