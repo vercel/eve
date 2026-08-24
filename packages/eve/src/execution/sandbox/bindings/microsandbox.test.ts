@@ -228,8 +228,7 @@ describe.skipIf(onWindows)("createMicrosandboxNetworkPlan", () => {
 });
 
 describe("applyMicrosandboxNetwork", () => {
-  it("enables verified TLS interception for brokered header transforms", () => {
-    const tls = createFluentMock(["interceptedPorts", "verifyUpstream"]);
+  it("registers brokered header transforms through sandbox secrets", () => {
     const secret = createFluentMock([
       "allowAnyHostDangerous",
       "allowHost",
@@ -246,20 +245,15 @@ describe("applyMicrosandboxNetwork", () => {
     const network = {
       enabled: vi.fn(() => network),
       policyJson: vi.fn(() => network),
-      secret: vi.fn((configure: (builder: typeof secret) => unknown) => {
-        configure(secret);
-        return network;
-      }),
-      tls: vi.fn((configure: (builder: typeof tls) => unknown) => {
-        configure(tls);
-        return network;
-      }),
-      trustHostCAs: vi.fn(() => network),
     };
     const sandbox = {
       disableNetwork: vi.fn(),
       network: vi.fn((configure: (builder: typeof network) => unknown) => {
         configure(network);
+        return sandbox;
+      }),
+      secret: vi.fn((configure: (builder: typeof secret) => unknown) => {
+        configure(secret);
         return sandbox;
       }),
     };
@@ -270,18 +264,15 @@ describe("applyMicrosandboxNetwork", () => {
       },
     });
 
-    expect(network.tls).toHaveBeenCalledOnce();
-    expect(tls.interceptedPorts).toHaveBeenCalledWith([443]);
-    expect(tls.verifyUpstream).toHaveBeenCalledWith(true);
+    expect(sandbox.secret).toHaveBeenCalledOnce();
+    expect(secret.requireTlsIdentity).toHaveBeenCalledWith(true);
+    expect(secret.allowHost).toHaveBeenCalledWith("api.example.com");
   });
 
-  it("does not enable TLS interception without brokered header transforms", () => {
+  it("does not register sandbox secrets without brokered header transforms", () => {
     const network = {
       enabled: vi.fn(() => network),
       policyJson: vi.fn(() => network),
-      secret: vi.fn(),
-      tls: vi.fn(),
-      trustHostCAs: vi.fn(() => network),
     };
     const sandbox = {
       disableNetwork: vi.fn(),
@@ -289,11 +280,12 @@ describe("applyMicrosandboxNetwork", () => {
         configure(network);
         return sandbox;
       }),
+      secret: vi.fn(),
     };
 
     applyMicrosandboxNetwork(sandbox as never, { allow: ["api.example.com"] });
 
-    expect(network.tls).not.toHaveBeenCalled();
+    expect(sandbox.secret).not.toHaveBeenCalled();
   });
 });
 

@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Enable verified TLS interception for microsandbox policies with brokered header transforms so credentials replace placeholders at the network boundary.
+Broker microsandbox header credentials through its managed secret API so placeholders are replaced at the verified network boundary.
