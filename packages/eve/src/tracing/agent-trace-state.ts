@@ -2,15 +2,11 @@ import type { SpanContext } from "#compiled/@opentelemetry/api/index.js";
 
 import type {
   InstrumentationActionKind,
-  InstrumentationParentLineage,
   InstrumentationTraceContext,
   InstrumentationTurnFailedEvent,
   InstrumentationTurnSettledEvent,
 } from "#harness/instrumentation/lifecycle.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
-
-/** Sized so an ordinary session stays one trace and only an outsized one rolls. */
-export const SESSION_WINDOW_TURN_LIMIT = 200;
 
 export interface AgentSessionTraceState {
   readonly channelAudience?: ChannelAudience;
@@ -18,18 +14,16 @@ export interface AgentSessionTraceState {
   readonly channelKind?: string;
   readonly context: SpanContext;
   readonly rootSessionId: string;
-  readonly turnsInWindow: number;
-  readonly window: number;
 }
 
 export interface AgentTurnTraceState {
   readonly context: SpanContext;
-  readonly lineage?: InstrumentationParentLineage;
   readonly parentIsRemote?: boolean;
   readonly parentSpanId: string;
   readonly rootSessionId: string;
   readonly sequence: number;
   readonly startTimeMs: number;
+  readonly subagentName?: string;
   readonly terminal?:
     | { readonly error: unknown; readonly type: InstrumentationTurnFailedEvent["type"] }
     | { readonly type: InstrumentationTurnSettledEvent["type"] };

@@ -10,11 +10,7 @@ import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
-import {
-  SESSION_WINDOW_TURN_LIMIT,
-  type AgentSessionTraceState,
-  type AgentTraceStateStore,
-} from "#tracing/agent-trace-state.js";
+import type { AgentSessionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 
 interface AgentOtelSessionContextInput {
   readonly frameworkVersion: string;
@@ -39,18 +35,16 @@ interface AgentOtelSessionContext {
 export function createAgentOtelSessionContext(
   input: AgentOtelSessionContextInput,
 ): AgentOtelSessionContext {
-  const openSessionWindow = (window: {
+  const openSessionTrace = (session: {
     readonly agentName?: string;
     readonly channelAudience: ChannelAudience;
-    readonly index: number;
-    readonly previousTraceId?: string;
     readonly rootSessionId: string;
     readonly sessionId: string;
   }): SpanContext => {
-    if (!shouldTrace(input.tracePolicy, window)) {
+    if (!shouldTrace(input.tracePolicy, session)) {
       return {
         isRemote: false,
-        spanId: input.idGenerator.deriveSpanId(`session:${window.sessionId}:${window.index}`),
+        spanId: input.idGenerator.deriveSpanId(`session:${session.sessionId}`),
         traceFlags: 0,
         traceId: input.idGenerator.generateTraceId(),
       };
@@ -59,20 +53,15 @@ export function createAgentOtelSessionContext(
       attributes: {
         "agent.framework.name": "eve",
         "agent.framework.version": input.frameworkVersion,
-        "agent.channel.audience": window.channelAudience,
-        "agent.name": window.agentName,
-        "agent.root.session.id": window.rootSessionId,
-        "agent.session.id": window.sessionId,
-        "agent.session.window": window.index,
-        "agent.trace.schema.version": 1,
-        ...(window.previousTraceId === undefined
-          ? {}
-          : { "agent.session.window.previous.trace.id": window.previousTraceId }),
+        "agent.channel.audience": session.channelAudience,
+        "agent.name": session.agentName,
+        "agent.session.id": session.sessionId,
+        "agent.trace.schema.version": 2,
       },
       root: true,
     });
-    span.addEvent(window.index === 0 ? "session.started" : "session.window.opened");
-    // The window outlives this worker and has no guaranteed close — an idle
+    span.addEvent("session.started");
+    // The session outlives this worker and has no guaranteed close — an idle
     // session never ends — so the root is recorded as a zero-duration marker
     // and later spans parent through its persisted context.
     span.end();
@@ -90,10 +79,9 @@ export function createAgentOtelSessionContext(
         channelKind: event.channelKind,
         context:
           event.parentTraceContext === undefined
-            ? openSessionWindow({
+            ? openSessionTrace({
                 agentName: event.agentName,
                 channelAudience: normalizeChannelAudience(event.channelAudience),
-                index: 0,
                 rootSessionId: event.rootSessionId,
                 sessionId: event.sessionId,
               })
@@ -107,33 +95,10 @@ export function createAgentOtelSessionContext(
                 }),
               ),
         rootSessionId: event.rootSessionId,
-        turnsInWindow: 0,
-        window: 0,
       };
       await input.stateStore.setSession(event.sessionId, state);
     }
     return state;
-  };
-
-  const advanceSessionWindow = (
-    sessionId: string,
-    session: AgentSessionTraceState,
-  ): AgentSessionTraceState => {
-    if (session.turnsInWindow < SESSION_WINDOW_TURN_LIMIT) return session;
-    const index = session.window + 1;
-    return {
-      ...session,
-      context: openSessionWindow({
-        agentName: session.agentName,
-        channelAudience: normalizeChannelAudience(session.channelAudience),
-        index,
-        previousTraceId: session.context.traceId,
-        rootSessionId: session.rootSessionId,
-        sessionId,
-      }),
-      turnsInWindow: 0,
-      window: index,
-    };
   };
 
   const prepareSessionTrace = async (
@@ -154,19 +119,16 @@ export function createAgentOtelSessionContext(
       };
     }
 
-    const session = advanceSessionWindow(
-      event.sessionId,
-      await ensureSessionContext({
-        agentName: undefined,
-        channelAudience: "unknown",
-        channelKind: undefined,
-        idempotencyKey: sessionIdempotencyKey(event.sessionId),
-        parentTraceContext: event.parentTraceContext,
-        rootSessionId: event.rootSessionId,
-        sessionId: event.sessionId,
-        type: "session.started",
-      }),
-    );
+    const session = await ensureSessionContext({
+      agentName: undefined,
+      channelAudience: "unknown",
+      channelKind: undefined,
+      idempotencyKey: sessionIdempotencyKey(event.sessionId),
+      parentTraceContext: event.parentTraceContext,
+      rootSessionId: event.rootSessionId,
+      sessionId: event.sessionId,
+      type: "session.started",
+    });
     // The turn outlives this worker, so no live span can cover it: the span
     // id is allocated now for descendants to parent through, and the span
     // itself is emitted at the turn's session transition.
@@ -176,18 +138,14 @@ export function createAgentOtelSessionContext(
       traceFlags: session.context.traceFlags,
       traceId: session.context.traceId,
     };
-    await input.stateStore.setSession(event.sessionId, {
-      ...session,
-      turnsInWindow: session.turnsInWindow + 1,
-    });
     await input.stateStore.setTurn(event.sessionId, event.turnId, {
       context: turnContext,
-      lineage: event.parentLineage,
       parentIsRemote: session.context.isRemote,
       parentSpanId: session.context.spanId,
       rootSessionId: event.rootSessionId,
       sequence: event.sequence,
       startTimeMs: Date.now(),
+      subagentName: event.parentLineage?.subagentName,
     });
     return portableSpanContext(session.context);
   };

@@ -58,23 +58,22 @@ void (async () => {
   const runPromise = runner.run();
 
   try {
-    const sessionWindow = "9".repeat(16);
+    const sessionRoot = "9".repeat(16);
     const turn = "a".repeat(16);
     const delivery = "0".repeat(16);
     const step = "b".repeat(16);
     const model = "c".repeat(16);
     const action = "e".repeat(16);
-    // A real capture roots turns under the session's window span, so the
+    // A real capture roots turns under the session span, so the
     // fixture does too — turn discovery must not depend on root position.
     await writeSegment(appRoot, TRACE_ONE, {
-      spanId: sessionWindow,
+      spanId: sessionRoot,
       name: "agent.session",
       start: 900,
       end: 900,
       attributes: {
         "agent.session.id": "session-smoke",
         "agent.name": "smoke-agent",
-        "agent.session.window": 0,
       },
     });
     await writeSegment(appRoot, TRACE_ONE, {
@@ -82,7 +81,7 @@ void (async () => {
       name: "agent.turn",
       start: 1_000,
       end: 1_000,
-      parentSpanId: sessionWindow,
+      parentSpanId: sessionRoot,
       attributes: {
         "agent.session.id": "session-smoke",
         "agent.name": "smoke-agent",
@@ -94,7 +93,7 @@ void (async () => {
       name: "agent.channel.delivery",
       start: 1_000,
       end: 1_000,
-      parentSpanId: sessionWindow,
+      parentSpanId: sessionRoot,
       attributes: {
         "agent.channel.delivery.input": JSON.stringify({ message: "smoke prompt" }),
         "agent.turn.id": "turn_0",
@@ -133,20 +132,30 @@ void (async () => {
         "gen_ai.tool.call.result": '{"temperature":72}',
       },
     });
-    // A subagent child turn recorded into the same trace, carrying its
-    // dispatch lineage (#1433 attributes).
+    const subagentAction = "d".repeat(16);
+    await writeSegment(appRoot, TRACE_ONE, {
+      spanId: subagentAction,
+      name: "agent.action",
+      start: 6_500,
+      end: 7_000,
+      parentSpanId: turn,
+      attributes: {
+        "agent.action.call_id": "call-1",
+        "agent.action.kind": "subagent-call",
+        "agent.action.name": "echo",
+        "agent.turn.id": "turn_0",
+      },
+    });
+    // A subagent child turn recorded into the same trace and parented to its
+    // dispatch action.
     await writeSegment(appRoot, TRACE_ONE, {
       spanId: "8".repeat(16),
       name: "agent.turn",
       start: 7_000,
       end: 7_000,
-      parentSpanId: sessionWindow,
+      parentSpanId: subagentAction,
       attributes: {
         "agent.session.id": "child-session",
-        "agent.parent.session.id": "session-smoke",
-        "agent.parent.turn.id": "turn_0",
-        "agent.parent.call_id": "call-1",
-        "agent.subagent.name": "echo",
         "agent.turn.id": "turn_child",
       },
     });
@@ -155,7 +164,7 @@ void (async () => {
       name: "agent.channel.delivery",
       start: 7_000,
       end: 7_000,
-      parentSpanId: sessionWindow,
+      parentSpanId: sessionRoot,
       attributes: {
         "agent.channel.delivery.input": JSON.stringify({ message: "delegated task" }),
         "agent.turn.id": "turn_child",

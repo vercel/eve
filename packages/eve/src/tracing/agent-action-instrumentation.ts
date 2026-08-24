@@ -126,7 +126,6 @@ export function createAgentActionInstrumentation(input: {
             "agent.action.name": state.name,
             "agent.framework.name": "eve",
             "agent.framework.version": input.frameworkVersion,
-            "agent.root.session.id": state.rootSessionId,
             "agent.session.id": state.sessionId,
             "agent.step.attempt": state.attemptIndex,
             "agent.step.index": state.stepIndex,

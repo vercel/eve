@@ -74,7 +74,7 @@ or tool more than once.
 ## Agent OTel semantics
 
 ```text
-agent.session                              {agent.session.id, agent.session.window}
+agent.session                              {agent.session.id}
   +-- agent.turn                           {agent.turn.id, agent.turn.sequence}
       +-- agent.step                       {agent.step.index, agent.step.attempt}
           +-- model-provider spans
@@ -87,47 +87,27 @@ covers one model call and the actions it requests through their resolution. `age
 an open discriminator — `tool` today, with `skill`, `subagent`, and `remote-agent` reserved.
 
 The `agent.*` namespace carries cheap structural attributes only: session/turn/step/attempt
-identity, action identity, agent and framework identity, channel and environment, principal, and
-parent/root lineage. Message content, model output, and tool payloads are optional capture, off by
+identity, action identity, and agent and framework identity. Message content, model output, and tool payloads are optional capture, off by
 default. The OTel provider owns this mapping; the bridge and hooks contain no span names,
 attributes, or parent contexts.
 
-### Session windows
-
-A session is one trace until it outgrows one. Sessions run for thousands of turns across days, and a
-single unbounded trace serves nobody: the local store evicts whole traces, and exporters cap spans
-per trace and assemble within a bounded time window, so late children get dropped. No local session
-is long enough to reach that, so windowing is for the production providers of phase 7; it is settled
-here because the window is what a subagent adopts and what a sampler decides on.
-
-A session therefore maps to a sequence of windowed traces. A window rolls on a turn count, chosen so
-ordinary sessions stay exactly one trace, and rolls only between turns so a turn's spans always
-share a trace. Turn count is the sole criterion because it is derived from state eve already
-persists, so a replaying worker reaches the same decision — an elapsed-time rule could not.
-`agent.session.window` is the zero-based index; each window's root records
-`agent.session.window.previous.trace.id`.
-
-Session identity does not live in the trace id. Every span carries `agent.session.id`, and eve's
-inspection path resolves a session to its windows through that attribute.
-
-### The window root is a real span
+### The session root is a real span
 
 `agent.session` is a real root span opened with OTel's `root` option, not a synthesized parent
 context. eve persists its span context — including the sampling decision it actually received — and
-later turns in the window parent to that stored context.
+later turns parent to that stored context.
 
 This is what makes an authored sampler work. A synthesized parent asserting a sampled flag is a
 valid parent to `ParentBasedSampler`, which resolves through a parent branch and never consults the
 configured root rule. Asserting unsampled instead selects `localParentNotSampled`, which drops
 everything. A genuine root avoids both.
 
-Sampling is therefore per window, not per session: a ratio sampler may keep some windows of a long
-session and drop others. `agent.session.id` is a creation-time attribute, so an author who needs
-whole sessions can key a sampler on it.
+Sampling is therefore per session trace. `agent.session.id` is a creation-time attribute, so an
+author can key a sampler on it.
 
 ### Marker spans
 
-The window root is recorded and ended immediately, as `agent.turn` already is. A window outlives the
+The session root is recorded and ended immediately, as `agent.turn` already is. A session outlives the
 worker that opened it and a span object cannot cross that boundary, so eve records the root,
 persists its span context, and parents later spans through it.
 
@@ -135,26 +115,20 @@ The cost is that a backend reports the root's duration rather than the window's.
 durations, where the time actually is, are unaffected, and `eve traces` renders a marker's
 descendant extent in place of its zero duration.
 
-A real duration would mean emitting the span once at window close, with explicit timestamps and a
+A real duration would mean emitting the span once at session close, with explicit timestamps and a
 span id chosen before the span exists. The ids are reachable — `registerOTel` accepts an
 `idGenerator` — but the close is not: a session that goes idle and never resumes closes on nothing,
 so its root would never be emitted and every span in the trace would reference a parent that never
 arrives. A marker is the only representation that is always emitted. `agent.turn` does have a
 guaranteed close and could carry a real duration; that is tracked separately.
 
-Cross-window grouping relies on `agent.session.id` plus the previous-trace-id chain. Span links are
-the richer form but are not in eve's vendored OTel surface. Vercel Agent Runs is assembled from
-Workflow run tags rather than spans and is unaffected.
-
 ### Subagents
 
-A subagent keeps its own session identity but records into the window its parent had open, so
-delegated work appears in the trace that caused it. Durable trace state is scoped to one session's
-context, so the window's `SpanContext` is handed down at dispatch rather than looked up by the
-child, and the child snapshots it — a later roll on the parent does not move work already recorded.
-A child with no handed-down window (a remote agent, running under its own deployment's tracing)
-opens its own root. A child that outgrows the adopted window rolls into its own, chained like any
-other roll. `eve traces` resolves any session recorded in a trace, not only the one that opened it.
+A local subagent keeps its own session identity but adopts the parent action's `SpanContext`, so
+delegated work appears directly beneath the action that caused it. Remote dispatch sends the same
+context as `traceparent`; the receiver adopts it when available. A child with no propagated context
+opens its own root. `eve traces` resolves any session recorded in a trace, not only the one that
+opened it.
 
 ## Runtime integration
 

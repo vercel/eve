@@ -18,22 +18,15 @@ describe("ContextAgentTraceStateStore", () => {
         agentName: "weather",
         context: spanContext("1", "2"),
         rootSessionId: "session-1",
-        turnsInWindow: 3,
-        window: 1,
       });
       store.setTurn("session-1", "turn-1", {
         context: spanContext("1", "3"),
-        lineage: {
-          callId: "call-1",
-          sessionId: "parent-session",
-          subagentName: "researcher",
-          turnId: "parent-turn",
-        },
         parentIsRemote: true,
         parentSpanId: "2".repeat(16),
         rootSessionId: "session-1",
         sequence: 0,
         startTimeMs: 1_700_000_000_000,
+        subagentName: "researcher",
         terminal: { error: new Error("failed"), type: "turn.failed" },
       });
     });
@@ -43,18 +36,12 @@ describe("ContextAgentTraceStateStore", () => {
     await contextStorage.run(restored, () => {
       const store = new ContextAgentTraceStateStore();
       expect(store.getSession("session-1")?.context).toEqual(spanContext("1", "2"));
-      expect(store.getSession("session-1")).toMatchObject({ turnsInWindow: 3, window: 1 });
       expect(store.getTurn("session-1", "turn-1")?.context).toEqual(spanContext("1", "3"));
       expect(store.getTurn("session-1", "turn-1")).toMatchObject({
-        lineage: {
-          callId: "call-1",
-          sessionId: "parent-session",
-          subagentName: "researcher",
-          turnId: "parent-turn",
-        },
         parentIsRemote: true,
         parentSpanId: "2".repeat(16),
         startTimeMs: 1_700_000_000_000,
+        subagentName: "researcher",
       });
       const terminal = store.getTurn("session-1", "turn-1")?.terminal;
       expect(terminal?.type).toBe("turn.failed");
@@ -70,8 +57,6 @@ describe("ContextAgentTraceStateStore", () => {
       store.setSession("session-1", {
         context: spanContext("1", "2"),
         rootSessionId: "session-1",
-        turnsInWindow: 0,
-        window: 0,
       });
       store.setTurn("session-1", "turn-1", {
         context: spanContext("1", "3"),
@@ -95,8 +80,6 @@ describe("ContextAgentTraceStateStore", () => {
       new ContextAgentTraceStateStore().setSession("session-1", {
         context: spanContext("1", "2"),
         rootSessionId: "session-1",
-        turnsInWindow: 0,
-        window: 0,
       });
     });
 
@@ -109,14 +92,12 @@ describe("ContextAgentTraceStateStore", () => {
 });
 
 describe("readSessionTraceContext", () => {
-  it("reads one session's window out of a serialized context", async () => {
+  it("reads one session's trace context out of a serialized context", async () => {
     const context = new ContextContainer();
     await contextStorage.run(context, () => {
       new ContextAgentTraceStateStore().setSession("session-1", {
         context: spanContext("1", "2"),
         rootSessionId: "session-1",
-        turnsInWindow: 0,
-        window: 0,
       });
     });
     const serialized = await serializeContext(context);
