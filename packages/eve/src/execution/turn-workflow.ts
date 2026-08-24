@@ -129,10 +129,19 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         serializedContext: cursor.serializedContext,
         sessionState: cursor.sessionState,
       };
-      const result =
-        initialStep?.result ??
-        (await turnStep(cursor.createStepInput(nextStepInput, cancellation?.signal)));
+      const stepPromise =
+        initialStep === undefined
+          ? turnStep(cursor.createStepInput(nextStepInput, cancellation?.signal))
+          : Promise.resolve(initialStep.result);
       initialStep = undefined;
+      const stepOutcome =
+        cancellation === undefined
+          ? { kind: "step" as const, result: await stepPromise }
+          : await Promise.race([
+              stepPromise.then((result) => ({ kind: "step" as const, result })),
+              cancellation.requested.then(() => ({ kind: "cancel" as const })),
+            ]);
+      const result = stepOutcome.kind === "step" ? stepOutcome.result : await stepPromise;
       const pendingActionKeys =
         result.action === "dispatch-workflow-runtime-actions" || result.action === "park"
           ? result.pendingRuntimeActionKeys
