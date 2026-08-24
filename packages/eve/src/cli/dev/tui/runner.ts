@@ -22,6 +22,13 @@ import {
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { subscribeDevelopmentSandboxPrewarmLogs } from "#execution/sandbox/development-prewarm.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
+import { projectActionProgressEvents } from "#execution/progress-action-events.js";
+import { createProgressSnapshot, reduceProgressBatch } from "#execution/session-progress.js";
+import type {
+  ProgressEventV1,
+  ProgressSnapshotV1,
+  ProgressWorkIdentityV1,
+} from "#protocol/progress.js";
 import { isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 import {
   createDevelopmentRuntimeArtifactRefresher,
@@ -77,6 +84,7 @@ import {
   type SetupIssue,
 } from "./setup-issues.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
+import { buildTuiProgressRenderers, type TuiProgressActivityUpdate } from "./progress.js";
 import type { TraceViewerRenderer } from "./traces/trace-viewer-session.js";
 import type { RemoteDevelopmentTarget } from "./target.js";
 import type {
@@ -260,6 +268,8 @@ export type AgentTUIRenderer = {
   /** Commits the startup `/vc:login` invocation to the transcript. */
   renderCommandInvocation?(text: string, status?: "failed"): void;
   renderCommandResult?(text: string, tone?: "success" | "error"): void;
+  /** Replaces one progress activity tree independently of normal stream blocks. */
+  renderProgressActivity?(update: TuiProgressActivityUpdate): void;
   readonly setupFlow?: SetupFlowRenderer;
   /**
    * The renderer's full-screen local trace viewer, opened by `/traces`.
@@ -542,6 +552,9 @@ export class EveTUIRunner {
    * in the same section per child step) and per-tool state.
    */
   readonly #subagentPump: SubagentPump;
+  readonly #progressRenderers: ReturnType<typeof buildTuiProgressRenderers>;
+  #progressRendererStates: Readonly<Record<string, unknown>> = {};
+  #progressSnapshot: ProgressSnapshotV1 = createProgressSnapshot();
   /**
    * callId → AbortController for the parallel child-session stream pump
    * launched on `subagent.called`. Cancelled on `subagent.completed`, when
@@ -576,7 +589,12 @@ export class EveTUIRunner {
     if (options.client !== undefined) this.#client = options.client;
     if (options.lifecycle !== undefined) this.#lifecycle = options.lifecycle;
     this.#renderer = createRenderer(options);
-    const pumpOptions: SubagentPumpOptions = { formatActionResultError };
+    this.#progressRenderers = buildTuiProgressRenderers(options.progressRenderers ?? []);
+    const pumpOptions: SubagentPumpOptions = {
+      formatActionResultError,
+      onProgressEvent: ({ callId, event }) =>
+        this.#observeProgressEvent(event, this.#session, callId),
+    };
     if (this.#client !== undefined) pumpOptions.client = this.#client;
     if (this.#renderer.subagents !== undefined) pumpOptions.view = this.#renderer.subagents;
     this.#subagentPump = new SubagentPump(pumpOptions);
@@ -1481,6 +1499,7 @@ export class EveTUIRunner {
       },
       events: eveEventsToTUIStream({
         events,
+        onProgressEvent: (event) => this.#observeProgressEvent(event, sourceSession),
         pendingInputRequests: this.#pendingInputRequests,
         turnState,
         onSubagentCalled: (called) => this.#subagentPump.begin(called),
@@ -1497,6 +1516,93 @@ export class EveTUIRunner {
       }),
       turnState,
     };
+  }
+
+  #observeProgressEvent(
+    event: MessageStreamEvent,
+    session: ClientSession | undefined,
+    parentCallId?: string,
+  ): void {
+    if (this.#progressRenderers.length === 0 || session === undefined) return;
+    const at = new Date().toISOString();
+    const root = (turnId: string): ProgressWorkIdentityV1 => ({
+      id: `root:${session.state.sessionId}:${turnId}`,
+      kind: "root-turn",
+      rootSessionId: session.state.sessionId,
+      rootTurnId: turnId,
+      sessionId: session.state.sessionId,
+      turnId,
+    });
+    let events: readonly ProgressEventV1[] = [];
+    if (event.type === "turn.started" && parentCallId === undefined) {
+      events = [
+        {
+          eventId: `${root(event.data.turnId).id}:started`,
+          kind: "work.started",
+          startedAt: at,
+          work: root(event.data.turnId),
+        },
+      ];
+    } else if (event.type === "subagent.called") {
+      const parent =
+        parentCallId === undefined
+          ? root(event.data.turnId)
+          : Object.values(this.#progressSnapshot.work).find(
+              (candidate) => candidate.callId === parentCallId,
+            );
+      if (parent === undefined) return;
+      const id = `work:${session.state.sessionId}:${event.data.turnId}:${event.data.callId}`;
+      events = [
+        {
+          eventId: `${id}:started`,
+          kind: "work.started",
+          startedAt: at,
+          work: {
+            callId: event.data.callId,
+            id,
+            kind: event.data.remote === undefined ? "subagent" : "remote-agent",
+            name: event.data.name,
+            parentId: parent.id,
+            rootSessionId: parent.rootSessionId,
+            rootTurnId: parent.rootTurnId,
+          },
+        },
+      ];
+    } else if (event.type === "subagent.completed" && event.data.backgroundTask === undefined) {
+      const work = Object.values(this.#progressSnapshot.work).find(
+        (candidate) => candidate.callId === event.data.callId,
+      );
+      if (work !== undefined) {
+        events = [
+          {
+            eventId: `${work.id}:settled:completed`,
+            kind: "work.settled",
+            outcome: "completed",
+            settledAt: at,
+            workId: work.id,
+          },
+        ];
+      }
+    } else if ("data" in event && "turnId" in event.data && typeof event.data.turnId === "string") {
+      const lineage =
+        parentCallId === undefined
+          ? root(event.data.turnId)
+          : Object.values(this.#progressSnapshot.work).find(
+              (candidate) => candidate.callId === parentCallId,
+            );
+      if (lineage !== undefined) events = projectActionProgressEvents({ at, event, lineage });
+    }
+    if (events.length === 0) return;
+    this.#progressSnapshot = reduceProgressBatch(this.#progressSnapshot, { events, version: 1 });
+    const states: Record<string, unknown> = { ...this.#progressRendererStates };
+    for (const renderer of this.#progressRenderers) {
+      states[renderer.id] = renderer.render({
+        renderActivity: (update) => this.#renderer.renderProgressActivity?.(update),
+        snapshot: this.#progressSnapshot,
+        state: states[renderer.id],
+      });
+    }
+    this.#progressRendererStates = states;
   }
 
   async #renderSetupIssues(info: AgentInfoResult | undefined): Promise<void> {
@@ -1932,6 +2038,7 @@ function formatAgentUpdateNotice(
 
 type EveStreamTranslatorInput = {
   events: AsyncIterable<MessageStreamEvent>;
+  onProgressEvent?: (event: MessageStreamEvent) => void;
   pendingInputRequests: Map<string, InputRequest>;
   turnState: AgentTUITurnState;
   onSubagentCalled?: (event: SubagentCalledStreamEvent) => void;
@@ -1959,6 +2066,7 @@ async function* eveEventsToTUIStream(
 ): AsyncIterable<AgentTUIStreamEvent> {
   const {
     events,
+    onProgressEvent,
     pendingInputRequests,
     turnState,
     onSubagentCalled,
@@ -1994,6 +2102,8 @@ async function* eveEventsToTUIStream(
     if (!seenEvents.admit(event)) {
       continue;
     }
+
+    onProgressEvent?.(event);
 
     if (visibleTurnCompleted && isPostTurnVisibleEvent(event)) {
       continue;
