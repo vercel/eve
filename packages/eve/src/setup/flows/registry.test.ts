@@ -59,11 +59,11 @@ describe("runRegistryFlow", () => {
           address: "extension/agent-browser",
           title: "Agent Browser",
           facts: [],
-          output: [],
+          output: ["Environment: AGENT_BROWSER_TOKEN"],
         },
       ],
       facts: [],
-      output: [],
+      output: ["Environment: AGENT_BROWSER_TOKEN"],
     });
     expect(flowDeps.installRegistryItem).toHaveBeenCalledWith(
       APP_ROOT,
@@ -124,7 +124,7 @@ describe("runRegistryFlow", () => {
     });
   });
 
-  it("links to an installed registry item's documentation", async () => {
+  it("prints an installed registry item's environment and documentation", async () => {
     const answers = ["category:extension", "item:0", "add"];
     const fake = createFakePrompter({ single: () => answers.shift()! });
 
@@ -135,6 +135,7 @@ describe("runRegistryFlow", () => {
         deps: deps({
           getRegistryItemManifest: vi.fn(async () => ({
             description: "Browser automation",
+            envVars: { BROWSER_TOKEN: "", BROWSER_URL: "" },
             meta: { eve: { docs: "/integrations/browser" } },
             name: "extension/agent-browser",
           })),
@@ -143,7 +144,10 @@ describe("runRegistryFlow", () => {
     ).resolves.toMatchObject({
       items: [
         {
-          output: ["Documentation: https://eve.dev/integrations/browser"],
+          output: [
+            "Environment: BROWSER_TOKEN, BROWSER_URL",
+            "Documentation: https://eve.dev/integrations/browser",
+          ],
         },
       ],
     });

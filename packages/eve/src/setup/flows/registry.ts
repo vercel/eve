@@ -183,6 +183,13 @@ function summarizeDetails(values: readonly string[], limit = 3): string {
   return remaining > 0 ? `${visible.join(", ")} … (+${remaining} more)` : visible.join(", ");
 }
 
+function environmentVariables(manifest: Record<string, unknown>): string[] {
+  const envVars = manifest.envVars;
+  return typeof envVars === "object" && envVars !== null && !Array.isArray(envVars)
+    ? Object.keys(envVars)
+    : [];
+}
+
 function itemDetails(
   item: RegistryCatalogItem,
   manifest: Record<string, unknown>,
@@ -195,10 +202,9 @@ function itemDetails(
   ];
   if (dependencies.length > 0)
     details.push({ label: "Packages", value: summarizeDetails(dependencies) });
-  const envVars = manifest.envVars;
-  if (typeof envVars === "object" && envVars !== null && !Array.isArray(envVars)) {
-    const names = Object.keys(envVars);
-    if (names.length > 0) details.push({ label: "Environment", value: summarizeDetails(names) });
+  const environment = environmentVariables(manifest);
+  if (environment.length > 0) {
+    details.push({ label: "Environment", value: summarizeDetails(environment) });
   }
   const files = Array.isArray(manifest.files) ? manifest.files : [];
   const targets = files.flatMap((file) => {
@@ -222,6 +228,7 @@ async function inspectItem(
       kind: "added";
       output: readonly string[];
       documentation?: string;
+      environment?: readonly string[];
       setup?: Awaited<ReturnType<RegistryFlowDeps["installRegistryItem"]>>["setup"];
     }
   | { kind: "back" }
@@ -257,7 +264,12 @@ async function inspectItem(
           signal,
         });
       const result = await (prompter.withExclusiveTerminal?.(install) ?? install());
-      return { kind: "added", documentation: documentationLink(manifest), ...result };
+      return {
+        kind: "added",
+        documentation: documentationLink(manifest),
+        environment: environmentVariables(manifest),
+        ...result,
+      };
     } finally {
       spinner?.stop();
     }
@@ -304,7 +316,14 @@ async function offerItem(
     input.signal,
   );
   if (inspected.kind !== "added") return undefined;
-  session.add(item.address, itemLabel(item), inspected.output, inspected.setup);
+  const output = [...inspected.output];
+  if (inspected.environment !== undefined && inspected.environment.length > 0) {
+    output.push(`Environment: ${inspected.environment.join(", ")}`);
+  }
+  if (inspected.documentation !== undefined) {
+    output.push(`Setup: ${inspected.documentation}`);
+  }
+  session.add(item.address, itemLabel(item), output, inspected.setup);
   const next = await session.continueAfterInstall({
     appRoot: input.appRoot,
     prompter: input.prompter,
