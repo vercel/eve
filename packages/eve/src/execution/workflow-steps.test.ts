@@ -59,7 +59,10 @@ import { appendTaskAgentAnnouncement } from "#execution/tasks/parent/agent-views
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
 import { turnStep } from "#execution/workflow-steps.js";
-import { registerInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
+import {
+  createInstrumentationRuntime,
+  registerInstrumentationRuntime,
+} from "#harness/instrumentation/runtime.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import {
   LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
@@ -271,28 +274,34 @@ describe("delivery instrumentation controls", () => {
       toolRegistry: {},
       turnAgent: TestTurnAgent,
     } as never);
-    const resolveControls = vi.fn(() => ({
+    const resolveDecision = vi.fn(() => ({
       action: "record" as const,
       recordInputs: false,
       recordOutputs: true,
     }));
     let controlsAtDelivery: unknown;
-    registerInstrumentationRuntime({
-      forceFlush: async () => undefined,
-      hooks: {
-        capturesContent: true,
-        publish: async (event) => {
-          if (event.type === "channel.delivery.started") {
-            controlsAtDelivery = loadContext().get(InstrumentationControlsKey);
-          }
-        },
+    const hooks = {
+      capturesContent: true,
+      publish: async (
+        event: import("#harness/instrumentation/lifecycle.js").InstrumentationEvent,
+      ) => {
+        if (event.type === "channel.delivery.started") {
+          controlsAtDelivery = loadContext().get(InstrumentationControlsKey);
+        }
       },
-      otelSettings: undefined,
-      resolveControls,
-      runInContext: (_operation, execute) => execute(),
-      runWithTracingSuppressed: (execute) => execute(),
-      shutdown: async () => undefined,
-    });
+    };
+    registerInstrumentationRuntime(
+      createInstrumentationRuntime({
+        createHooks: () => hooks,
+        forceFlush: async () => undefined,
+        otelSettings: undefined,
+        resolveDecision,
+        runInContext: (_operation, execute) => execute(),
+        runWithTracingSuppressed: (execute) => execute(),
+        shutdown: async () => undefined,
+      }),
+      undefined,
+    );
     const session = createStubSession();
     installSessionStoreMocks([session]);
     vi.mocked(createExecutionNodeStep).mockReturnValue(async (stepSession) => ({
@@ -323,7 +332,7 @@ describe("delivery instrumentation controls", () => {
       sessionState: createStubSessionState(),
     });
 
-    expect(resolveControls).toHaveBeenCalledWith(
+    expect(resolveDecision).toHaveBeenCalledWith(
       expect.objectContaining({ audience: "private", sessionId: session.sessionId }),
     );
     expect(controlsAtDelivery).toEqual({
@@ -334,7 +343,7 @@ describe("delivery instrumentation controls", () => {
     expect(result.serializedContext[InstrumentationControlsKey.name]).toEqual(controlsAtDelivery);
     expect(
       vi.mocked(createExecutionNodeStep).mock.calls[0]?.[0].instrumentation,
-    ).not.toHaveProperty("resolveControls");
+    ).not.toHaveProperty("resolveDecision");
     expect(vi.mocked(createExecutionNodeStep).mock.calls[0]?.[0].instrumentationChannel).toEqual({
       kind: "channel:test",
       metadata: {},

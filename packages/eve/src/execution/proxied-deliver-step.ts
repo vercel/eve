@@ -1,5 +1,6 @@
 import type { DeliverHookPayload, DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
+import { constructSerializedInstrumentation } from "#execution/instrumentation-controls.js";
 import {
   type DurableSessionState,
   readDurableSession,
@@ -83,6 +84,27 @@ export async function routeProxiedDeliverStep(
 ): Promise<LegacyRoutedDeliverResult | RoutedDeliverResult> {
   "use step";
 
+  return await constructSerializedInstrumentation(input.serializedContext ?? {}).run(() =>
+    routeProxiedDeliver(input),
+  );
+}
+
+async function routeProxiedDeliver(
+  input:
+    | {
+        readonly delivery: DeliverHookPayload;
+        readonly parentWritable: WritableStream<Uint8Array>;
+        readonly serializedContext?: Record<string, unknown>;
+        readonly sessionState: DurableSessionState;
+      }
+    | {
+        readonly auth?: SessionAuthContext | null;
+        readonly parentWritable: WritableStream<Uint8Array>;
+        readonly payload: DeliverPayload;
+        readonly serializedContext?: Record<string, unknown>;
+        readonly sessionState: DurableSessionState;
+      },
+): Promise<LegacyRoutedDeliverResult | RoutedDeliverResult> {
   let durableSession = await readDurableSession(input.sessionState);
   const legacyInput = !("delivery" in input);
   const sourceDelivery: DeliverHookPayload =

@@ -60,7 +60,7 @@ The third configurable surface, [runtime context events](#runtime-context), atta
 
 Built-in messaging channels classify their instrumentation metadata with an `audience`: `public`, `private`, or `unknown`. Slack public channels and Chat SDK workspace-visible threads are public; direct and private conversations are private; platform surfaces without enough visibility evidence remain unknown.
 
-With instrumentation providers enabled, `otel({ tracePolicy })` maps that classification to a delivery-scoped decision before the harness runs. Return `{ action: "drop" }` to omit the trace, or return `{ action: "record", recordInputs, recordOutputs }` to create it with an explicit content ceiling. By default, eve records public deliveries with inputs and outputs and drops private and unknown deliveries. The harness and span export policies do not receive the audience value.
+With instrumentation providers enabled, `otel({ tracePolicy })` maps that classification to a delivery-scoped decision before the harness runs. eve constructs the harness instrumentation from that decision, including its provider set, content-filtered hooks, telemetry, and tracing context. Return `{ action: "drop" }` to omit the trace, or return `{ action: "record", recordInputs, recordOutputs }` to create it with an explicit content ceiling. By default, eve records public deliveries with inputs and outputs and drops private and unknown deliveries. The harness and span export policies receive neither the audience value nor the decision.
 
 This decision governs durable agent and AI telemetry. The optional inbound server span created by `traceChannelRequests: true` is request-scoped, contains no body or session content, and begins before a channel can classify the audience.
 

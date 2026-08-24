@@ -8,6 +8,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import { getSessionTaskIndex } from "#tasks/session-index.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { constructSerializedInstrumentation } from "#execution/instrumentation-controls.js";
 
 const log = createLogger("execution.terminate-child-sessions");
 
@@ -28,6 +29,15 @@ export async function terminateChildSessionsStep(input: {
 }): Promise<void> {
   "use step";
 
+  return await constructSerializedInstrumentation(input.serializedContext ?? {}).run(() =>
+    terminateChildSessions(input),
+  );
+}
+
+async function terminateChildSessions(input: {
+  readonly serializedContext?: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}): Promise<void> {
   let session;
   try {
     session = await readDurableSession(input.sessionState);

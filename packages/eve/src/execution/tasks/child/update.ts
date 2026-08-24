@@ -1,5 +1,5 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
-import { SessionCallbackKey } from "#context/keys.js";
+import { InstrumentationControlsKey, SessionCallbackKey } from "#context/keys.js";
 import { fireTaskUpdateCallbackStep } from "#execution/session-callback-step.js";
 import {
   isSubagentAdapterState,
@@ -10,6 +10,7 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-id.js";
 import type { TaskInboundUpdate } from "#tasks/types.js";
+import type { InstrumentationControls } from "#shared/instrumentation-controls.js";
 
 /** Sends one child-authored progress update over its existing parent transport. */
 export async function executeTaskUpdate(input: {
@@ -32,6 +33,9 @@ export async function executeTaskUpdate(input: {
       updateIndex: input.updateIndex,
       updateEpoch: input.updateEpoch,
       message,
+      instrumentationControls: input.serializedContext?.[InstrumentationControlsKey.name] as
+        | InstrumentationControls
+        | undefined,
     });
     if (taskId === undefined) {
       return createTaskControlError(input.action, "This session is not owned by a parent task.");

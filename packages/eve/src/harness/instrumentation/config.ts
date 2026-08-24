@@ -1,5 +1,8 @@
 import { createInstrumentationHooks } from "#harness/instrumentation/lifecycle.js";
-import { registerInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
+import {
+  createInstrumentationRuntime,
+  registerInstrumentationRuntime,
+} from "#harness/instrumentation/runtime.js";
 import { createInstrumentationSetupContext } from "#harness/instrumentation/setup-context.js";
 import type { InstrumentationDefinition } from "#public/instrumentation/index.js";
 
@@ -46,24 +49,30 @@ export async function registerInstrumentationConfig(
   globalContainer[INSTRUMENTATION_CONFIG_GLOBAL_KEY] = config;
   // This legacy layout leaves `registerOTel` to `setup`, so install only the
   // runtime projection consumed by the harness.
-  registerInstrumentationRuntime({
-    forceFlush: async () => undefined,
-    hooks: createInstrumentationHooks([]),
-    otelSettings: {
-      functionId: config.functionId,
-      recordInputs: config.recordInputs === true,
-      recordOutputs: config.recordOutputs === true,
-      traceChannelRequests: config.traceChannelRequests === true,
-    },
-    resolveControls: () => ({
-      action: "record",
-      recordInputs: config.recordInputs === true,
-      recordOutputs: config.recordOutputs === true,
+  const hooks = createInstrumentationHooks([]);
+  const otelSettings = {
+    functionId: config.functionId,
+    recordInputs: config.recordInputs === true,
+    recordOutputs: config.recordOutputs === true,
+    traceChannelRequests: config.traceChannelRequests === true,
+  };
+  registerInstrumentationRuntime(
+    createInstrumentationRuntime({
+      authoredConfig: config,
+      createHooks: () => hooks,
+      forceFlush: async () => undefined,
+      otelSettings,
+      resolveDecision: () => ({
+        action: "record",
+        recordInputs: config.recordInputs === true,
+        recordOutputs: config.recordOutputs === true,
+      }),
+      runInContext: (_operation, execute) => execute(),
+      runWithTracingSuppressed: (execute) => execute(),
+      shutdown: async () => undefined,
     }),
-    runInContext: (_operation, execute) => execute(),
-    runWithTracingSuppressed: (execute) => execute(),
-    shutdown: async () => undefined,
-  });
+    otelSettings,
+  );
   await config.setup?.(createInstrumentationSetupContext(input.agentName));
 }
 

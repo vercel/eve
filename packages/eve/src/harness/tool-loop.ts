@@ -167,7 +167,6 @@ import {
   convertStaleResponsesToUserMessage,
   dropStaleSessionLimitContinuationResponses,
 } from "#harness/stale-input-responses.js";
-import { getInstrumentationConfig } from "#harness/instrumentation/config.js";
 import type { OtelHarnessSettings } from "#tracing/otel-declaration.js";
 import {
   normalizeModelMessages,
@@ -210,10 +209,7 @@ import {
   TASK_DELIVERY_SETTLED_INSTRUCTION,
 } from "#tasks/delivery-context.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
-import {
-  ensureOtelIntegration,
-  getRegisteredTelemetryIntegrations,
-} from "#harness/ai-sdk-telemetry.js";
+import { ensureOtelIntegration } from "#harness/ai-sdk-telemetry.js";
 import { getAdvertisedTools } from "#harness/advertised-tools.js";
 import { createBackgroundToolCallBatch } from "#harness/background-tools.js";
 import {
@@ -320,8 +316,13 @@ function enrichTelemetry(
   agentName: string | undefined,
   runtimeContext?: Readonly<Record<string, unknown>>,
   bridgeIntegration?: Telemetry,
+  telemetryIntegrations?: readonly Telemetry[],
 ): TelemetryOptions | undefined {
-  if (settings === undefined && bridgeIntegration === undefined) {
+  if (
+    settings === undefined &&
+    bridgeIntegration === undefined &&
+    telemetryIntegrations === undefined
+  ) {
     return undefined;
   }
 
@@ -331,18 +332,12 @@ function enrichTelemetry(
   for (const key of Object.keys(runtimeContext ?? {})) {
     includeRuntimeContext[key] = true;
   }
-  const includeRegisteredIntegrations =
-    settings?.enabled !== false &&
-    settings?.recordInputs !== false &&
-    settings?.recordOutputs !== false;
   const integrations =
-    bridgeIntegration === undefined
-      ? includeRegisteredIntegrations
-        ? undefined
-        : []
+    bridgeIntegration === undefined && telemetryIntegrations === undefined
+      ? undefined
       : [
-          bridgeIntegration,
-          ...(includeRegisteredIntegrations ? getRegisteredTelemetryIntegrations() : []),
+          ...(bridgeIntegration === undefined ? [] : [bridgeIntegration]),
+          ...(telemetryIntegrations ?? []),
         ];
 
   return {
@@ -586,15 +581,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   // The legacy single-file layout reads its runtime-context resolver from the
   // authored config object; the provider directory collects resolvers at install
   // time onto the runtime. Both paths feed buildTelemetryRuntimeContext.
-  const authoredConfig = getInstrumentationConfig();
+  const authoredConfig = config.instrumentation?.authoredConfig;
   const providerRuntimeContextResolvers = config.instrumentation?.runtimeContextResolvers;
-  if (otelSettings !== undefined && otelSettings.enabled !== false) {
+  if (otelSettings !== undefined) {
     ensureOtelIntegration();
   }
-  const tracer =
-    otelSettings !== undefined && otelSettings.enabled !== false
-      ? trace.getTracer("eve")
-      : undefined;
+  const tracer = otelSettings !== undefined ? trace.getTracer("eve") : undefined;
   const agentName = config.runtimeIdentity?.agentName;
 
   async function runStep(
@@ -634,10 +626,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         turnSpan?.end();
       }
     };
-    const runWithTracingSuppressed = config.instrumentation?.runWithTracingSuppressed;
-    return runWithTracingSuppressed === undefined
-      ? await execute()
-      : await runWithTracingSuppressed(execute);
+    return await execute();
   }
 
   async function executeStepBody(
@@ -788,7 +777,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             resolveModel: config.resolveModel,
             runtimeIdentity: config.runtimeIdentity,
             session,
-            telemetry: enrichTelemetry(otelSettings, agentName) ?? undefined,
+            telemetry:
+              enrichTelemetry(
+                otelSettings,
+                agentName,
+                undefined,
+                undefined,
+                config.instrumentation?.telemetryIntegrations,
+              ) ?? undefined,
           });
 
           session = {
@@ -1282,7 +1278,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       resolveModel: config.resolveModel,
       runtimeIdentity: config.runtimeIdentity,
       session,
-      telemetry: enrichTelemetry(otelSettings, agentName) ?? undefined,
+      telemetry:
+        enrichTelemetry(
+          otelSettings,
+          agentName,
+          undefined,
+          undefined,
+          config.instrumentation?.telemetryIntegrations,
+        ) ?? undefined,
     });
     session = compaction.session;
     if (compaction.compacted) {
@@ -1582,6 +1585,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           agentName,
           telemetryRuntimeContext,
           bridgeIntegration,
+          config.instrumentation?.telemetryIntegrations,
         ),
         toolApproval: buildToolApproval(modelTools),
         toolChoice: hasPendingApprovalBatch(session) ? ("none" as const) : undefined,

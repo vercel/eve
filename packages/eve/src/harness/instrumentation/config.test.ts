@@ -71,7 +71,8 @@ describe("instrumentation-config chunk-isolation regression", () => {
 
   it("installs harness telemetry settings on the instrumentation runtime", async () => {
     const { registerInstrumentationConfig } = await import("#harness/instrumentation/config.js");
-    const { getInstrumentationRuntime } = await import("#harness/instrumentation/runtime.js");
+    const { constructInstrumentation, getInstrumentationRuntime } =
+      await import("#harness/instrumentation/runtime.js");
 
     await registerInstrumentationConfig(
       {
@@ -83,7 +84,15 @@ describe("instrumentation-config chunk-isolation regression", () => {
       { agentName: "test-agent" },
     );
 
-    expect(getInstrumentationRuntime()?.otelSettings).toEqual({
+    const runtime = getInstrumentationRuntime()!;
+    expect(runtime.traceChannelRequests).toBe(true);
+    expect(
+      constructInstrumentation(runtime, {
+        action: "record",
+        recordInputs: true,
+        recordOutputs: false,
+      }).harness?.otelSettings,
+    ).toMatchObject({
       functionId: "weather",
       recordInputs: true,
       recordOutputs: false,
@@ -93,11 +102,20 @@ describe("instrumentation-config chunk-isolation regression", () => {
 
   it("disables input and output recording by default", async () => {
     const { registerInstrumentationConfig } = await import("#harness/instrumentation/config.js");
-    const { getInstrumentationRuntime } = await import("#harness/instrumentation/runtime.js");
+    const { constructInstrumentation, getInstrumentationRuntime } =
+      await import("#harness/instrumentation/runtime.js");
 
     await registerInstrumentationConfig({}, { agentName: "test-agent" });
 
-    expect(getInstrumentationRuntime()?.otelSettings).toEqual({
+    const runtime = getInstrumentationRuntime()!;
+    expect(runtime.traceChannelRequests).toBe(false);
+    expect(
+      constructInstrumentation(runtime, {
+        action: "record",
+        recordInputs: false,
+        recordOutputs: false,
+      }).harness?.otelSettings,
+    ).toMatchObject({
       functionId: undefined,
       recordInputs: false,
       recordOutputs: false,

@@ -1,5 +1,10 @@
 import type { ContextContainer } from "#context/container.js";
-import { ContinuationTokenKey, SessionCallbackKey, SessionIdKey } from "#context/keys.js";
+import {
+  ContinuationTokenKey,
+  InstrumentationControlsKey,
+  SessionCallbackKey,
+  SessionIdKey,
+} from "#context/keys.js";
 import { fireTaskEventCallbackStep } from "#execution/session-callback-step.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
@@ -30,6 +35,7 @@ export async function forwardTaskEventToSessionCallback(
     childContinuationToken: ctx.require(ContinuationTokenKey),
     childSessionId: ctx.require(SessionIdKey),
     event,
+    instrumentationControls: ctx.get(InstrumentationControlsKey),
   });
   return true;
 }

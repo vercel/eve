@@ -3,9 +3,9 @@ import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import type { ContextContainer } from "#context/container.js";
 import { ChannelInstrumentationKey, InstrumentationControlsKey } from "#context/keys.js";
 import {
-  bindInstrumentationRuntime,
+  constructInstrumentation,
   getInstrumentationRuntime,
-  type HarnessInstrumentation,
+  type ConstructedInstrumentation,
   type InstrumentationRuntime,
 } from "#harness/instrumentation/runtime.js";
 import { normalizeChannelAudience, withoutChannelAudience } from "#shared/channel-audience.js";
@@ -17,8 +17,12 @@ interface PreparedDeliveryInstrumentation {
     readonly kind?: string;
     readonly metadata: Readonly<Record<string, unknown>>;
   };
-  readonly instrumentation?: HarnessInstrumentation;
+  readonly scope: ConstructedInstrumentation;
 }
+
+const UNINSTRUMENTED: ConstructedInstrumentation = {
+  run: (execute) => execute(),
+};
 
 /** Resolves one delivery's audience at the execution boundary and returns bound controls. */
 export function prepareDeliveryInstrumentation(input: {
@@ -39,12 +43,14 @@ export function prepareDeliveryInstrumentation(input: {
           metadata: withoutChannelAudience(channel.metadata),
         };
   const { instrumentation } = input;
-  if (instrumentation === undefined) return { channel: projectedChannel };
+  if (instrumentation === undefined) {
+    return { channel: projectedChannel, scope: UNINSTRUMENTED };
+  }
 
   const existing = input.ctx.get(InstrumentationControlsKey);
   const shouldResolve = existing === undefined || input.delivery?.kind === "deliver";
   const resolved = shouldResolve
-    ? instrumentation.resolveControls({
+    ? instrumentation.resolveDecision({
         agentName: input.agentName,
         audience: normalizeChannelAudience(channel?.metadata.audience),
         rootSessionId: input.rootSessionId,
@@ -58,7 +64,7 @@ export function prepareDeliveryInstrumentation(input: {
   input.ctx.set(InstrumentationControlsKey, controls);
   return {
     channel: projectedChannel,
-    instrumentation: bindInstrumentationRuntime(instrumentation, controls),
+    scope: constructInstrumentation(instrumentation, controls),
   };
 }
 
@@ -82,29 +88,24 @@ export function consumeDeliveryInstrumentationControls(
   return changed ? { ...delivery, payloads } : delivery;
 }
 
-/** Runs a dispatch side effect under the active delivery's drop decision. */
-export function runWithInstrumentationControls<T>(
+/** Constructs the active delivery capability from a persisted decision. */
+export function constructExecutionInstrumentation(
   controls: InstrumentationControls | undefined,
   instrumentation: InstrumentationRuntime | undefined,
-  execute: () => PromiseLike<T>,
-): PromiseLike<T> {
-  return controls?.action === "drop" && instrumentation !== undefined
-    ? instrumentation.runWithTracingSuppressed(execute)
-    : execute();
+): ConstructedInstrumentation {
+  return controls === undefined || instrumentation === undefined
+    ? UNINSTRUMENTED
+    : constructInstrumentation(instrumentation, controls);
 }
 
-/** Applies a serialized drop decision in out-of-band execution steps. */
-export function runWithSerializedInstrumentationControls<T>(
+/** Constructs an out-of-band execution capability from serialized state. */
+export function constructSerializedInstrumentation(
   serializedContext: Record<string, unknown>,
-  execute: () => PromiseLike<T>,
-): PromiseLike<T> {
+): ConstructedInstrumentation {
   const value = serializedContext[InstrumentationControlsKey.name];
-  const dropped =
-    typeof value === "object" &&
-    value !== null &&
-    (value as { action?: unknown }).action === "drop";
-  const instrumentation = getInstrumentationRuntime();
-  return dropped && instrumentation !== undefined
-    ? instrumentation.runWithTracingSuppressed(execute)
-    : execute();
+  const controls =
+    typeof value === "object" && value !== null && "action" in value
+      ? (value as InstrumentationControls)
+      : undefined;
+  return constructExecutionInstrumentation(controls, getInstrumentationRuntime());
 }

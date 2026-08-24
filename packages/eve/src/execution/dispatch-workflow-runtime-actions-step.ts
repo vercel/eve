@@ -23,6 +23,7 @@ import type {
   RuntimeActionResult,
 } from "#runtime/actions/types.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
+import { constructSerializedInstrumentation } from "#execution/instrumentation-controls.js";
 
 const log = createLogger("execution.dispatch-workflow-runtime-actions");
 
@@ -44,6 +45,26 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
 }> {
   "use step";
 
+  return await constructSerializedInstrumentation(input.serializedContext).run(() =>
+    dispatchWorkflowRuntimeActions(input),
+  );
+}
+
+async function dispatchWorkflowRuntimeActions(input: {
+  readonly callbackBaseUrl?: string;
+  readonly parentContinuationToken?: string;
+  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}): Promise<{
+  readonly results: readonly RuntimeActionResult[];
+  readonly sessionState: DurableSessionState;
+  readonly pendingTasks: readonly {
+    readonly taskInboxToken: string;
+    readonly taskId: string;
+    readonly taskRunId: string;
+  }[];
+}> {
   const durableSession = await readDurableSession(input.sessionState);
   const pending = getPendingWorkflowInterrupt(durableSession.state);
   if (pending === undefined) {

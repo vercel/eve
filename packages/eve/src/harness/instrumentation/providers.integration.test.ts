@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { turnIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+import { constructInstrumentation } from "#harness/instrumentation/runtime.js";
 import {
   finalizeInstrumentationProviders,
   registerInstrumentationProvider,
@@ -68,7 +69,12 @@ describe("authored instrumentation provider dispatch", () => {
 
     expect(order).toEqual(["first:setup", "first:setup-complete", "second:setup"]);
 
-    const runtime = finalizeInstrumentationProviders({ serviceName: "weather" });
+    const installedRuntime = finalizeInstrumentationProviders({ serviceName: "weather" });
+    const runtime = constructInstrumentation(installedRuntime, {
+      action: "record",
+      recordInputs: true,
+      recordOutputs: true,
+    }).harness!;
     const publication = runtime.hooks.publish({
       idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
       rootSessionId: "session-1",

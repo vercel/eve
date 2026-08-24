@@ -6,6 +6,10 @@ import { SESSION_FAILED } from "#harness/agent-handle-errors.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import { constructSerializedInstrumentation } from "#execution/instrumentation-controls.js";
+import { constructExecutionInstrumentation } from "#execution/instrumentation-controls.js";
+import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
+import type { InstrumentationControls } from "#shared/instrumentation-controls.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 const log = createLogger("execution.session-callback");
@@ -18,9 +22,25 @@ export async function fireTaskEventCallbackStep(input: {
   readonly event:
     | SubagentAuthorizationEvent
     | Extract<UnstampedMessageStreamEvent, { type: "input.requested" }>;
+  readonly instrumentationControls?: InstrumentationControls;
 }): Promise<void> {
   "use step";
 
+  return await constructExecutionInstrumentation(
+    input.instrumentationControls,
+    getInstrumentationRuntime(),
+  ).run(() => fireTaskEventCallback(input));
+}
+
+async function fireTaskEventCallback(input: {
+  readonly callback: unknown;
+  readonly childContinuationToken: string;
+  readonly childSessionId: string;
+  readonly event:
+    | SubagentAuthorizationEvent
+    | Extract<UnstampedMessageStreamEvent, { type: "input.requested" }>;
+  readonly instrumentationControls?: InstrumentationControls;
+}): Promise<void> {
   const callback = parseSerializedSessionCallback(input.callback);
   if (callback.taskId === undefined) return;
   const inputRequested = input.event.type === "input.requested";
@@ -49,9 +69,24 @@ export async function fireTaskUpdateCallbackStep(input: {
   readonly updateIndex: number;
   readonly updateEpoch: string;
   readonly message: string;
+  readonly instrumentationControls?: InstrumentationControls;
 }): Promise<string | undefined> {
   "use step";
 
+  return await constructExecutionInstrumentation(
+    input.instrumentationControls,
+    getInstrumentationRuntime(),
+  ).run(() => fireTaskUpdateCallback(input));
+}
+
+async function fireTaskUpdateCallback(input: {
+  readonly callback: unknown;
+  readonly callId: string;
+  readonly updateIndex: number;
+  readonly updateEpoch: string;
+  readonly message: string;
+  readonly instrumentationControls?: InstrumentationControls;
+}): Promise<string | undefined> {
   const callback = parseSerializedSessionCallback(input.callback);
   if (callback.taskId === undefined) return undefined;
   const response = await postSessionCallbackRequest({
@@ -94,6 +129,18 @@ export async function fireSessionCallbackStep(input: {
 }): Promise<void> {
   "use step";
 
+  return await constructSerializedInstrumentation(input.serializedContext).run(() =>
+    fireSessionCallback(input),
+  );
+}
+
+async function fireSessionCallback(input: {
+  readonly error?: unknown;
+  readonly output?: unknown;
+  readonly serializedContext: Record<string, unknown>;
+  readonly status: "completed" | "failed";
+  readonly usage?: TokenUsage;
+}): Promise<void> {
   const sessionId = (input.serializedContext["eve.sessionId"] as string | undefined) ?? "";
   const value = input.serializedContext[SessionCallbackKey.name];
   if (value === undefined) {

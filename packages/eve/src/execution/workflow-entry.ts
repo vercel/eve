@@ -262,6 +262,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       await notifyTurnCallerStep({
         caller: await resolveCallerForCrash(crashCleanupState, input.serializedContext),
         lifecycle: "terminal",
+        serializedContext: input.serializedContext,
         sessionId,
         settled: { isError: true, output: error },
       });
@@ -519,6 +520,7 @@ async function runDriverLoop(input: {
         await notifyTurnCallerStep({
           caller: input.crashCleanupState.caller,
           lifecycle: "parked",
+          serializedContext: stateCursor.serializedContext,
           sessionId: stateCursor.sessionState.sessionId,
           settled,
         });
@@ -633,6 +635,7 @@ async function finalizeExpiredSession(input: {
     await notifyTurnCallerStep({
       caller: input.caller,
       lifecycle: "terminal",
+      serializedContext: input.serializedContext,
       sessionId: input.sessionState.sessionId,
       settled: { output: "" },
     });
@@ -679,6 +682,7 @@ async function finalizeDone(input: {
     await notifyTurnCallerStep({
       caller: input.caller,
       lifecycle: "terminal",
+      serializedContext,
       sessionId: input.action.sessionState.sessionId,
       settled,
     });

@@ -3,8 +3,9 @@ import { callAdapterEventHandler } from "#channel/adapter.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { ChannelInstrumentationKey, InstrumentationControlsKey } from "#context/keys.js";
+import { ChannelInstrumentationKey } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
+import { constructSerializedInstrumentation } from "#execution/instrumentation-controls.js";
 import {
   createDurableSessionState,
   type DurableSessionState,
@@ -28,10 +29,7 @@ import {
 import { abandonRunningAgentTurns } from "#harness/handles/transitions.js";
 import { clearPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { createInstrumentationHandleEvent } from "#harness/instrumentation/native-events.js";
-import {
-  bindInstrumentationRuntime,
-  getInstrumentationRuntime,
-} from "#harness/instrumentation/runtime.js";
+import type { ConstructedInstrumentation } from "#harness/instrumentation/runtime.js";
 import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
 import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import {
@@ -62,18 +60,24 @@ export async function settleCancelledTurnStep(input: {
 }): Promise<CancelledTurnSettleResult> {
   "use step";
 
+  const instrumentationScope = constructSerializedInstrumentation(input.serializedContext);
+  return await instrumentationScope.run(() => settleCancelledTurn(input, instrumentationScope));
+}
+
+async function settleCancelledTurn(
+  input: {
+    readonly parentWritable: WritableStream<Uint8Array>;
+    readonly serializedContext: Record<string, unknown>;
+    readonly sessionState: DurableSessionState;
+  },
+  instrumentationScope: ConstructedInstrumentation,
+): Promise<CancelledTurnSettleResult> {
   const durableSession = await readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   const adapter = ctx.require(ChannelKey);
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const instrumentation = getInstrumentationRuntime();
-  const controls = ctx.get(InstrumentationControlsKey);
-  const harnessInstrumentation =
-    instrumentation === undefined || controls === undefined
-      ? instrumentation
-      : bindInstrumentationRuntime(instrumentation, controls);
 
   let session = hydrateDurableSession({
     compactionOverrides: {
@@ -118,7 +122,7 @@ export async function settleCancelledTurnStep(input: {
               agentName: bundle.turnAgent.id,
               channelKind: ctx.get(ChannelInstrumentationKey)?.kind,
               handleEvent: baseEmit,
-              hooks: harnessInstrumentation?.hooks,
+              hooks: instrumentationScope.harness?.hooks,
               sessionId: session.sessionId,
               turnId: activeTurnId(emissionState),
             }) ?? baseEmit;
@@ -127,15 +131,11 @@ export async function settleCancelledTurnStep(input: {
             session: enrichedSession,
           };
         });
-      const runWithTracingSuppressed = harnessInstrumentation?.runWithTracingSuppressed;
-      const scoped =
-        runWithTracingSuppressed === undefined
-          ? await settle()
-          : await runWithTracingSuppressed(settle);
+      const scoped = await settle();
       emissionState = scoped.result;
       session = scoped.session;
     } finally {
-      await instrumentation?.forceFlush();
+      await instrumentationScope.harness?.forceFlush?.();
       writer.releaseLock();
     }
   }

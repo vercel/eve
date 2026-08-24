@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { turnIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+import { constructInstrumentation } from "#harness/instrumentation/runtime.js";
 import {
   EVE_EVALUATION_ENV_FLAG,
   EVE_EVALUATION_RUN_ID_ENV,
@@ -207,7 +208,10 @@ describe("finalizeInstrumentationProviders", () => {
     const started = vi.fn();
     await register("rows", defineInstrumentation({ events: { "turn.started": started } }));
 
-    const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
+    const runtime = constructInstrumentation(
+      finalizeInstrumentationProviders({ serviceName: "weather-agent" }),
+      { action: "record", recordInputs: true, recordOutputs: true },
+    ).harness!;
     await runtime.hooks.publish(turnStarted);
 
     expect(started).toHaveBeenCalledOnce();
@@ -220,7 +224,10 @@ describe("finalizeInstrumentationProviders", () => {
     // going missing.
     await register("rows", defineInstrumentation({}));
 
-    const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
+    const runtime = constructInstrumentation(
+      finalizeInstrumentationProviders({ serviceName: "weather-agent" }),
+      { action: "record", recordInputs: true, recordOutputs: true },
+    ).harness!;
     const result = await runtime.runInContext(
       {
         idempotencyKey: "tool:session-1:turn-1:0:0:call-1:0",

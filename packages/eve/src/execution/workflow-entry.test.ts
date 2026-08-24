@@ -365,6 +365,7 @@ describe("workflowEntry", () => {
     expect(notifyTurnCallerStep).toHaveBeenCalledWith({
       caller: undefined,
       lifecycle: "terminal",
+      serializedContext: expect.any(Object),
       sessionId: "wrun_test_123",
       settled: { output: "" },
     });
@@ -557,6 +558,7 @@ describe("workflowEntry", () => {
     expect(notifyTurnCallerStep).toHaveBeenCalledWith({
       caller,
       lifecycle: "terminal",
+      serializedContext: expect.any(Object),
       sessionId: "wrun_test_123",
       settled: {
         isError: true,
@@ -606,6 +608,7 @@ describe("workflowEntry", () => {
     expect(notifyTurnCallerStep).toHaveBeenCalledWith({
       caller,
       lifecycle: "terminal",
+      serializedContext: expect.any(Object),
       sessionId: "wrun_test_123",
       settled: {
         isError: true,
@@ -704,6 +707,7 @@ describe("workflowEntry", () => {
         subagentName: "researcher",
       },
       lifecycle: "terminal",
+      serializedContext: expect.any(Object),
       sessionId: "wrun_test_123",
       settled: {
         isError: true,
@@ -763,6 +767,7 @@ describe("workflowEntry", () => {
     expect(notifyTurnCallerStep).toHaveBeenCalledWith({
       caller,
       lifecycle: "parked",
+      serializedContext: expect.any(Object),
       sessionId: "wrun_test_123",
       settled: { output: "settled answer" },
     });
@@ -809,6 +814,7 @@ describe("workflowEntry", () => {
     expect(notifyTurnCallerStep).toHaveBeenCalledExactlyOnceWith({
       caller,
       lifecycle: "parked",
+      serializedContext: expect.any(Object),
       sessionId: "wrun_test_123",
       settled: { output: "approved answer" },
     });
@@ -1044,6 +1050,7 @@ describe("workflowEntry", () => {
     expect(notifyTurnCallerStep).toHaveBeenCalledExactlyOnceWith({
       caller: undefined,
       lifecycle: "terminal",
+      serializedContext: expect.any(Object),
       sessionId: "wrun_test_123",
       settled: { output: "ok" },
     });
@@ -1091,6 +1098,7 @@ describe("workflowEntry", () => {
     expect(notifyTurnCallerStep).toHaveBeenCalledWith({
       caller: undefined,
       lifecycle: "parked",
+      serializedContext: expect.any(Object),
       sessionId: "wrun_test_123",
       settled: { output: "hello" },
     });
@@ -1231,12 +1239,14 @@ describe("workflowEntry", () => {
     expect(notifyTurnCallerStep).toHaveBeenNthCalledWith(1, {
       caller: firstCaller,
       lifecycle: "parked",
+      serializedContext: expect.any(Object),
       sessionId: "wrun_test_123",
       settled: { output: "first answer" },
     });
     expect(notifyTurnCallerStep).toHaveBeenNthCalledWith(2, {
       caller: secondCaller,
       lifecycle: "parked",
+      serializedContext: expect.any(Object),
       sessionId: "wrun_test_123",
       settled: { output: "second answer" },
     });

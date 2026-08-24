@@ -282,7 +282,6 @@ export interface OtelPipeline {
 
 /** What the harness reads at turn time, as opposed to at registration. @internal */
 export interface OtelHarnessSettings {
-  readonly enabled?: boolean;
   readonly functionId?: string;
   readonly traceChannelRequests: boolean;
   /** Legacy `defineInstrumentation()` capture settings. Provider destinations capture fully. */

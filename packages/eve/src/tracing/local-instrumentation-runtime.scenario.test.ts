@@ -14,6 +14,7 @@ import {
 } from "#compiled/@opentelemetry/api/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
+import { constructInstrumentation } from "#harness/instrumentation/runtime.js";
 import { listLocalTraces } from "#tracing/local-trace-reader.js";
 import type { InstrumentationAttemptScope } from "#harness/instrumentation/lifecycle.js";
 import {
@@ -43,11 +44,14 @@ describe("local instrumentation runtime", () => {
     const authoredTracer = (
       require("@opentelemetry/api") as typeof import("@opentelemetry/api")
     ).trace.getTracer("test-user");
-    const runtime = installLocalInstrumentationRuntime({
-      appRoot,
-      frameworkVersion: "test",
-      serviceName: "test-agent",
-    });
+    const runtime = constructInstrumentation(
+      installLocalInstrumentationRuntime({
+        appRoot,
+        frameworkVersion: "test",
+        serviceName: "test-agent",
+      }),
+      { action: "record", recordInputs: true, recordOutputs: true },
+    ).harness!;
     const scope: InstrumentationAttemptScope = {
       attemptId: "session-1:turn-1:0:0",
       attemptIndex: 0,

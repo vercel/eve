@@ -5,22 +5,26 @@ import { ChannelInstrumentationKey, InstrumentationControlsKey } from "#context/
 import { prepareDeliveryInstrumentation } from "#execution/instrumentation-controls.js";
 import { consumeDeliveryInstrumentationControls } from "#execution/instrumentation-controls.js";
 import { setChannelContext } from "#execution/channel-context.js";
-import type { InstrumentationRuntime } from "#harness/instrumentation/runtime.js";
+import {
+  createInstrumentationRuntime,
+  type InstrumentationRuntime,
+} from "#harness/instrumentation/runtime.js";
 
 function runtime(): InstrumentationRuntime {
-  return {
+  const hooks = { capturesContent: true, publish: async () => undefined };
+  return createInstrumentationRuntime({
+    createHooks: () => hooks,
     forceFlush: async () => undefined,
-    hooks: { capturesContent: true, publish: async () => undefined },
     otelSettings: {
       recordInputs: true,
       recordOutputs: true,
       traceChannelRequests: false,
     },
-    resolveControls: () => ({ action: "record", recordInputs: true, recordOutputs: true }),
+    resolveDecision: () => ({ action: "record", recordInputs: true, recordOutputs: true }),
     runInContext: (_operation, execute) => execute(),
     runWithTracingSuppressed: (execute) => execute(),
     shutdown: async () => undefined,
-  };
+  });
 }
 
 describe("prepareDeliveryInstrumentation", () => {

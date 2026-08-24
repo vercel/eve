@@ -22,7 +22,7 @@ type ChannelAudience = "public" | "private" | "unknown";
 
 The field is optional for authored channels. Eve normalizes absent, malformed, and unsupported values to `unknown`. Built-in channel metadata interfaces require the field and classify only from platform evidence already captured during dispatch; ambiguous and proactive destinations remain `unknown` rather than performing observability-only network requests.
 
-At channel delivery, eve evaluates the process-wide trace policy and persists only its generic trace and content controls for that turn. The harness, lifecycle providers, trace state, and export policies never receive the audience classification. Local subagents inherit the resolved controls; remote agents classify their receiving channel independently.
+At channel delivery, eve evaluates the process-wide trace policy and persists only its generic decision for that turn. Each durable execution boundary reconstructs a decision-bound instrumentation scope whose hooks, telemetry, provider graph, and execution context already enforce the decision. The harness, lifecycle providers, trace state, and export policies never receive the audience classification or branch on the decision. Local subagents inherit the serialized decision; remote agents classify their receiving channel independently.
 
 ## Public tracing API
 
@@ -162,8 +162,8 @@ This keeps unclassified local HTTP/TUI sessions observable while still rejecting
 The runtime order is:
 
 1. Derive and normalize the channel audience at channel delivery.
-2. Evaluate `tracePolicy` and persist only its drop/record and content controls for the turn.
-3. Apply those controls to lifecycle providers, eve spans, and AI SDK telemetry before content is materialized.
+2. Evaluate `tracePolicy` and persist only its drop/record and content decision for the turn.
+3. Construct an instrumentation scope that includes only the permitted providers and exposes pre-filtered hooks, telemetry, and execution context to the harness.
 4. Run each managed destination's composed export policies in declaration order. Destination policies may redact further but cannot restore content removed by the delivery controls.
 5. Hand the resulting facade to that destination's processors or exporter.
 

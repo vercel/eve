@@ -1,34 +1,38 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { InstrumentationRuntime } from "#harness/instrumentation/runtime.js";
-import { bindInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
+import {
+  constructInstrumentation,
+  createInstrumentationRuntime,
+} from "#harness/instrumentation/runtime.js";
 
 function runtime(publish = vi.fn()): InstrumentationRuntime {
-  return {
+  const hooks = { capturesContent: true, publish };
+  return createInstrumentationRuntime({
+    createHooks: () => hooks,
     forceFlush: async () => undefined,
-    hooks: { capturesContent: true, publish },
     otelSettings: {
       recordInputs: true,
       recordOutputs: true,
       traceChannelRequests: false,
     },
-    resolveControls: () => ({ action: "drop", recordInputs: false, recordOutputs: false }),
+    resolveDecision: () => ({ action: "drop", recordInputs: false, recordOutputs: false }),
     runInContext: (_operation, execute) => execute(),
     runWithTracingSuppressed: (execute) => execute(),
     shutdown: async () => undefined,
-  };
+  });
 }
 
-describe("bindInstrumentationRuntime", () => {
+describe("constructInstrumentation", () => {
   it("applies directional content controls before publishing", async () => {
     const publish = vi.fn();
-    const bound = bindInstrumentationRuntime(runtime(publish), {
+    const constructed = constructInstrumentation(runtime(publish), {
       action: "record",
       recordInputs: false,
       recordOutputs: true,
     });
 
-    await bound.hooks.publish({
+    await constructed.harness!.hooks.publish({
       idempotencyKey: "model-1",
       input: { instructions: "secret", messages: [] },
       model: { modelId: "test", provider: "test" },
@@ -41,7 +45,7 @@ describe("bindInstrumentationRuntime", () => {
       },
       type: "model.call.started",
     });
-    await bound.hooks.publish({
+    await constructed.harness!.hooks.publish({
       content: [{ text: "visible", type: "text" }],
       finishReason: "stop",
       idempotencyKey: "model-1",
@@ -58,27 +62,22 @@ describe("bindInstrumentationRuntime", () => {
 
     expect(publish.mock.calls[0]?.[0]).toHaveProperty("input", undefined);
     expect(publish.mock.calls[1]?.[0]).toHaveProperty("content");
-    expect(bound.otelSettings).toMatchObject({
-      enabled: true,
+    expect(constructed.harness?.otelSettings).toMatchObject({
       recordInputs: false,
       recordOutputs: true,
     });
   });
 
   it("suppresses OTel while retaining metadata-only provider events", () => {
-    const bound = bindInstrumentationRuntime(runtime(), {
+    const constructed = constructInstrumentation(runtime(), {
       action: "drop",
       recordInputs: false,
       recordOutputs: false,
     });
 
-    expect(bound.hooks.capturesContent).toBe(false);
-    expect(bound.otelSettings).toMatchObject({
-      enabled: false,
-      recordInputs: false,
-      recordOutputs: false,
-    });
-    expect(bound.prepareSessionTrace).toBeUndefined();
-    expect(bound.prepareTurnTrace).toBeUndefined();
+    expect(constructed.harness?.hooks.capturesContent).toBe(false);
+    expect(constructed.harness?.otelSettings).toBeUndefined();
+    expect(constructed.harness?.prepareSessionTrace).toBeUndefined();
+    expect(constructed.harness?.prepareTurnTrace).toBeUndefined();
   });
 });

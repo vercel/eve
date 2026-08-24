@@ -2,7 +2,7 @@ import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler } from "#channel/adapter.js";
 import { deserializeContext } from "#context/serialize.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
-import { runWithSerializedInstrumentationControls } from "#execution/instrumentation-controls.js";
+import { constructSerializedInstrumentation } from "#execution/instrumentation-controls.js";
 import { createLogger, formatError } from "#internal/logging.js";
 import {
   createSessionFailedEvent,
@@ -21,6 +21,16 @@ export async function emitTerminalSessionFailureStep(input: {
 }): Promise<void> {
   "use step";
 
+  return await constructSerializedInstrumentation(input.serializedContext).run(() =>
+    emitTerminalSessionFailure(input),
+  );
+}
+
+async function emitTerminalSessionFailure(input: {
+  readonly error: unknown;
+  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly serializedContext: Record<string, unknown>;
+}): Promise<void> {
   // Cataloged failures replace the raw identity with the curated one; the
   // `detail` dump stays attached to the private event so the session trace
   // keeps the raw evidence while the transcript shows the actionable summary.
@@ -56,9 +66,7 @@ export async function emitTerminalSessionFailureStep(input: {
     const adapter = ctx.get(ChannelKey);
     if (adapter !== undefined) {
       const adapterCtx = buildAdapterContext(adapter, ctx);
-      await runWithSerializedInstrumentationControls(input.serializedContext, () =>
-        callAdapterEventHandler(adapter, event, adapterCtx),
-      );
+      await callAdapterEventHandler(adapter, event, adapterCtx);
     }
   } catch (notificationError) {
     log.error("adapter failed to handle terminal session.failed event", {

@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { InstrumentationControlsKey } from "#context/keys.js";
 import { turnIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+import { constructInstrumentation } from "#harness/instrumentation/runtime.js";
 import { installInstrumentationRuntime } from "#tracing/install-instrumentation-runtime.js";
 import { otel, otelIntegration, collectOtelPipeline } from "#tracing/otel-declaration.js";
 
@@ -70,7 +70,14 @@ describe("installInstrumentationRuntime", () => {
 
     expect(forceFlush).toHaveBeenCalledOnce();
     expect(providerFlush).toHaveBeenCalledOnce();
-    expect(runtime.otelSettings).toEqual({
+    expect(runtime.traceChannelRequests).toBe(false);
+    expect(
+      constructInstrumentation(runtime, {
+        action: "record",
+        recordInputs: true,
+        recordOutputs: true,
+      }).harness?.otelSettings,
+    ).toMatchObject({
       functionId: undefined,
       recordInputs: true,
       recordOutputs: true,
@@ -98,9 +105,14 @@ describe("installInstrumentationRuntime", () => {
       serviceName: "weather",
     });
     const idempotencyKey = turnIdempotencyKey("session-1", "turn-1");
+    const instrumentation = constructInstrumentation(runtime, {
+      action: "record",
+      recordInputs: true,
+      recordOutputs: true,
+    }).harness!;
 
     await contextStorage.run(new ContextContainer(), async () => {
-      await runtime.hooks.publish({
+      await instrumentation.hooks.publish({
         idempotencyKey,
         rootSessionId: "session-1",
         sequence: 0,
@@ -108,7 +120,7 @@ describe("installInstrumentationRuntime", () => {
         turnId: "turn-1",
         type: "turn.started",
       });
-      await runtime.hooks.publish({
+      await instrumentation.hooks.publish({
         idempotencyKey,
         sessionId: "session-1",
         turnId: "turn-1",
@@ -129,12 +141,12 @@ describe("installInstrumentationRuntime", () => {
     });
     const context = { rootSessionId: "session-1", sessionId: "session-1" };
 
-    expect(runtime.resolveControls({ ...context, audience: "public" })).toEqual({
+    expect(runtime.resolveDecision({ ...context, audience: "public" })).toEqual({
       action: "record",
       recordInputs: true,
       recordOutputs: true,
     });
-    expect(runtime.resolveControls({ ...context, audience: "private" })).toEqual({
+    expect(runtime.resolveDecision({ ...context, audience: "private" })).toEqual({
       action: "drop",
       recordInputs: false,
       recordOutputs: false,
@@ -159,7 +171,7 @@ describe("installInstrumentationRuntime", () => {
     });
 
     expect(
-      runtime.resolveControls({
+      runtime.resolveDecision({
         audience: "private",
         rootSessionId: "session-1",
         sessionId: "session-1",
@@ -183,7 +195,7 @@ describe("installInstrumentationRuntime", () => {
     });
 
     expect(
-      runtime.resolveControls({
+      runtime.resolveDecision({
         audience: "public",
         rootSessionId: "session-1",
         sessionId: "session-1",
@@ -204,15 +216,14 @@ describe("installInstrumentationRuntime", () => {
       ],
       serviceName: "weather",
     });
-    const ctx = new ContextContainer();
-    ctx.set(InstrumentationControlsKey, {
+    const instrumentation = constructInstrumentation(runtime, {
       action: "drop",
       recordInputs: false,
       recordOutputs: false,
-    });
+    }).harness!;
 
-    await contextStorage.run(ctx, async () => {
-      await runtime.hooks.publish({
+    await contextStorage.run(new ContextContainer(), async () => {
+      await instrumentation.hooks.publish({
         idempotencyKey: "turn-1",
         rootSessionId: "session-1",
         sequence: 0,
@@ -220,7 +231,7 @@ describe("installInstrumentationRuntime", () => {
         turnId: "turn-1",
         type: "turn.started",
       });
-      await runtime.hooks.publish({
+      await instrumentation.hooks.publish({
         idempotencyKey: "turn-1",
         sessionId: "session-1",
         turnId: "turn-1",

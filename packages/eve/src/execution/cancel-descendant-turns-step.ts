@@ -13,6 +13,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import type { ContextContainer } from "#context/container.js";
+import { constructSerializedInstrumentation } from "#execution/instrumentation-controls.js";
 
 // Retry through transient world contention (queue wakes, hook-claim
 // conflicts), then log loudly: a silently dropped cancel leaves the child
@@ -31,6 +32,15 @@ export async function cancelDescendantTurnsStep(input: {
 }): Promise<void> {
   "use step";
 
+  return await constructSerializedInstrumentation(input.serializedContext).run(() =>
+    cancelDescendantTurns(input),
+  );
+}
+
+async function cancelDescendantTurns(input: {
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}): Promise<void> {
   let running: readonly RunningAgentHandle[];
   try {
     const session = await readDurableSession(input.sessionState);

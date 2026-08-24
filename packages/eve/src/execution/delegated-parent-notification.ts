@@ -21,6 +21,7 @@ import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import { constructSerializedInstrumentation } from "#execution/instrumentation-controls.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 import type { TaskInboundTurnStarted } from "#tasks/types.js";
@@ -43,6 +44,16 @@ export async function notifyDelegatedParentStep(input: {
 }): Promise<void> {
   "use step";
 
+  return await constructSerializedInstrumentation(input.serializedContext).run(() =>
+    notifyDelegatedParent(input),
+  );
+}
+
+async function notifyDelegatedParent(input: {
+  readonly result: RuntimeSubagentChildResult | undefined;
+  readonly serializedContext: Record<string, unknown>;
+  readonly usage?: TokenUsage;
+}): Promise<void> {
   if (input.result === undefined) {
     return;
   }
@@ -104,11 +115,24 @@ const ZERO_TOKEN_USAGE: TokenUsage = {
 export async function notifyTurnCallerStep(input: {
   readonly caller: TurnCaller | undefined;
   readonly lifecycle: AgentTurnOutcome["kind"];
+  readonly serializedContext?: Record<string, unknown>;
   readonly sessionId: string;
   readonly settled: SettledTurnNotification;
 }): Promise<void> {
   "use step";
 
+  return await constructSerializedInstrumentation(input.serializedContext ?? {}).run(() =>
+    notifyTurnCaller(input),
+  );
+}
+
+async function notifyTurnCaller(input: {
+  readonly caller: TurnCaller | undefined;
+  readonly lifecycle: AgentTurnOutcome["kind"];
+  readonly serializedContext?: Record<string, unknown>;
+  readonly sessionId: string;
+  readonly settled: SettledTurnNotification;
+}): Promise<void> {
   if (input.caller === undefined) {
     return;
   }

@@ -5,7 +5,7 @@ import type {
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import type { ContextContainer } from "#context/container.js";
-import { InstrumentationControlsKey, ModeKey } from "#context/keys.js";
+import { ModeKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -25,8 +25,7 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { encodeMessageStreamEvent, stampMessageStreamEvent } from "#protocol/message.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
-import { runWithInstrumentationControls } from "#execution/instrumentation-controls.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
+import { constructSerializedInstrumentation } from "#execution/instrumentation-controls.js";
 
 type SubagentEventHookPayload =
   | SubagentAuthorizationEventHookPayload
@@ -48,15 +47,7 @@ export async function runProxySubagentEventStep(input: {
 }): Promise<ProxySubagentEventResult> {
   "use step";
 
-  const durableSession = await readDurableSession(input.sessionState);
-  const ctx = await deserializeContext(input.serializedContext);
-
-  return emitProxiedSubagentEvent({
-    ctx,
-    durableSession,
-    hookPayload: input.hookPayload,
-    parentWritable: input.parentWritable,
-  });
+  return runSerializedProxyEvent(input, true);
 }
 
 /** Emits a task request whose proxy routes were committed by a prior step. */
@@ -68,15 +59,7 @@ export async function emitRecordedTaskInputRequestStep(input: {
 }): Promise<ProxySubagentEventResult> {
   "use step";
 
-  const durableSession = await readDurableSession(input.sessionState);
-  const ctx = await deserializeContext(input.serializedContext);
-  return emitProxiedSubagentEvent({
-    ctx,
-    durableSession,
-    hookPayload: input.hookPayload,
-    parentWritable: input.parentWritable,
-    recordProxyInputRequests: false,
-  });
+  return runSerializedProxyEvent(input, false);
 }
 
 /** Emits a task authorization event after its ownership was validated. */
@@ -88,14 +71,28 @@ export async function emitRecordedTaskAuthorizationEventStep(input: {
 }): Promise<ProxySubagentEventResult> {
   "use step";
 
-  const durableSession = await readDurableSession(input.sessionState);
-  const ctx = await deserializeContext(input.serializedContext);
-  return emitProxiedSubagentEvent({
-    ctx,
-    durableSession,
-    hookPayload: input.hookPayload,
-    parentWritable: input.parentWritable,
-    recordProxyInputRequests: false,
+  return runSerializedProxyEvent(input, false);
+}
+
+async function runSerializedProxyEvent(
+  input: {
+    readonly hookPayload: SubagentEventHookPayload;
+    readonly parentWritable: WritableStream<Uint8Array>;
+    readonly serializedContext: Record<string, unknown>;
+    readonly sessionState: DurableSessionState;
+  },
+  recordProxyInputRequests: boolean,
+): Promise<ProxySubagentEventResult> {
+  return await constructSerializedInstrumentation(input.serializedContext).run(async () => {
+    const durableSession = await readDurableSession(input.sessionState);
+    const ctx = await deserializeContext(input.serializedContext);
+    return emitProxiedSubagentEvent({
+      ctx,
+      durableSession,
+      hookPayload: input.hookPayload,
+      parentWritable: input.parentWritable,
+      recordProxyInputRequests,
+    });
   });
 }
 
@@ -127,11 +124,7 @@ export async function emitProxiedSubagentEvent(input: {
     // A re-emitted child event is a distinct event on the parent stream, so it
     // gets its own id rather than the child's.
     const emit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
-      const transformed = await runWithInstrumentationControls(
-        ctx.get(InstrumentationControlsKey),
-        getInstrumentationRuntime(),
-        () => callAdapterEventHandler(adapter, event, adapterCtx),
-      );
+      const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
       await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(transformed)));
     };
 

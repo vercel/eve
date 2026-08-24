@@ -2,7 +2,7 @@ import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler } from "#channel/adapter.js";
 import { deserializeContext } from "#context/serialize.js";
 import { createLogger } from "#internal/logging.js";
-import { runWithSerializedInstrumentationControls } from "#execution/instrumentation-controls.js";
+import { constructSerializedInstrumentation } from "#execution/instrumentation-controls.js";
 import {
   createSessionCompletedEvent,
   encodeMessageStreamEvent,
@@ -19,6 +19,15 @@ export async function emitTerminalSessionCompletionStep(input: {
 }): Promise<void> {
   "use step";
 
+  return await constructSerializedInstrumentation(input.serializedContext).run(() =>
+    emitTerminalSessionCompletion(input),
+  );
+}
+
+async function emitTerminalSessionCompletion(input: {
+  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly serializedContext: Record<string, unknown>;
+}): Promise<void> {
   const event = createSessionCompletedEvent();
   const sessionId = (input.serializedContext["eve.sessionId"] as string | undefined) ?? "";
 
@@ -27,9 +36,7 @@ export async function emitTerminalSessionCompletionStep(input: {
     const adapter = ctx.get(ChannelKey);
     if (adapter !== undefined) {
       const adapterCtx = buildAdapterContext(adapter, ctx);
-      await runWithSerializedInstrumentationControls(input.serializedContext, () =>
-        callAdapterEventHandler(adapter, event, adapterCtx),
-      );
+      await callAdapterEventHandler(adapter, event, adapterCtx);
     }
   } catch (notificationError) {
     log.error("adapter failed to handle terminal session.completed event", {

@@ -28,8 +28,7 @@ import {
   type RuntimeActionDispatchResult,
   startSubagent,
 } from "#execution/dispatch-runtime-actions-shared.js";
-import { runWithInstrumentationControls } from "#execution/instrumentation-controls.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
+import { constructSerializedInstrumentation } from "#execution/instrumentation-controls.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import {
   beginDelegatedTask,
@@ -51,6 +50,14 @@ export async function dispatchTaskStep(
 ): Promise<RuntimeActionDispatchResult> {
   "use step";
 
+  return await constructSerializedInstrumentation(input.serializedContext).run(() =>
+    dispatchTasks(input),
+  );
+}
+
+async function dispatchTasks(
+  input: RuntimeActionDispatchInput,
+): Promise<RuntimeActionDispatchResult> {
   const prepared = await prepareRuntimeActionDispatch({
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,
@@ -60,7 +67,6 @@ export async function dispatchTaskStep(
     return { results: [], sessionState: input.sessionState, pendingTasks: [] };
   }
   const { batch, bundle, session } = prepared;
-  const instrumentation = getInstrumentationRuntime();
   // Acquired only once preflight can no longer throw, so a planning failure
   // never leaks the writer lock.
   const writer = input.parentWritable.getWriter();
@@ -77,20 +83,15 @@ export async function dispatchTaskStep(
       }
 
       if (entry.kind === "task-control") {
-        const control = await runWithInstrumentationControls(
-          prepared.instrumentationControls,
-          instrumentation,
-          () =>
-            executeTaskControlAction({
-              action: entry.action,
-              adapter: prepared.adapter,
-              bundle,
-              parentStepIndex: batch.event.stepIndex,
-              parentTurnId: batch.event.turnId,
-              serializedContext: prepared.serializedContext,
-              session: nextSession,
-            }),
-        );
+        const control = await executeTaskControlAction({
+          action: entry.action,
+          adapter: prepared.adapter,
+          bundle,
+          parentStepIndex: batch.event.stepIndex,
+          parentTurnId: batch.event.turnId,
+          serializedContext: prepared.serializedContext,
+          session: nextSession,
+        });
         nextSession = control.session;
         if (control.pendingTask !== undefined) pendingTasks.push(control.pendingTask);
         results.push(control.result);
@@ -111,24 +112,19 @@ export async function dispatchTaskStep(
         }
       }
 
-      const delegated = await runWithInstrumentationControls(
-        prepared.instrumentationControls,
-        instrumentation,
-        () =>
-          beginDelegatedTask({
-            ...describeTaskDispatch({
-              action: entry.kind === "resume" ? entry.action : entry.target.action,
-              agentId: entry.kind === "resume" ? entry.agentId : undefined,
-              parentSessionId: session.sessionId,
-              parentTurnId: batch.event.turnId,
-              session: nextSession,
-            }),
-            parentSessionId: session.sessionId,
-            parentStepIndex: batch.event.stepIndex,
-            parentTurnId: batch.event.turnId,
-            session: nextSession,
-          }),
-      );
+      const delegated = await beginDelegatedTask({
+        ...describeTaskDispatch({
+          action: entry.kind === "resume" ? entry.action : entry.target.action,
+          agentId: entry.kind === "resume" ? entry.agentId : undefined,
+          parentSessionId: session.sessionId,
+          parentTurnId: batch.event.turnId,
+          session: nextSession,
+        }),
+        parentSessionId: session.sessionId,
+        parentStepIndex: batch.event.stepIndex,
+        parentTurnId: batch.event.turnId,
+        session: nextSession,
+      });
       let persistedContinuation: PersistedContinuationTask | undefined;
       if (entry.kind === "resume") {
         persistedContinuation = await persistContinuationTaskInParentSession({
@@ -143,55 +139,45 @@ export async function dispatchTaskStep(
       let outcome: DispatchOutcome;
       switch (entry.kind) {
         case "resume":
-          outcome = await runWithInstrumentationControls(
-            prepared.instrumentationControls,
-            instrumentation,
-            () =>
-              dispatchToTaskAgentAddress({
-                action: entry.action,
-                agentId: entry.agentId,
-                auth: prepared.auth,
-                bundle: createAgentContinuationBundle({
-                  action: entry.action,
-                  bundle,
-                  dynamicRemoteAgent: entry.dynamicRemoteAgent,
-                }),
-                currentSession: nextSession,
-                instrumentationControls: prepared.instrumentationControls,
-                parentToken: delegated.taskInboxToken,
-              }),
-          );
+          outcome = await dispatchToTaskAgentAddress({
+            action: entry.action,
+            agentId: entry.agentId,
+            auth: prepared.auth,
+            bundle: createAgentContinuationBundle({
+              action: entry.action,
+              bundle,
+              dynamicRemoteAgent: entry.dynamicRemoteAgent,
+            }),
+            currentSession: nextSession,
+            instrumentationControls: prepared.instrumentationControls,
+            parentToken: delegated.taskInboxToken,
+          });
           break;
         case "start":
-          outcome = await runWithInstrumentationControls(
-            prepared.instrumentationControls,
-            instrumentation,
-            () =>
-              startSubagent({
-                auth: prepared.auth,
-                batchEvent: batch.event,
-                bundle,
-                callbackBaseUrl: input.callbackBaseUrl,
-                capabilities: prepared.capabilities,
-                channelMetadata: prepared.channelMetadata,
-                currentSession: nextSession,
-                fanoutSize: prepared.fanoutSize,
-                initiatorAuth: prepared.initiatorAuth,
-                instrumentationControls: prepared.instrumentationControls,
-                parentContinuationToken: delegated.taskInboxToken,
-                parentTraceContext: prepared.parentTraceContext,
-                // Background tasks require resumable children, so task mode
-                // always dispatches conversation-mode (persistent) sessions;
-                // `experimental.subagentPersistentSessions` never produces a
-                // third mode here.
-                persistentSessions: true,
-                sandboxSessionId: prepared.sandboxSessionId,
-                serializedContext: prepared.serializedContext,
-                session,
-                taskOwned: true,
-                target: entry.target,
-              }),
-          );
+          outcome = await startSubagent({
+            auth: prepared.auth,
+            batchEvent: batch.event,
+            bundle,
+            callbackBaseUrl: input.callbackBaseUrl,
+            capabilities: prepared.capabilities,
+            channelMetadata: prepared.channelMetadata,
+            currentSession: nextSession,
+            fanoutSize: prepared.fanoutSize,
+            initiatorAuth: prepared.initiatorAuth,
+            instrumentationControls: prepared.instrumentationControls,
+            parentContinuationToken: delegated.taskInboxToken,
+            parentTraceContext: prepared.parentTraceContext,
+            // Background tasks require resumable children, so task mode
+            // always dispatches conversation-mode (persistent) sessions;
+            // `experimental.subagentPersistentSessions` never produces a
+            // third mode here.
+            persistentSessions: true,
+            sandboxSessionId: prepared.sandboxSessionId,
+            serializedContext: prepared.serializedContext,
+            session,
+            taskOwned: true,
+            target: entry.target,
+          });
           break;
       }
 
@@ -222,17 +208,15 @@ export async function dispatchTaskStep(
       }
       pendingTasks.push(delegated);
 
-      await runWithInstrumentationControls(prepared.instrumentationControls, instrumentation, () =>
-        emitSubagentCalled({
-          adapter: prepared.adapter,
-          adapterCtx: prepared.adapterCtx,
-          batchEvent: batch.event,
-          entry,
-          outcome,
-          sessionId: session.sessionId,
-          writer,
-        }),
-      );
+      await emitSubagentCalled({
+        adapter: prepared.adapter,
+        adapterCtx: prepared.adapterCtx,
+        batchEvent: batch.event,
+        entry,
+        outcome,
+        sessionId: session.sessionId,
+        writer,
+      });
     }
   } finally {
     writer.releaseLock();

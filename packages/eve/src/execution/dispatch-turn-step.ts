@@ -5,6 +5,7 @@ import {
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import { startWorkflowPreferLatest, turnWorkflowReference } from "#execution/workflow-runtime.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
+import { constructSerializedInstrumentation } from "#execution/instrumentation-controls.js";
 
 /** Starts a per-turn child workflow for the current driver session. */
 export async function dispatchTurnStep(
@@ -12,6 +13,12 @@ export async function dispatchTurnStep(
 ): Promise<{ readonly runId: string }> {
   "use step";
 
+  return await constructSerializedInstrumentation(input.serializedContext).run(() =>
+    dispatchTurn(input),
+  );
+}
+
+async function dispatchTurn(input: TurnWorkflowDispatchInput): Promise<{ readonly runId: string }> {
   const run = await startWorkflowPreferLatest(
     turnWorkflowReference,
     [createTurnWorkflowInput(input)],
