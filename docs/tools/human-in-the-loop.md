@@ -56,6 +56,50 @@ Policies can also return `"approved"` or `"denied"` to decide automatically. Use
 
 Gating a side effect on approval is also how you make non-idempotent work safe across replays: a charge or email that sits behind `always()` can't fire from a re-run step without a fresh human decision.
 
+### Authorizing approval responses
+
+A request-time policy decides whether a tool call needs approval. A response-time policy decides whether the authenticated person who selects **Approve** may approve that specific call. Use the object form of `approval` when approval must come from a particular user, role, or tenant. The same object form works for authored tools and connection-wide approval:
+
+```ts title="agent/tools/refund_charge.ts"
+import { defineTool } from "eve/tools";
+import { always } from "eve/tools/approval";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Refund a charge.",
+  inputSchema: z.object({ chargeId: z.string() }),
+  approval: {
+    request: always(),
+    response: ({ responder }) => {
+      // Your route or channel authenticates the responder and supplies this ID.
+      // This example allows one configured user; larger apps can look up membership here.
+      const canApprove = responder.principalId === process.env.REFUND_APPROVER_ID;
+
+      return canApprove
+        ? { status: "allowed" }
+        : { status: "rejected", reason: "This user cannot approve refunds." };
+    },
+  },
+  async execute(input) {
+    return refund(input);
+  },
+});
+```
+
+The `response` policy receives:
+
+- `responder`: the authenticated principal that submitted the response, including its `principalId`, `principalType`, `authenticator`, and `attributes`. Your route or channel supplies this identity. Attribute names and values are defined by your application, not by eve.
+- `request`: the stable `requestId`, `callId`, `toolName`, and typed `toolInput` for the call being approved.
+- `response`: the submitted decision. Response policies run for approval, so its current value is `{ decision: "approve" }`.
+- `session`: read-only session identity and lineage: `id`, `initiator`, `parent`, and `turn`.
+- `auth`: narrow `getToken(provider, options?)` and `requireAuth(provider, options?)` capabilities bound to the responder. Use these when authorization depends on a provider identity or permission; an interactive provider flow parks durably and then retries the policy.
+
+Return `{ status: "allowed" }` to accept the approval. Return `{ status: "rejected", reason }` to leave the shared request pending so another eligible responder can approve it. Errors, timeouts, and invalid results fail closed and also leave the request pending. eve emits the reason on the `approval.candidate` event so channels can show it to the responder, but it does not become a tool result because the tool call has not been settled.
+
+A response policy does not run when someone selects **Cancel**; cancellation prevents the tool from running. eve still requires an authenticated responder when the approval has a response policy. Your route or channel must authenticate the responder and prevent unauthorized tenants from accessing the session in the first place.
+
+Response authorization is a gate, not a substitute for authorization inside `execute`. Recheck access before the side effect because identity, membership, or policy can change while the run is parked. See [Multi-tenant approvals](/docs/patterns/multi-tenant-approvals#protect-the-approval-response) for session-boundary requirements and four-eyes workflows.
+
 ### Skipping approval for schedule-dispatched turns
 
 `session.auth.current` identifies the caller of this turn. Markdown schedules use the app principal (`authenticator: "app"`, `principalId: "eve:app"`, `principalType: "runtime"`) automatically. A `run` schedule must pass its `appAuth` to `send(...)` for the child session to use that principal. Match all three fields to skip approval for automated turns while still prompting when a person calls the same tool:
