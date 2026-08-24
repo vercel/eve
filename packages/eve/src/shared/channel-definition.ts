@@ -22,7 +22,15 @@ export interface FetchFileResult {
   readonly filename?: string;
 }
 
-export type FetchFileFunction = (url: string) => Promise<Buffer | FetchFileResult | null>;
+/** Runtime context supplied while resolving a channel-owned file URL. */
+export interface FetchFileContext {
+  readonly state: Readonly<Record<string, unknown>>;
+}
+
+export type FetchFileFunction = (
+  url: string,
+  context?: FetchFileContext,
+) => Promise<Buffer | FetchFileResult | null>;
 
 /**
  * Input passed to a channel's `receive` callback when another channel or

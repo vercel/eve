@@ -169,14 +169,15 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     const resolvedBytes = Buffer.from("resolved-ref-bytes", "utf8");
     let fetchFileCalls = 0;
     const adapter: ChannelAdapter<any> = {
-      async fetchFile(url) {
+      async fetchFile(url, context) {
         fetchFileCalls += 1;
         // fetchFile receives the URL string from the FilePart.
         expect(url).toBe("https://example.com/file");
+        expect(context?.state).toEqual({ installationTeamId: "T_INSTALLATION" });
         return resolvedBytes;
       },
       kind: "custom-channel",
-      state: { opener: "alice" },
+      state: { installationTeamId: "T_INSTALLATION" },
     };
 
     const sandbox = mockSandbox({ id: "sbx_ref" });
