@@ -12,7 +12,11 @@ import { ROOT_RUNTIME_AGENT_NODE_ID, type ResolvedRuntimeAgentNode } from "#runt
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import type { RuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
-import { createExecutionNodeStep, createNodeHarnessTools } from "#execution/node-step.js";
+import {
+  appendCurrentTimeContext,
+  createExecutionNodeStep,
+  createNodeHarnessTools,
+} from "#execution/node-step.js";
 import { countLocalSubagentCalls } from "#runtime/framework-tools/subagent/local.js";
 import { createSession } from "#execution/session.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
@@ -381,6 +385,18 @@ describe("createNodeHarnessTools", () => {
 });
 
 describe("createExecutionNodeStep", () => {
+  it("adds a precise current time only to delivered step input", () => {
+    const now = new Date("2026-08-16T20:21:22.123Z");
+
+    expect(
+      appendCurrentTimeContext({ context: ["Requester context."], message: "Hello." }, now),
+    ).toEqual({
+      context: ["Requester context.", "Current time: 2026-08-16T20:21:22.123Z."],
+      message: "Hello.",
+    });
+    expect(appendCurrentTimeContext(undefined, now)).toBeUndefined();
+  });
+
   it("builds a usable harness step for the root node", async () => {
     setupMockAgentForToolExecution("regular-tool", { question: "Run the tool." });
 

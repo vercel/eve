@@ -2,6 +2,7 @@ import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, defaultDeliverResult } from "#channel/adapter.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import { contextStorage } from "#context/container.js";
+import { dispatchDateTimeInstructionEvent } from "#context/date-time-instruction-lifecycle.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import {
   dispatchDynamicInstructionEvent,
@@ -416,6 +417,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       event: emitted,
       messages: messages ?? [],
     });
+    dispatchDateTimeInstructionEvent({ ctx, event: emitted });
     await dispatchDynamicInstructionEvent({
       ctx,
       resolvers: dynamicInstructionsResolvers,
