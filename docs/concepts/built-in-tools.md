@@ -175,7 +175,6 @@ const reviewSchema = z.object({
       severity: z.enum(["low", "medium", "high"]),
     }),
   ),
-  workingDirectory: "my-repo-checkout",
 });
 
 export default defineFixedHarnessAgentTool({
@@ -185,6 +184,7 @@ export default defineFixedHarnessAgentTool({
   instructions:
     "Review the current code changes diff. Provide a final verdict and any findings that require iteration or should be reconsidered.",
   outputSchema: reviewSchema,
+  workingDirectory: "my-repo-checkout",
 });
 ```
 
