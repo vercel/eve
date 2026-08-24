@@ -20,6 +20,7 @@ import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 
 interface AgentApprovalSpanState {
+  readonly agentSessionId: string;
   readonly actionCallId: string;
   readonly actionName: string;
   readonly attemptIndex: number;
@@ -27,7 +28,6 @@ interface AgentApprovalSpanState {
   readonly parent: SpanContext;
   readonly requestAttribute?: string;
   readonly requestId: string;
-  readonly rootSessionId: string;
   readonly sessionId: string;
   readonly startTimeMs: number;
   readonly stepIndex: number;
@@ -64,6 +64,8 @@ export function createAgentApprovalInstrumentation(input: {
     const state: Record<string, JsonValue> = {
       actionCallId: event.action.callId,
       actionName: event.action.name,
+      agentSessionId:
+        event.scope.agentSessionId ?? event.scope.rootSessionId ?? event.scope.sessionId,
       attemptIndex: event.scope.attemptIndex,
       channelAudience: normalizeChannelAudience(event.scope.channelAudience),
       parent: {
@@ -72,7 +74,6 @@ export function createAgentApprovalInstrumentation(input: {
         traceId: parent.spanContext.traceId,
       },
       requestId: event.requestId,
-      rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
       sessionId: event.scope.sessionId,
       startTimeMs: Date.now(),
       stepIndex: event.scope.stepIndex,
@@ -105,10 +106,11 @@ export function createAgentApprovalInstrumentation(input: {
               "agent.approval.request_id": state.requestId,
               "agent.framework.name": "eve",
               "agent.framework.version": input.frameworkVersion,
-              "agent.session.id": state.sessionId,
+              "agent.session.id": state.agentSessionId,
               "agent.step.attempt": state.attemptIndex,
               "agent.step.index": state.stepIndex,
               "agent.turn.id": state.turnId,
+              "workflow.run.id": state.sessionId,
             },
             startTime: state.startTimeMs,
           },
@@ -146,7 +148,7 @@ function readState(value: unknown): AgentApprovalSpanState | undefined {
     typeof parentRecord["traceFlags"] !== "number" ||
     typeof parentRecord["traceId"] !== "string" ||
     typeof state["requestId"] !== "string" ||
-    typeof state["rootSessionId"] !== "string" ||
+    (typeof state["agentSessionId"] !== "string" && typeof state["rootSessionId"] !== "string") ||
     typeof state["sessionId"] !== "string" ||
     typeof state["startTimeMs"] !== "number" ||
     typeof state["stepIndex"] !== "number" ||
@@ -159,6 +161,10 @@ function readState(value: unknown): AgentApprovalSpanState | undefined {
   return {
     actionCallId: state["actionCallId"],
     actionName: state["actionName"],
+    agentSessionId:
+      typeof state["agentSessionId"] === "string"
+        ? state["agentSessionId"]
+        : (state["rootSessionId"] as string),
     attemptIndex: state["attemptIndex"],
     channelAudience: normalizeChannelAudience(state["channelAudience"]),
     parent: {
@@ -169,7 +175,6 @@ function readState(value: unknown): AgentApprovalSpanState | undefined {
     },
     requestAttribute,
     requestId: state["requestId"],
-    rootSessionId: state["rootSessionId"],
     sessionId: state["sessionId"],
     startTimeMs: state["startTimeMs"],
     stepIndex: state["stepIndex"],

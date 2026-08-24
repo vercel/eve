@@ -63,6 +63,8 @@ export function createAgentActionInstrumentation(input: {
 
     const existing = await input.stateStore.getAction(event.idempotencyKey);
     const state: AgentActionTraceState = existing ?? {
+      agentSessionId:
+        event.scope.agentSessionId ?? event.scope.rootSessionId ?? event.scope.sessionId,
       attemptIndex: event.scope.attemptIndex,
       callId: event.callId,
       channelAudience: normalizeChannelAudience(event.scope.channelAudience),
@@ -74,7 +76,6 @@ export function createAgentActionInstrumentation(input: {
         traceFlags: traceContext.traceFlags,
         traceId: traceContext.traceId,
       },
-      rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
       sessionId: event.scope.sessionId,
       spanId: input.idGenerator.deriveSpanId(`action:${event.idempotencyKey}`),
       startTimeMs: Date.now(),
@@ -126,10 +127,11 @@ export function createAgentActionInstrumentation(input: {
             "agent.action.name": state.name,
             "agent.framework.name": "eve",
             "agent.framework.version": input.frameworkVersion,
-            "agent.session.id": state.sessionId,
+            "agent.session.id": state.agentSessionId,
             "agent.step.attempt": state.attemptIndex,
             "agent.step.index": state.stepIndex,
             "agent.turn.id": state.turnId,
+            "workflow.run.id": state.sessionId,
           },
           startTime: state.startTimeMs,
         },

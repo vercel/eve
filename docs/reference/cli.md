@@ -292,11 +292,13 @@ eve traces --verbose       # expand every span with all attributes and events
 eve traces --json          # dump the full trace as JSON
 ```
 
-Reads the immutable OTLP/JSON segments under `.eve/traces/v1`, so `eve dev` need not be running. Accepts a full trace id, an `agent.session.id`, or an unambiguous prefix of either. Malformed segments are skipped without hiding valid spans from the same trace.
+Reads the immutable OTLP/JSON segments under `.eve/traces/v1`, so `eve dev` need not be running. Accepts a full trace id, an `agent.session.id`, a `workflow.run.id`, or an unambiguous prefix. Malformed segments are skipped without hiding valid spans from the same trace.
 
 Span rows carry inline metrics when the span recorded them — `↑input`/`↓output` token counts, gateway cost, and the tool name for `ai.toolCall` spans — and the header aggregates models, token totals, cost, and error count across the trace's step spans. `--verbose` expands each span under its tree row: status (with the error message on failures), timing, ids, every attribute (prompts, responses, and tool payloads as transcripts or pretty-printed JSON), and every span event with its offset from span start. `--json` prints the same records as JSON, one object per selected trace.
 
-A local subagent keeps its own session id but records into the parent trace. Its turn is parented to the `agent.action` span that dispatched it, so the span tree carries the relationship without duplicate lineage attributes; `agent.subagent.name` remains on the child turn as a standalone label. Either session id resolves to that trace. Remote agents propagate the parent trace context over `traceparent`.
+Eve creates `agent.session.id` independently from Workflow run ids. It remains stable for the Agent Run while `workflow.run.id` identifies the root or child Workflow execution that produced each span.
+
+A local subagent inherits the Agent Run session id and parent trace. Its turn normally parents to the `agent.action` span that dispatched it, so the span tree carries the relationship without duplicate lineage attributes. If durable action context is unavailable, the child falls back to the inherited session context and `agent.subagent.name` still labels it. Remote agents propagate the parent trace context over `traceparent`.
 
 A durable session keeps one persisted trace context across turns and worker resumptions. Independently replayed attempts can still produce another trace; passing the session id shows every trace it produced, oldest first.
 

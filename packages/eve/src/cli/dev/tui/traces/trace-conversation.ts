@@ -43,12 +43,12 @@ export interface ConversationItem {
   readonly error: boolean;
 }
 
-/** Dispatch lineage for a subagent turn, read from its parent action span. */
+/** Display metadata for a subagent turn. */
 export interface ConversationSubagent {
   /** Subagent name, when the turn arrived through the subagent adapter. */
   readonly name?: string;
-  /** Turn id of the dispatching parent turn. */
-  readonly parentTurnId: string;
+  /** Turn id of the dispatching parent turn, when its action span is present. */
+  readonly parentTurnId?: string;
   /** Tool call id of the dispatch, when recorded. */
   readonly parentCallId?: string;
 }
@@ -198,17 +198,22 @@ function turnSubagent(
   byId: ReadonlyMap<string, LocalTraceSpan>,
 ): ConversationSubagent | undefined {
   const parent = turn.parentSpanId === undefined ? undefined : byId.get(turn.parentSpanId);
-  if (parent?.name !== "agent.action") return undefined;
-  const kind = stringAttribute(parent, "agent.action.kind");
-  if (kind !== "subagent-call" && kind !== "remote-agent-call") return undefined;
-  const parentTurnId = stringAttribute(parent, "agent.turn.id");
-  if (parentTurnId === undefined) return undefined;
-  const name = stringAttribute(parent, "agent.action.name");
-  return {
-    name: name === undefined ? undefined : stripTerminalControls(name),
-    parentCallId: stringAttribute(parent, "agent.action.call_id"),
-    parentTurnId,
-  };
+  if (parent?.name === "agent.action") {
+    const kind = stringAttribute(parent, "agent.action.kind");
+    const parentTurnId = stringAttribute(parent, "agent.turn.id");
+    if ((kind === "subagent-call" || kind === "remote-agent-call") && parentTurnId !== undefined) {
+      const name =
+        stringAttribute(parent, "agent.action.name") ??
+        stringAttribute(turn, "agent.subagent.name");
+      return {
+        name: name === undefined ? undefined : stripTerminalControls(name),
+        parentCallId: stringAttribute(parent, "agent.action.call_id"),
+        parentTurnId,
+      };
+    }
+  }
+  const name = stringAttribute(turn, "agent.subagent.name");
+  return name === undefined ? undefined : { name: stripTerminalControls(name) };
 }
 
 /**

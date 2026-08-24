@@ -104,7 +104,7 @@ describe("eve traces", () => {
     expect(output.out[0]!.indexOf(TRACE_ONE)).toBeLessThan(output.out[0]!.indexOf(TRACE_TWO));
   });
 
-  it("resolves a subagent child to the parent trace it recorded into", async () => {
+  it("keeps a subagent child in the root Agent Run session", async () => {
     const root = await createRoot();
     const session = "a".repeat(16);
     const child = "b".repeat(16);
@@ -113,21 +113,24 @@ describe("eve traces", () => {
       TRACE_ONE,
       span(session, "agent.session", 10, 10, undefined, {
         "agent.session.id": "session-one",
+        "workflow.run.id": "workflow-root",
       }),
     );
     await writeSegment(
       root,
       TRACE_ONE,
       span(child, "agent.turn", 20, 30, session, {
-        "agent.session.id": "child-one",
+        "agent.session.id": "session-one",
+        "agent.subagent.name": "researcher",
+        "workflow.run.id": "workflow-child",
       }),
     );
     const traces = await listLocalTraces(root);
 
     // The opener still names the trace, so `eve trace ls` reads unchanged.
     expect(traces[0]!.sessionId).toBe("session-one");
-    expect(ids(resolveLocalTraces(traces, "child-one"))).toEqual([TRACE_ONE]);
     expect(ids(resolveLocalTraces(traces, "session-one"))).toEqual([TRACE_ONE]);
+    expect(ids(resolveLocalTraces(traces, "workflow-child"))).toEqual([TRACE_ONE]);
   });
 
   it("renders a parented span tree and tolerates missing parents", async () => {

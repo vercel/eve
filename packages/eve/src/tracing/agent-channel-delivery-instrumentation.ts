@@ -54,6 +54,7 @@ export function createAgentChannelDeliveryInstrumentation(input: {
     ctx: InstrumentationHandlerContext,
   ): Promise<void> => {
     const session = await input.ensureSessionContext({
+      agentSessionId: event.agentSessionId ?? event.rootSessionId ?? event.sessionId,
       agentName: event.agentName,
       channelAudience: event.delivery.channelAudience,
       channelKind: event.delivery.channelKind,
@@ -122,9 +123,10 @@ export function createAgentChannelDeliveryInstrumentation(input: {
             "agent.framework.name": "eve",
             "agent.framework.version": input.frameworkVersion,
             "agent.name": event.agentName,
-            "agent.session.id": event.sessionId,
+            "agent.session.id": event.agentSessionId ?? event.rootSessionId ?? event.sessionId,
             "agent.turn.id": event.turnId,
             "agent.turn.sequence": event.sequence,
+            "workflow.run.id": event.sessionId,
           },
           kind: SpanKind.CONSUMER,
           links:

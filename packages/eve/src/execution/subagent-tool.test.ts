@@ -14,6 +14,7 @@ function makeSession(): HarnessSession {
       system: "",
       tools: [],
     },
+    agentSessionId: "agent-session-1",
     compaction: { recentWindowSize: 10, threshold: 100_000 },
     continuationToken: "parent-token",
     history: [],
@@ -96,6 +97,7 @@ describe("buildSubagentRunInput", () => {
       turn: { id: "turn-17", sequence: 5 },
     });
     expect(runInput.continuationToken).toBe(childContinuationToken);
+    expect(runInput.agentSessionId).toBe("agent-session-1");
     expect(childContinuationToken).toMatch(/^subagent:parent-session:call-1$/);
     expect(runInput.mode).toBe("task");
   });

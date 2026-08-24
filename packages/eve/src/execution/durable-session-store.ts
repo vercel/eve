@@ -71,6 +71,8 @@ export interface DurableSessionState {
  * `bundle.turnAgent`.
  */
 export interface DurableSession {
+  /** Optional only for snapshots created before Eve owned this identity. */
+  readonly agentSessionId?: string;
   readonly sessionId: string;
   /**
    * Top user-facing session id in the dispatch chain. Optional because

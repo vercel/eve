@@ -8,6 +8,7 @@ import {
   stampMessageStreamEvent,
 } from "#protocol/message.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { publishTerminalSessionInstrumentation } from "#execution/terminal-session-instrumentation.js";
 
 const log = createLogger("execution.workflow-entry");
 
@@ -45,6 +46,18 @@ export async function emitTerminalSessionCompletionStep(input: {
   } catch (writeError) {
     log.error("failed to write terminal session.completed event to durable stream", {
       error: writeError,
+      sessionId,
+    });
+  }
+
+  try {
+    await publishTerminalSessionInstrumentation({
+      serializedContext: input.serializedContext,
+      type: "session.completed",
+    });
+  } catch (instrumentationError) {
+    log.error("failed to publish terminal session.completed instrumentation", {
+      error: instrumentationError,
       sessionId,
     });
   }

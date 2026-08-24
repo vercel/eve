@@ -107,9 +107,11 @@ describe("localTracePolicy", () => {
   ] as const)("accepts the %s audience: %s", (audience, accepted) => {
     expect(
       localTracePolicy({
+        agentSessionId: "agent-session-1",
         audience,
-        rootSessionId: "session-1",
-        sessionId: "session-1",
+        rootSessionId: "workflow-run-1",
+        sessionId: "workflow-run-1",
+        workflowRunId: "workflow-run-1",
       }),
     ).toBe(accepted);
   });

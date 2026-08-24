@@ -13,6 +13,7 @@ import type { ChannelAudience } from "#shared/channel-audience.js";
  * fire once per attempt.
  */
 export interface InstrumentationAttemptScope {
+  readonly agentSessionId?: string;
   readonly channelAudience?: ChannelAudience;
   readonly attemptId: string;
   readonly attemptIndex: number;
@@ -181,6 +182,7 @@ export interface InstrumentationChannelDeliveryInput {
 }
 
 interface InstrumentationChannelDeliveryScope {
+  readonly agentSessionId?: string;
   readonly agentName?: string;
   readonly delivery: InstrumentationChannelDeliveryRef;
   readonly idempotencyKey: string;
@@ -284,6 +286,7 @@ export interface InstrumentationStepAttemptStartedEvent {
 
 export interface InstrumentationSessionStartedEvent {
   readonly type: "session.started";
+  readonly agentSessionId?: string;
   readonly agentName?: string;
   readonly channelKind?: string;
   readonly channelAudience?: ChannelAudience;
@@ -315,16 +318,20 @@ export interface InstrumentationParentLineage {
  */
 export interface InstrumentationSessionSettledEvent {
   readonly type: "session.completed" | "session.waiting";
+  readonly agentSessionId?: string;
   readonly idempotencyKey: string;
+  readonly isRootSession?: boolean;
   readonly sessionId: string;
   readonly turnId?: string;
 }
 
 export interface InstrumentationSessionFailedEvent {
   readonly type: "session.failed";
+  readonly agentSessionId?: string;
   /** Content. Absent unless this provider declared `capture: "content"`. */
   readonly error?: unknown;
   readonly idempotencyKey: string;
+  readonly isRootSession?: boolean;
   readonly sessionId: string;
   readonly turnId?: string;
 }
@@ -335,6 +342,7 @@ export type InstrumentationSessionTransitionEvent =
 
 export interface InstrumentationTurnStartedEvent {
   readonly type: "turn.started";
+  readonly agentSessionId?: string;
   readonly idempotencyKey: string;
   readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;

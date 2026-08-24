@@ -676,6 +676,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const parentTraceContext = store?.get(ParentTraceContextKey);
     let activeAttemptScope: InstrumentationAttemptScope | undefined;
     const emit = createInstrumentationHandleEvent({
+      agentSessionId: session.agentSessionId ?? session.rootSessionId ?? session.sessionId,
       agentName: config.runtimeIdentity?.agentName,
       channelAudience,
       channelKind: channelInstrumentation?.kind,
@@ -734,6 +735,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             }
           : undefined;
       return await prepareTurnTraceContext({
+        agentSessionId: session.agentSessionId ?? session.rootSessionId ?? session.sessionId,
         agentName: config.runtimeIdentity?.agentName,
         channelAudience,
         instrumentation: config.instrumentation,
@@ -1518,6 +1520,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         instrumentationHooks === undefined
           ? undefined
           : {
+              agentSessionId: session.agentSessionId ?? session.rootSessionId ?? session.sessionId,
               attemptId: `${session.sessionId}:${instrumentationTurnId}:${emissionState.stepIndex}:${opts.attemptIndex}`,
               attemptIndex: opts.attemptIndex,
               channelAudience,

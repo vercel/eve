@@ -159,13 +159,15 @@ export function createAgentOtelInstrumentation(
           "agent.step",
           {
             attributes: {
-              "agent.session.id": event.scope.sessionId,
+              "agent.session.id":
+                event.scope.agentSessionId ?? event.scope.rootSessionId ?? event.scope.sessionId,
               "agent.framework.name": "eve",
               "agent.framework.version": input.frameworkVersion,
               "agent.step.attempt": event.scope.attemptIndex,
               "agent.step.index": event.scope.stepIndex,
               "agent.turn.id": event.scope.turnId,
               "agent.name": event.scope.functionId,
+              "workflow.run.id": event.scope.sessionId,
               ...runtimeContextAttributes(event.runtimeContext),
             },
             links:
@@ -266,10 +268,11 @@ export function createAgentOtelInstrumentation(
                   "agent.framework.name": "eve",
                   "agent.framework.version": input.frameworkVersion,
                   "agent.name": session?.agentName,
-                  "agent.session.id": event.sessionId,
+                  "agent.session.id": turn.agentSessionId,
                   "agent.subagent.name": turn.subagentName,
                   "agent.turn.id": event.turnId,
                   "agent.turn.sequence": turn.sequence,
+                  "workflow.run.id": event.sessionId,
                 },
                 startTime: turn.startTimeMs,
               },

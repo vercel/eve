@@ -14,6 +14,7 @@ import type {
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
+import type { AgentSessionRunInput } from "#execution/agent-session-run-input.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 import { resolveRemainingSessionTokenLimits } from "#harness/subagent-token-budget.js";
 
@@ -43,7 +44,7 @@ export type SubagentInputSource =
  */
 export interface SubagentRunInputBuild {
   readonly childContinuationToken: string;
-  readonly runInput: RunInput;
+  readonly runInput: AgentSessionRunInput;
 }
 
 /**
@@ -150,12 +151,13 @@ export function buildSubagentRunInput(input: {
   }
 
   const runInput: {
-    -readonly [K in keyof RunInput]: RunInput[K];
+    -readonly [K in keyof AgentSessionRunInput]: AgentSessionRunInput[K];
   } = {
     adapter: {
       kind: SUBAGENT_ADAPTER_KIND,
       state: adapterState,
     },
+    agentSessionId: session.agentSessionId ?? session.rootSessionId ?? session.sessionId,
     auth,
     capabilities,
     channelMetadata,

@@ -200,6 +200,8 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   if (rawInput.input?.kind === "deliver") {
     await contextStorage.run(ctx, () =>
       instrumentChannelDelivery({
+        agentSessionId:
+          initialSession.agentSessionId ?? initialSession.rootSessionId ?? initialSession.sessionId,
         agentName: bundle.turnAgent.id,
         ctx,
         delivery: rawInput.input as DeliverHookPayload,

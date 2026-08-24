@@ -106,10 +106,12 @@ export async function settleCancelledTurnStep(input: {
         };
         const emit =
           createInstrumentationHandleEvent({
+            agentSessionId: session.agentSessionId ?? session.rootSessionId ?? session.sessionId,
             agentName: bundle.turnAgent.id,
             channelKind: ctx.get(ChannelInstrumentationKey)?.kind,
             handleEvent: baseEmit,
             hooks: instrumentation?.hooks,
+            rootSessionId: session.rootSessionId,
             sessionId: session.sessionId,
             turnId: activeTurnId(emissionState),
           }) ?? baseEmit;

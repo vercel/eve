@@ -74,6 +74,8 @@ export type SessionAgent = SessionAgentBase &
  */
 export interface HarnessSession {
   readonly agent: SessionAgent;
+  /** Eve-owned Agent Run identity shared by local subagent Workflow runs. */
+  readonly agentSessionId?: string;
   readonly compaction: CompactionConfig;
   readonly continuationToken: string;
   readonly history: ModelMessage[];

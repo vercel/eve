@@ -51,6 +51,8 @@ import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
+import type { AgentSessionRunInput } from "#execution/agent-session-run-input.js";
+import { AgentSessionIdKey } from "#context/keys.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
@@ -130,6 +132,7 @@ export function createWorkflowRuntime(config: {
 }): Runtime {
   return {
     async createSession(input: RunInput): Promise<RunHandle> {
+      const agentSessionId = (input as AgentSessionRunInput).agentSessionId ?? crypto.randomUUID();
       const bundle = await getCompiledRuntimeAgentBundle({
         compiledArtifactsSource: config.compiledArtifactsSource,
         nodeId: config.nodeId,
@@ -139,6 +142,7 @@ export function createWorkflowRuntime(config: {
         dynamicSubagentAgentConfig: config.dynamicSubagentAgentConfig,
         run: input,
       });
+      ctx.set(AgentSessionIdKey, agentSessionId);
       const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
       const serializedContext = serializeContext(ctx);
       const parentLineage = readParentLineage(serializedContext);
@@ -146,6 +150,7 @@ export function createWorkflowRuntime(config: {
       const workflowInput: {
         -readonly [K in keyof WorkflowEntryInput]: WorkflowEntryInput[K];
       } = {
+        agentSessionId,
         input: input.input,
         limits: input.limits,
         serializedContext,

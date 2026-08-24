@@ -32,6 +32,7 @@ import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions
 import type { ChannelAudience } from "#shared/channel-audience.js";
 
 export interface CreateInstrumentationHandleEventInput {
+  readonly agentSessionId?: string;
   readonly agentName?: string;
   readonly channelKind?: string;
   readonly channelAudience?: ChannelAudience;
@@ -290,9 +291,11 @@ function toLifecycleEvent(
   input: CreateInstrumentationHandleEventInput,
   activeTurnId: string | undefined,
 ): InstrumentationPointEvent | undefined {
+  const agentSessionId = input.agentSessionId ?? input.rootSessionId ?? input.sessionId;
   switch (event.type) {
     case "session.started":
       return {
+        agentSessionId,
         agentName: input.agentName,
         channelAudience: input.channelAudience,
         channelKind: input.channelKind,
@@ -305,21 +308,26 @@ function toLifecycleEvent(
     case "session.completed":
     case "session.waiting":
       return {
+        agentSessionId,
         idempotencyKey: sessionIdempotencyKey(input.sessionId),
+        isRootSession: input.rootSessionId === undefined,
         sessionId: input.sessionId,
         turnId: activeTurnId,
         type: event.type,
       };
     case "session.failed":
       return {
+        agentSessionId,
         error: new Error(event.data.message),
         idempotencyKey: sessionIdempotencyKey(input.sessionId),
+        isRootSession: input.rootSessionId === undefined,
         sessionId: input.sessionId,
         turnId: activeTurnId,
         type: "session.failed",
       };
     case "turn.started":
       return {
+        agentSessionId,
         idempotencyKey: turnIdempotencyKey(input.sessionId, event.data.turnId),
         parentLineage: input.parentLineage,
         parentTraceContext: input.parentTraceContext,

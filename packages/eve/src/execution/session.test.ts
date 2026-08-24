@@ -156,6 +156,23 @@ describe("createSession", () => {
     expect(hydrated.history).toEqual([{ content: "Pinned tenant policy.", role: "user" }]);
   });
 
+  it("preserves the Agent Run session id independently from Workflow session ids", () => {
+    const session = createSession({
+      agentSessionId: "agent-session-1",
+      continuationToken: "child-token",
+      rootSessionId: "root-workflow-run",
+      sessionId: "child-workflow-run",
+      turnAgent: createTestTurnAgent(),
+    });
+
+    const durable = projectToDurableSession(session);
+    const hydrated = hydrateDurableSession({ durable, turnAgent: createTestTurnAgent() });
+
+    expect(hydrated.agentSessionId).toBe("agent-session-1");
+    expect(hydrated.sessionId).toBe("child-workflow-run");
+    expect(hydrated.rootSessionId).toBe("root-workflow-run");
+  });
+
   it("defaults description and inputSchema when null", () => {
     const session = createSession({
       continuationToken: "root-token",

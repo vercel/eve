@@ -93,6 +93,7 @@ describe("createInstrumentationHandleEvent", () => {
       },
     };
     const handleEvent = createInstrumentationHandleEvent({
+      agentSessionId: "agent-session-1",
       agentName: "weather",
       handleEvent: async (event) => {
         order.push(`durable:${event.type}`);
@@ -166,7 +167,9 @@ describe("createInstrumentationHandleEvent", () => {
 
     expect(events).toEqual([
       {
+        agentSessionId: "session-1",
         idempotencyKey: sessionIdempotencyKey("session-1"),
+        isRootSession: true,
         sessionId: "session-1",
         turnId: "turn-1",
         type: "session.waiting",
@@ -183,6 +186,7 @@ describe("createInstrumentationHandleEvent", () => {
       turnId: "turn-1",
     };
     const handleEvent = createInstrumentationHandleEvent({
+      agentSessionId: "agent-session-1",
       handleEvent: async () => {},
       hooks: {
         capturesContent: false,
@@ -200,6 +204,7 @@ describe("createInstrumentationHandleEvent", () => {
 
     expect(events.filter((event) => event.type === "turn.started")).toEqual([
       {
+        agentSessionId: "agent-session-1",
         idempotencyKey: turnIdempotencyKey("child-1", "child-turn-1"),
         parentLineage,
         parentTraceContext: undefined,
@@ -210,6 +215,7 @@ describe("createInstrumentationHandleEvent", () => {
         type: "turn.started",
       },
       {
+        agentSessionId: "agent-session-1",
         idempotencyKey: turnIdempotencyKey("child-1", "child-turn-2"),
         parentLineage,
         parentTraceContext: undefined,

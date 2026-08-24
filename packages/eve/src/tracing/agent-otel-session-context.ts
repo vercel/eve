@@ -36,15 +36,15 @@ export function createAgentOtelSessionContext(
   input: AgentOtelSessionContextInput,
 ): AgentOtelSessionContext {
   const openSessionTrace = (session: {
+    readonly agentSessionId: string;
     readonly agentName?: string;
     readonly channelAudience: ChannelAudience;
-    readonly rootSessionId: string;
-    readonly sessionId: string;
+    readonly workflowRunId: string;
   }): SpanContext => {
     if (!shouldTrace(input.tracePolicy, session)) {
       return {
         isRemote: false,
-        spanId: input.idGenerator.deriveSpanId(`session:${session.sessionId}`),
+        spanId: input.idGenerator.deriveSpanId(`session:${session.agentSessionId}`),
         traceFlags: 0,
         traceId: input.idGenerator.generateTraceId(),
       };
@@ -55,8 +55,9 @@ export function createAgentOtelSessionContext(
         "agent.framework.version": input.frameworkVersion,
         "agent.channel.audience": session.channelAudience,
         "agent.name": session.agentName,
-        "agent.session.id": session.sessionId,
+        "agent.session.id": session.agentSessionId,
         "agent.trace.schema.version": 2,
+        "workflow.run.id": session.workflowRunId,
       },
       root: true,
     });
@@ -71,30 +72,32 @@ export function createAgentOtelSessionContext(
   const ensureSessionContext = async (
     event: InstrumentationSessionStartedEvent,
   ): Promise<AgentSessionTraceState> => {
+    const agentSessionId = event.agentSessionId ?? event.rootSessionId ?? event.sessionId;
     let state = await input.stateStore.getSession(event.sessionId);
     if (state === undefined) {
       state = {
+        agentSessionId,
         agentName: event.agentName,
         channelAudience: normalizeChannelAudience(event.channelAudience),
         channelKind: event.channelKind,
         context:
           event.parentTraceContext === undefined
             ? openSessionTrace({
+                agentSessionId,
                 agentName: event.agentName,
                 channelAudience: normalizeChannelAudience(event.channelAudience),
-                rootSessionId: event.rootSessionId,
-                sessionId: event.sessionId,
+                workflowRunId: event.sessionId,
               })
             : adoptedSpanContext(
                 event.parentTraceContext,
                 shouldTrace(input.tracePolicy, {
+                  agentSessionId,
                   agentName: event.agentName,
                   channelAudience: normalizeChannelAudience(event.channelAudience),
-                  rootSessionId: event.rootSessionId,
-                  sessionId: event.sessionId,
+                  rootWorkflowRunId: event.rootSessionId,
+                  workflowRunId: event.sessionId,
                 }),
               ),
-        rootSessionId: event.rootSessionId,
       };
       await input.stateStore.setSession(event.sessionId, state);
     }
@@ -120,6 +123,7 @@ export function createAgentOtelSessionContext(
     }
 
     const session = await ensureSessionContext({
+      agentSessionId: event.agentSessionId ?? event.rootSessionId ?? event.sessionId,
       agentName: undefined,
       channelAudience: "unknown",
       channelKind: undefined,
@@ -139,10 +143,10 @@ export function createAgentOtelSessionContext(
       traceId: session.context.traceId,
     };
     await input.stateStore.setTurn(event.sessionId, event.turnId, {
+      agentSessionId: event.agentSessionId ?? event.rootSessionId ?? event.sessionId,
       context: turnContext,
       parentIsRemote: session.context.isRemote,
       parentSpanId: session.context.spanId,
-      rootSessionId: event.rootSessionId,
       sequence: event.sequence,
       startTimeMs: Date.now(),
       subagentName: event.parentLineage?.subagentName,
@@ -156,19 +160,22 @@ export function createAgentOtelSessionContext(
 function shouldTrace(
   policy: TraceCapturePolicy | undefined,
   trace: {
+    readonly agentSessionId: string;
     readonly agentName?: string;
     readonly channelAudience: ChannelAudience;
-    readonly rootSessionId: string;
-    readonly sessionId: string;
+    readonly rootWorkflowRunId?: string;
+    readonly workflowRunId: string;
   },
 ): boolean {
   try {
     return (
       policy?.({
+        agentSessionId: trace.agentSessionId,
         agentName: trace.agentName,
         audience: trace.channelAudience,
-        rootSessionId: trace.rootSessionId,
-        sessionId: trace.sessionId,
+        rootSessionId: trace.rootWorkflowRunId ?? trace.workflowRunId,
+        sessionId: trace.workflowRunId,
+        workflowRunId: trace.workflowRunId,
       }) ?? trace.channelAudience === "public"
     );
   } catch {

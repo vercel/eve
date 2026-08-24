@@ -9,18 +9,18 @@ import type {
 import type { ChannelAudience } from "#shared/channel-audience.js";
 
 export interface AgentSessionTraceState {
+  readonly agentSessionId: string;
   readonly channelAudience?: ChannelAudience;
   readonly agentName?: string;
   readonly channelKind?: string;
   readonly context: SpanContext;
-  readonly rootSessionId: string;
 }
 
 export interface AgentTurnTraceState {
+  readonly agentSessionId: string;
   readonly context: SpanContext;
   readonly parentIsRemote?: boolean;
   readonly parentSpanId: string;
-  readonly rootSessionId: string;
   readonly sequence: number;
   readonly startTimeMs: number;
   readonly subagentName?: string;
@@ -30,6 +30,7 @@ export interface AgentTurnTraceState {
 }
 
 export interface AgentActionTraceState {
+  readonly agentSessionId: string;
   readonly attemptIndex: number;
   readonly callId: string;
   readonly channelAudience?: ChannelAudience;
@@ -37,7 +38,6 @@ export interface AgentActionTraceState {
   readonly kind: InstrumentationActionKind;
   readonly name: string;
   readonly parent: InstrumentationTraceContext;
-  readonly rootSessionId: string;
   readonly sessionId: string;
   readonly spanId: string;
   readonly startTimeMs: number;

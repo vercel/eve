@@ -33,6 +33,7 @@ export interface CreateSessionStepResult {
  * the root agent.
  */
 export async function createSessionStep(input: {
+  readonly agentSessionId?: string;
   readonly compiledArtifactsSource: DurableCompiledArtifactsSource;
   readonly continuationToken: string;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
@@ -69,6 +70,7 @@ export async function createSessionStep(input: {
   // delegating parent: a child may narrow what its parent granted, never widen
   // it. Root runs have no inherited limits, so their configured values apply.
   const session = createSession({
+    agentSessionId: input.agentSessionId,
     compactionOverrides: {
       thresholdPercent: effectiveAgent.thresholdPercent,
     },

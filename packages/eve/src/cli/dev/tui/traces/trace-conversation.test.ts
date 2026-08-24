@@ -191,6 +191,21 @@ describe("buildConversationItems", () => {
     });
   });
 
+  it("labels a subagent from its turn when the parent action span is absent", () => {
+    const session = span("0".repeat(16), "agent.session", 0, 0);
+    const childTurn = span("f".repeat(16), "agent.turn", 10, 10, session.spanId, {
+      "agent.session.id": "child-session",
+      "agent.subagent.name": "echo-marker",
+      "agent.turn.id": "turn_child",
+    });
+    const childDelivery = delivery("5".repeat(16), 10, "turn_child", "delegated task");
+
+    const items = buildConversationItems(trace([session, childTurn, childDelivery]));
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.subagent).toEqual({ name: "echo-marker" });
+  });
+
   it("interleaves a subagent's cards between the parent's dispatch and reply", () => {
     // The parent parks while the child runs: step 1 dispatches, the child
     // works, step 2 replies with the result. Cards must read in that order,

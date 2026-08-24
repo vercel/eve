@@ -49,16 +49,13 @@ export interface LocalTrace {
   readonly endTimeNs: bigint;
   /** Session that opened the trace, which is the one the list shows. */
   readonly sessionId?: string;
-  /**
-   * Every session recorded in the trace, opener first.
-   *
-   * A subagent child records into the trace its parent opened, so one
-   * trace can hold several sessions and any of their ids resolves to it.
-   */
+  /** Semantic Agent Run sessions recorded in the trace, opener first. */
   readonly sessionIds: readonly string[];
   readonly spans: readonly LocalTraceSpan[];
   readonly startTimeNs: bigint;
   readonly traceId: string;
+  /** Workflow executions represented by spans in the Agent Run trace. */
+  readonly workflowRunIds?: readonly string[];
 }
 
 /**
@@ -184,6 +181,7 @@ export function assembleLocalTrace(traceId: string, spans: readonly LocalTraceSp
   const ordered = [...spans].sort(compareLocalTraceSpans);
   const attributes = ordered.map((span) => span.attributes);
   const sessionIds = distinctAttributes(attributes, "agent.session.id");
+  const workflowRunIds = distinctAttributes(attributes, "workflow.run.id");
   return {
     agentName: firstAttribute(attributes, "agent.name"),
     endTimeNs: ordered.reduce(
@@ -198,6 +196,7 @@ export function assembleLocalTrace(traceId: string, spans: readonly LocalTraceSp
       ordered[0]!.startTimeNs,
     ),
     traceId,
+    workflowRunIds,
   };
 }
 

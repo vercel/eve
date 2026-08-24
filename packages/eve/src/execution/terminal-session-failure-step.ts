@@ -9,6 +9,7 @@ import {
   stampMessageStreamEvent,
 } from "#protocol/message.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { publishTerminalSessionInstrumentation } from "#execution/terminal-session-instrumentation.js";
 
 const log = createLogger("execution.workflow-entry");
 
@@ -80,6 +81,19 @@ export async function emitTerminalSessionFailureStep(input: {
       errorId: typeof details.errorId === "string" ? details.errorId : undefined,
       sessionId,
       error: writeError,
+    });
+  }
+
+  try {
+    await publishTerminalSessionInstrumentation({
+      error: input.error,
+      serializedContext: input.serializedContext,
+      type: "session.failed",
+    });
+  } catch (instrumentationError) {
+    log.error("failed to publish terminal session.failed instrumentation", {
+      error: instrumentationError,
+      sessionId,
     });
   }
 }

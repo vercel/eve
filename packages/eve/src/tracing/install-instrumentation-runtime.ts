@@ -58,13 +58,13 @@ export function installInstrumentationRuntime(input: {
     });
     // The span must exist before authored providers observe the lifecycle event.
     serialBefore.push({ ...agentOtel.hook, stateNamespace: "internal:otel" });
-    prepareSessionTrace = agentOtel.prepareSessionTrace;
-    prepareTurnTrace = agentOtel.prepareTurnTrace;
     runInContext = agentOtel.runInContext;
 
     const releasable = input.collected.pipeline.spanProcessors
       .filter(isSpanProcessor)
       .filter(hasSessionRelease);
+    prepareSessionTrace = agentOtel.prepareSessionTrace;
+    prepareTurnTrace = agentOtel.prepareTurnTrace;
     if (releasable.length > 0) serialAfter.push(sessionReleaseProvider(releasable));
   }
 
@@ -103,8 +103,17 @@ function isSpanProcessor(processor: SpanProcessor | "auto"): processor is SpanPr
 function sessionReleaseProvider(
   processors: readonly LocalTracesProcessor[],
 ): InstrumentationProviderDefinition {
-  const release = async (event: { readonly sessionId: string }): Promise<void> => {
-    await Promise.all(processors.map((processor) => processor.releaseSession(event.sessionId)));
+  const release = async (event: {
+    readonly agentSessionId?: string;
+    readonly isRootSession?: boolean;
+    readonly sessionId: string;
+  }): Promise<void> => {
+    if (event.isRootSession === false) return;
+    await Promise.all(
+      processors.map((processor) =>
+        processor.releaseSession(event.agentSessionId ?? event.sessionId),
+      ),
+    );
   };
   return {
     events: { "session.completed": release, "session.failed": release },

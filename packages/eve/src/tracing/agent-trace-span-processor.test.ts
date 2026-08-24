@@ -58,6 +58,16 @@ describe("AgentTraceSpanProcessor", () => {
     expect(processor.releaseSession("session-unknown")).toBe(false);
   });
 
+  it("keeps Agent Run ownership when a resumed worker observes delegated work first", () => {
+    const processor = new AgentTraceSpanProcessor([]);
+    processor.onStart(span("trace-1", { "agent.session.id": "session-1" }), {});
+
+    expect(processor.releaseSession("child-1")).toBe(false);
+    expect([...processor.activeTraceIds()]).toEqual(["trace-1"]);
+    expect(processor.releaseSession("session-1")).toBe(true);
+    expect([...processor.activeTraceIds()]).toEqual([]);
+  });
+
   it("keeps a shared trace pinned when a subagent child finishes first", () => {
     const child = {
       forceFlush: vi.fn(async () => {}),
@@ -67,7 +77,7 @@ describe("AgentTraceSpanProcessor", () => {
     };
     const processor = new AgentTraceSpanProcessor([child]);
     const owned = { "agent.session.id": "session-1" };
-    const delegated = { "agent.session.id": "child-1" };
+    const delegated = { "agent.session.id": "session-1" };
     processor.onStart(span("trace-1", owned), {});
     processor.onStart(span("trace-1", delegated), {});
 
@@ -80,6 +90,17 @@ describe("AgentTraceSpanProcessor", () => {
     expect(child.onEnd).toHaveBeenCalledWith(later);
 
     expect(processor.releaseSession("session-1")).toBe(true);
+    expect([...processor.activeTraceIds()]).toEqual([]);
+  });
+
+  it("keeps a shared trace pinned until every Agent Run owner finishes", () => {
+    const processor = new AgentTraceSpanProcessor([]);
+    processor.onStart(span("trace-1", { "agent.session.id": "agent-session-1" }), {});
+    processor.onStart(span("trace-1", { "agent.session.id": "agent-session-2" }), {});
+
+    expect(processor.releaseSession("agent-session-1")).toBe(true);
+    expect([...processor.activeTraceIds()]).toEqual(["trace-1"]);
+    expect(processor.releaseSession("agent-session-2")).toBe(true);
     expect([...processor.activeTraceIds()]).toEqual([]);
   });
 

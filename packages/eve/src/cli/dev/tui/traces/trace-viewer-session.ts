@@ -288,7 +288,12 @@ export class TraceViewerSession {
     for (const entry of entries) {
       const trace = await this.#store.read(entry.traceId);
       if (this.#disposed) return undefined;
-      if (trace?.sessionIds.includes(sessionId)) return entry.traceId;
+      if (
+        trace?.sessionIds.includes(sessionId) ||
+        trace?.workflowRunIds?.includes(sessionId) === true
+      ) {
+        return entry.traceId;
+      }
     }
     return undefined;
   }

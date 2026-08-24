@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SpanKind } from "#compiled/@opentelemetry/api/index.js";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
-import { ChannelRequestIdKey } from "#context/keys.js";
+import { AgentSessionIdKey, ChannelRequestIdKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
@@ -15,6 +15,7 @@ import {
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import type { AgentSessionRunInput } from "#execution/agent-session-run-input.js";
 
 const getHookByTokenMock = vi.fn();
 const getRunMock = vi.fn();
@@ -374,6 +375,7 @@ describe("createWorkflowRuntime#createSession", () => {
       workflowEntryReference,
       [
         {
+          agentSessionId: expect.any(String),
           input: { message: "hello" },
           serializedContext: expect.objectContaining({
             "eve.bundle": { source: compiledArtifactsSource },
@@ -484,6 +486,7 @@ describe("createWorkflowRuntime#createSession", () => {
       workflowEntryReference,
       [
         {
+          agentSessionId: expect.any(String),
           input: { message: "hello" },
           serializedContext: expect.objectContaining({
             [ChannelRequestIdKey.name]: "req_run",
@@ -519,6 +522,7 @@ describe("createWorkflowRuntime#createSession", () => {
       nodeId: "researcher",
     }).createSession({
       adapter: { kind: "subagent" },
+      agentSessionId: "agent-session-1",
       auth: null,
       continuationToken: "subagent:parent-session:call-1",
       input: { message: "research this" },
@@ -529,7 +533,7 @@ describe("createWorkflowRuntime#createSession", () => {
         sessionId: "parent-session",
         turn: { id: "turn-1", sequence: 1 },
       },
-    });
+    } as AgentSessionRunInput);
 
     expect(startMock).toHaveBeenCalledWith(workflowEntryReference, expect.any(Array), {
       allowReservedAttributes: true,
@@ -544,6 +548,30 @@ describe("createWorkflowRuntime#createSession", () => {
         "$eve.type": "subagent",
       },
     });
+    const [, [workflowInput]] = startMock.mock.calls[0]!;
+    expect(workflowInput.agentSessionId).toBe("agent-session-1");
+  });
+
+  it("creates an Agent Run session id independently from the Workflow run id", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: "driver-run" });
+
+    await buildRuntime(compiledArtifactsSource).createSession({
+      adapter,
+      auth: null,
+      input: { message: "hello" },
+      mode: "task",
+    });
+
+    const [, [workflowInput]] = startMock.mock.calls[0]!;
+    expect(workflowInput.agentSessionId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+    );
+    expect(workflowInput.agentSessionId).not.toBe("driver-run");
+    expect(workflowInput.serializedContext[AgentSessionIdKey.name]).toBe(
+      workflowInput.agentSessionId,
+    );
   });
 
   it("falls back to the current deployment when latest is unsupported", async () => {

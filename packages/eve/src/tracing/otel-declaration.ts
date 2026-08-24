@@ -105,10 +105,14 @@ export interface ContentOptions {
 }
 
 export interface TraceCaptureContext {
+  readonly agentSessionId: string;
   readonly agentName?: string;
   readonly audience: ChannelAudience;
-  readonly rootSessionId: string;
+  /** @deprecated Use `workflowRunId`. */
   readonly sessionId: string;
+  /** @deprecated Workflow ancestry only; use `agentSessionId` for Agent Run identity. */
+  readonly rootSessionId: string;
+  readonly workflowRunId: string;
 }
 
 export type TraceCapturePolicy = (trace: TraceCaptureContext) => boolean;

@@ -124,8 +124,9 @@ guaranteed close and could carry a real duration; that is tracked separately.
 
 ### Subagents
 
-A local subagent keeps its own session identity but adopts the parent action's `SpanContext`, so
-delegated work appears directly beneath the action that caused it. Remote dispatch sends the same
+A local subagent inherits Eve's Agent Run session id and adopts the parent action's `SpanContext`,
+so delegated work appears directly beneath the action that caused it. Its separate Workflow run id
+remains execution metadata rather than becoming `agent.session.id`. Remote dispatch sends the same
 context as `traceparent`; the receiver adopts it when available. A child with no propagated context
 opens its own root. `eve traces` resolves any session recorded in a trace, not only the one that
 opened it.

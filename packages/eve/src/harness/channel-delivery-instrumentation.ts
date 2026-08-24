@@ -16,6 +16,7 @@ import { instrumentationHooksForAudience } from "#harness/instrumentation/conten
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 
 interface ChannelDeliveryStartInstrumentation {
+  readonly agentSessionId?: string;
   readonly agentName?: string;
   readonly ctx: AlsContext;
   readonly delivery: DeliverHookPayload;
@@ -55,6 +56,7 @@ export async function instrumentChannelDelivery(
         normalizeChannelAudience(item.delivery.channelAudience),
       );
       await hooks?.publish({
+        agentSessionId: item.agentSessionId,
         agentName: item.agentName,
         delivery: item.delivery,
         error: input.error,
@@ -92,6 +94,7 @@ export async function instrumentChannelDelivery(
     const deliveryInput =
       !hooks?.capturesContent || payload === undefined ? undefined : projectDeliveryInput(payload);
     const item: ActiveChannelDelivery = {
+      agentSessionId: input.agentSessionId,
       agentName: input.agentName,
       delivery,
       rootSessionId: input.rootSessionId,
@@ -101,6 +104,7 @@ export async function instrumentChannelDelivery(
     };
     active.push(item);
     await hooks?.publish({
+      agentSessionId: input.agentSessionId,
       agentName: item.agentName,
       delivery,
       idempotencyKey: channelDeliveryIdempotencyKey(input.sessionId, delivery.deliveryId),

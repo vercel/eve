@@ -58,6 +58,7 @@ export function createCompactionConfig(
 }
 
 export interface CreateSessionInput {
+  readonly agentSessionId?: string;
   readonly continuationToken: string;
   readonly compactionOverrides?: {
     readonly thresholdPercent?: number;
@@ -90,6 +91,7 @@ export function createSession(input: CreateSessionInput): HarnessSession {
       createSessionSystemPrompt({ additions: input.systemPromptAdditions, turnAgent }),
       tools,
     ),
+    agentSessionId: input.agentSessionId ?? input.rootSessionId ?? input.sessionId,
     compaction: createCompactionConfig({
       contextWindowTokens: turnAgent.model?.contextWindowTokens,
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
@@ -200,6 +202,7 @@ export function mintSubagentContinuationToken(suffix?: string): string {
 export function projectToDurableSession(session: HarnessSession): DurableSession {
   const durable: {
     agent: { system: string };
+    agentSessionId: string;
     compaction?: {
       lastKnownInputTokens?: number;
       lastKnownPromptMessageCount?: number;
@@ -216,6 +219,7 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
     workflowMaxSubagents?: number;
   } = {
     agent: { system: session.agent.system },
+    agentSessionId: session.agentSessionId ?? session.rootSessionId ?? session.sessionId,
     continuationToken: session.continuationToken,
     history: session.history,
     sessionId: session.sessionId,
@@ -273,6 +277,7 @@ export function hydrateDurableSession(input: {
     -readonly [K in keyof HarnessSession]: HarnessSession[K];
   } = {
     agent: createSessionAgent(turnAgent, durable.agent.system, tools),
+    agentSessionId: durable.agentSessionId ?? durable.rootSessionId ?? durable.sessionId,
     compaction: createCompactionConfig({
       contextWindowTokens: turnAgent.model?.contextWindowTokens,
       lastKnownInputTokens: durable.compaction?.lastKnownInputTokens,

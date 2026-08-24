@@ -42,7 +42,7 @@ export function resolveLocalTraces(
   const exactTrace = traces.find((trace) => references.includes(trace.traceId));
   if (exactTrace !== undefined) return [exactTrace];
   const exactSessions = traces.filter((trace) =>
-    trace.sessionIds.some((sessionId) => references.includes(sessionId)),
+    [...trace.sessionIds, ...(trace.workflowRunIds ?? [])].some((id) => references.includes(id)),
   );
   if (exactSessions.length > 0) return orderWindows(exactSessions);
 
@@ -50,7 +50,9 @@ export function resolveLocalTraces(
     references.some(
       (candidate) =>
         trace.traceId.startsWith(candidate) ||
-        trace.sessionIds.some((sessionId) => sessionId.startsWith(candidate)),
+        [...trace.sessionIds, ...(trace.workflowRunIds ?? [])].some((id) =>
+          id.startsWith(candidate),
+        ),
     ),
   );
   if (matches.length === 0) {
@@ -199,6 +201,7 @@ function serializeTraceForJson(trace: LocalTrace): Record<string, unknown> {
     durationMs: durationMs(trace.startTimeNs, trace.endTimeNs),
     sessionId: trace.sessionId ?? null,
     sessionIds: trace.sessionIds,
+    workflowRunIds: trace.workflowRunIds,
     spanCount: trace.spans.length,
     spans: trace.spans.map((span) => ({
       attributes: span.attributes,

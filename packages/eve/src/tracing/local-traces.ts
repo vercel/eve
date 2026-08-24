@@ -16,9 +16,8 @@ import {
  */
 export interface LocalTracesProcessor extends SpanProcessor {
   /**
-   * Settles pending writes and drops one root session's liveness, then bounds
-   * the store. A subagent child owns no traces, so releasing one is a no-op
-   * and leaves the shared trace pinned until its root finishes.
+   * Settles pending writes and drops one Agent Run's liveness, then bounds the
+   * store.
    */
   releaseSession(sessionId: string): Promise<boolean>;
 }
@@ -33,7 +32,8 @@ export interface LocalTracesProcessor extends SpanProcessor {
  * @internal
  */
 export function hasSessionRelease(processor: SpanProcessor): processor is LocalTracesProcessor {
-  return typeof (processor as Partial<LocalTracesProcessor>).releaseSession === "function";
+  const candidate = processor as Partial<LocalTracesProcessor>;
+  return typeof candidate.releaseSession === "function";
 }
 
 /**

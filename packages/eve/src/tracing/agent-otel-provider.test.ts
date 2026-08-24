@@ -20,7 +20,10 @@ import {
   type AgentOtelInstrumentationInput,
 } from "#tracing/agent-otel-provider.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
-import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
+import {
+  ContextAgentTraceStateStore,
+  readActionTraceContext,
+} from "#tracing/agent-trace-context-store.js";
 import {
   type AgentTraceStateStore,
   InMemoryAgentTraceStateStore,
@@ -94,6 +97,7 @@ function createRuntime(
 }
 
 async function emitAttempt(input: {
+  readonly agentSessionId?: string;
   readonly actionUsage?: InstrumentationUsage;
   readonly attemptIndex?: number;
   readonly attemptError?: Error;
@@ -114,6 +118,7 @@ async function emitAttempt(input: {
   readonly turnSequence: number;
 }): Promise<void> {
   const scope: InstrumentationAttemptScope = {
+    agentSessionId: input.agentSessionId ?? input.sessionId,
     attemptId: `${input.sessionId}:${input.turnId}:0:${input.attemptIndex ?? 0}`,
     attemptIndex: input.attemptIndex ?? 0,
     channelAudience: input.channelAudience,
@@ -286,6 +291,7 @@ async function emitAttempt(input: {
 }
 
 async function publishTurnStarted(input: {
+  readonly agentSessionId?: string;
   readonly channelAudience?: ChannelAudience;
   readonly hooks: InstrumentationHooks;
   readonly parentLineage?: InstrumentationParentLineage;
@@ -296,7 +302,9 @@ async function publishTurnStarted(input: {
   readonly turnSequence: number;
 }): Promise<void> {
   const rootSessionId = input.rootSessionId ?? input.sessionId;
+  const agentSessionId = input.agentSessionId ?? rootSessionId;
   await input.hooks.publish({
+    agentSessionId,
     agentName: "weather",
     channelAudience: input.channelAudience,
     channelKind: "http",
@@ -307,6 +315,7 @@ async function publishTurnStarted(input: {
     type: "session.started",
   });
   await input.hooks.publish({
+    agentSessionId,
     idempotencyKey: turnIdempotencyKey(input.sessionId, input.turnId),
     parentLineage: input.parentLineage,
     parentTraceContext: input.parentTraceContext,
@@ -1575,6 +1584,7 @@ describe("createAgentOtelInstrumentation", () => {
   it("records a subagent child into its parent's trace", async () => {
     const runtime = createRuntime();
     await publishTurnStarted({
+      agentSessionId: "agent-session-1",
       hooks: runtime.hooks,
       sessionId: "session-1",
       turnId: "turn-1",
@@ -1584,6 +1594,7 @@ describe("createAgentOtelInstrumentation", () => {
     const parentSession = byName(runtime.exporter.getFinishedSpans(), "agent.session")[0]!;
 
     await publishTurnStarted({
+      agentSessionId: "agent-session-1",
       hooks: runtime.hooks,
       parentLineage: {
         callId: "call-1",
@@ -1602,16 +1613,72 @@ describe("createAgentOtelInstrumentation", () => {
 
     const spans = runtime.exporter.getFinishedSpans();
     const childTurn = byName(spans, "agent.turn").find(
-      (span) => span.attributes["agent.session.id"] === "child-1",
+      (span) => span.attributes["workflow.run.id"] === "child-1",
     )!;
 
     expect(childTurn.spanContext().traceId).toBe(parentSession.spanContext().traceId);
     expect(childTurn.parentSpanContext?.spanId).toBe(parentSession.spanContext().spanId);
+    expect(childTurn.attributes["agent.session.id"]).toBe("agent-session-1");
     expect(childTurn.attributes["agent.subagent.name"]).toBe("researcher");
     expect(childTurn.attributes).not.toHaveProperty("agent.parent.call_id");
     expect(childTurn.attributes).not.toHaveProperty("agent.parent.session.id");
     expect(childTurn.attributes).not.toHaveProperty("agent.parent.turn.id");
     expect(byName(spans, "agent.session")).toHaveLength(1);
+  });
+
+  it("parents a local child turn to the durable dispatch action", async () => {
+    const traceId = "1".repeat(32);
+    const actionSpanId = "3".repeat(16);
+    const parentTraceContext = readActionTraceContext(
+      {
+        "eve.harness.agentTrace": {
+          actions: {
+            "action-1": {
+              attemptIndex: 0,
+              callId: "call-1",
+              kind: "subagent-call",
+              name: "researcher",
+              parent: { spanId: "2".repeat(16), traceFlags: 1, traceId },
+              agentSessionId: "agent-session-1",
+              sessionId: "session-1",
+              spanId: actionSpanId,
+              startTimeMs: 1_700_000_000_000,
+              stepIndex: 0,
+              turnId: "turn-1",
+            },
+          },
+          sessions: {},
+          turns: {},
+        },
+      },
+      "session-1",
+      "turn-1",
+      "call-1",
+    );
+    expect(parentTraceContext).toBeDefined();
+
+    const runtime = createRuntime();
+    await publishTurnStarted({
+      agentSessionId: "agent-session-1",
+      hooks: runtime.hooks,
+      parentLineage: {
+        callId: "call-1",
+        sessionId: "session-1",
+        subagentName: "researcher",
+        turnId: "turn-1",
+      },
+      parentTraceContext,
+      rootSessionId: "session-1",
+      sessionId: "child-1",
+      turnId: "child-turn-1",
+      turnSequence: 0,
+    });
+    await completeTurn(runtime.hooks, "child-1", "child-turn-1");
+    await runtime.provider.forceFlush();
+
+    const childTurn = byName(runtime.exporter.getFinishedSpans(), "agent.turn")[0]!;
+    expect(childTurn.spanContext().traceId).toBe(traceId);
+    expect(childTurn.parentSpanContext?.spanId).toBe(actionSpanId);
   });
 
   it("preserves a remote action as the parent of a remote child turn", async () => {
@@ -1623,6 +1690,7 @@ describe("createAgentOtelInstrumentation", () => {
       traceId: "1".repeat(32),
     };
     await publishTurnStarted({
+      agentSessionId: "agent-session-1",
       hooks: runtime.hooks,
       parentTraceContext,
       rootSessionId: "parent-session",
@@ -1641,6 +1709,7 @@ describe("createAgentOtelInstrumentation", () => {
   it("opens its own root when a child session is handed no parent trace", async () => {
     const runtime = createRuntime();
     await publishTurnStarted({
+      agentSessionId: "agent-session-1",
       hooks: runtime.hooks,
       rootSessionId: "session-1",
       sessionId: "child-1",
@@ -1651,7 +1720,8 @@ describe("createAgentOtelInstrumentation", () => {
 
     const sessions = byName(runtime.exporter.getFinishedSpans(), "agent.session");
     expect(sessions).toHaveLength(1);
-    expect(sessions[0]!.attributes["agent.session.id"]).toBe("child-1");
+    expect(sessions[0]!.attributes["agent.session.id"]).toBe("agent-session-1");
+    expect(sessions[0]!.attributes["workflow.run.id"]).toBe("child-1");
     expect(sessions[0]!.parentSpanContext).toBeUndefined();
   });
 

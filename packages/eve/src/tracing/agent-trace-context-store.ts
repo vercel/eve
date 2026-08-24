@@ -190,11 +190,16 @@ function deserializeState(data: unknown): AgentTraceContextState {
   const sessions = deserializeRecord(data.sessions, (value) => {
     if (!isRecord(value) || !isSpanContext(value.context)) return undefined;
     return {
+      agentSessionId:
+        typeof value.agentSessionId === "string"
+          ? value.agentSessionId
+          : typeof value.rootSessionId === "string"
+            ? value.rootSessionId
+            : "",
       agentName: typeof value.agentName === "string" ? value.agentName : undefined,
       channelAudience: normalizeChannelAudience(value.channelAudience),
       channelKind: typeof value.channelKind === "string" ? value.channelKind : undefined,
       context: value.context,
-      rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
     } satisfies AgentSessionTraceState;
   });
   const turns = deserializeRecord(data.turns, (value) => {
@@ -203,10 +208,15 @@ function deserializeState(data: unknown): AgentTraceContextState {
       return undefined;
     }
     return {
+      agentSessionId:
+        typeof value.agentSessionId === "string"
+          ? value.agentSessionId
+          : typeof value.rootSessionId === "string"
+            ? value.rootSessionId
+            : "",
       context: value.context,
       parentIsRemote: typeof value.parentIsRemote === "boolean" ? value.parentIsRemote : undefined,
       parentSpanId: value.parentSpanId,
-      rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
       sequence: typeof value.sequence === "number" ? value.sequence : 0,
       startTimeMs: value.startTimeMs,
       subagentName: typeof value.subagentName === "string" ? value.subagentName : undefined,
@@ -224,7 +234,7 @@ function deserializeAction(value: unknown): AgentActionTraceState | undefined {
     !isActionKind(value.kind) ||
     typeof value.name !== "string" ||
     !isSpanContext(value.parent) ||
-    typeof value.rootSessionId !== "string" ||
+    (typeof value.agentSessionId !== "string" && typeof value.rootSessionId !== "string") ||
     typeof value.sessionId !== "string" ||
     typeof value.spanId !== "string" ||
     typeof value.startTimeMs !== "number" ||
@@ -234,6 +244,10 @@ function deserializeAction(value: unknown): AgentActionTraceState | undefined {
     return undefined;
   }
   return {
+    agentSessionId:
+      typeof value.agentSessionId === "string"
+        ? value.agentSessionId
+        : (value.rootSessionId as string),
     attemptIndex: value.attemptIndex,
     callId: value.callId,
     channelAudience: normalizeChannelAudience(value.channelAudience),
@@ -241,7 +255,6 @@ function deserializeAction(value: unknown): AgentActionTraceState | undefined {
     kind: value.kind,
     name: value.name,
     parent: value.parent,
-    rootSessionId: value.rootSessionId,
     sessionId: value.sessionId,
     spanId: value.spanId,
     startTimeMs: value.startTimeMs,

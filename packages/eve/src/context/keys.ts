@@ -68,6 +68,7 @@ export interface Session {
 export const AuthKey = new ContextKey<SessionAuthContext | null>("eve.auth");
 export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.initiatorAuth");
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
+export const AgentSessionIdKey = new ContextKey<string>("eve.agentSessionId");
 export const ContinuationTokenKey = new ContextKey<string>("eve.continuationToken");
 export const ChannelRequestIdKey = new ContextKey<string>("eve.channelRequestId");
 export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.channelDelivery");
@@ -78,6 +79,7 @@ export const TurnTaskDeliveryKey = new ContextKey<"none" | "initiating" | "pendi
 /** Framework-authored task state supplied to the model without altering user-message history. */
 export const TurnTaskStateKey = new ContextKey<string>("eve.turnTaskState");
 export interface ActiveChannelDelivery {
+  readonly agentSessionId?: string;
   readonly agentName?: string;
   readonly delivery: InstrumentationChannelDeliveryRef;
   readonly rootSessionId: string;

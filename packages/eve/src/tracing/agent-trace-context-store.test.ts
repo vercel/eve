@@ -17,13 +17,13 @@ describe("ContextAgentTraceStateStore", () => {
       store.setSession("session-1", {
         agentName: "weather",
         context: spanContext("1", "2"),
-        rootSessionId: "session-1",
+        agentSessionId: "agent-session-1",
       });
       store.setTurn("session-1", "turn-1", {
         context: spanContext("1", "3"),
         parentIsRemote: true,
         parentSpanId: "2".repeat(16),
-        rootSessionId: "session-1",
+        agentSessionId: "agent-session-1",
         sequence: 0,
         startTimeMs: 1_700_000_000_000,
         subagentName: "researcher",
@@ -56,12 +56,12 @@ describe("ContextAgentTraceStateStore", () => {
       const store = new ContextAgentTraceStateStore();
       store.setSession("session-1", {
         context: spanContext("1", "2"),
-        rootSessionId: "session-1",
+        agentSessionId: "agent-session-1",
       });
       store.setTurn("session-1", "turn-1", {
         context: spanContext("1", "3"),
         parentSpanId: "2".repeat(16),
-        rootSessionId: "session-1",
+        agentSessionId: "agent-session-1",
         sequence: 0,
         startTimeMs: 1_700_000_000_000,
       });
@@ -79,7 +79,7 @@ describe("ContextAgentTraceStateStore", () => {
     await contextStorage.run(context, () => {
       new ContextAgentTraceStateStore().setSession("session-1", {
         context: spanContext("1", "2"),
-        rootSessionId: "session-1",
+        agentSessionId: "agent-session-1",
       });
     });
 
@@ -97,7 +97,7 @@ describe("readSessionTraceContext", () => {
     await contextStorage.run(context, () => {
       new ContextAgentTraceStateStore().setSession("session-1", {
         context: spanContext("1", "2"),
-        rootSessionId: "session-1",
+        agentSessionId: "agent-session-1",
       });
     });
     const serialized = await serializeContext(context);
@@ -118,7 +118,7 @@ describe("readActionTraceContext", () => {
         kind: "subagent-call",
         name: "researcher",
         parent: spanContext("1", "2"),
-        rootSessionId: "session-1",
+        agentSessionId: "agent-session-1",
         sessionId: "session-1",
         spanId: "3".repeat(16),
         startTimeMs: 1_700_000_000_000,

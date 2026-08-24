@@ -23,6 +23,8 @@ export async function prepareWorkflowPreambleTrace(input: {
   const parent = input.ctx.get(ParentSessionKey);
   const channel = input.ctx.get(ChannelInstrumentationKey);
   return await prepareTurnTraceContext({
+    agentSessionId:
+      input.session.agentSessionId ?? input.session.rootSessionId ?? input.session.sessionId,
     agentName: input.runtimeIdentity.agentName,
     channelAudience: normalizeChannelAudience(channel?.metadata.audience),
     instrumentation: getInstrumentationRuntime(),

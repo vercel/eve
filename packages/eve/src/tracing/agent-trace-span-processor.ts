@@ -11,7 +11,7 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
   readonly #children: readonly SpanProcessor[];
   readonly #ownedTraceIds = new Set<string>();
   readonly #sessionTraceIds = new Map<string, Set<string>>();
-  readonly #traceOwners = new Map<string, string>();
+  readonly #traceSessionIds = new Map<string, Set<string>>();
   constructor(children: readonly SpanProcessor[]) {
     this.#children = children;
   }
@@ -26,12 +26,12 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
     if (typeof sessionId === "string") {
       const traceId = span.spanContext().traceId;
       this.#ownedTraceIds.add(traceId);
-      if (!this.#traceOwners.has(traceId)) {
-        this.#traceOwners.set(traceId, sessionId);
-        const owned = this.#sessionTraceIds.get(sessionId) ?? new Set<string>();
-        owned.add(traceId);
-        this.#sessionTraceIds.set(sessionId, owned);
-      }
+      const owned = this.#sessionTraceIds.get(sessionId) ?? new Set<string>();
+      owned.add(traceId);
+      this.#sessionTraceIds.set(sessionId, owned);
+      const owners = this.#traceSessionIds.get(traceId) ?? new Set<string>();
+      owners.add(sessionId);
+      this.#traceSessionIds.set(traceId, owners);
     }
     if (!this.#accepts(span)) return;
     for (const child of this.#children) child.onStart(span, parentContext);
@@ -48,16 +48,18 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
   }
 
   /**
-   * Forgets every trace one root session owned, reporting whether it owned any.
-   * A subagent child owns none, so releasing one reports `false` and leaves the
-   * shared trace pinned until its root finishes.
+   * Forgets every trace one Agent Run owned, reporting whether it owned any.
    */
   releaseSession(sessionId: string): boolean {
     const owned = this.#sessionTraceIds.get(sessionId);
     if (owned === undefined) return false;
     for (const traceId of owned) {
-      this.#ownedTraceIds.delete(traceId);
-      this.#traceOwners.delete(traceId);
+      const owners = this.#traceSessionIds.get(traceId);
+      owners?.delete(sessionId);
+      if (owners?.size === 0) {
+        this.#traceSessionIds.delete(traceId);
+        this.#ownedTraceIds.delete(traceId);
+      }
     }
     this.#sessionTraceIds.delete(sessionId);
     return true;

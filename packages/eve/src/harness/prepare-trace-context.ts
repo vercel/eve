@@ -12,6 +12,7 @@ const log = createLogger("harness.prepare-trace-context");
 
 /** Prepares native session/turn tracing before their durable stream events. */
 export async function prepareTurnTraceContext(input: {
+  readonly agentSessionId?: string;
   readonly agentName?: string;
   readonly channelAudience?: ChannelAudience;
   readonly instrumentation?: HarnessInstrumentation;
@@ -29,6 +30,7 @@ export async function prepareTurnTraceContext(input: {
   if (!input.sessionStarted && input.instrumentation?.prepareSessionTrace !== undefined) {
     try {
       prepared = await input.instrumentation.prepareSessionTrace({
+        agentSessionId: input.agentSessionId,
         agentName: input.agentName,
         channelAudience: input.channelAudience,
         idempotencyKey: sessionIdempotencyKey(input.sessionId),
@@ -45,6 +47,7 @@ export async function prepareTurnTraceContext(input: {
   if (input.instrumentation?.prepareTurnTrace !== undefined) {
     try {
       prepared = await input.instrumentation.prepareTurnTrace({
+        agentSessionId: input.agentSessionId,
         idempotencyKey: turnIdempotencyKey(input.sessionId, input.turnId),
         parentLineage: input.parentLineage,
         parentTraceContext: input.parentTraceContext,

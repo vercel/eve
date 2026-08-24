@@ -47,6 +47,7 @@ import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { isTaskOwnedSerializedContext } from "#execution/tasks/child/instructions.js";
+import { AgentSessionIdKey } from "#context/keys.js";
 
 const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
   "Agent workflow failed. Inspect the private session trace for details.";
@@ -61,6 +62,8 @@ const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
  * and deserialized at each `"use step"` boundary.
  */
 export interface WorkflowEntryInput {
+  /** Optional only for Workflow inputs created before Eve owned this identity. */
+  readonly agentSessionId?: string;
   readonly input: RunInput["input"];
   readonly limits?: RunInput["limits"];
   readonly sessionTimeoutMs?: number | false;
@@ -148,6 +151,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
   // Seed `eve.sessionId` so the terminal failure emitter can stamp it
   // onto `session.failed` even if `createSessionStep` itself throws.
   input.serializedContext["eve.sessionId"] = sessionId;
+  input.serializedContext[AgentSessionIdKey.name] = input.agentSessionId ?? sessionId;
 
   const driverWritable = getWritable<Uint8Array>();
   const crashCleanupState: CrashCleanupState = {
@@ -166,6 +170,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       | undefined;
 
     const { state: sessionState } = await createSessionStep({
+      agentSessionId: input.agentSessionId ?? sessionId,
       compiledArtifactsSource: serializedBundle.source,
       continuationToken,
       dynamicSubagentAgentConfig,
@@ -559,6 +564,10 @@ async function runDriverLoop(input: {
           serializedContext: stateCursor.serializedContext,
           sessionState: stateCursor.sessionState,
         });
+        await emitTerminalSessionCompletionStep({
+          parentWritable: input.driverWritable,
+          serializedContext: stateCursor.serializedContext,
+        });
         return { kind: "result", result: { output: "" } };
       }
 
@@ -568,6 +577,10 @@ async function runDriverLoop(input: {
       }
 
       if (next.kind === "closed") {
+        await emitTerminalSessionCompletionStep({
+          parentWritable: input.driverWritable,
+          serializedContext: stateCursor.serializedContext,
+        });
         return { kind: "result", result: { output: "" } };
       }
 
