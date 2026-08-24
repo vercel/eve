@@ -102,7 +102,7 @@ describe("resolveSlackInboundMrkdwn", () => {
       ],
     });
 
-    expect(result).toContain("see the docs:rocket:");
+    expect(result).toContain("see <https://example.com|the docs>:rocket:");
     expect(result).toContain("one\ntwo");
   });
 
@@ -311,6 +311,40 @@ describe("resolveSlackInboundMrkdwn", () => {
     });
 
     expect(result).toBe("First alert\nLatency is high\nSecond alert: deploy blocked");
+  });
+
+  it("does not duplicate fallback when nested attachment blocks carry the content", () => {
+    const result = resolveSlackInboundMrkdwn("", {
+      attachments: [
+        {
+          fallback: "Alert: latency high",
+          blocks: [{ type: "section", text: { type: "mrkdwn", text: "*Alert:* latency high" } }],
+        },
+      ],
+    });
+
+    expect(result).toBe("*Alert:* latency high");
+  });
+
+  it("preserves rich_text link labels and URLs as mrkdwn links", () => {
+    const result = resolveSlackInboundMrkdwn("", {
+      blocks: [
+        {
+          type: "rich_text",
+          elements: [
+            {
+              type: "rich_text_section",
+              elements: [
+                { type: "text", text: "See " },
+                { type: "link", text: "incident dashboard", url: "https://example.com/incident" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toBe("See <https://example.com/incident|incident dashboard>");
   });
 
   it("extracts Block Kit nested inside legacy attachments", () => {

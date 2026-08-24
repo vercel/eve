@@ -530,6 +530,34 @@ describe("Block Kit inbound markdown", () => {
     expect(message?.markdown).toBe("cc @U123 @here");
   });
 
+  it("converts rich_text links to GFM in the extracted markdown", () => {
+    const message = parseMessageEvent({
+      type: "event_callback",
+      event: {
+        type: "message",
+        bot_id: "B01",
+        text: "",
+        channel: "C01",
+        ts: "1234567890.123463",
+        blocks: [
+          {
+            type: "rich_text",
+            elements: [
+              {
+                type: "rich_text_section",
+                elements: [
+                  { type: "link", text: "incident dashboard", url: "https://example.com/incident" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(message?.markdown).toBe("[incident dashboard](https://example.com/incident)");
+  });
+
   it("prefers block content over a short fallback text field", () => {
     const message = parseMessageEvent({
       type: "event_callback",

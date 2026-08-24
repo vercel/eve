@@ -1,3 +1,4 @@
+import { formatSlackLink } from "#compiled/@chat-adapter/slack/format.js";
 import { isObject } from "#shared/guards.js";
 
 /** Derives inbound mrkdwn from top-level text plus Block Kit and legacy attachments. */
@@ -122,6 +123,10 @@ function extractLegacyAttachmentLines(legacyAttachments: unknown): string[] {
     if (typeof attachment.footer === "string" && attachment.footer.length > 0) {
       lines.push(attachment.footer);
     }
+    lines.push(...extractBlockKitLines(attachment.blocks));
+    // Fallback is per-attachment and only when this attachment has no other
+    // visible fields; nested blocks count, and earlier attachments must not
+    // suppress a later fallback.
     if (
       lines.length === attachmentStart &&
       typeof attachment.fallback === "string" &&
@@ -129,7 +134,6 @@ function extractLegacyAttachmentLines(legacyAttachments: unknown): string[] {
     ) {
       lines.push(attachment.fallback);
     }
-    lines.push(...extractBlockKitLines(attachment.blocks));
   }
 
   return lines;
@@ -249,7 +253,9 @@ function richTextInlineToPlain(elements: unknown): string {
         if (typeof element.text === "string") parts.push(element.text);
         break;
       case "link":
-        if (typeof element.text === "string") {
+        if (typeof element.url === "string" && typeof element.text === "string") {
+          parts.push(formatSlackLink(element.url, element.text));
+        } else if (typeof element.text === "string") {
           parts.push(element.text);
         } else if (typeof element.url === "string") {
           parts.push(element.url);
