@@ -187,6 +187,7 @@ interface InstrumentationChannelDeliveryScope {
   readonly rootSessionId: string;
   readonly sequence?: number;
   readonly sessionId: string;
+  readonly traceSeed?: InstrumentationTraceContext;
   readonly turnId?: string;
 }
 

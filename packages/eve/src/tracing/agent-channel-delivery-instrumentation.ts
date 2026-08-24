@@ -61,6 +61,7 @@ export function createAgentChannelDeliveryInstrumentation(input: {
       parentTraceContext: event.parentTraceContext,
       rootSessionId: event.rootSessionId,
       sessionId: event.sessionId,
+      traceSeed: event.traceSeed,
       type: "session.started",
     });
     if (!isSampledTrace(session.context)) return;
