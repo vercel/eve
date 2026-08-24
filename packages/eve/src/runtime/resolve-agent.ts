@@ -1,4 +1,5 @@
 import type {
+  CompiledAgentManifest,
   CompiledAgentNodeManifest,
   CompiledAgentResources,
   CompiledInstructionsDefinition,
@@ -19,6 +20,7 @@ import { resolveDynamicInstructionsDefinition } from "#runtime/resolve-dynamic-i
 import { resolveDynamicSkillDefinition } from "#runtime/resolve-dynamic-skill.js";
 import { resolveDynamicToolDefinition } from "#runtime/resolve-dynamic-tool.js";
 import { resolveToolDefinition } from "#runtime/resolve-tool.js";
+import { registerExtensionConfigs } from "#runtime/extension-registrations.js";
 import type {
   ResolvedAgent,
   ResolvedChannelDefinition,
@@ -39,6 +41,9 @@ export interface ResolveAgentInput {
  * Resolves the core authored agent path from compiled artifacts.
  */
 export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAgent> {
+  if (isCompiledAgentManifest(input.manifest)) {
+    registerExtensionConfigs(input.manifest, input.moduleMap);
+  }
   const resolvedSkills = input.manifest.skills.map((skill) => ({
     ...skill,
     metadata:
@@ -132,6 +137,12 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
   return "config" in input.manifest
     ? { ...resolvedAgent, config: createResolvedAgentConfig(input.manifest) }
     : resolvedAgent;
+}
+
+function isCompiledAgentManifest(
+  manifest: CompiledAgentNodeManifest | CompiledAgentResources,
+): manifest is CompiledAgentManifest {
+  return "subagents" in manifest && "subagentEdges" in manifest;
 }
 
 function createResolvedInstructionsDefinition(

@@ -20,15 +20,6 @@ import { loadAuthoredModuleNamespace } from "#internal/authored-module-loader.js
 import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
 
 /**
- * Ambient namespace read by `defineExtension` when it is evaluated from a module
- * the bundler could not scope — specifically a mount's extension package, which
- * resolves cross-package and so loads unbundled in the dev/eval loader. Set only
- * around the synchronous evaluation of one mount module (see below), so it never
- * leaks into consumer code.
- */
-const EXT_CONFIG_SCOPE = Symbol.for("eve.ext-config-scope");
-
-/**
  * Loads a disk-backed module map by hydrating authored modules directly from
  * source. This is for dev/build flows that need tsconfig alias support and
  * source reloads without relying on Node's module cache for module-map.mjs.
@@ -49,8 +40,6 @@ export async function loadCompiledModuleMapFromAuthoredSource(input: {
 interface ExtensionScopeIndex {
   /** Mount namespace (from `ext:<ns>:` source ids) to package namespace. */
   readonly byMountNamespace: ReadonlyMap<string, string>;
-  /** Mount module source id to package namespace. */
-  readonly byMountSourceId: ReadonlyMap<string, string>;
 }
 
 async function hydrateCompiledModuleMapFromManifest(
@@ -115,12 +104,6 @@ async function hydrateCompiledModuleMapFromManifest(
   for (const nodeManifest of nodeManifests) {
     const scopeIndex: ExtensionScopeIndex = {
       byMountNamespace: extensionNamespacesForNode(nodeManifest.nodeId),
-      byMountSourceId: new Map(
-        nodeManifest.manifest.extensionMounts.map((mount) => [
-          mount.mountSourceId,
-          mount.packageNamespace,
-        ]),
-      ),
     };
     nodes[nodeManifest.nodeId] = {
       modules: await hydrateCompiledNodeScope({
@@ -182,32 +165,16 @@ async function hydrateCompiledNodeScope(input: {
     ...collectModuleRefsForManifest(input.manifest),
     ...(input.additionalModuleRef === undefined ? [] : [input.additionalModuleRef]),
   ].sort((left, right) => left.sourceId.localeCompare(right.sourceId));
-  const container = globalThis as Record<symbol, unknown>;
   const modules: CompiledModuleMap["nodes"][string]["modules"] = {};
 
   for (const ref of refs) {
     const modulePath = join(input.agentRoot, ref.logicalPath);
     const extensionScopeNamespace = extensionNamespaceForSourceId(ref.sourceId, input.scopeIndex);
 
-    // A mount module (e.g. `agent/extensions/crm.ts`) imports the extension
-    // package cross-package, so its config handle loads unbundled and the
-    // bundler cannot scope it. Set the ambient config scope around this one
-    // synchronous load so the mount's `defineExtension` binds under the package
-    // namespace — matching what the extension's own bundled tools read.
-    const mountConfigScope = input.scopeIndex.byMountSourceId.get(ref.sourceId);
-    if (mountConfigScope !== undefined) {
-      container[EXT_CONFIG_SCOPE] = mountConfigScope;
-    }
-    try {
-      modules[ref.sourceId] = await loadAuthoredModuleNamespace(modulePath, {
-        externalDependencies: input.externalDependencies,
-        extensionScopeNamespace,
-      });
-    } finally {
-      if (mountConfigScope !== undefined) {
-        container[EXT_CONFIG_SCOPE] = undefined;
-      }
-    }
+    modules[ref.sourceId] = await loadAuthoredModuleNamespace(modulePath, {
+      externalDependencies: input.externalDependencies,
+      extensionScopeNamespace,
+    });
   }
 
   return modules;

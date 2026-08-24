@@ -3,7 +3,7 @@ import { resolve, sep } from "node:path";
 
 /**
  * One extension's on-disk source root paired with the namespace its durable
- * state keys and config binding must be scoped to.
+ * state keys use.
  */
 export interface ExtensionScope {
   /** Absolute path to the extension's source root. */
@@ -14,13 +14,7 @@ export interface ExtensionScope {
 
 const VIRTUAL_PREFIX = "\0eve-ext-scope:";
 
-/** Framework module an extension-owned import is redirected through. */
-type ScopedFrameworkModule = "eve/context" | "eve/extension";
-
-const SCOPED_FRAMEWORK_MODULES: Record<ScopedFrameworkModule, "context" | "extension"> = {
-  "eve/context": "context",
-  "eve/extension": "extension",
-};
+const SCOPED_FRAMEWORK_MODULE = "eve/context";
 
 /** The subset of the rolldown/rollup plugin shape this plugin implements. */
 export interface ExtensionScopeBundlerPlugin {
@@ -47,27 +41,12 @@ function isUnder(path: string, root: string): boolean {
   return path === root || path.startsWith(`${root}${sep}`);
 }
 
-function shimSource(kind: "context" | "extension", namespace: string): string {
+function shimSource(namespace: string): string {
   const ns = JSON.stringify(namespace);
-  if (kind === "context") {
-    // Wrap `defineState` (the only runtime export) so the durable key is
-    // prefixed with the namespace baked into the bundle, not read from
-    // evaluation-order-sensitive global state.
-    return [
-      `import { defineState as __eveScopedDefineState } from "eve/context";`,
-      `export function defineState(name, initial) {`,
-      `  return __eveScopedDefineState(${ns} + "." + name, initial);`,
-      `}`,
-      "",
-    ].join("\n");
-  }
-  // Wrap `defineExtension` (the only runtime export) so the handle bakes the
-  // namespace — both the mount binding and the handle's `config` reader resolve
-  // to the same scope from any module in the extension.
   return [
-    `import { defineExtension as __eveScopedDefineExtension } from "eve/extension";`,
-    `export function defineExtension(options, namespace) {`,
-    `  return __eveScopedDefineExtension(options, namespace === undefined ? ${ns} : namespace);`,
+    `import { defineState as __eveScopedDefineState } from "eve/context";`,
+    `export function defineState(name, initial) {`,
+    `  return __eveScopedDefineState(${ns} + "." + name, initial);`,
     `}`,
     "",
   ].join("\n");
@@ -85,25 +64,25 @@ function scopeHooks(
   return {
     name,
     resolveId(source: string, importer: string | undefined) {
-      const kind = SCOPED_FRAMEWORK_MODULES[source as ScopedFrameworkModule];
-      if (kind === undefined || importer === undefined || importer.startsWith("\0")) {
+      if (
+        source !== SCOPED_FRAMEWORK_MODULE ||
+        importer === undefined ||
+        importer.startsWith("\0")
+      ) {
         return undefined;
       }
       const namespace = namespaceFor(importer);
       if (namespace === undefined) {
         return undefined;
       }
-      return `${VIRTUAL_PREFIX}${kind}:${namespace}`;
+      return `${VIRTUAL_PREFIX}${namespace}`;
     },
     load(id: string) {
       if (!id.startsWith(VIRTUAL_PREFIX)) {
         return undefined;
       }
-      const descriptor = id.slice(VIRTUAL_PREFIX.length);
-      const separatorIndex = descriptor.indexOf(":");
-      const kind = descriptor.slice(0, separatorIndex) as "context" | "extension";
-      const namespace = descriptor.slice(separatorIndex + 1);
-      return { code: shimSource(kind, namespace), moduleType: "js" as const };
+      const namespace = id.slice(VIRTUAL_PREFIX.length);
+      return { code: shimSource(namespace), moduleType: "js" as const };
     },
   };
 }
@@ -111,8 +90,8 @@ function scopeHooks(
 /**
  * Path-containment scope plugin for the whole-application bundle (the production
  * build). Any module physically under an extension's source root has its
- * `eve/context`/`eve/extension` imports redirected to a generated shim that
- * bakes the extension's package namespace into `defineState`/`defineExtension`.
+ * `eve/context` imports redirected to a generated shim that prefixes
+ * `defineState` keys with the extension's package namespace.
  *
  * Returns `null` when there are no extensions, so consumer-only builds carry no
  * extra plugin and their output is byte-identical to a non-extension build.

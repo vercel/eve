@@ -44,9 +44,8 @@ const CHANNEL_MODULE_CACHE_KEY = "__eveChannelModuleCache__";
 export interface AuthoredModuleLoadOptions {
   readonly externalDependencies?: readonly string[];
   /**
-   * When set, the module being loaded is extension-owned: its
-   * `defineState`/`defineExtension` calls (and those of its same-package
-   * dependencies bundled with it) are scoped to this namespace at bundle time.
+   * When set, the module being loaded is extension-owned. Its `defineState`
+   * calls and those of its same-package dependencies use this durable namespace.
    */
   readonly extensionScopeNamespace?: string;
 }

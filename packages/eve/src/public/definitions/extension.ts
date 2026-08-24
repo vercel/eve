@@ -2,23 +2,12 @@ import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js"
 
 /** Marker carried by the object an extension handle produces when called. */
 const MOUNTED_EXTENSION = Symbol.for("eve.mounted-extension");
-
+const MOUNTED_EXTENSION_CONFIG = Symbol.for("eve.mounted-extension-config");
+const EXTENSION_HANDLE = Symbol.for("eve.extension-handle");
 const CONFIG_REGISTRY = Symbol.for("eve.extension-config-registry");
+const EXTENSION_REGISTRATION_STORAGE = Symbol.for("eve.extension-registration-storage");
 
-/**
- * Ambient namespace set by the dev/eval loader around a mount module's
- * evaluation. A mount loads the handle unbundled (cross-package), so the
- * bundler's scope shim never runs on it; this fallback lets the mount still bind
- * under the package namespace. The shim's explicit argument takes precedence.
- */
-const EXT_CONFIG_SCOPE = Symbol.for("eve.ext-config-scope");
-
-function ambientConfigScope(): string | undefined {
-  const scope = (globalThis as Record<symbol, unknown>)[EXT_CONFIG_SCOPE];
-  return typeof scope === "string" && scope.length > 0 ? scope : undefined;
-}
-
-/** Process-global map of extension namespace to its bound, validated config. */
+/** Process-global map of extension registration id to its validated config. */
 function configRegistry(): Map<string, Record<string, unknown>> {
   const container = globalThis as Record<symbol, unknown>;
   let registry = container[CONFIG_REGISTRY] as Map<string, Record<string, unknown>> | undefined;
@@ -29,15 +18,23 @@ function configRegistry(): Map<string, Record<string, unknown>> {
   return registry;
 }
 
+function activeExtensionRegistrationId(): string | undefined {
+  const storage = (globalThis as Record<symbol, unknown>)[EXTENSION_REGISTRATION_STORAGE] as
+    | { getStore(): unknown }
+    | undefined;
+  const registrationId = storage?.getStore();
+  return typeof registrationId === "string" ? registrationId : undefined;
+}
+
 /**
  * Marker value an extension handle returns when called. The consumer's mount
  * file default-exports it (directly for a no-config extension, or as the result
- * of the factory call for a configured one). The build reads the mount statically
- * for its package specifier; the runtime evaluates it so the call binds config
- * into the extension's scope.
+ * of the factory call for a configured one). The runtime associates its validated
+ * config with the mount module's compiler-derived registration id.
  */
 export interface MountedExtension {
   readonly [MOUNTED_EXTENSION]: true;
+  readonly [MOUNTED_EXTENSION_CONFIG]: Record<string, unknown>;
 }
 
 /**
@@ -53,6 +50,7 @@ export interface ExtensionHandle<S extends StandardSchemaV1 = StandardSchemaV1> 
   readonly config: StandardSchemaV1.InferOutput<S>;
   /** The declared config schema; read by `eve extension build`. */
   readonly schema: S;
+  readonly [EXTENSION_HANDLE]: true;
 }
 
 /**
@@ -63,6 +61,7 @@ export interface NoConfigExtensionHandle {
   (): MountedExtension;
   readonly config: Record<string, never>;
   readonly schema: undefined;
+  readonly [EXTENSION_HANDLE]: true;
 }
 
 /**
@@ -116,47 +115,66 @@ function validateConfig(
  *
  * // extension/tools/search.ts
  * import extension from "../extension.js";
- * const { apiKey } = extension.config;
+ * export default defineTool({
+ *   execute: async () => {
+ *     const { apiKey } = extension.config;
+ *     // ...
+ *   },
+ * });
  * ```
- *
- * The `namespace` argument is supplied by the bundler shim and is not part of the
- * authoring surface.
  */
-export function defineExtension<const S extends StandardSchemaV1>(
-  options: { readonly config: S },
-  namespace?: string,
-): ExtensionHandle<S>;
-export function defineExtension(
-  options?: { readonly config?: undefined },
-  namespace?: string,
-): NoConfigExtensionHandle;
-export function defineExtension(
-  options?: { readonly config?: StandardSchemaV1 },
-  namespace?: string,
-): ExtensionHandle | NoConfigExtensionHandle {
+export function defineExtension<const S extends StandardSchemaV1>(options: {
+  readonly config: S;
+}): ExtensionHandle<S>;
+export function defineExtension(options?: { readonly config?: undefined }): NoConfigExtensionHandle;
+export function defineExtension(options?: {
+  readonly config?: StandardSchemaV1;
+}): ExtensionHandle | NoConfigExtensionHandle {
   const schema = options?.config;
-  // The bundler shim passes the namespace explicitly for the extension's own
-  // bundled modules; an unshimmed cross-package mount falls back to the ambient
-  // scope the loader sets around the mount evaluation.
-  const resolvedNamespace = namespace ?? ambientConfigScope();
+  let localConfig: Record<string, unknown> | undefined;
 
   const handle = ((values?: unknown): MountedExtension => {
-    const parsed = validateConfig(schema, values);
-    if (resolvedNamespace !== undefined && resolvedNamespace.length > 0) {
-      configRegistry().set(resolvedNamespace, parsed);
-    }
-    return { [MOUNTED_EXTENSION]: true };
+    localConfig = validateConfig(schema, values);
+    return {
+      [MOUNTED_EXTENSION]: true,
+      [MOUNTED_EXTENSION_CONFIG]: localConfig,
+    };
   }) as ExtensionHandle & NoConfigExtensionHandle;
 
   Object.defineProperty(handle, "schema", { value: schema, enumerable: true });
+  Object.defineProperty(handle, EXTENSION_HANDLE, { value: true });
   Object.defineProperty(handle, "config", {
     enumerable: true,
     get(): Record<string, unknown> {
-      const bound =
-        resolvedNamespace === undefined ? undefined : configRegistry().get(resolvedNamespace);
-      return bound ?? validateConfig(schema, {});
+      const registrationId = activeExtensionRegistrationId();
+      const registered =
+        registrationId === undefined ? undefined : configRegistry().get(registrationId);
+      return registered ?? localConfig ?? validateConfig(schema, {});
     },
   });
 
   return handle;
+}
+
+/** Binds one evaluated mount export to its compiler-derived registration id. */
+export function bindExtensionRegistration(registrationId: string, value: unknown): void {
+  if (typeof value === "function" && EXTENSION_HANDLE in value) {
+    const handle = value as unknown as { readonly schema: StandardSchemaV1 | undefined };
+    configRegistry().set(registrationId, validateConfig(handle.schema, {}));
+    return;
+  }
+
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    MOUNTED_EXTENSION in value &&
+    MOUNTED_EXTENSION_CONFIG in value
+  ) {
+    configRegistry().set(registrationId, (value as MountedExtension)[MOUNTED_EXTENSION_CONFIG]);
+    return;
+  }
+
+  throw new Error(
+    `Expected extension registration "${registrationId}" to export an extension mount.`,
+  );
 }

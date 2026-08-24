@@ -5,6 +5,10 @@ import {
   getAuthoredModuleExport,
   materializeAuthoredModuleExport,
 } from "#internal/authored-module.js";
+import {
+  runWithExtensionRegistration,
+  wrapExtensionCallbacks,
+} from "#runtime/extension-registrations.js";
 import type { ResolvedModuleSourceRef } from "#runtime/types.js";
 
 /**
@@ -94,5 +98,18 @@ export async function loadResolvedModuleExport(input: {
     logicalPath: input.definition.logicalPath,
   });
 
-  return await materializeAuthoredModuleExport(exportValue);
+  const value = await runWithExtensionRegistration({
+    moduleMap: input.moduleMap,
+    nodeId: resolvedNodeId,
+    sourceId: input.definition.sourceId,
+    logicalPath: input.definition.logicalPath,
+    operation: async () => await materializeAuthoredModuleExport(exportValue),
+  });
+  return wrapExtensionCallbacks({
+    moduleMap: input.moduleMap,
+    nodeId: resolvedNodeId,
+    sourceId: input.definition.sourceId,
+    logicalPath: input.definition.logicalPath,
+    value,
+  });
 }

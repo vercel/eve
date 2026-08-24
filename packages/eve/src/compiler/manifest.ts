@@ -765,8 +765,8 @@ const compiledSubagentEdgeSchema: z.ZodType<CompiledSubagentEdge> = z
 
 /**
  * One mounted extension recorded on a compiled agent manifest. The runtime
- * evaluates {@link mountLogicalPath} at module-map load so the mount's factory
- * call binds the extension's config before any tool runs.
+ * evaluates {@link mountLogicalPath} at module-map load so the runtime can bind
+ * its config to the mount's compiler-derived registration id.
  */
 export interface CompiledExtensionMount {
   /** Runtime packages this extension requires the consuming application to externalize. */
@@ -775,15 +775,15 @@ export interface CompiledExtensionMount {
   readonly namespace: string;
   readonly packageName: string;
   /**
-   * Package-derived namespace that scopes the extension's durable state keys and
-   * config binding. Distinct from {@link namespace}: state stays keyed to the
-   * package so a consumer renaming the mount file cannot orphan persisted state.
+   * Package-derived namespace that scopes the extension's durable state keys.
+   * Distinct from {@link namespace}: state stays keyed to the package so a
+   * consumer renaming the mount file cannot orphan persisted state.
    */
   readonly packageNamespace: string;
   /**
    * Absolute path to the extension's source root on disk. The extension-scope
    * bundler plugin treats any module under this root as extension-owned and
-   * rewrites its `eve/context`/`eve/extension` imports to bake in the namespace.
+   * rewrites its `eve/context` imports to scope durable state.
    */
   readonly sourceRoot: string;
   readonly mountSourceId: string;

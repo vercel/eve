@@ -15,6 +15,8 @@ import {
 import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "#internal/application/runtime-compiled-artifacts-source.js";
 import type { MaterializedInstrumentation } from "#internal/materialized-authored-modules.js";
 import { useScenarioApp } from "#internal/testing/scenario-app.js";
+import { registerExtensionConfigs } from "#runtime/extension-registrations.js";
+import { resolveToolDefinition } from "#runtime/resolve-tool.js";
 
 describe("development generation artifacts", () => {
   const scenarioApp = useScenarioApp();
@@ -177,7 +179,7 @@ describe("development generation artifacts", () => {
     expect(moduleNamespace.default.events["session.started"]).toBeDefined();
   });
 
-  it("preserves extension scope in a shared generation graph", async () => {
+  it("attributes config to each mount of a shared extension graph", async () => {
     const packageName = "@acme/shared-graph-extension";
     const app = await scenarioApp({
       dependencies: {
@@ -185,9 +187,14 @@ describe("development generation artifacts", () => {
       },
       files: {
         "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
-        "agent/extensions/acme.mjs": [
+        "agent/extensions/acme-a.mjs": [
           `import extension from ${JSON.stringify(packageName)};`,
-          'export default extension({ label: "configured" });',
+          'export default extension({ label: "first" });',
+          "",
+        ].join("\n"),
+        "agent/extensions/acme-b.mjs": [
+          `import extension from ${JSON.stringify(packageName)};`,
+          'export default extension({ label: "second" });',
           "",
         ].join("\n"),
         "agent/instructions.md": "Use the available tools.",
@@ -239,15 +246,22 @@ describe("development generation artifacts", () => {
         snapshot.runtimeAppRoot,
       ),
     });
-    const toolSourceId = compileResult.manifest.tools.find((tool) =>
-      tool.sourceId.startsWith("ext:acme:"),
-    )?.sourceId;
-    expect(toolSourceId).toBeDefined();
-    const tool = moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules[toolSourceId!] as {
-      default: { execute(): string };
-    };
+    registerExtensionConfigs(compileResult.manifest, moduleMap);
+    const extensionTools = compileResult.manifest.tools.filter((tool) =>
+      tool.sourceId.startsWith("ext:acme-"),
+    );
+    const resolved = await Promise.all(
+      extensionTools.map(
+        async (tool) => await resolveToolDefinition(tool, moduleMap, ROOT_COMPILED_AGENT_NODE_ID),
+      ),
+    );
 
-    expect(tool.default.execute()).toBe("configured");
+    expect(
+      Object.fromEntries(resolved.map((tool) => [tool.name, tool.execute!({}, {} as never)])),
+    ).toEqual({
+      "acme-a__read_label": "first",
+      "acme-b__read_label": "second",
+    });
   });
 
   it("materializes a mounted extension from a physical installed directory", async () => {

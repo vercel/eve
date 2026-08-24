@@ -259,8 +259,8 @@ export function collectModuleRefsForManifest(
     });
   }
 
-  // Extension mount modules (root manifest only). Their top-level factory call
-  // binds config, so they must be evaluated at module-map load.
+  // Extension mount modules must be evaluated so the runtime can associate each
+  // exported config value with its mount-path registration.
   const extensionMounts = (manifest as { extensionMounts?: readonly CompiledExtensionMount[] })
     .extensionMounts;
   if (extensionMounts !== undefined) {

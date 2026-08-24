@@ -23,12 +23,12 @@ describe("createExtensionScopePlugin (path containment)", () => {
 
   it("redirects eve/context to a namespaced shim for extension-owned importers", () => {
     const id = pathPlugin().resolveId("eve/context", "/pkg/crm/extension/tools/budget.ts");
-    expect(id).toBe("\0eve-ext-scope:context:acme-crm");
+    expect(id).toBe("\0eve-ext-scope:acme-crm");
   });
 
-  it("redirects eve/extension to a namespaced shim for extension-owned importers", () => {
+  it("does not scope extension config through a bundler shim", () => {
     const id = pathPlugin().resolveId("eve/extension", "/pkg/crm/extension/config.ts");
-    expect(id).toBe("\0eve-ext-scope:extension:acme-crm");
+    expect(id).toBeUndefined();
   });
 
   it("ignores importers outside every extension source root", () => {
@@ -52,16 +52,14 @@ describe("createFixedNamespaceScopePlugin (dev per-module)", () => {
     const plugin = createFixedNamespaceScopePlugin("acme-crm");
     // The importer path is irrelevant in fixed mode.
     expect(plugin.resolveId("eve/context", "/anywhere/on/disk/tool.ts")).toBe(
-      "\0eve-ext-scope:context:acme-crm",
+      "\0eve-ext-scope:acme-crm",
     );
-    expect(plugin.resolveId("eve/extension", "/anywhere/config.ts")).toBe(
-      "\0eve-ext-scope:extension:acme-crm",
-    );
+    expect(plugin.resolveId("eve/extension", "/anywhere/config.ts")).toBeUndefined();
   });
 
   it("never re-enters through virtual shim importers", () => {
     const plugin = createFixedNamespaceScopePlugin("acme-crm");
-    expect(plugin.resolveId("eve/context", "\0eve-ext-scope:context:acme-crm")).toBeUndefined();
+    expect(plugin.resolveId("eve/context", "\0eve-ext-scope:acme-crm")).toBeUndefined();
   });
 
   it("only intercepts the scoped framework modules", () => {
@@ -72,22 +70,11 @@ describe("createFixedNamespaceScopePlugin (dev per-module)", () => {
 
 describe("shim baking (shared)", () => {
   it("bakes the namespace into the defineState shim", () => {
-    const shim = createFixedNamespaceScopePlugin("acme-crm").load(
-      "\0eve-ext-scope:context:acme-crm",
-    );
+    const shim = createFixedNamespaceScopePlugin("acme-crm").load("\0eve-ext-scope:acme-crm");
     expect(shim?.code).toContain(
       `import { defineState as __eveScopedDefineState } from "eve/context"`,
     );
     expect(shim?.code).toContain(`__eveScopedDefineState("acme-crm" + "." + name, initial)`);
-  });
-
-  it("bakes the namespace into the defineExtension shim", () => {
-    const shim = createFixedNamespaceScopePlugin("acme-crm").load(
-      "\0eve-ext-scope:extension:acme-crm",
-    );
-    expect(shim?.code).toContain(`from "eve/extension"`);
-    expect(shim?.code).toContain(`export function defineExtension(options, namespace)`);
-    expect(shim?.code).toContain(`namespace === undefined ? "acme-crm" : namespace`);
   });
 
   it("passes through non-shim ids in load", () => {

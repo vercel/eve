@@ -21,6 +21,7 @@ import {
 } from "#runtime/framework-tools/index.js";
 import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
+import { registerExtensionConfigs } from "#runtime/extension-registrations.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
 import { resolveDynamicSubagentDefinition } from "#runtime/resolve-dynamic-subagent.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
@@ -88,6 +89,7 @@ class ResolveRuntimeAgentGraphError extends Error {
 export async function resolveRuntimeAgentGraph(
   input: ResolveRuntimeAgentGraphInput,
 ): Promise<ResolvedAgentGraphBundle> {
+  registerExtensionConfigs(input.manifest, input.moduleMap);
   const nodesByNodeId = new Map<string, ResolvedAgentGraphBundle["root"]>();
   const childNodeIdsByParentNodeId = createChildNodeIdsByParentNodeId(input.manifest);
   const subagentNodesById = new Map(
