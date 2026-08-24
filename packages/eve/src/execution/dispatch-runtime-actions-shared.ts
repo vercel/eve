@@ -39,7 +39,9 @@ import { readActionTraceContext } from "#tracing/agent-trace-context-store.js";
 import {
   assertUniqueRuntimeActionCallIds,
   getPendingRuntimeActionBatch,
+  setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
+import { activeTurnId } from "#harness/active-turn-id.js";
 import {
   createSubagentCalledEvent,
   encodeMessageStreamEvent,
@@ -53,7 +55,11 @@ import type {
   RuntimeSubagentDispatchFailure,
   RuntimeToolCallActionRequest,
 } from "#runtime/actions/types.js";
-import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+import {
+  createDurableSessionState,
+  type DurableSessionState,
+  readDurableSession,
+} from "#execution/durable-session-store.js";
 import {
   createRecursiveAgentRootOnlyResult,
   createUnavailableDynamicSubagentResult,
@@ -161,6 +167,11 @@ export interface PreparedRuntimeActionDispatch {
   readonly session: RuntimeSession;
 }
 
+interface PreparedPendingRuntimeActionDispatch extends PreparedRuntimeActionDispatch {
+  /** Returns the durable baseline corresponding to `session`. */
+  readonly getBaselineSessionState: () => DurableSessionState;
+}
+
 /**
  * Runs every dispatch precondition that may throw — durable reads, context
  * deserialization, handle-store validation, and batch planning — before
@@ -177,19 +188,38 @@ export async function prepareRuntimeActionDispatch(input: {
    * those calls fail as unsupported batch actions.
    */
   readonly taskControls: boolean;
-}): Promise<PreparedRuntimeActionDispatch | undefined> {
+}): Promise<PreparedPendingRuntimeActionDispatch | undefined> {
   const durableSession = await readDurableSession(input.sessionState);
   const batch = getPendingRuntimeActionBatch(durableSession.state);
 
   if (batch === undefined || batch.actions.length === 0) return undefined;
+  const parentTurnId = batch.event.turnId || activeTurnId(input.sessionState.emissionState);
+  const sessionStateRepaired = batch.event.turnId !== parentTurnId;
+  const repairedBatch = sessionStateRepaired
+    ? { ...batch, event: { ...batch.event, turnId: parentTurnId } }
+    : batch;
   const ctx = await deserializeContext(input.serializedContext);
-  return await prepareActionDispatch({
-    batch,
+  const prepared = await prepareActionDispatch({
+    batch: repairedBatch,
     ctx,
     durableSession,
     serializedContext: input.serializedContext,
     taskControls: input.taskControls,
   });
+  if (!sessionStateRepaired) {
+    return { ...prepared, getBaselineSessionState: () => input.sessionState };
+  }
+
+  const session = setPendingRuntimeActionBatch({
+    ...repairedBatch,
+    session: prepared.session,
+  });
+
+  return {
+    ...prepared,
+    getBaselineSessionState: () => createDurableSessionState({ session }),
+    session,
+  };
 }
 
 export async function prepareAgentActionDispatch(input: {
