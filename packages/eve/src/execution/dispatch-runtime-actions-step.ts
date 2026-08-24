@@ -125,8 +125,8 @@ export async function dispatchRuntimeActionsStep(
   return {
     results,
     sessionState:
-      nextSession === session && !prepared.sessionStateRepaired
-        ? input.sessionState
+      nextSession === session
+        ? prepared.getBaselineSessionState()
         : createDurableSessionState({ session: nextSession }),
     pendingTasks: [],
   };

@@ -55,7 +55,11 @@ import type {
   RuntimeSubagentDispatchFailure,
   RuntimeToolCallActionRequest,
 } from "#runtime/actions/types.js";
-import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+import {
+  createDurableSessionState,
+  type DurableSessionState,
+  readDurableSession,
+} from "#execution/durable-session-store.js";
 import {
   createRecursiveAgentRootOnlyResult,
   createUnavailableDynamicSubagentResult,
@@ -159,9 +163,13 @@ export interface PreparedRuntimeActionDispatch {
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
-  readonly sessionStateRepaired: boolean;
   readonly plan: readonly DispatchPlanEntry[];
   readonly session: RuntimeSession;
+}
+
+interface PreparedPendingRuntimeActionDispatch extends PreparedRuntimeActionDispatch {
+  /** Returns the durable baseline corresponding to `session`. */
+  readonly getBaselineSessionState: () => DurableSessionState;
 }
 
 /**
@@ -180,7 +188,7 @@ export async function prepareRuntimeActionDispatch(input: {
    * those calls fail as unsupported batch actions.
    */
   readonly taskControls: boolean;
-}): Promise<PreparedRuntimeActionDispatch | undefined> {
+}): Promise<PreparedPendingRuntimeActionDispatch | undefined> {
   const durableSession = await readDurableSession(input.sessionState);
   const batch = getPendingRuntimeActionBatch(durableSession.state);
 
@@ -198,15 +206,19 @@ export async function prepareRuntimeActionDispatch(input: {
     serializedContext: input.serializedContext,
     taskControls: input.taskControls,
   });
-  if (!sessionStateRepaired) return prepared;
+  if (!sessionStateRepaired) {
+    return { ...prepared, getBaselineSessionState: () => input.sessionState };
+  }
+
+  const session = setPendingRuntimeActionBatch({
+    ...repairedBatch,
+    session: prepared.session,
+  });
 
   return {
     ...prepared,
-    session: setPendingRuntimeActionBatch({
-      ...repairedBatch,
-      session: prepared.session,
-    }),
-    sessionStateRepaired: true,
+    getBaselineSessionState: () => createDurableSessionState({ session }),
+    session,
   };
 }
 
@@ -302,7 +314,6 @@ async function prepareActionDispatch(input: {
     plan,
     sandboxSessionId,
     serializedContext: input.serializedContext,
-    sessionStateRepaired: false,
     session,
   };
 }
