@@ -285,7 +285,7 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
       createOptions: withBaseSetupNetworkPolicy({
         ...input.createOptions,
         name: input.templateKey,
-        persistent: false,
+        persistent: true,
         tags: tags,
       }),
     });
