@@ -55,7 +55,7 @@ export class ClientSession {
     input: SendTurnInput<TOutput>,
   ): Promise<{ readonly response: MessageResponse<TOutput>; readonly session: ClientSession }> {
     const response = await postTurn(context, EVE_SESSION_ROUTE_PATH, input, true);
-    const sessionId = await readSessionId(response);
+    const { sessionId } = await readAcceptedTurn(response);
     const session = new ClientSession(context, { sessionId, streamIndex: 0 });
 
     return {
@@ -111,17 +111,21 @@ export class ClientSession {
   async #send<TOutput = unknown>(
     input: SendTurnPayload<TOutput>,
   ): Promise<MessageResponse<TOutput>> {
-    const initialStreamIndex = this.#state.streamIndex;
     const response = await postTurn(
       this.#context,
       createEveSessionRoutePath(this.#state.sessionId),
       input,
       false,
     );
-    const responseSessionId = await readSessionId(response, this.#state.sessionId);
-    if (responseSessionId !== this.#state.sessionId) {
+    const accepted = await readAcceptedTurn(response, this.#state.sessionId);
+    if (accepted.sessionId !== this.#state.sessionId) {
       throw new Error("Message route returned a different session id.");
     }
+    const initialStreamIndex = Math.max(
+      this.#state.streamIndex,
+      accepted.streamIndex ?? this.#state.streamIndex,
+    );
+    this.#state = { sessionId: this.#state.sessionId, streamIndex: initialStreamIndex };
     return this.#messageResponse<TOutput>(response, input, initialStreamIndex);
   }
 
@@ -296,14 +300,23 @@ async function postTurn(
   return response;
 }
 
-async function readSessionId(response: Response, expected?: string): Promise<string> {
+async function readAcceptedTurn(
+  response: Response,
+  expected?: string,
+): Promise<{ readonly sessionId: string; readonly streamIndex?: number }> {
   const payload = (await response.json()) as Record<string, unknown>;
   const sessionId =
     (typeof payload.sessionId === "string" ? payload.sessionId : undefined) ??
     response.headers.get(EVE_SESSION_ID_HEADER)?.trim() ??
     expected;
   if (!sessionId) throw new Error("Message route did not return a session id.");
-  return sessionId;
+  const streamIndex =
+    typeof payload.streamIndex === "number" &&
+    Number.isSafeInteger(payload.streamIndex) &&
+    payload.streamIndex >= 0
+      ? payload.streamIndex
+      : undefined;
+  return { sessionId, streamIndex };
 }
 
 function createMessageBody(

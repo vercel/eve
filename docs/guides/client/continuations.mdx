@@ -52,6 +52,12 @@ console.log((await response.result()).message);
 `attach()` performs no request. Every later operation targets exactly
 `saved.sessionId`; it never follows or creates a replacement.
 
+For each `send()` or `respond()`, the server returns the durable tail captured
+before it accepts the new input. An attached handle advances its local cursor to
+that position, preventing an interrupted or stale saved cursor from making the
+new response replay and settle on an older turn. Read missed history explicitly
+with `snapshot()` or `stream()` before sending new input.
+
 ## Waiting, completed, and reset sessions
 
 A session that emits `session.waiting` accepts another message through the same

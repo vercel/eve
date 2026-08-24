@@ -46,11 +46,12 @@ async function collectEventTypes(events: AsyncIterable<{ type: string }>): Promi
   return eventTypes;
 }
 
-function createAcceptedResponse() {
+function createAcceptedResponse(streamIndex?: number) {
   return Response.json(
     {
       ok: true,
       sessionId: "session_1",
+      ...(streamIndex === undefined ? {} : { streamIndex }),
     },
     { status: 202 },
   );
@@ -491,6 +492,70 @@ describe("ClientSession", () => {
     expect(postRequests[1]!.body).toEqual({
       message: "second",
     });
+  });
+
+  it("does not return an older turn when an attached cursor is behind the durable tail", async () => {
+    const oldTurnEvents = [
+      { type: "turn.started", data: { sequence: 0, turnId: "turn_0" } },
+      {
+        type: "message.completed",
+        data: {
+          finishReason: "stop",
+          message: "older result",
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn_0",
+        },
+      },
+      { type: "turn.completed", data: { sequence: 0, turnId: "turn_0" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      },
+    ];
+    const currentTurnEvents = [
+      { type: "turn.started", data: { sequence: 1, turnId: "turn_1" } },
+      {
+        type: "message.completed",
+        data: {
+          finishReason: "stop",
+          message: "current result",
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+        },
+      },
+      { type: "turn.completed", data: { sequence: 1, turnId: "turn_1" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      },
+    ];
+    const durableEvents = [...oldTurnEvents];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        durableEvents.push(...currentTurnEvents);
+        return createAcceptedResponse(oldTurnEvents.length);
+      }
+
+      const url =
+        typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
+      const parsedUrl = new URL(url);
+      const startIndex = Number(parsedUrl.searchParams.get("startIndex") ?? 0);
+      const response = createStreamResponse(durableEvents.slice(startIndex));
+      if (parsedUrl.searchParams.get("includeTailIndex") === "1") {
+        response.headers.set("x-eve-stream-tail-index", String(durableEvents.length - 1));
+      }
+      return response;
+    });
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+    const result = await (await session.send("current prompt")).result();
+
+    expect(result.message).toBe("current result");
+    expect(result.events).toEqual(currentTurnEvents);
+    expect(session.state.streamIndex).toBe(oldTurnEvents.length + currentTurnEvents.length);
   });
 
   it("cancels a parked stream after collecting its result", async () => {

@@ -153,7 +153,9 @@ describe("eve ID-addressed session routes", () => {
   });
 
   it("sends directly to the path session ID and rejects token-bearing bodies", async () => {
-    const session = createFixedSession();
+    const session = createFixedSession({
+      getStreamTailIndex: vi.fn().mockResolvedValue(7),
+    });
     const handler = route("POST", "/eve/v1/session/:sessionId");
     const response = await handler(
       new Request("https://eve.test/eve/v1/session/wrun_A", {
@@ -165,6 +167,16 @@ describe("eve ID-addressed session routes", () => {
     );
 
     expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      sessionId: "wrun_A",
+      status: "accepted",
+      streamIndex: 8,
+    });
+    expect(session.getStreamTailIndex).toHaveBeenCalledOnce();
+    expect(vi.mocked(session.getStreamTailIndex).mock.invocationCallOrder[0]!).toBeLessThan(
+      vi.mocked(session.send).mock.invocationCallOrder[0]!,
+    );
     expect(session.send).toHaveBeenCalledWith(
       "follow-up",
       expect.objectContaining({ auth: expect.objectContaining({ authenticator: "none" }) }),
@@ -184,6 +196,7 @@ describe("eve ID-addressed session routes", () => {
 
   it("returns conflict instead of creating when an exact session is inactive", async () => {
     const session = createFixedSession({
+      getStreamTailIndex: vi.fn().mockRejectedValue(new Error("run not found")),
       send: vi.fn().mockResolvedValue({ status: "session_not_active" }),
     });
     const response = await route("POST", "/eve/v1/session/:sessionId")(
@@ -201,6 +214,8 @@ describe("eve ID-addressed session routes", () => {
       error: "The session is no longer active.",
       ok: false,
     });
+    expect(session.getStreamTailIndex).toHaveBeenCalledOnce();
+    expect(session.send).toHaveBeenCalledOnce();
   });
 
   it.each([

@@ -398,8 +398,15 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         }
 
         let result: Awaited<ReturnType<Session["send"]>>;
+        let streamIndex: number | undefined;
+        let streamTailError: unknown;
         try {
           const session = attachSession(sessionId);
+          try {
+            streamIndex = (await session.getStreamTailIndex()) + 1;
+          } catch (error) {
+            streamTailError = error;
+          }
           const options = {
             auth: dispatchAuth,
             callback: body.callback,
@@ -428,9 +435,20 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             { headers: { "cache-control": "no-store" }, status: 409 },
           );
         }
+        if (streamIndex === undefined) {
+          log.warn("failed to read session stream tail; dispatched without a cursor", {
+            error: streamTailError,
+            sessionId,
+          });
+        }
 
         return Response.json(
-          { ok: true, sessionId: result.sessionId, status: "accepted" },
+          {
+            ok: true,
+            sessionId: result.sessionId,
+            status: "accepted",
+            ...(streamIndex === undefined ? {} : { streamIndex }),
+          },
           {
             headers: {
               "cache-control": "no-store",
