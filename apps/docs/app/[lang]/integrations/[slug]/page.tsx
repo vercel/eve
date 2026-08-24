@@ -156,7 +156,7 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
             </Markdown>
           )}
         </Section>
-        <Section id="setup" title="Configure">
+        <Section id="configure" title="Configure">
           {setup ? (
             <Suspense
               fallback={
