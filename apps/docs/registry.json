@@ -1387,7 +1387,8 @@
           "implementation": "native"
         }
       },
-      "dependencies": ["@vercel/connect@>=0.6.0"]
+      "dependencies": ["@vercel/connect@>=0.6.0"],
+      "devDependencies": ["vercel@>=58.5.1"]
     },
     {
       "name": "channel/linear-agent",
@@ -1407,7 +1408,8 @@
           "implementation": "native"
         }
       },
-      "dependencies": ["@vercel/connect"]
+      "dependencies": ["@vercel/connect"],
+      "devDependencies": ["vercel@>=58.5.1"]
     },
     {
       "name": "channel/web",
@@ -1878,6 +1880,7 @@
       "title": "Linq",
       "description": "Connect an eve agent to iMessage and SMS through Linq with guided Connect or portable setup.",
       "dependencies": ["@vercel/connect@>=0.9.0"],
+      "devDependencies": ["vercel@>=58.5.1"],
       "meta": {
         "eve": {
           "setup": {
