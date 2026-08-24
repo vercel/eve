@@ -317,6 +317,9 @@ function logToolExecutionError(event: {
  */
 const MODEL_CALL_MAX_ATTEMPTS = 3;
 
+const PENDING_APPROVAL_TOOL_RESTRICTION =
+  "A tool call is awaiting user approval. Tools are unavailable until the pending approval is resolved. Do not simulate tool calls or tool results. Answer without tools when possible; otherwise explain that you cannot use tools until the approval is resolved.";
+
 /**
  * Base delay (ms) between model-call retries. Doubled each attempt,
  * plus a small random jitter to avoid thundering-herd behavior when
@@ -1366,6 +1369,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       });
     }
 
+    const hasPendingApproval = hasPendingApprovalBatch(session);
+    if (hasPendingApproval) {
+      systemMessages.push({
+        role: "system",
+        content: PENDING_APPROVAL_TOOL_RESTRICTION,
+      });
+    }
+
     const modelMessages = nonSystemMessages;
 
     const prepareModelCallInput = (extraSystemNote?: string) => {
@@ -1512,6 +1523,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       const modelTools = advertisedModelTools.modelTools;
 
       const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;
+      const callableModelTools: ToolSet = hasPendingApproval ? {} : effectiveTools;
 
       const instrumentationTurnId = activeTurnId(emissionState);
       const attemptScope: InstrumentationAttemptScope | undefined =
@@ -1591,9 +1603,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           telemetryRuntimeContext,
           bridgeIntegration,
         ),
-        toolApproval: buildToolApproval(modelTools),
-        toolChoice: hasPendingApprovalBatch(session) ? ("none" as const) : undefined,
-        tools: effectiveTools,
+        toolApproval: buildToolApproval(callableModelTools),
+        toolChoice: hasPendingApproval ? ("none" as const) : undefined,
+        tools: callableModelTools,
       };
       const agent = new ToolLoopAgent(agentSettings);
 

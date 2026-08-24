@@ -7716,7 +7716,11 @@ describe("createToolLoopHarness", () => {
       expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(callIndex + 1);
       expect(vi.mocked(ToolLoopAgent).mock.calls[callIndex]?.[0]).toMatchObject({
         toolChoice: "none",
+        tools: {},
       });
+      expect(
+        JSON.stringify(vi.mocked(ToolLoopAgent).mock.calls[callIndex]?.[0].instructions),
+      ).toMatch(/tools are unavailable.+pending approval/iu);
       expect(messages.at(-1)).toEqual({ content: question, role: "user" });
       expect(messages.every((message) => message.role !== "tool")).toBe(true);
       expect(messages.filter(isPendingApprovalProjection)).toHaveLength(1);
@@ -7735,8 +7739,11 @@ describe("createToolLoopHarness", () => {
 
     const denialIndex = followupQuestions.length + 1;
     const denialMessages = readGenerateMessages(denialIndex);
+    const denialSettings = vi.mocked(ToolLoopAgent).mock.calls[denialIndex]?.[0];
     expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(denialIndex + 1);
-    expect(vi.mocked(ToolLoopAgent).mock.calls[denialIndex]?.[0].toolChoice).not.toBe("none");
+    expect(denialSettings?.toolChoice).not.toBe("none");
+    expect(denialSettings?.tools).toHaveProperty("bash");
+    expect(JSON.stringify(denialSettings?.instructions)).not.toMatch(/tools are unavailable/iu);
     expect(denialMessages.slice(-2)).toEqual([
       {
         content: [
