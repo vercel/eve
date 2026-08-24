@@ -79,8 +79,9 @@ extension features work around that assumption at different layers:
   effective `sandbox.ts` source;
 - the default agent config is synthesized inside normalization rather than
   selected as an `agent.ts` source;
-- the home page and public health endpoint are native host routes that bypass
-  channel source composition and use a second route-precedence system;
+- the home page, public health endpoint, and `/eve/v1/info` inspection
+  endpoint are native host routes that bypass channel source composition and
+  use a second route-precedence system;
 - subagent composition results from `composeAgentSubagentSources` and
   `composeExtensionSubagentSources` are consumed inline and discarded, while
   module-global `WeakSet`/`WeakMap` state stands in for compiled subagent
@@ -594,21 +595,26 @@ The definitions carry truthful HTTP adapter metadata and use the ordinary
 channel handler path, eliminating framework-only route construction and fetch
 dispatch.
 
-Add root framework channel modules at `channels/home.ts` and
-`channels/eve/v1/health.ts`. They use ordinary `defineChannel`, `GET`, and
-`HEAD` values for the home page and public health protocol. Metadata needed by
-the home handler comes from an eve-owned context provider, not a special source
-kind or build-time native route. The default modules preserve the current
-response bodies, status codes, and authentication behavior.
+Add root framework channel modules at `channels/home.ts`,
+`channels/eve/v1/health.ts`, and `channels/eve/v1/info.ts`. They use ordinary
+`defineChannel`, `GET`, and `HEAD` values for the home page, the public health
+protocol, and the agent-info route. Data needed by the home and info handlers
+comes from eve-owned context providers — for info, the effective compiled
+graph, binding owners, composition diagnostics, and kernel plan — not a
+special source kind or build-time native route. The default modules preserve
+the current response bodies, status codes, and authentication behavior,
+including the resolved eve channel auth policy guarding `GET /eve/v1/info`.
 
-Home and health are replaceable and disableable through ordinary source
-composition at those exact paths. This is an intentional pre-1.0 breaking
-change. A replacement for health owns its implementation but must return the
-public `HealthResult` payload on a successful response. `Client.health()`
+Home, health, and info are replaceable and disableable through ordinary
+source composition at those exact paths. This is an intentional pre-1.0
+breaking change. A replacement for health or info owns its implementation but
+must return the public payload on a successful response. `Client.health()`
 validates successful JSON with `HealthResultSchema`; a non-success response
-throws `ClientError`, and a successful response with an invalid payload throws
-`HealthResponseError`. No client or host code reaches a hidden native health
-fallback.
+throws `ClientError`, and a successful response with an invalid payload
+throws `HealthResponseError`. `Client.info()` validates with
+`AgentInfoResultSchema` and throws `AgentInfoResponseError` for an unusable
+authorized payload. No client or host code reaches a hidden native fallback
+for any of the three.
 
 #### One compiled route plan
 
@@ -650,8 +656,8 @@ path must have identical normalized options or fail with
 `compile/channel-cors-conflict`; identical options produce one derived
 `OPTIONS` record.
 
-Replacing or disabling `channels/home.ts` or
-`channels/eve/v1/health.ts` is source-slot composition. An unrelated channel
+Replacing or disabling `channels/home.ts`, `channels/eve/v1/health.ts`, or
+`channels/eve/v1/info.ts` is source-slot composition. An unrelated channel
 that declares the same concrete route follows route ordering and does not gain
 source precedence.
 
@@ -798,8 +804,10 @@ visibility rules in tool advertisement.
 Replace agent-info v2 instead of preserving fields whose meanings no longer
 fit. The `/eve/v1/info` payload becomes version 3 and has one projector from the
 effective compiled graph, binding owners, composition diagnostics, and kernel
-plan. All in-repository clients, TUI views, eval targeting, and tests migrate in
-the same change; there is no v2 fallback before 1.0.
+plan, served by the framework channel source at `channels/eve/v1/info.ts`
+rather than a native Nitro route. All in-repository clients, TUI views, eval
+targeting, and tests migrate in the same change; there is no v2 fallback
+before 1.0.
 
 Version 3 reports:
 
@@ -929,8 +937,8 @@ convention dies with the catalog — and no new name-based dispatch may be
 added.
 
 PR 1 includes the `minor` changeset — it breaks the agent-info schema and the
-replaceable health contract — and updates tool, config, channel, health,
-sandbox, and agent-info documentation.
+replaceable health and info contracts — and updates tool, config, channel,
+health, sandbox, and agent-info documentation.
 
 ### PR 2 — kernel effects
 
@@ -956,15 +964,15 @@ item, and required CI suite across both PRs is complete.
 The work is incomplete while any listed path or equivalent parallel system
 remains:
 
-| Requirement group            | Required deletion                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Binding authority            | Optional bindings; binding reconstruction in compiled constructors; extension scope inferred from source-ID prefixes; fixtures that use physical extension paths as logical identity.                                                                                                                                                                                                                                                 |
-| Composition and loading      | `logicalPath`-based module loading or sandbox hashing; post-normalization binding reconstruction; module normalizers accepting missing bindings; non-config definition loading before the total remaining binding table exists; eager programmatic namespaces or definition imports; parallel active-owner indexes; arbitrary unbound injected definitions in production normalizers.                                                 |
-| Framework-source graph       | Runtime no-source sandbox construction; `PACKAGE_ROUTES` and native home/health defaults; host lifecycle probes using the public health route; silent post-compile ordinary route drops; discovery-only diagnostics that lose compiler warnings; module-global subagent executor-identity state and discarded subagent composition; prompt ownership parsed from source IDs; `public/tools/internal.ts` and `toPublicToolDefinition`. |
-| Primitive ownership          | The mixed `runtime/framework-tools` directory, transitional re-export wrappers, public-to-runtime imports, duplicate default definition values, and ordinary “framework tool catalog” terminology.                                                                                                                                                                                                                                    |
-| Default config authority     | Synthesized default config in `normalize-agent-config.ts`, undefined-config-source inspection conventions, and config loading outside the total binding table.                                                                                                                                                                                                                                                                        |
-| Kernel effects               | `sourceId.startsWith("eve:")` execution branching; `ask_question` and `final_output` tool-name checks in the harness; the `TASK_CONTROL_TOOL_NAMES` name set; the `frameworkAction: "load-skill"` marker; name-based advertisement visibility; kernel conditionals, literal name lists, or registries outside the exhaustive integration points; native fabrication of ordinary resources.                                            |
-| Inspection and memory parity | Inspection owner fallback or framework-state reconstruction; omitted dynamic-resolver or remote-agent provenance; `createMemorySourceId`, mirrored memory manifest references, and other in-memory descriptor shortcuts; harness execution of caller-owned tool objects; downstream source catalogs, composers, merges, or compatibility readers.                                                                                     |
+| Requirement group            | Required deletion                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Binding authority            | Optional bindings; binding reconstruction in compiled constructors; extension scope inferred from source-ID prefixes; fixtures that use physical extension paths as logical identity.                                                                                                                                                                                                                                                                      |
+| Composition and loading      | `logicalPath`-based module loading or sandbox hashing; post-normalization binding reconstruction; module normalizers accepting missing bindings; non-config definition loading before the total remaining binding table exists; eager programmatic namespaces or definition imports; parallel active-owner indexes; arbitrary unbound injected definitions in production normalizers.                                                                      |
+| Framework-source graph       | Runtime no-source sandbox construction; `PACKAGE_ROUTES` and the native home, health, and info route defaults; host lifecycle probes using the public health route; silent post-compile ordinary route drops; discovery-only diagnostics that lose compiler warnings; module-global subagent executor-identity state and discarded subagent composition; prompt ownership parsed from source IDs; `public/tools/internal.ts` and `toPublicToolDefinition`. |
+| Primitive ownership          | The mixed `runtime/framework-tools` directory, transitional re-export wrappers, public-to-runtime imports, duplicate default definition values, and ordinary “framework tool catalog” terminology.                                                                                                                                                                                                                                                         |
+| Default config authority     | Synthesized default config in `normalize-agent-config.ts`, undefined-config-source inspection conventions, and config loading outside the total binding table.                                                                                                                                                                                                                                                                                             |
+| Kernel effects               | `sourceId.startsWith("eve:")` execution branching; `ask_question` and `final_output` tool-name checks in the harness; the `TASK_CONTROL_TOOL_NAMES` name set; the `frameworkAction: "load-skill"` marker; name-based advertisement visibility; kernel conditionals, literal name lists, or registries outside the exhaustive integration points; native fabrication of ordinary resources.                                                                 |
+| Inspection and memory parity | Inspection owner fallback or framework-state reconstruction; omitted dynamic-resolver or remote-agent provenance; `createMemorySourceId`, mirrored memory manifest references, and other in-memory descriptor shortcuts; harness execution of caller-owned tool objects; downstream source catalogs, composers, merges, or compatibility readers.                                                                                                          |
 
 This ledger also removes the old framework tool and channel catalogs, duplicate
 `Resolved*` constants and callback builders, `getAllFramework*Names`, compiled
@@ -1040,8 +1048,8 @@ The implementation is complete only when:
    children receive `task_update`. No harness or execution code branches on a
    tool name or source ID.
 8. Connection search preserves filtering, auth, approval, failure, long-name,
-   durable callback, and restart behavior without history scanning; home and
-   health replacement, `Client.health()` payload validation, and internal
+   durable callback, and restart behavior without history scanning; home,
+   health, and info replacement, client payload validation, and internal
    process readiness agree without a native fallback.
 9. Agent-info explains the owner and replacement history of every config,
    primitive, route, local subagent, remote agent, and dynamic resolver
