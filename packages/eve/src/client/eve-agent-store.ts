@@ -339,9 +339,13 @@ export class EveAgentStore<TData> {
 
       if (!this.#isActiveTurn(turn)) return;
       this.#publish();
-      if (!isSettledSessionTail(replayed)) {
+      const replaySettled = isSettledSessionTail(replayed);
+      if (!replaySettled || replayed.at(-1)?.type === "session.waiting") {
         const pendingAuthorizations = collectPendingAuthorizations(replayed);
-        for await (const event of session.stream({ signal: turn.abortController.signal })) {
+        for await (const event of session.stream({
+          signal: turn.abortController.signal,
+          streamReconnectPolicy: replaySettled ? { reconnect: false } : undefined,
+        })) {
           if (!this.#isActiveTurn(turn)) return;
           this.#acceptServerEvent(event);
           updatePendingAuthorizations(pendingAuthorizations, event);
