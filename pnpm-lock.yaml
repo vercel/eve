@@ -203,8 +203,8 @@ importers:
         specifier: 2.0.1
         version: 2.0.1(@sveltejs/kit@2.63.0(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.1.2(svelte@5.56.1(@typescript-eslint/types@8.59.4))(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)))(svelte@5.56.1(@typescript-eslint/types@8.59.4))(typescript@6.0.3)(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)))(next@16.3.1(@babel/core@7.29.0(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(@types/node@25.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(nuxt@4.4.6(c0a4980342d3390a308191ce8335e2bd))(react@19.2.6)(svelte@5.56.1(@typescript-eslint/types@8.59.4))(vue@3.5.35(typescript@6.0.3))
       '@vercel/geistdocs':
-        specifier: 1.22.0
-        version: 1.22.0(a214f349ed7cea5039ddee8b1875767f)
+        specifier: 1.23.0
+        version: 1.23.0(a214f349ed7cea5039ddee8b1875767f)
       '@vercel/speed-insights':
         specifier: 2.0.0
         version: 2.0.0(@sveltejs/kit@2.63.0(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.1.2(svelte@5.56.1(@typescript-eslint/types@8.59.4))(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)))(svelte@5.56.1(@typescript-eslint/types@8.59.4))(typescript@6.0.3)(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)))(next@16.3.1(@babel/core@7.29.0(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(@types/node@25.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(nuxt@4.4.6(c0a4980342d3390a308191ce8335e2bd))(react@19.2.6)(svelte@5.56.1(@typescript-eslint/types@8.59.4))(vue@3.5.35(typescript@6.0.3))
@@ -8532,8 +8532,8 @@ packages:
   '@vercel/gatsby-plugin-vercel-builder@2.2.35':
     resolution: {integrity: sha512-H1qNhnvyRIhek/esVnVK+RoFsxrSOLl4qiM4iyV2IcjDoqY4H0Ped65tc5ZgZEP/P2KGNYfEDSBEukdBZa+kCg==}
 
-  '@vercel/geistdocs@1.22.0':
-    resolution: {integrity: sha512-4tQ1vu9GK/SC04ROt64vI3RbI5aww59dW8nkuTQNrKALP91reHESQqcUR0u7Q7NO5ndRtfTAdSZ7T1bMiMecig==}
+  '@vercel/geistdocs@1.23.0':
+    resolution: {integrity: sha512-mmRwmb4UEZkGEfShafwnc6RTq4oxSATx06CRL0qcr6kU0kHYNW917J+r5H4ynQduq01EhXpWLHu3GwRvElDCYQ==}
     hasBin: true
     peerDependencies:
       next: ^16.3.0
@@ -23123,7 +23123,7 @@ snapshots:
 
   '@smithy/eventstream-codec@4.4.12':
     dependencies:
-      '@smithy/core': 3.29.7
+      '@smithy/core': 3.33.2
       tslib: 2.8.1
 
   '@smithy/fetch-http-handler@5.6.6':
@@ -23192,7 +23192,7 @@ snapshots:
 
   '@smithy/util-utf8@4.4.12':
     dependencies:
-      '@smithy/core': 3.29.7
+      '@smithy/core': 3.33.2
       tslib: 2.8.1
 
   '@so-ric/colorspace@1.1.6':
@@ -24332,7 +24332,7 @@ snapshots:
       etag: 1.8.1
       fs-extra: 11.1.0
 
-  '@vercel/geistdocs@1.22.0(a214f349ed7cea5039ddee8b1875767f)':
+  '@vercel/geistdocs@1.23.0(a214f349ed7cea5039ddee8b1875767f)':
     dependencies:
       '@ai-sdk/react': 3.0.193(react@19.2.6)(zod@4.4.3)
       '@clack/prompts': 0.11.0

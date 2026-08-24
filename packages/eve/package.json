@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.44.1",
+  "version": "0.44.3",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -409,7 +409,7 @@
     "@opentelemetry/api": "^1.0.0",
     "ai": "catalog:",
     "braintrust": "^3.0.0",
-    "just-bash": "^3.0.0",
+    "just-bash": "^3.1.0",
     "microsandbox": "^0.5.0"
   },
   "peerDependenciesMeta": {

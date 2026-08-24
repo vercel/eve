@@ -228,6 +228,12 @@ describe("ensureChannel", () => {
     await expect(readFile(join(projectRoot, "app/page.tsx"), "utf8")).resolves.toContain(
       "AgentChat",
     );
+    await expect(readFile(join(projectRoot, "app/s/page.tsx"), "utf8")).resolves.toContain(
+      "<AgentChat sessionless />",
+    );
+    await expect(
+      readFile(join(projectRoot, "app/s/[sessionId]/page.tsx"), "utf8"),
+    ).resolves.toContain("<AgentChat sessionId={sessionId} />");
     await expect(
       readFile(join(projectRoot, "agent/tools/randomize.ts"), "utf8"),
     ).rejects.toMatchObject({
@@ -249,6 +255,10 @@ describe("ensureChannel", () => {
     const packageJson = await readFile(join(projectRoot, "package.json"), "utf8");
     expect(packageJson).not.toContain('"better-auth"');
     expect(packageJson).toContain('"next": "16.2.6"');
+    expect(packageJson).toContain('"shiki": "3.23.0"');
+    expect(packageJson).toContain('"@shikijs/core": "3.23.0"');
+    expect(packageJson).toContain('"@shikijs/engine-javascript": "3.23.0"');
+    expect(packageJson).toContain('"@shikijs/engine-oniguruma": "3.23.0"');
     expect(packageJson).toContain('"build:eve": "eve build"');
     expect(packageJson).toContain('"dev": "next dev"');
     expect(packageJson).toContain('"dev:eve": "eve dev"');
@@ -1013,6 +1023,12 @@ describe("scaffoldBaseProject", () => {
     const agentSource = await readFile(join(projectRoot, "agent/agent.ts"), "utf8");
     expect(agentSource).toContain('model: "openai/gpt-5-mini"');
     expect(agentSource).not.toContain("modelOptions");
+    const readme = await readFile(join(projectRoot, "README.md"), "utf8");
+    expect(readme).toContain("# demo-agent");
+    expect(readme).toContain("## Getting started");
+    expect(readme).toContain("## Learn more");
+    expect(readme).toContain("## Deploy on Vercel");
+    expect(readme).not.toContain("__EVE_INIT_");
     const packageJson = await readFile(join(projectRoot, "package.json"), "utf8");
     expect(packageJson).toContain('"eve": "^0.25.0"');
     // Channels added later (`eve add channel/slack`, possibly next to a
@@ -1022,6 +1038,14 @@ describe("scaffoldBaseProject", () => {
     // The default path used by `eve init` must carry the stable toolchain
     // version captured from the workspace catalog into generated projects.
     expect(JSON.parse(packageJson)).toMatchObject({
+      scripts: {
+        build: "eve build",
+        deploy: "eve deploy",
+        dev: "eve dev",
+        eval: "eve eval",
+        start: "eve start",
+        typecheck: "tsc",
+      },
       devDependencies: { typescript: "7.0.2" },
       engines: { node: "24.x" },
     });
@@ -1089,6 +1113,7 @@ describe("scaffoldBaseProject", () => {
       await expect(readFile(join(projectRoot, "package.json"), "utf8")).resolves.toContain(
         '"eve": "^0.25.0"',
       );
+      await expect(readFile(join(projectRoot, "README.md"), "utf8")).resolves.toContain("eve dev");
       await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(
         packageManager === "pnpm",
       );

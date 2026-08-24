@@ -344,13 +344,13 @@ function createEveStreamHandler(input: EveChannelInput) {
   return {
     getEventStream,
     getStreamTailIndex,
-    async fetch(url: string) {
+    async fetch(url: string, init?: RequestInit) {
       const args: RouteHandlerArgs = {
         ...createRouteArgs(),
         attachSession: () => session,
         params: { sessionId: "test-session-id" },
       };
-      return (streamRoute as any).handler(new Request(url), args);
+      return (streamRoute as any).handler(new Request(url, init), args);
     },
   };
 }
@@ -533,6 +533,26 @@ describe("eveChannel — stream cursor", () => {
     expect(new TextDecoder().decode(firstChunk.value)).toBe("\n");
   });
 
+  it("cancels the durable stream when the request aborts", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    const cancelled = vi.fn();
+    handler.getEventStream.mockResolvedValueOnce(
+      new ReadableStream({
+        cancel: cancelled,
+      }),
+    );
+    const abort = new AbortController();
+
+    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream", {
+      signal: abort.signal,
+    });
+    const reader = response.body!.getReader();
+    await reader.read();
+    abort.abort();
+
+    await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce());
+  });
+
   it("forwards negative tail-relative start indices", async () => {
     const handler = createEveStreamHandler({ auth: none() });
 
@@ -577,6 +597,49 @@ describe("eveChannel — stream cursor", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("x-eve-stream-tail-index")).toBe("41");
+  });
+
+  it("closes a tail-indexed replay after its durable events", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    const cancelled = vi.fn();
+    handler.getStreamTailIndex.mockResolvedValueOnce(1);
+    handler.getEventStream.mockResolvedValueOnce(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue({ sequence: 0 });
+          controller.enqueue({ sequence: 1 });
+        },
+        cancel: cancelled,
+      }),
+    );
+
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session/test-session-id/stream?includeTailIndex=1",
+    );
+
+    await expect(response.text()).resolves.toBe('\n{"sequence":0}\n{"sequence":1}\n');
+    await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce());
+  });
+
+  it("closes a tail-relative replay after the requested durable event", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    const cancelled = vi.fn();
+    handler.getStreamTailIndex.mockResolvedValueOnce(41);
+    handler.getEventStream.mockResolvedValueOnce(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue({ sequence: 41 });
+        },
+        cancel: cancelled,
+      }),
+    );
+
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session/test-session-id/stream?startIndex=-1&includeTailIndex=1",
+    );
+
+    await expect(response.text()).resolves.toBe('\n{"sequence":41}\n');
+    await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce());
   });
 });
 

@@ -1068,9 +1068,10 @@ async function createSessionStreamResponse(request: Request, session: Session): 
     if (tailIndex !== undefined) {
       headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
     }
-    return new Response(serializeAsNdjson(events), {
-      headers,
-    });
+    return new Response(
+      serializeAsNdjson(events, request.signal, streamEventLimit(startIndex, tailIndex)),
+      { headers },
+    );
   } catch {
     return Response.json({ error: "Session not found.", ok: false }, { status: 404 });
   }
@@ -1352,16 +1353,38 @@ function parseStartIndex(request: Request): number | undefined | Response {
   return parsed;
 }
 
-function serializeAsNdjson(events: ReadableStream<unknown>): ReadableStream<Uint8Array> {
+function streamEventLimit(
+  startIndex: number | undefined,
+  tailIndex: number | undefined,
+): number | undefined {
+  if (tailIndex === undefined) return undefined;
+  const resolvedStartIndex =
+    startIndex === undefined
+      ? 0
+      : startIndex < 0
+        ? Math.max(0, tailIndex + 1 + startIndex)
+        : startIndex;
+  return Math.max(0, tailIndex - resolvedStartIndex + 1);
+}
+
+function serializeAsNdjson(
+  events: ReadableStream<unknown>,
+  signal: AbortSignal,
+  eventLimit?: number,
+): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
-  return events.pipeThrough(
-    new TransformStream<unknown, Uint8Array>({
-      start(controller) {
-        controller.enqueue(encoder.encode("\n"));
-      },
-      transform(event, controller) {
-        controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
-      },
-    }),
-  );
+  let eventCount = 0;
+  const transform = new TransformStream<unknown, Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode("\n"));
+      if (eventLimit === 0) controller.terminate();
+    },
+    transform(event, controller) {
+      controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+      eventCount += 1;
+      if (eventCount === eventLimit) controller.terminate();
+    },
+  });
+  void events.pipeTo(transform.writable, { signal }).catch(() => {});
+  return transform.readable;
 }
