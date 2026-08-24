@@ -77,6 +77,10 @@ export async function compileConnectionDefinition(
   if (vercelConnect !== undefined) {
     compiled.vercelConnect = vercelConnect;
   }
+  const vercelConnectRequirement = extractVercelConnectRequirement(auth);
+  if (vercelConnectRequirement !== undefined) {
+    compiled.vercelConnectRequirement = vercelConnectRequirement;
+  }
 
   return compiled;
 }
@@ -105,4 +109,44 @@ function extractVercelConnectMarker(auth: unknown): { readonly connector: string
     return undefined;
   }
   return { connector };
+}
+
+function extractVercelConnectRequirement(
+  auth: unknown,
+): import("#compiler/vercel-connect-manifest.js").VercelConnectRequirement | undefined {
+  if (auth === null || typeof auth !== "object") return undefined;
+  const requirement = (auth as { vercelConnectRequirement?: unknown }).vercelConnectRequirement;
+  if (requirement === null || typeof requirement !== "object") return undefined;
+  const candidate = requirement as {
+    reference?: unknown;
+    connector?: { type?: unknown; configuration?: unknown };
+    access?: { principalTypes?: unknown };
+  };
+  if (
+    typeof candidate.reference !== "string" ||
+    candidate.reference.length === 0 ||
+    typeof candidate.connector?.type !== "string" ||
+    !Array.isArray(candidate.access?.principalTypes) ||
+    !candidate.access.principalTypes.every((type) => type === "app" || type === "user")
+  ) {
+    return undefined;
+  }
+  if (
+    candidate.connector.configuration !== undefined &&
+    (typeof candidate.connector.configuration !== "object" ||
+      candidate.connector.configuration === null ||
+      Array.isArray(candidate.connector.configuration))
+  ) {
+    return undefined;
+  }
+  return {
+    reference: candidate.reference,
+    connector: {
+      type: candidate.connector.type,
+      ...(candidate.connector.configuration === undefined
+        ? {}
+        : { configuration: candidate.connector.configuration as Record<string, unknown> }),
+    },
+    access: { principalTypes: candidate.access.principalTypes },
+  };
 }

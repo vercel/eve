@@ -77,6 +77,7 @@ export interface CompiledChannelDefinition {
    * channel leaves CORS untouched.
    */
   readonly cors?: NormalizedChannelCorsOptions;
+  readonly vercelConnectRequirement?: import("#compiler/vercel-connect-manifest.js").VercelConnectRequirement;
 }
 
 /**
@@ -354,6 +355,19 @@ const compiledChannelDefinitionSchema = z
     exportName: z.string().optional(),
     adapterKind: z.string().optional(),
     cors: compiledChannelCorsSchema.optional(),
+    vercelConnectRequirement: z
+      .object({
+        reference: z.string(),
+        connector: z
+          .object({
+            type: z.string(),
+            configuration: z.record(z.string(), z.unknown()).optional(),
+          })
+          .strict(),
+        access: z.object({ principalTypes: z.array(z.enum(["app", "user"])).readonly() }).strict(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -605,6 +619,19 @@ const compiledConnectionDefinitionSchema = z
     vercelConnect: z
       .object({
         connector: z.string(),
+      })
+      .strict()
+      .optional(),
+    vercelConnectRequirement: z
+      .object({
+        reference: z.string(),
+        connector: z
+          .object({
+            type: z.string(),
+            configuration: z.record(z.string(), z.unknown()).optional(),
+          })
+          .strict(),
+        access: z.object({ principalTypes: z.array(z.enum(["app", "user"])).readonly() }).strict(),
       })
       .strict()
       .optional(),

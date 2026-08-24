@@ -9,6 +9,7 @@
 import type { ToolSet } from "ai";
 
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
+import type { VercelConnectRequirement } from "#compiler/vercel-connect-manifest.js";
 import type { Approval } from "#public/definitions/approval.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { JsonValue } from "#public/types/json.js";
@@ -245,6 +246,9 @@ interface AuthorizationDefinitionBase {
   readonly vercelConnect?: {
     readonly connector: string;
   };
+
+  /** Static Connect provisioning metadata consumed only by the compiler. */
+  readonly vercelConnectRequirement?: VercelConnectRequirement;
 
   /**
    * Optional human-readable provider name shown in sign-in UI (e.g.
