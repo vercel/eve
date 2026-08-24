@@ -151,6 +151,16 @@ describe("rootMarkdownRedirects", () => {
   });
 });
 
+describe("compatibilityRedirects", () => {
+  it("redirects the previous benchmark route", () => {
+    expect(compatibilityRedirects).toContainEqual({
+      source: "/evals",
+      destination: "/benchmarks",
+      permanent: true,
+    });
+  });
+});
+
 describe("defaultLanguageRedirects", () => {
   it("redirects observed locale aliases directly to their canonical destination", () => {
     expect(defaultLanguageRedirects).toEqual([
