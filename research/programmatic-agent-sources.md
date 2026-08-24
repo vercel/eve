@@ -451,24 +451,24 @@ compilation use the same composer and normalizers as production.
 After migration, the framework provides exactly these default identities
 through source composition:
 
-| Identity                     | Definition                             | Registered for   | Notes                                                         |
-| ---------------------------- | -------------------------------------- | ---------------- | ------------------------------------------------------------- |
-| `agent.ts`                   | `defineAgent`                          | every local node | default model config; phase-one composition                   |
-| `sandbox.ts`                 | `defineSandbox({})`                    | every local node | selects `defaultSandbox()`; stable semantic revision          |
-| `tools/bash.ts`              | `defineTool`                           | every local node | ordinary executor                                             |
-| `tools/read_file.ts`         | `defineTool`                           | every local node | ordinary executor                                             |
-| `tools/write_file.ts`        | `defineTool`                           | every local node | ordinary executor                                             |
-| `tools/todo.ts`              | `defineTool`                           | every local node | ordinary executor                                             |
-| `tools/web_fetch.ts`         | `defineTool`                           | every local node | ordinary executor                                             |
-| `tools/load_skill.ts`        | `defineTool`                           | every local node | visibility: `requires-loadable-skill`                         |
-| `tools/connection_search.ts` | `defineDynamic`                        | every local node | discovers and qualifies connection tools                      |
-| `tools/ask_question.ts`      | `defineTool` + `request-input`         | every local node | visibility: `requires-request-input`                          |
-| `tools/agent.ts`             | `defineTool` + `agent-dispatch`        | root node        | visibility: `root-session`                                    |
-| `tools/task_update.ts`       | `defineTool` + `task-control`          | root node        | prepared in tasks mode; visibility: `delegated-task-child`    |
-| `tools/task_cancel.ts`       | `defineTool` + `task-control`          | root node        | prepared in tasks mode; visibility: `root-session`            |
-| `tools/web_search.ts`        | `webSearch` sentinel + `provider-tool` | every local node | materialized at eligible model calls                          |
-| `channels/eve.ts`            | `eveChannel` factory                   | root node        | complete `/eve/v1` surface: protocol, callbacks, health, info |
-| `channels/home.ts`           | `defineChannel`                        | root node        | `GET` and `HEAD` at `/`                                       |
+| Identity                     | Definition                             | Registered for   | Notes                                                                 |
+| ---------------------------- | -------------------------------------- | ---------------- | --------------------------------------------------------------------- |
+| `agent.ts`                   | `defineAgent`                          | every local node | default model config; phase-one composition                           |
+| `sandbox.ts`                 | `defineSandbox({})`                    | every local node | selects `defaultSandbox()`; stable semantic revision                  |
+| `tools/bash.ts`              | `defineTool`                           | every local node | ordinary executor                                                     |
+| `tools/read_file.ts`         | `defineTool`                           | every local node | ordinary executor                                                     |
+| `tools/write_file.ts`        | `defineTool`                           | every local node | ordinary executor                                                     |
+| `tools/todo.ts`              | `defineTool`                           | every local node | ordinary executor                                                     |
+| `tools/web_fetch.ts`         | `defineTool`                           | every local node | ordinary executor                                                     |
+| `tools/load_skill.ts`        | `defineTool`                           | every local node | visibility: `requires-loadable-skill`                                 |
+| `tools/connection_search.ts` | `defineDynamic`                        | every local node | discovers and qualifies connection tools                              |
+| `tools/ask_question.ts`      | `defineTool` + `request-input`         | every local node | visibility: `requires-request-input`                                  |
+| `tools/agent.ts`             | `defineTool` + `dispatch`              | root node        | action: `subagent-call`; visibility: `root-session`                   |
+| `tools/task_update.ts`       | `defineTool` + `dispatch`              | root node        | action: `task-update`; tasks mode; visibility: `delegated-task-child` |
+| `tools/task_cancel.ts`       | `defineTool` + `dispatch`              | root node        | action: `task-cancel`; tasks mode; visibility: `root-session`         |
+| `tools/web_search.ts`        | `webSearch` sentinel + `provider-tool` | every local node | materialized at eligible model calls                                  |
+| `channels/eve.ts`            | `eveChannel` factory                   | root node        | complete `/eve/v1` surface: protocol, callbacks, health, info         |
+| `channels/home.ts`           | `defineChannel`                        | root node        | `GET` and `HEAD` at `/`                                               |
 
 Every identity above is replaceable and disableable through ordinary slot
 composition. `glob` and `grep` are published at `eve/tools/glob` and
@@ -556,11 +556,16 @@ data carried on the definition value:
 
 ```ts
 interface KernelEffectDeclaration {
-  readonly kind:
-    "request-input" | "agent-dispatch" | "task-control" | "provider-tool" | "workflow-host";
-  // per-kind payload stays minimal and JSON-serializable,
-  // e.g. the delegation target for "agent-dispatch"
+  readonly kind: "request-input" | "dispatch" | "provider-tool";
+  // per-kind payload stays minimal and JSON-serializable;
+  // "dispatch" carries one typed action
 }
+
+type DispatchAction =
+  | { readonly kind: "subagent-call"; readonly nodeId: string; readonly subagentName?: string }
+  | { readonly kind: "remote-agent-call"; readonly nodeId: string }
+  | { readonly kind: "task-update" }
+  | { readonly kind: "task-cancel" };
 
 type ToolVisibilityCondition =
   "root-session" | "delegated-task-child" | "requires-request-input" | "requires-loadable-skill";
@@ -579,14 +584,19 @@ materialization remains the `provider-tool` effect described below.
 
 Workflow follows the same pattern with no framework default: the authored
 `experimental_workflow()` sentinel at `tools/workflow.ts` composes at that
-canonical slot, declares the `workflow-host` effect, and carries the tool's
-complete configuration in its arguments. The kernel owns its advertisement
-(root sessions below the depth limit), sandbox materialization over
-`agent-dispatch`-eligible tools, and interrupt dispatch. Despite the shared
-name, `defineAgent({ experimental: { workflow } })` is unrelated to the
-tool: it selects the durable-runtime world backing the agent's own
-execution. That world selection and the workflow transport in the closed
-host inventory are not tool identities.
+canonical slot and carries the tool's complete configuration in its
+arguments. Workflow declares no effect of its own — it is code mode over the
+`dispatch` effect. The kernel materializes the model-visible tool as an
+isolated program sandbox whose only host functions are the
+`dispatch`-declaring tools in the effective graph, and each host call
+performs the same `dispatch` effect the `agent` tool performs, with results
+resuming the durable program instead of the model step. Advertisement (root
+sessions below the depth limit) is declared visibility data like any other
+effectful tool. Despite the shared name,
+`defineAgent({ experimental: { workflow } })` is unrelated to the tool: it
+selects the durable-runtime world backing the agent's own execution. That
+world selection and the workflow transport in the closed host inventory are
+not tool identities.
 
 ### `connection_search`
 
@@ -783,22 +793,32 @@ on every run, is that suspended computation's serialized continuation.
 
 The kernel is keyed by a closed set of effect kinds, never by tool name:
 
-| Effect kind      | Declared by                                                     | Kernel behavior                                                                |
-| ---------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `request-input`  | `tools/ask_question.ts`; tool approvals internally              | park the turn on a pending input batch; resume synthesizes the tool result     |
-| `agent-dispatch` | `tools/agent.ts`; graph-derived subagent and remote-agent tools | park into the runtime-action batch; dispatch child sessions; fold results back |
-| `task-control`   | `tools/task_update.ts`, `tools/task_cancel.ts`                  | execute through the durable task dispatch step                                 |
-| `provider-tool`  | the `tools/web_search.ts` provider sentinel                     | materialize the provider-managed tool at eligible model calls                  |
-| `workflow-host`  | the selected `tools/workflow.ts` sentinel                       | expose eligible tools inside the Workflow sandbox                              |
+| Effect kind     | Declared by                                                                                                                          | Kernel behavior                                                                  |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| `request-input` | `tools/ask_question.ts`; tool approvals internally                                                                                   | park the turn on a pending input batch; resume synthesizes the tool result       |
+| `dispatch`      | `tools/agent.ts`; graph-derived subagent and remote-agent tools; `tools/task_update.ts`; `tools/task_cancel.ts`; Workflow host calls | park; execute the typed action in the durable dispatch step; resume with results |
+| `provider-tool` | the `tools/web_search.ts` provider sentinel                                                                                          | materialize the provider-managed tool at eligible model calls; no suspension     |
+
+The two suspension kinds are genuinely distinct — `request-input` resolves
+inside the harness when the next channel delivery arrives, while `dispatch`
+resolves outside it in a durable step — and `provider-tool` never suspends at
+all. Everything narrower is payload, not a new kind. A `dispatch`
+declaration carries exactly one typed `DispatchAction`, and the dispatch
+handler switches exhaustively over the action union: `subagent-call` and
+`remote-agent-call` start or resume child sessions; `task-update` and
+`task-cancel` execute task commands. Results resume one of two continuations
+the pending batch already identifies: the model step, or the durable
+Workflow program whose host call performed the effect.
 
 Each effect kind owns its park semantics, dispatch, resume, prompt flags,
 advertisement predicate evaluation, and inspection projection through one
-exhaustive lifecycle. Adding an effect kind must produce TypeScript failures
-until every lifecycle stage handles it. Effects prepare from the effective
-composed sources that declare them: replacing or disabling `tools/agent.ts`
-removes `agent-dispatch` preparation because no selected definition declares
-the effect. The compiled kernel effect plan serializes, per node, each
-prepared effect kind with its declaring source ID and declared visibility
+exhaustive lifecycle. Adding an effect kind — or a dispatch action kind —
+must produce TypeScript failures until every lifecycle stage handles it.
+Effects prepare from the effective composed sources that declare them:
+replacing or disabling `tools/agent.ts` removes its `dispatch` preparation
+because no selected definition declares the effect. The compiled kernel
+effect plan serializes, per node, each prepared effect kind with its
+declaring source ID, action kind where applicable, and declared visibility
 conditions — nothing more. No kernel code fabricates a `Resolved*` record
 merely for validation or inspection.
 
@@ -825,9 +845,9 @@ parent/root sessions. Build inspection reports prepared potential, never
 claims to be the exact tools for every session and model call.
 
 Local and remote subagent tools remain derived from the effective subagent
-graph; they declare the `agent-dispatch` effect rather than appearing as
-kernel catalog entries, though the kernel may inspect their runtime actions
-when preparing Workflow.
+graph; they declare the `dispatch` effect rather than appearing as kernel
+catalog entries. Workflow's sandbox materialization derives its host
+functions from exactly those `dispatch`-declaring tools.
 
 Import guards enforce the layering: no harness or execution code may branch on
 a tool name or source ID; only kernel effect handlers touch park/resume
