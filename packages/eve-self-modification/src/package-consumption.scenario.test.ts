@@ -73,6 +73,7 @@ describe("packed package consumption", () => {
   it("builds a fresh app using only installed tarball contents", async () => {
     await access(join(packageRoot, "dist/index.mjs"));
     await access(join(packageRoot, "scaffold/agent.js"));
+    await access(join(packageRoot, "scaffold/sandbox.js"));
     await access(join(evePackageRoot, "dist/src/index.js"));
 
     const root = await mkdtemp(join(tmpdir(), "eve-self-modification-package-"));

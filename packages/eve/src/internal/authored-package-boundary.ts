@@ -104,9 +104,24 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
         source,
       });
       if (externalModule !== undefined) {
+        const importerPath =
+          importer === undefined ||
+          importer.startsWith("\0") ||
+          importer.startsWith(CACHED_CHANNEL_PREFIX)
+            ? undefined
+            : resolve(importer);
+        // Installed configured externals stay external by package name so Node
+        // applies runtime export conditions. Linked workspace sources use their
+        // resolved paths because the output may not be able to resolve the link.
+        if (
+          importerPath !== undefined &&
+          isPathInsideOrEqual(toCanonicalPath(importerPath), canonicalPackageRoot) &&
+          isNodeModulesPath(externalModule.resolvedId)
+        ) {
+          return { external: true, id: source };
+        }
         const resolvedId =
           resolveExistingExternalFilePath(externalModule.resolvedId) ?? externalModule.resolvedId;
-
         return {
           external: true,
           id: normalizeEsmImportSpecifier(resolvedId),
