@@ -9,6 +9,7 @@ import {
   stampMessageStreamEvent,
 } from "#protocol/message.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { clearDurableDynamicCallbacksForSession } from "#shared/durable-dynamic-tool-callbacks.js";
 
 const log = createLogger("execution.workflow-entry");
 
@@ -82,4 +83,6 @@ export async function emitTerminalSessionFailureStep(input: {
       error: writeError,
     });
   }
+
+  if (sessionId.length > 0) clearDurableDynamicCallbacksForSession(sessionId);
 }

@@ -170,9 +170,10 @@ Call expressions such as `execute: makeExecutor()` are not transformed. Put the 
 
 ### Identity and redeploys
 
-A parked call binds to its callback by **tool name and phase** — the same identity a static tool uses — never by source position. This gives dynamic tools static-tool semantics across deploys:
+A parked call binds to its callback by **tool name and phase**, the same identity a static tool uses. An internal registration key also isolates callbacks by session, lifecycle scope, resolver, and entry. The key does not depend on callback source positions, so dynamic tools keep static-tool semantics across deploys:
 
 - Editing a callback body (or anything else that does not change tool names) is safe: replaying a parked call runs the latest deployed code with the closure values snapshotted when the call was made.
+- Different sessions can resolve different implementations under the same tool name without replacing each other's callbacks.
 - If a persisted callback has no registered implementation (fresh process after a crash, or after a redeploy), eve re-runs `session.started` resolvers once to rebind it, then replays.
 - If the tool no longer exists under that name, replay fails closed with an explicit error instead of invoking something else. Turn-scoped and step-scoped tools are not rebound; a parked call to a missing one errors.
 

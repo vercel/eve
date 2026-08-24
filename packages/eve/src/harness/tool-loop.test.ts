@@ -2165,6 +2165,7 @@ describe("createToolLoopHarness", () => {
 
     const approval = vi.fn((_context: unknown) => "user-approval" as const);
     const ctx = new ContextContainer();
+    ctx.set(SessionIdKey, "test-session");
     ctx.set(SessionKey, {
       auth: {
         current: {
@@ -2180,19 +2181,23 @@ describe("createToolLoopHarness", () => {
     });
     registerDurableDynamicCallback({
       callback: () => ({ ok: true }),
+      owner: "test-session",
       phase: "execute",
+      registrationKey: "test:tfl:execute",
       toolName: "tfl__getLineStatus",
     });
     registerDurableDynamicCallback({
       callback: (_closure: unknown, approvalContext: unknown) => approval(approvalContext as never),
+      owner: "test-session",
       phase: "approvalRequest",
+      registrationKey: "test:tfl:approval-request",
       toolName: "tfl__getLineStatus",
     });
     ctx.set(StepDynamicToolMetadataKey, [
       {
         callbacks: {
-          approvalRequest: { closure: {} },
-          execute: { closure: {} },
+          approvalRequest: { closure: {}, registrationKey: "test:tfl:approval-request" },
+          execute: { closure: {}, registrationKey: "test:tfl:execute" },
         },
         description: "Get TfL line status.",
         entryKey: "tfl__getLineStatus",
