@@ -164,7 +164,7 @@ Structural tags describe each run's place in the tree:
 - `$eve.subagent`: compiled graph node id (subagent runs only)
 - `$eve.trigger`: the channel kind that started the run
 - `$eve.title`: truncated title derived from the first user message
-- `$eve.trace_id`: trace id of the run's `agent.session` span, written on session, subagent, and turn rows so a dashboard run can be joined to its OpenTelemetry trace. Present only when the trace is sampled; absence means no exported OTEL trace exists.
+- `$eve.trace_id`: trace id of the sampled agent trace containing the run, written on session, subagent, and turn rows so a dashboard run can be joined to its OpenTelemetry trace. Present only when the trace is sampled; absence means no exported OTEL trace exists.
 
 Per-turn usage tags are written on each step of a turn, accumulating cumulative totals (last write wins):
 
