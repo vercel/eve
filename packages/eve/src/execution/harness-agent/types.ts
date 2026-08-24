@@ -42,6 +42,8 @@ export interface FixedHarnessAgentToolInput {
 export interface CreateHarnessAgentToolSettings<
   TOutputSchema extends StandardJSONSchemaV1<unknown, unknown> | undefined = undefined,
 > extends HarnessAgentSettings {
+  /** Model-facing description for this preconfigured HarnessAgent tool. */
+  readonly description: string;
   /** Harnesses exposed to the calling model. Defaults to all supported harnesses. */
   readonly harnesses?: "all" | readonly HarnessAgentHarness[];
   /** Optional model override for each harness. Omitted harnesses use their native default model. */

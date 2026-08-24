@@ -2,7 +2,7 @@
   "kind": "eve-extension-capability-contract",
   "capability": "tool",
   "epoch": 18,
-  "sha256": "3f4d868dc2df0dc842da096b80ae5c4159e50ac2864b7f5cc038818dac8ff182",
+  "sha256": "6f0cf6dd039899a544a4ddf7c4a6996b938d7db1c35cc71473688a9d6913860e",
   "exports": [
     "createHarnessAgentTool",
     "defineBashTool",

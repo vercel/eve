@@ -13,16 +13,25 @@ import type {
 import type { ToolDefinition } from "#public/definitions/tool.js";
 import { always } from "#public/tools/approval/approval-helpers.js";
 
+/** Input accepted by {@link defineHarnessAgentTool}. */
+export interface DefineHarnessAgentToolInput {
+  /** Model-facing description for the flexible HarnessAgent tool. */
+  readonly description?: string;
+}
+
 /**
  * Defines a flexible HarnessAgent tool. Export it from
  * `agent/tools/harness_agent.ts`; eve derives the runtime name `harness_agent`
  * from that path. Every invocation requires outer tool approval and runs in
  * the current eve sandbox.
  */
-export function defineHarnessAgentTool(): ToolDefinition<HarnessAgentToolInput, string> {
+export function defineHarnessAgentTool(
+  input: DefineHarnessAgentToolInput = {},
+): ToolDefinition<HarnessAgentToolInput, string> {
   return {
     approval: always(),
     description:
+      input.description ??
       "Run a coding harness such as Claude Code or Codex in the current eve sandbox to complete a task.",
     async execute(input, ctx) {
       return await executeHarnessAgentTool({
@@ -43,7 +52,7 @@ export function createHarnessAgentTool<
   },
 ): ToolDefinition<FixedHarnessAgentToolInput, StandardJSONSchemaV1.InferOutput<TOutputSchema>>;
 export function createHarnessAgentTool(
-  settings?: CreateHarnessAgentToolSettings,
+  settings: CreateHarnessAgentToolSettings,
 ): ToolDefinition<FixedHarnessAgentToolInput, string>;
 
 /**
@@ -52,12 +61,13 @@ export function createHarnessAgentTool(
  * fixed in code. The calling model chooses only the task and harness.
  */
 export function createHarnessAgentTool(
-  settings: CreateHarnessAgentToolSettings<StandardJSONSchemaV1<unknown, unknown> | undefined> = {},
+  settings: CreateHarnessAgentToolSettings<StandardJSONSchemaV1<unknown, unknown> | undefined>,
 ): unknown {
-  const runtime = createHarnessAgentToolRuntime(settings);
+  const { description, ...runtimeSettings } = settings;
+  const runtime = createHarnessAgentToolRuntime(runtimeSettings);
   const definition: ToolDefinition<FixedHarnessAgentToolInput, unknown> = {
     approval: always(),
-    description: "Run a preconfigured coding harness in the current eve sandbox.",
+    description,
     async execute(input, ctx) {
       return await runtime.execute({
         abortSignal: ctx.abortSignal,

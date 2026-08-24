@@ -69,6 +69,16 @@ describe("defineHarnessAgentTool", () => {
     expect(tool.approval).toBeTypeOf("function");
   });
 
+  it("allows overriding the model-facing description", () => {
+    expect(defineHarnessAgentTool().description).toBe(
+      "Run a coding harness such as Claude Code or Codex in the current eve sandbox to complete a task.",
+    );
+    expect(
+      defineHarnessAgentTool({ description: "Delegate repository work to a coding harness." })
+        .description,
+    ).toBe("Delegate repository work to a coding harness.");
+  });
+
   it("runs the selected harness in the current sandbox", async () => {
     vi.mocked(runHarnessAgent).mockResolvedValue("done");
     const context = createContext();
@@ -104,6 +114,7 @@ describe("defineHarnessAgentTool", () => {
 describe("createHarnessAgentTool", () => {
   it("exposes only task and an allowlisted harness", () => {
     const tool = createHarnessAgentTool({
+      description: "Implement a focused change in the repository.",
       harnesses: ["claude-code", "codex"],
       models: { codex: "gpt-5.4-codex" },
     });
@@ -125,6 +136,7 @@ describe("createHarnessAgentTool", () => {
       },
     });
     expect(tool.approval).toBeTypeOf("function");
+    expect(tool.description).toBe("Implement a focused change in the repository.");
   });
 
   it("uses the same structured schema for the eve tool and harness result", async () => {
@@ -132,6 +144,7 @@ describe("createHarnessAgentTool", () => {
     const output = { summary: "Reviewed." };
     vi.mocked(runHarnessAgent).mockResolvedValue(output);
     const tool = createHarnessAgentTool({
+      description: "Review a change and return structured findings.",
       harnesses: ["claude-code"],
       instructions: "Review the change.",
       outputSchema,
@@ -151,12 +164,18 @@ describe("createHarnessAgentTool", () => {
   });
 
   it("rejects empty allowlists and model settings for disabled harnesses", () => {
-    expect(() => createHarnessAgentTool({ harnesses: [] })).toThrow("at least one enabled harness");
-    expect(() => createHarnessAgentTool({ harnesses: ["unknown" as HarnessAgentHarness] })).toThrow(
-      'Unknown HarnessAgent harness "unknown"',
+    expect(() => createHarnessAgentTool({ description: "Run a harness.", harnesses: [] })).toThrow(
+      "at least one enabled harness",
     );
     expect(() =>
       createHarnessAgentTool({
+        description: "Run a harness.",
+        harnesses: ["unknown" as HarnessAgentHarness],
+      }),
+    ).toThrow('Unknown HarnessAgent harness "unknown"');
+    expect(() =>
+      createHarnessAgentTool({
+        description: "Run a harness.",
         harnesses: ["codex"],
         models: { "claude-code": "claude-opus-4-1" },
       }),

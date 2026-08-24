@@ -11,6 +11,11 @@ import {
 } from "#execution/harness-agent/types.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
+type HarnessAgentToolRuntimeSettings = Omit<
+  CreateHarnessAgentToolSettings<StandardJSONSchemaV1<unknown, unknown> | undefined>,
+  "description"
+>;
+
 const skillFileSchema = z.strictObject({
   content: z.string(),
   path: z.string(),
@@ -61,9 +66,7 @@ export async function executeHarnessAgentTool(input: {
   });
 }
 
-export function createHarnessAgentToolRuntime(
-  settings: CreateHarnessAgentToolSettings<StandardJSONSchemaV1<unknown, unknown> | undefined>,
-) {
+export function createHarnessAgentToolRuntime(settings: HarnessAgentToolRuntimeSettings) {
   const enabledHarnesses = resolveEnabledHarnesses(settings.harnesses);
   validateModels({ enabledHarnesses, models: settings.models });
 

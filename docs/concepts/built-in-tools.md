@@ -128,6 +128,8 @@ import { defineHarnessAgentTool } from "eve/tools";
 export default defineHarnessAgentTool();
 ```
 
+Pass `description` to replace the default model-facing tool description.
+
 The model supplies `task` and `harness`. It can also supply `model`, `id`, `instructions`, `skills`, and a workspace-relative `workingDirectory`. Supported harness names are `claude-code`, `cline`, `codex`, `deepagents`, `grok-build`, `opencode`, and `pi`. Omitting `model` uses the selected harness's default model.
 
 Every `harness_agent` call requires eve tool approval before it starts. Once approved, the selected coding harness runs its built-in tools without additional approval prompts. The HarnessAgent tool does not expose inner tool approval, permission mode, tool filtering, timeout, or debug settings.
@@ -140,16 +142,17 @@ Use `createHarnessAgentTool` when instructions and other settings belong in code
 import { createHarnessAgentTool } from "eve/tools";
 
 export default createHarnessAgentTool({
+  description: "Implement a requested change in the repository.",
   instructions: "Implement the requested change and run the relevant checks.",
   harnesses: ["claude-code", "codex"],
   models: {
     "claude-code": "your-claude-model",
   },
-  workingDirectory: "packages/api",
+  workingDirectory: "my-repo-checkout",
 });
 ```
 
-Set `harnesses` to an allowlist or to `"all"`; omitting it enables all supported harnesses. `models` is the only per-harness configuration. Each omitted model continues to use that harness's default.
+`description` is required because each preconfigured tool has a specific purpose. Set `harnesses` to an allowlist or to `"all"`; omitting it enables all supported harnesses. `models` is the only per-harness configuration. Each omitted model continues to use that harness's default.
 
 The general settings are `id`, `instructions`, `skills`, and `workingDirectory`. A skill has `name`, `description`, and `content`, plus optional `files` entries with `path` and `content`.
 
@@ -162,19 +165,25 @@ import { createHarnessAgentTool } from "eve/tools";
 import { z } from "zod";
 
 const reviewSchema = z.object({
+  verdict: z.enum(["approved", "neutral", "changes-required"]),
   summary: z.string(),
   findings: z.array(
     z.object({
       file: z.string(),
+      line: z.string().optional(),
       message: z.string(),
       severity: z.enum(["low", "medium", "high"]),
     }),
   ),
+  workingDirectory: "my-repo-checkout",
 });
 
 export default createHarnessAgentTool({
-  harnesses: ["claude-code", "codex"],
-  instructions: "Review the requested change without modifying files.",
+  description:
+    "Request a code review of the current diff in the repository, including structured findings.",
+  harnesses: ["claude-code", "codex", "grok-build"],
+  instructions:
+    "Review the current code changes diff. Provide a final verdict and any findings that require iteration or should be reconsidered.",
   outputSchema: reviewSchema,
 });
 ```
