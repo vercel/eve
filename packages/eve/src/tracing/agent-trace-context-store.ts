@@ -2,7 +2,6 @@ import type { SpanContext } from "#compiled/@opentelemetry/api/index.js";
 
 import { contextStorage, loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import type { InstrumentationParentLineage } from "#harness/instrumentation/lifecycle.js";
 import type {
   AgentActionTraceState,
   AgentSessionTraceState,
@@ -36,7 +35,7 @@ export function preserveSerializedAgentTraceState(
 }
 
 /**
- * Reads a named session's trace window straight out of a serialized context,
+ * Reads a named session's trace context straight out of a serialized context,
  * which {@link ContextAgentTraceStateStore} cannot do — its reads are scoped
  * to the ambient session.
  */
@@ -196,8 +195,6 @@ function deserializeState(data: unknown): AgentTraceContextState {
       channelKind: typeof value.channelKind === "string" ? value.channelKind : undefined,
       context: value.context,
       rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
-      turnsInWindow: typeof value.turnsInWindow === "number" ? value.turnsInWindow : 0,
-      window: typeof value.window === "number" ? value.window : 0,
     } satisfies AgentSessionTraceState;
   });
   const turns = deserializeRecord(data.turns, (value) => {
@@ -207,12 +204,12 @@ function deserializeState(data: unknown): AgentTraceContextState {
     }
     return {
       context: value.context,
-      lineage: deserializeLineage(value.lineage),
       parentIsRemote: typeof value.parentIsRemote === "boolean" ? value.parentIsRemote : undefined,
       parentSpanId: value.parentSpanId,
       rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
       sequence: typeof value.sequence === "number" ? value.sequence : 0,
       startTimeMs: value.startTimeMs,
+      subagentName: typeof value.subagentName === "string" ? value.subagentName : undefined,
       terminal: deserializeTerminal(value.terminal),
     } satisfies AgentTurnTraceState;
   });
@@ -273,23 +270,6 @@ function deserializeRecord<T>(
     if (parsed !== undefined) result[key] = parsed;
   }
   return result;
-}
-
-function deserializeLineage(value: unknown): InstrumentationParentLineage | undefined {
-  if (
-    !isRecord(value) ||
-    typeof value.callId !== "string" ||
-    typeof value.sessionId !== "string" ||
-    typeof value.turnId !== "string"
-  ) {
-    return undefined;
-  }
-  return {
-    callId: value.callId,
-    sessionId: value.sessionId,
-    subagentName: typeof value.subagentName === "string" ? value.subagentName : undefined,
-    turnId: value.turnId,
-  };
 }
 
 function deserializeTerminal(value: unknown): AgentTurnTraceState["terminal"] {

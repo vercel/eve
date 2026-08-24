@@ -11,6 +11,7 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
   readonly #children: readonly SpanProcessor[];
   readonly #ownedTraceIds = new Set<string>();
   readonly #sessionTraceIds = new Map<string, Set<string>>();
+  readonly #traceOwners = new Map<string, string>();
   constructor(children: readonly SpanProcessor[]) {
     this.#children = children;
   }
@@ -23,13 +24,14 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
     if (!isSpanLike(span)) return;
     const sessionId = span.attributes["agent.session.id"];
     if (typeof sessionId === "string") {
-      const rootSessionId = span.attributes["agent.root.session.id"];
-      const owner = typeof rootSessionId === "string" ? rootSessionId : sessionId;
       const traceId = span.spanContext().traceId;
       this.#ownedTraceIds.add(traceId);
-      const owned = this.#sessionTraceIds.get(owner) ?? new Set<string>();
-      owned.add(traceId);
-      this.#sessionTraceIds.set(owner, owned);
+      if (!this.#traceOwners.has(traceId)) {
+        this.#traceOwners.set(traceId, sessionId);
+        const owned = this.#sessionTraceIds.get(sessionId) ?? new Set<string>();
+        owned.add(traceId);
+        this.#sessionTraceIds.set(sessionId, owned);
+      }
     }
     if (!this.#accepts(span)) return;
     for (const child of this.#children) child.onStart(span, parentContext);
@@ -53,7 +55,10 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
   releaseSession(sessionId: string): boolean {
     const owned = this.#sessionTraceIds.get(sessionId);
     if (owned === undefined) return false;
-    for (const traceId of owned) this.#ownedTraceIds.delete(traceId);
+    for (const traceId of owned) {
+      this.#ownedTraceIds.delete(traceId);
+      this.#traceOwners.delete(traceId);
+    }
     this.#sessionTraceIds.delete(sessionId);
     return true;
   }

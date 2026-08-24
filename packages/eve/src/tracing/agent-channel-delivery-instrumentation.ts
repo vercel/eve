@@ -30,7 +30,6 @@ interface ChannelDeliverySpanState {
   readonly requestTraceContext?: SpanContext;
   readonly spanId: string;
   readonly startTimeMs: number;
-  readonly window: number;
 }
 
 /** Builds durable channel delivery spans around the turn that consumes each request. */
@@ -76,7 +75,6 @@ export function createAgentChannelDeliveryInstrumentation(input: {
       },
       spanId: input.idGenerator.deriveSpanId(`channel-delivery:${event.idempotencyKey}`),
       startTimeMs: Date.now(),
-      window: session.window,
     };
     if (inputAttribute !== undefined) state.inputAttribute = inputAttribute;
     if (event.delivery.requestTraceContext !== undefined) {
@@ -99,7 +97,6 @@ export function createAgentChannelDeliveryInstrumentation(input: {
       event.turnId === undefined
         ? undefined
         : await input.stateStore.getTurn(event.sessionId, event.turnId);
-    const session = await input.stateStore.getSession(event.sessionId);
     const parent =
       turn === undefined
         ? state.parent
@@ -125,9 +122,7 @@ export function createAgentChannelDeliveryInstrumentation(input: {
             "agent.framework.name": "eve",
             "agent.framework.version": input.frameworkVersion,
             "agent.name": event.agentName,
-            "agent.root.session.id": event.rootSessionId,
             "agent.session.id": event.sessionId,
-            "agent.session.window": session?.window ?? state.window,
             "agent.turn.id": event.turnId,
             "agent.turn.sequence": event.sequence,
           },
@@ -173,11 +168,7 @@ export function createAgentChannelDeliveryInstrumentation(input: {
 
 function readState(value: unknown): ChannelDeliverySpanState | undefined {
   if (!isRecord(value) || !isSpanContext(value.parent)) return undefined;
-  if (
-    typeof value.spanId !== "string" ||
-    typeof value.startTimeMs !== "number" ||
-    typeof value.window !== "number"
-  ) {
+  if (typeof value.spanId !== "string" || typeof value.startTimeMs !== "number") {
     return undefined;
   }
   const requestTraceContext = isSpanContext(value.requestTraceContext)
@@ -190,7 +181,6 @@ function readState(value: unknown): ChannelDeliverySpanState | undefined {
     requestTraceContext,
     spanId: value.spanId,
     startTimeMs: value.startTimeMs,
-    window: value.window,
   };
 }
 
