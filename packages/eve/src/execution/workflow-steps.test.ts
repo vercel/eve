@@ -14,11 +14,13 @@ import {
   AuthKey,
   ChannelInstrumentationKey,
   ContinuationTokenKey,
+  DynamicSkillManifestKey,
   DynamicSubagentAgentConfigKey,
   ModeKey,
   SessionCallbackKey,
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicSubagentSelectionsKey,
+  SessionDynamicInstructionsKey,
   SessionDynamicModelReferenceKey,
   SessionDynamicToolMetadataKey,
   SessionDynamicToolRuntimeRevisionKey,
@@ -1939,8 +1941,17 @@ describe("turnStep", () => {
       createStubSession({ history: [{ content: `step ${index}`, role: "assistant" }] }),
     );
     installSessionStoreMocks([sessions[0]!]);
+    const sessionModel = { id: "openai/gpt-5.6-sol", contextWindowTokens: 1_000_000 };
     const run = vi.fn(async (_session: HarnessSession, _input?: StepInput): Promise<StepResult> => {
       const index = run.mock.calls.length;
+      if (index === 3) {
+        const ctx = loadContext();
+        ctx.set(SessionDynamicModelReferenceKey, sessionModel);
+        ctx.set(DynamicSkillManifestKey, { skills: [{ description: "Skill", name: "skill" }] });
+        ctx.set(SessionDynamicInstructionsKey, {
+          instructions: [{ content: "Session instruction", role: "system" }],
+        });
+      }
       return {
         next: index < 4 ? run : { done: true, output: "done" },
         session: sessions[index]!,
@@ -1968,6 +1979,15 @@ describe("turnStep", () => {
     expect(result.cancellationTransition?.sessionState.snapshot?.session.history).toEqual(
       sessions[2]!.history,
     );
+    expect(result.cancellationTransition?.serializedContext).toMatchObject({
+      [DynamicSkillManifestKey.name]: {
+        skills: [{ description: "Skill", name: "skill" }],
+      },
+      [SessionDynamicInstructionsKey.name]: {
+        instructions: [{ content: "Session instruction", role: "system" }],
+      },
+      [SessionDynamicModelReferenceKey.name]: sessionModel,
+    });
   });
 
   it("resumes a physical retry from the durable logical checkpoint", async () => {
@@ -2840,15 +2860,19 @@ describe("turnStep", () => {
     const next = vi.fn(async () => ({ next: null, session }) as const);
     const taskSession = createStubSession({ continuationToken: "background-checkpoint" });
     installSessionStoreMocks([session]);
+    const sessionModel = { id: "anthropic/claude-opus-4.6", contextWindowTokens: 1_000_000 };
     vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (stepSession): Promise<StepResult> => ({
-        backgroundTaskSession: taskSession,
-        backgroundTasks: [
-          { taskId: "task-1", taskInboxToken: "task-inbox-1", taskRunId: "task-run-1" },
-        ],
-        next,
-        session: stepSession,
-      });
+      return async (stepSession): Promise<StepResult> => {
+        loadContext().set(SessionDynamicModelReferenceKey, sessionModel);
+        return {
+          backgroundTaskSession: taskSession,
+          backgroundTasks: [
+            { taskId: "task-1", taskInboxToken: "task-inbox-1", taskRunId: "task-run-1" },
+          ],
+          next,
+          session: stepSession,
+        };
+      };
     });
 
     const result = await turnStep({
@@ -2871,6 +2895,10 @@ describe("turnStep", () => {
     expect(result.commitBarrier?.transition.sessionState.snapshot?.session.continuationToken).toBe(
       "background-checkpoint",
     );
+    expect(result.commitBarrier?.transition.serializedContext).toMatchObject({
+      [SessionDynamicModelReferenceKey.name]: sessionModel,
+    });
+    expect(result.cancellationTransition).toEqual(result.commitBarrier?.transition);
   });
 
   it("persists onDeliver context into the next durable step", async () => {

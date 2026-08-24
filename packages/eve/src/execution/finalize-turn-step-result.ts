@@ -1,5 +1,6 @@
 import type { ContextContainer } from "#context/container.js";
 import type { AgentLoopBatch } from "#execution/agent-loop-batch.js";
+import { preserveSerializedSessionPreambleState } from "#context/serialized-session-preamble-state.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import type { DurableStepResult } from "#execution/next-driver-action.js";
 import { derivePendingState } from "#execution/pending-turn-state.js";
@@ -34,16 +35,21 @@ export async function finalizeTurnStepResult(input: {
   const serializedContext = serializeContext(input.ctx);
   const sessionState = createDurableSessionState({ session: stepResult.session });
   const checkpointTransition = input.batch.cancellationTransition();
+  const cancellationContext = preserveSerializedSessionPreambleState(
+    checkpointTransition?.serializedContext ?? input.batch.checkpointSerializedContext(),
+    serializedContext,
+  );
   const backgroundTaskState =
     stepResult.backgroundTasks === undefined || stepResult.backgroundTaskSession === undefined
       ? undefined
       : createDurableSessionState({ session: stepResult.backgroundTaskSession });
   const cancellationTransition =
     backgroundTaskState === undefined
-      ? checkpointTransition
+      ? checkpointTransition === undefined
+        ? undefined
+        : { ...checkpointTransition, serializedContext: cancellationContext }
       : {
-          serializedContext:
-            checkpointTransition?.serializedContext ?? input.batch.checkpointSerializedContext(),
+          serializedContext: cancellationContext,
           sessionState: backgroundTaskState,
         };
   const commitBarrier =

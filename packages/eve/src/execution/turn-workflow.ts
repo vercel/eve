@@ -7,7 +7,7 @@ import {
 } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload } from "#channel/types.js";
-import { preserveSerializedSessionDynamicModelSelection } from "#context/serialized-dynamic-model-selection.js";
+import { preserveSerializedSessionPreambleState } from "#context/serialized-session-preamble-state.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { sendTurnControlStep, type TurnInboxPayload } from "#execution/turn-control-protocol.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
@@ -172,7 +172,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         // step-owned cancellation transition; old results retain the original
         // whole-step rollback plus the one-time session model.
         const cancellationTransition: DurableTransition = result.cancellationTransition ?? {
-          serializedContext: preserveSerializedSessionDynamicModelSelection(
+          serializedContext: preserveSerializedSessionPreambleState(
             beforeStep.serializedContext,
             result.serializedContext,
           ),

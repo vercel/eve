@@ -13,7 +13,7 @@ import {
   prepareDynamicInstructionPreamble,
 } from "#context/dynamic-instruction-lifecycle.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
-import { preserveSerializedSessionDynamicModelSelection } from "#context/serialized-dynamic-model-selection.js";
+import { preserveSerializedSessionPreambleState } from "#context/serialized-session-preamble-state.js";
 import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import {
   dispatchDynamicSubagentEvent,
@@ -592,10 +592,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     }
     const serializedContext = preserveSerializedInstrumentationState(
       preserveSerializedAgentTraceState(
-        preserveSerializedSessionDynamicModelSelection(
-          batch.checkpointSerializedContext(),
-          interrupted,
-        ),
+        preserveSerializedSessionPreambleState(batch.checkpointSerializedContext(), interrupted),
         interrupted,
       ),
       interrupted,
