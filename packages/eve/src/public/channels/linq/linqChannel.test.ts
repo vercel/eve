@@ -58,7 +58,18 @@ describe("linqChannel", () => {
     expect(markRead).toHaveBeenCalledWith(thread.id, message.id);
     expect(send).toHaveBeenCalledWith(
       { context: [], message: "Hello Linq" },
-      { auth: null, thread, title: undefined },
+      {
+        auth: {
+          attributes: { user_name: "user" },
+          authenticator: "linq-message",
+          issuer: "linq",
+          principalId: "linq:user",
+          principalType: "user",
+          subject: "user",
+        },
+        thread,
+        title: undefined,
+      },
     );
   });
 

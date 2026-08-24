@@ -16,7 +16,7 @@ export default linqChannel({
 });
 ```
 
-The default webhook route is `/eve/v1/linq`. The channel verifies forwarded webhooks with same-project Vercel OIDC by default, marks accepted messages as read, and continues the same eve session for every message in a Linq conversation. A new accepted message cooperatively cancels an active turn and steers its replacement turn.
+The default webhook route is `/eve/v1/linq`. The channel verifies forwarded webhooks with same-project Vercel OIDC by default, derives user auth from each message author, marks accepted messages as read, and continues the same eve session for every message in a Linq conversation. A new accepted message cooperatively cancels an active turn and steers its replacement turn.
 
 Set `turnPolicy: "queue"` when every response should finish before Linq starts the next message.
 
