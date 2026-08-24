@@ -233,6 +233,20 @@ function tryResolvePackageRoot(): string | undefined {
   }
 }
 
+function tryResolveLocalPackageRoot(currentModulePath: string): string | undefined {
+  try {
+    const canonicalModulePath = realpathSync.native(currentModulePath);
+    const directBuildLocation = tryResolveDirectBuildLocation(canonicalModulePath);
+
+    return (
+      directBuildLocation?.packageRoot ??
+      findNearestVerifiedPackageRoot(dirname(canonicalModulePath))
+    );
+  } catch {
+    return undefined;
+  }
+}
+
 function rewriteSourceFilePathForBuild(relativeSourcePath: string): string {
   return relativeSourcePath.replace(/\.[cm]?tsx?$/, ".js");
 }
@@ -357,14 +371,14 @@ function tryReadInstalledPackageInfo(
 }
 
 /**
- * Resolves the installed eve package identity from package.json.
+ * Resolves eve's package identity from local or build-stamped metadata.
  */
 export function resolveInstalledPackageInfo(): InstalledPackageInfo {
   if (cachedPackageInfo) {
     return cachedPackageInfo;
   }
 
-  const packageRoot = tryResolvePackageRoot();
+  const packageRoot = tryResolveLocalPackageRoot(resolveCurrentModulePath());
   const packageRootInfo =
     packageRoot === undefined
       ? undefined
@@ -373,22 +387,6 @@ export function resolveInstalledPackageInfo(): InstalledPackageInfo {
   if (packageRootInfo) {
     cachedPackageInfo = packageRootInfo;
     return cachedPackageInfo;
-  }
-
-  try {
-    const resolvedPackageJsonPath = packageRequire.resolve(`${EVE_PACKAGE_NAME}/package.json`);
-    const resolvedPackageInfo = tryReadInstalledPackageInfo(
-      resolvedPackageJsonPath,
-      EVE_PACKAGE_NAME,
-    );
-
-    if (resolvedPackageInfo) {
-      cachedPackageInfo = resolvedPackageInfo;
-      return cachedPackageInfo;
-    }
-  } catch {
-    // Fall back to the package's development identity when the self package
-    // cannot be resolved from bundled runtime output.
   }
 
   cachedPackageInfo = {
