@@ -515,20 +515,22 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 export default channel;
 \`\`\`
 
-Set up X before you deploy:
+For a DM-only agent, keep \`bot.onDirectMessage\` and remove the \`bot.onNewMention\` and \`bot.onSubscribedMessage\` handlers.
+
+### Set up X authentication
 
 1. In the [X developer portal](https://developer.x.com), create a Project and App.
 2. Under **Keys and tokens**, copy the app's **API Key Secret** into \`X_CONSUMER_SECRET\`.
-3. Enable OAuth 2.0 user authentication with \`tweet.read\`, \`tweet.write\`, \`users.read\`, \`dm.read\`, \`dm.write\`, \`like.write\`, and \`offline.access\` scopes.
+3. Enable OAuth 2.0 user authentication with \`dm.read\` and \`dm.write\`. Also add \`users.read\`, or set \`X_USER_ID\` explicitly so the adapter can identify the bot account. Add \`tweet.read\` and \`tweet.write\` for public mentions and replies, \`like.write\` for likes, and \`media.write\` for image uploads. Add \`offline.access\` only when the adapter manages token refresh.
 4. Authorize the app as the bot account. Set \`X_CLIENT_ID\` and \`X_REFRESH_TOKEN\` so the adapter can refresh the short-lived OAuth 2.0 access token. In production, use a durable state adapter and set \`X_ENCRYPTION_KEY\` to a base64-encoded 32-byte key to encrypt persisted tokens. Alternatively, set a static OAuth 2.0 user token as \`X_USER_ACCESS_TOKEN\`.
 5. Deploy the agent. For a production deployment at \`https://your-domain.com\`, its X webhook URL is \`https://your-domain.com/eve/v1/x\`.
 
 See the [X adapter docs](https://chat-sdk.dev/adapters/official/x) for the adapter's complete credential reference.`,
-    configure: `After deployment:
+    configure: `### Set up the webhook
 
 1. In the [X developer console](https://console.x.com), register \`https://your-domain.com/eve/v1/x\` as the Activity API webhook URL, replacing the domain with your production deployment. The URL must be publicly accessible HTTPS without a port.
-2. Allow X to complete its CRC \`GET\` challenge. eve answers that challenge automatically, including X's hourly re-validation. Signed event deliveries arrive as \`POST\` requests on the same URL.
-3. Create subscriptions for \`post.mention.create\`, \`dm.received\`, and \`dm.sent\`. The DM events are private, so authorize the app as the bot account before creating those subscriptions.
+2. Allow X to complete its CRC \`GET\` challenge. The adapter answers it automatically, including later revalidation requests. Signed event deliveries arrive as \`POST\` requests on the same URL.
+3. Create a \`dm.received\` subscription for a DM-only agent. Add \`post.mention.create\` to receive public mentions. \`dm.sent\` is optional; subscribe to it only when your app needs events for outgoing DMs. These are private events, so authorize the app as the bot account before creating the subscriptions.
 
 The adapter owns X authentication, CRC handling, signature verification, and delivery; eve owns session dispatch and replies. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for routes and state options.`,
   },
