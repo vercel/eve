@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { WizardCancelledError } from "#setup/step.js";
 
 import { RegistryFlowFailedError, runRegistryFlow, type RegistryFlowDeps } from "./registry.js";
 
@@ -382,6 +383,123 @@ describe("runRegistryFlow", () => {
     expect(flowDeps.runDeployFlow).not.toHaveBeenCalled();
   });
 
+  it("returns to the category hub when post-install continuation is cancelled", async () => {
+    const answers = ["category:extension", "item:0", "add", "esc", "action:done"];
+    const fake = createFakePrompter({
+      single: () => {
+        const answer = answers.shift()!;
+        if (answer === "esc") throw new WizardCancelledError();
+        return answer;
+      },
+    });
+    const flowDeps = deps({
+      installRegistryItem: vi.fn(async () => ({
+        output: [],
+        setup: { facts: [], deploymentRequired: true as const },
+      })),
+    });
+
+    await expect(
+      runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: flowDeps }),
+    ).resolves.toMatchObject({ kind: "done", addedItems: ["extension/agent-browser"] });
+    expect(fake.selectMessages).toEqual([
+      "Add an integration",
+      "Browse extensions",
+      "agent-browser",
+      "What would you like to do next?",
+      "Add an integration",
+    ]);
+  });
+
+  it("returns to continuation options when deploy confirmation is cancelled", async () => {
+    const answers = ["category:extension", "item:0", "add", "deploy", "esc", "finish"];
+    const fake = createFakePrompter({
+      single: () => {
+        const answer = answers.shift()!;
+        if (answer === "esc") throw new WizardCancelledError();
+        return answer;
+      },
+    });
+    const flowDeps = deps({
+      detectDeployment: vi.fn(async () => ({ state: "linked" as const, projectId: "prj_1" })),
+      installRegistryItem: vi.fn(async () => ({
+        output: [],
+        setup: { facts: [], deploymentRequired: true as const },
+      })),
+    });
+
+    await expect(
+      runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: flowDeps }),
+    ).resolves.toMatchObject({ kind: "done", addedItems: ["extension/agent-browser"] });
+    expect(fake.selectMessages).toEqual([
+      "Add an integration",
+      "Browse extensions",
+      "agent-browser",
+      "What would you like to do next?",
+      "Deploy to prod?",
+      "What would you like to do next?",
+    ]);
+    expect(flowDeps.runDeployFlow).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["post-install continuation", ["category:extension", "item:0", "add"]],
+    ["deploy confirmation", ["category:extension", "item:0", "add", "deploy"]],
+  ])("preserves external aborts during %s", async (_case, answers) => {
+    const controller = new AbortController();
+    const fake = createFakePrompter({
+      single: () => {
+        const answer = answers.shift();
+        if (answer !== undefined) return answer;
+        controller.abort();
+        throw new WizardCancelledError();
+      },
+    });
+    const flowDeps = deps({
+      detectDeployment: vi.fn(async () => ({ state: "linked" as const, projectId: "prj_1" })),
+      installRegistryItem: vi.fn(async () => ({
+        output: [],
+        setup: { facts: [], deploymentRequired: true as const },
+      })),
+    });
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        signal: controller.signal,
+        deps: flowDeps,
+      }),
+    ).resolves.toEqual({ kind: "cancelled" });
+    expect(flowDeps.runDeployFlow).not.toHaveBeenCalled();
+  });
+
+  it("returns to continuation options when deployment is cancelled", async () => {
+    const answers = ["category:extension", "item:0", "add", "deploy", "yes", "finish"];
+    const fake = createFakePrompter({ single: () => answers.shift()! });
+    const flowDeps = deps({
+      detectDeployment: vi.fn(async () => ({ state: "linked" as const, projectId: "prj_1" })),
+      installRegistryItem: vi.fn(async () => ({
+        output: [],
+        setup: { facts: [], deploymentRequired: true as const },
+      })),
+      runDeployFlow: vi.fn(async () => ({ kind: "cancelled" as const })),
+    });
+
+    await expect(
+      runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: flowDeps }),
+    ).resolves.toMatchObject({ kind: "done", addedItems: ["extension/agent-browser"] });
+    expect(fake.selectMessages).toEqual([
+      "Add an integration",
+      "Browse extensions",
+      "agent-browser",
+      "What would you like to do next?",
+      "Deploy to prod?",
+      "What would you like to do next?",
+    ]);
+    expect(flowDeps.runDeployFlow).toHaveBeenCalledOnce();
+  });
+
   it("preserves earlier setup results when a later item fails", async () => {
     const answers = [
       "category:channel",
@@ -453,5 +571,68 @@ describe("runRegistryFlow", () => {
       "Browse channels",
       "Add an integration",
     ]);
+  });
+
+  it("returns to the category hub when a registry list is cancelled", async () => {
+    const answers = ["category:channel", "esc", "action:done"];
+    const prompts: unknown[] = [];
+    const fake = createFakePrompter({
+      single: (options) => {
+        prompts.push(options);
+        const answer = answers.shift()!;
+        if (answer === "esc") throw new WizardCancelledError();
+        return answer;
+      },
+    });
+
+    await expect(
+      runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: deps() }),
+    ).resolves.toEqual({ kind: "done", addedItems: [], items: [], facts: [], output: [] });
+
+    expect(fake.selectMessages).toEqual([
+      "Add an integration",
+      "Browse channels",
+      "Add an integration",
+    ]);
+    expect(prompts[2]).toMatchObject({ initialValue: "category:channel" });
+  });
+
+  it("returns to the registry list when item inspection is cancelled", async () => {
+    const answers = ["category:extension", "item:0", "esc", "action:back", "action:done"];
+    const prompts: unknown[] = [];
+    const fake = createFakePrompter({
+      single: (options) => {
+        prompts.push(options);
+        const answer = answers.shift()!;
+        if (answer === "esc") throw new WizardCancelledError();
+        return answer;
+      },
+    });
+
+    await expect(
+      runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: deps() }),
+    ).resolves.toEqual({ kind: "done", addedItems: [], items: [], facts: [], output: [] });
+
+    expect(fake.selectMessages).toEqual([
+      "Add an integration",
+      "Browse extensions",
+      "agent-browser",
+      "Browse extensions",
+      "Add an integration",
+    ]);
+    expect(prompts[3]).toMatchObject({ initialValue: "item:0" });
+  });
+
+  it("cancels the flow when the category hub is cancelled", async () => {
+    const fake = createFakePrompter({
+      single: () => {
+        throw new WizardCancelledError();
+      },
+    });
+
+    await expect(
+      runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: deps() }),
+    ).resolves.toEqual({ kind: "cancelled" });
+    expect(fake.selectMessages).toEqual(["Add an integration"]);
   });
 });

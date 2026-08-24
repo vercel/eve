@@ -229,7 +229,14 @@ async function inspectItem(
     const description =
       typeof manifest.description === "string" ? manifest.description : item.description;
     if (description !== undefined) request.description = description;
-    const action = await prompter.select(request);
+    let action: string;
+    try {
+      action = await prompter.select(request);
+    } catch (error) {
+      if (!(error instanceof WizardCancelledError)) throw error;
+      if (signal?.aborted) throw error;
+      return { kind: "back" };
+    }
     if (action === "back") return { kind: "back" };
     const spinner = prompter.log.spinner?.(`Installing ${itemLabel(item)} and dependencies…`);
     try {
@@ -292,6 +299,7 @@ export async function runRegistryFlow(input: {
   };
   let notices: SelectNotice[] = [];
   const session = createRegistrySession(deps);
+  let nextCategory: RegistryRow | undefined;
 
   try {
     while (true) {
@@ -311,59 +319,73 @@ export async function runRegistryFlow(input: {
         options: categoryRows(),
         hintLayout: "inline",
         notices,
+        initialValue: nextCategory,
       });
       notices = [];
       if (selectedCategory === DONE) return session.result();
+      nextCategory = selectedCategory;
 
       const categoryItems = itemsForCategory(catalog.items, selectedCategory);
-      const rows = itemRows(categoryItems);
-      rows.push({ value: BACK, label: "Back", trailingAction: true });
-      const selected = await input.prompter.select<RegistryRow>({
-        message: categoryFor(selectedCategory)?.browseLabel ?? "Browse integrations",
-        options: rows,
-        search: true,
-        placeholder: "Search integrations or enter an item address",
-        searchAction: {
-          label: (query) => `Add “${query}”`,
-          value: (query) => `${ADDRESS_PREFIX}${query.trim()}`,
-        },
-        hintLayout: "inline",
-      });
-      if (selected === BACK) continue;
-      const resolved = selected.startsWith(ADDRESS_PREFIX)
-        ? await resolveAddressItem(
-            input.prompter,
-            deps,
-            input.appRoot,
-            selected.slice(ADDRESS_PREFIX.length),
-          )
-        : { item: categoryItems[Number(selected.slice("item:".length))] };
-      if (resolved.item === undefined) {
-        throw new Error("The selected registry item is no longer available.");
-      }
-      const inspected = await inspectItem(
-        input.prompter,
-        deps,
-        input.appRoot,
-        resolved.item,
-        "manifest" in resolved ? resolved.manifest : undefined,
-        input.signal,
-      );
-      if (inspected.kind !== "added") continue;
+      let nextItem: RegistryRow | undefined;
+      while (true) {
+        const rows = itemRows(categoryItems);
+        rows.push({ value: BACK, label: "Back", trailingAction: true });
+        let selected: RegistryRow;
+        try {
+          selected = await input.prompter.select<RegistryRow>({
+            message: categoryFor(selectedCategory)?.browseLabel ?? "Browse integrations",
+            options: rows,
+            search: true,
+            placeholder: "Search integrations or enter an item address",
+            searchAction: {
+              label: (query) => `Add “${query}”`,
+              value: (query) => `${ADDRESS_PREFIX}${query.trim()}`,
+            },
+            hintLayout: "inline",
+            initialValue: nextItem,
+          });
+        } catch (error) {
+          if (!(error instanceof WizardCancelledError)) throw error;
+          if (input.signal?.aborted) throw error;
+          break;
+        }
+        if (selected === BACK) break;
+        nextItem = selected;
+        const resolved = selected.startsWith(ADDRESS_PREFIX)
+          ? await resolveAddressItem(
+              input.prompter,
+              deps,
+              input.appRoot,
+              selected.slice(ADDRESS_PREFIX.length),
+            )
+          : { item: categoryItems[Number(selected.slice("item:".length))] };
+        if (resolved.item === undefined) {
+          throw new Error("The selected registry item is no longer available.");
+        }
+        const inspected = await inspectItem(
+          input.prompter,
+          deps,
+          input.appRoot,
+          resolved.item,
+          "manifest" in resolved ? resolved.manifest : undefined,
+          input.signal,
+        );
+        if (inspected.kind !== "added") continue;
 
-      session.add(
-        resolved.item.address,
-        itemLabel(resolved.item),
-        inspected.output,
-        inspected.setup,
-      );
-      const next = await session.continueAfterInstall({
-        appRoot: input.appRoot,
-        prompter: input.prompter,
-        signal: input.signal,
-      });
-      if (next === "add-more") continue;
-      return next;
+        session.add(
+          resolved.item.address,
+          itemLabel(resolved.item),
+          inspected.output,
+          inspected.setup,
+        );
+        const next = await session.continueAfterInstall({
+          appRoot: input.appRoot,
+          prompter: input.prompter,
+          signal: input.signal,
+        });
+        if (next === "add-more") break;
+        return next;
+      }
     }
   } catch (error) {
     if (error instanceof WizardCancelledError) return { kind: "cancelled" };
