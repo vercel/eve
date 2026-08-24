@@ -3,6 +3,7 @@ import { createScheduleRegistrations } from "#runtime/schedules/register.js";
 import { resolveSchedules } from "#runtime/schedules/resolve-schedule.js";
 import type { ResolvedScheduleDefinition } from "#runtime/types.js";
 import type { ApplicationBuildWorkspace } from "#internal/application/build-workspace.js";
+import { resolveDeploymentSource } from "#internal/application/deployment-source.js";
 import { join } from "node:path";
 import {
   type BuiltInWorkflowWorldTarget,
@@ -120,6 +121,7 @@ export async function prepareProductionApplicationHost(
   const compiledArtifacts = await writeCompiledArtifactsFiles({
     compileResult,
     defaultWorkflowWorld: resolveProductionWorkflowWorldTarget(),
+    deploymentSource: resolveDeploymentSource({ appRoot: workspace.appRoot }),
     outDir: workspace.host.artifactsDir,
   });
 

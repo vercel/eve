@@ -5,10 +5,12 @@ export {
   type AgentStaticModelDefinition,
   type DefinedAgent,
   type DynamicLocalSubagentDefinition,
+  type DeploymentSource,
   type DynamicSubagentDefinition,
   type RemoteAgentDefinition,
   type RemoteAgentDefinitionInput,
   defineAgent,
   defineDynamic,
   defineRemoteAgent,
+  getDeploymentSource,
 } from "../../src/public/index.ts";

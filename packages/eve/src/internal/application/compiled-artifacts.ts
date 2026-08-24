@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { CompileMetadata } from "#compiler/artifacts.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { stringifyEsmImportSpecifier } from "#internal/application/import-specifier.js";
+import type { DeploymentSource } from "#public/deployment/index.js";
 import {
   resolvePackageCompiledFilePath,
   resolvePackageSourceFilePath,
@@ -73,6 +74,7 @@ export interface GeneratedCompiledArtifactsFiles {
 export async function writeCompiledArtifactsFiles(input: {
   compileResult: CompileAgentResult;
   defaultWorkflowWorld: BuiltInWorkflowWorldTarget;
+  deploymentSource: DeploymentSource | null;
   outDir: string;
 }): Promise<GeneratedCompiledArtifactsFiles> {
   const bootstrapPath = join(input.outDir, "compiled-artifacts-bootstrap.mjs");
@@ -90,6 +92,7 @@ export async function writeCompiledArtifactsFiles(input: {
     bootstrapPath,
     createCompiledArtifactsBootstrapSource({
       compileResult: input.compileResult,
+      deploymentSource: input.deploymentSource,
       installModulePath: resolvePackageSourceFilePath("src/runtime/loaders/bundled-artifacts.ts"),
       metadata: input.compileResult.metadata,
       moduleMapImportPath: moduleMapPath,
@@ -291,6 +294,7 @@ function createDevelopmentCompiledArtifactsBootstrapSource(agentName: string): s
 
 export function createCompiledArtifactsBootstrapSource(input: {
   compileResult: CompileAgentResult;
+  deploymentSource: DeploymentSource | null;
   installModulePath: string;
   metadata: CompileMetadata;
   moduleMapImportPath: string;
@@ -313,6 +317,7 @@ export function createCompiledArtifactsBootstrapSource(input: {
     "",
     "export function installCompiledArtifactsBootstrap() {",
     "  installBundledCompiledArtifacts({",
+    `    deploymentSource: ${JSON.stringify(input.deploymentSource)},`,
     "    manifest,",
     "    metadata,",
     "    moduleMap,",

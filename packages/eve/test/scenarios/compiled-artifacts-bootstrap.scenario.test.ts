@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { compileAgent } from "../../src/compiler/compile-agent.js";
 import { writeCompiledArtifactsFiles } from "../../src/internal/application/compiled-artifacts.js";
 import { resolvePackageSourceFilePath } from "../../src/internal/application/package.js";
+import { getDeploymentSource } from "../../src/public/deployment/index.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "../../src/runtime/compiled-artifacts-source.js";
 import { loadCompileMetadata } from "../../src/runtime/loaders/compile-metadata.js";
 import {
@@ -38,9 +39,15 @@ describe("writeCompiledArtifactsFiles", () => {
     const compileResult = await compileAgent({
       startPath: appRoot,
     });
+    const deploymentSource = {
+      repository: "github.com/acme/support-agent",
+      revision: "0123456789abcdef0123456789abcdef01234567",
+      rootDirectory: ".",
+    };
     const generatedArtifacts = await writeCompiledArtifactsFiles({
       compileResult,
       defaultWorkflowWorld: "local",
+      deploymentSource,
       outDir,
     });
     const bootstrapSource = await readFile(generatedArtifacts.bootstrapPath, "utf8");
@@ -60,6 +67,7 @@ describe("writeCompiledArtifactsFiles", () => {
           compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
         }),
       ).resolves.toEqual(compileResult.metadata);
+      expect(getDeploymentSource()).toEqual(deploymentSource);
     });
   });
 
@@ -84,6 +92,7 @@ describe("writeCompiledArtifactsFiles", () => {
     const generatedArtifacts = await writeCompiledArtifactsFiles({
       compileResult,
       defaultWorkflowWorld: "local",
+      deploymentSource: null,
       outDir,
     });
     const bootstrapSource = await readFile(generatedArtifacts.bootstrapPath, "utf8");
@@ -163,6 +172,7 @@ describe("writeCompiledArtifactsFiles", () => {
     const generatedArtifacts = await writeCompiledArtifactsFiles({
       compileResult,
       defaultWorkflowWorld: "local",
+      deploymentSource: null,
       outDir,
     });
     const instrumentationPluginPath = generatedArtifacts.instrumentationPluginPath;
@@ -236,6 +246,7 @@ describe("writeCompiledArtifactsFiles", () => {
     const generatedArtifacts = await writeCompiledArtifactsFiles({
       compileResult,
       defaultWorkflowWorld: "local",
+      deploymentSource: null,
       outDir,
     });
     const instrumentationPluginPath = generatedArtifacts.instrumentationPluginPath;
@@ -269,6 +280,7 @@ describe("writeCompiledArtifactsFiles", () => {
     const generatedArtifacts = await writeCompiledArtifactsFiles({
       compileResult,
       defaultWorkflowWorld: "local",
+      deploymentSource: null,
       outDir,
     });
     const instrumentationPluginPath = generatedArtifacts.instrumentationPluginPath;
@@ -316,6 +328,7 @@ describe("writeCompiledArtifactsFiles", () => {
     const generatedArtifacts = await writeCompiledArtifactsFiles({
       compileResult,
       defaultWorkflowWorld: "local",
+      deploymentSource: null,
       outDir,
     });
 

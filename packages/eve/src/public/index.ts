@@ -20,6 +20,7 @@ export {
   defineDynamic,
 } from "#public/definitions/agent.js";
 export type { DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";
+export { getDeploymentSource, type DeploymentSource } from "#public/deployment/index.js";
 export {
   type RemoteAgentDefinition,
   type RemoteAgentDefinitionInput,

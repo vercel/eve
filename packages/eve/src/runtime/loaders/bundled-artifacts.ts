@@ -1,6 +1,7 @@
 import type { CompileMetadata } from "#compiler/artifacts.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { DeploymentSource } from "#public/deployment/index.js";
 import {
   createRuntimeSession,
   getActiveRuntimeSession,
@@ -12,6 +13,7 @@ import {
  * embedded directly into the server bundle.
  */
 export interface BundledCompiledArtifacts {
+  deploymentSource?: DeploymentSource | null;
   manifest: CompiledAgentManifest;
   metadata?: CompileMetadata;
   moduleMap: CompiledModuleMap;
@@ -33,6 +35,7 @@ export interface WithBundledCompiledArtifactsInput extends BundledCompiledArtifa
  */
 export function installBundledCompiledArtifacts(input: BundledCompiledArtifacts): void {
   getActiveRuntimeSession().compiledArtifacts = {
+    deploymentSource: input.deploymentSource,
     manifest: input.manifest,
     metadata: input.metadata,
     moduleMap: input.moduleMap,
