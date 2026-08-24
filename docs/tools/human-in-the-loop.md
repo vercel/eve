@@ -71,10 +71,10 @@ export default defineTool({
   approval: {
     request: always(),
     response: ({ responder }) => {
-      // The Slack channel authenticates the responder and includes the workspace
-      // and user IDs, for example: "slack:T012AB3CD:U045EF6GH".
-      // This example allows one configured Slack user; larger apps can look up membership here.
-      const canApprove = responder.principalId === process.env.SLACK_REFUND_APPROVER_PRINCIPAL_ID;
+      // The Slack channel authenticates the responder and includes the workspace and user IDs.
+      // Larger apps can look up approver membership here instead.
+      const approvers = ["slack:T012AB3CD:U045EF6GH", "slack:T012AB3CD:U078JK9LM"];
+      const canApprove = approvers.includes(responder.principalId);
 
       return canApprove
         ? { status: "allowed" }
