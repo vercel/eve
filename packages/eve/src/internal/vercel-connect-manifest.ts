@@ -1,3 +1,4 @@
+import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { JsonObject } from "#shared/json.js";
 
 export const VERCEL_CONNECT_MANIFEST_FILENAME = "vercel-connect-manifest.json";
@@ -30,6 +31,85 @@ export interface VercelConnectManifest {
   readonly schemaVersion: typeof VERCEL_CONNECT_MANIFEST_SCHEMA_VERSION;
   readonly generator: { readonly name: "eve"; readonly version: string };
   readonly requirements: readonly VercelConnectRequirement[];
+}
+
+export function buildVercelConnectRequirements(manifest: {
+  readonly connections: readonly Pick<
+    CompiledAgentManifest["connections"][number],
+    "connectionName" | "logicalPath" | "protocol" | "url" | "vercelConnect"
+  >[];
+  readonly channelRoutes: {
+    readonly effective: readonly Pick<
+      CompiledAgentManifest["channelRoutes"]["effective"][number],
+      "logicalPath" | "method" | "name" | "urlPath" | "vercelConnect"
+    >[];
+  };
+}): readonly VercelConnectRequirement[] {
+  return [
+    ...manifest.connections.flatMap((connection) => {
+      const vercelConnect = connection.vercelConnect;
+      if (
+        vercelConnect?.connectorType === undefined ||
+        vercelConnect.principalTypes === undefined
+      ) {
+        return [];
+      }
+      return [
+        {
+          target: { mode: "direct" as const, locator: vercelConnect.connector },
+          connector: { type: vercelConnect.connectorType },
+          access: { principalTypes: vercelConnect.principalTypes },
+          resource: { protocol: connection.protocol, url: connection.url },
+          uses: [
+            {
+              kind: "connection" as const,
+              name: connection.connectionName,
+              logicalPath: connection.logicalPath,
+            },
+          ],
+        },
+      ];
+    }),
+    ...manifest.channelRoutes.effective.flatMap((channel) => {
+      const vercelConnect = channel.vercelConnect;
+      if (
+        vercelConnect?.connectorType === undefined ||
+        vercelConnect.principalTypes === undefined
+      ) {
+        return [];
+      }
+      return [
+        {
+          target: { mode: "direct" as const, locator: vercelConnect.connector },
+          connector: { type: vercelConnect.connectorType },
+          access: { principalTypes: vercelConnect.principalTypes },
+          triggers: [{ method: channel.method, path: channel.urlPath }],
+          uses: [
+            { kind: "channel" as const, name: channel.name, logicalPath: channel.logicalPath },
+          ],
+        },
+      ];
+    }),
+  ];
+}
+
+export async function emitVercelConnectManifest(input: {
+  readonly generatorVersion: string;
+  readonly manifest: CompiledAgentManifest;
+  readonly outputDirectory: string;
+}): Promise<void> {
+  const manifest = createVercelConnectManifest({
+    generatorVersion: input.generatorVersion,
+    requirements: buildVercelConnectRequirements(input.manifest),
+  });
+  if (manifest === undefined) return;
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  await mkdir(input.outputDirectory, { recursive: true });
+  await writeFile(
+    join(input.outputDirectory, VERCEL_CONNECT_MANIFEST_FILENAME),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
 }
 
 export function createVercelConnectManifest(input: {
