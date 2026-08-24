@@ -449,6 +449,39 @@ describe("SlackThread.refresh", () => {
     expect("metadata" in firstMessage).toBe(false);
   });
 
+  it("extracts Block Kit and legacy attachment content for text-less replies", async () => {
+    vi.unstubAllGlobals();
+    mock = buildFetchMock([
+      {
+        text: "",
+        ts: "1700000000.123456",
+        thread_ts: "1700000000.000001",
+        bot_id: "B01",
+        blocks: [
+          { type: "section", text: { type: "mrkdwn", text: "*Alert:* Service latency is high" } },
+          { type: "section", fields: [{ type: "mrkdwn", text: "Region: us-east-1" }] },
+        ],
+        attachments: [{ title: "Runbook", text: "Restart the pods." }],
+      },
+    ]);
+    vi.stubGlobal("fetch", mock.fetch);
+
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1700000000.000001",
+      teamId: undefined,
+    });
+
+    await thread.refresh();
+
+    const message = thread.recentMessages[0]!;
+    expect(message.markdown).toContain("Service latency is high");
+    expect(message.markdown).toContain("Region: us-east-1");
+    expect(message.markdown).toContain("Runbook");
+    expect(message.markdown).toContain("Restart the pods.");
+  });
+
   it("shares one conversations.replies request across overlapping refreshes", async () => {
     let resolveReplies!: (response: Response) => void;
     const replies = new Promise<Response>((resolve) => {
