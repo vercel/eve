@@ -409,6 +409,12 @@ importers:
         specifier: 'catalog:'
         version: 7.0.2
 
+  apps/fixtures/embedded-triage-cli:
+    dependencies:
+      eve:
+        specifier: workspace:*
+        version: link:../../../packages/eve
+
   apps/fixtures/weather-agent:
     dependencies:
       eve:

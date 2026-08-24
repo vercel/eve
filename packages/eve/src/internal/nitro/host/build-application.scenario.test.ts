@@ -194,6 +194,51 @@ describe("buildApplication", () => {
     vi.unstubAllEnvs();
   });
 
+  it("builds from a resolved root with an injected workspace compiler", async () => {
+    vi.stubEnv("VERCEL", "");
+    const appRoot = await createScratchDirectory("eve-build-application-injected-");
+    const compile = vi.fn(async () => createPreparedHost(appRoot).compileResult);
+
+    prepareProductionApplicationHostMock.mockImplementationOnce(
+      async (
+        workspace: ApplicationBuildWorkspace,
+        injectedCompile: (input: {
+          artifactLocations: { publishedRoot: string; writeRoot: string };
+        }) => Promise<PreparedApplicationHost["compileResult"]>,
+      ) => {
+        await mkdir(join(workspace.compiler.artifactsDir, "compile"), { recursive: true });
+        await injectedCompile({
+          artifactLocations: {
+            publishedRoot: join(workspace.publication.output.finalDir, ".eve"),
+            writeRoot: workspace.compiler.artifactsDir,
+          },
+        });
+        return createPreparedHost(workspace.appRoot);
+      },
+    );
+    createProductionApplicationNitroMock.mockImplementationOnce(
+      async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) =>
+        createNitroStub(options.outputDir),
+    );
+
+    const { buildApplicationFromResolvedRoot } =
+      await import("#internal/nitro/host/build-application.js");
+    const result = await buildApplicationFromResolvedRoot(
+      appRoot,
+      DEPLOYABLE_BUILD_OPTIONS,
+      compile,
+    );
+
+    expect(result).toBe(join(appRoot, ".output"));
+    expect(resolveDiscoveryProjectMock).not.toHaveBeenCalled();
+    expect(compile).toHaveBeenCalledWith({
+      artifactLocations: {
+        publishedRoot: join(appRoot, ".output", ".eve"),
+        writeRoot: expect.stringContaining(join(appRoot, ".eve", "builds")),
+      },
+    });
+  });
+
   it("builds without publishing stable runtime compiler artifacts", async () => {
     vi.stubEnv("VERCEL", "");
     const appRoot = await createScratchDirectory("eve-build-application-single-");

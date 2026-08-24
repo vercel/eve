@@ -104,7 +104,7 @@ interface WriteCompilerArtifactsInput {
 /**
  * Result of writing compiler-owned artifacts.
  */
-interface WriteCompilerArtifactsResult {
+export interface WriteCompilerArtifactsResult {
   compiledManifest: CompiledAgentManifest;
   diagnosticsArtifact: DiscoveryDiagnosticsArtifact;
   metadata: CompileMetadata;
@@ -198,25 +198,25 @@ export function createCompileMetadata(input: {
   };
 }
 
-/** Writes compiler-owned artifacts and records their stable published locations. */
-export async function writeCompilerArtifacts(
-  input: WriteCompilerArtifactsInput,
-): Promise<WriteCompilerArtifactsResult> {
+/** Writes an already-compiled manifest with normal production artifact metadata. */
+export async function writePrecompiledCompilerArtifacts(input: {
+  readonly appRoot: string;
+  readonly artifactLocations: CompilerArtifactLocations;
+  readonly compiledManifest: CompiledAgentManifest;
+  readonly diagnostics: readonly DiscoverDiagnostic[];
+  readonly discoveryManifest: AgentSourceManifest;
+}): Promise<WriteCompilerArtifactsResult> {
   const paths = resolveCompilerArtifactPathsAt(input.appRoot, input.artifactLocations.writeRoot);
   const publishedPaths = resolveCompilerArtifactPathsAt(
     input.appRoot,
     input.artifactLocations.publishedRoot,
   );
   const diagnosticsArtifact = createDiscoveryDiagnosticsArtifact(input.diagnostics);
-  const compiledManifest = await materializeWorkspaceResources({
-    compileDirectoryPath: paths.compileDirectoryPath,
-    manifest: await compileAgentManifest(input.manifest),
-  });
-  const compiledManifestJson = serializeArtifactJson(compiledManifest);
-  const discoveryManifestJson = serializeArtifactJson(input.manifest);
+  const compiledManifestJson = serializeArtifactJson(input.compiledManifest);
+  const discoveryManifestJson = serializeArtifactJson(input.discoveryManifest);
   const diagnosticsArtifactJson = serializeArtifactJson(diagnosticsArtifact);
   const moduleMapSource = createCompiledModuleMapSource({
-    manifest: compiledManifest,
+    manifest: input.compiledManifest,
     moduleMapPath: publishedPaths.moduleMapPath,
   });
   const metadata = createCompileMetadata({
@@ -227,29 +227,45 @@ export async function writeCompilerArtifacts(
     moduleMapSource,
     paths: publishedPaths,
   });
-  const metadataJson = serializeArtifactJson(metadata);
 
-  await mkdir(paths.discoveryDirectoryPath, {
-    recursive: true,
-  });
-  await mkdir(paths.compileDirectoryPath, {
-    recursive: true,
-  });
+  await Promise.all([
+    mkdir(paths.discoveryDirectoryPath, { recursive: true }),
+    mkdir(paths.compileDirectoryPath, { recursive: true }),
+  ]);
   await Promise.all([
     writeFile(paths.compiledManifestPath, compiledManifestJson),
     writeFile(paths.diagnosticsPath, diagnosticsArtifactJson),
     writeFile(paths.discoveryManifestPath, discoveryManifestJson),
     writeFile(paths.moduleMapPath, moduleMapSource),
-    writeFile(paths.compileMetadataPath, metadataJson),
+    writeFile(paths.compileMetadataPath, serializeArtifactJson(metadata)),
   ]);
 
   return {
-    compiledManifest,
+    compiledManifest: input.compiledManifest,
     diagnosticsArtifact,
     metadata,
     moduleMapSource,
     paths,
   };
+}
+
+/** Writes compiler-owned artifacts and records their stable published locations. */
+export async function writeCompilerArtifacts(
+  input: WriteCompilerArtifactsInput,
+): Promise<WriteCompilerArtifactsResult> {
+  const paths = resolveCompilerArtifactPathsAt(input.appRoot, input.artifactLocations.writeRoot);
+  const compiledManifest = await materializeWorkspaceResources({
+    compileDirectoryPath: paths.compileDirectoryPath,
+    manifest: await compileAgentManifest(input.manifest),
+  });
+
+  return await writePrecompiledCompilerArtifacts({
+    appRoot: input.appRoot,
+    artifactLocations: input.artifactLocations,
+    compiledManifest,
+    diagnostics: input.diagnostics,
+    discoveryManifest: input.manifest,
+  });
 }
 
 function createContentHash(content: string): string {

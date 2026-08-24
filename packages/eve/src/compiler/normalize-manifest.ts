@@ -40,11 +40,18 @@ import { compileToolEntry } from "#compiler/normalize-tool.js";
  */
 export async function compileAgentManifest(
   manifest: AgentSourceManifest,
+  options: { readonly agentConfigDefinition?: unknown } = {},
 ): Promise<CompiledAgentManifest> {
   const context: ManifestCompileContext = {
     modelCatalog: createCompiledRuntimeModelCatalogLoader(manifest.appRoot),
   };
-  const compiledNode = await compileAgentNodeManifest(manifest, context);
+  const compiledNode = await compileAgentNodeManifest(
+    manifest,
+    context,
+    Object.hasOwn(options, "agentConfigDefinition")
+      ? { agentConfigDefinition: options.agentConfigDefinition }
+      : {},
+  );
   const subagentGraph = await compileSubagentGraph({
     appRoot: manifest.appRoot,
     compileAgentNodeManifest,

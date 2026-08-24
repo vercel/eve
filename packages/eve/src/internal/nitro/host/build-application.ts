@@ -34,7 +34,10 @@ import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-
 import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extension.js";
 import { copyHostMiddlewareFunctions } from "#internal/nitro/host/copy-host-middleware.js";
 import { normalizeVercelServiceCrons } from "#internal/nitro/host/normalize-vercel-service-crons.js";
-import { prepareProductionApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
+import {
+  prepareProductionApplicationHost,
+  type ProductionApplicationCompiler,
+} from "#internal/nitro/host/prepare-application-host.js";
 import { runVercelBuildPrewarm } from "#internal/nitro/host/vercel-build-prewarm.js";
 import type { ApplicationBuildOptions } from "#internal/nitro/host/types.js";
 import { findClosestVercelOutputDirectory } from "#shared/vercel-output-directory.js";
@@ -339,11 +342,33 @@ export async function buildApplication(
   const project = await measureBuildPhase(profiler, "project.resolve", () =>
     resolveDiscoveryProject(rootDir),
   );
+  return buildResolvedApplication(project.appRoot, options, undefined, profiler, profileOutputPath);
+}
+
+/**
+ * Builds an application whose root and compiler have already been resolved by
+ * an internal authoring adapter.
+ */
+export async function buildApplicationFromResolvedRoot(
+  appRoot: string,
+  options: ApplicationBuildOptions,
+  compile: ProductionApplicationCompiler,
+): Promise<string> {
+  const profileOutputPath =
+    options.profileOutputPath === undefined ? undefined : resolve(options.profileOutputPath);
+  const profiler = profileOutputPath === undefined ? undefined : new ApplicationBuildProfiler();
+  return buildResolvedApplication(appRoot, options, compile, profiler, profileOutputPath);
+}
+
+async function buildResolvedApplication(
+  appRoot: string,
+  options: ApplicationBuildOptions,
+  compile: ProductionApplicationCompiler | undefined,
+  profiler: ApplicationBuildProfiler | undefined,
+  profileOutputPath: string | undefined,
+): Promise<string> {
   const workspace = await measureBuildPhase(profiler, "workspace.create", () =>
-    createApplicationBuildWorkspace(
-      project.appRoot,
-      options.vercelServiceOutput?.serviceOutputDirectory,
-    ),
+    createApplicationBuildWorkspace(appRoot, options.vercelServiceOutput?.serviceOutputDirectory),
   );
 
   // A recoverable publication failure leaves the lock journal pointing at
@@ -352,7 +377,7 @@ export async function buildApplication(
   let preserveWorkspaceForRecovery = false;
   let outputDirectory: string;
   try {
-    outputDirectory = await buildApplicationInWorkspace(workspace, options, profiler);
+    outputDirectory = await buildApplicationInWorkspace(workspace, options, profiler, compile);
   } catch (error) {
     preserveWorkspaceForRecovery = error instanceof RecoverablePublicationError;
     throw error;
@@ -379,9 +404,10 @@ async function buildApplicationInWorkspace(
   workspace: ApplicationBuildWorkspace,
   options: ApplicationBuildOptions,
   profiler: ApplicationBuildProfiler | undefined,
+  compile: ProductionApplicationCompiler | undefined,
 ): Promise<string> {
   const preparedHost = await measureBuildPhase(profiler, "host.prepare", () =>
-    prepareProductionApplicationHost(workspace),
+    prepareProductionApplicationHost(workspace, compile),
   );
   const isVercelBuild = Boolean(process.env.VERCEL);
 

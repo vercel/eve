@@ -1,0 +1,14 @@
+{
+  "name": "embedded-triage-cli",
+  "private": true,
+  "bin": {
+    "embedded-triage": "./bin/triage.mjs"
+  },
+  "type": "module",
+  "scripts": {
+    "embedded-triage": "node --experimental-strip-types --conditions=eve-source --import ./bin/eve-source-loader.mjs ./bin/triage.mjs"
+  },
+  "dependencies": {
+    "eve": "workspace:*"
+  }
+}

@@ -161,8 +161,15 @@
       "import": "./dist/src/public/sandbox/vercel.js",
       "default": "./dist/src/public/sandbox/vercel.js"
     },
+    "./embedded": {
+      "types": "./dist/src/experimental/embedded/index.d.ts",
+      "eve-source": "./src/experimental/embedded/index.ts",
+      "import": "./dist/src/experimental/embedded/index.js",
+      "default": "./dist/src/experimental/embedded/index.js"
+    },
     "./evals": {
       "types": "./dist/src/evals/index.d.ts",
+      "eve-source": "./src/evals/index.ts",
       "import": "./dist/src/evals/index.js",
       "default": "./dist/src/evals/index.js"
     },

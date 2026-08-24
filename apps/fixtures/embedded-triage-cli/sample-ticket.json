@@ -1,0 +1,5 @@
+{
+  "id": "SUP-1042",
+  "subject": "Cannot sign in after password reset",
+  "body": "I reset my password this morning, but the new password is rejected every time I try to sign in."
+}

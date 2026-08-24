@@ -36,3 +36,21 @@ export function installEveWorkflowQueueNamespace(agentName: string): string {
   process.env[WORKFLOW_QUEUE_NAMESPACE_ENV] = namespace;
   return namespace;
 }
+
+/** Restores a namespace captured before an invocation-owned Workflow runtime. */
+export function restoreEveWorkflowQueueNamespace(
+  namespace: string | undefined,
+  options: { readonly ifCurrent?: string } = {},
+): void {
+  if (
+    options.ifCurrent !== undefined &&
+    process.env[WORKFLOW_QUEUE_NAMESPACE_ENV] !== options.ifCurrent
+  ) {
+    return;
+  }
+  if (namespace === undefined) {
+    delete process.env[WORKFLOW_QUEUE_NAMESPACE_ENV];
+  } else {
+    process.env[WORKFLOW_QUEUE_NAMESPACE_ENV] = namespace;
+  }
+}

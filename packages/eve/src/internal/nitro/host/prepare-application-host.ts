@@ -1,3 +1,4 @@
+import type { CompilerArtifactLocations } from "#compiler/artifacts.js";
 import { compileAgentInWorkspace, type CompileAgentResult } from "#compiler/compile-agent.js";
 import { createScheduleRegistrations } from "#runtime/schedules/register.js";
 import { resolveSchedules } from "#runtime/schedules/resolve-schedule.js";
@@ -105,15 +106,23 @@ export async function prepareDevelopmentApplicationHost(
  * locations point at the published output (`<finalDir>/.eve`), where
  * publication later installs them.
  */
+export type ProductionApplicationCompiler = (input: {
+  readonly artifactLocations: CompilerArtifactLocations;
+}) => Promise<CompileAgentResult>;
+
 export async function prepareProductionApplicationHost(
   workspace: ApplicationBuildWorkspace,
+  compile: ProductionApplicationCompiler = ({ artifactLocations }) =>
+    compileAgentInWorkspace({
+      artifactLocations,
+      startPath: workspace.appRoot,
+    }),
 ): Promise<PreparedApplicationHost> {
-  const compileResult = await compileAgentInWorkspace({
+  const compileResult = await compile({
     artifactLocations: {
       publishedRoot: join(workspace.publication.output.finalDir, ".eve"),
       writeRoot: workspace.compiler.artifactsDir,
     },
-    startPath: workspace.appRoot,
   });
   const schedules = await resolveSchedules({ manifest: compileResult.manifest });
 

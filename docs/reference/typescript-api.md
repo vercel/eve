@@ -3,7 +3,7 @@ title: "TypeScript API Reference"
 description: "The define* helpers, the runtime ctx, and where each one is imported from."
 ---
 
-This is the public surface of the `eve` package: the `define*` helpers you author with, the `ctx` they receive at runtime, and the import path for each. The full contract lives in `packages/eve/src/public/index.ts`; anything not exported there is a framework internal.
+This is the supported public surface of the `eve` package: the `define*` helpers you author with, the `ctx` they receive at runtime, and the import path for each. The stable authoring contract lives in `packages/eve/src/public/index.ts`; separately documented experimental entrypoints are not part of that contract.
 
 Identity comes from the filesystem, not a field you set. A tool at `agent/tools/get_weather.ts` is `get_weather`, and a connection at `agent/connections/linear.ts` is `linear`, so no definition carries a `name` or `id`.
 
@@ -50,7 +50,10 @@ export default defineTool({
 | `defineEval`                                          | `eve/evals`                                          | `evals/*.eval.ts`                                                          | [Evals](../evals/overview)                             |
 | `defineEvalConfig`                                    | `eve/evals`                                          | `evals/evals.config.ts`                                                    | [Evals](../evals/overview)                             |
 | `mockModel`                                           | `eve/evals`                                          | Deterministic fixture agent models                                         | [Evals](../evals/overview)                             |
+| `defineEmbeddedAgent`                                 | `eve/embedded`                                       | Experimental application-owned agent entrypoint                            | See the warning below                                  |
 | `useEveAgent`                                         | `eve/react`, `eve/vue`, `eve/svelte`                 | frontend                                                                   | [Frontend](../guides/frontend/overview)                |
+
+> **Experimental embedded spike:** `eve/embedded` also exports `buildEmbeddedApplication` and `createEmbeddedLocalExecutor`. This proof of concept supports one default-exported agent, one local executor per process, JSON task input, and structured task output. It does not define compatibility, multi-agent registries, human input, authentication, deployment behavior, or sandbox ownership. Do not use it as a supported application integration API.
 
 A few additional helpers round out the set: `defineGlobTool`, `defineGrepTool`, `disableTool`, `experimental_workflow`, and `webSearch` from `eve/tools` (see [Built-in tools](../concepts/built-in-tools)), `sleep` from `eve/tools/sleep`, the route verbs `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`WS` from `eve/channels`, the approval policies `always`/`once`/`never` from `eve/tools/approval`, and the channel auth helpers `localDev`/`vercelOidc`/`placeholderAuth` from `eve/channels/auth`. To wrap a framework-provided tool, import its definition from `eve/tools/defaults` (`bash`, `readFile`, `writeFile`, `glob`, `grep`, `webFetch`, `todo`, `loadSkill`). `AgentReasoningDefinition` is exported from `eve` for the top-level `defineAgent({ reasoning })` setting. `AgentLimitsDefinition` is exported for `defineAgent({ limits })`. `AgentWorkflowDefinition` and `AgentWorkflowWorldDefinition` are exported from `eve` for the `defineAgent({ experimental: { workflow } })` config shape. `ExperimentalWorkflowToolInput`, `WebSearchToolInput`, and `WebSearchProvider` are exported from `eve/tools` for their corresponding tool configuration helpers.
 
@@ -91,6 +94,7 @@ A few additional helpers round out the set: `defineGlobTool`, `defineGrepTool`, 
 | `eve/instrumentation`                                       | `defineInstrumentation`, `isChannel`                                                                      |
 | `eve/models/openai`                                         | `chatgpt`, deprecated `experimental_chatgpt`                                                              |
 | `eve/evals`                                                 | `defineEval`, `defineEvalConfig`, `mockModel`, eval types                                                 |
+| `eve/embedded`                                              | Experimental single-agent definition, local executor, and production builder                              |
 | `eve/evals/expect`                                          | `includes`, `equals`, `matches`, `similarity`                                                             |
 | `eve/evals/reporters`                                       | `Braintrust`, `JUnit`, `EvalReporter`                                                                     |
 | `eve/evals/loaders`                                         | `loadJson`, `loadYaml`                                                                                    |
