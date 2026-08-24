@@ -1,4 +1,4 @@
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 
 /** Renders eve input requests as one user-visible Linear elicitation body. */

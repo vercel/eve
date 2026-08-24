@@ -65,12 +65,7 @@ function createInstructionsPromptBlocks(
   }
 
   const only = systemInstructions.length === 1 ? systemInstructions[0] : undefined;
-  const name =
-    only !== undefined &&
-    !only.sourceId.startsWith("ext:") &&
-    !only.sourceId.startsWith("ext-override:")
-      ? only.name
-      : "instructions";
+  const name = only !== undefined && only.owner.kind !== "extension" ? only.name : "instructions";
   const content = systemInstructions
     .map((entry) => entry.content)
     .join("\n\n")

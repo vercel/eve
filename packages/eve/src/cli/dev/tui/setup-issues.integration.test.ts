@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client, type AgentInfoResult } from "#client/index.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 
 import { EveTUIRunner, type AgentTUIRenderer } from "./runner.js";
 import { detectSetupIssues } from "./setup-issues.js";
@@ -14,40 +15,22 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const BASE_GATEWAY_INFO = createTestAgentInfoResult({
+  agentRoot: "/app/agent",
+  appRoot: "/app",
+  modelId: "openai/gpt-5.5",
+  name: "Agent",
+});
 const DISCONNECTED_GATEWAY_INFO: AgentInfoResult = {
+  ...BASE_GATEWAY_INFO,
   agent: {
-    agentRoot: "/app/agent",
-    appRoot: "/app",
+    ...BASE_GATEWAY_INFO.agent,
     model: {
       endpoint: { kind: "gateway", connected: false },
       id: "openai/gpt-5.5",
       routing: { kind: "gateway", target: "openai" },
     },
-    name: "Agent",
   },
-  capabilities: { devRoutes: true },
-  channels: { authored: [], available: [], disabledFramework: [], framework: [] },
-  connections: [],
-  diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
-  hooks: [],
-  instructions: { dynamic: [], static: [] },
-  kind: "eve-agent-info",
-  mode: "development",
-  sandbox: null,
-  schedules: [],
-  skills: { dynamic: [], static: [] },
-  subagents: { local: [], total: 0 },
-  tools: {
-    authored: [],
-    available: [],
-    disabledFramework: [],
-    dynamic: [],
-    framework: [],
-    reserved: [],
-  },
-  version: 2,
-  workflow: { enabled: false, toolName: "Workflow" },
-  workspace: { resourceRoot: null, rootEntries: [] },
 };
 
 async function linkedAppRoot(): Promise<string> {

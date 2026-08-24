@@ -41,7 +41,7 @@ describe("authored tool execution", () => {
         };
       },
     });
-    const runtime = createTestRuntime({ tools: [weatherTool] });
+    const runtime = await createTestRuntime({ tools: [weatherTool] });
 
     const result = await runtime.runAsSession(undefined, async () => {
       return await runtime.executeTool(weatherTool, { city: "Brooklyn" });
@@ -62,7 +62,7 @@ describe("authored tool execution", () => {
         throw new Error("weather upstream unavailable");
       },
     });
-    const runtime = createTestRuntime({ tools: [weatherTool] });
+    const runtime = await createTestRuntime({ tools: [weatherTool] });
 
     await expect(
       runtime.runAsSession(undefined, async () => {
@@ -79,7 +79,7 @@ describe("authored tool execution", () => {
         return ctx.session;
       },
     });
-    const runtime = createTestRuntime({ tools: [sessionProbe] });
+    const runtime = await createTestRuntime({ tools: [sessionProbe] });
 
     const result = await runtime.runAsSession(
       {
@@ -109,7 +109,7 @@ describe("authored tool execution", () => {
         return ctx.session;
       },
     });
-    const runtime = createTestRuntime({ tools: [sessionProbe] });
+    const runtime = await createTestRuntime({ tools: [sessionProbe] });
 
     const result = await runtime.runAsSession(
       {
@@ -157,7 +157,7 @@ describe("authored tool execution", () => {
         return await ctx.getSkill("semantic-model").file("references/catalog.yml").text();
       },
     });
-    const runtime = createTestRuntime({
+    const runtime = await createTestRuntime({
       tools: [skillReader],
       skills: [semanticModel.source],
     });
@@ -187,7 +187,7 @@ describe("authored tool execution", () => {
         return { content, id: live.id };
       },
     });
-    const runtime = createTestRuntime({ tools: [sandboxTool] });
+    const runtime = await createTestRuntime({ tools: [sandboxTool] });
 
     const result = (await runtime.runAsSession({ sandbox }, async () =>
       runtime.executeTool(sandboxTool, {}),
@@ -222,7 +222,7 @@ describe("authored tool execution", () => {
         return { reportPath, stdout: result.stdout.trim() };
       },
     });
-    const runtime = createTestRuntime({ tools: [resolveTool] });
+    const runtime = await createTestRuntime({ tools: [resolveTool] });
 
     const result = await runtime.runAsSession({ sandbox }, async () =>
       runtime.executeTool(resolveTool, {}),

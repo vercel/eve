@@ -29,7 +29,7 @@ import {
 describe("stageAttachmentsToSandbox (integration)", () => {
   it("writes FilePart bytes into the active sandbox and rewrites data to an eve-sandbox: ref", async () => {
     const sandbox = mockSandbox({ id: "sbx_integration" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
     const csvBytes = Buffer.from("id,name\n1,alpha\n", "utf8");
 
     const content: UserContent = [
@@ -75,7 +75,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
         return await live.readTextFile({ path: filePath });
       },
     });
-    const runtime = createTestRuntime({ tools: [readTool] });
+    const runtime = await createTestRuntime({ tools: [readTool] });
     const payload = "id,name\n1,alpha\n";
     const bytes = Buffer.from(payload, "utf8");
 
@@ -98,7 +98,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
 
   it("passes text-only messages through without touching the sandbox", async () => {
     const sandbox = mockSandbox({ id: "sbx_text" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
 
     const result = await runtime.runAsSession({ sandbox }, async () =>
       stageAttachmentsToSandbox("hello"),
@@ -110,7 +110,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
 
   it("passes UserContent arrays with no FileParts through untouched", async () => {
     const sandbox = mockSandbox({ id: "sbx_no_files" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
     const content: UserContent = [{ type: "text", text: "just text" }];
 
     const staged = await runtime.runAsSession({ sandbox }, async () =>
@@ -122,7 +122,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
   });
 
   it("returns the message unchanged when no SandboxKey is bound on the context", async () => {
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
     const payload = Buffer.from("bytes", "utf8");
     const content: UserContent = [
       { data: payload, filename: "orphan.txt", mediaType: "text/plain", type: "file" },
@@ -138,7 +138,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
 
   it("dedupes repeated uploads of the same payload within one session", async () => {
     const sandbox = mockSandbox({ id: "sbx_dedupe" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
     const payload = Buffer.from("shared-payload", "utf8");
 
     const firstStaged = await runtime.runAsSession({ sandbox }, async () => {
@@ -181,7 +181,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     };
 
     const sandbox = mockSandbox({ id: "sbx_ref" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
     const content: UserContent = [
       { type: "text", text: "what do you see?" },
       {
@@ -230,7 +230,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
       state: {},
     };
     const sandbox = mockSandbox({ id: "sbx_refine" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
     const content: UserContent = [
       {
         data: new URL("https://example.com/image"),
@@ -259,7 +259,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
       state: {},
     };
     const sandbox = mockSandbox({ id: "sbx_preserve" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
     const content: UserContent = [
       {
         data: new URL("https://example.com/report.csv"),
@@ -281,7 +281,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     const adapter: ChannelAdapter<any> = { kind: "custom-channel", state: {} };
     const fileUrl = new URL("https://example.com/a.bin");
     const sandbox = mockSandbox({ id: "sbx_no_resolver" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
     const content: UserContent = [
       { data: fileUrl, filename: "a.bin", mediaType: "application/octet-stream", type: "file" },
     ];
@@ -308,7 +308,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
       state: {},
     };
     const sandbox = mockSandbox({ id: "sbx_threw" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
     const content: UserContent = [
       {
         data: new URL("https://example.com/a.bin"),
@@ -339,7 +339,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
       state: {},
     };
     const sandbox = mockSandbox({ id: "sbx_propagate" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
     const content: UserContent = [
       {
         data: new URL("https://example.com/a.bin"),
@@ -358,7 +358,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
 
   it("works alongside non-file parts in the same user message", async () => {
     const sandbox = mockSandbox({ id: "sbx_mixed" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
     const imageBytes = new Uint8Array([137, 80, 78, 71]);
     const fileBytes = Buffer.from("text", "utf8");
 
@@ -392,7 +392,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
 
   it("hydrates small images inline as bytes — provider consumes them multimodally", async () => {
     const sandbox = mockSandbox({ id: "sbx_hydrate_image" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
 
     const stagedContent = (await runtime.runAsSession({ sandbox }, async () =>
       stageAttachmentsToSandbox([
@@ -430,7 +430,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
 
   it("hydrates small PDFs inline as bytes — provider handles them natively", async () => {
     const sandbox = mockSandbox({ id: "sbx_hydrate_pdf" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
 
     const stagedContent = (await runtime.runAsSession({ sandbox }, async () =>
       stageAttachmentsToSandbox([
@@ -455,7 +455,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
 
   it("substitutes non-inlinable FileParts with a text reference pointing at the sandbox path", async () => {
     const sandbox = mockSandbox({ id: "sbx_hydrate_text_ref" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
     const csvBytes = Buffer.from("id,name\n1,alpha\n", "utf8");
 
     const stagedContent = (await runtime.runAsSession({ sandbox }, async () =>
@@ -491,7 +491,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
 
   it("treats oversized images (>3 MiB) as non-inlinable — renders a text reference instead of bytes", async () => {
     const sandbox = mockSandbox({ id: "sbx_hydrate_big_image" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
     // One byte over the 3 MiB cap so the ref size fails the inline
     // check without allocating two massive buffers in the test.
     const oversizedImage = Buffer.alloc(3 * 1024 * 1024 + 1, 0x89);
@@ -519,7 +519,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
 
   it("treats oversized PDFs (>20 MiB) as non-inlinable — renders a text reference instead of bytes", async () => {
     const sandbox = mockSandbox({ id: "sbx_hydrate_big_pdf" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
     const oversizedPdf = Buffer.alloc(20 * 1024 * 1024 + 1, 0x25);
 
     const stagedContent = (await runtime.runAsSession({ sandbox }, async () =>
@@ -550,7 +550,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
 
   it("treats unknown binary media types as non-inlinable — renders a text reference", async () => {
     const sandbox = mockSandbox({ id: "sbx_hydrate_binary" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
     const binary = Buffer.from([0x00, 0x01, 0x02, 0x03]);
 
     const stagedContent = (await runtime.runAsSession({ sandbox }, async () =>
@@ -581,7 +581,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
 
   it("returns the input array unchanged (no allocation) when no messages contain sandbox refs", async () => {
     const sandbox = mockSandbox({ id: "sbx_noop" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
 
     const messages = [{ content: "plain text", role: "user" as const }];
     const hydrated = await runtime.runAsSession({ sandbox }, async () =>
@@ -593,7 +593,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
 
   it("is idempotent on inline Buffer FileParts", async () => {
     const sandbox = mockSandbox({ id: "sbx_idempotent" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
     const bytes = Buffer.from("hi", "utf8");
     const messages = [
       {
@@ -618,7 +618,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
     // Hydration must not fail the whole turn over it — it degrades to a
     // text part so the run survives (#276).
     const sandbox = mockSandbox({ id: "sbx_missing" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
 
     // Ref pointing at a path that was never written. Use an
     // inlinable media type so the byte-read path fires —
@@ -663,7 +663,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
     // resuming a durable session whose ephemeral sandbox is gone. The
     // bytes are unreachable, but the turn must not fail.
     const stagingSandbox = mockSandbox({ id: "sbx_resume_stage" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
 
     const stagedContent = (await runtime.runAsSession({ sandbox: stagingSandbox }, async () =>
       stageAttachmentsToSandbox([
@@ -697,7 +697,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
     // would still cost a full sandbox read per turn just to be
     // thrown away.
     const sandbox = mockSandbox({ id: "sbx_no_read" });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
     const csvBytes = Buffer.from("id,name\n1,alpha\n", "utf8");
 
     const stagedContent = (await runtime.runAsSession({ sandbox }, async () =>

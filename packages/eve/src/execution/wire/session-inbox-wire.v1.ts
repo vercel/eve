@@ -8,7 +8,7 @@ import type {
 } from "#channel/types.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
-import { inputRequestSchema, inputResponseSchema } from "#runtime/input/types.js";
+import { inputRequestSchema, inputResponseSchema } from "#shared/input.js";
 import { formatValidationError } from "#runtime/validation.js";
 import { jsonObjectSchema, jsonValueSchema } from "#shared/json-schemas.js";
 import { tokenUsageSchema } from "#shared/token-usage.js";

@@ -4,12 +4,13 @@ import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
-import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { readDevelopmentRuntimeArtifactsRevision } from "#services/dev-client/runtime-artifacts.js";
 
 const EVE_BASE_URL_ENV = "EVE_BASE_URL";
 const DEFAULT_SERVER_READY_TIMEOUT_MS = 180_000;
 const DEV_SERVER_REGISTRY_TIMEOUT_MS = 180_000;
 const DEV_SERVER_REGISTRY_POLL_MS = 100;
+const DEV_SERVER_READINESS_TIMEOUT_MS = 1_000;
 const DEV_SERVER_STALE_LOCK_MS = 30_000;
 const EVE_CACHE_DIRECTORY_NAME = ".eve";
 const EVE_NEXT_DEV_SERVER_FILE_NAME = "next-dev-server.json";
@@ -47,10 +48,6 @@ function getGlobalState(): EveNextGlobalState {
   };
 
   return globalWithState[globalStateSymbol];
-}
-
-function joinRoutePrefix(prefix: string, path: string): string {
-  return `${prefix.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
 }
 
 function normalizeOrigin(origin: string): string {
@@ -120,25 +117,6 @@ function normalizeDevServerRegistry(value: unknown): EveDevServerRegistry | unde
   }
 }
 
-async function isEveServerHealthy(origin: string): Promise<boolean> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, 1_000);
-
-  try {
-    const response = await fetch(joinRoutePrefix(origin, `${EVE_ROUTE_PREFIX}/health`), {
-      signal: controller.signal,
-    });
-
-    return response.ok;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 async function readUsableEveDevServerRegistry(appRoot: string): Promise<string | undefined> {
   try {
     const registry = normalizeDevServerRegistry(
@@ -149,7 +127,12 @@ async function readUsableEveDevServerRegistry(appRoot: string): Promise<string |
       return undefined;
     }
 
-    if (!(await isEveServerHealthy(registry.origin))) {
+    if (
+      (await readDevelopmentRuntimeArtifactsRevision({
+        serverUrl: registry.origin,
+        timeoutMs: DEV_SERVER_READINESS_TIMEOUT_MS,
+      })) === undefined
+    ) {
       return undefined;
     }
 

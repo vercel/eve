@@ -33,42 +33,39 @@ export const TRANSACTIONAL_REBUILD_DESCRIPTOR: ScenarioAppDescriptor = {
   ...DEV_SERVER_AGENT_DESCRIPTOR,
   files: {
     ...DEV_SERVER_AGENT_DESCRIPTOR.files,
-    "agent/channels/dev-generation.ts": createOverlappingChannelSource(),
+    "agent/channels/dev-generation.ts": createTransactionalRouteSource(),
     "agent/instrumentation.ts": createInstrumentationSource("one"),
   },
 };
 
 export function createInstrumentationSource(marker: string): string {
   return [
-    'import { randomUUID } from "node:crypto";',
-    "",
     "declare global {",
     "  var __EVE_INSTRUMENTATION_MARKER__: string | undefined;",
-    "  var __EVE_WORKER_ID__: string | undefined;",
     "}",
     "",
     `globalThis.__EVE_INSTRUMENTATION_MARKER__ = ${JSON.stringify(marker)};`,
-    "globalThis.__EVE_WORKER_ID__ = randomUUID();",
     "export default {};",
     "",
   ].join("\n");
 }
 
-export function createOverlappingChannelSource(): string {
+export function createTransactionalRouteSource(): string {
   return createTransactionalChannelSource([
-    '    GET("/overlap/:slug", (_request, context) => new Response(`parameter:${context.params.slug}`)),',
+    '    GET("/overlap/parameter/:slug", (_request, context) => new Response(`parameter:${context.params.slug}`)),',
     '    GET("/overlap/static", () => new Response("static")),',
   ]);
 }
 
 export function createTransactionalChannelSource(routeLines: readonly string[]): string {
   return [
+    'import { threadId } from "node:worker_threads";',
     'import { defineChannel, GET } from "eve/channels";',
     "",
     "export default defineChannel({",
     "  routes: [",
     '    GET("/instrumentation-marker", () => new Response(String(globalThis.__EVE_INSTRUMENTATION_MARKER__ ?? "missing"))),',
-    '    GET("/worker-id", () => new Response(String(globalThis.__EVE_WORKER_ID__ ?? "missing"))),',
+    '    GET("/worker-id", () => new Response(String(threadId))),',
     ...routeLines,
     "  ],",
     "});",

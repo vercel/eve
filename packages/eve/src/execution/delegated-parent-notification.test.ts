@@ -16,7 +16,7 @@ import { SUBAGENT_ADAPTER } from "#execution/subagent-adapter.js";
 import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
+import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 
 vi.mock("../runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: vi.fn(),

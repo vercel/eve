@@ -71,14 +71,14 @@ import {
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
-import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
+import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
 import { resolveAgentsAnnouncement } from "#harness/handles/prompt.js";
 import { getAgentHandleStore } from "#harness/handles/store.js";
 import {
   getWorkflowRuntimeActionInterrupts,
   isWorkflowRuntimeActionInterrupt,
 } from "#harness/workflow-runtime-action-state.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 import {
   hydrateSandboxAttachments,
   stageAttachmentsToSandbox,
@@ -157,7 +157,7 @@ import { attemptIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
 import { resolveParentLineage } from "#harness/parent-lineage.js";
 import { prepareTurnTraceContext } from "#harness/prepare-trace-context.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { TASK_UPDATE_TOOL_NAME } from "#runtime/framework-tools/tasks.js";
+import { TASK_UPDATE_TOOL_NAME } from "#shared/task-tool.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 import {
   consumeDeferredStepInput,
@@ -253,10 +253,7 @@ import {
   type WorkflowSandboxInterrupt,
   unwrapWorkflowSandboxResult,
 } from "#shared/workflow-sandbox.js";
-import {
-  buildFinalOutputTool,
-  FINAL_OUTPUT_TOOL_NAME,
-} from "#runtime/framework-tools/final-output.js";
+import { buildFinalOutputTool, FINAL_OUTPUT_TOOL_NAME } from "#harness/final-output.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { createHistoryViewPreparer } from "#shared/history-view.js";

@@ -802,7 +802,7 @@ describe("app runtime dependency tracing", () => {
     expect(serverModuleSource).not.toContain('import("esbuild")');
     expect(serverModuleSource).not.toContain('import("rolldown")');
     expect(serverModuleSource).toContain(
-      "This tool requires sandbox access on the runtime context.",
+      "Execute a shell command in the shared workspace environment.",
     );
     expect(serverModuleSource).toContain("The dynamic skill");
     expect(serverModuleSource).toContain("URL must start with https://");

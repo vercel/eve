@@ -1,5 +1,5 @@
 import { executeGlobOnSandbox, type GlobInput } from "#execution/sandbox/glob-tool.js";
-import { GLOB_INPUT_SCHEMA, GLOB_OUTPUT_SCHEMA } from "#runtime/framework-tools/glob.js";
+import { GLOB_INPUT_SCHEMA, GLOB_OUTPUT_SCHEMA } from "#public/tools/glob.js";
 import type { ToolDefinition } from "#public/definitions/tool.js";
 
 /**

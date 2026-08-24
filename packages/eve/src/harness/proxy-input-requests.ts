@@ -1,6 +1,6 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
-import type { InputRequestKind } from "#runtime/input/types.js";
+import type { InputRequestKind } from "#shared/input.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
 
 const PROXY_INPUT_REQUESTS_KEY = "eve.runtime.proxyInputRequests";

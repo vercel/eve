@@ -20,6 +20,7 @@ const compileMetadataSchema: z.ZodType<CompileMetadata> = z
   .object({
     compile: z
       .object({
+        manifest: compileArtifactDigestSchema,
         moduleMap: compileArtifactDigestSchema,
       })
       .strict(),

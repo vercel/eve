@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildApprovalResponseAuth, createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import { buildApprovalResponseAuth } from "#execution/tool-auth.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
 import { loadContext } from "#context/container.js";
 import { AuthKey, SessionIdKey } from "#context/keys.js";
@@ -16,7 +16,7 @@ import type {
   AuthorizationDefinition,
   ConnectionPrincipal,
   TokenResult,
-} from "#runtime/connections/types.js";
+} from "#shared/connection-types.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 
 /**
@@ -65,16 +65,22 @@ function authoredTool(input: {
   const logicalPath = `tools/${input.name}.ts`;
   return {
     description: `${input.name} auth tool.`,
-    execute: createToolExecuteWithAuth({
-      execute: input.execute as (toolInput: unknown, ctx: unknown) => unknown,
-      scope: input.name,
-    }),
+    execute: (toolInput, runtimeContext) =>
+      input.execute(toolInput, expectToolContext(runtimeContext)),
     inputSchema: null,
     logicalPath,
     name: input.name,
+    owner: { kind: "application" },
     sourceId: logicalPath,
     sourceKind: "module",
   };
+}
+
+function expectToolContext(value: unknown): ToolContext {
+  if (typeof value !== "object" || value === null || !("getToken" in value)) {
+    throw new Error("Expected the authored tool context.");
+  }
+  return value as ToolContext;
 }
 
 describe("approval response authorization", () => {
@@ -93,7 +99,7 @@ describe("approval response authorization", () => {
         return { token: "linear-token" };
       },
     };
-    const runtime = createTestRuntime({ tools: [] });
+    const runtime = await createTestRuntime({ tools: [] });
 
     const tokens = await runtime.runAsSession(undefined, async () => {
       const auth = buildApprovalResponseAuth({
@@ -123,7 +129,7 @@ describe("approval response authorization", () => {
         return { token: "bound-responder-token" };
       },
     };
-    const runtime = createTestRuntime({ tools: [] });
+    const runtime = await createTestRuntime({ tools: [] });
 
     await runtime.runAsSession(undefined, async () => {
       loadContext().set(AuthKey, {
@@ -172,7 +178,7 @@ describe("tool-hosted authorization", () => {
         return { first: first.token, second: second.token };
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
 
@@ -188,7 +194,7 @@ describe("tool-hosted authorization", () => {
         return { callId: ctx.callId, toolName: ctx.toolName };
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
 
@@ -213,7 +219,7 @@ describe("tool-hosted authorization", () => {
         return { first: first.token, second: second.token };
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
 
@@ -242,7 +248,7 @@ describe("tool-hosted authorization", () => {
         return { github: github.token, linear: linear.token };
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
 
@@ -269,7 +275,7 @@ describe("tool-hosted authorization", () => {
         await ctx.getToken(linearAuth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     await expect(
       runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {})),
@@ -283,7 +289,7 @@ describe("tool-hosted authorization", () => {
         return await (ctx.getToken as () => Promise<TokenResult>)();
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     await expect(
       runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {})),
@@ -310,7 +316,7 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(inlineAuth, { displayName: "Linear" });
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession(
       { sessionId: "session_inline_auth_park" },
@@ -352,7 +358,7 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(inlineAuth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession(
       { sessionId: "session_connect_callback" },
@@ -390,7 +396,7 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession({ sessionId: "session_auth_park" }, async () => {
       seedUserPrincipal();
@@ -429,7 +435,7 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession({ sessionId: "session_display_name" }, async () => {
       seedUserPrincipal();
@@ -465,7 +471,7 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession(
       { sessionId: "session_display_name_strategy" },
@@ -500,7 +506,7 @@ describe("tool-hosted authorization", () => {
         ctx.requireAuth(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession({ sessionId: "session_require_auth" }, async () => {
       seedUserPrincipal();
@@ -535,7 +541,7 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession({ sessionId: "session_resume" }, async () => {
       seedUserPrincipal();
@@ -581,7 +587,7 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(inlineAuth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession({ sessionId: "session_inline_resume" }, async () => {
       seedUserPrincipal();
@@ -630,7 +636,7 @@ describe("tool-hosted authorization", () => {
         ctx.requireAuth(inlineAuth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession({ sessionId: "session_inline_require" }, async () => {
       seedUserPrincipal();
@@ -670,7 +676,7 @@ describe("tool-hosted authorization", () => {
         ctx.requireAuth(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const error = await runtime
       .runAsSession({ sessionId: "session_loop_guard" }, async () => {
@@ -719,7 +725,7 @@ describe("tool-hosted authorization", () => {
         ctx.requireAuth(inlineAuth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const error = await runtime
       .runAsSession({ sessionId: "session_inline_loop_guard" }, async () => {
@@ -757,7 +763,7 @@ describe("tool-hosted authorization", () => {
       },
     };
     const scoped = { authorization: auth, connection: { url: "" }, scope: "list_groups" };
-    const runtime = createTestRuntime({ tools: [] });
+    const runtime = await createTestRuntime({ tools: [] });
 
     const tokens = await runtime.runAsSession({ sessionId: "session_evict" }, async () => {
       seedUserPrincipal();
@@ -788,7 +794,7 @@ describe("tool-hosted authorization", () => {
       },
     };
     const scoped = { authorization: auth, connection: { url: "" }, scope: "list_groups" };
-    const runtime = createTestRuntime({ tools: [] });
+    const runtime = await createTestRuntime({ tools: [] });
 
     await runtime.runAsSession({ sessionId: "session_evict_cascade" }, async () => {
       seedUserPrincipal();
@@ -819,7 +825,7 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     // No CallbackBaseUrlKey set → getHookUrl returns undefined → no park
     // signal. The interactive path must NOT leak the raw Required into the
@@ -851,7 +857,7 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     // Non-interactive strategies have no consent flow to park on, so the
     // model should see the original failure.

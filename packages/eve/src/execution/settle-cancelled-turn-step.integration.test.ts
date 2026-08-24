@@ -99,7 +99,7 @@ function buildSerializedContext(): Record<string, unknown> {
 
 describe("settleCancelledTurnStep handle store", () => {
   it("parks abandoned running handles as cancelled and keeps parked ones", async () => {
-    const runtime = createTestRuntime({ agent: { name: "settle-cancel-handles" } });
+    const runtime = await createTestRuntime({ agent: { name: "settle-cancel-handles" } });
 
     await runtime.run(async () => {
       const result = await settleCancelledTurnStep({

@@ -32,7 +32,7 @@ import {
 } from "#harness/prompt-cache.js";
 import { createRuntimeActionRequestFromToolCall } from "#harness/runtime-actions.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
-import type { RuntimeToolResultActionResult } from "#runtime/actions/types.js";
+import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import {
   type HarnessEmitFn,
   type HarnessSession,

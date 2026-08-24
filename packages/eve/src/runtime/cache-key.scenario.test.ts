@@ -98,6 +98,10 @@ async function writeCompileMetadata(input: {
     `${JSON.stringify(
       {
         compile: {
+          manifest: {
+            path: ".eve/compile/compiled-agent-manifest.json",
+            sha256: "compiled-manifest-hash",
+          },
           moduleMap: {
             path: ".eve/compile/module-map.mjs",
             sha256: "module-map-hash",

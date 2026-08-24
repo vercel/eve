@@ -28,7 +28,7 @@ import {
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import { getPendingInputBatches } from "#harness/pending-input-batches.js";
 import type { HarnessSession, HarnessToolMap, StepInput } from "#harness/types.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 
 const UNAUTHENTICATED_APPROVAL_FEEDBACK = "Authentication is required to respond to this approval.";
 const TEXT_APPROVAL_FEEDBACK =

@@ -36,7 +36,7 @@ import {
   type InteractiveAuthorizationDefinition,
   supportsInteractiveAuthorization,
   type TokenResult,
-} from "#runtime/connections/types.js";
+} from "#shared/connection-types.js";
 
 const LOCAL_HTTP_VERCEL_CONNECT_HOSTNAMES: ReadonlySet<string> = new Set(["127.0.0.1", "[::1]"]);
 

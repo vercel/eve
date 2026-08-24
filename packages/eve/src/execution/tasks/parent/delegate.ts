@@ -15,7 +15,7 @@ import {
 } from "#execution/tasks/parent/run-parent.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
-import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
+import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#shared/tool-task.js";
 import { recordSessionTask } from "#tasks/session-index.js";

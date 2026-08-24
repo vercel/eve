@@ -92,6 +92,9 @@ async function createFakePnpmEnvironment(scratch: string): Promise<{
   const env = {
     ...withoutCodingAgentMarkers(baseEnv),
     EVE_INIT_PNPM_LOG: logPath,
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "commit.gpgsign",
+    GIT_CONFIG_VALUE_0: "false",
     GIT_AUTHOR_EMAIL: "eve-init@example.com",
     GIT_AUTHOR_NAME: "eve Init",
     GIT_COMMITTER_EMAIL: "eve-init@example.com",
@@ -138,6 +141,9 @@ async function createFakeNpmEnvironment(scratch: string): Promise<{
   const env = {
     ...withoutCodingAgentMarkers(baseEnv),
     EVE_INIT_NPM_LOG: logPath,
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "commit.gpgsign",
+    GIT_CONFIG_VALUE_0: "false",
     GIT_AUTHOR_EMAIL: "eve-init@example.com",
     GIT_AUTHOR_NAME: "eve Init",
     GIT_COMMITTER_EMAIL: "eve-init@example.com",

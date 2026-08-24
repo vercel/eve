@@ -7,7 +7,7 @@
  * identical session state always produces an identical prompt — no model call
  * is involved.
  */
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { SessionTokenLimitViolation } from "#harness/turn-tag-state.js";
 
 /** Synthetic action tool name carried by session-limit continuation requests. */

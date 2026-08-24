@@ -1046,7 +1046,9 @@ Dispatch becomes declared effects, and the seam is deleted:
 1. effect declarations and visibility conditions consumed by the kernel;
 2. the exhaustive effect-kind lifecycle, with approvals riding
    `request-input`;
-3. deletion of the complete magic-string dispatch layer listed in the
+3. replacement of `localSubagentExecutors` function-identity classification
+   with prepared `dispatch` effect state;
+4. deletion of the complete magic-string dispatch layer listed in the
    deletion ledger's kernel row.
 
 `COMPILED_AGENT_MANIFEST_VERSION` moves from 42 to 43 with the serialized

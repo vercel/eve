@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION } from "#execution/session.js";
 import { createSessionStep } from "#execution/create-session-step.js";
+import { TASK_UPDATE_TOOL_NAME } from "#shared/task-tool.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 
 vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
@@ -22,9 +23,21 @@ describe("createSessionStep", () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       resolvedAgent: {
         config: { experimental: { tasks: true } },
-        disabledFrameworkTools: [],
       },
-      turnAgent: TestTurnAgent,
+      turnAgent: {
+        ...TestTurnAgent,
+        tools: [
+          {
+            description: "Report task progress.",
+            inputSchema: null,
+            kind: "authored-tool",
+            logicalPath: `tools/${TASK_UPDATE_TOOL_NAME}.ts`,
+            name: TASK_UPDATE_TOOL_NAME,
+            owner: { feature: "tasks", kind: "framework" },
+            sourceId: `framework:tools/${TASK_UPDATE_TOOL_NAME}.ts`,
+          },
+        ],
+      },
     } as never);
 
     const { state } = await createSessionStep({
@@ -43,7 +56,6 @@ describe("createSessionStep", () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       resolvedAgent: {
         config: {},
-        disabledFrameworkTools: [],
       },
       turnAgent: TestTurnAgent,
     } as never);

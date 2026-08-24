@@ -11,7 +11,7 @@ import {
 } from "#harness/proxy-input-requests.js";
 import { getAgentHandleStore } from "#harness/handles/store.js";
 import { removeTaskAgentAddressFromState } from "#harness/handles/transitions.js";
-import { isInputRequest } from "#runtime/input/types.js";
+import { isInputRequest } from "#shared/input.js";
 import { cacheTerminalTaskView, findSessionTaskEntry } from "#tasks/session-index.js";
 import { createEveTaskInputRoutePath } from "#protocol/routes.js";
 import { isTerminalTaskStatus, readSubagentTaskMetadata, type TaskView } from "#tasks/types.js";

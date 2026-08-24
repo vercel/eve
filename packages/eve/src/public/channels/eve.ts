@@ -34,7 +34,11 @@ import {
 } from "#protocol/message.js";
 import { parseTraceparent } from "#protocol/traceparent.js";
 import {
+  EVE_CALLBACK_ROUTE_PATTERN,
+  EVE_CONNECTION_CALLBACK_ROUTE_PATTERN,
+  EVE_HEALTH_ROUTE_PATH,
   EVE_INFO_ROUTE_PATH,
+  EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN,
   EVE_SESSION_ROUTE_PATH,
   EVE_SESSION_CANCEL_ROUTE_PATTERN,
   EVE_SESSION_CLEAR_ROUTE_PATTERN,
@@ -43,10 +47,18 @@ import {
   EVE_SESSION_RESET_ROUTE_PATTERN,
   EVE_SESSION_STREAM_ROUTE_PATTERN,
   EVE_SUBAGENT_STREAM_ROUTE_PATTERN,
+  EVE_TASK_INPUT_ROUTE_PATTERN,
   createEveSessionStreamRoutePath,
   createEveSubagentStreamRoutePath,
 } from "#protocol/routes.js";
-import { isInputResponse, type ValidatedInputResponse } from "#runtime/input/types.js";
+import { workflowEntryReference } from "#execution/workflow-runtime.js";
+import {
+  handleConnectionCallbackRequest,
+  handleLegacyConnectionCallbackRequest,
+} from "#execution/connections/callback-route.js";
+import { handleSessionCallbackRequest } from "#execution/session-callback-route.js";
+import { handleTaskInputResponseRequest } from "#execution/task-input-response-route.js";
+import { isInputResponse, type ValidatedInputResponse } from "#shared/input.js";
 import { type AuthFn, routeAuth } from "#public/channels/auth.js";
 import {
   collectUploadPolicyViolations,
@@ -59,6 +71,7 @@ import {
   defineChannel,
   POST,
   GET,
+  HEAD,
   type Channel,
   type ChannelCors,
   type ChannelEvents,
@@ -223,6 +236,9 @@ export function eveChannel(input: EveChannelInput): EveChannel {
     cors: normalizeEveCors(input.cors),
     turnPolicy: input.turnPolicy,
     routes: [
+      GET(EVE_HEALTH_ROUTE_PATH, async () => healthResponse()),
+      HEAD(EVE_HEALTH_ROUTE_PATH, async () => healthResponse()),
+
       GET(EVE_INFO_ROUTE_PATH, async (req, args) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
@@ -237,6 +253,13 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         return await respond();
       }),
+
+      GET(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
+      POST(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
+      GET(EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN, handleLegacyConnectionCallbackRequest),
+      POST(EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN, handleLegacyConnectionCallbackRequest),
+      POST(EVE_CALLBACK_ROUTE_PATTERN, handleSessionCallbackRequest),
+      POST(EVE_TASK_INPUT_ROUTE_PATTERN, handleTaskInputResponseRequest),
 
       POST(EVE_SESSION_ROUTE_PATH, async (req, args) => {
         const authResult = await routeAuth(req, input.auth);
@@ -678,6 +701,14 @@ export function eveChannel(input: EveChannelInput): EveChannel {
       }),
     ],
     events: input.events,
+  });
+}
+
+function healthResponse(): Response {
+  return Response.json({
+    ok: true,
+    status: "ready",
+    workflowId: workflowEntryReference.workflowId,
   });
 }
 

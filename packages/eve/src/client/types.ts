@@ -7,8 +7,9 @@ import type { ClearStatus } from "#protocol/clear-session.js";
 import type { CompactStatus } from "#protocol/compact-session.js";
 import type { ResetStatus } from "#protocol/reset-session.js";
 import type { TurnPolicy } from "#channel/types.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
+export type { HealthResult } from "#client/health-schema.js";
 
 export type {
   AgentInfoChannelEntry,
@@ -16,12 +17,11 @@ export type {
   AgentInfoConnectionEntry,
   AgentInfoDynamicResolverEntry,
   AgentInfoEntry,
-  AgentInfoFrameworkChannelEntry,
-  AgentInfoFrameworkToolEntry,
   AgentInfoHookEntry,
   AgentInfoInstructions,
   AgentInfoInstructionsEntry,
   AgentInfoResult,
+  AgentInfoRemoteAgentEntry,
   AgentInfoSandboxEntry,
   AgentInfoScheduleEntry,
   AgentInfoSkillEntry,
@@ -308,12 +308,6 @@ export interface MessageResult<TOutput = unknown> {
 /**
  * Response from the health endpoint.
  */
-export interface HealthResult {
-  readonly ok: true;
-  readonly status: "ready";
-  readonly workflowId: string;
-}
-
 /**
  * Serializable cursor for one fixed, ID-addressed client session.
  */

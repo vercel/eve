@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import pc from "picocolors";
+import pc from "#compiled/picocolors/index.js";
 
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 

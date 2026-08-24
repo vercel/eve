@@ -12,34 +12,50 @@ import type { AgentSourceManifest } from "#discover/manifest.js";
 import { loadAuthoredModuleNamespace } from "#internal/authored-module-loader.js";
 import { extensionUsesState } from "#internal/nitro/host/extension-state-usage.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
+import type { SourceDefinitionCompileOptions } from "#compiler/normalize-helpers.js";
 
 /** Derives only the extension-facing contracts used by one authored tree. */
 export async function deriveExtensionCapabilityRequirements(input: {
   readonly declarationModule: ModuleSourceRef;
   readonly manifest: AgentSourceManifest;
+  readonly packageName: string;
   readonly runtimeDependencies: readonly string[];
+  readonly shortName: string;
   readonly sourceRoot: string;
 }): Promise<ExtensionCapabilityRequirements> {
   const required = new Set<ExtensionCapability>(["extension"]);
-  const loadOptions = { externalDependencies: input.runtimeDependencies };
   const manifests = collectSubagentManifests(input.manifest);
   const [tools, skills, instructions, declaration, usesState] = await Promise.all([
     Promise.all(
       manifests.flatMap((manifest) =>
-        manifest.tools.map((source) => compileToolEntry(manifest.agentRoot, source, loadOptions)),
+        manifest.tools.map((source) =>
+          compileToolEntry(
+            manifest.agentRoot,
+            source,
+            createLoadOptions(input, source, manifest.agentRoot),
+          ),
+        ),
       ),
     ),
     Promise.all(
       manifests.flatMap((manifest) =>
         manifest.skills.map((source) =>
-          compileSkillSource(manifest.agentRoot, source, loadOptions),
+          compileSkillSource(
+            manifest.agentRoot,
+            source,
+            createLoadOptions(input, source, manifest.agentRoot),
+          ),
         ),
       ),
     ),
     Promise.all(
       manifests.flatMap((manifest) =>
         manifest.instructions.map((source) =>
-          compileInstructionsEntry(manifest.agentRoot, source, loadOptions),
+          compileInstructionsEntry(
+            manifest.agentRoot,
+            source,
+            createLoadOptions(input, source, manifest.agentRoot),
+          ),
         ),
       ),
     ),
@@ -78,6 +94,40 @@ export async function deriveExtensionCapabilityRequirements(input: {
       .filter((capability) => required.has(capability))
       .map((capability) => [capability, EXTENSION_CAPABILITY_VERSIONS[capability]]),
   );
+}
+
+function createLoadOptions(
+  input: {
+    readonly packageName: string;
+    readonly runtimeDependencies: readonly string[];
+    readonly shortName: string;
+    readonly sourceRoot: string;
+  },
+  source: { readonly logicalPath: string },
+  moduleRoot: string,
+): SourceDefinitionCompileOptions & {
+  readonly binding: NonNullable<SourceDefinitionCompileOptions["binding"]>;
+  readonly registries: readonly [];
+} {
+  const owner = {
+    kind: "extension" as const,
+    namespace: input.shortName,
+    packageName: input.packageName,
+  };
+  return {
+    binding: {
+      backing: {
+        externalDependencies: input.runtimeDependencies,
+        extensionScope: { namespace: input.shortName, sourceRoot: input.sourceRoot },
+        kind: "filesystem",
+        sourcePath: join(moduleRoot, source.logicalPath),
+      },
+      logicalPath: source.logicalPath,
+      owner,
+    },
+    owner,
+    registries: [],
+  };
 }
 
 function collectSubagentManifests(manifest: AgentSourceManifest): AgentSourceManifest[] {

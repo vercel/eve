@@ -11,7 +11,7 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { defaultLinearAuth } from "#public/channels/linear/defaults.js";
 import { linearChannel, type LinearChannelState } from "#public/channels/linear/linearChannel.js";
 import { signLinearWebhookBody } from "#public/channels/linear/verify.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 
 const SECRET = "linear-secret";
 

@@ -14,7 +14,7 @@ import {
 } from "#shared/chatgpt-model.js";
 import { createStaticSourceChange } from "#source-change/static-source-change.js";
 
-import pc from "picocolors";
+import pc from "#compiled/picocolors/index.js";
 
 export type ApplyModelSettingsOutcome =
   | {

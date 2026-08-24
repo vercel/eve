@@ -2,7 +2,7 @@ import type { UserContent } from "ai";
 
 import type { CrossChannelToFn } from "#channel/cross-channel-receive.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import type { InputResponse } from "#shared/input.js";
 import type { Session } from "#channel/session.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ChannelMethod } from "#public/definitions/channel.js";

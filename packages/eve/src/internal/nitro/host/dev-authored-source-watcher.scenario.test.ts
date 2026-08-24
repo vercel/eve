@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createCompiledAgentManifest } from "#compiler/manifest.js";
+import { compileFromMemory } from "#compiler/compile-from-memory.js";
 import type { DevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
 import { STRUCTURAL_RELOAD_LOG_LINE } from "#internal/nitro/host/dev-watcher-log.js";
@@ -89,7 +89,7 @@ afterEach(async () => {
 
 describe("startAuthoredSourceWatcher", () => {
   it("forces a transactional rebuild for local setup actions", async () => {
-    const host = createPreparedHost();
+    const host = await createPreparedHost();
     const coordinator = createCoordinator(host);
     const watcher = await startAuthoredSourceWatcher({ coordinator, preparedHost: host });
 
@@ -102,7 +102,7 @@ describe("startAuthoredSourceWatcher", () => {
   });
 
   it("rebuilds once after resuming a suspended watcher", async () => {
-    const host = createPreparedHost();
+    const host = await createPreparedHost();
     const coordinator = createCoordinator(host);
     const watcher = await startAuthoredSourceWatcher({ coordinator, preparedHost: host });
 
@@ -123,7 +123,7 @@ describe("startAuthoredSourceWatcher", () => {
   });
 
   it("ignores generated directories while watching authored roots", async () => {
-    const host = createPreparedHost();
+    const host = await createPreparedHost();
     const watcher = await startAuthoredSourceWatcher({
       coordinator: createCoordinator(host),
       preparedHost: host,
@@ -142,7 +142,7 @@ describe("startAuthoredSourceWatcher", () => {
 
   it("drops initial and directory-only events", async () => {
     mockedWatcher.deferReadiness();
-    const host = createPreparedHost();
+    const host = await createPreparedHost();
     const coordinator = createCoordinator(host);
     const watcherPromise = startAuthoredSourceWatcher({ coordinator, preparedHost: host });
 
@@ -163,7 +163,7 @@ describe("startAuthoredSourceWatcher", () => {
   });
 
   it("coalesces edits received during an in-flight rebuild", async () => {
-    const host = createPreparedHost();
+    const host = await createPreparedHost();
     const first = createDeferred<{ host: PreparedDevelopmentApplicationHost; kind: "runtime" }>();
     const coordinator = createCoordinator(host);
     vi.mocked(coordinator.rebuild)
@@ -188,7 +188,7 @@ describe("startAuthoredSourceWatcher", () => {
   });
 
   it("reports a structural commit only after the coordinator completes", async () => {
-    const host = createPreparedHost();
+    const host = await createPreparedHost();
     const coordinator = createCoordinator(host);
     vi.mocked(coordinator.rebuild).mockResolvedValue({ host, kind: "structural" });
     const watcher = await startAuthoredSourceWatcher({ coordinator, preparedHost: host });
@@ -215,7 +215,7 @@ describe("startAuthoredSourceWatcher", () => {
       join(workspaceRoot, "tsconfig.base.json"),
       '{"compilerOptions":{"strict":true}}\n',
     );
-    const host = createPreparedHost(appRoot);
+    const host = await createPreparedHost(appRoot);
     const watcher = await startAuthoredSourceWatcher({
       coordinator: createCoordinator(host),
       preparedHost: host,
@@ -257,7 +257,7 @@ describe("startAuthoredSourceWatcher", () => {
     );
     await writeFile(join(packageRoot, "src", "index.ts"), "export const shared = true;\n");
     await symlink(packageRoot, packageLink, "junction");
-    const host = createPreparedHost(appRoot);
+    const host = await createPreparedHost(appRoot);
     const watcher = await startAuthoredSourceWatcher({
       coordinator: createCoordinator(host),
       preparedHost: host,
@@ -285,7 +285,7 @@ describe("startAuthoredSourceWatcher", () => {
     await writeFile(join(appRoot, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n");
     await writeFile(tsconfigPath, "{}\n");
     const host: PreparedDevelopmentApplicationHost = {
-      ...createPreparedHost(appRoot),
+      ...(await createPreparedHost(appRoot)),
       workspaceExtensions: [
         {
           packageRoot,
@@ -325,7 +325,7 @@ describe("startAuthoredSourceWatcher", () => {
     temporaryDirectories.push(tempRoot);
     await mkdir(join(appRoot, "agent"), { recursive: true });
     await writeFile(join(appRoot, "package.json"), '{"name":"standalone-agent"}\n');
-    const host = createPreparedHost(appRoot);
+    const host = await createPreparedHost(appRoot);
     const watcher = await startAuthoredSourceWatcher({
       coordinator: createCoordinator(host),
       preparedHost: host,
@@ -347,7 +347,7 @@ describe("startAuthoredSourceWatcher", () => {
     await writeFile(join(appRoot, "package.json"), '{"name":"watch-agent","type":"module"}\n');
     await writeFile(join(appRoot, "tsconfig.base.a.json"), "{}\n");
     await writeFile(join(appRoot, "tsconfig.json"), '{"extends":"./tsconfig.base.a.json"}\n');
-    const host = createPreparedHost(appRoot);
+    const host = await createPreparedHost(appRoot);
     const coordinator = createCoordinator(host);
     const watcher = await startAuthoredSourceWatcher({ coordinator, preparedHost: host });
 
@@ -373,22 +373,21 @@ describe("startAuthoredSourceWatcher", () => {
   });
 });
 
-function createPreparedHost(
+async function createPreparedHost(
   appRoot: string = DEFAULT_APP_ROOT,
-): PreparedDevelopmentApplicationHost {
+): Promise<PreparedDevelopmentApplicationHost> {
   const agentRoot = join(appRoot, "agent");
+  const { manifest } = await compileFromMemory({
+    agentRoot,
+    appRoot,
+    model: "openai/gpt-5.4",
+    name: "watch-agent",
+  });
   return {
     appRoot,
     compileResult: {
       diagnostics: [],
-      manifest: createCompiledAgentManifest({
-        agentRoot,
-        appRoot,
-        config: {
-          model: { id: "openai/gpt-5-mini", routing: { kind: "gateway", target: "openai" } },
-          name: "watch-agent",
-        },
-      }),
+      manifest,
       metadata: {} as PreparedDevelopmentApplicationHost["compileResult"]["metadata"],
       paths: {} as PreparedDevelopmentApplicationHost["compileResult"]["paths"],
       project: { agentRoot, appRoot, layout: "flat" },

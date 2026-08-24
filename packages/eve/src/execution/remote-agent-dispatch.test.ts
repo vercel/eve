@@ -11,7 +11,7 @@ import {
   resolveRemoteAgentStreamHeaders,
   startRemoteAgentSession,
 } from "#execution/remote-agent-dispatch.js";
-import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeRemoteAgentCallActionRequest } from "#shared/action-types.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 
 describe("resolveRemoteAgentForAction", () => {

@@ -51,7 +51,7 @@ Install a channel from the registry with `eve add channel/<name>`, such as `eve 
 
 ## The eve HTTP channel (default)
 
-The eve channel is the framework's default HTTP session API, the routes the terminal UI, [`useEveAgent`](../guides/frontend/overview), and `curl` all talk to. It is enabled by default, even with no `agent/channels/eve.ts` file. Add that file only to override the defaults, most often the route auth policy. See [HTTP channel](./eve) for routes, auth, and customization.
+The eve channel is the framework's default HTTP session API, the routes the terminal UI, [`useEveAgent`](../guides/frontend/overview), and `curl` all talk to. Its selected `channels/eve.ts` source owns health, inspection, callbacks, task input, and the session protocol as one replaceable surface. eve supplies the source when no `agent/channels/eve.ts` file exists; author that file to replace it, most often to change route auth. See [HTTP channel](./eve) for routes, auth, replacement, and disablement.
 
 ## Custom channels
 

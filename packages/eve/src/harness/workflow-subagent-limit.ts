@@ -1,4 +1,4 @@
-import type { RuntimeActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeActionRequest } from "#shared/action-types.js";
 import type { WorkflowSandboxInterrupt } from "#shared/workflow-sandbox.js";
 
 /**

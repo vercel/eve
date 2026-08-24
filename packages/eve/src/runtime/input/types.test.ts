@@ -5,7 +5,7 @@ import {
   inputResponseSchema,
   isInputRequest,
   isInputResponse,
-} from "#runtime/input/types.js";
+} from "#shared/input.js";
 
 describe("inputRequestSchema", () => {
   it("accepts a confirmation request (approval)", () => {

@@ -6,7 +6,7 @@ import {
   SLEEP_TOOL_DESCRIPTION,
   type SleepToolInput,
   type SleepToolOutput,
-} from "#runtime/framework-tools/sleep.js";
+} from "#execution/tools/sleep.js";
 
 export type { SleepToolInput, SleepToolOutput };
 

@@ -24,7 +24,7 @@ import type {
   AuthorizationDefinition,
   ConnectionPrincipal,
   TokenResult,
-} from "#runtime/connections/types.js";
+} from "#shared/connection-types.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { toInputSchema } from "#shared/tool-schema.js";
 
@@ -70,7 +70,7 @@ function buildSerializedContext(overrides: {
 interface WeatherAuthRuntime {
   completeCalls(): number;
   completedPrincipals(): readonly ConnectionPrincipal[];
-  runtime: ReturnType<typeof createTestRuntime>;
+  runtime: Awaited<ReturnType<typeof createTestRuntime>>;
 }
 
 /**
@@ -79,7 +79,7 @@ interface WeatherAuthRuntime {
  * `oauth-code` callback. Shared by the callback-resume and
  * challenge-stays-open driver tests.
  */
-function createWeatherAuthRuntime(agentName: string): WeatherAuthRuntime {
+async function createWeatherAuthRuntime(agentName: string): Promise<WeatherAuthRuntime> {
   let completeCalls = 0;
   const completedPrincipals: ConnectionPrincipal[] = [];
   const weatherAuth: AuthorizationDefinition<{ nonce: string }> = {
@@ -139,10 +139,11 @@ function createWeatherAuthRuntime(agentName: string): WeatherAuthRuntime {
     }),
     logicalPath: "tools/get_weather.ts",
     name: "get_weather",
+    owner: { kind: "application" },
     sourceId: "tools/get_weather.ts",
     sourceKind: "module",
   };
-  const runtime = createTestRuntime({
+  const runtime = await createTestRuntime({
     agent: { name: agentName },
     tools: [getWeatherTool],
   });
@@ -188,7 +189,9 @@ function expectSingleTurn(events: readonly MessageStreamEvent[], turnId: string)
 
 describe("workflowEntry integration", () => {
   it("resumes normal follow-ups after an interactive authorization callback", async () => {
-    const { completeCalls, runtime } = createWeatherAuthRuntime("workflow-entry-auth-followup");
+    const { completeCalls, runtime } = await createWeatherAuthRuntime(
+      "workflow-entry-auth-followup",
+    );
     const continuationToken = "http:workflow-entry-auth-followup";
 
     await runtime.run(async () => {
@@ -304,7 +307,7 @@ describe("workflowEntry integration", () => {
   });
 
   it("runs ordinary deliveries while an authorization challenge stays open", async () => {
-    const { completeCalls, completedPrincipals, runtime } = createWeatherAuthRuntime(
+    const { completeCalls, completedPrincipals, runtime } = await createWeatherAuthRuntime(
       "workflow-entry-auth-open",
     );
     const continuationToken = "http:workflow-entry-auth-open";
@@ -440,7 +443,9 @@ describe("workflowEntry integration", () => {
   });
 
   it("defers ordinary deliveries while a task waits for authorization", async () => {
-    const { completeCalls, runtime } = createWeatherAuthRuntime("workflow-entry-task-auth-open");
+    const { completeCalls, runtime } = await createWeatherAuthRuntime(
+      "workflow-entry-task-auth-open",
+    );
     const continuationToken = "http:workflow-entry-task-auth-open";
 
     await runtime.run(async () => {
@@ -505,7 +510,9 @@ describe("workflowEntry integration", () => {
   });
 
   it("ignores stale and duplicate callbacks after a challenge is replaced", async () => {
-    const { completeCalls, runtime } = createWeatherAuthRuntime("workflow-entry-auth-replaced");
+    const { completeCalls, runtime } = await createWeatherAuthRuntime(
+      "workflow-entry-auth-replaced",
+    );
     const continuationToken = "http:workflow-entry-auth-replaced";
 
     await runtime.run(async () => {
@@ -592,7 +599,7 @@ describe("workflowEntry integration", () => {
   });
 
   it("completes the challenge after a no-op cancel consumed the parked wait", async () => {
-    const { completeCalls, runtime } = createWeatherAuthRuntime("workflow-entry-auth-cancel");
+    const { completeCalls, runtime } = await createWeatherAuthRuntime("workflow-entry-auth-cancel");
     const continuationToken = "http:workflow-entry-auth-cancel";
 
     await runtime.run(async () => {
@@ -675,7 +682,7 @@ describe("workflowEntry integration", () => {
   });
 
   it("parks in conversation mode and resumes via runtime delivery", async () => {
-    const runtime = createTestRuntime({ agent: { name: "workflow-entry-conversation" } });
+    const runtime = await createTestRuntime({ agent: { name: "workflow-entry-conversation" } });
     const continuationToken = "http:workflow-entry-conversation";
 
     await runtime.run(async () => {
@@ -744,7 +751,7 @@ describe("workflowEntry integration", () => {
   });
 
   it("publishes the session ID as the waiting address for an ID-only session", async () => {
-    const runtime = createTestRuntime({ agent: { name: "workflow-entry-id-only" } });
+    const runtime = await createTestRuntime({ agent: { name: "workflow-entry-id-only" } });
 
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
@@ -771,7 +778,7 @@ describe("workflowEntry integration", () => {
   });
 
   it("stamps every stream event with an id that survives a rewind", async () => {
-    const runtime = createTestRuntime({ agent: { name: "workflow-entry-event-ids" } });
+    const runtime = await createTestRuntime({ agent: { name: "workflow-entry-event-ids" } });
     const continuationToken = "http:workflow-entry-event-ids";
 
     await runtime.run(async () => {
@@ -834,7 +841,7 @@ describe("workflowEntry integration", () => {
   });
 
   it("completes an expired conversation and lets its channel start a fresh session", async () => {
-    const runtime = createTestRuntime({ agent: { name: "workflow-entry-timeout" } });
+    const runtime = await createTestRuntime({ agent: { name: "workflow-entry-timeout" } });
     const continuationToken = "http:workflow-entry-timeout";
     const workflowRuntime = createWorkflowRuntime({
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
@@ -897,7 +904,9 @@ describe("workflowEntry integration", () => {
   });
 
   it("notifies each delegated conversation turn and remains available via agentId", async () => {
-    const runtime = createTestRuntime({ agent: { name: "workflow-entry-delegated-conversation" } });
+    const runtime = await createTestRuntime({
+      agent: { name: "workflow-entry-delegated-conversation" },
+    });
     const workflowRuntime = createWorkflowRuntime({
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
     });
@@ -976,7 +985,7 @@ describe("workflowEntry integration", () => {
   });
 
   it("exits a competing continuation owner before its first turn", async () => {
-    const runtime = createTestRuntime({ agent: { name: "workflow-entry-hook-owner" } });
+    const runtime = await createTestRuntime({ agent: { name: "workflow-entry-hook-owner" } });
     const continuationToken = "http:workflow-entry-hook-owner";
 
     await runtime.run(async () => {
@@ -1031,7 +1040,7 @@ describe("workflowEntry integration", () => {
   });
 
   it("emits completed structured results for a conversation turn outputSchema", async () => {
-    const runtime = createTestRuntime({ agent: { name: "workflow-entry-output-schema" } });
+    const runtime = await createTestRuntime({ agent: { name: "workflow-entry-output-schema" } });
     const continuationToken = "http:workflow-entry-output-schema";
     const outputSchema = {
       properties: {
@@ -1090,7 +1099,7 @@ describe("workflowEntry integration", () => {
   });
 
   it("completes immediately in task mode", async () => {
-    const runtime = createTestRuntime({ agent: { name: "workflow-entry-task" } });
+    const runtime = await createTestRuntime({ agent: { name: "workflow-entry-task" } });
 
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
@@ -1119,7 +1128,7 @@ describe("workflowEntry integration", () => {
       required: ["summary"],
       type: "object",
     } as const;
-    const runtime = createTestRuntime({
+    const runtime = await createTestRuntime({
       agent: { name: "workflow-entry-task-output-schema", outputSchema },
     });
 
@@ -1143,7 +1152,7 @@ describe("workflowEntry integration", () => {
   });
 
   it("emits `$eve.*` session attributes onto the parent workflow run", async () => {
-    const runtime = createTestRuntime({ agent: { name: "workflow-entry-tags" } });
+    const runtime = await createTestRuntime({ agent: { name: "workflow-entry-tags" } });
     const continuationToken = "http:workflow-entry-tags";
 
     await runtime.run(async () => {
@@ -1195,7 +1204,7 @@ describe("workflowEntry integration", () => {
   });
 
   it("emits parent lineage onto a subagent workflow run", async () => {
-    const runtime = createTestRuntime({ agent: { name: "workflow-entry-subagent-tags" } });
+    const runtime = await createTestRuntime({ agent: { name: "workflow-entry-subagent-tags" } });
 
     await runtime.run(async () => {
       const serializedContext = buildSerializedContext({

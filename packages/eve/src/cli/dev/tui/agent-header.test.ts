@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AgentInfoResult, AgentInfoToolEntry } from "#client/index.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 
 import { AGENT_HEADER_TIPS, buildAgentHeader, pickAgentHeaderTip } from "./agent-header.js";
 import { createTheme } from "./theme.js";
@@ -15,9 +16,8 @@ const FRAMEWORK_TOOL: AgentInfoToolEntry = {
   inputSchema: { type: "object" },
   logicalPath: "eve:framework/bash",
   name: "bash",
-  origin: "framework",
+  owner: { feature: "test", kind: "framework" },
   outputSchema: { type: "object" },
-  replacesFrameworkTool: false,
   requiresApproval: false,
   sourceId: "eve:bash-tool",
   sourceKind: "module",
@@ -32,86 +32,22 @@ const AUTHORED_TOOL: AgentInfoToolEntry = {
   inputSchema: { type: "object" },
   logicalPath: "agent/tools/get_weather.ts",
   name: "get_weather",
-  origin: "authored",
+  owner: { kind: "application" },
   outputSchema: null,
-  replacesFrameworkTool: false,
   requiresApproval: false,
+  sourceId: "tools/get_weather.ts",
   sourceKind: "module",
 };
 
+const TEST_INFO = createTestAgentInfoResult({
+  agentRoot: "/tmp/weather-agent/agent",
+  appRoot: "/tmp/weather-agent",
+  modelId: "anthropic/claude-opus-4.7",
+  name: "Weather Agent",
+});
 const INFO: AgentInfoResult = {
-  agent: {
-    agentRoot: "/tmp/weather-agent/agent",
-    appRoot: "/tmp/weather-agent",
-    model: {
-      id: "anthropic/claude-opus-4.7",
-      routing: { kind: "gateway", target: "anthropic" },
-    },
-    name: "Weather Agent",
-  },
-  capabilities: {
-    devRoutes: true,
-  },
-  channels: {
-    authored: [],
-    available: [],
-    disabledFramework: [],
-    framework: [],
-  },
-  connections: [],
-  diagnostics: {
-    discoveryErrors: 0,
-    discoveryWarnings: 0,
-  },
-  hooks: [],
-  instructions: {
-    dynamic: [],
-    static: [
-      {
-        content: "You are a weather assistant.",
-        logicalPath: "instructions.md",
-        name: "instructions",
-        role: "system",
-        sourceKind: "markdown",
-      },
-    ],
-  },
-  kind: "eve-agent-info",
-  mode: "development",
-  sandbox: null,
-  schedules: [],
-  skills: {
-    dynamic: [],
-    static: [],
-  },
-  subagents: {
-    local: [],
-    total: 0,
-  },
-  tools: {
-    authored: [AUTHORED_TOOL],
-    available: [FRAMEWORK_TOOL, AUTHORED_TOOL],
-    disabledFramework: [],
-    dynamic: [],
-    framework: [
-      {
-        ...FRAMEWORK_TOOL,
-        disabledByAuthor: false,
-        replacedByAuthoredTool: false,
-        status: "active",
-      },
-    ],
-    reserved: [],
-  },
-  version: 2,
-  workflow: {
-    enabled: false,
-    toolName: "Workflow",
-  },
-  workspace: {
-    resourceRoot: null,
-    rootEntries: [],
-  },
+  ...TEST_INFO,
+  tools: { dynamic: [], static: [FRAMEWORK_TOOL, AUTHORED_TOOL] },
 };
 
 describe("buildAgentHeader", () => {

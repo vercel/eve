@@ -3,8 +3,8 @@ import { type ToolApprovalConfiguration, type ToolApprovalStatus, type ToolSet, 
 import type { SessionCapabilities } from "#channel/types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
-import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
-import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
+import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
+import { WEB_SEARCH_TOOL_NAME } from "#harness/provider-tool-schemas.js";
 import { isObject } from "#shared/guards.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { resolveApprovalPolicy, type ApprovalStatus } from "#public/definitions/approval.js";
@@ -300,14 +300,14 @@ export async function buildToolSetWithProviderTools(input: {
 
   // Inject the real provider tool for web_search when the definition has
   // no local execute (i.e. the framework definition uses the provider sentinel).
-  if (!disabled?.has(WEB_SEARCH_TOOL_DEFINITION.name)) {
-    const webSearchTool = input.tools.get(WEB_SEARCH_TOOL_DEFINITION.name);
+  if (!disabled?.has(WEB_SEARCH_TOOL_NAME)) {
+    const webSearchTool = input.tools.get(WEB_SEARCH_TOOL_NAME);
     if (webSearchTool !== undefined && webSearchTool.execute === undefined) {
       const backend = resolveWebSearchBackend(input.modelReference, input.webSearchProvider);
       if (backend === null) {
-        delete tools[WEB_SEARCH_TOOL_DEFINITION.name];
+        delete tools[WEB_SEARCH_TOOL_NAME];
       } else {
-        tools[WEB_SEARCH_TOOL_DEFINITION.name] = await resolveWebSearchProviderTool(backend);
+        tools[WEB_SEARCH_TOOL_NAME] = await resolveWebSearchProviderTool(backend);
       }
     }
   }

@@ -1,5 +1,3 @@
-import type { H3Event } from "nitro";
-
 /**
  * Public docs URL surfaced from the barebones home page. Kept in source
  * so the deployment output is a fully static, build-time-baked HTML
@@ -274,21 +272,4 @@ export function buildHomePageResponse(
       "content-type": "text/html; charset=utf-8",
     },
   });
-}
-
-/**
- * Nitro route handler for `GET /`. Adapts the Nitro event shape into
- * {@link buildHomePageResponse}.
- */
-export function handleHomePageRequest(
-  input: {
-    readonly agentName: string;
-  },
-  request: Request,
-): Response {
-  return buildHomePageResponse(input, request);
-}
-
-export default function handleStaticHomePageRequest(event: H3Event): Response {
-  return buildHomePageResponse({ agentName: "eve" }, event.req);
 }

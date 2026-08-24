@@ -25,7 +25,7 @@ import {
   type InputResponse,
   parseInputResponses,
   type StrictInputResponses,
-} from "#runtime/input/types.js";
+} from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 

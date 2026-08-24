@@ -95,9 +95,7 @@ function manifestEnablesWorkflow(manifest: CompiledAgentManifest): boolean {
 }
 
 function manifestHasWebSocketChannel(manifest: CompiledAgentManifest): boolean {
-  return manifest.channels.some(
-    (entry) => entry.kind === "channel" && entry.method === "WEBSOCKET",
-  );
+  return manifest.channelRoutes.effective.some((entry) => entry.method === "WEBSOCKET");
 }
 
 function collectHostedTraceDependencies(

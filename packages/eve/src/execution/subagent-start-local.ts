@@ -11,7 +11,7 @@ import {
   rejectAgentEffect,
 } from "#harness/handles/transitions.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeSubagentCallActionRequest } from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { toErrorMessage } from "#shared/errors.js";
 

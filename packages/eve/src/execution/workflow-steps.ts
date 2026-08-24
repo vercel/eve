@@ -103,7 +103,7 @@ import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/s
 import { createExecutionHistoryView } from "#execution/history-view.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
-import { isTaskToolAvailable, TASK_UPDATE_TOOL_NAME } from "#runtime/framework-tools/tasks.js";
+import { TASK_UPDATE_TOOL_NAME } from "#shared/task-tool.js";
 import { stageAttachmentsToSandbox } from "#harness/attachment-staging.js";
 
 const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
@@ -132,14 +132,13 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
   const taskUpdatesEnabled =
     isTaskOwnedSerializedContext(input.serializedContext) &&
-    isTaskToolAvailable({
-      disabledFrameworkTools: bundle.resolvedAgent.disabledFrameworkTools ?? [],
-      hasAuthoredTool: effectiveAgent.turnAgent.tools.some(
-        (tool) => tool.name === TASK_UPDATE_TOOL_NAME,
-      ),
-      tasksEnabled,
-      toolName: TASK_UPDATE_TOOL_NAME,
-    });
+    tasksEnabled &&
+    effectiveAgent.turnAgent.tools.some(
+      (tool) =>
+        tool.kind === "authored-tool" &&
+        tool.owner.kind === "framework" &&
+        tool.name === TASK_UPDATE_TOOL_NAME,
+    );
 
   // Populate the callback base URL so getHookUrl() works during tool
   // execution, preferring eve's active local origin over metadata fallback.

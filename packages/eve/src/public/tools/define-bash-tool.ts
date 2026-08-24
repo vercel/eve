@@ -1,5 +1,5 @@
 import { type BashInput, executeBashOnSandbox } from "#execution/sandbox/bash-tool.js";
-import { BASH_INPUT_SCHEMA, BASH_OUTPUT_SCHEMA } from "#runtime/framework-tools/bash.js";
+import { BASH_INPUT_SCHEMA, BASH_OUTPUT_SCHEMA } from "#public/tools/bash.js";
 import type { ToolDefinition } from "#public/definitions/tool.js";
 
 /**

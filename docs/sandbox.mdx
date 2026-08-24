@@ -5,7 +5,7 @@ description: "The agent's isolated bash environment, including built-in file too
 
 The sandbox is the agent's isolated bash environment: a filesystem rooted at `/workspace` where it can run shell commands, execute scripts, and read or write files without ever touching your app runtime. Every eve agent has exactly one. The default `bash`, `read_file`, and `write_file` tools target it; you can also add the framework's `glob` and `grep` tools or access it from authored code.
 
-A working sandbox exists by default, with nothing to author. Override it only to add setup, seed files, pick a backend, or lock down the network.
+A working sandbox exists by default, with nothing to author. eve selects a framework-provided `defineSandbox({})` source for each local agent; `agent/sandbox.ts` or `agent/sandbox/sandbox.ts` replaces that source. Override it only to add setup, seed files, pick a backend, or lock down the network.
 
 The default sandbox is not a substitute for configuring network policy, credentials, retention, deletion, or other controls your application requires.
 

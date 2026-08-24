@@ -4,7 +4,7 @@ import {
   PENDING_APPROVALS_LABEL,
   renderPendingApprovalsSnippet,
 } from "#harness/hitl/approval-prompt.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 
 describe("renderPendingApprovalsSnippet", () => {
   it("projects approval identity without exposing tool input", () => {

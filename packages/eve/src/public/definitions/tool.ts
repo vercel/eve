@@ -14,7 +14,7 @@ import type {
   ConnectionAuthorizationContext,
   NonInteractiveAuthorizationDefinition,
   TokenResult,
-} from "#runtime/connections/types.js";
+} from "#shared/connection-types.js";
 import {
   DYNAMIC_SENTINEL_KIND,
   TOOL_BRAND,
