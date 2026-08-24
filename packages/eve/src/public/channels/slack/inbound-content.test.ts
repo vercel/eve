@@ -457,8 +457,40 @@ describe("resolveSlackInboundMrkdwn", () => {
       ],
     });
 
-    expect(result).toContain("incident link");
-    expect(result).toContain("https://example.com/?q=a|b");
+    expect(result).toBe("incident link (https://example.com/?q=a|b)");
+  });
+
+  it("formats safe rich_text links as Slack mrkdwn tokens", () => {
+    const result = resolveSlackInboundMrkdwn("", {
+      blocks: [
+        {
+          type: "rich_text",
+          elements: [
+            {
+              type: "rich_text_section",
+              elements: [{ type: "link", url: "https://example.com", text: "docs" }],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toBe("<https://example.com|docs>");
+  });
+
+  it("returns top-level text when block extraction throws", () => {
+    const badBlock: Record<string, unknown> = {};
+    Object.defineProperty(badBlock, "type", {
+      get() {
+        throw new Error("boom");
+      },
+    });
+
+    expect(
+      resolveSlackInboundMrkdwn("keep this comment", {
+        blocks: [badBlock],
+      }),
+    ).toBe("keep this comment");
   });
 
   it("keeps a human comment when legacy attachment content is much longer", () => {

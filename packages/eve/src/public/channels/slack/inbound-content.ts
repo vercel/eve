@@ -1,8 +1,18 @@
-import { formatSlackLink } from "#compiled/@chat-adapter/slack/format.js";
+import { escapeSlackText } from "#compiled/@chat-adapter/slack/format.js";
 import { isObject } from "#shared/guards.js";
+
+const SLACK_LINK_URL_CONTROL_CHARS = /[<>|]/u;
 
 /** Derives inbound mrkdwn from top-level text plus Block Kit and legacy attachments. */
 export function resolveSlackInboundMrkdwn(text: string, raw: Record<string, unknown>): string {
+  try {
+    return resolveSlackInboundMrkdwnUnsafe(text, raw);
+  } catch {
+    return text;
+  }
+}
+
+function resolveSlackInboundMrkdwnUnsafe(text: string, raw: Record<string, unknown>): string {
   const extracted = extractSlackStructuredMrkdwn(raw.blocks, raw.attachments);
   const trimmedText = text.trim();
 
@@ -332,12 +342,8 @@ function normalizeComparableText(input: string): string {
 }
 
 function formatInboundRichTextLink(url: string, label: string): string {
-  try {
-    return formatSlackLink(url, label);
-  } catch (error) {
-    if (error instanceof TypeError) {
-      return `${label} (${url})`;
-    }
-    throw error;
+  if (SLACK_LINK_URL_CONTROL_CHARS.test(url)) {
+    return `${label} (${url})`;
   }
+  return `<${url}|${escapeSlackText(label)}>`;
 }
