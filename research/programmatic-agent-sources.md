@@ -542,14 +542,14 @@ fallback remains.
 
 ### Effectful tools
 
-`ask_question`, `agent`, `task_update`, `task_cancel`, and `web_search` are
-also ordinary public `defineTool` values registered at canonical `tools/*.ts`
-slots. They compose, replace, and disable through the same source graph as any
-authored tool. Instead of an executor that performs work in-process, each
-declares a typed kernel effect (described below) with its input and output
-schemas. The definitions know nothing about Workflow, parking, pending
-batches, or the model SDK; the kernel translates a declared effect into
-durable park/resume mechanics.
+`ask_question`, `agent`, `task_update`, and `task_cancel` are ordinary public
+`defineTool` values, and `web_search` is the public `webSearch()` sentinel,
+all registered at canonical `tools/*.ts` slots. They compose, replace, and
+disable through the same source graph as any authored tool. Instead of an
+executor that performs work in-process, each declares a typed kernel effect
+(described below). The definitions know nothing about Workflow, parking,
+pending batches, or the model SDK; the kernel translates a declared effect
+into durable park/resume mechanics.
 
 The declaration and its visibility conditions are closed, JSON-serializable
 data carried on the definition value:
@@ -568,7 +568,11 @@ type DispatchAction =
   | { readonly kind: "task-cancel" };
 
 type ToolVisibilityCondition =
-  "root-session" | "delegated-task-child" | "requires-request-input" | "requires-loadable-skill";
+  | "root-session"
+  | "delegated-task-child"
+  | "requires-request-input"
+  | "requires-loadable-skill"
+  | "below-subagent-depth";
 ```
 
 A definition declares zero or more visibility conditions; all declared
@@ -585,18 +589,19 @@ materialization remains the `provider-tool` effect described below.
 Workflow follows the same pattern with no framework default: the authored
 `experimental_workflow()` sentinel at `tools/workflow.ts` composes at that
 canonical slot and carries the tool's complete configuration in its
-arguments. Workflow declares no effect of its own — it is code mode over the
-`dispatch` effect. The kernel materializes the model-visible tool as an
-isolated program sandbox whose only host functions are the
-`dispatch`-declaring tools in the effective graph, and each host call
-performs the same `dispatch` effect the `agent` tool performs, with results
-resuming the durable program instead of the model step. Advertisement (root
-sessions below the depth limit) is declared visibility data like any other
-effectful tool. Despite the shared name,
-`defineAgent({ experimental: { workflow } })` is unrelated to the tool: it
-selects the durable-runtime world backing the agent's own execution. That
-world selection and the workflow transport in the closed host inventory are
-not tool identities.
+arguments. It mints no new effect kind — the sentinel declares `dispatch` in
+program mode, which is code mode over the same effect. The kernel
+materializes the model-visible tool as an isolated program sandbox whose
+only host functions are the other `dispatch`-declaring tools in the
+effective graph. Each host call performs the same `dispatch` effect the
+`agent` tool performs, restricted to the agent-call actions — a program
+performing a task action is rejected — with results resuming the durable
+program instead of the model step. Advertisement (root sessions below the
+depth limit) is declared visibility data like any other effectful tool.
+Despite the shared name, `defineAgent({ experimental: { workflow } })` is
+unrelated to the tool: it selects the durable-runtime world backing the
+agent's own execution. That world selection and the workflow transport in
+the closed host inventory are not tool identities.
 
 ### `connection_search`
 
@@ -793,22 +798,24 @@ on every run, is that suspended computation's serialized continuation.
 
 The kernel is keyed by a closed set of effect kinds, never by tool name:
 
-| Effect kind     | Declared by                                                                                                                          | Kernel behavior                                                                  |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
-| `request-input` | `tools/ask_question.ts`; tool approvals internally                                                                                   | park the turn on a pending input batch; resume synthesizes the tool result       |
-| `dispatch`      | `tools/agent.ts`; graph-derived subagent and remote-agent tools; `tools/task_update.ts`; `tools/task_cancel.ts`; Workflow host calls | park; execute the typed action in the durable dispatch step; resume with results |
-| `provider-tool` | the `tools/web_search.ts` provider sentinel                                                                                          | materialize the provider-managed tool at eligible model calls; no suspension     |
+| Effect kind     | Declared by                                                                                                                                                      | Kernel behavior                                                               |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `request-input` | `tools/ask_question.ts`; tool approvals internally                                                                                                               | park the turn on a pending input batch; resume synthesizes the tool result    |
+| `dispatch`      | `tools/agent.ts`; graph-derived subagent and remote-agent tools; `tools/task_update.ts`; `tools/task_cancel.ts`; the `tools/workflow.ts` sentinel (program mode) | park; execute typed actions in the durable dispatch step; resume with results |
+| `provider-tool` | the `tools/web_search.ts` provider sentinel                                                                                                                      | materialize the provider-managed tool at eligible model calls; no suspension  |
 
 The two suspension kinds are genuinely distinct — `request-input` resolves
 inside the harness when the next channel delivery arrives, while `dispatch`
 resolves outside it in a durable step — and `provider-tool` never suspends at
 all. Everything narrower is payload, not a new kind. A `dispatch`
-declaration carries exactly one typed `DispatchAction`, and the dispatch
-handler switches exhaustively over the action union: `subagent-call` and
-`remote-agent-call` start or resume child sessions; `task-update` and
-`task-cancel` execute task commands. Results resume one of two continuations
-the pending batch already identifies: the model step, or the durable
-Workflow program whose host call performed the effect.
+declaration either names exactly one typed `DispatchAction` (call mode) or
+declares program mode, where the materialized durable program performs
+agent-call actions. The dispatch handler switches exhaustively over the
+action union: `subagent-call` and `remote-agent-call` start or resume child
+sessions; `task-update` and `task-cancel` execute task commands and may not
+be performed from a program. Results resume one of two continuations the
+pending batch already identifies: the model step, or the durable Workflow
+program whose host call performed the effect.
 
 Each effect kind owns its park semantics, dispatch, resume, prompt flags,
 advertisement predicate evaluation, and inspection projection through one
@@ -1070,8 +1077,9 @@ pnpm docs:check
 
 Fixture-owned e2e suites run in CI. A deterministic fixture covers defaults,
 extension and override layers, application replacement and disablement, nested
-subagents, `task_update`, home/health, dynamic tools and skills, dynamic model
-and subagent config, a remote agent, sandbox, and default/authored config
+subagents, `task_update`, home, health, info, dynamic tools and skills,
+dynamic model and subagent config, a remote agent, sandbox, and
+default/authored config
 across development, production, and agent-info artifacts. It invokes a
 replaced ordinary tool through the installed runtime rather than an imported
 definition object. The final required CI includes deterministic world suites
@@ -1105,7 +1113,8 @@ The implementation is complete only when:
    ordinary route or generated preflight absent from the compiled channel
    route plan, and route-planning failures use their stable compile error
    codes.
-7. Every kernel effect kind is covered through preparation, advertisement,
+7. Every kernel effect kind, every dispatch action kind, and the
+   `final_output` interception are covered through preparation, advertisement,
    materialization, dispatch, prompts, and inspection for root, self-delegated
    root, named and dynamic task children, non-task children,
    provider-dependent calls, Workflow depth, and structured output. Named task
