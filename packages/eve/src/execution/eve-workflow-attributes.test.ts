@@ -11,6 +11,7 @@ import {
   readParentLineage,
   readParentSessionId,
   readRootSessionId,
+  readSessionTraceId,
 } from "#execution/eve-workflow-attributes.js";
 import { ChannelRequestIdKey } from "#context/keys.js";
 
@@ -151,6 +152,7 @@ describe("buildSessionAttributes", () => {
     expect(attrs).toEqual({
       "$eve.channel_request_id": undefined,
       "$eve.is_trace_content_visible": true,
+      "$eve.trace_id": undefined,
       "$eve.type": "session",
       "$eve.trigger": "slack",
       "$eve.title": "ship the thing please",
@@ -191,6 +193,30 @@ describe("buildSessionAttributes", () => {
 
     expect(attrs["$eve.channel_request_id"]).toBe("req_session");
   });
+
+  it("emits $eve.trace_id from a sampled trace seed", () => {
+    const attrs = buildSessionAttributes({
+      inputMessage: "hi",
+      serializedContext: {
+        ...slackChannelCtx,
+        "eve.sessionTraceSeed": { spanId: "a".repeat(16), traceFlags: 1, traceId: "b".repeat(32) },
+      },
+    });
+
+    expect(attrs["$eve.trace_id"]).toBe("b".repeat(32));
+  });
+
+  it("withholds $eve.trace_id from an unsampled trace seed", () => {
+    const attrs = buildSessionAttributes({
+      inputMessage: "hi",
+      serializedContext: {
+        ...slackChannelCtx,
+        "eve.sessionTraceSeed": { spanId: "a".repeat(16), traceFlags: 0, traceId: "b".repeat(32) },
+      },
+    });
+
+    expect(attrs["$eve.trace_id"]).toBeUndefined();
+  });
 });
 
 describe("buildSubagentRootAttributes", () => {
@@ -207,6 +233,7 @@ describe("buildSubagentRootAttributes", () => {
     expect(attrs).toEqual({
       "$eve.channel_request_id": undefined,
       "$eve.is_trace_content_visible": true,
+      "$eve.trace_id": undefined,
       "$eve.type": "subagent",
       "$eve.parent": "wrun_parent_subagent",
       "$eve.parent_call": "call_subagent_0",
@@ -230,6 +257,22 @@ describe("buildSubagentRootAttributes", () => {
 
     expect(attrs["$eve.channel_request_id"]).toBe("req_subagent");
   });
+
+  it("emits $eve.trace_id from a sampled trace seed", () => {
+    const attrs = buildSubagentRootAttributes({
+      identity: { nodeId: "subagents/linear" },
+      parentCallId: "call_subagent_0",
+      parentSessionId: "wrun_parent_subagent",
+      parentTurnId: "turn_0",
+      rootSessionId: "wrun_top_level_session",
+      serializedContext: {
+        ...subagentChainCtx,
+        "eve.sessionTraceSeed": { spanId: "e".repeat(16), traceFlags: 1, traceId: "f".repeat(32) },
+      },
+    });
+
+    expect(attrs["$eve.trace_id"]).toBe("f".repeat(32));
+  });
 });
 
 describe("buildTurnAttributes", () => {
@@ -243,6 +286,7 @@ describe("buildTurnAttributes", () => {
     expect(attrs).toEqual({
       "$eve.channel_request_id": undefined,
       "$eve.is_trace_content_visible": true,
+      "$eve.trace_id": undefined,
       "$eve.type": "turn",
       "$eve.parent": "wrun_session_123",
       "$eve.root": "wrun_session_123",
@@ -258,5 +302,40 @@ describe("buildTurnAttributes", () => {
     });
 
     expect(attrs["$eve.channel_request_id"]).toBe("req_turn");
+  });
+
+  it("emits $eve.trace_id from a sampled trace seed", () => {
+    const attrs = buildTurnAttributes({
+      parentSessionId: "wrun_session_123",
+      rootSessionId: "wrun_session_123",
+      serializedContext: {
+        ...slackChannelCtx,
+        "eve.sessionTraceSeed": { spanId: "c".repeat(16), traceFlags: 1, traceId: "d".repeat(32) },
+      },
+    });
+
+    expect(attrs["$eve.trace_id"]).toBe("d".repeat(32));
+  });
+});
+
+describe("readSessionTraceId", () => {
+  it("returns the trace id from a sampled seed", () => {
+    expect(
+      readSessionTraceId({
+        "eve.sessionTraceSeed": { spanId: "a".repeat(16), traceFlags: 1, traceId: "b".repeat(32) },
+      }),
+    ).toBe("b".repeat(32));
+  });
+
+  it("returns undefined for an unsampled seed", () => {
+    expect(
+      readSessionTraceId({
+        "eve.sessionTraceSeed": { spanId: "a".repeat(16), traceFlags: 0, traceId: "b".repeat(32) },
+      }),
+    ).toBeUndefined();
+  });
+
+  it("returns undefined when no seed is present", () => {
+    expect(readSessionTraceId({})).toBeUndefined();
   });
 });
