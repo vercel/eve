@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
 status: draft
-last_updated: "2026-08-20"
+last_updated: "2026-08-24"
 ---
 
 # Subagents as tasks: additive delivery plan
@@ -46,9 +46,11 @@ so replayed creation for the same originating call yields the same task without 
 
 `agentId` follow-ups to a finished child require conversation-mode children and parked
 handles, which `experimental.subagentPersistentSessions` gates today. `experimental.tasks`
-therefore implies persistent-session children for subagent dispatch. Whether it sets the other
-flag or simply selects the same behavior internally is a stage-4 decision; the two flags must
-not produce a third hybrid mode.
+therefore implies persistent-session children for subagent dispatch. Agent resolution normalizes
+that implication once: the compiled manifest preserves the authored flags, while the resolved
+runtime config sets `subagentPersistentSessions: true` whenever `tasks` is true. Downstream
+consumers read only the normalized persistent-session flag; the two flags cannot produce a third
+hybrid mode.
 
 ## Additivity rules
 
@@ -171,7 +173,15 @@ Concretely:
 Verification: the design doc's acceptance criteria become a scenario suite plus a new e2e
 fixture with the flag on; existing subagent fixtures prove the flag-off path is unchanged.
 
-### Stage 5 — normalize and retire
+### Stage 5 — graduate persistent subagent sessions
+
+Make persistent sessions the default for subagent dispatch, remove
+`experimental.subagentPersistentSessions`, and preserve the current continuation semantics:
+successful delegation returns an `agentId`, follow-ups address that child, and busy/unreachable
+errors remain explicit. This graduation precedes default task execution so persistent identity is
+the stable baseline rather than an incidental task-mode behavior.
+
+### Stage 6 — normalize and retire task mode
 
 Converge local and remote subagents onto the same delegated path while preserving authored
 definitions, then make tasks the default subagent execution and retire the flag once the
