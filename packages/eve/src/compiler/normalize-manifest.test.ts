@@ -66,6 +66,10 @@ describe("compileAgentManifest source graph", () => {
         loadNamespace: async () => ({
           default: defineAgent({
             model: "openai/gpt-5.4",
+            toolOutput: {
+              maxInlineBytes: 64 * 1024,
+              overflow: "sandbox",
+            },
           }),
         }),
       },
@@ -87,6 +91,10 @@ describe("compileAgentManifest source graph", () => {
 
     const weather = compiled.tools.find((tool) => tool.name === "weather");
     expect(compiled.config.source.logicalPath).toBe("agent.ts");
+    expect(compiled.config.toolOutput).toEqual({
+      maxInlineBytes: 64 * 1024,
+      overflow: "sandbox",
+    });
     expect(compiled.bindings[compiled.config.source.sourceId]?.owner).toEqual({
       kind: "application",
     });

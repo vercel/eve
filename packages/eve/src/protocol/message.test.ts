@@ -17,6 +17,7 @@ import {
   createStepStartedEvent,
   createSubagentCalledEvent,
   createTurnCancelledEvent,
+  createToolOutputSpilledEvent,
   encodeMessageStreamEvent,
   stampMessageStreamEvent,
 } from "#protocol/message.js";
@@ -25,7 +26,36 @@ import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 
 describe("message stream protocol", () => {
   it("pins the stream version for timed session events", () => {
-    expect(EVE_MESSAGE_STREAM_VERSION).toBe("24");
+    expect(EVE_MESSAGE_STREAM_VERSION).toBe("25");
+  });
+
+  it("creates model-facing tool-output spill notifications", () => {
+    expect(
+      createToolOutputSpilledEvent({
+        bytes: 131_072,
+        callId: "call-1",
+        maxInlineBytes: 65_536,
+        path: "/workspace/.eve/tool-results/abc.json",
+        sequence: 2,
+        spillId: "abc",
+        stepIndex: 1,
+        toolName: "search",
+        turnId: "turn_2",
+      }),
+    ).toEqual({
+      data: {
+        bytes: 131_072,
+        callId: "call-1",
+        maxInlineBytes: 65_536,
+        path: "/workspace/.eve/tool-results/abc.json",
+        sequence: 2,
+        spillId: "abc",
+        stepIndex: 1,
+        toolName: "search",
+        turnId: "turn_2",
+      },
+      type: "tool.output.spilled",
+    });
   });
 
   it("creates authoritative input resolution batches", () => {

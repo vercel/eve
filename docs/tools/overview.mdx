@@ -142,6 +142,15 @@ toModelOutput(output) {
 
 Tool outputs must be JSON-serializable. Return plain objects, arrays, strings, numbers, booleans, or `null`; convert values like `Date`, `Map`, `Set`, `NaN`, and cyclic objects before returning them from `execute` or from a `{ type: "json" }` `toModelOutput`.
 
+For an agent-wide safety bound, set `toolOutput` in
+[`defineAgent`](/docs/agent-config#spill-oversized-tool-results). It applies
+after `toModelOutput` and also covers generated connection tools that do not
+have an authored projection. Oversized model-facing output moves to the
+session sandbox while `action.result` keeps the full execution result.
+Successful spills also emit a durable `tool.output.spilled` stream event, so
+hooks, channels, clients, and traces can observe the model-facing projection
+without changing the complete `action.result`.
+
 ### Send images to the model with content parts
 
 A tool that produces an image — a screenshot, a rendered chart — can hand the pixels to a vision-capable model by returning a `content` output from `toModelOutput`. Build outputs with the `toolOutput` helpers and parts with the `toolOutputPart` helpers, both from `eve/tools`:

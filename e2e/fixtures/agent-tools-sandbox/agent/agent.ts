@@ -5,4 +5,8 @@ import { respond } from "./lib/mock-responder.js";
 export default defineAgent({
   ...e2eAgentConfig({ mock: respond }),
   reasoning: "high",
+  toolOutput: {
+    maxInlineBytes: 64 * 1024,
+    overflow: "sandbox",
+  },
 });

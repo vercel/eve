@@ -18,6 +18,7 @@ import {
   inputIdempotencyKey,
   sessionIdempotencyKey,
   turnIdempotencyKey,
+  toolOutputSpillIdempotencyKey,
 } from "#harness/instrumentation/lifecycle.js";
 import {
   rememberInstrumentationActionScope,
@@ -317,6 +318,13 @@ function toLifecycleEvent(
         sessionId: input.sessionId,
         turnId: activeTurnId,
         type: "session.failed",
+      };
+    case "tool.output.spilled":
+      return {
+        ...event.data,
+        idempotencyKey: toolOutputSpillIdempotencyKey(input.sessionId, event.data.spillId),
+        sessionId: input.sessionId,
+        type: "tool.output.spilled",
       };
     case "turn.started":
       return {

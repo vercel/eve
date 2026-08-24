@@ -21,6 +21,7 @@ import type {
 import { ContextKey } from "#context/key.js";
 import { SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import type { InstrumentationChannelDeliveryRef } from "#harness/instrumentation/lifecycle.js";
+import type { ToolOutputSpill } from "#harness/tool-output-overflow.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { DurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
@@ -132,6 +133,9 @@ export const SessionCallbackKey = new ContextKey<SessionCallback>(
 
 export const SessionKey = new ContextKey<Session>("eve.session");
 export const SandboxKey = new ContextKey<SandboxAccess>("eve.sandbox");
+export const PendingToolOutputSpillsKey = new ContextKey<readonly ToolOutputSpill[]>(
+  "eve.pendingToolOutputSpills",
+);
 export const HandleEventKey = new ContextKey<HandleEventFn>("eve.internal.handleEvent");
 
 // ---------------------------------------------------------------------------

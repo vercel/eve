@@ -22,6 +22,46 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.reasoning).toBe("high");
   });
 
+  it("accepts a sandbox tool-output overflow policy", () => {
+    const definition = normalizeAgentDefinition(
+      {
+        model: "openai/gpt-5.5",
+        toolOutput: {
+          maxInlineBytes: 64 * 1024,
+          overflow: "sandbox",
+        },
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.toolOutput).toEqual({
+      maxInlineBytes: 64 * 1024,
+      overflow: "sandbox",
+    });
+  });
+
+  it("rejects incomplete or unsupported tool-output policies", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          toolOutput: { overflow: "sandbox" },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"toolOutput" requires a positive integer "maxInlineBytes"');
+
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          toolOutput: { maxInlineBytes: 1024, overflow: "truncate" },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('overflow: "sandbox"');
+  });
+
   it("accepts dynamic model definitions", () => {
     const model = defineDynamic({
       events: {

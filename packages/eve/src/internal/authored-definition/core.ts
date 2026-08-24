@@ -56,6 +56,7 @@ export function normalizeAgentDefinition(
       "modelOptions",
       "outputSchema",
       "reasoning",
+      "toolOutput",
     ],
     message,
   );
@@ -113,6 +114,20 @@ export function normalizeAgentDefinition(
 
   if (record.limits !== undefined) {
     definition.limits = normalizeAgentLimitsDefinition(record.limits, message);
+  }
+
+  if (record.toolOutput !== undefined) {
+    const toolOutput = expectObjectRecord(record.toolOutput, message);
+    expectOnlyKnownKeys(toolOutput, ["maxInlineBytes", "overflow"], message);
+    if (toolOutput.maxInlineBytes === undefined || toolOutput.overflow !== "sandbox") {
+      throw new Error(
+        `${message} "toolOutput" requires a positive integer "maxInlineBytes" and overflow: "sandbox".`,
+      );
+    }
+    definition.toolOutput = {
+      maxInlineBytes: expectPositiveInteger(toolOutput.maxInlineBytes, message),
+      overflow: "sandbox",
+    };
   }
 
   return definition as Readonly<NormalizedAgentDefinition>;

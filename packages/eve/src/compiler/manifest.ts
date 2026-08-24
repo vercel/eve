@@ -54,7 +54,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 44;
+export const COMPILED_AGENT_MANIFEST_VERSION = 45;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -571,6 +571,13 @@ const compiledAgentCompactionDefinitionSchema: z.ZodType<CompiledAgentCompaction
   })
   .strict();
 
+const compiledAgentToolOutputDefinitionSchema = z
+  .object({
+    maxInlineBytes: z.number().int().positive(),
+    overflow: z.literal("sandbox"),
+  })
+  .strict();
+
 const sessionTokenLimitSchema = z.union([z.number().int().positive(), z.literal(false)]);
 const sessionTimeoutSchema = z.union([z.number().int().positive(), z.literal(false)]);
 
@@ -611,6 +618,7 @@ const compiledAgentConfigBaseFields = {
     .optional(),
   source: moduleSourceRefSchema,
   limits: compiledAgentLimitsDefinitionSchema.optional(),
+  toolOutput: compiledAgentToolOutputDefinitionSchema.optional(),
 };
 
 const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z.union([
@@ -1159,6 +1167,13 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
             maxInputTokensPerSession: config.limits.maxInputTokensPerSession,
             maxOutputTokensPerSession: config.limits.maxOutputTokensPerSession,
             sessionTimeoutMs: config.limits.sessionTimeoutMs,
+          },
+    toolOutput:
+      config.toolOutput === undefined
+        ? undefined
+        : {
+            maxInlineBytes: config.toolOutput.maxInlineBytes,
+            overflow: config.toolOutput.overflow,
           },
     source: { ...config.source },
   };

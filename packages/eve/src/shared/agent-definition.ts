@@ -141,6 +141,16 @@ export interface PublicAgentCompactionDefinition {
 }
 
 /**
+ * Controls how eve stores oversized model-facing tool results.
+ */
+export interface AgentToolOutputDefinition {
+  /** Maximum UTF-8 payload size that remains inline in model history. */
+  readonly maxInlineBytes: number;
+  /** Writes oversized payloads to the session sandbox and leaves a file reference inline. */
+  readonly overflow: "sandbox";
+}
+
+/**
  * Configures framework-owned runtime limits for this agent's runs.
  */
 export interface AgentLimitsDefinition {
@@ -268,6 +278,7 @@ export type InternalAgentDefinition = {
   reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;
   limits?: AgentLimitsDefinition;
+  toolOutput?: AgentToolOutputDefinition;
 };
 
 /**
@@ -307,6 +318,10 @@ type PublicAgentDefinitionBase = {
    * per-message output schema.
    */
   readonly outputSchema?: StandardJSONSchemaV1<unknown, unknown> | JsonObject;
+  /**
+   * Optional agent-wide overflow policy for model-facing tool results.
+   */
+  readonly toolOutput?: AgentToolOutputDefinition;
 };
 
 /**

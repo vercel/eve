@@ -3,6 +3,7 @@ export {
   type AgentDefinition,
   type AgentModelDefinition,
   type AgentStaticModelDefinition,
+  type AgentToolOutputDefinition,
   type DefinedAgent,
   type DynamicLocalSubagentDefinition,
   type DynamicSubagentDefinition,

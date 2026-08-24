@@ -188,6 +188,7 @@ function createResolvedAgentConfig(
     reasoning?: NonNullable<ResolvedAgent["config"]>["reasoning"];
     source?: NonNullable<ResolvedAgent["config"]>["source"];
     limits?: NonNullable<ResolvedAgent["config"]>["limits"];
+    toolOutput?: NonNullable<ResolvedAgent["config"]>["toolOutput"];
   } = {
     name: manifest.config.name,
   };
@@ -256,6 +257,13 @@ function createResolvedAgentConfig(
       maxInputTokensPerSession: manifest.config.limits.maxInputTokensPerSession,
       maxOutputTokensPerSession: manifest.config.limits.maxOutputTokensPerSession,
       sessionTimeoutMs: manifest.config.limits.sessionTimeoutMs,
+    };
+  }
+
+  if (manifest.config.toolOutput !== undefined) {
+    config.toolOutput = {
+      maxInlineBytes: manifest.config.toolOutput.maxInlineBytes,
+      overflow: manifest.config.toolOutput.overflow,
     };
   }
 

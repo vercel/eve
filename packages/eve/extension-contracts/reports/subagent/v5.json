@@ -8,6 +8,7 @@
     "AgentDefinition",
     "AgentModelDefinition",
     "AgentStaticModelDefinition",
+
     "DefinedAgent",
     "DynamicLocalSubagentDefinition",
     "DynamicSubagentDefinition",

@@ -89,6 +89,7 @@ export async function compileAgentConfig(
     reasoning?: CompiledAgentDefinition["reasoning"];
     source: ModuleSourceRef;
     limits?: CompiledAgentDefinition["limits"];
+    toolOutput?: CompiledAgentDefinition["toolOutput"];
   } = {
     compaction,
     name: manifest.agentId,
@@ -140,6 +141,12 @@ export async function compileAgentConfig(
     };
   }
 
+  if (definition.toolOutput !== undefined) {
+    compiledConfig.toolOutput = {
+      maxInlineBytes: definition.toolOutput.maxInlineBytes,
+      overflow: definition.toolOutput.overflow,
+    };
+  }
   if (definition.compaction?.model !== undefined) {
     compaction.model = await normalizeAuthoredModelReference({
       modelCatalog: context.modelCatalog,

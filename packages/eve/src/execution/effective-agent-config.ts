@@ -3,11 +3,13 @@ import { DynamicSubagentAgentConfigKey } from "#context/keys.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
+import type { AgentToolOutputDefinition } from "#shared/agent-definition.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 
 export interface EffectiveAgentRuntime {
   readonly limits?: AgentLimitsDefinition;
   readonly thresholdPercent?: number;
+  readonly toolOutput?: AgentToolOutputDefinition;
   readonly turnAgent: RuntimeTurnAgent;
 }
 
@@ -29,6 +31,7 @@ export function resolveEffectiveAgentRuntimeFromConfig(
     return {
       limits: bundle.resolvedAgent.config?.limits,
       thresholdPercent: bundle.resolvedAgent.config?.compaction?.thresholdPercent,
+      toolOutput: bundle.resolvedAgent.config?.toolOutput,
       turnAgent: bundle.turnAgent,
     };
   }
@@ -43,6 +46,7 @@ export function resolveEffectiveAgentRuntimeFromConfig(
   return {
     limits: config.limits,
     thresholdPercent: config.compaction?.thresholdPercent,
+    toolOutput: config.toolOutput,
     turnAgent: {
       ...turnAgent,
       compactionModel: config.compaction?.model,

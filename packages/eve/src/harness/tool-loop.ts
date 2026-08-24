@@ -35,9 +35,11 @@ import {
   AuthKey,
   ChannelInstrumentationKey,
   ParentSessionKey,
+  PendingToolOutputSpillsKey,
   ParentTraceContextKey,
   ScheduleIdKey,
   SessionCallbackKey,
+  SandboxKey,
   SessionTraceSeedKey,
   TurnTaskDeliveryKey,
   TurnTaskStateKey,
@@ -75,6 +77,7 @@ import {
   createInputRequestedEvent,
   createResultCompletedEvent,
   createSessionWaitingEvent,
+  createToolOutputSpilledEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
@@ -90,6 +93,10 @@ import {
   hydrateSandboxAttachments,
   stageAttachmentsToSandbox,
 } from "#harness/attachment-staging.js";
+import {
+  projectOversizedToolResults,
+  type ToolOutputSpill,
+} from "#harness/tool-output-overflow.js";
 import {
   buildWorkflowHostTools,
   resolveWorkflowSandboxBridgeRequestLimit,
@@ -722,6 +729,25 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       sessionId: session.sessionId,
       turnId: activeTurnId(emissionState),
     });
+    const onToolOutputSpill =
+      emit === undefined
+        ? undefined
+        : async (spill: ToolOutputSpill): Promise<void> => {
+            await emit(
+              createToolOutputSpilledEvent({
+                ...spill,
+                sequence: emissionState.sequence,
+                stepIndex: emissionState.stepIndex,
+                turnId: activeTurnId(emissionState),
+              }),
+            );
+          };
+    if (onToolOutputSpill !== undefined && store !== undefined) {
+      for (const spill of store.get(PendingToolOutputSpillsKey) ?? []) {
+        await onToolOutputSpill(spill);
+      }
+      store.set(PendingToolOutputSpillsKey, []);
+    }
     const failModelSelection = async (
       error: unknown,
       failureState: ReturnType<typeof getHarnessEmissionState>,
@@ -812,6 +838,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           const ctx = contextStorage.getStore();
           const resolvedModel = await resolveActiveRuntimeModel({ config, ctx, session });
           session = resolvedModel.session;
+          const overflowMessages = await projectOversizedToolResults({
+            messages: session.history,
+            policy: config.toolOutput,
+            sandboxAccess: ctx?.get(SandboxKey),
+            onSpill: onToolOutputSpill,
+          });
+          if (overflowMessages !== session.history) {
+            session = { ...session, history: [...overflowMessages] };
+          }
 
           const compacted = await maybeCompact({
             abortSignal: config.abortSignal,
@@ -1318,6 +1353,24 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     session = resolvedModel.session;
     const model = resolvedModel.model;
+    const durableHistoryLength =
+      resolvedRuntimeActions.outcome === "resolved"
+        ? resolvedRuntimeActions.messages.length + instructionMessages.length
+        : session.history.length;
+    const overflowMessages = await projectOversizedToolResults({
+      messages,
+      policy: config.toolOutput,
+      sandboxAccess: ctx?.get(SandboxKey),
+      onSpill: onToolOutputSpill,
+    });
+    if (overflowMessages !== messages) {
+      messages = [...overflowMessages];
+      session = {
+        ...session,
+        history: messages.slice(0, durableHistoryLength),
+      };
+      projectedMessages = projectHistory(messages, session.state);
+    }
 
     const cachePath = detectPromptCachePath(model);
     const marker = cachePath.kind === "anthropic-direct" ? getAnthropicCacheMarker() : undefined;
@@ -1349,7 +1402,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       messages = compaction.messages;
     }
     projectedMessages = normalizeModelMessages(projectHistory(messages, session.state));
-
     if (emit) {
       await emitStepStarted(
         emit,
@@ -1358,6 +1410,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         projectedMessages,
       );
     }
+
     const approvedTools = getApprovedTools(session);
 
     const isFirstTurn = emissionState.sequence === 0;
@@ -2045,6 +2098,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       config,
       emit,
       emissionState,
+      onToolOutputSpill,
       delegatedCaller: taskUpdatesEnabled,
       modelPromptMessageCount: projectedMessages.length,
       promptMessages: messages,
@@ -2607,6 +2661,7 @@ async function handleStepResult(input: {
   readonly config: ToolLoopHarnessConfig;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
+  readonly onToolOutputSpill?: (spill: ToolOutputSpill) => void | PromiseLike<void>;
   readonly delegatedCaller: boolean;
   readonly modelPromptMessageCount: number;
   readonly promptMessages: readonly ModelMessage[];
@@ -2657,7 +2712,12 @@ async function handleStepResult(input: {
     messages: rawResponseMessages,
     providerExecutedOutcomeIds,
   });
-  const responseMessages = normalizedProviderHistory.messages;
+  const responseMessages = await projectOversizedToolResults({
+    messages: normalizedProviderHistory.messages,
+    policy: config.toolOutput,
+    sandboxAccess: contextStorage.getStore()?.get(SandboxKey),
+    onSpill: input.onToolOutputSpill,
+  });
 
   const baseSession: HarnessSession = {
     ...session,
