@@ -15,7 +15,20 @@ const fonts = Promise.all([
   readFile(join(fontDirectory, "geist-sans-semibold.ttf")),
 ]);
 
-const formatRate = (rate: number | null): string => (rate === null ? "—" : `${Math.round(rate)}%`);
+const Rate = ({ value }: { value: number | null }) => {
+  if (value === null) return <div style={{ display: "flex" }}>—</div>;
+
+  return (
+    <div style={{ display: "flex" }}>
+      {[...String(Math.round(value))].map((digit, index) => (
+        <div key={index} style={{ display: "flex", justifyContent: "center", width: 14 }}>
+          {digit}
+        </div>
+      ))}
+      <div style={{ display: "flex", justifyContent: "center", width: 18 }}>%</div>
+    </div>
+  );
+};
 
 const latestResults = (rows: BenchmarkRow[]): BenchmarkRow[] =>
   [...rows].sort(
@@ -95,7 +108,7 @@ export const createEvalsOgImage = async (rows: BenchmarkRow[]): Promise<ImageRes
           <div style={{ display: "flex", justifyContent: "flex-end", width: 84 }}>Base</div>
           <div style={{ display: "flex", justifyContent: "flex-end", width: 104 }}>Guided</div>
         </div>
-        {results.map((row) => (
+        {results.map((row, index) => (
           <div
             key={row.groupId}
             style={{
@@ -105,6 +118,7 @@ export const createEvalsOgImage = async (rows: BenchmarkRow[]): Promise<ImageRes
               fontSize: 24,
               height: 52,
               letterSpacing: "-0.025em",
+              opacity: index < 5 ? 1 : 2 ** (4 - index),
               width: "100%",
             }}
           >
@@ -122,39 +136,29 @@ export const createEvalsOgImage = async (rows: BenchmarkRow[]): Promise<ImageRes
               style={{
                 color: "#888888",
                 display: "flex",
-                fontVariantNumeric: "tabular-nums",
+                fontSize: 24,
                 justifyContent: "flex-end",
+                letterSpacing: 0,
                 width: 84,
               }}
             >
-              {formatRate(row.baselineSuccessRate)}
+              <Rate value={row.baselineSuccessRate} />
             </div>
             <div
               style={{
                 display: "flex",
-                fontVariantNumeric: "tabular-nums",
+                fontSize: 24,
                 fontWeight: 500,
                 justifyContent: "flex-end",
+                letterSpacing: 0,
                 width: 104,
               }}
             >
-              {formatRate(row.guidedSuccessRate)}
+              <Rate value={row.guidedSuccessRate} />
             </div>
           </div>
         ))}
       </div>
-
-      <div
-        style={{
-          background: "linear-gradient(to bottom, transparent 0%, black 100%)",
-          bottom: 0,
-          display: "flex",
-          height: 230,
-          position: "absolute",
-          right: 0,
-          width: 600,
-        }}
-      />
     </div>,
     {
       ...evalsOgImageSize,
