@@ -471,10 +471,10 @@ through source composition:
 | `channels/home.ts`           | `defineChannel`                        | root node        | `GET` and `HEAD` at `/`                                       |
 
 Every identity above is replaceable and disableable through ordinary slot
-composition. `glob` and `grep` are exported from `eve/tools/defaults` but
-never registered. Workflow is enabled by the config sentinel rather than a
-default registration. Native behavior outside these identities is limited to
-`final_output` and the closed host inventory.
+composition. `glob` and `grep` are published at `eve/tools/glob` and
+`eve/tools/grep` but never registered. Workflow is enabled by the config
+sentinel rather than a default registration. Native behavior outside these
+identities is limited to `final_output` and the closed host inventory.
 
 ### Primitive ownership boundaries
 
@@ -485,7 +485,8 @@ Kernel effect handlers live under `kernel/<effect>` or their effect-specific
 execution modules.
 
 Each ordinary default has exactly one definition value. Its framework source
-module and `eve/tools/defaults` import that same value. Moving modules must
+module and its public `eve/tools/<name>` subpath export import that same
+value; there is no barrel export. Moving modules must
 preserve durable state key identity for todo, read-before-write, skill,
 connection-search, compaction, and task behavior. Import guards enforce that
 public modules do not import `runtime/`, ordinary framework sources construct
@@ -518,9 +519,10 @@ bypasses the total binding table.
 
 Author `bash`, `read_file`, `write_file`, `todo`, `web_fetch`, and
 `load_skill` once as public `defineTool` values with plain executors. Register
-those exact values at canonical paths and export them from
-`eve/tools/defaults`. `glob` and `grep` remain opt-in exports rather than
-dormant framework defaults.
+those exact values at canonical paths and publish each at its own
+`eve/tools/<name>` subpath. The `eve/tools/defaults` barrel export is
+deleted. `glob` and `grep` are published the same way at `eve/tools/glob` and
+`eve/tools/grep` but are never registered as defaults.
 
 Their executors receive ordinary `ToolContext`. Remove the public/internal
 converter, duplicate resolved-definition constants and wrappers, and the
@@ -963,9 +965,11 @@ magic-string list survives PR 1 — the `sourceId.startsWith("eve:")` calling
 convention dies with the catalog — and no new name-based dispatch may be
 added.
 
-PR 1 includes the `minor` changeset — it breaks the agent-info schema and
-moves the health and info routes into the replaceable eve channel — and
-updates tool, config, channel, health, sandbox, and agent-info documentation.
+PR 1 includes the `minor` changeset — it breaks the agent-info schema, moves
+the health and info routes into the replaceable eve channel, and replaces the
+`eve/tools/defaults` barrel with per-tool `eve/tools/<name>` subpath exports —
+and updates tool, config, channel, health, sandbox, and agent-info
+documentation.
 
 ### PR 2 — kernel effects
 
@@ -996,7 +1000,7 @@ remains:
 | Binding authority            | Optional bindings; binding reconstruction in compiled constructors; extension scope inferred from source-ID prefixes; fixtures that use physical extension paths as logical identity.                                                                                                                                                                                                                                                                      |
 | Composition and loading      | `logicalPath`-based module loading or sandbox hashing; post-normalization binding reconstruction; module normalizers accepting missing bindings; non-config definition loading before the total remaining binding table exists; eager programmatic namespaces or definition imports; parallel active-owner indexes; arbitrary unbound injected definitions in production normalizers.                                                                      |
 | Framework-source graph       | Runtime no-source sandbox construction; `PACKAGE_ROUTES` and the native home, health, and info route defaults; host lifecycle probes using the public health route; silent post-compile ordinary route drops; discovery-only diagnostics that lose compiler warnings; module-global subagent executor-identity state and discarded subagent composition; prompt ownership parsed from source IDs; `public/tools/internal.ts` and `toPublicToolDefinition`. |
-| Primitive ownership          | The mixed `runtime/framework-tools` directory, transitional re-export wrappers, public-to-runtime imports, duplicate default definition values, and ordinary “framework tool catalog” terminology.                                                                                                                                                                                                                                                         |
+| Primitive ownership          | The mixed `runtime/framework-tools` directory, the `eve/tools/defaults` barrel export, transitional re-export wrappers, public-to-runtime imports, duplicate default definition values, and ordinary “framework tool catalog” terminology.                                                                                                                                                                                                                 |
 | Default config authority     | Synthesized default config in `normalize-agent-config.ts`, undefined-config-source inspection conventions, and config loading outside the total binding table.                                                                                                                                                                                                                                                                                             |
 | Kernel effects               | `sourceId.startsWith("eve:")` execution branching; `ask_question` and `final_output` tool-name checks in the harness; the `TASK_CONTROL_TOOL_NAMES` name set; the `frameworkAction: "load-skill"` marker; name-based advertisement visibility; kernel conditionals, literal name lists, or registries outside the exhaustive integration points; native fabrication of ordinary resources.                                                                 |
 | Inspection and memory parity | Inspection owner fallback or framework-state reconstruction; omitted dynamic-resolver or remote-agent provenance; `createMemorySourceId`, mirrored memory manifest references, and other in-memory descriptor shortcuts; harness execution of caller-owned tool objects; downstream source catalogs, composers, merges, or compatibility readers.                                                                                                          |
