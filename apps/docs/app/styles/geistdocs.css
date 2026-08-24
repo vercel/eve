@@ -1,5 +1,3 @@
-@source "../../node_modules/@vercel/geistdocs/dist/**/*.js";
-@source "../../node_modules/streamdown/dist/*.js";
 @source "../**/*.{ts,tsx,mdx}";
 @source "../../components/**/*.{ts,tsx}";
 @source "../../../docs/**/*.{md,mdx}";
@@ -74,7 +72,7 @@ html[data-scrolled] body:has([data-home-route]) header {
     @apply px-6;
   }
 
-  #nd-page > .text-fd-muted-foreground:first-child {
+  #nd-page > .text-gray-900:first-child {
     @apply hidden;
   }
 }

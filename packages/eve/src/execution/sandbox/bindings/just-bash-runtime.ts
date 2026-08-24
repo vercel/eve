@@ -75,6 +75,7 @@ async function loadJustBashModule(input: {
 export async function createBashSandbox(input: {
   readonly appRoot: string;
   readonly autoInstall: boolean;
+  readonly customCommands?: JustBashSandboxCreateOptions["customCommands"];
   readonly filesystem?: JustBashSandboxCreateOptions["filesystem"];
   readonly rootPath: string;
   readonly sessionKey: string;
@@ -112,6 +113,7 @@ export async function createBashSandbox(input: {
 
   const sandbox = await Sandbox.create({
     cwd: WORKSPACE_ROOT,
+    customCommands: input.customCommands === undefined ? undefined : [...input.customCommands],
     env: metadata?.env as Record<string, string> | undefined,
     fs: filesystem,
     network: {

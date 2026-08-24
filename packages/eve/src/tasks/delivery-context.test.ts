@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { SessionStateMap } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 import {
+  resolveInitiatingTaskContext,
   resolveTaskDeliveryContext,
   TASK_DELIVERY_CONTEXT_LABEL,
+  TASK_DELIVERY_INITIATING_INSTRUCTION,
   TASK_DELIVERY_PENDING_INSTRUCTION,
   TASK_DELIVERY_SETTLED_INSTRUCTION,
 } from "#tasks/delivery-context.js";
@@ -14,6 +16,22 @@ import type { TaskView } from "#tasks/types.js";
 const metadata = { kind: "report-probe", name: "report_probe" } as const;
 
 describe("task delivery instructions", () => {
+  it("initiating instruction requires one launch acknowledgement", () => {
+    expect(TASK_DELIVERY_INITIATING_INSTRUCTION).toContain(TASK_DELIVERY_CONTEXT_LABEL);
+    expect(TASK_DELIVERY_INITIATING_INSTRUCTION).toContain("runtime-authored");
+    expect(TASK_DELIVERY_INITIATING_INSTRUCTION).toContain(
+      "continue independently after this turn",
+    );
+    expect(TASK_DELIVERY_INITIATING_INSTRUCTION).toContain(
+      "including starting any remaining background work",
+    );
+    expect(TASK_DELIVERY_INITIATING_INSTRUCTION).toContain(
+      "When no further tool calls are needed in this turn",
+    );
+    expect(TASK_DELIVERY_INITIATING_INSTRUCTION).toContain("one brief user-facing acknowledgement");
+    expect(TASK_DELIVERY_INITIATING_INSTRUCTION).not.toContain(EMPTY_DELIVERY_SENTINEL);
+  });
+
   it("pending instruction unconditionally requires the sentinel", () => {
     expect(TASK_DELIVERY_PENDING_INSTRUCTION).toContain(TASK_DELIVERY_CONTEXT_LABEL);
     expect(TASK_DELIVERY_PENDING_INSTRUCTION).toContain("runtime-authored");
@@ -46,6 +64,33 @@ describe("task delivery instructions", () => {
     );
     expect(TASK_DELIVERY_SETTLED_INSTRUCTION).toContain("one user-facing response");
     expect(TASK_DELIVERY_SETTLED_INSTRUCTION).not.toContain("When no task");
+  });
+});
+
+describe("resolveInitiatingTaskContext", () => {
+  it("projects the active turn's accepted background tasks as initiating", () => {
+    expect(
+      resolveInitiatingTaskContext({
+        state: taskState([
+          taskEntry("task_1", "turn_1", undefined, { data: {}, kind: "subagent" }),
+          taskEntry("task_2", "turn_2", undefined, { data: {}, kind: "subagent" }),
+        ]),
+        turnId: "turn_1",
+      }),
+    ).toEqual({
+      context:
+        '[Task state]\n{"tasks":[{"name":"report_probe","status":"pending","taskId":"task_1"}]}',
+      phase: "initiating",
+    });
+  });
+
+  it("ignores task records that were not accepted by an executor", () => {
+    expect(
+      resolveInitiatingTaskContext({
+        state: taskState([taskEntry("task_1", "turn_1")]),
+        turnId: "turn_1",
+      }),
+    ).toBeUndefined();
   });
 });
 
@@ -111,9 +156,15 @@ describe("resolveTaskDeliveryContext", () => {
   });
 });
 
-function taskEntry(taskId: string, createdByTurnId: string, terminalView?: TaskView) {
+function taskEntry(
+  taskId: string,
+  createdByTurnId: string,
+  terminalView?: TaskView,
+  executor?: { readonly data: Record<string, never>; readonly kind: string },
+) {
   return {
     createdByTurnId,
+    executor,
     metadata,
     taskId,
     taskInboxToken: `inbox-${taskId}`,

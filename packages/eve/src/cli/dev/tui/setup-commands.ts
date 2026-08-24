@@ -300,6 +300,13 @@ async function executeSetupCommand(
       }
     }
   } catch (error) {
+    const actionableError = error instanceof RegistryFlowFailedError ? error.cause : error;
+    const upgrade = await vercelCliUpgradeOutcome(actionableError, command, flows, {
+      appRoot,
+      prompter,
+      signal,
+    });
+    if (upgrade !== undefined) return upgrade;
     if (error instanceof RegistryFlowFailedError) {
       const completed = error.completed;
       return {
@@ -314,12 +321,6 @@ async function executeSetupCommand(
         preserveFlowDiagnostics: command !== "model",
       };
     }
-    const upgrade = await vercelCliUpgradeOutcome(error, command, flows, {
-      appRoot,
-      prompter,
-      signal,
-    });
-    if (upgrade !== undefined) return upgrade;
     // Provisioning steps (link, deploy, Slack) throw a Vercel human action when
     // `whoami` fails or a scope is denied. Route it to the in-TUI fix instead of
     // dumping the raw "Human action required" message.
@@ -352,7 +353,7 @@ async function vercelCliUpgradeOutcome(
   let choice: "upgrade" | "later";
   try {
     choice = await input.prompter.select({
-      message: "Your Vercel CLI needs an update to list your teams. Upgrade now?",
+      message: "Your Vercel CLI needs an update to continue setup. Upgrade now?",
       options: [
         {
           value: "upgrade",

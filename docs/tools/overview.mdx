@@ -70,10 +70,11 @@ progress with `task.send({ kind: "update", message })` and the terminal result w
 in-memory callback dies with the process — so the cross-process executor wire remains
 framework-owned and is not yet a stable authored-tool API.
 
-Each task-triggered parent turn includes runtime-authored state for tasks started by the same
-parent turn. The model is instructed to keep related intermediate results silent while that state
-contains pending tasks. Once every related task is terminal, the state includes their outputs so
-the model can combine the useful results.
+After the initiating turn accepts background tasks, eve supplies runtime-authored state for that
+cohort and instructs the model to acknowledge that the work started without waiting for results.
+Later task-triggered parent turns receive fresh state for the same cohort. The model is instructed
+to keep related intermediate results silent while any task remains pending. Once every related
+task is terminal, the state includes their outputs so the model can combine the useful results.
 
 ### The `ctx` parameter
 

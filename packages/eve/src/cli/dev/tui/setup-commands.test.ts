@@ -302,6 +302,34 @@ describe("runTuiSetupCommand", () => {
     );
   });
 
+  it("prompts to upgrade when an installed registry item's setup needs a newer CLI", async () => {
+    const flows = fakeFlows({
+      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => {
+        throw new RegistryFlowFailedError(
+          new HumanActionRequiredError({
+            kind: "vercel-cli-upgrade",
+            command: "vercel upgrade",
+            reason: "The installed Vercel CLI does not support Linq trigger options.",
+          }),
+          {
+            kind: "done",
+            addedItems: ["channel/linq"],
+            items: [{ address: "channel/linq", title: "Linq", facts: [], output: [] }],
+            facts: [],
+          },
+        );
+      }),
+      runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => ({
+        kind: "installed",
+      })),
+    });
+
+    await expect(run({ command: "add", flows, upgradeChoice: "upgrade" })).resolves.toEqual({
+      message: "Upgraded the Vercel CLI. Retry /add.",
+      preserveFlowDiagnostics: false,
+    });
+  });
+
   it("gives the manual upgrade command when the old-CLI prompt is declined", async () => {
     const flows = fakeFlows({
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => {

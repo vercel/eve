@@ -32,6 +32,7 @@ import { isCardElement, type CardElement, type FileUpload } from "#compiled/chat
 
 import { createLogger, logError } from "#internal/logging.js";
 import { cardToBlocks, cardToFallbackText } from "#public/channels/slack/blocks.js";
+import { resolveSlackInboundMrkdwn } from "#public/channels/slack/inbound-content.js";
 import { truncateTypingStatus } from "#public/channels/slack/limits.js";
 import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
 
@@ -646,7 +647,8 @@ function parseThreadMessage(
     readonly botUserId: string | undefined;
   },
 ): SlackThreadMessage {
-  const text = typeof raw.text === "string" ? raw.text : "";
+  const topLevelText = typeof raw.text === "string" ? raw.text : "";
+  const text = resolveSlackInboundMrkdwn(topLevelText, raw);
   const ts = typeof raw.ts === "string" ? raw.ts : "";
   const threadTs = typeof raw.thread_ts === "string" ? raw.thread_ts : threadRootTs;
   const user = typeof raw.user === "string" ? raw.user : undefined;

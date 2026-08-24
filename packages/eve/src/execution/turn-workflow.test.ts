@@ -323,11 +323,12 @@ describe("turnWorkflow", () => {
 
   it("reports a cancelled turn as a park with the cancelled marker", async () => {
     const sessionState = createSessionState();
+    const cancelledState = createSessionState({ continuationToken: "cancelled-state" });
     installInbox([]);
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "cancelled",
       serializedContext: { state: "cancelled" },
-      sessionState,
+      sessionState: cancelledState,
     });
 
     // Task mode on purpose: cancellation bypasses the `canPark` gate.
@@ -341,7 +342,7 @@ describe("turnWorkflow", () => {
     expect(vi.mocked(turnStep).mock.calls[0]?.[0].abortSignal).toBeInstanceOf(AbortSignal);
     expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
       serializedContext: { state: "cancelled" },
-      sessionState,
+      sessionState: cancelledState,
     });
     // The command inbox forwards cancellation to this turn-private hook.
     expect(cancelHookTokens()).toEqual(["turn-token:cancel"]);
@@ -352,7 +353,7 @@ describe("turnWorkflow", () => {
         cancelled: true,
         kind: "park",
         serializedContext: { state: "cancelled" },
-        sessionState,
+        sessionState: cancelledState,
       },
       kind: "turn-result",
     });

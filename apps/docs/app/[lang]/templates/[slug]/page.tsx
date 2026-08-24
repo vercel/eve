@@ -3,6 +3,7 @@ import { geistShikiTheme } from "@vercel/geistdocs/shiki-theme";
 import { highlight } from "fumadocs-core/highlight";
 import { ArrowLeftIcon } from "lucide-react";
 import type { Metadata } from "next";
+import { cacheLife } from "next/cache";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ComponentProps } from "react";
@@ -27,8 +28,6 @@ export const generateStaticParams = (): PageParams[] =>
   Object.keys(translations).flatMap((lang) =>
     templateManifest.map((entry) => ({ lang, slug: entry.slug })),
   );
-
-export const dynamicParams = false;
 
 export const generateMetadata = async ({
   params,
@@ -84,6 +83,7 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
         <Link
           className="inline-flex min-h-8 items-center gap-1.5 rounded-sm text-gray-900 text-label-14 no-underline outline-none transition-colors hover:text-gray-1000 focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100 motion-reduce:transition-none"
           href="/templates"
+          prefetch={true}
         >
           <ArrowLeftIcon aria-hidden="true" className="size-3.5" />
           Templates
@@ -195,27 +195,32 @@ const createStructuredData = (entry: TemplateEntry, canonicalUrl: string) => ({
   ],
 });
 
-const highlightFile = async (file: TemplateFile): Promise<HighlightedTemplateFile> => ({
-  code: await highlight(file.contents, {
-    lang: file.language,
-    theme: geistShikiTheme,
-    components: {
-      pre: ({ children, ...props }: ComponentProps<"pre">) => (
-        <CodeBlock
-          {...props}
-          className={cn(
-            props.className,
-            "overflow-x-hidden! whitespace-pre-wrap break-words rounded-none border-0 bg-transparent p-4 text-copy-13-mono [&>code]:min-w-0! [&>code]:w-full!",
-          )}
-        >
-          {children}
-        </CodeBlock>
-      ),
-    },
-  }),
-  language: file.language,
-  relativePath: file.relativePath,
-});
+const highlightFile = async (file: TemplateFile): Promise<HighlightedTemplateFile> => {
+  "use cache";
+  cacheLife("max");
+
+  return {
+    code: await highlight(file.contents, {
+      lang: file.language,
+      theme: geistShikiTheme,
+      components: {
+        pre: ({ children, ...props }: ComponentProps<"pre">) => (
+          <CodeBlock
+            {...props}
+            className={cn(
+              props.className,
+              "overflow-x-hidden! whitespace-pre-wrap break-words rounded-none border-0 bg-transparent p-4 text-copy-13-mono [&>code]:min-w-0! [&>code]:w-full!",
+            )}
+          >
+            {children}
+          </CodeBlock>
+        ),
+      },
+    }),
+    language: file.language,
+    relativePath: file.relativePath,
+  };
+};
 
 const IntegrationList = ({ entry }: { entry: TemplateEntry }) => (
   <ul

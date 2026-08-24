@@ -436,14 +436,11 @@ describe("connection_search", () => {
         session: { auth: { current: null, initiator: null }, id: "session-auth-replay" },
       } satisfies DynamicResolveContext)) as DynamicToolSet;
       const reference = readDurableDynamicToolCallbacks(tools["connection_search"]!)!.execute!;
-      const registry = (globalThis as Record<symbol, Map<string, Function> | undefined>)[
-        Symbol.for("@workflow/core//registeredSteps")
-      ]!;
 
-      return await registry.get(reference.stepId)!(reference.closure, {
+      return await reference.callback(reference.closure, {
         connection: "salesforce",
         keywords: "accounts",
-      });
+      } as never);
     });
 
     expect(isAuthorizationSignal(result)).toBe(true);

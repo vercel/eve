@@ -44,12 +44,7 @@ export async function cancelDescendantTurnsStep(input: {
     return;
   }
 
-  if (running.length === 0) {
-    log.warn("no running agent handles found while cancelling descendants; nothing to cancel", {
-      sessionId: input.sessionState.sessionId,
-    });
-    return;
-  }
+  if (running.length === 0) return;
 
   let remoteContext:
     | Promise<{

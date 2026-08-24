@@ -285,7 +285,6 @@ export async function runExtensionInitCommand(
     const installFailureOutput: string[] = [];
     const recentInstallOutput: string[] = [];
     const installResult = await dependencies.runPackageManagerInstall(packageManager, projectPath, {
-      bypassMinimumReleaseAge: true,
       progressDetails: process.stdout.isTTY === true && !debug,
       onOutput: (line) => {
         if (line.text.trim() !== "") {

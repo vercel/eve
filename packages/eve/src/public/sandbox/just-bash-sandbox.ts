@@ -1,4 +1,4 @@
-import type { IFileSystem } from "just-bash";
+import type { CustomCommand, IFileSystem } from "just-bash";
 
 /**
  * Context passed to a custom just-bash filesystem factory for each live handle.
@@ -28,6 +28,17 @@ export interface JustBashSandboxCreateOptions {
    * actionable install error instead. Defaults to `true`.
    */
   readonly autoInstall?: boolean;
+  /**
+   * Registers trusted host application code as commands in each live
+   * just-bash interpreter. Custom commands can participate in normal shell
+   * composition, including pipelines and redirections.
+   *
+   * Custom commands are not available during template prewarming. They run in
+   * eve's host process, outside the virtual filesystem security boundary, and
+   * are responsible for validating their own inputs and cleaning up host
+   * resources.
+   */
+  readonly customCommands?: ReadonlyArray<CustomCommand>;
   /**
    * Composes the filesystem used by each live sandbox handle. The factory is
    * called when a handle opens with eve's durable default filesystem; return a

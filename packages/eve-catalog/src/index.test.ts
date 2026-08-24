@@ -76,9 +76,10 @@ describe("integration catalog", () => {
   });
 
   it("uses Agentcard's streamable HTTP MCP endpoint", () => {
-    expect(getIntegrationEntry("agentcard")!.connection!.mcp!.url).toBe(
-      "https://mcp.agentcard.sh/mcp",
-    );
+    const agentcard = getIntegrationEntry("agentcard")!;
+
+    expect(agentcard.tagline).toBe("let agents buy online");
+    expect(agentcard.connection!.mcp!.url).toBe("https://mcp.agentcard.sh/mcp");
   });
 
   it("uses Linear's streamable HTTP MCP endpoint", () => {

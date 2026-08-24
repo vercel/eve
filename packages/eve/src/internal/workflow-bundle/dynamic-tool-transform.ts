@@ -1,11 +1,9 @@
 /**
- * Stamps callbacks passed to authored `defineTool()` calls with stable replay
- * descriptors. Each callback is hoisted independently, registered under a
- * module-and-source-coordinate id, and receives only the lexical values its
- * body references.
+ * Stamps callbacks passed to authored `defineTool()` calls with durable replay
+ * descriptors. Each callback body is hoisted into a module-suffix function and
+ * the live callback is stamped with that function plus the lexical values its
+ * body references; identity `(toolName, phase)` is assigned at resolve time.
  */
-
-import { createHash } from "node:crypto";
 
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
 import {
@@ -30,8 +28,6 @@ interface CallbackInfo {
   readonly propertyName: CallbackPropertyName;
   readonly propEnd: number;
   readonly propStart: number;
-  readonly sourceEnd: number;
-  readonly sourceStart: number;
 }
 
 interface ScopeEntry {
@@ -56,7 +52,7 @@ export async function transformDynamicToolExecute(
 
   const callbacks: CallbackInfo[] = [];
   walkForCallbacks(source, ast, callbacks, [], defineToolAliases);
-  return callbacks.length === 0 ? null : applyTransform(filename, source, callbacks);
+  return callbacks.length === 0 ? null : applyTransform(source, callbacks);
 }
 
 // Keep the old export name for backward compatibility with the plugin.
@@ -208,8 +204,6 @@ function collectCallbackProperty(
       propertyName,
       propEnd: property.end,
       propStart: property.start,
-      sourceEnd: value.end,
-      sourceStart: value.start,
     });
     return;
   }
@@ -227,23 +221,15 @@ function collectCallbackProperty(
       propertyName,
       propEnd: property.end,
       propStart: property.start,
-      sourceEnd: value.end,
-      sourceStart: value.start,
     });
   }
 }
 
-function applyTransform(
-  filename: string,
-  source: string,
-  callbacks: readonly CallbackInfo[],
-): { code: string } {
+function applyTransform(source: string, callbacks: readonly CallbackInfo[]): { code: string } {
   const replacements: Array<{ start: number; end: number; text: string }> = [];
   const hoistedFunctions: string[] = [];
-  const registrations: string[] = [];
-  const moduleId = stableModuleId(filename);
 
-  for (const callback of callbacks) {
+  for (const [index, callback] of callbacks.entries()) {
     const referencedNames = collectReferencedIdentifierNames(callback.bodyNode);
     const candidateVars = callback.nestedScopes.flatMap((scope) => [
       ...scope.params,
@@ -254,13 +240,11 @@ function applyTransform(
       (name) => !callbackParamNames.has(name) && referencedNames.has(name),
     );
     const closure = allVars.length > 0 ? `{ ${allVars.join(", ")} }` : "{}";
-    const coordinate = `${String(callback.sourceStart)}-${String(callback.sourceEnd)}`;
     const safePhase = callback.phase.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
     const hoistedName =
       callback.phase === "execute"
-        ? `__eve_dynamic_exec_${callback.sourceStart}`
-        : `__eve_dynamic_${safePhase}_${callback.sourceStart}`;
-    const stepId = `eve:dynamic-tool//${moduleId}/${callback.phase}/${coordinate}`;
+        ? `__eve_dynamic_exec_${index}`
+        : `__eve_dynamic_${safePhase}_${index}`;
     const originalParams = callback.params;
     const hoistedParams = originalParams ? `__vars, ${originalParams}` : "__vars";
     const varsDestructure = allVars.length > 0 ? `const ${closure} = __vars;\n  ` : "";
@@ -273,21 +257,13 @@ function applyTransform(
         `  ${varsDestructure}${bodyContent}\n` +
         `}`,
     );
-    registrations.push(`${hoistedName}.stepId = ${JSON.stringify(stepId)};`);
-    registrations.push(`__eveStepRegistry.set(${JSON.stringify(stepId)}, ${hoistedName});`);
 
     const wrapper = createLiveWrapper(callback, hoistedName, closure);
-    const stamped = `__eveStampDynamicCallback(${wrapper}, ${JSON.stringify(stepId)}, ${closure})`;
-    const replacement = [`${callback.propertyName}: ${stamped}`];
-    if (callback.phase === "execute") {
-      // Retained for generated-output compatibility while durable runtime
-      // metadata uses the phase-specific descriptor above.
-      replacement.push(`__executeStepFn: ${hoistedName}`, `__closureVars: ${closure}`);
-    }
+    const stamped = `__eveStampDynamicCallback(${wrapper}, ${hoistedName}, ${closure})`;
     replacements.push({
       end: callback.propEnd,
       start: callback.propStart,
-      text: replacement.join(",\n          "),
+      text: `${callback.propertyName}: ${stamped}`,
     });
   }
 
@@ -297,17 +273,13 @@ function applyTransform(
   }
 
   const registrySetup = [
-    `var __eveStepRegistrySym = Symbol.for("@workflow/core//registeredSteps");`,
-    `if (!globalThis[__eveStepRegistrySym]) globalThis[__eveStepRegistrySym] = new Map();`,
-    `var __eveStepRegistry = globalThis[__eveStepRegistrySym];`,
     `var __eveDurableCallbackSym = Symbol.for("eve:durable-dynamic-callback");`,
-    `function __eveStampDynamicCallback(callback, stepId, closure) {`,
-    `  Object.defineProperty(callback, __eveDurableCallbackSym, { configurable: true, value: { stepId, closure } });`,
+    `function __eveStampDynamicCallback(callback, impl, closure) {`,
+    `  Object.defineProperty(callback, __eveDurableCallbackSym, { configurable: true, value: { callback: impl, closure } });`,
     `  return callback;`,
     `}`,
   ].join("\n");
-  const suffix = [...hoistedFunctions, ...registrations].join("\n");
-  return { code: `${registrySetup}\n${code}\n\n${suffix}\n` };
+  return { code: `${registrySetup}\n${code}\n\n${hoistedFunctions.join("\n")}\n` };
 }
 
 function createLiveWrapper(callback: CallbackInfo, hoistedName: string, closure: string): string {
@@ -320,19 +292,6 @@ function createLiveWrapper(callback: CallbackInfo, hoistedName: string, closure:
   }
   const awaitPrefix = callback.isAsync ? "await " : "";
   return `${asyncPrefix}(...__args) => ${awaitPrefix}${hoistedName}(${closure}, ...__args)`;
-}
-
-function stableModuleId(filename: string): string {
-  let normalized = filename.replaceAll("\\", "/").replace(/[?#].*$/, "");
-  const nodeModules = normalized.lastIndexOf("/node_modules/");
-  if (nodeModules >= 0) {
-    normalized = normalized.slice(nodeModules + "/node_modules/".length);
-  } else {
-    const cwd = process.cwd().replaceAll("\\", "/");
-    if (normalized.startsWith(`${cwd}/`)) normalized = normalized.slice(cwd.length + 1);
-  }
-
-  return createHash("sha256").update(normalized).digest("hex").slice(0, 32);
 }
 
 function dedupeShadowed(names: readonly string[]): string[] {

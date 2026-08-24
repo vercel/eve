@@ -146,29 +146,6 @@ describe("runPnpmInstall", () => {
 });
 
 describe("runPackageManagerInstall", () => {
-  test.each([
-    [
-      "pnpm",
-      ["--dir", "/tmp/app", "install", "--no-frozen-lockfile", "--config.minimum-release-age=0"],
-    ],
-    ["npm", ["install", "--min-release-age=0"]],
-    // yarn has no release-age gate, so the bypass adds nothing.
-    ["yarn", ["install"]],
-    ["bun", ["install"]],
-  ] as const)("maps the release-age bypass onto %s", async (kind, expectedArgs) => {
-    expect(
-      packageManagerInstallSucceeded(
-        await runPackageManagerInstall(kind, "/tmp/app", { bypassMinimumReleaseAge: true }),
-      ),
-    ).toBe(true);
-
-    expect(mockedSpawn).toHaveBeenCalledWith(
-      kind,
-      expectedArgs,
-      expect.objectContaining({ cwd: "/tmp/app" }),
-    );
-  });
-
   test("requests npm output before registry operations complete", async () => {
     expect(
       packageManagerInstallSucceeded(

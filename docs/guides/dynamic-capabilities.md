@@ -166,7 +166,15 @@ Write callback properties as inline function expressions, arrows, method shortha
 
 Closure values must be JSON-serializable. Plain objects, arrays, strings, finite numbers, booleans, and `null` are supported; `undefined` object properties are omitted. Functions, class instances, `Date`, `Map`, symbols, non-finite numbers, and cyclic values fail resolution with the tool name and callback phase instead of being serialized lossily.
 
-Call expressions such as `execute: makeExecutor()` are not transformed. Put the callback body directly in `defineTool()` inside an authored module; eve-provided factories may also supply pre-registered callbacks. eve rejects a dynamic tool if any present callback lacks durable metadata, and replay never reruns the current resolver to recover one.
+Call expressions such as `execute: makeExecutor()` are not transformed. Put the callback body directly in `defineTool()` inside an authored module; eve-provided factories may also supply pre-registered callbacks. eve rejects a dynamic tool if any present callback lacks durable metadata.
+
+### Identity and redeploys
+
+A parked call binds to its callback by **tool name and phase** — the same identity a static tool uses — never by source position. This gives dynamic tools static-tool semantics across deploys:
+
+- Editing a callback body (or anything else that does not change tool names) is safe: replaying a parked call runs the latest deployed code with the closure values snapshotted when the call was made.
+- If a persisted callback has no registered implementation (fresh process after a crash, or after a redeploy), eve re-runs `session.started` resolvers once to rebind it, then replays.
+- If the tool no longer exists under that name, replay fails closed with an explicit error instead of invoking something else. Turn-scoped and step-scoped tools are not rebound; a parked call to a missing one errors.
 
 ### Naming
 
@@ -189,7 +197,7 @@ A dynamic tool or skill whose name matches an **authored** one **overrides** it 
 | `turn.started`    | Once per turn                                         | Every model call in the turn    |
 | `step.started`    | Before each model call                                | That model call                 |
 
-¹ Workflow recovery can redeliver a resolver event, so keep resolvers idempotent. Replaying a parked callback does not depend on running the resolver again.
+¹ Workflow recovery can redeliver a resolver event, so keep resolvers idempotent. Replaying a parked callback does not depend on running the resolver again — except for the one-shot rebind described under [Identity and redeploys](#identity-and-redeploys).
 
 ### Execution order
 

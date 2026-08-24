@@ -23,10 +23,7 @@ import {
 } from "#public/definitions/approval.js";
 import type { JsonValue } from "#public/types/json.js";
 import type { JsonObject } from "#shared/json.js";
-import {
-  registerDurableDynamicCallback,
-  stampDurableDynamicToolCallbacks,
-} from "#shared/durable-dynamic-tool-callbacks.js";
+import { stampDurableDynamicToolCallbacks } from "#shared/durable-dynamic-tool-callbacks.js";
 import { writeCachedToken } from "#runtime/connections/authorization-tokens.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
@@ -404,14 +401,6 @@ export function extractDiscoveredTools(
   return [...byQualifiedName.values()];
 }
 
-const CONNECTION_SEARCH_EXECUTE_STEP_ID = "eve:framework-dynamic//connection-search/execute/v1";
-const DISCOVERED_TOOL_EXECUTE_STEP_ID =
-  "eve:framework-dynamic//connection-search/discovered-execute/v1";
-const DISCOVERED_TOOL_APPROVAL_REQUEST_STEP_ID =
-  "eve:framework-dynamic//connection-search/discovered-approval-request/v1";
-const DISCOVERED_TOOL_APPROVAL_RESPONSE_STEP_ID =
-  "eve:framework-dynamic//connection-search/discovered-approval-response/v1";
-
 function readDiscoveredToolClosure(closure: JsonObject): {
   readonly connectionName: string;
   readonly toolName: string;
@@ -522,20 +511,6 @@ async function authorizeDiscoveredConnectionToolApproval(
     : await response(context);
 }
 
-registerDurableDynamicCallback(
-  CONNECTION_SEARCH_EXECUTE_STEP_ID,
-  (_closure: JsonObject, input: ConnectionSearchInput) => executeConnectionSearch(input),
-);
-registerDurableDynamicCallback(DISCOVERED_TOOL_EXECUTE_STEP_ID, executeDiscoveredConnectionTool);
-registerDurableDynamicCallback(
-  DISCOVERED_TOOL_APPROVAL_REQUEST_STEP_ID,
-  requestDiscoveredConnectionToolApproval,
-);
-registerDurableDynamicCallback(
-  DISCOVERED_TOOL_APPROVAL_RESPONSE_STEP_ID,
-  authorizeDiscoveredConnectionToolApproval,
-);
-
 // The step-scoped definition re-derives its tools from conversation history.
 // After compaction removes old search results, those tools naturally disappear.
 const connectionSearchDynamicDefinition = defineDynamic({
@@ -572,7 +547,10 @@ const connectionSearchDynamicDefinition = defineDynamic({
         outputSchema: CONNECTION_SEARCH_OUTPUT_SCHEMA,
       });
       stampDurableDynamicToolCallbacks(connectionSearchTool, {
-        execute: { closure: {}, stepId: CONNECTION_SEARCH_EXECUTE_STEP_ID },
+        execute: {
+          callback: (_closure, input) => executeConnectionSearch(input as ConnectionSearchInput),
+          closure: {},
+        },
       });
       tools["connection_search"] = connectionSearchTool;
 
@@ -594,13 +572,13 @@ const connectionSearchDynamicDefinition = defineDynamic({
           },
         });
         stampDurableDynamicToolCallbacks(discoveredTool, {
-          execute: { closure, stepId: DISCOVERED_TOOL_EXECUTE_STEP_ID },
+          execute: { callback: executeDiscoveredConnectionTool, closure },
           ...(approval === undefined
             ? {}
             : {
                 approvalRequest: {
+                  callback: requestDiscoveredConnectionToolApproval,
                   closure,
-                  stepId: DISCOVERED_TOOL_APPROVAL_REQUEST_STEP_ID,
                 },
               }),
           ...(approval === undefined ||
@@ -609,8 +587,8 @@ const connectionSearchDynamicDefinition = defineDynamic({
             ? {}
             : {
                 approvalResponse: {
+                  callback: authorizeDiscoveredConnectionToolApproval,
                   closure,
-                  stepId: DISCOVERED_TOOL_APPROVAL_RESPONSE_STEP_ID,
                 },
               }),
         });

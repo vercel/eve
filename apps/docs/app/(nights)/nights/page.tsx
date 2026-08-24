@@ -42,7 +42,7 @@ const events = [
   },
   {
     city: "New York",
-    date: "Tuesday, September 8, 5:30 PM EDT",
+    date: "Thursday, September 10, 5:30 PM EDT",
     href: "https://luma.com/eveNY",
   },
   {

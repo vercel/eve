@@ -14,6 +14,7 @@ import {
   translations,
 } from "@/geistdocs";
 import { defaultLanguage } from "./languages";
+import { getSiteOrigin } from "./url";
 
 export const config = defineConfig({
   title,
@@ -26,6 +27,7 @@ export const config = defineConfig({
   navbarActiveProduct: "eve",
   basePath,
   siteId,
+  siteUrl: getSiteOrigin(),
   translations,
   // Built-in edit link hardcodes `/edit/` and a `content/docs/` prefix; we
   // render our own `/blob/` link instead (see EditOnGithubAction).

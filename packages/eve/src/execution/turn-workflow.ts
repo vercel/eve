@@ -128,10 +128,12 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       // runtime-action batches are exempt — their wait observes the signal.
       if (result.action === "cancelled") {
         // The cancelled step returns only the context carve-outs required by
-        // the driver epilogue and later turns; adopt those before settling.
+        // the driver epilogue and later turns, plus the accepted user input in
+        // durable history. Adopt those before settling so a steered replacement
+        // keeps the interrupted request without committing partial model output.
         await cursor.adopt({
           serializedContext: result.serializedContext,
-          sessionState: cursor.sessionState,
+          sessionState: result.backgroundTaskState ?? result.sessionState,
         });
         await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
         return;

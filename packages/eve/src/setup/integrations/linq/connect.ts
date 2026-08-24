@@ -1,6 +1,7 @@
 import type { ChannelSetupLog } from "#setup/cli/index.js";
 import { createPromptCommandOutput, withPhase } from "#setup/cli/index.js";
 import type { ProcessOutputHandler } from "#setup/primitives/process-output.js";
+import { HumanActionRequiredError } from "#setup/human-action.js";
 import { replaceConnectTrigger } from "#setup/connect-provisioning.js";
 import type { VercelProjectReference } from "#setup/project-resolution.js";
 import {
@@ -53,6 +54,15 @@ export function parseCreatedLinqConnector(stdout: string): LinqConnectorRef | un
 
 function requireCreatedConnector(result: RunVercelCaptureResult): LinqConnectorRef {
   if (!result.ok) {
+    const output = `${result.stderr ?? ""}\n${result.stdout}`;
+    if (/(?:unknown|unexpected|invalid).*--trigger-event/iu.test(output)) {
+      throw new HumanActionRequiredError({
+        kind: "vercel-cli-upgrade",
+        command: "vercel upgrade",
+        reason:
+          "The installed Vercel CLI does not support the trigger options Linq setup needs. Upgrade it and retry.",
+      });
+    }
     const detail = [result.stderr, result.stdout].find(
       (value): value is string => value !== undefined && value.trim().length > 0,
     );

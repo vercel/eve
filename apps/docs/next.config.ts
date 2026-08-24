@@ -15,6 +15,9 @@ const wgslLoader = require.resolve("@vgpu/wgsl/loader-webpack");
 const localSiteHost = "localhost:3000";
 
 const config: NextConfig = {
+  cacheComponents: true,
+  partialPrefetching: true,
+
   env: {
     NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL:
       process.env.NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL ?? localSiteHost,
