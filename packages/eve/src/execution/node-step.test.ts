@@ -36,9 +36,14 @@ vi.mock("../runtime/agent/resolve-model.js", () => ({
 afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
+  vi.useRealTimers();
 });
 
-function setupMockAgentForToolExecution(toolName: string, args: unknown): void {
+function setupMockAgentForToolExecution(
+  toolName: string,
+  args: unknown,
+  onModelCall?: (messages: unknown[]) => void,
+): void {
   vi.mocked(ToolLoopAgent).mockImplementation(function (
     this: Record<string, unknown>,
     settings: Record<string, unknown>,
@@ -51,6 +56,7 @@ function setupMockAgentForToolExecution(toolName: string, args: unknown): void {
       | undefined;
 
     this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
+      onModelCall?.(options.messages);
       if (prepareStep) {
         await prepareStep({
           messages: options.messages,
@@ -397,8 +403,13 @@ describe("createExecutionNodeStep", () => {
     expect(appendCurrentTimeContext(undefined, now)).toBeUndefined();
   });
 
-  it("builds a usable harness step for the root node", async () => {
-    setupMockAgentForToolExecution("regular-tool", { question: "Run the tool." });
+  it("sends delivered request time to the model and persists it in session history", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-16T20:21:22.123Z"));
+    let modelMessages: unknown[] = [];
+    setupMockAgentForToolExecution("regular-tool", { question: "Run the tool." }, (messages) => {
+      modelMessages = messages;
+    });
 
     const toolRegistry = await createRuntimeToolRegistry({
       tools: [
@@ -460,6 +471,15 @@ describe("createExecutionNodeStep", () => {
     );
 
     expect(result.next).toEqual({ done: true, output: "tool-output" });
+    expect(modelMessages).toEqual([
+      { content: "Current time: 2026-08-16T20:21:22.123Z.", role: "user" },
+      { content: "Run the tool.", role: "user" },
+    ]);
+    expect(result.session.history).toEqual([
+      { content: "Current time: 2026-08-16T20:21:22.123Z.", role: "user" },
+      { content: "Run the tool.", role: "user" },
+      { content: "tool-output", role: "assistant" },
+    ]);
     expect(resolveRuntimeModelReference).toHaveBeenCalledWith(
       rootNode.turnAgent.model,
       modelResolutionScope,

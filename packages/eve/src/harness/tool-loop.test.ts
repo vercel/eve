@@ -12,6 +12,7 @@ import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { dispatchDateTimeInstructionEvent } from "#context/date-time-instruction-lifecycle.js";
 import { DynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
 import {
@@ -33,7 +34,7 @@ import {
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InstrumentationStepStartedEventInput } from "#public/instrumentation/index.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
@@ -11516,6 +11517,34 @@ describe("createToolLoopHarness", () => {
       });
       expect(messages.find((m) => m.content === "dynamic-system-instruction")).toBeUndefined();
       expect(messages.at(-1)?.content).toEqual(userContent);
+    });
+
+    it("routes the session date to model instructions without persisting it in history", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const session = createTestSession();
+      const ctx = new ContextContainer();
+      const sessionStarted = {
+        data: {},
+        meta: { at: "2026-08-16T20:21:22.123Z", id: "event_0" },
+        type: "session.started",
+      } as MessageStreamEvent;
+
+      dispatchDateTimeInstructionEvent({ ctx, event: sessionStarted });
+      const dateInstruction = ctx.require(SessionDynamicInstructionsKey)["$eve.date-time"]?.[0];
+      expect(dateInstruction).toBeDefined();
+      const result = await contextStorage.run(ctx, () => runStep(session, { message: "Hi" }));
+
+      const { instructions, messages } = getLastAgentSettings();
+      expect(instructions).toEqual({
+        role: "system",
+        content: `You are a test assistant.\n\n${dateInstruction?.content}`,
+      });
+      expect(messages.some((message) => message.content === dateInstruction?.content)).toBe(false);
+      expect(result.session.history).toEqual([
+        { content: "Hi", role: "user" },
+        { content: "ok", role: "assistant" },
+      ]);
     });
 
     it("commits dynamic user instructions before the current delivery in model history", async () => {
