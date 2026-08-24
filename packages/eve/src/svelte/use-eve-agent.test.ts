@@ -93,7 +93,10 @@ describe("useEveAgent (Svelte rune binding)", () => {
       createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
       createSessionWaitingEvent(),
     ];
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createBoundedStreamResponse(events));
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(createBoundedStreamResponse(events))
+      .mockResolvedValueOnce(createEagerStreamResponse([]));
     const seenEvents: UnstampedMessageStreamEvent[] = [];
 
     useEveAgent({
@@ -105,6 +108,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
     });
 
     await vi.waitFor(() => expect(seenEvents).toEqual(stampTestEvents(events)));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
   it("sends messages and notifies lifecycle callbacks from the shared store", async () => {

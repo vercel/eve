@@ -481,6 +481,9 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.2.6(react@19.2.6)
+      streamdown:
+        specifier: 'catalog:'
+        version: 2.5.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(supports-color@10.2.2)
       zod:
         specifier: 'catalog:'
         version: 4.4.3

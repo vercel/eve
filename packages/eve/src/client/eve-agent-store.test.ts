@@ -239,11 +239,12 @@ describe("EveAgentStore session resume", () => {
     expect(store.snapshot.error?.message).toBe("Session failed.");
   });
 
-  it("replays a settled session without opening a live stream", async () => {
+  it("probes beyond a settled replay without reconnecting an idle stream", async () => {
     const events = turnEvents();
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(boundedStreamResponse(events));
+      .mockResolvedValueOnce(boundedStreamResponse(events))
+      .mockResolvedValueOnce(streamResponse([]));
     const store = new EveAgentStore({
       initialSession: { sessionId: "session_1", streamIndex: 0 },
       reducer: defaultMessageReducer(),
@@ -253,12 +254,75 @@ describe("EveAgentStore session resume", () => {
 
     await store.resume();
 
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(
+      new URL(fetchMock.mock.calls[1]![0].toString(), "http://localhost").searchParams.get(
+        "startIndex",
+      ),
+    ).toBe(String(events.length));
     expect(publishedEventCounts).not.toContain(1);
     expect(publishedEventCounts).not.toContain(2);
     expect(store.snapshot.status).toBe("ready");
     expect(store.snapshot.events).toEqual(events);
     expect(store.snapshot.session).toEqual({ sessionId: "session_1", streamIndex: events.length });
+  });
+
+  it("follows a turn accepted after the last settled event was persisted", async () => {
+    const events = stampTestEvents([
+      createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Hi there.",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createSessionWaitingEvent(),
+      createMessageReceivedEvent({ message: "Again", sequence: 0, turnId: "turn_2" }),
+      createTurnStartedEvent({ sequence: 1, turnId: "turn_2" }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "A second reply.",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn_2",
+      }),
+      createSessionWaitingEvent(),
+    ] as UnstampedMessageStreamEvent[]);
+    const settled = events.slice(0, 3);
+    const [received, started, completed, waiting] = events.slice(3);
+    const live = controlledStreamResponse();
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(boundedStreamResponse(settled))
+      .mockResolvedValueOnce(live.response);
+    const store = new EveAgentStore({
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      reducer: defaultMessageReducer(),
+    });
+
+    const resuming = store.resume();
+    await vi.waitFor(() => expect(store.snapshot.events).toEqual(settled));
+
+    live.emit(received!);
+    live.emit(started!);
+    live.emit(completed!);
+    live.emit(waiting!);
+    live.close();
+    await resuming;
+
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.events.slice(settled.length).map((event) => event.type)).toEqual([
+      "message.received",
+      "turn.started",
+      "message.completed",
+      "session.waiting",
+    ]);
+    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
+      state: "done",
+      stepIndex: 0,
+      text: "A second reply.",
+      type: "text",
+    });
   });
 
   it("replays history and follows an interrupted turn through its boundary", async () => {

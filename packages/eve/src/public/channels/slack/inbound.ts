@@ -20,6 +20,7 @@ import type {
 } from "#compiled/@chat-adapter/slack/webhook.js";
 
 import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
+import { resolveSlackInboundMrkdwn } from "#public/channels/slack/inbound-content.js";
 import { isObject } from "#shared/guards.js";
 
 /**
@@ -56,7 +57,11 @@ export interface SlackAttachment {
  * `onAppMention(ctx, message)`).
  */
 export interface SlackMessage {
-  /** The original Slack text (mrkdwn). */
+  /**
+   * The message body (mrkdwn). Usually the top-level Slack `text`; when
+   * that is empty or a short fallback, derived from Block Kit blocks and
+   * legacy attachments on the raw event.
+   */
   readonly text: string;
   /** {@link text} re-rendered as GFM markdown for the agent. */
   readonly markdown: string;
@@ -245,9 +250,10 @@ export function slackMessageFromWebhookPayload(
   }
 
   if (!payload.channelId || !payload.ts) return null;
+  const text = resolveSlackInboundMrkdwn(payload.text, payload.raw);
   return {
-    text: payload.text,
-    markdown: slackMrkdwnToGfm(payload.text),
+    text,
+    markdown: slackMrkdwnToGfm(text),
     ts: payload.ts,
     threadTs: payload.threadTs,
     channelId: payload.channelId,
@@ -266,7 +272,8 @@ function buildSlackMessage(
   const ts = typeof event.ts === "string" ? event.ts : "";
   if (!channelId || !ts) return null;
 
-  const text = typeof event.text === "string" ? event.text : "";
+  const topLevelText = typeof event.text === "string" ? event.text : "";
+  const text = resolveSlackInboundMrkdwn(topLevelText, event as Record<string, unknown>);
   const threadTs = typeof event.thread_ts === "string" ? event.thread_ts : ts;
   const teamId = typeof envelopeTeamId === "string" ? envelopeTeamId : undefined;
 
