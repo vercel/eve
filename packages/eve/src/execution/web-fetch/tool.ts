@@ -91,10 +91,6 @@ export async function executeWebFetchTool(
         })
       : initial;
 
-  if (!response.ok) {
-    throw new Error(`Request failed with status code: ${response.status}`);
-  }
-
   const buffer = await response.arrayBuffer();
 
   const contentType = response.headers.get("content-type") ?? "";
@@ -109,6 +105,11 @@ export async function executeWebFetchTool(
     rawContent = extractTextFromHtml(body);
   } else {
     rawContent = body;
+  }
+
+  if (!response.ok) {
+    const failure = `Request failed with status code: ${response.status}`;
+    rawContent = rawContent.length === 0 ? failure : `${failure}\n\n${rawContent}`;
   }
 
   const { output: content, truncated } = truncateHead(rawContent);

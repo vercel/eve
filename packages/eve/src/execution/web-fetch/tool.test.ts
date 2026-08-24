@@ -190,12 +190,15 @@ describe("executeWebFetchTool", () => {
     expect(result.content).toBe(json);
   });
 
-  it("throws on non-ok responses", async () => {
+  it("returns non-ok responses as plain-text failures", async () => {
     requestPublicUrlMock.mockResolvedValueOnce(new Response("Not Found", { status: 404 }));
 
-    await expect(executeWebFetchTool({ url: "https://example.com/missing" })).rejects.toThrow(
-      "Request failed with status code: 404",
-    );
+    await expect(executeWebFetchTool({ url: "https://example.com/missing" })).resolves.toEqual({
+      content: "Request failed with status code: 404\n\nNot Found",
+      contentType: expect.stringContaining("text/plain"),
+      truncated: false,
+      url: "https://example.com/missing",
+    });
   });
 
   it("retries with honest user-agent on Cloudflare challenge", async () => {
