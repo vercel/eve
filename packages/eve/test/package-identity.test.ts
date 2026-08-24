@@ -15,8 +15,11 @@ describe("package identity", () => {
     expect(installedPackageInfo.version).toMatch(/\S/);
   });
 
-  it("falls back to bundled package metadata when runtime chunks have no package root", async () => {
+  it("falls back to bundled package metadata without runtime package resolution", async () => {
     vi.resetModules();
+    const resolvePackageJson = vi.fn(() => {
+      throw new Error("Unexpected package self-resolution.");
+    });
     vi.doMock("node:fs", () => ({
       existsSync: () => false,
       readFileSync: () => {
@@ -26,9 +29,7 @@ describe("package identity", () => {
     }));
     vi.doMock("node:module", () => ({
       createRequire: () => ({
-        resolve: () => {
-          throw new Error("Package self-resolution unavailable.");
-        },
+        resolve: resolvePackageJson,
       }),
     }));
 
@@ -37,6 +38,7 @@ describe("package identity", () => {
     const installedPackageInfo = resolveBundledPackageInfo();
 
     expect(installedPackageInfo.name).toBe(EVE_PACKAGE_NAME);
-    expect(installedPackageInfo.version).toMatch(/\S/);
+    expect(installedPackageInfo.version).toBe("0.0.0");
+    expect(resolvePackageJson).not.toHaveBeenCalled();
   });
 });
