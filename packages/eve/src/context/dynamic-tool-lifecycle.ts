@@ -20,9 +20,13 @@ import {
   isBrandedToolEntry,
 } from "#shared/dynamic-tool-definition.js";
 import {
-  readDurableDynamicToolCallbacks,
+  hasUnregisteredDurableDynamicCallbacks,
+  type DurableDynamicCallbackPhase,
   type DurableDynamicCallbackReference,
   type DurableDynamicToolCallbacks,
+  type StampedDurableDynamicCallback,
+  readDurableDynamicToolCallbacks,
+  registerDurableDynamicCallback,
 } from "#shared/durable-dynamic-tool-callbacks.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject } from "#shared/json.js";
@@ -102,11 +106,11 @@ function readDynamicToolResult(
 
 function validateReference(input: {
   readonly name: string;
-  readonly phase: keyof DurableDynamicToolCallbacks;
-  readonly reference: DurableDynamicCallbackReference | undefined;
+  readonly phase: DurableDynamicCallbackPhase;
+  readonly stamped: StampedDurableDynamicCallback | undefined;
   readonly required: boolean;
 }): DurableDynamicCallbackReference | undefined {
-  if (input.reference === undefined) {
+  if (input.stamped === undefined) {
     if (input.required) {
       throw new Error(
         `Dynamic tool "${input.name}" callback "${input.phase}" does not have a durable descriptor. ` +
@@ -115,38 +119,40 @@ function validateReference(input: {
     }
     return undefined;
   }
-  const unknownKeys = Object.keys(input.reference).filter(
-    (key) => key !== "closure" && key !== "stepId",
+  const unknownKeys = Object.keys(input.stamped).filter(
+    (key) => key !== "closure" && key !== "callback",
   );
+  if (unknownKeys.includes("stepId")) {
+    throw new Error(
+      `Dynamic tool "${input.name}" callback "${input.phase}" was persisted by a pre-release eve ` +
+        "version that identified callbacks by build offset. Start a new session to re-resolve it.",
+    );
+  }
   if (unknownKeys.length > 0) {
     throw new Error(
       `Dynamic tool "${input.name}" has invalid ${input.phase} callback metadata: unknown key(s) ${unknownKeys.join(", ")}.`,
     );
   }
-  if (typeof input.reference.stepId !== "string" || input.reference.stepId.length === 0) {
+  if (typeof input.stamped.callback !== "function") {
     throw new Error(
-      `Dynamic tool "${input.name}" has invalid ${input.phase} callback metadata: stepId must be a non-empty string.`,
+      `Dynamic tool "${input.name}" callback "${input.phase}" does not have a durable descriptor. ` +
+        "Author the callback inline in transformed source or use an eve durable callback helper.",
     );
   }
   let closure: DurableDynamicCallbackReference["closure"];
   try {
-    closure = parseJsonObject(input.reference.closure);
+    closure = parseJsonObject(input.stamped.closure);
   } catch (error) {
     throw new Error(
       `Dynamic tool "${input.name}" callback "${input.phase}" has a non-serializable capture. ${toErrorMessage(error)}`,
     );
   }
-  const registry = (globalThis as Record<symbol, Map<string, Function> | undefined>)[
-    Symbol.for("@workflow/core//registeredSteps")
-  ];
-  if (registry?.has(input.reference.stepId) !== true) {
-    throw new Error(
-      `Dynamic tool "${input.name}" callback "${input.phase}" references ` +
-        `"${input.reference.stepId}", but that step function is not registered. ` +
-        "Author the callback inline in transformed source or register it from an eve callback helper.",
-    );
-  }
-  return { closure, stepId: input.reference.stepId };
+  registerDurableDynamicCallback({
+    callback: input.stamped.callback,
+    phase: input.phase,
+    toolName: input.name,
+  });
+  return { closure };
 }
 
 export function validateDurableDynamicToolCallbacks(
@@ -154,16 +160,16 @@ export function validateDurableDynamicToolCallbacks(
   entry: DynamicToolEntry,
 ): DurableDynamicToolCallbacks {
   const raw = readDurableDynamicToolCallbacks(entry) ?? {};
-  const unknownKeys = Object.keys(raw).filter(
+  const unknownPhases = Object.keys(raw).filter(
     (key) =>
       key !== "execute" &&
       key !== "approvalRequest" &&
       key !== "approvalResponse" &&
       key !== "toModelOutput",
   );
-  if (unknownKeys.length > 0) {
+  if (unknownPhases.length > 0) {
     throw new Error(
-      `Dynamic tool "${name}" has unknown durable callback phase(s): ${unknownKeys.join(", ")}.`,
+      `Dynamic tool "${name}" has unknown durable callback phase(s): ${unknownPhases.join(", ")}.`,
     );
   }
 
@@ -175,25 +181,25 @@ export function validateDurableDynamicToolCallbacks(
   const execute = validateReference({
     name,
     phase: "execute",
-    reference: raw.execute,
+    stamped: raw.execute,
     required: true,
   })!;
   const approvalRequest = validateReference({
     name,
     phase: "approvalRequest",
-    reference: raw.approvalRequest,
+    stamped: raw.approvalRequest,
     required: hasApproval,
   });
   const approvalResponse = validateReference({
     name,
     phase: "approvalResponse",
-    reference: raw.approvalResponse,
+    stamped: raw.approvalResponse,
     required: hasApprovalResponse,
   });
   const toModelOutput = validateReference({
     name,
     phase: "toModelOutput",
-    reference: raw.toModelOutput,
+    stamped: raw.toModelOutput,
     required: entry.toModelOutput !== undefined,
   });
 
@@ -346,7 +352,11 @@ export async function dispatchDynamicToolEvent(input: {
   input.ctx.set(durableKey, [...kept, ...metadata]);
 }
 
-/** Refreshes session-scoped definitions only when the deployed code revision changes. */
+/**
+ * Refreshes session-scoped definitions when the deployed code revision changes
+ * or when persisted callbacks have no registered binding (fresh process after
+ * a crash, or a redeploy), so replay always resolves against current code.
+ */
 export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
   readonly ctx: ContextContainer;
   readonly resolvers: readonly ResolvedDynamicToolResolver[];
@@ -354,7 +364,12 @@ export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
   readonly messages: readonly ModelMessage[];
   readonly runtimeRevision: string;
 }): Promise<void> {
-  if (input.ctx.get(SessionDynamicToolRuntimeRevisionKey) === input.runtimeRevision) return;
+  const revisionChanged =
+    input.ctx.get(SessionDynamicToolRuntimeRevisionKey) !== input.runtimeRevision;
+  const needsRebind = hasUnregisteredDurableDynamicCallbacks(
+    input.ctx.get(SessionDynamicToolMetadataKey) ?? [],
+  );
+  if (!revisionChanged && !needsRebind) return;
   const matching = input.resolvers.filter((resolver) =>
     resolver.eventNames.includes("session.started"),
   );

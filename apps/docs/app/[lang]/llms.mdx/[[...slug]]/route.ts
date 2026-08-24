@@ -14,8 +14,6 @@ import { geistdocsSource } from "@/lib/geistdocs/source";
 import { getSiteOrigin } from "@/lib/geistdocs/url";
 import { integrationSource } from "@/lib/integrations/source";
 
-export const revalidate = false;
-
 const markdownRoute = createDocsMarkdownRoute({
   notFound: { getRequestedPath: getMarkdownRequestedPath },
   sources: [geistdocsSource, integrationSource],
@@ -40,4 +38,7 @@ export const GET: typeof markdownRoute.GET = async (request, context) => {
 
   return applyMarkdownRouteCanonical(response, canonicalUrl);
 };
-export const generateStaticParams = markdownRoute.generateStaticParams;
+export const generateStaticParams: typeof markdownRoute.generateStaticParams = async (options) =>
+  (await markdownRoute.generateStaticParams(options)).map((params) =>
+    params.slug?.[0] === "docs" ? { ...params, slug: params.slug.slice(1) } : params,
+  );

@@ -52,6 +52,14 @@ function callEvent(
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
+describe("discordChannel() audience metadata", () => {
+  it.each(["private", "unknown"] as const)("projects the %s audience", (audience) => {
+    const adapter = withState(getAdapter(discordChannel()), { audience });
+
+    expect(adapter.instrumentation?.metadata?.(adapter.state)).toMatchObject({ audience });
+  });
+});
+
 function captureAccessor(initialContinuationToken: string): {
   accessor: any;
   writes: Array<[string, unknown]>;
@@ -543,6 +551,7 @@ describe("discordChannel() default event handlers", () => {
       auth: null,
       message: "start",
       state: {
+        audience: "unknown",
         applicationId: null,
         channelId: "C01",
         conversationId: null,

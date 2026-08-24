@@ -54,6 +54,7 @@ import {
   type TelegramWebhookVerifier,
 } from "#public/channels/telegram/verify.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
+import { telegramInstrumentationMetadata } from "#public/channels/telegram/audience.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 const log = createLogger("telegram.channel");
@@ -219,11 +220,7 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
     kindHint: "telegram",
     turnPolicy: config.turnPolicy,
     state: initialTelegramState(config.botUsername),
-    metadata: (state) => ({
-      chatId: state.chatId,
-      chatType: state.chatType,
-      triggeringUserId: state.triggeringUserId ?? null,
-    }),
+    metadata: telegramInstrumentationMetadata,
     fetchFile: createTelegramFetchFile({
       api: config.api,
       credentials: config.credentials,

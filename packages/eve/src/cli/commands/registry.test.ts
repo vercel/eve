@@ -206,6 +206,7 @@ describe("registry commands", () => {
     "installs the official %s item before running its declared setup",
     async (kind) => {
       const logger = createLogger();
+      const prepareWebRegistryProject = vi.fn(async () => {});
       const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
       getRegistryItems.mockResolvedValue([
         {
@@ -226,9 +227,16 @@ describe("registry commands", () => {
         { overwrite: true, yes: true },
         {
           loadSetupCommandRunner: async () => runSetupCommand,
+          prepareWebRegistryProject,
         },
       );
 
+      expect(prepareWebRegistryProject).toHaveBeenCalledTimes(kind === "web" ? 1 : 0);
+      if (kind === "web") {
+        expect(prepareWebRegistryProject.mock.invocationCallOrder[0]).toBeLessThan(
+          addRegistryItems.mock.invocationCallOrder[0]!,
+        );
+      }
       expect(addRegistryItems).toHaveBeenCalledOnce();
       expect(addRegistryItems.mock.invocationCallOrder[0]).toBeLessThan(
         runSetupCommand.mock.invocationCallOrder[0]!,

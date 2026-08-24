@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ChannelSetupLog } from "#setup/cli/index.js";
+import { HumanActionRequiredError } from "#setup/human-action.js";
 
 import { parseCreatedLinqConnector, provisionLinqConnector } from "./connect.js";
 
@@ -28,6 +29,32 @@ describe("Linq Connect provisioning", () => {
         JSON.stringify({ ...createdConnector, data: { phoneNumbers: ["+14155550123"] } }),
       ),
     ).toEqual({ id: "scl_linq", uid: "linq/agent", phoneNumber: "+14155550123" });
+  });
+
+  it("requests a Vercel CLI upgrade when trigger options are unsupported", async () => {
+    const runVercelCaptureStdout = vi.fn(async () => ({
+      ok: false as const,
+      stdout: "",
+      stderr:
+        "Vercel CLI 56.4.1 (Node.js 24.18.0)\nError: unknown or unexpected option: --trigger-event",
+    }));
+
+    await expect(
+      provisionLinqConnector({
+        log: log(),
+        project: { orgId: "team_123", projectId: "prj_123" },
+        projectRoot: "/project",
+        slug: "agent",
+        deps: { runVercel: vi.fn(), runVercelCaptureStdout },
+      }),
+    ).rejects.toEqual(
+      new HumanActionRequiredError({
+        kind: "vercel-cli-upgrade",
+        command: "vercel upgrade",
+        reason:
+          "The installed Vercel CLI does not support the trigger options Linq setup needs. Upgrade it and retry.",
+      }),
+    );
   });
 
   it("creates a connector for an existing Linq account without exposing its token in argv", async () => {

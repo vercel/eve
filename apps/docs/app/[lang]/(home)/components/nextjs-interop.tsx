@@ -1,6 +1,7 @@
 import { CodeBlock } from "@vercel/geistdocs/components/code-block";
 import { geistShikiTheme } from "@vercel/geistdocs/shiki-theme";
 import { highlight } from "fumadocs-core/highlight";
+import { cacheLife } from "next/cache";
 import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 import { GradientBorder } from "./gradient-border";
@@ -54,6 +55,9 @@ async function renderCode(file: InteropFile) {
 }
 
 export async function NextjsInterop() {
+  "use cache";
+  cacheLife("max");
+
   const rendered = await Promise.all(FILES.map(renderCode));
 
   return (

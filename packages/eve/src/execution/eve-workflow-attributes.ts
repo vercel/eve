@@ -25,10 +25,13 @@
  * - `$eve.channel_request_id` — inbound channel request id
  * - `$eve.invocation_token` — channel-local continuation token for an external invocation
  * - `$eve.invocation_owner` — SHA-256 fingerprint of the invocation's initiating principal
+ * - `$eve.is_trace_content_visible` — whether observability may read content-bearing workflow data
  */
 
 import { ChannelRequestIdKey } from "#context/keys.js";
+import { shouldCaptureInstrumentationContent } from "#harness/instrumentation/content-policy.js";
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
+import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { isNonEmptyString } from "#shared/guards.js";
 
 /**
@@ -46,6 +49,7 @@ export interface SessionIdentitySummary {
 /** Untyped channel adapter snapshot as it survives serialization. */
 interface SerializedChannelAdapter {
   readonly kind?: unknown;
+  readonly audience?: unknown;
 }
 
 /** Untyped session parent snapshot as it survives serialization. */
@@ -77,6 +81,11 @@ export function readChannelKind(serializedContext: Record<string, unknown>): str
   const channel = serializedContext["eve.channel"] as SerializedChannelAdapter | undefined;
   const kind = channel?.kind;
   return isNonEmptyString(kind) ? kind : undefined;
+}
+
+export function isWorkflowTraceContentVisible(serializedContext: Record<string, unknown>): boolean {
+  const channel = serializedContext["eve.channel"] as SerializedChannelAdapter | undefined;
+  return shouldCaptureInstrumentationContent(normalizeChannelAudience(channel?.audience));
 }
 
 /**
@@ -209,11 +218,13 @@ export function buildSessionAttributes(input: {
   readonly inputMessage: unknown;
   readonly serializedContext: Record<string, unknown>;
 }): Record<string, EveAttributeValue> {
+  const isTraceContentVisible = isWorkflowTraceContentVisible(input.serializedContext);
   return {
     "$eve.channel_request_id": readChannelRequestId(input.serializedContext),
+    "$eve.is_trace_content_visible": isTraceContentVisible,
     "$eve.type": "session",
     "$eve.trigger": readChannelKind(input.serializedContext),
-    "$eve.title": deriveSessionTitle(input.inputMessage),
+    "$eve.title": isTraceContentVisible ? deriveSessionTitle(input.inputMessage) : undefined,
   };
 }
 
@@ -236,6 +247,7 @@ export function buildSubagentRootAttributes(input: {
 }): Record<string, EveAttributeValue> {
   return {
     "$eve.channel_request_id": readChannelRequestId(input.serializedContext),
+    "$eve.is_trace_content_visible": isWorkflowTraceContentVisible(input.serializedContext),
     "$eve.type": "subagent",
     "$eve.parent": input.parentSessionId,
     "$eve.parent_call": input.parentCallId,
@@ -260,9 +272,11 @@ export function buildTurnAttributes(input: {
   readonly parentSessionId: string;
   readonly requestId?: string;
   readonly rootSessionId: string;
+  readonly serializedContext: Record<string, unknown>;
 }): Record<string, EveAttributeValue> {
   return {
     "$eve.channel_request_id": input.requestId,
+    "$eve.is_trace_content_visible": isWorkflowTraceContentVisible(input.serializedContext),
     "$eve.type": "turn",
     "$eve.parent": input.parentSessionId,
     "$eve.root": input.rootSessionId,

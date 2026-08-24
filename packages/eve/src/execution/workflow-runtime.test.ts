@@ -377,7 +377,7 @@ describe("createWorkflowRuntime#createSession", () => {
           input: { message: "hello" },
           serializedContext: expect.objectContaining({
             "eve.bundle": { source: compiledArtifactsSource },
-            "eve.channel": { kind: "http", state: {} },
+            "eve.channel": expect.objectContaining({ kind: "http", state: {} }),
             "eve.mode": "task",
           }),
         },
@@ -385,7 +385,7 @@ describe("createWorkflowRuntime#createSession", () => {
       {
         allowReservedAttributes: true,
         attributes: {
-          "$eve.title": "hello",
+          "$eve.is_trace_content_visible": "false",
           "$eve.trigger": "http",
           "$eve.type": "session",
         },
@@ -394,7 +394,7 @@ describe("createWorkflowRuntime#createSession", () => {
     );
   });
 
-  it("uses an explicit title without changing the workflow model input", async () => {
+  it("withholds an explicit title for an unknown-audience workflow", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
     startMock.mockResolvedValue({ runId: "driver-run" });
@@ -410,7 +410,8 @@ describe("createWorkflowRuntime#createSession", () => {
 
     const [, workflowInput, startOptions] = startMock.mock.calls[0]!;
     expect(workflowInput[0].input.message).toBe(message);
-    expect(startOptions.attributes["$eve.title"]).toBe("ship it");
+    expect(startOptions.attributes["$eve.is_trace_content_visible"]).toBe("false");
+    expect(startOptions.attributes["$eve.title"]).toBeUndefined();
   });
 
   it("passes the configured session timeout to the durable workflow", async () => {
@@ -493,7 +494,7 @@ describe("createWorkflowRuntime#createSession", () => {
         allowReservedAttributes: true,
         attributes: {
           "$eve.channel_request_id": "req_run",
-          "$eve.title": "hello",
+          "$eve.is_trace_content_visible": "false",
           "$eve.trigger": "http",
           "$eve.type": "session",
         },
@@ -538,6 +539,7 @@ describe("createWorkflowRuntime#createSession", () => {
         "$eve.parent_turn": "turn-1",
         "$eve.root": "root-session",
         "$eve.subagent": "researcher",
+        "$eve.is_trace_content_visible": "false",
         "$eve.trigger": "subagent",
         "$eve.type": "subagent",
       },
@@ -562,7 +564,7 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(startMock).toHaveBeenNthCalledWith(1, workflowEntryReference, expect.any(Array), {
       allowReservedAttributes: true,
       attributes: {
-        "$eve.title": "hello",
+        "$eve.is_trace_content_visible": "false",
         "$eve.trigger": "http",
         "$eve.type": "session",
       },
@@ -571,7 +573,7 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(startMock).toHaveBeenNthCalledWith(2, workflowEntryReference, expect.any(Array), {
       allowReservedAttributes: true,
       attributes: {
-        "$eve.title": "hello",
+        "$eve.is_trace_content_visible": "false",
         "$eve.trigger": "http",
         "$eve.type": "session",
       },
@@ -605,7 +607,7 @@ describe("createWorkflowRuntime#createSession", () => {
       expect(startMock).toHaveBeenCalledWith(workflowEntryReference, expect.any(Array), {
         allowReservedAttributes: true,
         attributes: {
-          "$eve.title": "hello",
+          "$eve.is_trace_content_visible": "false",
           "$eve.trigger": "http",
           "$eve.type": "session",
         },

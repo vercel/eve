@@ -42,6 +42,12 @@ function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[
   );
 }
 
+function createBoundedStreamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
+  const response = createEagerStreamResponse(events);
+  response.headers.set("x-eve-stream-tail-index", String(events.length - 1));
+  return response;
+}
+
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
@@ -641,6 +647,62 @@ describe("useEveAgent", () => {
     expect(helpers?.status).toBe("ready");
     expect(helpers?.error).toBeUndefined();
     expect(helpers?.events).toEqual(stampTestEvents(events));
+  });
+
+  it("requires a session when automatic resume is enabled", async () => {
+    function TestComponent() {
+      useEveAgent({ resume: true });
+      return null;
+    }
+
+    await expect(
+      act(async () => {
+        create(createElement(TestComponent));
+      }),
+    ).rejects.toThrow("requires initialSession or session");
+  });
+
+  it("automatically replays an initial session when resume is enabled", async () => {
+    const events = [
+      createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
+      createMessageCompletedEvent({
+        message: "Hi there.",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createSessionWaitingEvent(),
+    ];
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(createBoundedStreamResponse(events));
+    let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
+    const statuses: string[] = [];
+
+    function TestComponent() {
+      helpers = useEveAgent({
+        initialSession: { sessionId: "session_1", streamIndex: 0 },
+        resume: true,
+      });
+      statuses.push(helpers.status);
+      return null;
+    }
+
+    await act(async () => {
+      create(createElement(TestComponent));
+      await vi.waitFor(() => expect(helpers?.events).toHaveLength(events.length));
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(statuses[0]).toBe("submitted");
+    expect(helpers?.status).toBe("ready");
+    expect(helpers?.data).toEqual(
+      completedTurnData({
+        assistantMessage: "Hi there.",
+        turnId: "turn_1",
+        userMessage: "Hello",
+      }),
+    );
   });
 
   it("projects input responses before the resumed stream returns", async () => {

@@ -38,6 +38,7 @@ import {
   ParentTraceContextKey,
   SessionCallbackKey,
   TurnTaskDeliveryKey,
+  TurnTaskStateKey,
 } from "#context/keys.js";
 import {
   buildDynamicInstructionMessages,
@@ -55,6 +56,7 @@ import {
 import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.js";
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import {
   createActionResultEvent,
   createApprovalCandidateEvent,
@@ -141,6 +143,10 @@ import {
   shouldPrepareApprovalPolicyTools,
 } from "#harness/approval-delivery-coordinator.js";
 import { buildTelemetryRuntimeContext } from "#harness/instrumentation/runtime-context.js";
+import {
+  instrumentationHooksForAudience,
+  shouldCaptureInstrumentationContent,
+} from "#harness/instrumentation/content-policy.js";
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
 import {
   createInstrumentationHandleEvent,
@@ -208,6 +214,7 @@ import {
   hasEmptyDeliverySentinel,
 } from "#shared/empty-delivery.js";
 import {
+  TASK_DELIVERY_INITIATING_INSTRUCTION,
   TASK_DELIVERY_PENDING_INSTRUCTION,
   TASK_DELIVERY_SETTLED_INSTRUCTION,
 } from "#tasks/delivery-context.js";
@@ -319,6 +326,7 @@ const MODEL_CALL_RETRY_BASE_DELAY_MS = 500;
 
 function enrichTelemetry(
   settings: OtelHarnessSettings | undefined,
+  channelAudience: ChannelAudience,
   agentName: string | undefined,
   runtimeContext?: Readonly<Record<string, unknown>>,
   bridgeIntegration?: Telemetry,
@@ -344,8 +352,10 @@ function enrichTelemetry(
         ? undefined
         : [bridgeIntegration, ...getRegisteredTelemetryIntegrations()],
     isEnabled: true,
-    recordInputs: settings?.recordInputs ?? false,
-    recordOutputs: settings?.recordOutputs ?? false,
+    recordInputs:
+      shouldCaptureInstrumentationContent(channelAudience) && (settings?.recordInputs ?? false),
+    recordOutputs:
+      shouldCaptureInstrumentationContent(channelAudience) && (settings?.recordOutputs ?? false),
   };
 }
 
@@ -648,6 +658,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     let emissionState = getHarnessEmissionState(session.state);
     const store = contextStorage.getStore();
+    const channelInstrumentation = store?.get(ChannelInstrumentationKey);
+    const channelAudience = normalizeChannelAudience(channelInstrumentation?.metadata.audience);
+    const instrumentationHooks = instrumentationHooksForAudience(
+      config.instrumentation?.hooks,
+      channelAudience,
+    );
     const parent = store?.get(ParentSessionKey);
     const channel = store?.get(ChannelKey);
     const callback = store?.get(SessionCallbackKey);
@@ -661,10 +677,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     let activeAttemptScope: InstrumentationAttemptScope | undefined;
     const emit = createInstrumentationHandleEvent({
       agentName: config.runtimeIdentity?.agentName,
-      channelKind: store?.get(ChannelInstrumentationKey)?.kind,
+      channelAudience,
+      channelKind: channelInstrumentation?.kind,
       getAttemptScope: () => activeAttemptScope,
       handleEvent: baseEmit,
-      hooks: config.instrumentation?.hooks,
+      hooks: instrumentationHooks,
       parentLineage,
       parentTraceContext,
       rootSessionId: parent?.rootSessionId,
@@ -718,6 +735,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           : undefined;
       return await prepareTurnTraceContext({
         agentName: config.runtimeIdentity?.agentName,
+        channelAudience,
         instrumentation: config.instrumentation,
         parentLineage,
         parentTraceContext,
@@ -772,7 +790,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             resolveModel: config.resolveModel,
             runtimeIdentity: config.runtimeIdentity,
             session,
-            telemetry: enrichTelemetry(otelSettings, agentName) ?? undefined,
+            telemetry: enrichTelemetry(otelSettings, channelAudience, agentName) ?? undefined,
           });
 
           session = {
@@ -1062,10 +1080,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     if (pending.resolvedInputs !== undefined) {
       for (const batch of pending.resolvedInputs) {
-        if (config.instrumentation?.hooks !== undefined) {
+        if (instrumentationHooks !== undefined) {
           await publishInputResolutions({
             batch,
-            hooks: config.instrumentation.hooks,
+            hooks: instrumentationHooks,
             sessionId: session.sessionId,
           });
         }
@@ -1266,7 +1284,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       resolveModel: config.resolveModel,
       runtimeIdentity: config.runtimeIdentity,
       session,
-      telemetry: enrichTelemetry(otelSettings, agentName) ?? undefined,
+      telemetry: enrichTelemetry(otelSettings, channelAudience, agentName) ?? undefined,
     });
     session = compaction.session;
     if (compaction.compacted) {
@@ -1285,18 +1303,26 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const approvedTools = getApprovedTools(session);
 
     const taskDeliveryPhase = ctx?.get(TurnTaskDeliveryKey);
-    const emptyDeliveryEnabled =
+    const deliveryInstruction =
       // A structured-output run must always produce its declared result.
-      session.outputSchema === undefined &&
+      session.outputSchema !== undefined ||
       // Eligibility requires durable framework provenance from the active context.
-      ctx !== undefined &&
+      ctx === undefined ||
       // A child must always return its result to its parent, even when framework-triggered.
-      ctx.get(ParentSessionKey) === undefined &&
-      // A schedule-initiated root turn may have nothing worth delivering.
-      (isScheduleAppAuth(ctx.get(AuthKey)) ||
-        // A task-notification root turn may act on the wake without messaging the user.
-        taskDeliveryPhase === "pending" ||
-        taskDeliveryPhase === "settled");
+      ctx.get(ParentSessionKey) !== undefined
+        ? undefined
+        : taskDeliveryPhase === "pending"
+          ? TASK_DELIVERY_PENDING_INSTRUCTION
+          : taskDeliveryPhase === "settled"
+            ? TASK_DELIVERY_SETTLED_INSTRUCTION
+            : // A schedule-initiated root turn may have nothing worth delivering.
+              isScheduleAppAuth(ctx.get(AuthKey))
+              ? CONDITIONAL_DELIVERY_INSTRUCTION
+              : taskDeliveryPhase === "initiating"
+                ? TASK_DELIVERY_INITIATING_INSTRUCTION
+                : undefined;
+    const emptyDeliveryEnabled =
+      deliveryInstruction !== undefined && taskDeliveryPhase !== "initiating";
 
     // --- Execute via ToolLoopAgent ------------------------------------------
 
@@ -1328,14 +1354,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       if (skillAnnouncement !== undefined && skillAnnouncement.length > 0) {
         systemMessages.push({ role: "system", content: skillAnnouncement });
       }
+      const taskState = ctx.get(TurnTaskStateKey);
+      if (taskState !== undefined) {
+        systemMessages.push({ role: "system", content: taskState });
+      }
     }
-    if (emptyDeliveryEnabled) {
-      const deliveryInstruction =
-        taskDeliveryPhase === "pending"
-          ? TASK_DELIVERY_PENDING_INSTRUCTION
-          : taskDeliveryPhase === "settled"
-            ? TASK_DELIVERY_SETTLED_INSTRUCTION
-            : CONDITIONAL_DELIVERY_INSTRUCTION;
+    if (deliveryInstruction !== undefined) {
       systemMessages.push({
         role: "system",
         content: deliveryInstruction,
@@ -1489,7 +1513,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;
 
-      const instrumentationHooks = config.instrumentation?.hooks;
       const instrumentationTurnId = activeTurnId(emissionState);
       const attemptScope: InstrumentationAttemptScope | undefined =
         instrumentationHooks === undefined
@@ -1497,6 +1520,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           : {
               attemptId: `${session.sessionId}:${instrumentationTurnId}:${emissionState.stepIndex}:${opts.attemptIndex}`,
               attemptIndex: opts.attemptIndex,
+              channelAudience,
               functionId: otelSettings?.functionId ?? agentName,
               rootSessionId: parent?.rootSessionId ?? session.sessionId,
               sessionId: session.sessionId,
@@ -1562,6 +1586,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         stopWhen: isStepCount(1),
         telemetry: enrichTelemetry(
           otelSettings,
+          channelAudience,
           agentName,
           telemetryRuntimeContext,
           bridgeIntegration,

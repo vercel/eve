@@ -2,7 +2,7 @@
 
 import type { UserContent } from "ai";
 import { useEveAgent } from "eve/react";
-import { AlertCircleIcon, BrainIcon } from "lucide-react";
+import { AlertCircleIcon, BrainIcon, PlusIcon, SquareIcon } from "lucide-react";
 import { useState } from "react";
 import {
   Conversation,
@@ -12,20 +12,50 @@ import {
 import { Message, MessageContent } from "@/components/ai-elements/message";
 import {
   PromptInput,
+  PromptInputButton,
   type PromptInputMessage,
   PromptInputSubmit,
   PromptInputTextarea,
 } from "@/components/ai-elements/prompt-input";
 import { Shimmer } from "@/components/ai-elements/shimmer";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { AgentMessage } from "./agent-message";
 
 const AGENT_NAME = "eve-agent";
 
-export function AgentChat() {
+export function AgentChat({
+  sessionId,
+  sessionless = false,
+}: {
+  readonly sessionId?: string;
+  readonly sessionless?: boolean;
+}) {
   const [cancellationError, setCancellationError] = useState<string>();
-  const agent = useEveAgent();
+  const agent = useEveAgent({
+    initialSession:
+      sessionId === undefined
+        ? undefined
+        : {
+            sessionId,
+            streamIndex: 0,
+          },
+    resume: sessionId !== undefined,
+    onSessionChange(session) {
+      if (sessionId === undefined && session !== undefined) {
+        // Next patches window.history to navigate, which would detach the active stream.
+        History.prototype.replaceState.call(
+          window.history,
+          window.history.state,
+          "",
+          `/s/${encodeURIComponent(session.sessionId)}`,
+        );
+      }
+    },
+  });
+
   const isBusy = agent.status === "submitted" || agent.status === "streaming";
+  const isRestoring = sessionId !== undefined && agent.events.length === 0 && isBusy;
   const isEmpty = agent.data.messages.length === 0;
   const lastMessage = agent.data.messages.at(-1);
   const isPendingAssistantShell =
@@ -36,6 +66,9 @@ export function AgentChat() {
     (agent.status === "submitted" || lastMessage?.role !== "assistant" || isPendingAssistantShell);
   const turnFailure = isBusy ? undefined : getLatestTurnFailure(agent.events);
   const errorMessage = cancellationError ?? agent.error?.message ?? turnFailure;
+  const hasConversationContent = sessionless || !isEmpty || errorMessage !== undefined;
+  const showConversationLayout = isRestoring || hasConversationContent;
+  const activeSessionId = sessionId ?? agent.session?.sessionId;
 
   const requestCancellation = () => {
     setCancellationError(undefined);
@@ -46,12 +79,13 @@ export function AgentChat() {
 
   const handleSubmit = async (message: PromptInputMessage) => {
     const text = message.text.trim();
-    if ((text.length === 0 && message.files.length === 0) || isBusy) return;
+    if ((text.length === 0 && message.files.length === 0) || isRestoring) return;
 
     setCancellationError(undefined);
+    const options = isBusy ? { turnPolicy: "steer" as const } : undefined;
 
     if (message.files.length === 0) {
-      await agent.send(text);
+      await agent.send(text, options);
       return;
     }
 
@@ -68,42 +102,44 @@ export function AgentChat() {
       });
     }
 
-    await agent.send(parts);
+    await agent.send(parts, options);
   };
 
   const composer = (
     <PromptInput onSubmit={handleSubmit}>
-      <PromptInputTextarea disabled={isBusy} placeholder="Send a message…" />
-      <PromptInputSubmit onStop={requestCancellation} status={agent.status} />
+      <PromptInputTextarea disabled={isRestoring} placeholder="Send a message…" />
+      {isBusy && !isRestoring ? (
+        <PromptInputButton
+          aria-label="Stop"
+          className="absolute right-12 bottom-2.5 rounded-full"
+          onClick={requestCancellation}
+          variant="default"
+        >
+          <SquareIcon className="size-3 fill-current" />
+        </PromptInputButton>
+      ) : null}
+      <PromptInputSubmit disabled={isRestoring} status={isBusy ? undefined : agent.status} />
     </PromptInput>
   );
 
   return (
     <main className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-      {isEmpty ? null : (
-        <header className="flex h-14 shrink-0 items-center justify-center pl-4 pr-2">
-          <span className="truncate text-muted-foreground text-sm">{AGENT_NAME}</span>
-        </header>
-      )}
-
-      {errorMessage ? (
-        <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-2 sm:px-6">
-          <div
-            className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm"
-            role="alert"
-          >
-            <AlertCircleIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
-            <div>
-              <p className="font-medium">Request failed</p>
-              <p className="mt-0.5 text-muted-foreground">{errorMessage}</p>
-            </div>
-          </div>
-        </div>
+      {showConversationLayout ? (
+        <ChatHeader canStartNewChat={activeSessionId !== undefined} />
       ) : null}
 
-      {isEmpty ? null : (
-        <Conversation className="min-h-0 flex-1">
-          <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 py-6 sm:px-6">
+      {showConversationLayout ? (
+        <Conversation
+          className="min-h-0 flex-1"
+          initial={sessionId === undefined ? undefined : false}
+          resize={activeSessionId === undefined ? "smooth" : "instant"}
+          scrollRestorationKey={
+            isEmpty || activeSessionId === undefined
+              ? undefined
+              : `eve:web-chat-scroll:${activeSessionId}`
+          }
+        >
+          <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-20 pb-36 sm:px-6">
             {agent.data.messages.map((message, index) =>
               showPendingThinking &&
               isPendingAssistantShell &&
@@ -123,27 +159,70 @@ export function AgentChat() {
               ),
             )}
             {showPendingThinking ? <PendingThinking /> : null}
+            {errorMessage ? <ErrorMessage message={errorMessage} /> : null}
           </ConversationContent>
           <ConversationScrollButton />
         </Conversation>
-      )}
+      ) : null}
 
       <div
         className={cn(
           "mx-auto w-full px-4 sm:px-6",
-          isEmpty
-            ? "flex max-w-xl flex-1 flex-col items-center justify-center gap-8 pb-[10vh]"
-            : "max-w-3xl shrink-0 pb-6",
+          showConversationLayout
+            ? "fixed bottom-0 left-1/2 z-20 max-w-3xl -translate-x-1/2 bg-gradient-to-t from-background via-background to-transparent pt-4 pb-6"
+            : "flex max-w-xl flex-1 flex-col items-center justify-center gap-8 pb-[10vh]",
         )}
       >
-        {isEmpty ? (
+        {showConversationLayout ? null : (
           <div className="flex flex-col items-center gap-3 text-center">
             <h1 className="font-medium text-5xl tracking-tighter">{AGENT_NAME}</h1>
           </div>
-        ) : null}
+        )}
         <div className="w-full">{composer}</div>
       </div>
     </main>
+  );
+}
+
+function ErrorMessage({ message }: { readonly message: string }) {
+  return (
+    <Message className="max-w-full" from="assistant">
+      <MessageContent>
+        <div
+          className="flex w-full items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm"
+          role="alert"
+        >
+          <AlertCircleIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
+          <div>
+            <p className="font-medium">Request failed</p>
+            <p className="mt-0.5 text-muted-foreground">{message}</p>
+          </div>
+        </div>
+      </MessageContent>
+    </Message>
+  );
+}
+
+function ChatHeader({ canStartNewChat }: { readonly canStartNewChat: boolean }) {
+  return (
+    <header className="pointer-events-none fixed top-0 right-0 left-0 z-20 h-14">
+      <div className="relative mx-auto flex h-full w-full max-w-3xl items-center justify-center bg-background px-24">
+        <span className="truncate text-muted-foreground text-sm">{AGENT_NAME}</span>
+        {canStartNewChat ? (
+          <Button
+            aria-label="Start a new chat"
+            className="pointer-events-auto fixed top-2 right-6"
+            onClick={() => window.location.assign("/s")}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <PlusIcon className="size-4" />
+            <span className="hidden sm:inline">New chat</span>
+          </Button>
+        ) : null}
+      </div>
+    </header>
   );
 }
 

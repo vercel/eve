@@ -5,15 +5,24 @@ import {
   type ResolvedContentOptions,
 } from "#tracing/content-attributes.js";
 import { hasSessionRelease, type LocalTracesProcessor } from "#tracing/local-traces.js";
+import { normalizeChannelAudience } from "#shared/channel-audience.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
+import {
+  contentRedactionForSpan,
+  spanExportPolicyStages,
+  type SpanExportContext,
+  type SpanExportPolicy,
+} from "#tracing/span-export-policy.js";
+import { channelAudienceFromContext } from "#tracing/channel-audience-context.js";
 
 /**
  * Puts one destination's content policy in front of it.
  *
- * Content is written onto a span if any destination wants it, so the span
- * reaching a destination that declined still carries it. This cannot strip the
- * attribute in place: that span object is shared with every other processor in
- * the pipeline, and editing it would strip the attribute everywhere. So it
- * gives the destination a facade whose attributes omit what it declined.
+ * Accepted traces carry content before they reach destination policies. This
+ * cannot strip an attribute in place: the span object is shared with every
+ * processor in the pipeline, and editing it would strip the attribute
+ * everywhere. So it gives the destination a facade whose attributes omit what
+ * its policy redacted.
  *
  * One facade follows the original from start through end. This preserves the
  * object identity stateful processors key on without ever exposing the original
@@ -24,20 +33,36 @@ import { hasSessionRelease, type LocalTracesProcessor } from "#tracing/local-tra
  */
 export function contentFilteringProcessor(
   downstream: SpanProcessor,
-  content: ResolvedContentOptions,
+  exportPolicy?: SpanExportPolicy,
 ): SpanProcessor {
-  if (content.recordInputs && content.recordOutputs) return downstream;
+  if (exportPolicy === undefined) return downstream;
 
+  let processor = downstream;
+  for (const policy of spanExportPolicyStages(exportPolicy).toReversed()) {
+    processor = policyFilteringProcessor(processor, policy);
+  }
+  return processor;
+}
+
+function policyFilteringProcessor(
+  downstream: SpanProcessor,
+  exportPolicy: SpanExportPolicy,
+): SpanProcessor {
   const facades = new WeakMap<object, SpanFacade>();
+  const dropped = new WeakSet<object>();
   const filtering: SpanProcessor = {
     forceFlush: () => downstream.forceFlush(),
     onEnd: (span) => {
       if (typeof span !== "object" || span === null) {
-        downstream.onEnd(span);
         return;
       }
 
-      const scoped = facadeFor(span, content, facades);
+      const scoped = facadeFor(span, exportPolicy, facades);
+      if (dropped.has(span) || !scoped.exported) {
+        dropped.delete(span);
+        facades.delete(span);
+        return;
+      }
       scoped.refresh();
       try {
         downstream.onEnd(scoped.value);
@@ -47,10 +72,19 @@ export function contentFilteringProcessor(
     },
     onStart: (span, parentContext) => {
       if (typeof span !== "object" || span === null) {
-        downstream.onStart(span, parentContext);
         return;
       }
-      downstream.onStart(facadeFor(span, content, facades).value, parentContext);
+      const scoped = facadeFor(
+        span,
+        exportPolicy,
+        facades,
+        channelAudienceFromContext(parentContext),
+      );
+      if (!scoped.exported) {
+        dropped.add(span);
+        return;
+      }
+      downstream.onStart(scoped.value, parentContext);
     },
     shutdown: () => downstream.shutdown(),
   };
@@ -64,27 +98,32 @@ export function contentFilteringProcessor(
 }
 
 interface SpanFacade {
+  readonly context: SpanExportContext;
+  readonly exported: boolean;
   readonly refresh: () => void;
   readonly value: object;
 }
 
 function facadeFor(
   span: object,
-  content: ResolvedContentOptions,
+  exportPolicy: SpanExportPolicy,
   facades: WeakMap<object, SpanFacade>,
+  inheritedAudience?: ChannelAudience,
 ): SpanFacade {
   const existing = facades.get(span);
   if (existing !== undefined) return existing;
 
+  const context = spanExportContext(span, inheritedAudience);
+  const effectiveContent = contentForSpan(context, exportPolicy);
   const attributes: Record<string, unknown> = {};
   const events: unknown[] = [];
   const status: Record<string, unknown> = {};
   const target = Object.create(Reflect.getPrototypeOf(span)) as Record<PropertyKey, unknown>;
   const boundMethods = new Map<PropertyKey, unknown>();
   const refresh = (): void => {
-    refreshAttributes(attributes, span, content);
-    refreshEvents(events, span, content);
-    refreshStatus(status, span, content);
+    refreshAttributes(attributes, span, effectiveContent, context, exportPolicy);
+    refreshEvents(events, span, effectiveContent);
+    refreshStatus(status, span, effectiveContent);
   };
   let value: object;
   const readOriginal = (property: PropertyKey): unknown => {
@@ -134,6 +173,8 @@ function facadeFor(
         : readOriginal(property),
   });
   const facade = {
+    context,
+    exported: shouldExport(context, exportPolicy),
     refresh,
     value,
   };
@@ -142,10 +183,20 @@ function facadeFor(
   return facade;
 }
 
+function contentForSpan(span: SpanExportContext, policy: SpanExportPolicy): ResolvedContentOptions {
+  const redaction = contentRedactionForSpan(policy, span);
+  return {
+    recordInputs: !redaction.redactInputs,
+    recordOutputs: !redaction.redactOutputs,
+  };
+}
+
 function refreshAttributes(
   destination: Record<string, unknown>,
   span: object,
   content: ResolvedContentOptions,
+  context: SpanExportContext,
+  policy: SpanExportPolicy | undefined,
 ): void {
   for (const key of Object.keys(destination)) delete destination[key];
 
@@ -153,7 +204,68 @@ function refreshAttributes(
   if (typeof source !== "object" || source === null) return;
 
   const kept = withoutDeclinedContent(source as Record<string, unknown>, content);
-  Object.assign(destination, kept ?? source);
+  const visible = kept ?? (source as Record<string, unknown>);
+  for (const [key, value] of Object.entries(visible)) {
+    const decision = attributeDecision(policy, { key, span: context, value });
+    if (decision.action === "keep") destination[key] = value;
+    else if (decision.action === "replace") destination[key] = decision.value;
+  }
+}
+
+function spanExportContext(
+  span: object,
+  inheritedAudience: ChannelAudience = "unknown",
+): SpanExportContext {
+  const attributes = (span as { readonly attributes?: unknown }).attributes;
+  const record =
+    typeof attributes === "object" && attributes !== null
+      ? (attributes as Readonly<Record<string, unknown>>)
+      : {};
+  const candidates = [
+    record["agent.channel.audience"],
+    record["ai.settings.context.eve.channel.audience"],
+  ].filter((value) => value !== undefined);
+  const normalized = candidates.map(normalizeChannelAudience);
+  const audience =
+    normalized.length > 0 && normalized.every((value) => value === normalized[0])
+      ? normalized[0]!
+      : normalized.length > 0
+        ? "unknown"
+        : inheritedAudience;
+  const spanContext = (span as { readonly spanContext?: () => unknown }).spanContext?.();
+  const ids =
+    typeof spanContext === "object" && spanContext !== null
+      ? (spanContext as Readonly<Record<string, unknown>>)
+      : {};
+  const name = (span as { readonly name?: unknown }).name;
+  return {
+    attributes: record,
+    audience,
+    name: typeof name === "string" ? name : "",
+    spanId: typeof ids["spanId"] === "string" ? ids["spanId"] : "",
+    traceId: typeof ids["traceId"] === "string" ? ids["traceId"] : "",
+  };
+}
+
+function shouldExport(context: SpanExportContext, policy: SpanExportPolicy | undefined): boolean {
+  if (policy === undefined) return true;
+  try {
+    return policy.span?.(context) !== false;
+  } catch {
+    return false;
+  }
+}
+
+function attributeDecision(
+  policy: SpanExportPolicy | undefined,
+  input: Parameters<NonNullable<SpanExportPolicy["attribute"]>>[0],
+) {
+  if (policy?.attribute === undefined) return { action: "keep" } as const;
+  try {
+    return policy.attribute(input);
+  } catch {
+    return { action: "drop" } as const;
+  }
 }
 
 function refreshEvents(

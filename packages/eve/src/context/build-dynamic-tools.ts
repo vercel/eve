@@ -15,28 +15,23 @@ import type {
   ApprovalResponseDecision,
   ApprovalStatus,
 } from "#public/definitions/approval.js";
-import type { DurableDynamicCallbackReference } from "#shared/durable-dynamic-tool-callbacks.js";
+import {
+  callDurableDynamicCallback,
+  lookupDurableDynamicCallback,
+  type DurableDynamicCallbackPhase,
+} from "#shared/durable-dynamic-tool-callbacks.js";
 import { toInputSchema, toOutputSchema } from "#shared/tool-schema.js";
 
 const log = createLogger("dynamic-tools");
 
-function lookupStepFunction(stepId: string): ((...args: unknown[]) => unknown) | null {
-  const registry = (globalThis as Record<symbol, Map<string, Function> | undefined>)[
-    Symbol.for("@workflow/core//registeredSteps")
-  ];
-  const callback = registry?.get(stepId);
-  return callback ? (callback as (...args: unknown[]) => unknown) : null;
-}
-
 function missingCallbackError(
   metadata: DurableDynamicToolMetadata,
-  phase: keyof DurableDynamicToolMetadata["callbacks"],
-  reference: DurableDynamicCallbackReference,
+  phase: DurableDynamicCallbackPhase,
 ): Error {
   return new Error(
-    `Dynamic tool "${metadata.name}" cannot replay its ${phase} callback because ` +
-      `step function "${reference.stepId}" is not registered. Rebuild the agent and ensure ` +
-      "the callback is created at module scope or transformed from authored source.",
+    `Dynamic tool "${metadata.name}" cannot replay its ${phase} callback because it is not ` +
+      "registered in this process. The tool was removed or renamed since this call was parked, " +
+      "or its resolver did not run. Restore the tool definition or start a new session.",
   );
 }
 
@@ -46,26 +41,30 @@ function buildReplayedApproval(
   const requestReference = metadata.callbacks.approvalRequest;
   if (requestReference === undefined) return undefined;
 
-  const request = lookupStepFunction(requestReference.stepId);
+  const request = lookupDurableDynamicCallback(metadata.name, "approvalRequest");
   const requestPolicy =
-    request === null
+    request === undefined
       ? async () => {
-          log.error(missingCallbackError(metadata, "approvalRequest", requestReference).message);
+          log.error(missingCallbackError(metadata, "approvalRequest").message);
           return "user-approval" as const;
         }
       : async (context: ApprovalContext) =>
-          (await request(requestReference.closure, context)) as ApprovalStatus;
+          (await callDurableDynamicCallback(
+            request,
+            requestReference.closure,
+            context,
+          )) as ApprovalStatus;
 
   const responseReference = metadata.callbacks.approvalResponse;
   if (responseReference === undefined) return requestPolicy;
 
-  const response = lookupStepFunction(responseReference.stepId);
+  const response = lookupDurableDynamicCallback(metadata.name, "approvalResponse");
   return {
     request: requestPolicy,
     response:
-      response === null
+      response === undefined
         ? async () => {
-            const error = missingCallbackError(metadata, "approvalResponse", responseReference);
+            const error = missingCallbackError(metadata, "approvalResponse");
             log.error(error.message);
             return {
               reason: error.message,
@@ -73,7 +72,11 @@ function buildReplayedApproval(
             };
           }
         : async (context: ApprovalResponseContext) =>
-            (await response(responseReference.closure, context)) as ApprovalResponseDecision,
+            (await callDurableDynamicCallback(
+              response,
+              responseReference.closure,
+              context,
+            )) as ApprovalResponseDecision,
   };
 }
 
@@ -83,22 +86,22 @@ export function replayDynamicTools(
 ): HarnessToolDefinition[] {
   return metadata.map((entry) => {
     const executeReference = entry.callbacks.execute;
-    const execute = lookupStepFunction(executeReference.stepId);
+    const execute = lookupDurableDynamicCallback(entry.name, "execute");
     const toModelOutputReference = entry.callbacks.toModelOutput;
     const toModelOutput =
       toModelOutputReference === undefined
         ? undefined
-        : lookupStepFunction(toModelOutputReference.stepId);
+        : lookupDurableDynamicCallback(entry.name, "toModelOutput");
 
     return {
       description: entry.description,
       execute: createToolExecuteWithAuth({
         scope: entry.name,
         execute: (input, context) => {
-          if (execute === null) {
-            throw missingCallbackError(entry, "execute", executeReference);
+          if (execute === undefined) {
+            throw missingCallbackError(entry, "execute");
           }
-          return execute(executeReference.closure, input, context);
+          return callDurableDynamicCallback(execute, executeReference.closure, input, context);
         },
       }),
       inputSchema: toInputSchema(entry.inputSchema),
@@ -109,10 +112,14 @@ export function replayDynamicTools(
         ? {}
         : {
             toModelOutput: (output: unknown) => {
-              if (toModelOutput === null) {
-                throw missingCallbackError(entry, "toModelOutput", toModelOutputReference);
+              if (toModelOutput === undefined) {
+                throw missingCallbackError(entry, "toModelOutput");
               }
-              return toModelOutput!(toModelOutputReference.closure, output);
+              return callDurableDynamicCallback(
+                toModelOutput!,
+                toModelOutputReference.closure,
+                output,
+              );
             },
           }),
     };

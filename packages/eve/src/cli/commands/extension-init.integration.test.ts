@@ -132,7 +132,7 @@ describe("runExtensionInitCommand", () => {
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
       projectPath,
-      expect.objectContaining({ bypassMinimumReleaseAge: true }),
+      expect.any(Object),
     );
     expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
 

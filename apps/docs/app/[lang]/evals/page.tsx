@@ -27,12 +27,6 @@ const EvalsPage = () => {
 
   return (
     <main className="mx-auto w-full min-w-0 max-w-[1080px] px-4 pb-32 sm:px-6">
-      <div className="mt-8 rounded-xl border border-gray-400 bg-gray-100 px-4 py-3 text-gray-900 text-sm leading-6">
-        <span className="font-medium text-gray-1000">Under construction.</span> This evaluation
-        suite is actively under development. Its results, methodology, and presentation are subject
-        to change.
-      </div>
-
       <section className="flex min-w-0 flex-col items-center px-0 pt-16 pb-12 text-center sm:px-4">
         <h1 className="text-gray-1000 text-heading-48 sm:text-heading-64">Agent Evaluations</h1>
         <p className="mt-5 max-w-3xl text-gray-900 text-lg">

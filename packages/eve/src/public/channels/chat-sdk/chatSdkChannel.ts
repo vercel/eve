@@ -43,6 +43,8 @@ import {
   type RouteHandlerArgs,
   type Session,
 } from "#public/definitions/channel.js";
+import { chatSdkInstrumentationMetadata } from "#public/channels/chat-sdk/audience.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 
 const log = createLogger("chat-sdk.channel");
 const DEFAULT_ROUTE = "/eve/v1";
@@ -100,6 +102,7 @@ export interface ChatSdkReceiveTarget {
  * Channel-owned metadata exposed to eve instrumentation.
  */
 export interface ChatSdkInstrumentationMetadata extends Record<string, unknown> {
+  readonly audience: ChannelAudience;
   readonly adapterName: string | null;
   readonly channelId: string | null;
   readonly isDM: boolean | null;
@@ -290,7 +293,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     kindHint: "chat-sdk",
     turnPolicy: config.turnPolicy,
     state: initialState(),
-    metadata: metadataFromState,
+    metadata: chatSdkInstrumentationMetadata,
     context(state) {
       return {
         bot,
@@ -575,15 +578,6 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
 
 function initialState(): ChatSdkChannelState {
   return { thread: null };
-}
-
-function metadataFromState(state: ChatSdkChannelState): ChatSdkInstrumentationMetadata {
-  return {
-    adapterName: state.thread?.adapterName ?? null,
-    channelId: state.thread?.channelId ?? null,
-    isDM: state.thread?.isDM ?? null,
-    threadId: state.thread?.id ?? null,
-  };
 }
 
 function threadFromState<TAdapters extends ChatSdkAdapters>(

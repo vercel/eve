@@ -5,6 +5,7 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload } from "#channel/types.js";
 import type { FetchFileResult, FetchFileFunction } from "#shared/channel-definition.js";
+import type { ChannelAudienceMetadata } from "#shared/channel-audience.js";
 
 const log = createLogger("channel.adapter");
 
@@ -97,7 +98,9 @@ export type ChannelEventHandlers<TCtx extends ChannelAdapterContext<any> = Chann
  */
 export type { FetchFileResult };
 
-export type ChannelInstrumentationMetadata = Readonly<Record<string, unknown>>;
+export type ChannelInstrumentationMetadata = Readonly<
+  Record<string, unknown> & ChannelAudienceMetadata
+>;
 
 export type ChannelInstrumentationMetadataProjector = (
   state: Record<string, unknown> | undefined,

@@ -25,9 +25,6 @@ async function createTempDir(): Promise<string> {
 
 const TEST_EVE_PACKAGE = { version: "0.25.0", nodeEngine: ">=24" } as const;
 const LATEST_EVE_PACKAGE = { version: "latest", nodeEngine: ">=24" } as const;
-const RELEASE_AGE_POLICY =
-  'minimumReleaseAgeExclude:\n  - "@ai-sdk/*"\n  - "@rolldown/*"\n  - "@vercel/*"\n  - "@workflow/*"\n  - ai\n  - experimental-ai-sdk-code-mode\n  - eve\n  - nitro\n  - rolldown\n  - workflow\n';
-
 const TEST_WEB_PACKAGE_VERSIONS = {
   evePackage: TEST_EVE_PACKAGE,
   aiPackageVersion: "7.0.0",
@@ -231,6 +228,12 @@ describe("ensureChannel", () => {
     await expect(readFile(join(projectRoot, "app/page.tsx"), "utf8")).resolves.toContain(
       "AgentChat",
     );
+    await expect(readFile(join(projectRoot, "app/s/page.tsx"), "utf8")).resolves.toContain(
+      "<AgentChat sessionless />",
+    );
+    await expect(
+      readFile(join(projectRoot, "app/s/[sessionId]/page.tsx"), "utf8"),
+    ).resolves.toContain("<AgentChat sessionId={sessionId} />");
     await expect(
       readFile(join(projectRoot, "agent/tools/randomize.ts"), "utf8"),
     ).rejects.toMatchObject({
@@ -242,7 +245,8 @@ describe("ensureChannel", () => {
       join(projectRoot, "app/_components/agent-chat.tsx"),
       "utf8",
     );
-    expect(agentChatSource).toContain("<PromptInputTextarea disabled={isBusy}");
+    expect(agentChatSource).toContain("<PromptInputTextarea disabled={isRestoring}");
+    expect(agentChatSource).toContain('turnPolicy: "steer"');
     expect(agentChatSource).toContain("{showPendingThinking ? <PendingThinking /> : null}");
     expect(agentChatSource).not.toContain("StatusDot");
     await expect(readFile(join(projectRoot, "next.config.ts"), "utf8")).resolves.toContain(
@@ -251,6 +255,10 @@ describe("ensureChannel", () => {
     const packageJson = await readFile(join(projectRoot, "package.json"), "utf8");
     expect(packageJson).not.toContain('"better-auth"');
     expect(packageJson).toContain('"next": "16.2.6"');
+    expect(packageJson).toContain('"shiki": "3.23.0"');
+    expect(packageJson).toContain('"@shikijs/core": "3.23.0"');
+    expect(packageJson).toContain('"@shikijs/engine-javascript": "3.23.0"');
+    expect(packageJson).toContain('"@shikijs/engine-oniguruma": "3.23.0"');
     expect(packageJson).toContain('"build:eve": "eve build"');
     expect(packageJson).toContain('"dev": "next dev"');
     expect(packageJson).toContain('"dev:eve": "eve dev"');
@@ -312,9 +320,14 @@ describe("ensureChannel", () => {
     expect(packageJson.dependencies.next).toBe("16.3.0");
 
     const pageSource = await readFile(join(projectRoot, "app/page.tsx"), "utf8");
-    expect(pageSource).toContain("auth.api.getSession");
-    expect(pageSource).toContain("<SignIn />");
-    expect(pageSource).toContain("<AccountControl");
+    expect(pageSource).toContain("<AuthenticatedAgentChat");
+    const authenticatedChatSource = await readFile(
+      join(projectRoot, "app/_components/authenticated-agent-chat.tsx"),
+      "utf8",
+    );
+    expect(authenticatedChatSource).toContain("auth.api.getSession");
+    expect(authenticatedChatSource).toContain("<SignIn />");
+    expect(authenticatedChatSource).toContain("<AccountControl");
 
     const authSource = await readFile(join(projectRoot, "lib/auth.ts"), "utf8");
     expect(authSource).toContain('requireEnvironmentVariable("BETTER_AUTH_SECRET")');
@@ -434,6 +447,37 @@ describe("ensureChannel", () => {
     // CRLF (no repo .gitattributes), so compare line content, not line endings.
     const normalizeEol = (text: string): string => text.replaceAll("\r\n", "\n");
     expect(normalizeEol(channelSource)).toBe(normalizeEol(sourceChannel));
+  });
+
+  test("scaffolds Web Chat questions as visible response forms", async () => {
+    const projectRoot = await createTempDir();
+    await mkdir(join(projectRoot, "agent"), { recursive: true });
+    await writeFile(
+      join(projectRoot, "package.json"),
+      `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await ensureChannel({
+      projectRoot,
+      kind: "web",
+      webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
+    });
+
+    const agentMessageSource = await readFile(
+      join(projectRoot, "app/_components/agent-message.tsx"),
+      "utf8",
+    );
+    const questionSource = await readFile(
+      join(projectRoot, "components/ai-elements/question.tsx"),
+      "utf8",
+    );
+    expect(agentMessageSource).toContain('inputRequest?.kind === "question"');
+    expect(agentMessageSource).toContain("<QuestionRequest");
+    expect(agentMessageSource).toContain("onInputResponses");
+    expect(questionSource).toContain("export const Question");
+    expect(questionSource).toContain("export const QuestionInput");
+    expect(questionSource).toContain("export const QuestionOption");
   });
 
   test("scaffolds a Web Chat Stop button with the agent cancellation API", async () => {
@@ -562,10 +606,11 @@ describe("ensureChannel", () => {
     );
   });
 
-  test("adds the Web Chat pnpm build policy to existing workspace policy", async () => {
+  test("adds Web Chat build policy after an existing YAML document marker", async () => {
     const projectRoot = await createTempDir();
     const pnpmWorkspacePath = join(projectRoot, "pnpm-workspace.yaml");
-    const existingPolicy = "packages:\n  - packages/*\nallowBuilds:\n  esbuild: true\n";
+    const existingPolicy =
+      "# Existing workspace policy\n---  # Workspace document\npackages:\n  - packages/*\nallowBuilds:\n  esbuild: true\n";
     await writeFile(
       join(projectRoot, "package.json"),
       `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
@@ -580,15 +625,16 @@ describe("ensureChannel", () => {
     });
 
     await expect(readFile(pnpmWorkspacePath, "utf8")).resolves.toBe(
-      `packages:\n  - packages/*\nallowBuilds:\n  esbuild: true\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
+      "# Existing workspace policy\n---  # Workspace document\npackages:\n  - packages/*\nallowBuilds:\n  esbuild: true\n  sharp: false\n",
     );
     expect(result.filesWritten).toContain(pnpmWorkspacePath);
   });
 
-  test("preserves an existing explicit sharp build policy when adding Web Chat", async () => {
+  test("preserves an existing release-age policy", async () => {
     const projectRoot = await createTempDir();
     const pnpmWorkspacePath = join(projectRoot, "pnpm-workspace.yaml");
-    const existingPolicy = "allowBuilds:\n  sharp: true\n";
+    const existingPolicy =
+      '"minimumReleaseAgeStrict": &strict false # Keep this comment\notherPolicy: *strict\nallowBuilds:\n  sharp: true\n';
     await writeFile(
       join(projectRoot, "package.json"),
       `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
@@ -602,36 +648,8 @@ describe("ensureChannel", () => {
       webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
     });
 
-    await expect(readFile(pnpmWorkspacePath, "utf8")).resolves.toBe(
-      `${existingPolicy}\n${RELEASE_AGE_POLICY}`,
-    );
-    expect(result.filesWritten).toContain(pnpmWorkspacePath);
-  });
-
-  test("adds the release age exclusions to an existing pnpm workspace exclusion list", async () => {
-    const projectRoot = await createTempDir();
-    const pnpmWorkspacePath = join(projectRoot, "pnpm-workspace.yaml");
-    await writeFile(
-      join(projectRoot, "package.json"),
-      `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
-      "utf8",
-    );
-    await writeFile(
-      pnpmWorkspacePath,
-      "minimumReleaseAgeExclude:\n  - react\nallowBuilds:\n  sharp: false\n",
-      "utf8",
-    );
-
-    const result = await ensureChannel({
-      projectRoot,
-      kind: "web",
-      webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
-    });
-
-    await expect(readFile(pnpmWorkspacePath, "utf8")).resolves.toBe(
-      'minimumReleaseAgeExclude:\n  - react\n  - "@ai-sdk/*"\n  - "@rolldown/*"\n  - "@vercel/*"\n  - "@workflow/*"\n  - ai\n  - experimental-ai-sdk-code-mode\n  - eve\n  - nitro\n  - rolldown\n  - workflow\nallowBuilds:\n  sharp: false\n',
-    );
-    expect(result.filesWritten).toContain(pnpmWorkspacePath);
+    await expect(readFile(pnpmWorkspacePath, "utf8")).resolves.toBe(existingPolicy);
+    expect(result.filesSkipped).toContain(pnpmWorkspacePath);
   });
 
   test("adds Web Chat pnpm policy and a missing package pattern at the ancestor workspace root", async () => {
@@ -663,7 +681,7 @@ describe("ensureChannel", () => {
     expect(result.filesWritten).not.toContain(join(projectRoot, "pnpm-workspace.yaml"));
     await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      `packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
+      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n",
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectRoot, "package.json"), "utf8"),
@@ -1014,6 +1032,14 @@ describe("scaffoldBaseProject", () => {
     // The default path used by `eve init` must carry the stable toolchain
     // version captured from the workspace catalog into generated projects.
     expect(JSON.parse(packageJson)).toMatchObject({
+      scripts: {
+        build: "eve build",
+        deploy: "eve deploy",
+        dev: "eve dev",
+        eval: "eve eval",
+        start: "eve start",
+        typecheck: "tsc",
+      },
       devDependencies: { typescript: "7.0.2" },
       engines: { node: "24.x" },
     });
@@ -1084,6 +1110,11 @@ describe("scaffoldBaseProject", () => {
       await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(
         packageManager === "pnpm",
       );
+      if (packageManager === "pnpm") {
+        await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toContain(
+          "minimumReleaseAgeStrict: true",
+        );
+      }
       const packageJson: unknown = JSON.parse(
         await readFile(join(projectRoot, "package.json"), "utf8"),
       );
@@ -1101,7 +1132,11 @@ describe("scaffoldBaseProject", () => {
       `${JSON.stringify({ private: true, engines: { node: "22.x" } }, null, 2)}\n`,
       "utf8",
     );
-    await writeFile(join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n", "utf8");
+    await writeFile(
+      join(workspaceRoot, "pnpm-workspace.yaml"),
+      "minimumReleaseAgeStrict: false\npackages:\n  - apps/*\n",
+      "utf8",
+    );
 
     const projectRoot = await scaffoldBaseProject({
       projectName: "demo-agent",
@@ -1116,7 +1151,7 @@ describe("scaffoldBaseProject", () => {
 
     await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      `packages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
+      "minimumReleaseAgeStrict: false\npackages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n",
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectRoot, "package.json"), "utf8"),
@@ -1159,7 +1194,7 @@ describe("scaffoldBaseProject", () => {
 
     await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      `packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
+      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n",
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectRoot, "package.json"), "utf8"),
@@ -1364,6 +1399,9 @@ describe("scaffoldBaseProject", () => {
 
     await expect(readFile(join(projectRoot, "package.json"), "utf8")).resolves.toContain(
       '"eve": "latest"',
+    );
+    await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
+      PNPM_WORKSPACE_CONTENT,
     );
   });
 

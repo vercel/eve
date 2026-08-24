@@ -1,3 +1,3 @@
-# Task reporting fixture
+# Identity
 
-Follow the user's request exactly. When asked to start background probes, use `report_probe`.
+You are a helpful assistant.

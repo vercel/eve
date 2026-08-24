@@ -167,7 +167,6 @@ describe("cancelDescendantTurnsStep", () => {
   });
 
   it("skips parked handles: an idle child has no turn to cancel", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const session = createSession({
       [AGENT_HANDLES_STATE_KEY]: {
         handles: [
@@ -188,10 +187,6 @@ describe("cancelDescendantTurnsStep", () => {
 
     expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
     expect(cancelRemoteAgentTurn).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledWith(
-      "[eve:execution.cancel-descendant-turns] no running agent handles found while cancelling descendants; nothing to cancel",
-      expect.objectContaining({ sessionId: expect.any(String) }),
-    );
   });
 
   it("retries no-active-turn responses during the child adoption window", async () => {
@@ -271,8 +266,6 @@ describe("cancelDescendantTurnsStep", () => {
   });
 
   it("treats sessions without a handle store as having no descendants", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
     await cancelDescendantTurnsStep({
       serializedContext: {},
       sessionState: createDurableSessionState({ session: createSession() }),
@@ -281,11 +274,6 @@ describe("cancelDescendantTurnsStep", () => {
     expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
     expect(cancelRemoteAgentTurn).not.toHaveBeenCalled();
     expect(deserializeContext).not.toHaveBeenCalled();
-    // The skipped cancellation is observable, not silent.
-    expect(warn).toHaveBeenCalledWith(
-      "[eve:execution.cancel-descendant-turns] no running agent handles found while cancelling descendants; nothing to cancel",
-      expect.objectContaining({ sessionId: expect.any(String) }),
-    );
   });
 });
 

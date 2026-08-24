@@ -22,6 +22,7 @@ import {
   SessionDynamicToolRuntimeRevisionKey,
   SessionIdKey,
   TurnTaskDeliveryKey,
+  TurnTaskStateKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
@@ -48,10 +49,7 @@ import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { projectToDurableSession } from "#execution/session.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { defineTool } from "#public/definitions/tool.js";
-import {
-  registerDurableDynamicCallback,
-  stampDurableDynamicCallback,
-} from "#shared/durable-dynamic-tool-callbacks.js";
+import { stampDurableDynamicCallback } from "#shared/durable-dynamic-tool-callbacks.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import { readLatestTaskView, sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
@@ -684,6 +682,7 @@ describe("dispatchTurnStep", () => {
           "$eve.channel_request_id": "req_turn",
           "$eve.parent": "sess-test",
           "$eve.root": "sess-test",
+          "$eve.is_trace_content_visible": "false",
           "$eve.type": "turn",
         },
         deploymentId: "latest",
@@ -722,6 +721,7 @@ describe("dispatchTurnStep", () => {
           "$eve.channel_request_id": "req_turn",
           "$eve.parent": "sess-test",
           "$eve.root": "sess-test",
+          "$eve.is_trace_content_visible": "false",
           "$eve.type": "turn",
         },
       },
@@ -744,6 +744,7 @@ describe("dispatchTurnStep", () => {
         "$eve.channel_request_id": "req_turn",
         "$eve.parent": "sess-test",
         "$eve.root": "sess-test",
+        "$eve.is_trace_content_visible": "false",
         "$eve.type": "turn",
       },
       deploymentId: "latest",
@@ -754,6 +755,7 @@ describe("dispatchTurnStep", () => {
         "$eve.channel_request_id": "req_turn",
         "$eve.parent": "sess-test",
         "$eve.root": "sess-test",
+        "$eve.is_trace_content_visible": "false",
         "$eve.type": "turn",
       },
     });
@@ -1801,6 +1803,9 @@ describe("turnStep", () => {
       },
     });
     expect(result.serializedContext).not.toHaveProperty(ThreadKey.name);
+    expect(result.sessionState.snapshot?.session.history).toEqual([
+      { content: "thread=unset; user=cancel this turn", role: "user" },
+    ]);
   });
 
   it("rejects task completion while input requests remain pending", async () => {
@@ -2303,6 +2308,7 @@ describe("turnStep", () => {
 
   it("sets task-delivery provenance only when the runtime supplies owned task state", async () => {
     const observedTaskDeliveries: unknown[] = [];
+    const observedTaskStates: unknown[] = [];
     const metadata = { kind: "report-probe", name: "report_probe" } as const;
     const session = createStubSession({
       state: {
@@ -2329,9 +2335,13 @@ describe("turnStep", () => {
     vi.mocked(createExecutionNodeStep).mockImplementation(() => {
       return async (stepSession): Promise<StepResult> => {
         observedTaskDeliveries.push(contextStorage.getStore()?.get(TurnTaskDeliveryKey));
+        observedTaskStates.push(contextStorage.getStore()?.get(TurnTaskStateKey));
         return { next: { done: true, output: "ok" }, session: stepSession };
       };
     });
+
+    const initialSerializedContext = createSerializedContext();
+    initialSerializedContext[TurnTaskStateKey.name] = "stale task state";
 
     const first = await turnStep({
       input: {
@@ -2340,7 +2350,7 @@ describe("turnStep", () => {
         taskDeliveryId: "task_1:ready:completed",
       },
       parentWritable: createTestWritable(),
-      serializedContext: createSerializedContext(),
+      serializedContext: initialSerializedContext,
       sessionState: createStubSessionState(),
     });
     const second = await turnStep({
@@ -2361,6 +2371,89 @@ describe("turnStep", () => {
     });
 
     expect(observedTaskDeliveries).toEqual(["settled", "none", "none"]);
+    expect(observedTaskStates).toEqual([undefined, undefined, undefined]);
+  });
+
+  it("supplies initiating task state after the active turn accepts delegated work", async () => {
+    const tasksBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: { experimental: { tasks: true } } },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(tasksBundle);
+
+    const session = createStubSession({
+      state: {
+        "eve.harness.emission": {
+          sequence: 0,
+          sessionStarted: true,
+          stepIndex: 1,
+          turnId: "turn_0",
+        },
+        "eve.tasks": {
+          tasks: [
+            {
+              createdByStepIndex: 0,
+              createdByTurnId: "turn_0",
+              executor: { data: {}, kind: "subagent" },
+              metadata: { kind: "report-probe", name: "report_probe" },
+              taskId: "task_1",
+              taskInboxToken: "task-token",
+              taskRunId: "run_1",
+            },
+          ],
+        },
+      },
+    });
+    installSessionStoreMocks([session]);
+
+    let observedInput: unknown;
+    let observedPhase: unknown;
+    let observedTaskState: unknown;
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession, stepInput): Promise<StepResult> => {
+        observedInput = stepInput;
+        observedPhase = contextStorage.getStore()?.get(TurnTaskDeliveryKey);
+        observedTaskState = contextStorage.getStore()?.get(TurnTaskStateKey);
+        return { next: { done: true, output: "ok" }, session: stepSession };
+      };
+    });
+    const serializedContext = createSerializedContext();
+    serializedContext[TurnTaskDeliveryKey.name] = "none";
+
+    await turnStep({
+      input: undefined,
+      parentWritable: createTestWritable(),
+      serializedContext,
+      sessionState: createStubSessionState({
+        emissionState: {
+          sequence: 0,
+          sessionStarted: true,
+          stepIndex: 1,
+          turnId: "turn_0",
+        },
+      }),
+    });
+
+    expect(observedPhase).toBe("initiating");
+    expect(observedTaskState).toBe(
+      '[Task state]\n{"tasks":[{"name":"report_probe","status":"pending","taskId":"task_1"}]}',
+    );
+    expect(observedInput).toBeUndefined();
   });
 
   it("projects a requested sleep onto the durable step result", async () => {
@@ -2621,15 +2714,13 @@ describe("turnStep", () => {
       },
     );
     const approval = stampDurableDynamicCallback(() => "not-applicable" as const, {
+      callback: () => "not-applicable",
       closure: {},
-      stepId: "test:current-tool/approval",
     });
     const execute = stampDurableDynamicCallback(async () => ({ ok: true }), {
+      callback: async () => ({ ok: true }),
       closure: {},
-      stepId: "test:current-tool/execute",
     });
-    registerDurableDynamicCallback("test:current-tool/approval", () => "not-applicable");
-    registerDurableDynamicCallback("test:current-tool/execute", async () => ({ ok: true }));
     const handler = vi.fn(() => {
       lifecycleOrder.push("refresh");
       return {
@@ -2706,7 +2797,7 @@ describe("turnStep", () => {
     ctx.set(SessionDynamicToolMetadataKey, [
       {
         callbacks: {
-          execute: { closure: {}, stepId: "eve:dynamic-tool//old" },
+          execute: { closure: {} },
         },
         description: "Stale deployment tool",
         entryKey: "old_tool",

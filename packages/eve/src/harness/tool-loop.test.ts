@@ -28,6 +28,7 @@ import {
   SessionDynamicSubagentSelectionsKey,
   StepDynamicToolMetadataKey,
   TurnTaskDeliveryKey,
+  TurnTaskStateKey,
 } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
@@ -37,6 +38,7 @@ import type { InstrumentationStepStartedEventInput } from "#public/instrumentati
 import { defineInstructions } from "#public/definitions/instructions.js";
 import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
 import type { DynamicResolveContext } from "#shared/dynamic-tool-definition.js";
+import { registerDurableDynamicCallback } from "#shared/durable-dynamic-tool-callbacks.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { compactMessages, shouldCompact } from "#harness/compaction.js";
 import { getHarnessEmissionState, isHarnessBetweenTurns } from "#harness/emission.js";
@@ -72,6 +74,7 @@ import {
   EMPTY_DELIVERY_SENTINEL,
 } from "#shared/empty-delivery.js";
 import {
+  TASK_DELIVERY_INITIATING_INSTRUCTION,
   TASK_DELIVERY_PENDING_INSTRUCTION,
   TASK_DELIVERY_SETTLED_INSTRUCTION,
 } from "#tasks/delivery-context.js";
@@ -2175,19 +2178,21 @@ describe("createToolLoopHarness", () => {
       sessionId: "test-session",
       turn: { id: "turn-test", sequence: 0 },
     });
-    const registryKey = Symbol.for("@workflow/core//registeredSteps");
-    const globals = globalThis as Record<symbol, Map<string, Function> | undefined>;
-    const registry = globals[registryKey] ?? new Map<string, Function>();
-    globals[registryKey] = registry;
-    registry.set("test-step-execute", () => ({ ok: true }));
-    registry.set("test-step-approval", (_closure: unknown, approvalContext: unknown) =>
-      approval(approvalContext as never),
-    );
+    registerDurableDynamicCallback({
+      callback: () => ({ ok: true }),
+      phase: "execute",
+      toolName: "tfl__getLineStatus",
+    });
+    registerDurableDynamicCallback({
+      callback: (_closure: unknown, approvalContext: unknown) => approval(approvalContext as never),
+      phase: "approvalRequest",
+      toolName: "tfl__getLineStatus",
+    });
     ctx.set(StepDynamicToolMetadataKey, [
       {
         callbacks: {
-          approvalRequest: { closure: {}, stepId: "test-step-approval" },
-          execute: { closure: {}, stepId: "test-step-execute" },
+          approvalRequest: { closure: {} },
+          execute: { closure: {} },
         },
         description: "Get TfL line status.",
         entryKey: "tfl__getLineStatus",
@@ -4919,7 +4924,12 @@ describe("createToolLoopHarness", () => {
 
       const { emit, events } = createEventCollector();
       const runStep = createToolLoopHarness({ ...config, handleEvent: emit });
-      const result = await runStep(session, { message: "Hi" });
+      const ctx = new ContextContainer();
+      ctx.set(ChannelInstrumentationKey, {
+        kind: "channel:public",
+        metadata: { audience: "public" },
+      });
+      const result = await contextStorage.run(ctx, () => runStep(session, { message: "Hi" }));
 
       // The second agent was constructed for the retry.
       expect(constructedCalls.count()).toBe(2);
@@ -5180,6 +5190,36 @@ describe("createToolLoopHarness", () => {
           content: expect.stringContaining(EMPTY_DELIVERY_SENTINEL),
           role: "user",
         });
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("does not offer silent delivery on an initiating-task retry", async () => {
+      setupFirstThenAgent(emptyResult, successResult);
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { emit } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const ctx = new ContextContainer();
+      ctx.set(TurnTaskDeliveryKey, "initiating");
+
+      try {
+        await contextStorage.run(ctx, () =>
+          runStep(createTestSession(), { message: "[Task state]" }),
+        );
+
+        const reissueAgent = vi.mocked(ToolLoopAgent).mock.results[1]?.value as {
+          stream: ReturnType<typeof vi.fn>;
+        };
+        const reissueMessages = reissueAgent.stream.mock.calls[0]?.[0]?.messages as Array<{
+          content: unknown;
+          role: string;
+        }>;
+        expect(reissueMessages.at(-1)).toMatchObject({
+          content: expect.stringContaining("was not delivered"),
+          role: "user",
+        });
+        expect(reissueMessages.at(-1)?.content).not.toContain(EMPTY_DELIVERY_SENTINEL);
       } finally {
         warnSpy.mockRestore();
       }
@@ -10784,7 +10824,12 @@ describe("createToolLoopHarness", () => {
         }),
       );
 
-      await runStep(createTestSession(), { message: "hi" });
+      const ctx = new ContextContainer();
+      ctx.set(ChannelInstrumentationKey, {
+        kind: "channel:public",
+        metadata: { audience: "public" },
+      });
+      await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "hi" }));
 
       const bridge = mockCreateAiSdkHookBridge.mock.results[0]!.value;
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
@@ -10798,6 +10843,51 @@ describe("createToolLoopHarness", () => {
         integrations: [bridge, registeredOtelIntegration, registeredAuthorIntegration],
         recordInputs: true,
         recordOutputs: false,
+      });
+    });
+
+    it("forces hosted unknown model telemetry to metadata only", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      declareTelemetry({ recordInputs: true, recordOutputs: true });
+
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      await runStep(createTestSession(), { message: "hi" });
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: { recordInputs?: boolean; recordOutputs?: boolean };
+      };
+      expect(agentCall.telemetry).toMatchObject({
+        recordInputs: false,
+        recordOutputs: false,
+      });
+    });
+
+    it("keeps unknown model telemetry content in a local development worker", async () => {
+      vi.stubEnv("EVE_DEV", "1");
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      declareTelemetry({ recordInputs: true, recordOutputs: true });
+
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      await runStep(createTestSession(), { message: "hi" });
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: { recordInputs?: boolean; recordOutputs?: boolean };
+      };
+      expect(agentCall.telemetry).toMatchObject({
+        recordInputs: true,
+        recordOutputs: true,
       });
     });
 
@@ -10842,6 +10932,7 @@ describe("createToolLoopHarness", () => {
       ctx.set(ChannelInstrumentationKey, {
         kind: "channel:support",
         metadata: {
+          audience: "public",
           triggeringUserId: "U123",
         },
       });
@@ -11311,6 +11402,41 @@ describe("createToolLoopHarness", () => {
 
       const { instructions } = getLastAgentSettings();
       expect(instructions).toBe("You are a test assistant.");
+    });
+
+    it("adds initiating task-reporting guidance without enabling silent delivery", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const ctx = new ContextContainer();
+      ctx.set(TurnTaskDeliveryKey, "initiating");
+      ctx.set(TurnTaskStateKey, '[Task state]\n{"tasks":[]}');
+
+      await contextStorage.run(ctx, () =>
+        runStep(createTestSession(), { message: "Start the background work." }),
+      );
+
+      const { instructions } = getLastAgentSettings();
+      expect(instructions).toEqual({
+        role: "system",
+        content: `You are a test assistant.\n\n[Task state]\n{"tasks":[]}\n\n${TASK_DELIVERY_INITIATING_INSTRUCTION}`,
+      });
+    });
+
+    it("keeps a scheduled initiating task turn conditionally deliverable", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const ctx = createScheduleContext();
+      ctx.set(TurnTaskDeliveryKey, "initiating");
+
+      await contextStorage.run(ctx, () =>
+        runStep(createTestSession(), { message: "[Task state]" }),
+      );
+
+      const { instructions } = getLastAgentSettings();
+      expect(instructions).toEqual({
+        role: "system",
+        content: `You are a test assistant.\n\n${CONDITIONAL_DELIVERY_INSTRUCTION}`,
+      });
     });
 
     it.each([
