@@ -182,6 +182,26 @@ export default defineSandbox({
 
 `justbash()` needs no daemon or VM, but commands run in a simulated bash with a virtual filesystem under `.eve/sandbox-cache/`, with no real binaries (`git`, `node`, package managers) and no network isolation. The `just-bash` package is an optional peer dependency, so `eve dev` installs it into your application automatically when missing (disable with `autoInstall: false`); production processes fail with an actionable install error instead.
 
+Pass `customCommands` to expose a `just-bash` `CustomCommand` inside each live sandbox session. The command participates in shell pipelines, redirections, and exit-code handling like a built-in command:
+
+```ts title="agent/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+import { justbash } from "eve/sandbox/just-bash";
+import { decodeBytesToUtf8, defineCommand } from "just-bash";
+
+const uppercase = defineCommand("uppercase", async (_args, context) => ({
+  stdout: decodeBytesToUtf8(context.stdin).toUpperCase(),
+  stderr: "",
+  exitCode: 0,
+}));
+
+export default defineSandbox({
+  backend: justbash({ customCommands: [uppercase] }),
+});
+```
+
+Custom commands are registered on live and reopened sessions, not during template prewarming. They run trusted host application code and create an explicit bridge from the sandbox to that code. Adapters can use this extension point to expose application APIs such as a Capable App's CLI; the outer eve `bash` tool does not automatically provide per-command Capable approvals.
+
 You can also write your own backend. A `SandboxBackend` is an adapter object with a `name`, a `create`, and an optional `prewarm`. It can point at your own container runner, VM pool, internal sandbox service, or another isolation layer, as long as it returns the `SandboxSession` operations eve needs. Handles returned by `create` implement `shutdown()`, which stops the underlying compute at server shutdown. See the `SandboxBackend*` types on `eve/sandbox`.
 
 ## Lifecycle
