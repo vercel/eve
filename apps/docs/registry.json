@@ -1717,11 +1717,14 @@
       ],
       "envVars": {
         "X_CONSUMER_SECRET": "",
+        "X_CLIENT_ID": "",
+        "X_REFRESH_TOKEN": "",
+        "X_ENCRYPTION_KEY": "",
         "X_USER_ACCESS_TOKEN": ""
       },
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/x",
           "implementation": "chat-sdk"
         }
       }

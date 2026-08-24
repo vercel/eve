@@ -124,6 +124,31 @@ describe("runRegistryFlow", () => {
     });
   });
 
+  it("links to an installed registry item's documentation", async () => {
+    const answers = ["category:extension", "item:0", "add"];
+    const fake = createFakePrompter({ single: () => answers.shift()! });
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        deps: deps({
+          getRegistryItemManifest: vi.fn(async () => ({
+            description: "Browser automation",
+            meta: { eve: { docs: "/integrations/browser" } },
+            name: "extension/agent-browser",
+          })),
+        }),
+      }),
+    ).resolves.toMatchObject({
+      items: [
+        {
+          output: ["Documentation: https://eve.dev/integrations/browser"],
+        },
+      ],
+    });
+  });
+
   it("uses the registry title when labeling an item", async () => {
     const answers = ["category:channel", "action:back", "action:done"];
     const prompts: unknown[] = [];

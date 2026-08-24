@@ -1,3 +1,4 @@
+import { z } from "#compiled/zod/index.js";
 import type { RegistryCatalogItem } from "#cli/commands/registry.js";
 import type {
   Prompter,
@@ -162,6 +163,20 @@ function manifestRecord(manifest: unknown): Record<string, unknown> {
     : {};
 }
 
+const RegistryDocumentationSchema = z.object({
+  meta: z
+    .object({
+      eve: z.object({ docs: z.string().min(1).optional() }).optional(),
+    })
+    .optional(),
+});
+
+function documentationLink(manifest: Record<string, unknown>): string | undefined {
+  const docs = RegistryDocumentationSchema.safeParse(manifest).data?.meta?.eve?.docs;
+  if (docs === undefined) return undefined;
+  return docs.startsWith("/") ? `https://eve.dev${docs}` : docs;
+}
+
 function summarizeDetails(values: readonly string[], limit = 3): string {
   const visible = values.slice(0, limit);
   const remaining = values.length - visible.length;
@@ -206,6 +221,7 @@ async function inspectItem(
   | {
       kind: "added";
       output: readonly string[];
+      documentation?: string;
       setup?: Awaited<ReturnType<RegistryFlowDeps["installRegistryItem"]>>["setup"];
     }
   | { kind: "back" }
@@ -241,7 +257,7 @@ async function inspectItem(
           signal,
         });
       const result = await (prompter.withExclusiveTerminal?.(install) ?? install());
-      return { kind: "added", ...result };
+      return { kind: "added", documentation: documentationLink(manifest), ...result };
     } finally {
       spinner?.stop();
     }
