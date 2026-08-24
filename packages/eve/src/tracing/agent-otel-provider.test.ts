@@ -62,7 +62,6 @@ interface TestRuntime {
 function createRuntime(
   stateStore: AgentTraceStateStore = new InMemoryAgentTraceStateStore(),
   tracePolicy: TraceCapturePolicy | null = () => true,
-  options: { readonly emitVercelSessionId?: boolean } = {},
 ): TestRuntime {
   const exporter = new InMemorySpanExporter();
   const idGenerator = new AgentSpanIdGenerator();
@@ -74,7 +73,6 @@ function createRuntime(
   const agentOtelInput: Omit<AgentOtelInstrumentationInput, "tracePolicy"> & {
     tracePolicy?: TraceCapturePolicy;
   } = {
-    emitVercelSessionId: options.emitVercelSessionId,
     frameworkVersion: "test",
     idGenerator,
     recordInputs: true,
@@ -1848,47 +1846,5 @@ describe("createAgentOtelInstrumentation", () => {
       "error.type": "TOOL_CALL_FAILED",
     });
     expect(byName(spans, "agent.turn")[0]!.status.code).toBe(SpanStatusCode.UNSET);
-  });
-
-  describe("emitVercelSessionId", () => {
-    it("emits vercel.session_id on session, turn, step, and action spans when enabled", async () => {
-      const runtime = createRuntime(undefined, undefined, { emitVercelSessionId: true });
-      await emitAttempt({
-        hooks: runtime.hooks,
-        runInContext: runtime.runInContext,
-        sessionId: "session-1",
-        turnId: "turn-1",
-        turnSequence: 0,
-      });
-      await runtime.provider.forceFlush();
-
-      const spans = runtime.exporter.getFinishedSpans();
-      const session = byName(spans, "agent.session")[0]!;
-      const turn = byName(spans, "agent.turn")[0]!;
-      const step = byName(spans, "agent.step")[0]!;
-      const action = byName(spans, "agent.action")[0]!;
-
-      expect(session.attributes["vercel.session_id"]).toBe("session-1");
-      expect(turn.attributes["vercel.session_id"]).toBe("session-1");
-      expect(step.attributes["vercel.session_id"]).toBe("session-1");
-      expect(action.attributes["vercel.session_id"]).toBe("session-1");
-    });
-
-    it("does not emit vercel.session_id by default", async () => {
-      const runtime = createRuntime();
-      await emitAttempt({
-        hooks: runtime.hooks,
-        runInContext: runtime.runInContext,
-        sessionId: "session-1",
-        turnId: "turn-1",
-        turnSequence: 0,
-      });
-      await runtime.provider.forceFlush();
-
-      const spans = runtime.exporter.getFinishedSpans();
-      for (const span of spans) {
-        expect(span.attributes["vercel.session_id"]).toBeUndefined();
-      }
-    });
   });
 });

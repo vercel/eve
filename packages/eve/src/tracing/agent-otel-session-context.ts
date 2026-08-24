@@ -17,7 +17,6 @@ import {
 } from "#tracing/agent-trace-state.js";
 
 interface AgentOtelSessionContextInput {
-  readonly emitVercelSessionId?: boolean;
   readonly frameworkVersion: string;
   readonly idGenerator: AgentSpanIdGenerator;
   readonly stateStore: AgentTraceStateStore;
@@ -40,7 +39,6 @@ interface AgentOtelSessionContext {
 export function createAgentOtelSessionContext(
   input: AgentOtelSessionContextInput,
 ): AgentOtelSessionContext {
-  const emitVercelSessionId = input.emitVercelSessionId ?? false;
   const openSessionWindow = (window: {
     readonly agentName?: string;
     readonly channelAudience: ChannelAudience;
@@ -67,9 +65,6 @@ export function createAgentOtelSessionContext(
         "agent.session.id": window.sessionId,
         "agent.session.window": window.index,
         "agent.trace.schema.version": 1,
-        ...(emitVercelSessionId
-          ? { "vercel.session_id": window.rootSessionId }
-          : {}),
         ...(window.previousTraceId === undefined
           ? {}
           : { "agent.session.window.previous.trace.id": window.previousTraceId }),

@@ -35,7 +35,6 @@ interface ChannelDeliverySpanState {
 
 /** Builds durable channel delivery spans around the turn that consumes each request. */
 export function createAgentChannelDeliveryInstrumentation(input: {
-  readonly emitVercelSessionId?: boolean;
   readonly ensureSessionContext: (
     event: InstrumentationSessionStartedEvent,
   ) => Promise<AgentSessionTraceState>;
@@ -51,7 +50,6 @@ export function createAgentChannelDeliveryInstrumentation(input: {
   | "channel.delivery.failed"
   | "channel.delivery.started"
 > {
-  const emitVercelSessionId = input.emitVercelSessionId ?? false;
   const onStarted = async (
     event: InstrumentationChannelDeliveryStartedEvent,
     ctx: InstrumentationHandlerContext,
@@ -132,9 +130,6 @@ export function createAgentChannelDeliveryInstrumentation(input: {
             "agent.session.window": session?.window ?? state.window,
             "agent.turn.id": event.turnId,
             "agent.turn.sequence": event.sequence,
-            ...(emitVercelSessionId
-              ? { "vercel.session_id": event.rootSessionId }
-              : {}),
           },
           kind: SpanKind.CONSUMER,
           links:
