@@ -1724,7 +1724,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "/integrations/x",
+          "docs": "/integrations/chat-sdk-x",
           "implementation": "chat-sdk"
         }
       }
