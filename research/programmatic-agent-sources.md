@@ -1013,14 +1013,14 @@ Everything becomes a source, and dispatch behavior does not change:
 4. framework channels, the compiled route plan, and the closed host inventory;
 5. inspection v3 and in-memory compiler parity.
 
-`COMPILED_AGENT_MANIFEST_VERSION` moves from 41 to 42 with required total
+`COMPILED_AGENT_MANIFEST_VERSION` moves from 42 to 43 with required total
 bindings, persisted composition, the channel route plan, config provenance,
 and v3 inspection metadata. The compiler diagnostic artifact moves from
 version 1 to version 2 in the same PR. Disk and bundled loaders reject
-earlier serialized shapes rather than repairing them. The complete version 42
+earlier serialized shapes rather than repairing them. The complete version 43
 schema, its single semantic validator, and serialization fixtures land first
 inside the PR, and the serialized shape does not change again within it; the
-same rule applies to version 43 in PR 2. Kernel preparation
+same rule applies to version 44 in PR 2. Kernel preparation
 switches from catalog membership to slot survival: a capability prepares only
 when its canonical source survived composition, and agent-info v3 derives its
 prepared kernel entries from that survival plus the static kind mapping.
@@ -1051,7 +1051,7 @@ Dispatch becomes declared effects, and the seam is deleted:
 4. deletion of the complete magic-string dispatch layer listed in the
    deletion ledger's kernel row.
 
-`COMPILED_AGENT_MANIFEST_VERSION` moves from 42 to 43 with the serialized
+`COMPILED_AGENT_MANIFEST_VERSION` moves from 43 to 44 with the serialized
 kernel effect plan. PR 2 is `patch` when externally observable behavior is
 preserved, and updates the dynamic capability documentation.
 

@@ -42,15 +42,12 @@ Tasks must not build a second addressing mechanism. The task record composes wit
 Task identity reuses the operation-id derivation, `hash(parentSessionId, parentTurnId, callId)`,
 so replayed creation for the same originating call yields the same task without new machinery.
 
-### Flag composition
+### Persistent subagent baseline
 
 `agentId` follow-ups to a finished child require conversation-mode children and parked
-handles, which `experimental.subagentPersistentSessions` gates today. `experimental.tasks`
-therefore implies persistent-session children for subagent dispatch. Agent resolution normalizes
-that implication once: the compiled manifest preserves the authored flags, while the resolved
-runtime config sets `subagentPersistentSessions: true` whenever `tasks` is true. Downstream
-consumers read only the normalized persistent-session flag; the two flags cannot produce a third
-hybrid mode.
+handles. Persistent subagent sessions are the default: every subagent tool exposes `agentId`, and
+children park after each turn so later calls can continue the same session. `experimental.tasks`
+selects background-task execution only; it does not change child identity or lifecycle.
 
 ## Additivity rules
 
@@ -64,7 +61,8 @@ Each PR in this plan must satisfy:
    them until the stage that selects the mode. Receivers land before senders.
 3. New modules over edits to shared modules wherever possible. Where a shared codepath must
    branch, the branch condition is the flag or a mode value that nothing sets yet.
-4. Existing tests pass unmodified. Stages add tests; they do not rewrite flag-off expectations.
+4. Existing tests pass unmodified through stage 4. Stage 5 intentionally replaces the one-shot
+   default and updates those expectations.
 
 ## Stages
 
@@ -74,10 +72,9 @@ section, folding its A2A step into the baseline.
 
 ### Stage 0 — flag plumbing
 
-Add `tasks?: boolean` to `AgentExperimentalDefinition`, mirroring the
-`subagentPersistentSessions` plumbing exactly: authored normalization, compiler copy, the strict
-compiled-manifest schema, manifest serialization, root-only enforcement, and a
-`ResolvedAgent` / harness-session projection. The flag does nothing.
+Add `tasks?: boolean` to `AgentExperimentalDefinition`: authored normalization, compiler copy,
+the strict compiled-manifest schema, manifest serialization, root-only enforcement, and a
+`ResolvedAgent` projection. The flag does nothing.
 
 Verification: compile/manifest unit tests; a fixture with the flag on behaves identically to one
 without it.
@@ -171,12 +168,12 @@ Concretely:
   cooperatively cancel live tasks first.
 
 Verification: the design doc's acceptance criteria become a scenario suite plus a new e2e
-fixture with the flag on; existing subagent fixtures prove the flag-off path is unchanged.
+fixture with the flag on; existing subagent fixtures prove task-mode selection is flag-gated.
 
 ### Stage 5 — graduate persistent subagent sessions
 
-Make persistent sessions the default for subagent dispatch, remove
-`experimental.subagentPersistentSessions`, and preserve the current continuation semantics:
+Persistent sessions are now the default for subagent dispatch, and
+`experimental.subagentPersistentSessions` is removed. The continuation semantics remain:
 successful delegation returns an `agentId`, follow-ups address that child, and busy/unreachable
 errors remain explicit. This graduation precedes default task execution so persistent identity is
 the stable baseline rather than an incidental task-mode behavior.

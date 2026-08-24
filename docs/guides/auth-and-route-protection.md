@@ -243,7 +243,7 @@ When the predicate accepts a create request, `ctx.session.auth.current` and `.in
 
 > ⚠️ Both deployments must support continuation forwarding before you resume persistent remote sessions. A create-only receiver rejects a forwarded continuation with HTTP 400; the sender does not fall back to service authority. See [Forwarding the caller identity](./remote-agents#forwarding-the-caller-identity) for the upgrade behavior.
 
-Persistent sessions do not preserve caller authority between turns. Every accepted follow-up replaces `auth.current`, including replacing it with no authenticated caller on internal local delivery; per-user connection lookup is then keyed from that current principal. This prevents a later caller from resolving a prior caller's OAuth grant. It does not hide the persistent session's conversation history or artifacts from a caller who is otherwise allowed to continue that session; session ownership remains an application policy.
+Subagent sessions are persistent by default, but they do not preserve caller authority between turns. Every accepted follow-up replaces `auth.current`, including replacing it with no authenticated caller on internal local delivery; per-user connection lookup is then keyed from that current principal. This prevents a later caller from resolving a prior caller's OAuth grant. It does not hide the persistent session's conversation history or artifacts from a caller who is otherwise allowed to continue that session; session ownership remains an application policy.
 
 ## What reaches `ctx.session.auth`
 
