@@ -107,6 +107,8 @@ function extractLegacyAttachmentLines(legacyAttachments: unknown): string[] {
   for (const attachment of legacyAttachments) {
     if (!isObject(attachment)) continue;
 
+    const attachmentStart = lines.length;
+
     if (typeof attachment.pretext === "string" && attachment.pretext.length > 0) {
       lines.push(attachment.pretext);
     }
@@ -121,7 +123,7 @@ function extractLegacyAttachmentLines(legacyAttachments: unknown): string[] {
       lines.push(attachment.footer);
     }
     if (
-      lines.length === 0 &&
+      lines.length === attachmentStart &&
       typeof attachment.fallback === "string" &&
       attachment.fallback.length > 0
     ) {

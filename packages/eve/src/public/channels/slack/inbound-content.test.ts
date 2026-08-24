@@ -302,6 +302,17 @@ describe("resolveSlackInboundMrkdwn", () => {
     expect(result).toBe("Deploy failed: see dashboard");
   });
 
+  it("uses fallback per attachment even when earlier attachments already contributed content", () => {
+    const result = resolveSlackInboundMrkdwn("", {
+      attachments: [
+        { title: "First alert", text: "Latency is high" },
+        { fallback: "Second alert: deploy blocked" },
+      ],
+    });
+
+    expect(result).toBe("First alert\nLatency is high\nSecond alert: deploy blocked");
+  });
+
   it("extracts Block Kit nested inside legacy attachments", () => {
     const result = resolveSlackInboundMrkdwn("", {
       attachments: [
