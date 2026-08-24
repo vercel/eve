@@ -321,7 +321,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const dynamicSkillResolvers = bundle.resolvedAgent.dynamicSkillResolvers ?? [];
   const dynamicSubagentResolvers = bundle.subagentRegistry.dynamicResolvers ?? [];
   const persistentSubagentSessions =
-    tasksEnabled || bundle.resolvedAgent.config?.experimental?.subagentPersistentSessions === true;
+    bundle.resolvedAgent.config?.experimental?.subagentPersistentSessions === true;
   const dynamicToolResolvers = bundle.resolvedAgent.dynamicToolResolvers ?? [];
   const effectiveNode = {
     ...bundle.graph.root,

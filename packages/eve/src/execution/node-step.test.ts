@@ -244,7 +244,10 @@ async function createNodeWithSourceOwnedTools(input: {
     agent: {
       ...node.agent,
       config: {
-        experimental: { tasks: input.tasks === true },
+        experimental: {
+          subagentPersistentSessions: input.tasks === true || undefined,
+          tasks: input.tasks === true,
+        },
         model: { id: "test-model" },
         name: "test",
       },

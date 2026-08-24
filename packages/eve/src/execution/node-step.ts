@@ -21,15 +21,15 @@ import {
   type RuntimeModelResolutionScope,
 } from "#runtime/agent/resolve-model.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { AGENT_TOOL_DESCRIPTION, AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
-import { createTaskToolHarnessDefinitions } from "#execution/tools/tasks.js";
-import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
-import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
 import {
+  AGENT_TOOL_DESCRIPTION,
+  AGENT_TOOL_NAME,
   PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA,
   SUBAGENT_TOOL_INPUT_SCHEMA,
 } from "#tools/framework/agent-contract.js";
-
+import { createTaskToolHarnessDefinitions } from "#execution/tools/tasks.js";
+import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
+import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
@@ -115,7 +115,6 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     mode: input.mode,
     onCompaction: preserveFrameworkStateOnCompaction,
     persistentSubagentSessions:
-      input.node.agent.config?.experimental?.tasks === true ||
       input.node.agent.config?.experimental?.subagentPersistentSessions === true,
     dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
@@ -239,7 +238,6 @@ function resolveHarnessToolDefinition(input: {
     const delegation = {
       description: AGENT_TOOL_DESCRIPTION,
       inputSchema:
-        input.tasksEnabled ||
         input.node.agent.config?.experimental?.subagentPersistentSessions === true
           ? PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA
           : SUBAGENT_TOOL_INPUT_SCHEMA,

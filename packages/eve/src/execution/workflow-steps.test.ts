@@ -1677,7 +1677,9 @@ describe("turnStep", () => {
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: { experimental: { tasks: true } } },
+      resolvedAgent: {
+        config: { experimental: { subagentPersistentSessions: true, tasks: true } },
+      },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,
@@ -1930,7 +1932,9 @@ describe("turnStep", () => {
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: { experimental: { tasks: true } } },
+      resolvedAgent: {
+        config: { experimental: { subagentPersistentSessions: true, tasks: true } },
+      },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,
@@ -1992,7 +1996,9 @@ describe("turnStep", () => {
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: { experimental: { tasks: true } } },
+      resolvedAgent: {
+        config: { experimental: { subagentPersistentSessions: true, tasks: true } },
+      },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,
@@ -2389,7 +2395,9 @@ describe("turnStep", () => {
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: { experimental: { tasks: true } } },
+      resolvedAgent: {
+        config: { experimental: { subagentPersistentSessions: true, tasks: true } },
+      },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,

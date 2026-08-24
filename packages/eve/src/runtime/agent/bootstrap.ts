@@ -112,9 +112,7 @@ export function createResolvedRuntimeTurnAgent(input: {
     instructions: composeRuntimeBasePrompt({
       connections: agent.connections,
       instructions: agent.instructions,
-      persistentSubagentSessions:
-        config?.experimental?.tasks === true ||
-        config?.experimental?.subagentPersistentSessions === true,
+      persistentSubagentSessions: config?.experimental?.subagentPersistentSessions === true,
       subagentsAvailable: subagentDeclaredTool || subagentFrameworkRootTool,
       tasksEnabled: config?.experimental?.tasks === true,
       toolsAvailable: input.tools.length > 0,

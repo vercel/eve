@@ -61,9 +61,9 @@ export async function startRemoteAgentSession(input: {
    */
   readonly operationId?: string;
   /**
-   * Whether the dispatching agent opted into
-   * `experimental.subagentPersistentSessions`. Persistent remote children run
-   * in conversation mode so their sessions accept follow-up messages.
+   * Whether the dispatching agent uses persistent subagent sessions.
+   * Persistent remote children run in conversation mode so their sessions
+   * accept follow-up messages.
    */
   readonly persistentSessions?: boolean;
   readonly parentTraceContext?: SessionTraceContext;

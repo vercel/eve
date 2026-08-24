@@ -25,7 +25,7 @@ interface ComposeRuntimeBasePromptInput {
   connections?: readonly ResolvedConnectionDefinition[];
   instructions?: readonly ResolvedInstructionsDefinition[];
   /**
-   * Whether the agent opted into `experimental.subagentPersistentSessions`.
+   * Whether the resolved agent uses persistent subagent sessions.
    * Gates the agent-messaging prompt block that documents `agentId`
    * continuation and the `<agents>` listing.
    */

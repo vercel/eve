@@ -327,7 +327,7 @@ export interface ToolLoopHarnessConfig {
    */
   readonly onCompaction?: () => readonly ModelMessage[];
   /**
-   * Whether the agent opted into `experimental.subagentPersistentSessions`.
+   * Whether the resolved agent uses persistent subagent sessions.
    * Gates delegated-agent handle tracking and the model-visible `<agents>`
    * listing appended after runtime-action batches resolve.
    */

@@ -106,7 +106,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest({
         config: {
-          experimental: { tasks: true },
+          experimental: { subagentPersistentSessions: true, tasks: true },
           name: "test-agent",
         } as ResolvedAgent["config"],
       }),

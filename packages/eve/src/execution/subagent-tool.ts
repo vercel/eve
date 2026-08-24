@@ -96,10 +96,9 @@ export function buildSubagentRunInput(input: {
   readonly parentContinuationToken?: string;
   readonly parentTraceContext?: SessionTraceContext;
   /**
-   * Whether the parent agent opted into
-   * `experimental.subagentPersistentSessions`. Persistent children run in
-   * conversation mode so their sessions survive the first answer; otherwise
-   * children run as one-shot task sessions.
+   * Whether the parent uses persistent subagent sessions. Persistent children
+   * run in conversation mode so their sessions survive the first answer;
+   * otherwise children run as one-shot task sessions.
    */
   readonly persistentSessions?: boolean;
   readonly session: HarnessSession;
