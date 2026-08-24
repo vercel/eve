@@ -28,8 +28,14 @@ const taskViewJsonBaseShape = {
   taskId: z.string(),
 };
 
-/** Model-visible task shape. Unlisted private fields are stripped by zod. */
-const taskViewJsonSchema = z.discriminatedUnion("status", [
+/**
+ * Model-visible task shape. Unlisted private fields are stripped by zod.
+ *
+ * Single source of truth for the model-facing projection: tool outputs
+ * (`task_cancel`) advertise this same schema via
+ * `#runtime/framework-tools/tasks.js`.
+ */
+export const taskViewJsonSchema = z.discriminatedUnion("status", [
   z.object({ ...taskViewJsonBaseShape, status: z.literal("working") }),
   z.object({
     ...taskViewJsonBaseShape,
