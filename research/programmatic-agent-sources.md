@@ -36,8 +36,8 @@ programmatic module exists on disk.
 
 The framework API is internal. Programmatic modules export ordinary public eve
 definitions: `defineTool`, `defineDynamic`, `defineChannel`, `defineSandbox`,
-`defineAgent`, and the existing connection, hook, schedule, instruction, and
-skill factories. They never construct `Compiled*` or `Resolved*` records.
+`defineAgent`, `defineInstrumentation`, and the existing connection, hook,
+schedule, instruction, and skill factories. They never construct `Compiled*` or `Resolved*` records.
 Production runtime behavior continues to live in the `eve` package; generated
 module maps only bind statically reachable module namespaces.
 
@@ -308,7 +308,9 @@ fails unless every module-backed manifest reference has exactly one binding,
 logical paths agree, extension-owned filesystem bindings carry
 `extensionScope`, and every binding is referenced. The same semantic validator
 runs after schema parsing in every disk and bundled artifact loader, before
-module-map hydration.
+module-map hydration. That validator is one module: new artifact checks
+extend it, and sibling per-artifact validator files are a design failure, not
+a pattern.
 
 The binding table participates in artifact versioning and hashing. Development
 hydration, generated module maps, bundled artifacts, materialized artifacts,
@@ -336,9 +338,15 @@ selected config:
 
 The config normalizer receives only its selected candidate and required
 binding. Module-backed primitive normalizers require a binding. Direct
-injected definitions are not a production escape hatch; the only
+injected definitions are not a production escape hatch: no candidate
+constructor accepts an evaluated definition value, and the only
 already-evaluated value passed between compilation phases is the
 compiler-owned selected config.
+
+The two phases append candidates to one composition state. There is no
+partial-graph merge step, no post-hoc disjointness or integrity assertion,
+and no string phase discriminator — phase safety is a type, such as a
+phase-one state that cannot yet yield a manifest.
 
 `createProgrammaticCompiledModuleMap` is asynchronous and resolves only the
 programmatic bindings present in the compiled manifest. Generated,
@@ -424,7 +432,11 @@ happens once in path space; normalization happens once after selection.
 
 The result is one effective compiled graph containing node manifests, required
 bindings, the composition report, a compiler-owned channel route plan, and the
-prepared kernel effect plan. Every downstream consumer reads it:
+prepared kernel effect plan. Those are the only named plan artifacts.
+Instrumentation, the Workflow world, sandbox workspace assets, and external
+dependencies are per-binding data, ordinary slot content, or existing config —
+introducing any new named plan artifact requires amending this document
+first. Every downstream consumer reads the effective graph:
 
 - graph resolution registers only compiled resources;
 - Nitro registers only the compiled ordered channel routes;
@@ -474,9 +486,10 @@ Every identity above is replaceable and disableable through ordinary slot
 composition. `glob` and `grep` are published at `eve/tools/glob` and
 `eve/tools/grep` but never registered. Workflow shares the slot pattern
 without a framework default: an authored `experimental_workflow()` sentinel
-at `tools/workflow.ts` opts in at that canonical identity. Native behavior
-outside these identities is limited to `final_output` and the closed host
-inventory.
+at `tools/workflow.ts` opts in at that canonical identity. Authored
+`instrumentation.ts` likewise composes as an ordinary module slot with no
+framework default and no dedicated plan artifact. Native behavior outside
+these identities is limited to `final_output` and the closed host inventory.
 
 ### Primitive ownership boundaries
 
@@ -490,10 +503,10 @@ Each ordinary default has exactly one definition value. Its framework source
 module and its public `eve/tools/<name>` subpath export import that same
 value; there is no barrel export. Moving modules must
 preserve durable state key identity for todo, read-before-write, skill,
-connection-search, compaction, and task behavior. Import guards enforce that
-public modules do not import `runtime/`, ordinary framework sources construct
-only public definitions, and kernel effects are dispatched only through the
-closed effect inventory.
+connection-search, compaction, and task behavior. These boundaries hold
+structurally: public modules do not import `runtime/`, ordinary framework
+sources construct only public definitions, and kernel effects are dispatched
+only through the closed effect inventory.
 
 The mixed `runtime/framework-tools` subsystem and transitional re-export
 wrappers are deleted after legitimate modules move. “Framework tool catalog”
@@ -856,11 +869,14 @@ graph; they declare the `dispatch` effect rather than appearing as kernel
 catalog entries. Workflow's sandbox materialization derives its host
 functions from exactly those `dispatch`-declaring tools.
 
-Import guards enforce the layering: no harness or execution code may branch on
-a tool name or source ID; only kernel effect handlers touch park/resume
-session-state keys; `public/` modules never import `runtime/`, `harness/`, or
-`execution/`. Invariant guards reject native ordinary-resource fabrication and
-any effect dispatch added outside the exhaustive integration points.
+The layering is structural, not tooled: no harness or execution code may
+branch on a tool name or source ID; only kernel effect handlers touch
+park/resume session-state keys; `public/` modules never import `runtime/`,
+`harness/`, or `execution/`; and the kernel exposes no lookup by tool name or
+logical path — consumers receive prepared effect state instead of querying
+the inventory. Native ordinary-resource fabrication or effect dispatch
+outside the exhaustive integration points is a design error to correct in
+the implementation, not a condition to police with new guards.
 
 This deletes the magic-string dispatch layer: `sourceId.startsWith("eve:")`
 execution branching, `toolName === "ask_question"` and
@@ -974,6 +990,15 @@ park/resume semantics inside the harness, reviewed in a small focused diff.
 PR #2407 was an earlier atomic attempt at this boundary; it remains open only
 as salvage reference and does not gate or define the implementation.
 
+Both PRs are judged by replacement ratio: production deletions from the
+ledger meet or exceed new machinery, and the touched subsystems end
+materially simpler than they started. A growing `guard-invariants` script,
+sibling validator modules, new plan artifacts, or hand-built test factories
+signal that the design is failing — the correction is always in the
+implementation, never in tooling around it. `guard-invariants` gains no new
+rules for this work; its changes are limited to baseline shrinks and
+deleted-path references.
+
 ### PR 1 — canonical source graph
 
 Everything becomes a source, and dispatch behavior does not change:
@@ -992,7 +1017,10 @@ Everything becomes a source, and dispatch behavior does not change:
 bindings, persisted composition, the channel route plan, config provenance,
 and v3 inspection metadata. The compiler diagnostic artifact moves from
 version 1 to version 2 in the same PR. Disk and bundled loaders reject
-earlier serialized shapes rather than repairing them. Kernel preparation
+earlier serialized shapes rather than repairing them. The complete version 42
+schema, its single semantic validator, and serialization fixtures land first
+inside the PR, and the serialized shape does not change again within it; the
+same rule applies to version 43 in PR 2. Kernel preparation
 switches from catalog membership to slot survival: a capability prepares only
 when its canonical source survived composition, and agent-info v3 derives its
 prepared kernel entries from that survival plus the static kind mapping.
@@ -1054,6 +1082,20 @@ renamed second source of truth does not satisfy deletion.
 
 ## Validation
 
+Tests are replaced, not accumulated. Tests that assert superseded behavior —
+catalog merges, fallback construction, name-based dispatch, agent-info v2 —
+are deleted with the code they cover and replaced by tight unit and
+integration tests for the new boundaries. Test helpers obtain compiled
+artifacts only through the real compiler, from filesystem fixtures or
+in-memory source registration; no helper constructs `Compiled*` records
+field-by-field.
+
+The work adds no new e2e evals and no new scenario suites. Existing
+scenario, TUI, and fixture-owned e2e suites are the behavioral regression
+net: nearly all of them must continue passing unchanged, with modifications
+limited to the named breaking surfaces — agent-info v3 assertions, the
+health and info routes, and `eve/tools/<name>` import paths.
+
 Run inexpensive checks throughout implementation:
 
 ```sh
@@ -1075,16 +1117,12 @@ pnpm test:tui
 pnpm docs:check
 ```
 
-Fixture-owned e2e suites run in CI. A deterministic fixture covers defaults,
-extension and override layers, application replacement and disablement, nested
-subagents, `task_update`, home, health, info, dynamic tools and skills,
-dynamic model and subagent config, a remote agent, sandbox, and
-default/authored config
-across development, production, and agent-info artifacts. It invokes a
-replaced ordinary tool through the installed runtime rather than an imported
-definition object. The final required CI includes deterministic world suites
-and the real-model `e2e-local` aggregate; transport or provider variance may
-be rerun, but repeated failures are investigated rather than waived.
+Fixture-owned e2e suites run in CI. Composition, replacement, and disablement
+coverage lives in unit and integration tests against the real compiler, not
+in new fixtures. The final required CI includes the deterministic world
+suites and the real-model `e2e-local` aggregate; transport or provider
+variance may be rerun, but repeated failures are investigated rather than
+waived.
 
 ## Completion criteria
 
@@ -1134,7 +1172,9 @@ The implementation is complete only when:
     changes module-map identity, while relocating identical filesystem content
     without changing its logical extension namespace does not.
 12. The complete implementation lands with all required local and CI
-    validation passing.
+    validation passing, existing higher-level suites modified only at the
+    named breaking surfaces, no new e2e or scenario suites, and no new
+    `guard-invariants` rules.
 
 ## Invariants and rejected alternatives
 
@@ -1153,6 +1193,10 @@ The implementation is complete only when:
   different implementation before load.
 - Active ownership has one location. Composition entries own only losing or
   disabled provenance; no winner-owner index or origin table is retained.
+- The design is self-enforcing. A boundary that needs a new mechanical guard
+  rule, an AST check over the implementation's own interfaces, or an
+  identifier-name pattern to survive is a design failure to correct, not a
+  guard to add.
 - `defineDynamic` remains the sole dynamic-definition lifecycle. Framework and
   future memory features do not gain parallel validation, durability,
   replacement, collision, or callback stores.
