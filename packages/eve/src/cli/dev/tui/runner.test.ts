@@ -9,6 +9,7 @@ import {
   type MessageStreamEvent,
 } from "#client/index.js";
 import { stampTestEvent } from "#internal/testing/events.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
@@ -98,7 +99,7 @@ function isStamped(event: unknown): event is MessageStreamEvent {
   return typeof (event as MessageStreamEvent).meta?.id === "string";
 }
 
-const AGENT_INFO: AgentInfoResult = {
+const AGENT_INFO: AgentInfoResult = createTestAgentInfoResult({
   agent: {
     agentRoot: "/tmp/weather-agent/agent",
     appRoot: "/tmp/weather-agent",
@@ -108,47 +109,23 @@ const AGENT_INFO: AgentInfoResult = {
     },
     name: "Weather Agent",
   },
-  capabilities: {
-    devRoutes: true,
-  },
-  channels: {
-    authored: [],
-    available: [],
-    disabledFramework: [],
-    framework: [],
-  },
-  connections: [],
-  diagnostics: {
-    discoveryErrors: 0,
-    discoveryWarnings: 0,
-  },
-  hooks: [],
   instructions: {
     dynamic: [],
     static: [
       {
         content: "You are a weather assistant.",
-        logicalPath: "agent/instructions.md",
+        logicalPath: "instructions.md",
         name: "instructions",
+        owner: { kind: "application" },
         role: "system",
+        sourceId: "test:instructions",
         sourceKind: "markdown",
       },
     ],
   },
-  kind: "eve-agent-info",
-  mode: "development",
-  sandbox: null,
-  schedules: [],
-  skills: {
-    dynamic: [],
-    static: [],
-  },
-  subagents: {
-    local: [],
-    total: 0,
-  },
   tools: {
-    authored: [
+    dynamic: [],
+    static: [
       {
         description: "Get the weather.",
         hasAuth: false,
@@ -156,31 +133,16 @@ const AGENT_INFO: AgentInfoResult = {
         hasModelOutputProjection: false,
         hasOutputSchema: false,
         inputSchema: { type: "object" },
-        logicalPath: "agent/tools/get_weather.ts",
+        logicalPath: "tools/get_weather.ts",
         name: "get_weather",
-        origin: "authored",
-        outputSchema: null,
-        replacesFrameworkTool: false,
+        owner: { kind: "application" },
         requiresApproval: false,
+        sourceId: "test:get-weather",
         sourceKind: "module",
       },
     ],
-    available: [],
-    disabledFramework: [],
-    dynamic: [],
-    framework: [],
-    reserved: [],
   },
-  version: 2,
-  workflow: {
-    enabled: false,
-    toolName: "Workflow",
-  },
-  workspace: {
-    resourceRoot: null,
-    rootEntries: [],
-  },
-};
+});
 
 beforeEach(() => {
   // The runner normalizes header endpoints from the real process.env; a

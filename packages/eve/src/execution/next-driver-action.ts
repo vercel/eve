@@ -40,6 +40,8 @@ export type DurableStepResult = (
       readonly hasPendingAuthorization: boolean;
       readonly hasPendingInputBatch: boolean;
       readonly pendingRuntimeActionKeys?: readonly string[];
+      /** Selects task-control dispatch for a task-owned child session. */
+      readonly taskControlsEnabled?: boolean;
       readonly tasksEnabled?: boolean;
       readonly sleepDurationMs?: number;
       readonly settled?: SettledTurn;

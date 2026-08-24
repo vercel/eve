@@ -93,34 +93,4 @@ describe("eve dist single-chunk module evaluation", () => {
     const loaded = await import(pathToFileURL(outfile).href);
     expect(loaded.__steps_registered).toBe(true);
   }, 180_000);
-
-  it("every framework tool definition is defined in the concatenated chunk (no silent `undefined` slots)", async () => {
-    // Defense in depth: catches any future cycle that lands a
-    // `*_TOOL_DEFINITION` after the registry in the bundle.
-    const scratch = await createScratchDirectory("eve-framework-tools-eval-");
-    const outDir = join(scratch, "out");
-    await mkdir(outDir, { recursive: true });
-
-    const entryFile = join(scratch, "entry.mjs");
-    const eveEntry = resolvePackageSourceFilePath("src/runtime/framework-tools/index.ts");
-    await writeFile(
-      entryFile,
-      `import * as ft from ${JSON.stringify(eveEntry)};\nexport default ft;\n`,
-    );
-
-    const outfile = await bundleEveDistAsSingleChunk({
-      cwd: scratch,
-      entry: entryFile,
-      outDir,
-    });
-
-    const loaded = await import(pathToFileURL(outfile).href);
-    const tools = loaded.default.getAllFrameworkToolDefinitions();
-    expect(tools.length).toBeGreaterThan(0);
-    for (const tool of tools) {
-      expect(tool, "framework tool entry must be defined").toBeDefined();
-      expect(typeof tool.name).toBe("string");
-      expect(tool.name.length).toBeGreaterThan(0);
-    }
-  }, 180_000);
 });

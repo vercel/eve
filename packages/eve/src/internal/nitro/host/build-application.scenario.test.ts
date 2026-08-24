@@ -4,7 +4,6 @@ import { join } from "node:path";
 import type { Nitro } from "nitro/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createCompiledAgentManifest } from "#compiler/manifest.js";
 import {
   APPLICATION_BUILD_PROFILE_SCHEMA_VERSION,
   type ApplicationBuildProfile,
@@ -12,6 +11,11 @@ import {
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import type { ApplicationBuildWorkspace } from "#internal/application/build-workspace.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
+import {
+  createStubCompiledAgentManifest as createCompiledAgentManifest,
+  TEST_COMPILED_AGENT_CONFIG_BINDING,
+  TEST_COMPILED_AGENT_CONFIG_SOURCE,
+} from "#internal/testing/compiled-manifest.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 import {
   VERCEL_EVE_AGENT_SUMMARY_KIND,
@@ -123,11 +127,14 @@ const DEPLOYABLE_BUILD_OPTIONS = { skipVercelSandboxPrewarm: false } as const;
 function createPreparedHost(appRoot: string): PreparedApplicationHost {
   const agentRoot = join(appRoot, "agent");
   const manifest = createCompiledAgentManifest({
+    kernelPlan: { prepared: [] },
     agentRoot,
     appRoot,
+    bindings: [TEST_COMPILED_AGENT_CONFIG_BINDING],
     config: {
       model: { id: "openai/gpt-5.4", routing: { kind: "gateway", target: "openai" } },
       name: "scenario-test-agent",
+      source: TEST_COMPILED_AGENT_CONFIG_SOURCE,
     },
   });
   return {

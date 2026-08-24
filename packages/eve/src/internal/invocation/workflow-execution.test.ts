@@ -9,7 +9,7 @@ import {
   invocationOwnerKey,
 } from "#internal/invocation/metadata.js";
 import { WorkflowAgentInvocationExecution } from "#internal/invocation/workflow-execution.js";
-import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
+import type { RouteSessionCreator } from "#channel/route-context.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 

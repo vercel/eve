@@ -8,6 +8,7 @@ import type { ScenarioAppDescriptor } from "#internal/testing/scenario-app.js";
 export const VERBOSE_BUNDLING_DESCRIPTOR: ScenarioAppDescriptor = {
   dependencies: {
     "snowflake-sdk": "^2.0.0",
+    typescript: "7.0.2",
     zod: "^4.3.6",
   },
   files: {

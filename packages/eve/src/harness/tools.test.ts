@@ -13,10 +13,12 @@ import {
   WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
   WEB_SEARCH_OPENAI_OUTPUT_SCHEMA,
   WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA,
-} from "#runtime/framework-tools/web-search.js";
+} from "#kernel/web-search.js";
 import type { JsonObject } from "#shared/json.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { getAdvertisedTools } from "#harness/advertised-tools.js";
+import { resolveModelProviderCapabilityAvailability } from "#harness/provider-tools.js";
 import { buildToolApproval, buildToolSet, buildToolSetWithProviderTools } from "#harness/tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
@@ -353,15 +355,13 @@ describe("buildToolSet", () => {
     expect(getJsonSchema(result.ask_question)).toEqual(schema);
   });
 
-  it("omits tools whose name is in disabledProviderTools", () => {
-    // The harness recovery path lists tools to drop after an AI Gateway
-    // fallback provider rejected them. `buildToolSet` must honor the
-    // list so the retry call does not re-send the offending tool.
+  it("keeps an authored web_search replacement when provider recovery disables the capability", async () => {
     const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
       [
         "web_search",
         {
-          description: "Web search.",
+          description: "Authored web search.",
+          execute: async () => "authored",
           inputSchema: jsonSchema({}),
           name: "web_search",
         },
@@ -377,13 +377,44 @@ describe("buildToolSet", () => {
       ],
     ]);
 
-    const result = buildToolSet({
-      disabledProviderTools: new Set(["web_search"]),
+    const result = await buildToolSetWithProviderTools({
+      disabledProviderCapabilities: new Set(["web_search"]),
+      kernelPlan: { prepared: ["web_search"] },
+      providerAvailability: resolveModelProviderCapabilityAvailability({
+        id: "anthropic/claude-opus-4.7",
+      }),
       tools,
     });
 
-    expect(result.web_search).toBeUndefined();
-    expect(result.echo).toBeDefined();
+    expect(result.tools.web_search).toBeDefined();
+    expect(result.tools.echo).toBeDefined();
+    expect(result.installedProviderCapabilities).toEqual(new Set());
+  });
+
+  it("omits only the disabled kernel provider definition", async () => {
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "web_search",
+        {
+          description: "Web search.",
+          inputSchema: jsonSchema({}),
+          kernelCapability: "web_search",
+          name: "web_search",
+        },
+      ],
+    ]);
+
+    const result = await buildToolSetWithProviderTools({
+      disabledProviderCapabilities: new Set(["web_search"]),
+      kernelPlan: { prepared: ["web_search"] },
+      providerAvailability: resolveModelProviderCapabilityAvailability({
+        id: "anthropic/claude-opus-4.7",
+      }),
+      tools,
+    });
+
+    expect(result.tools.web_search).toBeUndefined();
+    expect(result.installedProviderCapabilities).toEqual(new Set());
   });
 
   it.each([
@@ -435,17 +466,20 @@ describe("buildToolSet", () => {
           {
             description: "Web search.",
             inputSchema: jsonSchema({}),
+            kernelCapability: "web_search",
             name: "web_search",
           },
         ],
       ]);
 
       const result = await buildToolSetWithProviderTools({
-        modelReference,
+        kernelPlan: { prepared: ["web_search"] },
+        providerAvailability: resolveModelProviderCapabilityAvailability(modelReference),
         tools,
       });
 
-      expect(getOutputJsonSchema(result.web_search)).toEqual(expectedOutputSchema);
+      expect(getOutputJsonSchema(result.tools.web_search)).toEqual(expectedOutputSchema);
+      expect(result.installedProviderCapabilities).toEqual(new Set(["web_search"]));
     },
   );
 
@@ -456,18 +490,23 @@ describe("buildToolSet", () => {
         {
           description: "Web search.",
           inputSchema: jsonSchema({}),
+          kernelCapability: "web_search",
           name: "web_search",
         },
       ],
     ]);
 
     const result = await buildToolSetWithProviderTools({
-      modelReference: { id: "openai/gpt-5.4" },
+      kernelPlan: { prepared: ["web_search"] },
+      providerAvailability: resolveModelProviderCapabilityAvailability(
+        { id: "openai/gpt-5.4" },
+        "parallel",
+      ),
       tools,
-      webSearchProvider: "parallel",
     });
 
-    expect(getOutputJsonSchema(result.web_search)).toEqual(WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA);
+    expect(getOutputJsonSchema(result.tools.web_search)).toEqual(WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA);
+    expect(result.installedProviderCapabilities).toEqual(new Set(["web_search"]));
   });
 
   it("omits provider-managed web_search when no provider backend is available", async () => {
@@ -477,13 +516,15 @@ describe("buildToolSet", () => {
         {
           description: "Web search.",
           inputSchema: jsonSchema({}),
+          kernelCapability: "web_search",
           name: "web_search",
         },
       ],
     ]);
 
     const result = await buildToolSetWithProviderTools({
-      modelReference: {
+      kernelPlan: { prepared: ["web_search"] },
+      providerAvailability: resolveModelProviderCapabilityAvailability({
         id: "some-provider/some-model",
         source: {
           exportName: "model",
@@ -491,11 +532,12 @@ describe("buildToolSet", () => {
           sourceId: "agent.ts",
           sourceKind: "module",
         },
-      },
+      }),
       tools,
     });
 
-    expect(result.web_search).toBeUndefined();
+    expect(result.tools.web_search).toBeUndefined();
+    expect(result.installedProviderCapabilities).toEqual(new Set());
   });
 
   it("omits ask_question when the session cannot request input", () => {
@@ -505,15 +547,26 @@ describe("buildToolSet", () => {
         {
           description: "Ask the user a question.",
           inputSchema: jsonSchema({}),
+          kernelCapability: "ask_question",
           name: "ask_question",
         },
       ],
     ]);
 
-    const withoutCapability = buildToolSet({ tools });
+    const withoutCapability = buildToolSet({
+      tools: getAdvertisedTools({
+        kernelPlan: { prepared: ["ask_question"] },
+        session: {},
+        tools,
+      }),
+    });
     const withCapability = buildToolSet({
-      capabilities: { requestInput: true },
-      tools,
+      tools: getAdvertisedTools({
+        capabilities: { requestInput: true },
+        kernelPlan: { prepared: ["ask_question"] },
+        session: {},
+        tools,
+      }),
     });
 
     expect(withoutCapability.ask_question).toBeUndefined();

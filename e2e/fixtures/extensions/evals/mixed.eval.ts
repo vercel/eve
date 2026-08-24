@@ -11,7 +11,7 @@ export default defineEval({
     t.succeeded();
     t.calledTool("local_ping", { output: { reply: "local-ping" } });
     t.calledTool("gizmo__gizmo_search", {
-      output: { query: "eve", result: "gizmo-result-for:eve" },
+      output: { query: "eve", result: "application-override-for:eve" },
     });
   },
 });

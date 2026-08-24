@@ -4,9 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { compileAgent } from "../../src/compiler/compile-agent.js";
-import { BOOTSTRAP_RUNTIME_MODEL_ID } from "../../src/runtime/agent/bootstrap.js";
 import { TEST_DEFAULT_MODEL_ID } from "../../src/internal/testing/app-harness.js";
-import { resolveBootstrapRuntimeModel } from "../../src/runtime/agent/bootstrap-model.js";
 import { createMockAuthoredRuntimeModel } from "../../src/runtime/agent/mock-model-adapter.js";
 import { resolveRuntimeModelReference } from "../../src/runtime/agent/resolve-model.js";
 import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "../../src/internal/application/runtime-compiled-artifacts-source.js";
@@ -22,15 +20,6 @@ afterEach(() => {
 });
 
 describe("runtime model resolution", () => {
-  it("keeps the bootstrap sentinel separate from the default authored runtime model", () => {
-    expect(BOOTSTRAP_RUNTIME_MODEL_ID).not.toBe(TEST_DEFAULT_MODEL_ID);
-    expect(
-      resolveBootstrapRuntimeModel({
-        id: TEST_DEFAULT_MODEL_ID,
-      }),
-    ).toBeNull();
-  });
-
   it("forces authored runtime models onto the deterministic mock path in tests", async () => {
     vi.stubEnv("NODE_ENV", "test");
 

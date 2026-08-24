@@ -25,7 +25,7 @@ import {
   startSubagent,
 } from "#execution/dispatch-runtime-actions-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
-import type { RuntimeActionResult } from "#runtime/actions/types.js";
+import type { RuntimeActionResult } from "#shared/runtime-actions.js";
 
 export async function dispatchRuntimeActionsStep(
   input: RuntimeActionDispatchInput,

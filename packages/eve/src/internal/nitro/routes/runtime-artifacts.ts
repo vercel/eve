@@ -39,12 +39,15 @@ export function resolveNitroCompiledArtifactsSource(
   config: NitroArtifactsConfig,
 ): RuntimeCompiledArtifactsSource {
   if (config.kind === "development") {
-    const runtimeAppRoot =
-      readDevelopmentRuntimeArtifactsSnapshotRoot(config.devRuntimeArtifactsPointerPath) ??
-      config.appRoot;
+    const snapshotAppRoot = readDevelopmentRuntimeArtifactsSnapshotRoot(
+      config.devRuntimeArtifactsPointerPath,
+    );
+    const runtimeAppRoot = snapshotAppRoot ?? config.appRoot;
 
     return createDiskRuntimeCompiledArtifactsSource(runtimeAppRoot, {
       durableReference: config.durableArtifactsReference,
+      moduleMapLoaderKind:
+        snapshotAppRoot === undefined ? "authored-source" : "materialized-generation",
       moduleMapLoaderPath: config.moduleMapLoaderPath,
       sandboxAppRoot: config.appRoot,
     });

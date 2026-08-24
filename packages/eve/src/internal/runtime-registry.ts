@@ -10,9 +10,9 @@ export interface RuntimeRegistryEntryLocation {
 }
 
 /**
- * Error raised when a runtime-owned subsystem rejects an entry — for
- * example a duplicate authored sandbox name, a tool name reserved by the
- * framework, or a subagent whose node id is already taken.
+ * Error raised when a runtime-owned subsystem rejects an entry — for example
+ * a duplicate authored tool name, a name already owned by another prepared
+ * capability, or a subagent whose node id is already taken.
  *
  * The `registry` field identifies which subsystem produced the error
  * (`"sandbox"`, `"tool"`, `"subagent"`, …) so consumers can branch on
@@ -61,11 +61,10 @@ interface RuntimeRegistryRegisterOptions {
  * by unique name and need to surface a consistent error shape on
  * collision.
  *
- * The optional `reserved` set lets a registry detect collisions across
- * multiple registration passes — for example the tool registry seeds
- * reserved framework tool names so authored tools cannot shadow them.
- * Once an entry is registered its name is automatically added to the
- * reserved set.
+ * The optional `reserved` set lets a registry detect collisions with names
+ * already owned by another runtime-visible category, such as prepared kernel
+ * capabilities or subagent tools. Once an entry is registered its name is
+ * automatically reserved.
  */
 export class RuntimeRegistry<TEntry> {
   private readonly registry: string;
@@ -120,16 +119,6 @@ export class RuntimeRegistry<TEntry> {
       );
     }
 
-    this._entries.set(name, entry);
-    this._reserved.add(name);
-  }
-
-  /**
-   * Adds or replaces an entry without uniqueness or reservation checks.
-   * Use for framework-owned defaults that the caller has already
-   * validated.
-   */
-  set(name: string, entry: TEntry): void {
     this._entries.set(name, entry);
     this._reserved.add(name);
   }

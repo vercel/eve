@@ -2,14 +2,43 @@ import { asSchema } from "ai";
 import { describe, expect, it } from "vitest";
 import { z } from "#compiled/zod/index.js";
 import {
+  type CompiledAgentManifest,
   type CompiledChannelDefinition,
-  createCompiledAgentManifest,
   ROOT_COMPILED_AGENT_NODE_ID,
 } from "../src/compiler/manifest.js";
 import type { CompiledModuleMap } from "../src/compiler/module-map.js";
 import { TEST_DEFAULT_MODEL_ID } from "../src/internal/testing/app-harness.js";
-import { ResolveAgentError, resolveAgent } from "../src/runtime/resolve-agent.js";
+import {
+  createStubCompiledAgentManifest as createCompiledAgentManifest,
+  TEST_COMPILED_AGENT_CONFIG_BINDING,
+  TEST_COMPILED_AGENT_CONFIG_MODULE,
+  TEST_COMPILED_AGENT_CONFIG_SOURCE,
+  TEST_COMPILED_SANDBOX_MODULE,
+  TEST_COMPILED_SANDBOX_SOURCE_ID,
+} from "../src/internal/testing/compiled-manifest.js";
+import { resolveAgent as resolveAgentBase } from "../src/runtime/resolve-agent.js";
+import { ResolveAgentError } from "../src/runtime/resolve-helpers.js";
 import { serializeInputSchema } from "../src/shared/tool-schema.js";
+
+function resolveAgent(input: Parameters<typeof resolveAgentBase>[0]) {
+  const moduleMap: CompiledModuleMap = {
+    nodes: Object.fromEntries(
+      Object.entries(input.moduleMap.nodes).map(([nodeId, scope]) => [
+        nodeId,
+        {
+          modules: {
+            ...(nodeId === ROOT_COMPILED_AGENT_NODE_ID && "config" in input.manifest
+              ? { [input.manifest.config.source.sourceId]: TEST_COMPILED_AGENT_CONFIG_MODULE }
+              : {}),
+            [TEST_COMPILED_SANDBOX_SOURCE_ID]: TEST_COMPILED_SANDBOX_MODULE,
+            ...scope.modules,
+          },
+        },
+      ]),
+    ),
+  };
+  return resolveAgentBase({ ...input, moduleMap });
+}
 
 describe("resolveAgent", () => {
   it("hydrates compiled authored metadata and attaches tool execute functions", async () => {
@@ -23,9 +52,20 @@ describe("resolveAgent", () => {
       sourceKind: "module",
     };
     const manifest = createCompiledAgentManifest({
+      kernelPlan: { prepared: [] },
       agentRoot: "/app/agent",
       appRoot: "/app",
-      channels: [slackChannelDefinition],
+      bindings: [
+        { logicalPath: "agent.mjs", sourceId: "agent.mjs" },
+        { logicalPath: "channels/slack.mjs", sourceId: "channels/slack.mjs" },
+        { logicalPath: "sandbox/sandbox.mjs", sourceId: "sandbox/sandbox.mjs" },
+        {
+          logicalPath: "skills/route-weather.mjs",
+          sourceId: "skills/route-weather.mjs",
+        },
+        { logicalPath: "tools/get-weather.mjs", sourceId: "tools/get-weather.mjs" },
+      ],
+      channelRoutes: { effective: [slackChannelDefinition], preflight: [], shadowed: [] },
       config: {
         model: {
           id: "anthropic/claude-sonnet-4.5",
@@ -190,7 +230,7 @@ describe("resolveAgent", () => {
     expect(resolvedChannel.name).toBe("slack");
     expect(resolvedChannel.method).toBe("POST");
     expect(resolvedChannel.urlPath).toBe("/slack");
-    expect(typeof resolvedChannel.fetch).toBe("function");
+    expect(typeof resolvedChannel.handler).toBe("function");
     expect(resolved.channels).toHaveLength(1);
     expect(resolved.metadata).toEqual({
       agentRoot: "/app/agent",
@@ -205,6 +245,7 @@ describe("resolveAgent", () => {
         content: "You are a weather-focused assistant.",
         logicalPath: "instructions.md",
         name: "instructions",
+        owner: { kind: "application" },
         role: "system",
         sourceId: "instructions.md",
         sourceKind: "markdown",
@@ -266,6 +307,7 @@ describe("resolveAgent", () => {
       name: "get_weather",
       sourceId: "tools/get-weather.mjs",
       sourceKind: "module",
+      sourceOwner: { kind: "application" },
     });
     expect(serializeInputSchema(resolved.tools[0]!.inputSchema!)).toMatchObject({
       properties: {
@@ -283,20 +325,153 @@ describe("resolveAgent", () => {
     });
   });
 
+  it("derives instructions ownership from the canonical compiled source graph", async () => {
+    const extensionSourceRoot = "/app/node_modules/@acme/crm";
+    const extensionOwner = {
+      kind: "extension",
+      namespace: "crm",
+      packageName: "@acme/crm",
+    } as const;
+    const moduleManifest = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      bindings: [
+        TEST_COMPILED_AGENT_CONFIG_BINDING,
+        {
+          binding: {
+            backing: {
+              externalDependencies: [],
+              kind: "filesystem",
+              sourcePath: "/app/agent/extensions/crm.ts",
+            },
+            owner: { kind: "application" },
+          },
+          logicalPath: "extensions/crm.ts",
+          sourceId: "extensions/crm.ts",
+        },
+        {
+          binding: {
+            backing: {
+              extensionScope: {
+                namespace: "acme-crm",
+                sourceRoot: extensionSourceRoot,
+              },
+              externalDependencies: [],
+              kind: "filesystem",
+              sourcePath: `${extensionSourceRoot}/instructions/policy.ts`,
+            },
+            owner: extensionOwner,
+          },
+          logicalPath: "instructions/policy.ts",
+          sourceId: "opaque-module-source",
+        },
+      ],
+      config: {
+        model: {
+          id: TEST_DEFAULT_MODEL_ID,
+          routing: { kind: "gateway", target: "openai" },
+        },
+        name: "module-owner",
+        source: TEST_COMPILED_AGENT_CONFIG_SOURCE,
+      },
+      extensionMounts: [
+        {
+          externalDependencies: [],
+          mountLogicalPath: "extensions/crm.ts",
+          mountSourceId: "extensions/crm.ts",
+          namespace: "crm",
+          packageName: "@acme/crm",
+          packageNamespace: "acme-crm",
+          sourceRoot: extensionSourceRoot,
+        },
+      ],
+      instructions: [
+        {
+          content: "Module policy.",
+          logicalPath: "instructions/policy.ts",
+          name: "policy",
+          role: "system",
+          sourceId: "opaque-module-source",
+          sourceKind: "module",
+        },
+      ],
+    });
+
+    const resolvedModule = await resolveAgent({
+      manifest: moduleManifest,
+      moduleMap: { nodes: { [ROOT_COMPILED_AGENT_NODE_ID]: { modules: {} } } },
+    });
+    expect(resolvedModule.instructions[0]?.owner).toEqual(extensionOwner);
+
+    const markdownBase = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      bindings: [TEST_COMPILED_AGENT_CONFIG_BINDING],
+      config: {
+        model: {
+          id: TEST_DEFAULT_MODEL_ID,
+          routing: { kind: "gateway", target: "openai" },
+        },
+        name: "markdown-owner",
+        source: TEST_COMPILED_AGENT_CONFIG_SOURCE,
+      },
+      instructions: [
+        {
+          content: "Markdown policy.",
+          logicalPath: "instructions/policy.md",
+          name: "policy",
+          role: "system",
+          sourceId: "opaque-markdown-source",
+          sourceKind: "markdown",
+        },
+      ],
+    });
+    const markdownManifest: CompiledAgentManifest = {
+      ...markdownBase,
+      sourceComposition: {
+        ...markdownBase.sourceComposition,
+        selected: markdownBase.sourceComposition.selected.map((entry) =>
+          entry.sourceKind === "non-module" && entry.source.sourceId === "opaque-markdown-source"
+            ? {
+                ...entry,
+                source: {
+                  ...entry.source,
+                  layer: "extension-package",
+                  owner: extensionOwner,
+                },
+              }
+            : entry,
+        ),
+      },
+    };
+
+    const resolvedMarkdown = await resolveAgent({
+      manifest: markdownManifest,
+      moduleMap: { nodes: { [ROOT_COMPILED_AGENT_NODE_ID]: { modules: {} } } },
+    });
+    expect(resolvedMarkdown.instructions[0]?.owner).toEqual(extensionOwner);
+  });
+
   it("reattaches live standard-schema validators from authored tool exports", async () => {
     const schema = z.object({
       maxRows: z.number().int().positive().default(200),
       sql: z.string().default("SELECT 1"),
     });
     const manifest = createCompiledAgentManifest({
+      kernelPlan: { prepared: [] },
       agentRoot: "/app/agent",
       appRoot: "/app",
+      bindings: [
+        TEST_COMPILED_AGENT_CONFIG_BINDING,
+        { logicalPath: "tools/query.mjs", sourceId: "tools/query.mjs" },
+      ],
       config: {
         model: {
           id: TEST_DEFAULT_MODEL_ID,
           routing: { kind: "gateway", target: "openai" },
         },
         name: "weather-agent",
+        source: TEST_COMPILED_AGENT_CONFIG_SOURCE,
       },
       tools: [
         {
@@ -360,17 +535,20 @@ describe("resolveAgent", () => {
     });
   });
 
-  it("falls back to the bootstrap model when no compiled config is present", async () => {
+  it("preserves required compiled config provenance", async () => {
     const resolved = await resolveAgent({
       manifest: createCompiledAgentManifest({
+        kernelPlan: { prepared: [] },
         agentRoot: "/app/agent",
         appRoot: "/app",
+        bindings: [TEST_COMPILED_AGENT_CONFIG_BINDING],
         config: {
           model: {
             id: TEST_DEFAULT_MODEL_ID,
             routing: { kind: "gateway", target: "openai" },
           },
           name: "weather-agent",
+          source: TEST_COMPILED_AGENT_CONFIG_SOURCE,
         },
       }),
       moduleMap: {
@@ -386,12 +564,21 @@ describe("resolveAgent", () => {
     expect(resolved.config).toEqual({
       compaction: {},
       model: {
+        contextWindowTokens: undefined,
         id: TEST_DEFAULT_MODEL_ID,
+        maxOutputTokens: undefined,
+        providerOptions: undefined,
       },
       name: "weather-agent",
+      source: {
+        exportName: undefined,
+        logicalPath: "agent.ts",
+        sourceId: "test:stub-agent-config",
+        sourceKind: "module",
+      },
     });
     expect(resolved.instructions).toEqual([]);
-    expect(resolved.sandbox).toBeNull();
+    expect(resolved.sandbox.logicalPath).toBe("sandbox.ts");
     expect(resolved.skills).toEqual([]);
     expect(resolved.tools).toEqual([]);
     expect(resolved.workspaceSpec).toEqual({
@@ -402,16 +589,19 @@ describe("resolveAgent", () => {
   it("threads the compiled sandbox workspace folder into the resolved agent", async () => {
     const resolved = await resolveAgent({
       manifest: createCompiledAgentManifest({
+        kernelPlan: { prepared: [] },
         agentRoot: "/app/agent",
         appRoot: "/app",
+        bindings: [TEST_COMPILED_AGENT_CONFIG_BINDING],
         config: {
           model: { id: TEST_DEFAULT_MODEL_ID, routing: { kind: "gateway", target: "openai" } },
           name: "weather-agent",
+          source: TEST_COMPILED_AGENT_CONFIG_SOURCE,
         },
         sandboxWorkspaces: [
           {
             logicalPath: "sandbox/workspace",
-            rootEntries: ["seed.txt", "prompts/"],
+            rootEntries: ["prompts/", "seed.txt"],
             sourceId: "sandbox/workspace",
             sourcePath: "/app/agent/sandbox/workspace",
           },
@@ -436,8 +626,10 @@ describe("resolveAgent", () => {
   it("preserves source-backed model references already compiled into the manifest", async () => {
     const resolved = await resolveAgent({
       manifest: createCompiledAgentManifest({
+        kernelPlan: { prepared: [] },
         agentRoot: "/app/agent",
         appRoot: "/app",
+        bindings: [{ logicalPath: "agent.mjs", sourceId: "agent.mjs" }],
         config: {
           model: {
             id: "test-provider/weather-pro",
@@ -449,6 +641,11 @@ describe("resolveAgent", () => {
             routing: { kind: "external", provider: "test-provider" },
           },
           name: "weather-agent",
+          source: {
+            logicalPath: "agent.mjs",
+            sourceId: "agent.mjs",
+            sourceKind: "module",
+          },
         },
       }),
       moduleMap: {
@@ -473,8 +670,10 @@ describe("resolveAgent", () => {
   it("preserves model options on resolved runtime model references", async () => {
     const resolved = await resolveAgent({
       manifest: createCompiledAgentManifest({
+        kernelPlan: { prepared: [] },
         agentRoot: "/app/agent",
         appRoot: "/app",
+        bindings: [TEST_COMPILED_AGENT_CONFIG_BINDING],
         config: {
           model: {
             id: "anthropic/claude-opus-4.5-thinking",
@@ -488,6 +687,7 @@ describe("resolveAgent", () => {
             routing: { kind: "gateway", target: "anthropic" },
           },
           name: "weather-agent",
+          source: TEST_COMPILED_AGENT_CONFIG_SOURCE,
         },
       }),
       moduleMap: {
@@ -513,14 +713,20 @@ describe("resolveAgent", () => {
 
   it("rejects invalid authored tool exports while resolving the compiled agent", async () => {
     const manifest = createCompiledAgentManifest({
+      kernelPlan: { prepared: [] },
       agentRoot: "/app/agent",
       appRoot: "/app",
+      bindings: [
+        TEST_COMPILED_AGENT_CONFIG_BINDING,
+        { logicalPath: "tools/get-weather.mjs", sourceId: "tools/get-weather.mjs" },
+      ],
       config: {
         model: {
           id: TEST_DEFAULT_MODEL_ID,
           routing: { kind: "gateway", target: "openai" },
         },
         name: "weather-agent",
+        source: TEST_COMPILED_AGENT_CONFIG_SOURCE,
       },
       tools: [
         {

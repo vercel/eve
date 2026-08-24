@@ -3638,10 +3638,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   /** True when a tool name matches a subagent from the agent's roster. */
   #isSubagentToolName(toolName: string): boolean {
-    const local = this.#agentHeader?.info?.subagents.local;
-    if (local === undefined || local.length === 0) return false;
+    const info = this.#agentHeader?.info;
+    if (info === undefined) return false;
     const baseName = toolBaseName(toolName);
-    return local.some((subagent) => subagent.name === baseName);
+    const isDirectMatch = (agent: { readonly name: string; readonly parentNodeId: string }) =>
+      agent.parentNodeId === info.agent.nodeId && agent.name === baseName;
+    return (
+      info.subagents.local.some(isDirectMatch) || info.remoteAgents.entries.some(isDirectMatch)
+    );
   }
 
   /**

@@ -27,6 +27,15 @@ vision-capable model or [route image inputs to Gemini
 Flash](./guides/dynamic-capabilities#route-image-inputs-to-a-vision-model).
 When `agent.ts` is present, `model` is required.
 
+The default is a framework-owned `agent.ts` source in the same compiled slot as
+your file. Authoring `agent/agent.ts` replaces that source before normalization;
+eve does not synthesize another config later. The same source participates in
+every local subagent's config slot. A static subagent must still replace it with
+an authored `agent.ts`, because the framework cannot invent the model-visible
+`description` that tells its parent when to delegate. `GET /eve/v1/info` reports
+the selected root config and its source owner, so an omitted default and an
+authored replacement have explicit provenance.
+
 `model` accepts a gateway model id string, which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a provider-authored `LanguageModel`.
 
 Provider-specific AI SDK packages are regular project dependencies. A fresh `eve init` app includes the core `ai` package, but it does not install every provider package. Install the provider package you import, then set that provider's API key:
@@ -213,16 +222,22 @@ export default defineAgent({
 });
 ```
 
-Install that package in your app. It should export a default factory or
-`createWorld()` function. Pin a version built against the same `@workflow/*`
-line as your eve release (currently the `5.0.0-beta` line):
+Install that package in your app and set `world` to its bare package name. Package
+subpaths, relative or absolute paths, and URLs are not supported. The package
+should export a default factory or `createWorld()` function and declare a
+dependency or peer dependency on `@workflow/core` or `@workflow/world`. Pin a
+version built against the same `@workflow/*` line as your eve release (currently
+the `5.0.0-beta` line):
 
 ```bash
 pnpm add @workflow/world-postgres@5.0.0-beta.x
 ```
 
 The npm `latest` tag can lag behind that line, so an unpinned install may pull
-an incompatible protocol version that the Workflow SDK rejects during initialization.
+an incompatible protocol version. `eve dev` and `eve build` reject an
+incompatible package before loading its code. They also bind the package and
+its installed runtime dependencies to their compiled contents; changing that
+backing during a build fails the build, while `eve dev` watches it and rebuilds.
 
 Put credentials and host-specific options in runtime environment variables read
 by the world package, not in `agent.ts`. For the Postgres world, that means

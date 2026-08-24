@@ -43,6 +43,7 @@ import type { EveEvalContext } from "eve/evals";
 // everywhere else.
 
 const ALIAS_ENV = "EVE_E2E_REDEPLOY_ALIAS";
+const ALIAS_STABILITY_POLLS = 3;
 
 const FILE_PATH = "/workspace/redeploy-note.txt";
 const FILE_TOKEN = "sandbox-redeploy-ok-K4W";
@@ -191,15 +192,20 @@ async function deployToAlias(t: EveEvalContext, alias: string, phase: string): P
 }
 
 /**
- * Polls `/eve/v1/info` until the alias serves a deployment whose manifest
- * contains `marker`, so post-redeploy turns cannot hit a stale deployment.
+ * Polls `/eve/v1/info` until the alias stably serves a deployment whose
+ * manifest contains `marker`, so post-redeploy turns cannot hit a stale
+ * deployment while the alias update is still propagating.
  */
 async function waitForAliasToServe(t: EveEvalContext, marker: string): Promise<void> {
   const deadline = Date.now() + 120_000;
+  let consecutiveMatches = 0;
   while (Date.now() < deadline) {
     const response = await t.target.fetch("/eve/v1/info");
     if (response.ok && JSON.stringify(await response.json()).includes(marker)) {
-      return;
+      consecutiveMatches += 1;
+      if (consecutiveMatches >= ALIAS_STABILITY_POLLS) return;
+    } else {
+      consecutiveMatches = 0;
     }
     await t.sleep(1_000);
   }

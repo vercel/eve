@@ -1,17 +1,29 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { resolveCompilerArtifactPaths } from "../../src/compiler/artifacts.js";
+import {
+  createCompileMetadata,
+  resolveCompilerArtifactPaths,
+} from "../../src/compiler/artifacts.js";
 import { compileAgent } from "../../src/compiler/compile-agent.js";
-import { ROOT_COMPILED_AGENT_NODE_ID } from "../../src/compiler/manifest.js";
+import {
+  compiledAgentManifestSchema,
+  ROOT_COMPILED_AGENT_NODE_ID,
+} from "../../src/compiler/manifest.js";
+import { createCompiledModuleMapIdentity } from "../../src/compiler/module-map.js";
+import { collectUniqueModuleRefsForManifest } from "../../src/compiler/module-references.js";
 import {
   createBundledRuntimeCompiledArtifactsSource,
   createDiskRuntimeCompiledArtifactsSource,
   type RuntimeCompiledArtifactsSource,
 } from "../../src/runtime/compiled-artifacts-source.js";
 import { installBundledCompiledArtifacts } from "../../src/runtime/loaders/bundled-artifacts.js";
+import {
+  LoadCompiledArtifactSetError,
+  loadCompiledArtifactSet,
+} from "../../src/runtime/loaders/compiled-artifact-set.js";
 import {
   LoadCompiledManifestError,
   loadCompiledManifest,
@@ -20,13 +32,14 @@ import {
   LoadCompiledModuleMapError,
   loadCompiledModuleMap,
 } from "../../src/runtime/loaders/module-map.js";
+import { loadCompilerDiagnosticsArtifact } from "../../src/runtime/loaders/compiler-diagnostics.js";
 import { resolveRuntimeAgentGraph } from "../../src/runtime/resolve-agent-graph.js";
 import {
   createRuntimeSession,
   withRuntimeSession,
 } from "../../src/runtime/sessions/runtime-session.js";
+import { getCompiledRuntimeAgentBundle } from "../../src/runtime/sessions/compiled-agent-cache.js";
 import type { ResolvedAgent } from "../../src/runtime/types.js";
-import { loadCompiledModuleMapFromAuthoredSource } from "../../src/internal/authored-module-map-loader.js";
 import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "../../src/internal/application/runtime-compiled-artifacts-source.js";
 import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-app-roots.js";
 
@@ -34,20 +47,125 @@ const createAppRoot = useTemporaryAppRoots();
 
 const APP_ROOT_OPTIONS = { packageName: "runtime-loader-test-agent" } as const;
 
+async function waitForFile(path: string, timeoutMs: number = 60_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (true) {
+    try {
+      await readFile(path);
+      return;
+    } catch {
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for "${path}".`);
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    }
+  }
+}
+
+async function writeSemanticModuleMapDescriptorSnapshot(input: {
+  readonly adversarialModuleSourceId?: string;
+  readonly adversarialModuleSignalPath?: string;
+  readonly appRoot: string;
+  readonly evaluationSignalPath?: string;
+  readonly moduleMap: {
+    readonly nodes: Record<string, { readonly modules: Record<string, unknown> }>;
+  };
+}): Promise<void> {
+  const paths = resolveCompilerArtifactPaths(input.appRoot);
+  const [compiledManifestJson, diagnosticsArtifactJson, discoveryManifestJson] = await Promise.all([
+    readFile(paths.compiledManifestPath, "utf8"),
+    readFile(paths.diagnosticsPath, "utf8"),
+    readFile(paths.discoveryManifestPath, "utf8"),
+  ]);
+  const diagnostics = JSON.parse(diagnosticsArtifactJson) as {
+    summary: { errors: number; warnings: number };
+  };
+  const manifest = compiledAgentManifestSchema.parse(JSON.parse(compiledManifestJson));
+  const moduleMapIdentity = await createCompiledModuleMapIdentity(manifest);
+  const bindingsByNode = Object.fromEntries(
+    [
+      [ROOT_COMPILED_AGENT_NODE_ID, manifest] as const,
+      ...manifest.subagents.map((subagent) => [subagent.nodeId, subagent.agent] as const),
+    ].map(([nodeId, resources]) => [
+      nodeId,
+      Object.fromEntries(
+        Object.entries(resources.bindings).map(([sourceId, binding]) => [
+          sourceId,
+          binding.backing,
+        ]),
+      ),
+    ]),
+  );
+  const fallbackBacking = Object.values(manifest.bindings)[0]?.backing;
+  if (fallbackBacking === undefined) {
+    throw new Error("Expected the runtime-loader fixture manifest to contain a module binding.");
+  }
+  const moduleMapSource = [
+    ...(input.evaluationSignalPath === undefined
+      ? []
+      : [
+          `await (await import("node:fs/promises")).writeFile(${JSON.stringify(input.evaluationSignalPath)}, "evaluating");`,
+          "await new Promise((resolve) => setTimeout(resolve, 100));",
+        ]),
+    `const identity = ${JSON.stringify(moduleMapIdentity)};`,
+    `const moduleMapShape = ${JSON.stringify(input.moduleMap)};`,
+    `const bindingsByNode = ${JSON.stringify(bindingsByNode)};`,
+    `const fallbackBacking = ${JSON.stringify(fallbackBacking)};`,
+    `const adversarialModuleSourceId = ${JSON.stringify(input.adversarialModuleSourceId)};`,
+    `const adversarialModuleSignalPath = ${JSON.stringify(input.adversarialModuleSignalPath)};`,
+    "export const moduleMapDescriptor = Object.freeze({",
+    "  identity,",
+    "  nodes: Object.freeze(Object.fromEntries(",
+    "    Object.entries(moduleMapShape.nodes).map(([nodeId, scope]) => [",
+    "      nodeId,",
+    "      Object.freeze({",
+    "        modules: Object.freeze(Object.fromEntries(",
+    "          Object.entries(scope.modules).map(([sourceId, namespace]) => [",
+    "            sourceId,",
+    "            Object.freeze({",
+    "              artifactIdentity: identity,",
+    "              backing: bindingsByNode[nodeId]?.[sourceId] ?? fallbackBacking,",
+    "              load: async () => {",
+    "                if (sourceId === adversarialModuleSourceId) {",
+    '                  await (await import("node:fs/promises")).writeFile(adversarialModuleSignalPath, "executed");',
+    '                  throw new Error("adversarial module loader executed");',
+    "                }",
+    "                return Object.freeze(namespace);",
+    "              },",
+    '              ...((bindingsByNode[nodeId]?.[sourceId] ?? fallbackBacking).kind === "programmatic"',
+    "                ? { validate: async () => undefined }",
+    "                : {}),",
+    "            }),",
+    "          ])),",
+    "        ),",
+    "      }),",
+    "    ])),",
+    "  ),",
+    "});",
+    "export default moduleMapDescriptor;",
+    "",
+  ].join("\n");
+  await writeFile(paths.moduleMapPath, moduleMapSource);
+  const metadata = createCompileMetadata({
+    appRoot: input.appRoot,
+    compiledManifestJson,
+    diagnosticsArtifactJson,
+    diagnosticsSummary: diagnostics.summary,
+    discoveryManifestJson,
+    moduleMapIdentity,
+    moduleMapSource,
+    paths,
+  });
+  await writeFile(paths.compileMetadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
+}
+
 async function loadResolvedCompiledAgentGraph(input: {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
 }) {
-  const moduleMapPromise =
-    input.compiledArtifactsSource.kind === "disk" &&
-    input.compiledArtifactsSource.moduleMapLoaderPath !== undefined
-      ? loadCompiledModuleMapFromAuthoredSource({
-          compiledArtifactsSource: input.compiledArtifactsSource,
-        })
-      : loadCompiledModuleMap({ compiledArtifactsSource: input.compiledArtifactsSource });
-  const [manifest, moduleMap] = await Promise.all([
-    loadCompiledManifest({ compiledArtifactsSource: input.compiledArtifactsSource }),
-    moduleMapPromise,
-  ]);
+  const { manifest, moduleMap } = await loadCompiledArtifactSet({
+    compiledArtifactsSource: input.compiledArtifactsSource,
+  });
   return await resolveRuntimeAgentGraph({ manifest, moduleMap });
 }
 
@@ -345,8 +463,10 @@ describe("runtime compiled artifact loaders", () => {
         compiledArtifactsSource,
       }),
     ]);
-    const [compiledChannel] = manifest.channels;
-    const [resolvedChannel] = resolvedAgent.channels;
+    const compiledChannel = manifest.channelRoutes.effective.find(
+      (channel) => channel.name === "slack",
+    );
+    const resolvedChannel = resolvedAgent.channels.find((channel) => channel.name === "slack");
 
     expect(manifest.config).toEqual({
       compaction: {},
@@ -411,15 +531,13 @@ describe("runtime compiled artifact loaders", () => {
     expect(resolvedChannel.name).toBe("slack");
     expect(resolvedChannel.method).toBe("POST");
     expect(resolvedChannel.urlPath).toBe("/slack");
-    expect(typeof resolvedChannel.fetch).toBe("function");
-    expect(resolvedAgent.channels).toHaveLength(1);
+    expect(typeof resolvedChannel.handler).toBe("function");
+    expect(resolvedAgent.channels.some((channel) => channel.name === "eve")).toBe(true);
     // Authored instructions modules execute once at build time. They never appear in
     // the runtime module map.
-    expect(Object.keys(moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules ?? {})).toEqual([
-      "agent.mjs",
-      "channels/slack.mjs",
-      "tools/get_weather.mjs",
-    ]);
+    expect(Object.keys(moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules ?? {})).toEqual(
+      expect.arrayContaining(["agent.mjs", "channels/slack.mjs", "tools/get_weather.mjs"]),
+    );
     expect(
       (
         moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules["tools/get_weather.mjs"] as {
@@ -428,15 +546,19 @@ describe("runtime compiled artifact loaders", () => {
       ).default.description,
     ).toBe("Get the weather.");
     await expect(
-      resolvedAgent.tools[0]?.execute?.(
-        { city: "Brooklyn" },
-        { messages: [], toolCallId: "call_1" },
-      ),
+      resolvedAgent.tools
+        .find((tool) => tool.name === "get_weather")
+        ?.execute?.({ city: "Brooklyn" }, { messages: [], toolCallId: "call_1" }),
     ).resolves.toEqual({
       city: "Brooklyn",
       source: "lib",
     });
-    expect(resolvedAgent.instructions).toEqual(manifest.instructions);
+    expect(resolvedAgent.instructions).toEqual(
+      manifest.instructions.map((instructions) => ({
+        ...instructions,
+        owner: { kind: "application" },
+      })),
+    );
     expect(resolvedAgent.workspaceSpec).toEqual({
       rootEntries: [],
     });
@@ -450,7 +572,7 @@ describe("runtime compiled artifact loaders", () => {
     );
     await writeRuntimeLoaderFixture(agentRoot);
 
-    await compileAgent({
+    const compileResult = await compileAgent({
       startPath: appRoot,
     });
 
@@ -463,10 +585,16 @@ describe("runtime compiled artifact loaders", () => {
         compiledArtifactsSource,
       }),
     ]);
+    const diagnostics = await loadCompilerDiagnosticsArtifact({
+      compiledArtifactsSource,
+      manifest,
+    });
 
     await withRuntimeSession(createRuntimeSession("runtime-loaders-bundled-test"), async () => {
       installBundledCompiledArtifacts({
-        manifest,
+        diagnostics,
+        manifest: compileResult.manifest,
+        metadata: compileResult.metadata,
         moduleMap,
       });
 
@@ -501,8 +629,198 @@ describe("runtime compiled artifact loaders", () => {
           }
         ).default.description,
       );
-      expect(resolvedAgent.instructions).toEqual(manifest.instructions);
+      expect(resolvedAgent.instructions).toEqual(
+        manifest.instructions.map((instructions) => ({
+          ...instructions,
+          owner: { kind: "application" },
+        })),
+      );
     });
+  });
+
+  it.each(["missing", "semantically malformed"] as const)(
+    "rejects %s disk diagnostics before module-map hydration",
+    async (failure) => {
+      const { agentRoot, appRoot } = await createAppRoot(
+        `eve-runtime-loaders-diagnostics-${failure.replaceAll(" ", "-")}-`,
+        APP_ROOT_OPTIONS,
+      );
+      await writeRuntimeLoaderFixture(agentRoot);
+      await compileAgent({ startPath: appRoot });
+
+      const paths = resolveCompilerArtifactPaths(appRoot);
+      if (failure === "missing") {
+        await rm(paths.diagnosticsPath);
+      } else {
+        const artifact = JSON.parse(await readFile(paths.diagnosticsPath, "utf8")) as {
+          diagnostics: unknown[];
+          summary: { errors: number; warnings: number };
+        };
+        artifact.diagnostics = [
+          {
+            code: "test/programmatic-warning",
+            message: "A structurally valid diagnostic that disagrees with the manifest.",
+            severity: "warning",
+            sourceId: "opaque-programmatic-source",
+          },
+        ];
+        artifact.summary = { errors: 0, warnings: 1 };
+        await writeFile(paths.diagnosticsPath, `${JSON.stringify(artifact, null, 2)}\n`);
+      }
+
+      await writeFile(
+        paths.moduleMapPath,
+        'throw new Error("module map hydrated before diagnostics validation");\n',
+      );
+
+      const error = await loadCompiledArtifactSet({
+        compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(appRoot),
+      }).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(LoadCompiledArtifactSetError);
+      expect((error as Error).message).not.toContain("module map hydrated before diagnostics");
+    },
+  );
+
+  it.each(["missing node", "extra node", "missing module", "extra module"] as const)(
+    "rejects a disk module map with a %s before namespace or graph hydration",
+    async (failure) => {
+      const { agentRoot, appRoot } = await createAppRoot(
+        `eve-runtime-loaders-module-set-${failure.replaceAll(" ", "-")}-`,
+        APP_ROOT_OPTIONS,
+      );
+      await writeRuntimeLoaderFixture(agentRoot);
+      await compileAgent({ startPath: appRoot });
+
+      const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(appRoot);
+      const adversarialModuleSignalPath = join(appRoot, "unexpected-module-loader-executed");
+      const manifest = await loadCompiledManifest({ compiledArtifactsSource });
+      const moduleMap = {
+        nodes: {
+          [ROOT_COMPILED_AGENT_NODE_ID]: {
+            modules: Object.fromEntries(
+              collectUniqueModuleRefsForManifest(manifest).map((ref) => [ref.sourceId, {}]),
+            ),
+          },
+        } as Record<string, { modules: Record<string, unknown> }>,
+      };
+      const rootModules = moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules;
+      if (failure === "missing node") {
+        delete moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID];
+      } else if (failure === "extra node") {
+        moduleMap.nodes.unexpected = { modules: {} };
+      } else if (failure === "missing module") {
+        delete rootModules[Object.keys(rootModules)[0]!];
+      } else {
+        rootModules["unexpected:module"] = {};
+      }
+
+      await writeSemanticModuleMapDescriptorSnapshot({
+        ...(failure === "extra module"
+          ? {
+              adversarialModuleSignalPath,
+              adversarialModuleSourceId: "unexpected:module",
+            }
+          : {}),
+        appRoot,
+        moduleMap,
+      });
+
+      const error = await getCompiledRuntimeAgentBundle({ compiledArtifactsSource }).catch(
+        (caught: unknown) => caught,
+      );
+
+      expect(error).toBeInstanceOf(LoadCompiledArtifactSetError);
+      expect((error as Error).message).toContain(failure.includes("node") ? "node" : "module");
+      if (failure === "extra module") {
+        expect((error as Error).message).not.toContain("adversarial module loader executed");
+        await expect(readFile(adversarialModuleSignalPath, "utf8")).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+      }
+    },
+  );
+
+  it.each(["missing metadata", "failed metadata", "manifest digest mismatch"] as const)(
+    "rejects %s before disk module-map hydration",
+    async (failure) => {
+      const { agentRoot, appRoot } = await createAppRoot(
+        `eve-runtime-loaders-integrity-${failure.replaceAll(" ", "-")}-`,
+        APP_ROOT_OPTIONS,
+      );
+      await writeRuntimeLoaderFixture(agentRoot);
+      await compileAgent({ startPath: appRoot });
+      const paths = resolveCompilerArtifactPaths(appRoot);
+
+      if (failure === "missing metadata") {
+        await rm(paths.compileMetadataPath);
+      } else if (failure === "failed metadata") {
+        const metadata = JSON.parse(await readFile(paths.compileMetadataPath, "utf8")) as {
+          status: string;
+        };
+        metadata.status = "failed";
+        await writeFile(paths.compileMetadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
+      } else {
+        const manifestJson = await readFile(paths.compiledManifestPath, "utf8");
+        await writeFile(paths.compiledManifestPath, `${manifestJson}\n`);
+      }
+      await writeFile(
+        paths.moduleMapPath,
+        'throw new Error("module map hydrated before artifact integrity validation");\n',
+      );
+
+      const error = await loadCompiledArtifactSet({
+        compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(appRoot),
+      }).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).not.toContain(
+        "module map hydrated before artifact integrity validation",
+      );
+      if (failure === "failed metadata") {
+        expect((error as Error).message).toContain('status must be "ready"');
+      } else if (failure === "manifest digest mismatch") {
+        expect(error).toBeInstanceOf(LoadCompiledArtifactSetError);
+        expect((error as Error).message).toContain("compiled manifest digest mismatch");
+      }
+    },
+  );
+
+  it("imports the exact module-map source captured by the validated snapshot", async () => {
+    const { agentRoot, appRoot } = await createAppRoot(
+      "eve-runtime-loaders-captured-module-map-",
+      APP_ROOT_OPTIONS,
+    );
+    await writeRuntimeLoaderFixture(agentRoot);
+    await compileAgent({ startPath: appRoot });
+    const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(appRoot);
+    const manifest = await loadCompiledManifest({ compiledArtifactsSource });
+    const paths = resolveCompilerArtifactPaths(appRoot);
+    const evaluationSignalPath = join(appRoot, "module-map-evaluating");
+    const moduleMap = {
+      nodes: {
+        [ROOT_COMPILED_AGENT_NODE_ID]: {
+          modules: Object.fromEntries(
+            collectUniqueModuleRefsForManifest(manifest).map((ref) => [ref.sourceId, {}]),
+          ),
+        },
+      },
+    };
+    await writeSemanticModuleMapDescriptorSnapshot({
+      appRoot,
+      evaluationSignalPath,
+      moduleMap,
+    });
+
+    const loading = loadCompiledArtifactSet({ compiledArtifactsSource });
+    const loadingSettled = loading.catch(() => undefined);
+    try {
+      await waitForFile(evaluationSignalPath);
+      await writeFile(paths.moduleMapPath, 'throw new Error("rewritten module map executed");\n');
+    } finally {
+      await loadingSettled;
+      await expect(loading).resolves.toMatchObject({ moduleMap });
+    }
   });
 
   it("loads local subagent tools and sandboxes without indexing lib in the module map", async () => {
@@ -531,16 +849,15 @@ describe("runtime compiled artifact loaders", () => {
       ROOT_COMPILED_AGENT_NODE_ID,
       "subagents/researcher",
     ]);
-    expect(Object.keys(moduleMap.nodes["subagents/researcher"]?.modules ?? {})).toEqual([
-      "agent.mjs",
-      "sandbox/sandbox.mjs",
-      "tools/search.mjs",
-    ]);
+    expect(Object.keys(moduleMap.nodes["subagents/researcher"]?.modules ?? {})).toEqual(
+      expect.arrayContaining(["agent.mjs", "sandbox/sandbox.mjs", "tools/search.mjs"]),
+    );
     expect(researcherNode?.agent.instructions).toEqual([
       {
         content: "Investigate research tasks thoroughly.",
         name: "instructions",
         logicalPath: "instructions.md",
+        owner: { kind: "application" },
         role: "system",
         sourceId: "instructions.md",
         sourceKind: "markdown",
@@ -560,10 +877,9 @@ describe("runtime compiled artifact loaders", () => {
       ),
     ).toBe(false);
     await expect(
-      researcherNode?.agent.tools[0]?.execute?.(
-        { query: "climate" },
-        { messages: [], toolCallId: "call_1" },
-      ),
+      researcherNode?.agent.tools
+        .find((tool) => tool.name === "search")
+        ?.execute?.({ query: "climate" }, { messages: [], toolCallId: "call_1" }),
     ).resolves.toEqual({
       query: "climate",
       source: "subagent-lib",
@@ -618,7 +934,7 @@ describe("runtime compiled artifact loaders", () => {
     const firstResolved = await loadResolvedCompiledAgent({
       compiledArtifactsSource,
     });
-    const firstTool = firstResolved.tools[0];
+    const firstTool = firstResolved.tools.find((tool) => tool.name === "get_weather");
 
     if (firstTool === undefined) {
       throw new Error("Expected one compiled tool before the source update.");
@@ -646,7 +962,7 @@ describe("runtime compiled artifact loaders", () => {
     const secondResolved = await loadResolvedCompiledAgent({
       compiledArtifactsSource,
     });
-    const secondTool = secondResolved.tools[0];
+    const secondTool = secondResolved.tools.find((tool) => tool.name === "get_weather");
 
     if (secondTool === undefined) {
       throw new Error("Expected one compiled tool after the source update.");

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "../../src/channel/types.js";
 import { startRemoteAgentSession } from "../../src/execution/remote-agent-dispatch.js";
-import type { RuntimeRemoteAgentCallActionRequest } from "../../src/runtime/actions/types.js";
+import type { RuntimeRemoteAgentCallActionRequest } from "../../src/shared/runtime-actions.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "../../src/runtime/types.js";
 import {
   type ScenarioAppDescriptor,
@@ -145,6 +145,11 @@ function createRemote(input: {
 }): ResolvedRuntimeRemoteAgentNode {
   return {
     auth: async () => ({ headers: { authorization: `Bearer ${input.token}` } }),
+    configResolver: {
+      logicalPath: "subagents/site-ops/agent.ts",
+      sourceId: "config:site-ops",
+      sourceKind: "module",
+    },
     description: "Executes site operations as the requesting user.",
     forwardPrincipal: true,
     kind: "remote",
@@ -153,7 +158,7 @@ function createRemote(input: {
     nodeId: "subagents/site-ops.ts",
     path: "/eve/v1/session",
     sourceId: "subagents/site-ops.ts",
-    sourceKind: "module",
+    sourceKind: "subagent",
     url: input.url,
   };
 }

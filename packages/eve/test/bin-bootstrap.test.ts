@@ -20,6 +20,30 @@ const workspaceBuildInputPaths = new Set([
 ]);
 
 describe("eve CLI bootstrap", () => {
+  it("fails before bootstrapping when the CLI runs under Bun", async () => {
+    const exists = vi.fn(async () => true);
+    const importModule = vi.fn(async () => ({
+      runCli: vi.fn(async () => {}),
+    }));
+    const runCommand = vi.fn(async () => {});
+
+    await expect(
+      runEveCli(["info"], bootstrapOptions, {
+        bunVersion: "1.4.0",
+        exists,
+        importModule,
+        runCommand,
+      }),
+    ).rejects.toThrow(
+      "eve requires Node.js >=24. You are running Bun 1.4.0. " +
+        "Please run eve with a compatible Node.js executable.",
+    );
+
+    expect(exists).not.toHaveBeenCalled();
+    expect(importModule).not.toHaveBeenCalled();
+    expect(runCommand).not.toHaveBeenCalled();
+  });
+
   it("fails before bootstrapping when Node.js is older than 24", async () => {
     const exists = vi.fn(async () => true);
     const importModule = vi.fn(async () => ({

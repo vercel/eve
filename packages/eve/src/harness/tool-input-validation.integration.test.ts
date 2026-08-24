@@ -5,10 +5,7 @@ import { describe, expect, it } from "vitest";
 import { getPendingInputRequestIds } from "#harness/input-requests.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
-import {
-  ASK_QUESTION_INPUT_SCHEMA,
-  ASK_QUESTION_TOOL_DEFINITION,
-} from "#runtime/framework-tools/ask-question.js";
+import { ASK_QUESTION_INPUT_SCHEMA, ASK_QUESTION_TOOL_DESCRIPTION } from "#kernel/ask-question.js";
 import { serializeInputSchema } from "#shared/tool-schema.js";
 
 const usage = {
@@ -36,7 +33,7 @@ function findToolResult(messages: readonly ModelMessage[], toolCallId: string): 
   return undefined;
 }
 
-describe("framework tool input validation (real AI SDK)", () => {
+describe("native kernel tool input validation (real AI SDK)", () => {
   it("returns malformed and schema-invalid ask_question input to the model before accepting a retry", async () => {
     const malformedCallId = "question-malformed";
     const invalidCallId = "question-invalid";
@@ -90,14 +87,16 @@ describe("framework tool input validation (real AI SDK)", () => {
       [
         "ask_question",
         {
-          description: ASK_QUESTION_TOOL_DEFINITION.description,
+          description: ASK_QUESTION_TOOL_DESCRIPTION,
           inputSchema: ASK_QUESTION_INPUT_SCHEMA,
+          kernelCapability: "ask_question",
           name: "ask_question",
         },
       ],
     ]);
     const config: ToolLoopHarnessConfig = {
       capabilities: { requestInput: true },
+      kernelPlan: { prepared: ["ask_question", "final_output"] },
       mode: "conversation",
       resolveModel: async (): Promise<LanguageModel> => model,
       tools,
@@ -108,7 +107,7 @@ describe("framework tool input validation (real AI SDK)", () => {
         system: "You are a test assistant.",
         tools: [
           {
-            description: ASK_QUESTION_TOOL_DEFINITION.description,
+            description: ASK_QUESTION_TOOL_DESCRIPTION,
             inputSchema: serializeInputSchema(ASK_QUESTION_INPUT_SCHEMA),
             name: "ask_question",
           },
@@ -196,6 +195,7 @@ describe("framework tool input validation (real AI SDK)", () => {
       provider: "eve-integration-mock",
     });
     const config: ToolLoopHarnessConfig = {
+      kernelPlan: { prepared: ["final_output"] },
       mode: "task",
       resolveModel: async (): Promise<LanguageModel> => model,
       tools: new Map(),

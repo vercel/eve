@@ -69,6 +69,19 @@ eve derives names from file paths, so you do not configure them separately.
 
 The root agent uses its `package.json` `name`, or its app directory name if none is set. A subagent uses its directory name.
 
+### Compile-time selection and runtime loading
+
+Each logical path is one source slot. When more than one layer contributes to
+that slot, eve selects one source in this order: framework default, extension
+package, co-located extension override, then application. The selected source
+records both its owner and its exact filesystem or programmatic binding before
+eve loads the definition; shadowed sources do not execute.
+
+The compiled binding remains authoritative after the build. Runtime hydration
+does not turn a logical path into a guessed disk path, and programmatic defaults
+do not need placeholder files under `agent/`. A missing, mismatched, or tampered
+binding fails artifact validation instead of falling back to another source.
+
 ### Recommended layout
 
 A minimal agent needs `instructions.md`; `agent.ts` is optional when the defaults are sufficient. Add other slots as the agent needs them:
@@ -137,7 +150,13 @@ agent/subagents/researcher/
 └── subagents/
 ```
 
-A subagent's `agent.ts` is required and must provide a description, while its instructions are optional. Connections, hooks, skills, shared code, sandboxes, tools, and nested subagents are supported. Channels and schedules remain root-only. See [Subagents](./subagents) for inheritance and isolation behavior.
+A static subagent must author `agent.ts` with a description, while its
+instructions are optional. The canonical default config source applies when the
+file is omitted, but it intentionally supplies no model-visible description, so
+compilation tells you to author one. Connections, hooks, skills, shared code,
+sandboxes, tools, and nested subagents are supported. Channels and schedules
+remain root-only. See [Subagents](./subagents) for inheritance and isolation
+behavior.
 
 ### Flat layout
 

@@ -65,9 +65,6 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
   }
 
   async function createHandle(): Promise<SandboxBackendHandle | null> {
-    if (registered === null) {
-      return null;
-    }
     const inheritance = registered.inheritance;
     const definition = inheritance?.definition ?? registered.definition;
     const backend = definition.backend;

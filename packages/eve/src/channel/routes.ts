@@ -2,10 +2,10 @@ import type { UserContent } from "ai";
 
 import type { CrossChannelToFn } from "#channel/cross-channel-receive.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import type { InputResponse } from "#shared/input.js";
 import type { Session } from "#channel/session.js";
 import type { JsonObject } from "#shared/json.js";
-import type { ChannelMethod } from "#public/definitions/channel.js";
+import type { ChannelMethod, ChannelRouteMethod } from "#public/definitions/channel.js";
 
 type WebSocketHeaders = Headers | readonly (readonly [string, string])[] | Record<string, string>;
 
@@ -175,6 +175,29 @@ export interface WebSocketRouteDefinition<TState = undefined> {
 export type RouteDefinition<TState = undefined> =
   | HttpRouteDefinition<TState>
   | WebSocketRouteDefinition<TState>;
+
+export const CHANNEL_ROUTE_METHODS = [
+  "GET",
+  "HEAD",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "OPTIONS",
+  "WEBSOCKET",
+] as const satisfies readonly ChannelRouteMethod[];
+
+const channelRouteMethodSet = new Set<ChannelRouteMethod>(CHANNEL_ROUTE_METHODS);
+
+/** Returns whether a value is a canonical compiled channel route method. */
+export function isChannelRouteMethod(value: unknown): value is ChannelRouteMethod {
+  return typeof value === "string" && channelRouteMethodSet.has(value as ChannelRouteMethod);
+}
+
+/** Returns whether a value is a canonical HTTP channel route method. */
+export function isHttpChannelRouteMethod(value: unknown): value is ChannelMethod {
+  return isChannelRouteMethod(value) && value !== "WEBSOCKET";
+}
 
 /**
  * Declares an HTTP `GET` route at `path`, dispatching to `handler`. The handler

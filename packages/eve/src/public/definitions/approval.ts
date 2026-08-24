@@ -2,7 +2,7 @@ import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionParent, SessionTurn } from "#context/keys.js";
 import type { ToolAuthOptions, ToolAuthProvider } from "#public/definitions/tool.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { TokenResult } from "#runtime/connections/types.js";
+import type { TokenResult } from "#shared/connections.js";
 
 type ApprovalToolInput<TInput> = TInput extends object ? Readonly<TInput> : TInput;
 

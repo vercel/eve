@@ -6,7 +6,7 @@
  */
 
 import { SUBAGENT_EXECUTION_FAILED } from "#harness/agent-handle-errors.js";
-import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
+import type { RuntimeSubagentChildResult } from "#shared/runtime-actions.js";
 import type { JsonValue } from "#shared/json.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { TokenUsage } from "#shared/token-usage.js";

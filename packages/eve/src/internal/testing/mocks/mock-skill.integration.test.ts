@@ -16,23 +16,24 @@ describe("mockSkill", () => {
       },
     });
 
-    const source = skill.source;
-    expect(source.sourceKind).toBe("skill-package");
+    expect(skill.input).toEqual({
+      description: "Weather guidance.",
+      markdown: "Weather guidance.",
+      name: "weather",
+    });
+    expect(skill.input).not.toHaveProperty("sourceId");
+    expect(skill.input).not.toHaveProperty("sourceKind");
 
-    if (source.sourceKind !== "skill-package") {
-      throw new Error("Expected mock skill source to be a skill package.");
-    }
-
-    materializedRootPath = source.rootPath;
-    const referencesPath = source.referencesPath;
+    materializedRootPath = skill.paths.rootPath;
+    const referencesPath = skill.paths.referencesPath;
     expect(referencesPath).toBeDefined();
 
     if (referencesPath === undefined) {
       throw new Error("Expected mock skill to materialize references.");
     }
 
-    await expect(access(source.rootPath)).resolves.toBeUndefined();
-    await expect(access(source.skillFilePath)).resolves.toBeUndefined();
+    await expect(access(skill.paths.rootPath)).resolves.toBeUndefined();
+    await expect(access(skill.paths.skillFilePath)).resolves.toBeUndefined();
     await expect(access(referencesPath)).resolves.toBeUndefined();
   });
 

@@ -7,8 +7,7 @@ import {
   WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
   WEB_SEARCH_OPENAI_OUTPUT_SCHEMA,
   WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA,
-  WEB_SEARCH_TOOL_DEFINITION,
-} from "#runtime/framework-tools/web-search.js";
+} from "#kernel/web-search.js";
 import type { JsonObject } from "#shared/json.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
 
@@ -17,36 +16,18 @@ import type { WebSearchProvider } from "#shared/web-search.js";
  */
 export type WebSearchBackend = "anthropic" | "exa" | "google" | "openai" | "parallel";
 
-/**
- * Maps an upstream provider tool type (the literal `type` string the AI SDK
- * sends to the provider) back to the framework tool name that injected it.
- *
- * Used when the AI Gateway routes a request to a fallback provider that
- * does not support a provider-specific tool — the upstream error references
- * the provider-specific type (e.g. `web_search_20250305`), but the harness
- * needs to drop the framework tool by its public name (`web_search`).
- *
- * Adding a new provider tool requires adding the corresponding mapping
- * entry here alongside its {@link resolveWebSearchProviderTool} switch
- * arm so detection stays in lockstep with injection.
- */
-const UPSTREAM_TOOL_TYPE_TO_FRAMEWORK_NAME: Readonly<Record<string, string>> = {
-  // Anthropic's stable web search tool. The Bedrock and Vertex
-  // Anthropic backends reject this type because they only host the
-  // older Claude Messages surface.
-  web_search_20250305: WEB_SEARCH_TOOL_DEFINITION.name,
-};
+/** One model-call-scoped provider decision shared by prompt and tool stages. */
+export interface ModelProviderCapabilityAvailability {
+  readonly modelSupportsProviderTools: boolean;
+  readonly webSearchBackend: WebSearchBackend | null;
+}
 
-/**
- * Returns the framework tool name that produced an upstream provider tool
- * `type`, or `null` when the type is not one we know how to remove.
- *
- * Used by the harness recovery path to decide which tools to drop when a
- * gateway fallback provider rejects a tool. Unknown types fall through to
- * the existing terminal/recoverable handling.
- */
-export function resolveFrameworkToolFromUpstreamType(type: string): string | null {
-  return UPSTREAM_TOOL_TYPE_TO_FRAMEWORK_NAME[type] ?? null;
+export function resolveModelProviderCapabilityAvailability(
+  modelRef: RuntimeModelReference,
+  gatewayProvider?: WebSearchProvider,
+): ModelProviderCapabilityAvailability {
+  const webSearchBackend = resolveWebSearchBackend(modelRef, gatewayProvider);
+  return { modelSupportsProviderTools: webSearchBackend !== null, webSearchBackend };
 }
 
 /**

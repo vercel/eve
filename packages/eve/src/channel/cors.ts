@@ -43,6 +43,21 @@ export interface NormalizedChannelCorsOptions {
   };
 }
 
+/** Validates the serializable normalized CORS domain at artifact boundaries. */
+export function validateNormalizedChannelCorsOptions(
+  cors: NormalizedChannelCorsOptions,
+): readonly string[] {
+  const issues: string[] = [];
+  validateNormalizedStringList(cors.origin, "origin", issues);
+  validateNormalizedStringList(cors.methods, "methods", issues);
+  validateNormalizedStringList(cors.allowHeaders, "allowHeaders", issues);
+  validateNormalizedStringList(cors.exposeHeaders, "exposeHeaders", issues);
+  if (cors.maxAge !== undefined && cors.maxAge !== false && cors.maxAge.length === 0) {
+    issues.push("maxAge must be false or a non-empty string.");
+  }
+  return issues;
+}
+
 export function normalizeChannelCors(
   cors: ChannelCors | undefined,
 ): NormalizedChannelCorsOptions | undefined {
@@ -165,4 +180,15 @@ function normalizePreflight(
   }
 
   return { statusCode };
+}
+
+function validateNormalizedStringList(
+  value: "*" | "null" | readonly string[] | undefined,
+  label: "allowHeaders" | "exposeHeaders" | "methods" | "origin",
+  issues: string[],
+): void {
+  if (!Array.isArray(value)) return;
+  if (value.some((entry) => typeof entry !== "string" || entry.length === 0)) {
+    issues.push(`${label} entries must be non-empty strings.`);
+  }
 }

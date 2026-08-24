@@ -54,12 +54,12 @@ export interface CurrentAgentModel {
   reasoning: AgentReasoningDefinition | null;
   serviceTier: GatewayServiceTierState;
   /**
-   * The authored `model` is a string the source editor can rewrite. False for a
-   * source-backed SDK model call (`gateway(...)`, `anthropic(...)`), which is
-   * not a string literal — independent of how the model routes.
+   * The selected config is a filesystem-backed application `agent.ts` whose
+   * model is a string the source editor can rewrite. False for programmatic
+   * configs and source-backed SDK model calls.
    */
   editable: boolean;
-  /** Whether the top-level agent config object can carry reasoning/tier edits. */
+  /** Whether an application-owned `agent.ts` can carry reasoning/tier edits. */
   settingsEditable: boolean;
 }
 
@@ -238,7 +238,7 @@ function modelMenuRows(
       value: "model",
       label: "Change model",
       disabled: true,
-      description: "Set via an SDK model call in agent.ts; edit the source to change it",
+      description: "Add or edit an application agent.ts to change the model",
     };
   }
 
@@ -566,6 +566,10 @@ async function readCurrentAgentModel(appRoot: string): Promise<CurrentAgentModel
     const { compiledState } = await inspectApplication(appRoot);
     const config = compiledState?.manifest.config;
     const model = config?.model;
+    const configBinding =
+      config === undefined ? undefined : compiledState?.manifest.bindings[config.source.sourceId];
+    const configEditable =
+      configBinding?.owner.kind === "application" && configBinding.backing.kind === "filesystem";
     // A source-backed model (an SDK model call) carries `source`; a string id
     // does not, and only a string is a literal the editor can rewrite.
     const chatgpt = isChatGptModelRouting(model?.routing);
@@ -574,8 +578,8 @@ async function readCurrentAgentModel(appRoot: string): Promise<CurrentAgentModel
       routing: model?.routing ?? null,
       reasoning: config?.reasoning ?? null,
       serviceTier: readGatewayServiceTier(model?.providerOptions),
-      editable: model !== undefined && (model.source === undefined || chatgpt),
-      settingsEditable: config?.source !== undefined,
+      editable: configEditable && model !== undefined && (model.source === undefined || chatgpt),
+      settingsEditable: configEditable,
     };
   } catch {
     return {
@@ -590,16 +594,17 @@ async function readCurrentAgentModel(appRoot: string): Promise<CurrentAgentModel
 }
 
 /**
- * Refusal message when `/model` can't rewrite the model — it is a source-backed
- * SDK model call (`gateway(...)`, `anthropic(...)`), not a string literal — or
- * null when the model is an editable string. Editability is independent of
- * routing: a `gateway(...)` call is gateway-routed yet still uneditable here.
+ * Refusal message when `/model` cannot rewrite the selected config or model, or
+ * null when an application-owned `agent.ts` contains an editable string model.
  */
 export async function modelChangeRefusalForUneditableModel(
   appRoot: string,
 ): Promise<string | null> {
-  const { editable, routing } = await readCurrentAgentModel(appRoot);
+  const { editable, routing, settingsEditable } = await readCurrentAgentModel(appRoot);
   if (editable) return null;
+  if (!settingsEditable) {
+    return "The selected agent config is not backed by an editable application agent.ts; add or edit `agent.ts` to change the model.";
+  }
   const detail =
     routing?.kind === "external"
       ? `the external provider \`${routing.provider}\``

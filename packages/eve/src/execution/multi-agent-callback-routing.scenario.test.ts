@@ -290,6 +290,11 @@ describe("multi-agent callback routing", () => {
       callbackBaseUrl: resolveWorkflowCallbackBaseUrl(deploymentOrigin),
       callbackToken,
       remote: {
+        configResolver: {
+          logicalPath: "agent/agents/research/agent.ts",
+          sourceId: "config:research",
+          sourceKind: "module",
+        },
         description: "remote research agent",
         kind: "remote",
         logicalPath: "agent/agents/research.ts",
@@ -297,7 +302,7 @@ describe("multi-agent callback routing", () => {
         nodeId: "agent/agents/research.ts",
         path: "/eve/v1/session",
         sourceId: "agent/agents/research.ts",
-        sourceKind: "module",
+        sourceKind: "subagent",
         url: remoteAgentOrigin,
       },
       session: createStubSession(sessionId),

@@ -8,11 +8,15 @@ import {
   type CompiledSubagentEdge,
   type CompiledSubagentNode,
   type CompiledToolDefinition,
-  createCompiledAgentManifest,
-  createCompiledAgentNodeManifest,
   ROOT_COMPILED_AGENT_NODE_ID,
 } from "#compiler/manifest.js";
 import { buildVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-summary.js";
+import {
+  createStubCompiledAgentManifest as createCompiledAgentManifest,
+  createStubCompiledAgentNodeManifest as createCompiledAgentNodeManifest,
+  TEST_COMPILED_AGENT_CONFIG_BINDING,
+  TEST_COMPILED_AGENT_CONFIG_SOURCE,
+} from "#internal/testing/compiled-manifest.js";
 import {
   normalizeChannelKindForDisplay,
   VERCEL_EVE_AGENT_SUMMARY_KIND,
@@ -26,9 +30,13 @@ const GENERATOR_VERSION = "0.0.0-test";
 function makeTool(name: string): CompiledToolDefinition {
   return {
     description: `${name} description`,
+    hasAuth: false,
+    hasExecute: true,
+    hasModelOutputProjection: false,
     inputSchema: null,
     logicalPath: `tools/${name}.ts`,
     name,
+    requiresApproval: false,
     sourceId: `tools/${name}.ts`,
     sourceKind: "module",
   };
@@ -46,6 +54,9 @@ function makeConnection(
   const base: CompiledConnectionDefinition = {
     connectionName: name,
     description: `${name} description`,
+    hasApproval: false,
+    hasAuthorization: false,
+    hasHeaders: false,
     logicalPath: `connections/${name}.ts`,
     protocol,
     sourceId: `connections/${name}.ts`,
@@ -109,24 +120,32 @@ function makePackagedSkill(name: string): CompiledSkillDefinition {
 }
 
 function makeSubagent(name: string): CompiledSubagentNode {
+  const entryPath = `subagents/${name}/agent.ts`;
   return {
-    agent: createCompiledAgentNodeManifest({
-      agentRoot: `${AGENT_ROOT}/subagents/${name}`,
-      appRoot: APP_ROOT,
-      config: {
-        model: { id: "openai/gpt-5.4", routing: { kind: "gateway", target: "openai" } },
-        name,
+    agent: createCompiledAgentNodeManifest(
+      {
+        kernelPlan: { prepared: [] },
+        agentRoot: `${AGENT_ROOT}/subagents/${name}`,
+        appRoot: APP_ROOT,
+        bindings: [TEST_COMPILED_AGENT_CONFIG_BINDING],
+        config: {
+          model: { id: "openai/gpt-5.4", routing: { kind: "gateway", target: "openai" } },
+          name,
+          source: TEST_COMPILED_AGENT_CONFIG_SOURCE,
+        },
       },
-    }),
+      { isRoot: false, nodeId: `subagents/${name}/agent.ts` },
+    ),
+    backing: { externalDependencies: [], kind: "filesystem", sourcePath: entryPath },
     description: `${name} subagent description`,
-    entryPath: `subagents/${name}/agent.ts`,
-    exportName: undefined,
+    entryPath,
     logicalPath: `subagents/${name}`,
     name,
-    nodeId: name,
+    nodeId: `subagents/${name}/agent.ts`,
+    owner: { kind: "application" },
     rootPath: `subagents/${name}`,
     sourceId: `subagents/${name}/agent.ts`,
-    sourceKind: "module",
+    sourceKind: "subagent",
   };
 }
 
@@ -134,24 +153,44 @@ describe("buildVercelAgentSummary", () => {
   it("produces the public summary shape from a compiled manifest", () => {
     const subagent = makeSubagent("research");
     const subagentEdge: CompiledSubagentEdge = {
-      childNodeId: "research",
+      childNodeId: "subagents/research/agent.ts",
       parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
     };
     const manifest = createCompiledAgentManifest({
+      kernelPlan: { prepared: [] },
       agentRoot: AGENT_ROOT,
       appRoot: APP_ROOT,
-      channels: [
-        makeChannel({ name: "slack", adapterKind: "slack" }),
-        makeChannel({ name: "weather-bot", adapterKind: "weather-slack" }),
-        makeChannel({ name: "messages", adapterKind: "http" }),
-        makeChannel({ name: "stripe", adapterKind: "stripe-webhook" }),
-        makeChannel({ name: "mystery" }),
-        { kind: "disabled", logicalPath: "channels/disabled.ts", name: "disabled" },
+      bindings: [
+        TEST_COMPILED_AGENT_CONFIG_BINDING,
+        ...["slack", "weather-bot", "messages", "stripe", "mystery"].map((name) => ({
+          logicalPath: `channels/${name}.ts`,
+          sourceId: `channels/${name}.ts`,
+        })),
+        ...["linear", "github", "notion-api"].map((name) => ({
+          logicalPath: `connections/${name}.ts`,
+          sourceId: `connections/${name}.ts`,
+        })),
+        ...["get-weather", "send-slack"].map((name) => ({
+          logicalPath: `tools/${name}.ts`,
+          sourceId: `tools/${name}.ts`,
+        })),
       ],
+      channelRoutes: {
+        effective: [
+          makeChannel({ name: "slack", adapterKind: "slack" }),
+          makeChannel({ name: "weather-bot", adapterKind: "weather-slack" }),
+          makeChannel({ name: "messages", adapterKind: "http" }),
+          makeChannel({ name: "stripe", adapterKind: "stripe-webhook" }),
+          makeChannel({ name: "mystery" }),
+        ],
+        preflight: [],
+        shadowed: [],
+      },
       config: {
         description: "An agent for tests.",
         model: { id: "openai/gpt-5.4", routing: { kind: "gateway", target: "openai" } },
         name: "test-agent",
+        source: TEST_COMPILED_AGENT_CONFIG_SOURCE,
       },
       connections: [
         makeConnection("linear", {
@@ -328,7 +367,7 @@ describe("buildVercelAgentSummary", () => {
       },
     ]);
 
-    expect(summary.sandbox).toBeNull();
+    expect(summary.sandbox).toEqual({ logicalPath: "sandbox.ts" });
 
     expect(summary.subagents).toEqual([
       {
@@ -343,11 +382,14 @@ describe("buildVercelAgentSummary", () => {
 
   it("surfaces the package version when no generatorVersion is given", () => {
     const manifest = createCompiledAgentManifest({
+      kernelPlan: { prepared: [] },
       agentRoot: AGENT_ROOT,
       appRoot: APP_ROOT,
+      bindings: [TEST_COMPILED_AGENT_CONFIG_BINDING],
       config: {
         model: { id: "openai/gpt-5.4", routing: { kind: "gateway", target: "openai" } },
         name: "minimal-agent",
+        source: TEST_COMPILED_AGENT_CONFIG_SOURCE,
       },
     });
 
@@ -360,11 +402,17 @@ describe("buildVercelAgentSummary", () => {
 
   it("captures module-backed instructions with their resolved content and role", () => {
     const manifest = createCompiledAgentManifest({
+      kernelPlan: { prepared: [] },
       agentRoot: AGENT_ROOT,
       appRoot: APP_ROOT,
+      bindings: [
+        TEST_COMPILED_AGENT_CONFIG_BINDING,
+        { logicalPath: "instructions.ts", sourceId: "instructions.ts" },
+      ],
       config: {
         model: { id: "openai/gpt-5.4", routing: { kind: "gateway", target: "openai" } },
         name: "module-instructions-agent",
+        source: TEST_COMPILED_AGENT_CONFIG_SOURCE,
       },
       instructions: [
         {

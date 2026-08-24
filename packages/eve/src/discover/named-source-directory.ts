@@ -1,7 +1,10 @@
 import { join } from "node:path";
 
 import type { MarkdownSourceRef, ModuleSourceRef } from "#shared/source-ref.js";
-import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discover/diagnostics.js";
+import {
+  createCompilerErrorDiagnostic,
+  type CompilerDiagnostic,
+} from "#shared/compiler-diagnostics.js";
 import {
   getDirectoryEntryType,
   getSupportedModuleBaseName,
@@ -44,6 +47,7 @@ interface DiscoverNamedSourceDirectoryBaseInput {
    * directory.
    */
   invalidDirectoryMessage: string;
+  nodeId: string;
   rootEntries: readonly ProjectSourceEntry[];
   rootPath: string;
   source: ProjectSource;
@@ -57,7 +61,11 @@ interface DiscoverNamedSourceDirectoryBaseInput {
    * every leaf slot name and, when `recursive`, every subdirectory name.
    * Failed segments produce a diagnostic and the candidate is dropped.
    */
-  validateSegment?: (segment: string, sourcePath: string) => DiscoverDiagnostic | null;
+  validateSegment?: (
+    segment: string,
+    sourcePath: string,
+    nodeId: string,
+  ) => CompilerDiagnostic | null;
   /**
    * When set, emit this diagnostic for any leaf file that is neither a
    * supported authored module nor (when allowed) a markdown file. When
@@ -109,13 +117,13 @@ export interface DiscoverNamedSourceDirectoryWithMarkdownInput<
 export async function discoverNamedSourceDirectory(
   input: DiscoverNamedSourceDirectoryModuleInput,
 ): Promise<{
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
   sources: ModuleSourceRef[];
 }>;
 export async function discoverNamedSourceDirectory<TDefinition>(
   input: DiscoverNamedSourceDirectoryWithMarkdownInput<TDefinition>,
 ): Promise<{
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
   sources: (MarkdownSourceRef<TDefinition> | ModuleSourceRef)[];
 }>;
 export async function discoverNamedSourceDirectory<TDefinition>(
@@ -123,9 +131,10 @@ export async function discoverNamedSourceDirectory<TDefinition>(
     | DiscoverNamedSourceDirectoryModuleInput
     | DiscoverNamedSourceDirectoryWithMarkdownInput<TDefinition>,
 ): Promise<{
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
   sources: (MarkdownSourceRef<TDefinition> | ModuleSourceRef)[];
 }> {
+  const { nodeId } = input;
   const directoryPath = join(input.rootPath, input.directoryName);
   const directoryEntry = input.rootEntries.find((entry) => entry.name === input.directoryName);
 
@@ -136,9 +145,10 @@ export async function discoverNamedSourceDirectory<TDefinition>(
   if (!directoryEntry.isDirectory()) {
     return {
       diagnostics: [
-        createDiscoverErrorDiagnostic({
+        createCompilerErrorDiagnostic({
           code: input.invalidDirectoryCode,
           message: input.invalidDirectoryMessage,
+          nodeId,
           sourcePath: directoryPath,
         }),
       ],
@@ -146,7 +156,7 @@ export async function discoverNamedSourceDirectory<TDefinition>(
     };
   }
 
-  const diagnostics: DiscoverDiagnostic[] = [];
+  const diagnostics: CompilerDiagnostic[] = [];
   const sources: (MarkdownSourceRef<TDefinition> | ModuleSourceRef)[] = [];
 
   await walkNamedSourceDirectory<TDefinition>({
@@ -156,6 +166,7 @@ export async function discoverNamedSourceDirectory<TDefinition>(
       input.allowMarkdown === true
         ? (input as DiscoverNamedSourceDirectoryWithMarkdownInput<TDefinition>).markdownLowerer
         : undefined,
+    nodeId,
     projectSource: input.source,
     recursive: input.recursive,
     relativeDirectory: input.directoryName,
@@ -174,8 +185,9 @@ export async function discoverNamedSourceDirectory<TDefinition>(
 
 interface WalkNamedSourceDirectoryInput<TDefinition> {
   allowMarkdown: boolean;
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
   markdownLowerer?: (markdown: string, input: { name: string }) => TDefinition;
+  nodeId: string;
   projectSource: ProjectSource;
   recursive: boolean;
   /**
@@ -198,7 +210,11 @@ interface WalkNamedSourceDirectoryInput<TDefinition> {
   unsupportedEntryMessage?: (sourcePath: string, directoryName: string) => string;
   unsupportedFileCode?: string;
   unsupportedFileMessage?: (sourcePath: string, directoryName: string) => string;
-  validateSegment?: (segment: string, sourcePath: string) => DiscoverDiagnostic | null;
+  validateSegment?: (
+    segment: string,
+    sourcePath: string,
+    nodeId: string,
+  ) => CompilerDiagnostic | null;
 }
 
 async function walkNamedSourceDirectory<TDefinition>(
@@ -237,7 +253,7 @@ async function walkSubdirectories<TDefinition>(
     const segmentPath = join(absoluteDirectory, entry.name);
 
     if (input.validateSegment !== undefined) {
-      const segmentDiagnostic = input.validateSegment(entry.name, segmentPath);
+      const segmentDiagnostic = input.validateSegment(entry.name, segmentPath, input.nodeId);
       if (segmentDiagnostic !== null) {
         input.diagnostics.push(segmentDiagnostic);
         continue;
@@ -248,6 +264,7 @@ async function walkSubdirectories<TDefinition>(
       allowMarkdown: input.allowMarkdown,
       diagnostics: input.diagnostics,
       markdownLowerer: input.markdownLowerer,
+      nodeId: input.nodeId,
       projectSource: input.projectSource,
       recursive: input.recursive,
       relativeDirectory: input.relativeDirectory,
@@ -282,11 +299,12 @@ function emitUnsupportedLeafDiagnostics<TDefinition>(
     if (entryType === "other") {
       if (input.unsupportedEntryCode !== undefined) {
         input.diagnostics.push(
-          createDiscoverErrorDiagnostic({
+          createCompilerErrorDiagnostic({
             code: input.unsupportedEntryCode,
             message:
               input.unsupportedEntryMessage?.(entryPath, input.relativeDirectory) ??
               `Expected "${entryPath}" to be a regular file or directory within "${input.relativeDirectory}/".`,
+            nodeId: input.nodeId,
             sourcePath: entryPath,
           }),
         );
@@ -310,11 +328,12 @@ function emitUnsupportedLeafDiagnostics<TDefinition>(
     }
 
     input.diagnostics.push(
-      createDiscoverErrorDiagnostic({
+      createCompilerErrorDiagnostic({
         code: input.unsupportedFileCode,
         message:
           input.unsupportedFileMessage?.(entryPath, input.relativeDirectory) ??
           `Expected "${entryPath}" to be a supported authored source within "${input.relativeDirectory}/".`,
+        nodeId: input.nodeId,
         sourcePath: entryPath,
       }),
     );
@@ -342,6 +361,7 @@ async function collectLeafSources<TDefinition>(
       const segmentDiagnostic = input.validateSegment(
         candidates.slotName,
         join(absoluteDirectory, probeFileName),
+        input.nodeId,
       );
       if (segmentDiagnostic !== null) {
         input.diagnostics.push(segmentDiagnostic);
@@ -351,10 +371,12 @@ async function collectLeafSources<TDefinition>(
 
     if (candidates.markdownFileName !== undefined && candidates.moduleFileNames.length > 0) {
       input.diagnostics.push(
-        createSlotCollisionDiagnostic(absoluteDirectory, slotLogicalPath, [
-          candidates.markdownFileName,
-          ...candidates.moduleFileNames,
-        ]),
+        createSlotCollisionDiagnostic(
+          absoluteDirectory,
+          slotLogicalPath,
+          [candidates.markdownFileName, ...candidates.moduleFileNames],
+          input.nodeId,
+        ),
       );
       continue;
     }
@@ -365,6 +387,7 @@ async function collectLeafSources<TDefinition>(
           absoluteDirectory,
           slotLogicalPath,
           candidates.moduleFileNames,
+          input.nodeId,
         ),
       );
       continue;

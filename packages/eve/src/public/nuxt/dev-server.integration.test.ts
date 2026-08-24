@@ -27,13 +27,14 @@ afterEach(() => {
 describe("resolveSharedEveDevServer", () => {
   it("reuses a healthy registered server instead of spawning", async () => {
     const appRoot = await createTempAppRoot();
-    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    const fetchMock = vi.fn(async () => Response.json({ revision: "test", serverId: "server-1" }));
     vi.stubGlobal("fetch", fetchMock);
 
     await writeRegistry(appRoot, {
       appRoot,
       origin: "http://127.0.0.1:49152",
       pid: null,
+      serverId: "server-1",
       updatedAt: new Date().toISOString(),
     });
 
@@ -42,7 +43,8 @@ describe("resolveSharedEveDevServer", () => {
     expect(handle).toEqual({ origin: "http://127.0.0.1:49152" });
     expect(handle.process).toBeUndefined();
     expect(process.env[EVE_BASE_URL_ENV]).toBe("http://127.0.0.1:49152");
-    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:49152/eve/v1/health", {
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:49152/eve/v1/dev/runtime-artifacts", {
+      redirect: "error",
       signal: expect.any(AbortSignal),
     });
   });

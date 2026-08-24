@@ -1,11 +1,17 @@
 import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
 import type { ToolSourceRef } from "#discover/manifest.js";
-import type { CompiledToolDefinition, CompiledDynamicToolDefinition } from "#compiler/manifest.js";
+import type {
+  CompiledDynamicToolDefinition,
+  CompiledToolDefinition,
+  CompiledWebSearchProviderDefinition,
+  CompiledWorkflowToolDefinition,
+} from "#compiler/manifest.js";
 import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
+import { isKernelSpecialDefinitionPath } from "#kernel/capabilities.js";
 
 /**
  * Compiled tool entry produced from one authored `tools/*.ts` file.
@@ -17,8 +23,11 @@ import {
 export type CompiledToolEntry =
   | { readonly kind: "tool"; readonly definition: CompiledToolDefinition }
   | { readonly kind: "disabled"; readonly name: string }
-  | { readonly kind: "workflow-tool"; readonly maxSubagents?: number }
-  | { readonly kind: "web-search-tool"; readonly provider: "exa" | "parallel" }
+  | { readonly kind: "workflow-tool"; readonly definition: CompiledWorkflowToolDefinition }
+  | {
+      readonly kind: "web-search-tool";
+      readonly definition: CompiledWebSearchProviderDefinition;
+    }
   | { readonly kind: "dynamic-tool"; readonly definition: CompiledDynamicToolDefinition };
 
 /**
@@ -34,38 +43,62 @@ export type CompiledToolEntry =
  * are rejected by the normalizer.
  */
 export async function compileToolEntry(
-  agentRoot: string,
   source: ToolSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
+  options: ModuleBackedDefinitionLoadOptions & { readonly name?: string },
 ): Promise<CompiledToolEntry> {
   const entry = normalizeToolDefinition(
     await loadModuleBackedDefinition({
-      agentRoot,
-      externalDependencies: options.externalDependencies,
+      binding: options.binding,
       kind: "tool",
+      moduleLoader: options.moduleLoader,
       source,
     }),
     `Expected the tool export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
   );
-  const toolName = stripLogicalPathExtension(source.logicalPath)
-    .replace(/^tools\//, "")
-    .replaceAll("/", "-");
+  const toolName =
+    options.name ??
+    stripLogicalPathExtension(source.logicalPath)
+      .replace(/^tools\//, "")
+      .replaceAll("/", "-");
 
   if (entry.kind === "disabled") {
     return { kind: "disabled", name: toolName };
   }
 
   if (entry.kind === "workflow-tool") {
-    return { kind: "workflow-tool", maxSubagents: entry.maxSubagents };
+    if (!isKernelSpecialDefinitionPath(source.logicalPath, "workflow-tool")) {
+      throw new Error(
+        `The experimental_workflow() definition must be exported from "tools/workflow.ts", not "${source.logicalPath}".`,
+      );
+    }
+    return {
+      kind: "workflow-tool",
+      definition: {
+        exportName: source.exportName,
+        logicalPath: source.logicalPath,
+        maxSubagents: entry.maxSubagents,
+        sourceId: source.sourceId,
+        sourceKind: "module",
+      },
+    };
   }
 
   if (entry.kind === "web-search-tool") {
-    if (toolName !== "web_search") {
+    if (!isKernelSpecialDefinitionPath(source.logicalPath, "web-search-tool")) {
       throw new Error(
         `The webSearch() definition must be exported from "tools/web_search.ts", not "${source.logicalPath}".`,
       );
     }
-    return { kind: "web-search-tool", provider: entry.provider };
+    return {
+      kind: "web-search-tool",
+      definition: {
+        exportName: source.exportName,
+        logicalPath: source.logicalPath,
+        provider: entry.provider,
+        sourceId: source.sourceId,
+        sourceKind: "module",
+      },
+    };
   }
 
   if (entry.kind === "dynamic-tool") {
@@ -88,10 +121,14 @@ export async function compileToolEntry(
       description: entry.definition.description,
       execution: entry.definition.execution,
       exportName: source.exportName,
+      hasAuth: entry.definition.hasAuth,
+      hasExecute: entry.definition.execute !== undefined,
+      hasModelOutputProjection: entry.definition.hasModelOutputProjection,
       inputSchema: entry.definition.inputSchema ?? null,
       logicalPath: source.logicalPath,
       name: toolName,
       outputSchema: entry.definition.outputSchema,
+      requiresApproval: entry.definition.requiresApproval,
       sourceId: source.sourceId,
       sourceKind: "module",
     },

@@ -1,0 +1,7 @@
+{
+  "kind": "eve-extension-capability-contract",
+  "capability": "instrumentation",
+  "epoch": 1,
+  "sha256": "0d3cb53a0022f774013de3f852e078f426445843c75c4b2e821ddb235a2612c9",
+  "exports": ["defineInstrumentation", "disableInstrumentation"]
+}

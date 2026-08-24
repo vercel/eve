@@ -16,17 +16,9 @@ export interface RuntimeBundledCompiledArtifactsSource {
 /**
  * Disk-backed compiled artifacts rooted at one authored application.
  */
-export interface RuntimeDiskCompiledArtifactsSource {
+interface RuntimeDiskCompiledArtifactsSourceBase {
   readonly appRoot: string;
   readonly kind: "disk";
-  /**
-   * Native filesystem path to the package-owned authored-source module map
-   * loader. When set, the runtime loads modules directly from authored
-   * source instead of the bundled-compiled module map. Omitted in deployed
-   * runtimes, where the module map must come from the compiled artifact
-   * emitted by the build.
-   */
-  readonly moduleMapLoaderPath?: string;
   /**
    * Stable application root used for local sandbox template/session caches.
    * In development, `appRoot` can point at an immutable runtime snapshot
@@ -43,6 +35,20 @@ export interface RuntimeDiskCompiledArtifactsSource {
   readonly durableReference?: "development-generation";
 }
 
+export type RuntimeDiskCompiledArtifactsSource = RuntimeDiskCompiledArtifactsSourceBase &
+  (
+    | {
+        readonly moduleMapLoaderKind?: undefined;
+        readonly moduleMapLoaderPath?: undefined;
+      }
+    | {
+        /** Package-owned loader used to hydrate the validated manifest. */
+        readonly moduleMapLoaderPath: string;
+        /** Whether hydration reads live authored source or an immutable generation. */
+        readonly moduleMapLoaderKind: "authored-source" | "materialized-generation";
+      }
+  );
+
 /**
  * Creates the bundled compiled-artifact source.
  */
@@ -57,24 +63,60 @@ export function createBundledRuntimeCompiledArtifactsSource(): RuntimeBundledCom
  */
 export function createDiskRuntimeCompiledArtifactsSource(
   appRoot: string,
-  options: {
-    readonly durableReference?: "development-generation";
-    readonly moduleMapLoaderPath?: string;
-    readonly sandboxAppRoot?: string;
-  } = {},
+  options:
+    | {
+        readonly durableReference?: "development-generation";
+        readonly moduleMapLoaderKind?: undefined;
+        readonly moduleMapLoaderPath?: undefined;
+        readonly sandboxAppRoot?: string;
+      }
+    | {
+        readonly durableReference?: "development-generation";
+        readonly moduleMapLoaderKind: "authored-source" | "materialized-generation";
+        readonly moduleMapLoaderPath: string;
+        readonly sandboxAppRoot?: string;
+      } = {},
 ): RuntimeDiskCompiledArtifactsSource {
-  if (
-    options.moduleMapLoaderPath !== undefined ||
-    options.sandboxAppRoot !== undefined ||
-    options.durableReference !== undefined
-  ) {
-    return {
+  if (options.moduleMapLoaderKind !== undefined) {
+    const source: {
+      appRoot: string;
+      durableReference?: "development-generation";
+      kind: "disk";
+      moduleMapLoaderKind: "authored-source" | "materialized-generation";
+      moduleMapLoaderPath: string;
+      sandboxAppRoot?: string;
+    } = {
       appRoot,
-      durableReference: options.durableReference,
       kind: "disk",
+      moduleMapLoaderKind: options.moduleMapLoaderKind,
       moduleMapLoaderPath: options.moduleMapLoaderPath,
-      sandboxAppRoot: options.sandboxAppRoot,
     };
+    if (options.durableReference !== undefined) {
+      source.durableReference = options.durableReference;
+    }
+    if (options.sandboxAppRoot !== undefined) {
+      source.sandboxAppRoot = options.sandboxAppRoot;
+    }
+    return source;
+  }
+
+  if (options.sandboxAppRoot !== undefined || options.durableReference !== undefined) {
+    const source: {
+      appRoot: string;
+      durableReference?: "development-generation";
+      kind: "disk";
+      sandboxAppRoot?: string;
+    } = {
+      appRoot,
+      kind: "disk",
+    };
+    if (options.durableReference !== undefined) {
+      source.durableReference = options.durableReference;
+    }
+    if (options.sandboxAppRoot !== undefined) {
+      source.sandboxAppRoot = options.sandboxAppRoot;
+    }
+    return source;
   }
 
   return {
@@ -112,7 +154,7 @@ export function getRuntimeCompiledArtifactsCacheKey(
   }
 
   if (source.moduleMapLoaderPath !== undefined) {
-    return `disk:${source.appRoot}:authored-source:${source.moduleMapLoaderPath}`;
+    return `disk:${source.appRoot}:${source.moduleMapLoaderKind}:${source.moduleMapLoaderPath}`;
   }
 
   return `disk:${source.appRoot}`;

@@ -88,6 +88,49 @@ describe("createRuntimeSubagentRegistry", () => {
       }),
     ).toThrowError(RuntimeRegistryError);
   });
+
+  it("keeps structural subagent provenance separate from its dynamic config resolver", () => {
+    const events = { "session.started": () => null };
+    const registry = createRuntimeSubagentRegistry({
+      subagents: [
+        {
+          dynamic: {
+            eventNames: ["session.started"],
+            events,
+            exportName: "resolveResearcher",
+            logicalPath: "subagents/researcher/agent.ts",
+            sourceId: "config:researcher",
+            sourceKind: "module",
+          },
+          kind: "subagent",
+          logicalPath: "subagents/researcher",
+          name: "researcher",
+          nodeId: "subagents/researcher",
+          sourceId: "source:researcher",
+          sourceKind: "subagent",
+        },
+      ],
+    });
+
+    expect(registry.dynamicResolvers).toEqual([
+      {
+        eventNames: ["session.started"],
+        events,
+        exportName: "resolveResearcher",
+        kind: "subagent",
+        logicalPath: "subagents/researcher/agent.ts",
+        name: "researcher",
+        nodeId: "subagents/researcher",
+        sourceId: "config:researcher",
+        sourceKind: "module",
+        subagentSource: {
+          logicalPath: "subagents/researcher",
+          sourceId: "source:researcher",
+          sourceKind: "subagent",
+        },
+      },
+    ]);
+  });
 });
 
 function createResolvedRuntimeSubagentNode(input: {
@@ -104,6 +147,6 @@ function createResolvedRuntimeSubagentNode(input: {
     name: input.name,
     nodeId: input.nodeId,
     sourceId: input.sourceId,
-    sourceKind: "module",
+    sourceKind: "subagent",
   };
 }

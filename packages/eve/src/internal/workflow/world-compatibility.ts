@@ -23,6 +23,12 @@ export interface AssertWorkflowWorldCompatibilityInput {
   readonly expectedWorkflowVersion: string;
 }
 
+export interface ValidatedWorkflowWorldCompatibility {
+  readonly declaredPackageName: (typeof WORKFLOW_COMPATIBILITY_PACKAGES)[number];
+  readonly declaredRange: string;
+  readonly expectedVersion: string;
+}
+
 interface VersionLine {
   readonly major: number;
   readonly prereleaseTag: string | undefined;
@@ -54,9 +60,12 @@ function parseVersionLine(value: string): VersionLine | undefined {
   return { major, prereleaseTag };
 }
 
-function readDeclaredWorkflowDependency(
-  manifest: WorkflowWorldManifest,
-): { packageName: string; range: string } | undefined {
+function readDeclaredWorkflowDependency(manifest: WorkflowWorldManifest):
+  | {
+      packageName: (typeof WORKFLOW_COMPATIBILITY_PACKAGES)[number];
+      range: string;
+    }
+  | undefined {
   for (const packageName of WORKFLOW_COMPATIBILITY_PACKAGES) {
     const range = manifest.dependencies?.[packageName] ?? manifest.peerDependencies?.[packageName];
 
@@ -92,22 +101,35 @@ function formatExpectedLine(line: VersionLine): string {
  */
 export function assertWorkflowWorldCompatibility(
   input: AssertWorkflowWorldCompatibilityInput,
-): void {
+): ValidatedWorkflowWorldCompatibility {
   const declared = readDeclaredWorkflowDependency(input.worldManifest);
 
   if (declared === undefined) {
-    return;
+    throw new Error(
+      `Configured Workflow world "${input.worldPackageName}" must declare a dependency or peerDependency on @workflow/core or @workflow/world so eve can validate its protocol line.`,
+    );
   }
 
   const worldLine = parseVersionLine(declared.range);
   const expectedLine = parseVersionLine(input.expectedWorkflowVersion);
 
-  if (worldLine === undefined || expectedLine === undefined) {
-    return;
+  if (worldLine === undefined) {
+    throw new Error(
+      `Configured Workflow world "${input.worldPackageName}" declares ${declared.packageName} with unsupported range ${JSON.stringify(declared.range)}. Use a semver range that identifies its Workflow protocol line.`,
+    );
+  }
+  if (expectedLine === undefined) {
+    throw new Error(
+      `eve cannot validate configured Workflow world "${input.worldPackageName}" because its bundled Workflow version ${JSON.stringify(input.expectedWorkflowVersion)} is invalid.`,
+    );
   }
 
   if (!isDefiniteLineMismatch(worldLine, expectedLine)) {
-    return;
+    return {
+      declaredPackageName: declared.packageName,
+      declaredRange: declared.range,
+      expectedVersion: input.expectedWorkflowVersion,
+    };
   }
 
   const worldLineLabel =

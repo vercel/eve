@@ -20,7 +20,7 @@ import {
   readAgentInfoRouteResponse,
   readRemoteAgentStreamHeadersResolver,
   readRouteSessionCreator,
-} from "#internal/nitro/routes/channel-route-context.js";
+} from "#channel/route-context.js";
 import {
   EVE_MESSAGE_STREAM_CONTENT_TYPE,
   EVE_MESSAGE_STREAM_FORMAT,
@@ -46,7 +46,7 @@ import {
   createEveSessionStreamRoutePath,
   createEveSubagentStreamRoutePath,
 } from "#protocol/routes.js";
-import { isInputResponse, type ValidatedInputResponse } from "#runtime/input/types.js";
+import { isInputResponse, type ValidatedInputResponse } from "#shared/input.js";
 import { type AuthFn, routeAuth } from "#public/channels/auth.js";
 import {
   collectUploadPolicyViolations,

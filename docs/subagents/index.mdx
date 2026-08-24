@@ -48,7 +48,11 @@ export default defineAgent({
 });
 ```
 
-`description` is required. The parent reads it to decide whether to delegate, so the compiler rejects any subagent whose `agent.ts` leaves it out.
+`description` is required. The parent reads it to decide whether to delegate, so
+the compiler rejects a static subagent without one. If `agent.ts` is omitted,
+eve selects the same canonical framework config source used by the root, but
+that source intentionally supplies no generic description. Author this file to
+replace the default with a useful routing description and model.
 
 A mounted extension can also contribute declared subagents from `extension/subagents/`. The mount namespace prefixes the subagent visible to the consuming agent node: mounting an extension as `crm` exposes its `reviewer` subagent as `crm__reviewer`. The contributed subagent keeps its own isolated tools, connections, skills, hooks, instructions, sandbox, and nested subagents, and its modules can read configuration from the extension handle. See [Extensions](./extensions#add-a-subagent) for the authoring and override behavior.
 
@@ -105,7 +109,7 @@ Minimum files:
 
 ```text
 agent/subagents/researcher/
-├── agent.ts            # required
+├── agent.ts            # required for a static description
 ├── instructions.md     # or instructions.ts, optional
 ├── tools/              # optional, its own tools
 ├── extensions/         # optional, mounted only into this subagent

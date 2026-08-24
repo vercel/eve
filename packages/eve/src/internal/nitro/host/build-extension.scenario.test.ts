@@ -92,6 +92,13 @@ describe("extension build output", () => {
         },
       },
     });
+    const runtimeRoot = join(root, "node_modules", "layout-sensitive-runtime");
+    await mkdir(runtimeRoot, { recursive: true });
+    await writeFile(
+      join(runtimeRoot, "package.json"),
+      JSON.stringify({ name: "layout-sensitive-runtime", version: "1.0.0" }),
+      "utf8",
+    );
     const config = await tryReadExtensionBuildConfig(root);
     const outDir = await buildExtensionPackage(root, config!);
     const manifestPath = join(outDir, "extension", "_manifest.json");
@@ -265,6 +272,7 @@ describe("extension build output", () => {
     );
     expect(manifest.kind).toBe("eve-extension");
     expect(manifest.builtWithEve).toMatch(/^\d+\.\d+\.\d+/);
+    expect(manifest.build).toEqual({ externalDependencies: [] });
     // The set of stamped capabilities is the assertion; the versions track
     // the current contract table so epoch bumps do not break this test.
     expect(manifest.requires).toEqual({
@@ -287,6 +295,63 @@ describe("extension build output", () => {
         "utf8",
       ),
     ).toBe("runtime data\n");
+  });
+
+  it("stamps instrumentation only when the extension root contributes it", async () => {
+    const root = await createExtensionPackage();
+    await writeFile(
+      join(root, "extension", "instrumentation.ts"),
+      [
+        'import { defineInstrumentation } from "eve/instrumentation";',
+        "export default defineInstrumentation({});",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const config = await tryReadExtensionBuildConfig(root);
+    const outDir = await buildExtensionPackage(root, config!);
+    const manifestPath = join(outDir, "extension", "_manifest.json");
+    const manifest = parseExtensionCompatibilityManifest(
+      await readFile(manifestPath, "utf8"),
+      manifestPath,
+    );
+    const declaration = await readFile(join(outDir, "extension", "instrumentation.d.ts"), "utf8");
+
+    expect(manifest.requires.instrumentation).toBe(EXTENSION_CAPABILITY_VERSIONS.instrumentation);
+    expect(declaration).not.toContain("PROVIDER");
+  });
+
+  it("does not stamp instrumentation contributed below the extension root", async () => {
+    const root = await createExtensionPackage();
+    const subagentRoot = join(root, "extension", "subagents", "reviewer");
+    await mkdir(subagentRoot, { recursive: true });
+    await writeFile(
+      join(subagentRoot, "agent.ts"),
+      [
+        'import { defineAgent } from "eve";',
+        'export default defineAgent({ model: "openai/gpt-5.4" });',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      join(subagentRoot, "instrumentation.ts"),
+      [
+        'import { defineInstrumentation } from "eve/instrumentation";',
+        "export default defineInstrumentation({});",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const config = await tryReadExtensionBuildConfig(root);
+    const outDir = await buildExtensionPackage(root, config!);
+    const manifestPath = join(outDir, "extension", "_manifest.json");
+    const manifest = parseExtensionCompatibilityManifest(
+      await readFile(manifestPath, "utf8"),
+      manifestPath,
+    );
+
+    expect(manifest.requires.instrumentation).toBeUndefined();
   });
 
   it("preserves JavaScript files inside packaged skill resource trees", async () => {

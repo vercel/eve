@@ -2,7 +2,10 @@ import { join, relative, resolve } from "node:path";
 
 import { lowerSkillMarkdown } from "#internal/helpers/markdown.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discover/diagnostics.js";
+import {
+  createCompilerErrorDiagnostic,
+  type CompilerDiagnostic,
+} from "#shared/compiler-diagnostics.js";
 import {
   classifySkillPackageEntry,
   classifySkillsDirectoryEntry,
@@ -33,6 +36,7 @@ export const DISCOVER_SKILL_MARKDOWN_MISSING = "discover/skill-markdown-missing"
  */
 interface DiscoverSkillsInput {
   agentRoot: string;
+  nodeId: string;
   /**
    * Optional {@link ProjectSource} used for all filesystem reads. Defaults to
    * a disk-backed source so disk callers keep their current behaviour.
@@ -46,7 +50,7 @@ interface DiscoverSkillsInput {
  * Result of discovering authored skills.
  */
 interface DiscoverSkillsResult {
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
   skills: SkillSourceRef[];
 }
 
@@ -56,6 +60,7 @@ interface DiscoverSkillsResult {
  * entries or Agent Skills packages rooted at `skills/<name>/SKILL.md`.
  */
 export async function discoverSkills(input: DiscoverSkillsInput): Promise<DiscoverSkillsResult> {
+  const { nodeId } = input;
   const source = input.source ?? createDiskProjectSource();
   const agentRoot = resolve(input.agentRoot);
   const skillsDirectoryPath = resolve(input.skillsDirectoryPath ?? join(agentRoot, "skills"));
@@ -74,9 +79,10 @@ export async function discoverSkills(input: DiscoverSkillsInput): Promise<Discov
   if (skillsDirectoryType !== "directory") {
     return {
       diagnostics: [
-        createDiscoverErrorDiagnostic({
+        createCompilerErrorDiagnostic({
           code: DISCOVER_SKILLS_DIRECTORY_INVALID,
           message: `Expected "${skillsDirectoryPath}" to be a directory of authored skills.`,
+          nodeId,
           sourcePath: skillsDirectoryPath,
         }),
       ],
@@ -84,7 +90,7 @@ export async function discoverSkills(input: DiscoverSkillsInput): Promise<Discov
     };
   }
 
-  const diagnostics: DiscoverDiagnostic[] = [];
+  const diagnostics: CompilerDiagnostic[] = [];
   const collidedSkillIds = new Set<string>();
   const skillsById = new Map<
     string,
@@ -99,6 +105,7 @@ export async function discoverSkills(input: DiscoverSkillsInput): Promise<Discov
     const discoveredSkill = await discoverOneSkill({
       entryName: entry.name,
       entryType: getDirectoryEntryType(entry),
+      nodeId,
       skillsDirectoryPath,
       skillsLogicalPath,
       source,
@@ -118,9 +125,10 @@ export async function discoverSkills(input: DiscoverSkillsInput): Promise<Discov
 
     if (existingSkill !== undefined) {
       diagnostics.push(
-        createDiscoverErrorDiagnostic({
+        createCompilerErrorDiagnostic({
           code: DISCOVER_SKILL_COLLISION,
           message: `Found conflicting authored skill sources for "${discoveredSkill.skillId}": "${existingSkill.logicalPath}" and "${discoveredSkill.logicalPath}".`,
+          nodeId,
           sourcePath: join(skillsDirectoryPath, discoveredSkill.skillId),
         }),
       );
@@ -144,11 +152,12 @@ export async function discoverSkills(input: DiscoverSkillsInput): Promise<Discov
 async function discoverOneSkill(input: {
   entryName: string;
   entryType: "directory" | "file" | "other";
+  nodeId: string;
   skillsDirectoryPath: string;
   skillsLogicalPath: string;
   source: ProjectSource;
 }): Promise<{
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
   logicalPath: string;
   skill: SkillSourceRef | null;
   skillId: string | null;
@@ -159,6 +168,7 @@ async function discoverOneSkill(input: {
     case "skill-package-directory":
       return discoverPackagedSkill({
         logicalSkillsPath: input.skillsLogicalPath,
+        nodeId: input.nodeId,
         skillId: input.entryName,
         skillRootPath: entryPath,
         source: input.source,
@@ -166,6 +176,7 @@ async function discoverOneSkill(input: {
     case "flat-skill-markdown":
       return discoverFlatMarkdownSkill({
         logicalSkillsPath: input.skillsLogicalPath,
+        nodeId: input.nodeId,
         skillFileName: input.entryName,
         skillFilePath: entryPath,
         source: input.source,
@@ -185,9 +196,10 @@ async function discoverOneSkill(input: {
     default:
       return {
         diagnostics: [
-          createDiscoverErrorDiagnostic({
+          createCompilerErrorDiagnostic({
             code: DISCOVER_SKILL_ENTRY_NOT_DIRECTORY,
             message: `Expected "${entryPath}" to be a skill directory containing SKILL.md or a flat ".md", ".ts", ".cts", ".mts", ".js", ".cjs", or ".mjs" skill file.`,
+            nodeId: input.nodeId,
             sourcePath: entryPath,
           }),
         ],
@@ -200,11 +212,12 @@ async function discoverOneSkill(input: {
 
 async function discoverPackagedSkill(input: {
   logicalSkillsPath: string;
+  nodeId: string;
   skillId: string;
   skillRootPath: string;
   source: ProjectSource;
 }): Promise<{
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
   logicalPath: string;
   skill: SkillSourceRef | null;
   skillId: string | null;
@@ -221,9 +234,10 @@ async function discoverPackagedSkill(input: {
   if (skillFileName === undefined) {
     return {
       diagnostics: [
-        createDiscoverErrorDiagnostic({
+        createCompilerErrorDiagnostic({
           code: DISCOVER_SKILL_MARKDOWN_MISSING,
           message: `Expected "${skillFilePath}" to exist for the "${input.skillId}" skill.`,
+          nodeId: input.nodeId,
           sourcePath: input.skillRootPath,
         }),
       ],
@@ -240,9 +254,10 @@ async function discoverPackagedSkill(input: {
   } catch (error) {
     return {
       diagnostics: [
-        createDiscoverErrorDiagnostic({
+        createCompilerErrorDiagnostic({
           code: DISCOVER_SKILL_FRONTMATTER_INVALID,
           message: formatSkillDiscoveryError(skillFilePath, error),
+          nodeId: input.nodeId,
           sourcePath: skillFilePath,
         }),
       ],
@@ -308,11 +323,12 @@ async function discoverPackagedSkill(input: {
 
 async function discoverFlatMarkdownSkill(input: {
   logicalSkillsPath: string;
+  nodeId: string;
   skillFileName: string;
   skillFilePath: string;
   source: ProjectSource;
 }): Promise<{
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
   logicalPath: string;
   skill: SkillSourceRef | null;
   skillId: string | null;
@@ -328,9 +344,10 @@ async function discoverFlatMarkdownSkill(input: {
   } catch (error) {
     return {
       diagnostics: [
-        createDiscoverErrorDiagnostic({
+        createCompilerErrorDiagnostic({
           code: DISCOVER_SKILL_FRONTMATTER_INVALID,
           message: formatSkillDiscoveryError(input.skillFilePath, error),
+          nodeId: input.nodeId,
           sourcePath: input.skillFilePath,
         }),
       ],
@@ -357,7 +374,7 @@ async function discoverFlatModuleSkill(input: {
   logicalSkillsPath: string;
   skillFileName: string;
 }): Promise<{
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
   logicalPath: string;
   skill: SkillSourceRef | null;
   skillId: string | null;

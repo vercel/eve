@@ -20,7 +20,7 @@ import type {
   HeadersDefinition,
   HeaderValue,
   ToolFilterDefinition,
-} from "#runtime/connections/types.js";
+} from "#shared/connections.js";
 
 interface McpToolCache {
   readonly metadata: readonly ConnectionToolMetadata[];

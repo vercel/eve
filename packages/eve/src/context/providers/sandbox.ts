@@ -25,7 +25,7 @@ export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
     const channel = ctx.get(ChannelKey);
     const adapterState = channel?.state as Record<string, unknown> | undefined;
     const parentSandboxState = adapterState?.parentSandboxState as SandboxState | undefined;
-    const inheritsParent = registry.sandbox?.definition.inheritsParent === true;
+    const inheritsParent = registry.sandbox.definition.inheritsParent === true;
     const sharedSandboxSessionId = adapterState?.sandboxSessionId as string | undefined;
     const sharesSandbox = inheritsParent || sharedSandboxSessionId !== undefined;
     const sandboxSessionId = sharesSandbox ? (sharedSandboxSessionId ?? sessionId) : sessionId;

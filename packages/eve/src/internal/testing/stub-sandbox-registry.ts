@@ -1,7 +1,5 @@
-import {
-  createFrameworkSandboxDefinition,
-  type RuntimeSandboxRegistry,
-} from "#runtime/sandbox/registry.js";
+import { defaultSandbox } from "#public/sandbox/backends/default.js";
+import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 
 /**
  * Stub registry for tests that exercise harness/execution paths that do
@@ -15,11 +13,21 @@ import {
 export function createStubSandboxRegistry(): RuntimeSandboxRegistry {
   return {
     sandbox: {
-      definition: createFrameworkSandboxDefinition(),
+      definition: createStubSandboxDefinition(),
       workspaceResourceRoot: {
         logicalPath: "test:stub-sandbox/workspace",
         rootEntries: [],
       },
     },
+  };
+}
+
+function createStubSandboxDefinition() {
+  return {
+    backend: defaultSandbox(),
+    logicalPath: "test:stub-sandbox",
+    sourceHash: "test:stub-sandbox",
+    sourceId: "test:stub-sandbox",
+    sourceKind: "module" as const,
   };
 }

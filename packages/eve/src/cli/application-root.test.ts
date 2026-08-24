@@ -8,17 +8,16 @@ import {
   resolveCliApplicationRoot,
   type ResolveCliApplicationRootDependencies,
 } from "#cli/application-root.js";
-import {
-  createDiscoverErrorDiagnostic,
-  DISCOVER_PROJECT_NOT_FOUND,
-} from "#discover/diagnostics.js";
-import { DiscoveryProjectResolutionError } from "#discover/project.js";
+import { createCompilerErrorDiagnostic } from "#shared/compiler-diagnostics.js";
+import { DISCOVER_PROJECT_NOT_FOUND, DiscoveryProjectResolutionError } from "#discover/project.js";
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/compiled-agent-node-id.js";
 
 function projectNotFound(path: string): DiscoveryProjectResolutionError {
   return new DiscoveryProjectResolutionError(
-    createDiscoverErrorDiagnostic({
+    createCompilerErrorDiagnostic({
       code: DISCOVER_PROJECT_NOT_FOUND,
       message: `Could not resolve an eve agent root from "${path}".`,
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       sourcePath: path,
     }),
   );

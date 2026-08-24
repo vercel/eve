@@ -11,7 +11,7 @@ import {
   resolveRemoteAgentStreamHeaders,
   startRemoteAgentSession,
 } from "#execution/remote-agent-dispatch.js";
-import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeRemoteAgentCallActionRequest } from "#shared/runtime-actions.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 
 describe("resolveRemoteAgentForAction", () => {
@@ -20,8 +20,9 @@ describe("resolveRemoteAgentForAction", () => {
       dynamic: {
         eventNames: ["session.started"],
         events: { "session.started": () => null },
-        logicalPath: "subagents/research.ts",
-        sourceId: "subagents/research.ts",
+        exportName: "resolveResearch",
+        logicalPath: "subagents/research/agent.ts",
+        sourceId: "config:research",
         sourceKind: "module",
       },
       kind: "subagent",
@@ -29,7 +30,7 @@ describe("resolveRemoteAgentForAction", () => {
       name: "research",
       nodeId: "subagents/research.ts",
       sourceId: "subagents/research.ts",
-      sourceKind: "module",
+      sourceKind: "subagent",
     } as const;
 
     const credentialsStepId = "eve:dynamic-remote-agent//selected-research";
@@ -56,6 +57,12 @@ describe("resolveRemoteAgentForAction", () => {
 
     expect(resolved).toMatchObject({
       description: "Selected remote research.",
+      configResolver: {
+        exportName: "resolveResearch",
+        logicalPath: "subagents/research/agent.ts",
+        sourceId: "config:research",
+        sourceKind: "module",
+      },
       headers: { "x-selected": "yes" },
       kind: "remote",
       logicalPath: "subagents/research.ts",
@@ -63,7 +70,7 @@ describe("resolveRemoteAgentForAction", () => {
       nodeId: "subagents/research.ts",
       path: "/custom/session",
       sourceId: "subagents/research.ts",
-      sourceKind: "module",
+      sourceKind: "subagent",
       url: "https://selected.example.com",
     });
     await expect(resolved.auth?.()).resolves.toEqual({
@@ -973,6 +980,11 @@ function createAction(): RuntimeRemoteAgentCallActionRequest {
 function createRemoteAgent(): ResolvedRuntimeRemoteAgentNode {
   return {
     auth: async () => ({ headers: { authorization: "Bearer remote-token" } }),
+    configResolver: {
+      logicalPath: "subagents/research/agent.ts",
+      sourceId: "config:research",
+      sourceKind: "module",
+    },
     description: "Performs research.",
     headers: { "x-static": "yes" },
     kind: "remote",
@@ -981,7 +993,7 @@ function createRemoteAgent(): ResolvedRuntimeRemoteAgentNode {
     nodeId: "subagents/research.ts",
     path: "/eve/v1/session",
     sourceId: "subagents/research.ts",
-    sourceKind: "module",
+    sourceKind: "subagent",
     url: "https://remote.example.com",
   };
 }

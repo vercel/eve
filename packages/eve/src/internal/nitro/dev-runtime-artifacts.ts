@@ -4,10 +4,24 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
+import { parseCompiledAgentManifest } from "#compiler/compiled-manifest-validation.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
-import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
+import type { CompiledExternalDependencyPlan } from "#compiler/external-dependency-plan.js";
+import { verifyCompiledExternalDependencyPlanFiles } from "#compiler/external-dependency-plan.js";
+import type { CompiledWorkflowWorldPlan } from "#compiler/workflow-world-plan.js";
+import { materializeCompiledWorkflowWorldPlan } from "#compiler/workflow-world-plan-materialization.js";
+import { materializeCompiledExternalDependencyPlan } from "#internal/materialize-external-dependencies.js";
+import {
+  readMaterializedAuthoredModuleIndex,
+  type ValidatedMaterializedAuthoredModuleIndex,
+} from "#internal/materialized-authored-modules.js";
+import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { loadCompiledArtifactEnvelope } from "#runtime/loaders/compiled-artifact-set.js";
+import {
+  copyDevelopmentDiscoveryArtifacts,
+  rewriteSnapshotCompileMetadata,
+} from "#internal/nitro/dev-runtime-artifact-integrity.js";
 import { copyDevelopmentSourceSnapshot } from "#internal/nitro/dev-runtime-source-snapshot-copy.js";
-import { resolveExtensionExternalDependencyPaths } from "#internal/nitro/host/extension-external-dependency-plugin.js";
 import {
   createDevelopmentSourceSnapshotPlan,
   toDevelopmentSourceSnapshotPath,
@@ -18,17 +32,12 @@ import {
   recordRetiredDevelopmentRuntimeArtifactsSnapshot,
 } from "#internal/nitro/dev-runtime-artifacts-retention.js";
 import { renameWithTransientBusyRetry } from "#shared/rename-with-retry.js";
+import { relocateCompiledAgentManifest } from "#internal/nitro/compiled-manifest-relocation.js";
+import { serializeArtifactJson } from "#protocol/artifact-json.js";
 
 const DEV_RUNTIME_ARTIFACTS_DIRECTORY = "dev-runtime";
 const DEV_RUNTIME_ARTIFACTS_GENERATION_METADATA = "generation.json";
 const DEV_RUNTIME_ARTIFACTS_POINTER_VERSION = 2;
-
-interface DevelopmentRuntimeArtifactsPointerV1 {
-  readonly appRoot: string;
-  readonly kind: "eve-dev-runtime-artifacts-pointer";
-  readonly version: 1;
-}
-
 interface DevelopmentRuntimeArtifactsPointerV2 {
   readonly appRoot: string;
   readonly kind: "eve-dev-runtime-artifacts-pointer";
@@ -95,7 +104,11 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
 
   try {
     await copyDevelopmentSourceSnapshot(sourceSnapshotPlan);
-    await mountExtensionExternalDependencies({
+    const workflowWorld = await materializeCompiledWorkflowWorldPlan({
+      destinationRoot: join(sourceSnapshotPlan.runtimeAppRoot, ".eve", "workflow-world"),
+      plan: compileResult.manifest.workflowWorld,
+    });
+    const externalDependencyPlan = await materializeExternalDependencies({
       manifest: compileResult.manifest,
       runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot,
     });
@@ -106,8 +119,14 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
         recursive: true,
       },
     );
+    const copiedDiscoveryArtifacts = await copyDevelopmentDiscoveryArtifacts({
+      discoveryDirectoryPath: compileResult.paths.discoveryDirectoryPath,
+      runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot,
+    });
     await rewriteSnapshotCompiledManifest({
       appRoot: compileResult.project.appRoot,
+      externalDependencyPlan,
+      manifest: compileResult.manifest,
       manifestPath: join(
         sourceSnapshotPlan.runtimeAppRoot,
         ".eve",
@@ -117,6 +136,7 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
       runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot,
       snapshotSourceRoot: sourceSnapshotPlan.snapshotSourceRoot,
       sourceRoot: sourceSnapshotPlan.sourceRoot,
+      workflowWorld,
     });
     await validateSnapshotCompiledManifestRoots({
       manifestPath: join(
@@ -127,6 +147,9 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
       ),
       runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot,
     });
+    if (copiedDiscoveryArtifacts) {
+      await rewriteSnapshotCompileMetadata(sourceSnapshotPlan.runtimeAppRoot);
+    }
     await writeFile(
       join(snapshotRoot, DEV_RUNTIME_ARTIFACTS_GENERATION_METADATA),
       `${JSON.stringify({ runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot })}\n`,
@@ -144,54 +167,28 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
   };
 }
 
-async function mountExtensionExternalDependencies(input: {
-  readonly manifest?: CompiledAgentManifest;
+async function materializeExternalDependencies(input: {
+  readonly manifest: CompiledAgentManifest;
   readonly runtimeAppRoot: string;
-}): Promise<void> {
-  if (input.manifest === undefined) {
-    return;
+}): Promise<CompiledExternalDependencyPlan> {
+  const plan = input.manifest.externalDependencyPlan;
+  const materialized = await materializeCompiledExternalDependencyPlan({
+    destinationRoot: join(input.runtimeAppRoot, ".eve", "external-dependencies"),
+    plan,
+  });
+  for (const entry of plan.entries) {
+    const rootPackage = materialized.entryPackageRoots.get(entry.id)!;
+    const topLevelMount = join(
+      input.runtimeAppRoot,
+      "node_modules",
+      ...entry.packageName.split("/"),
+    );
+    await mkdir(dirname(topLevelMount), { recursive: true });
+    await rm(topLevelMount, { force: true, recursive: true });
+    await symlink(rootPackage, topLevelMount, "junction");
   }
 
-  const mounts = [
-    input.manifest,
-    ...(input.manifest.subagents ?? []).map((subagent) => subagent.agent),
-  ]
-    .flatMap((node) => node.extensionMounts ?? [])
-    .filter((mount) => (mount.externalDependencies ?? []).length > 0);
-
-  for (const [dependency, entryPath] of Object.entries(
-    resolveExtensionExternalDependencyPaths(mounts),
-  )) {
-    const packageRoot = findPackageRoot(entryPath, dependency);
-    const mountPath = join(input.runtimeAppRoot, "node_modules", ...dependency.split("/"));
-    await mkdir(dirname(mountPath), { recursive: true });
-    await rm(mountPath, { force: true, recursive: true });
-    await symlink(packageRoot, mountPath, "junction");
-  }
-}
-
-function findPackageRoot(entryPath: string, packageName: string): string {
-  let directory = dirname(entryPath);
-
-  while (true) {
-    const packageJsonPath = join(directory, "package.json");
-    if (existsSync(packageJsonPath)) {
-      try {
-        const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { name?: unknown };
-        if (pkg.name === packageName) {
-          return directory;
-        }
-      } catch {}
-    }
-
-    const parent = dirname(directory);
-    if (parent === directory) {
-      throw new Error(
-        `Cannot locate package root for extension external dependency "${packageName}".`,
-      );
-    }
-    directory = parent;
-  }
+  return materialized.plan;
 }
 
 /**
@@ -209,15 +206,27 @@ export async function activateDevelopmentRuntimeArtifactsSnapshotTransaction(inp
   readonly appRoot: string;
   readonly snapshot: DevelopmentRuntimeArtifactsSnapshot;
 }): Promise<DevelopmentRuntimeArtifactsActivation> {
-  const materializedIndex = await readMaterializedAuthoredModuleIndex(
-    input.snapshot.runtimeAppRoot,
-  );
-  if (
-    materializedIndex === undefined ||
-    !existsSync(join(input.snapshot.runtimeAppRoot, ".eve", "compile", materializedIndex.moduleMap))
-  ) {
+  let materializedIndex: ValidatedMaterializedAuthoredModuleIndex | undefined;
+  try {
+    const envelope = await loadCompiledArtifactEnvelope({
+      compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(
+        input.snapshot.runtimeAppRoot,
+      ),
+    });
+    await verifyCompiledExternalDependencyPlanFiles(envelope.manifest.externalDependencyPlan);
+    materializedIndex = await readMaterializedAuthoredModuleIndex({
+      metadata: envelope.metadata,
+      runtimeAppRoot: input.snapshot.runtimeAppRoot,
+    });
+  } catch (cause) {
     throw new Error(
-      `Cannot activate development runtime generation "${input.snapshot.snapshotRoot}" before its authored modules are materialized.`,
+      `Cannot activate incomplete development runtime generation "${input.snapshot.snapshotRoot}".`,
+      { cause },
+    );
+  }
+  if (materializedIndex === undefined) {
+    throw new Error(
+      `Cannot activate incomplete development runtime generation "${input.snapshot.snapshotRoot}".`,
     );
   }
 
@@ -288,10 +297,6 @@ export function readDevelopmentRuntimeArtifactsSnapshotRoot(
     return undefined;
   }
 
-  if (pointer.version === 1) {
-    return pointer.appRoot;
-  }
-
   return pointer.runtimeAppRoot;
 }
 
@@ -301,7 +306,7 @@ export function readActiveDevelopmentRuntimeArtifactsSnapshot(
   const pointer = readDevelopmentRuntimeArtifactsPointer(
     resolveDevelopmentRuntimeArtifactsPointerPath(appRoot),
   );
-  if (pointer === undefined || pointer.version === 1) {
+  if (pointer === undefined) {
     return undefined;
   }
   return {
@@ -343,7 +348,7 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshots(input: {
       pointer?.version === DEV_RUNTIME_ARTIFACTS_POINTER_VERSION ? pointer.snapshotRoot : undefined,
     gracePeriodMs: input.gracePeriodMs,
     now: input.now,
-    protectAll: pointer?.version === 1,
+    protectAll: false,
     retainCount: input.retainCount,
     snapshotsDirectory: resolveDevelopmentRuntimeArtifactsSnapshotsDirectory(input.appRoot),
   });
@@ -354,45 +359,29 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshots(input: {
  * modules hydrate from disk at runtime through snapshot paths, so their
  * packages stay real copies while other workspace dependencies are mounted.
  */
-function collectExtensionMountSourceRoots(manifest?: CompiledAgentManifest): string[] {
-  if (manifest === undefined) {
-    return [];
-  }
-
-  return [manifest, ...(manifest.subagents ?? []).map((subagent) => subagent.agent)].flatMap(
-    (node) => (node.extensionMounts ?? []).map((mount) => mount.sourceRoot),
+function collectExtensionMountSourceRoots(manifest: CompiledAgentManifest): string[] {
+  return [manifest, ...manifest.subagents.map((subagent) => subagent.agent)].flatMap((node) =>
+    node.extensionMounts.map((mount) => mount.sourceRoot),
   );
 }
 
 function readDevelopmentRuntimeArtifactsPointer(
   pointerPath: string | undefined,
-): DevelopmentRuntimeArtifactsPointerV1 | DevelopmentRuntimeArtifactsPointerV2 | undefined {
+): DevelopmentRuntimeArtifactsPointerV2 | undefined {
   if (pointerPath === undefined || !existsSync(pointerPath)) {
     return undefined;
   }
 
   try {
-    const pointer = JSON.parse(readFileSync(pointerPath, "utf8")) as Partial<
-      DevelopmentRuntimeArtifactsPointerV1 | DevelopmentRuntimeArtifactsPointerV2
-    >;
+    const pointer = JSON.parse(
+      readFileSync(pointerPath, "utf8"),
+    ) as Partial<DevelopmentRuntimeArtifactsPointerV2>;
 
     if (
       pointer.kind !== "eve-dev-runtime-artifacts-pointer" ||
       typeof pointer.version !== "number"
     ) {
       return undefined;
-    }
-
-    if (
-      pointer.version === 1 &&
-      typeof pointer.appRoot === "string" &&
-      pointer.appRoot.length > 0
-    ) {
-      return {
-        appRoot: pointer.appRoot,
-        kind: "eve-dev-runtime-artifacts-pointer",
-        version: 1,
-      };
     }
 
     if (
@@ -420,68 +409,37 @@ function readDevelopmentRuntimeArtifactsPointer(
 
 async function rewriteSnapshotCompiledManifest(input: {
   readonly appRoot: string;
+  readonly externalDependencyPlan: CompiledExternalDependencyPlan;
+  readonly manifest: CompiledAgentManifest;
   readonly manifestPath: string;
   readonly runtimeAppRoot: string;
   readonly snapshotSourceRoot: string;
   readonly sourceRoot: string;
+  readonly workflowWorld: CompiledWorkflowWorldPlan;
 }): Promise<void> {
-  const manifest = JSON.parse(await readFile(input.manifestPath, "utf8")) as unknown;
-  const rewritten = rewriteManifestRoots({
-    appRoot: input.appRoot,
-    runtimeAppRoot: input.runtimeAppRoot,
-    snapshotSourceRoot: input.snapshotSourceRoot,
-    sourceRoot: input.sourceRoot,
-    value: manifest,
+  const manifest = parseCompiledAgentManifest({
+    ...input.manifest,
+    externalDependencyPlan: input.externalDependencyPlan,
+    workflowWorld: input.workflowWorld,
+  });
+  const rewritten = relocateCompiledAgentManifest(manifest, {
+    appPath: (path) =>
+      rewritePathWithinAppRoot({
+        appRoot: input.appRoot,
+        path,
+        runtimeAppRoot: input.runtimeAppRoot,
+      }),
+    physicalPath: (path) =>
+      isPathInsideOrEqual(path, input.runtimeAppRoot)
+        ? path
+        : rewritePathWithinSourceRoot({
+            path,
+            snapshotSourceRoot: input.snapshotSourceRoot,
+            sourceRoot: input.sourceRoot,
+          }),
   });
 
-  await writeFile(input.manifestPath, `${JSON.stringify(rewritten, null, 2)}\n`);
-}
-
-function rewriteManifestRoots(input: {
-  readonly appRoot: string;
-  readonly runtimeAppRoot: string;
-  readonly snapshotSourceRoot: string;
-  readonly sourceRoot: string;
-  readonly value: unknown;
-}): unknown {
-  if (Array.isArray(input.value)) {
-    return input.value.map((value) => rewriteManifestRoots({ ...input, value }));
-  }
-
-  if (input.value === null || typeof input.value !== "object") {
-    return input.value;
-  }
-
-  const rewritten: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(input.value)) {
-    if (typeof value === "string" && (key === "appRoot" || key === "agentRoot")) {
-      rewritten[key] = rewritePathWithinAppRoot({
-        appRoot: input.appRoot,
-        path: value,
-        runtimeAppRoot: input.runtimeAppRoot,
-      });
-      continue;
-    }
-
-    if (typeof value === "string" && key === "sourceRoot") {
-      rewritten[key] = rewritePathWithinSourceRoot({
-        path: value,
-        snapshotSourceRoot: input.snapshotSourceRoot,
-        sourceRoot: input.sourceRoot,
-      });
-      continue;
-    }
-
-    rewritten[key] = rewriteManifestRoots({
-      appRoot: input.appRoot,
-      runtimeAppRoot: input.runtimeAppRoot,
-      snapshotSourceRoot: input.snapshotSourceRoot,
-      sourceRoot: input.sourceRoot,
-      value,
-    });
-  }
-
-  return rewritten;
+  await writeFile(input.manifestPath, serializeArtifactJson(rewritten));
 }
 
 function rewritePathWithinSourceRoot(input: {
@@ -606,7 +564,9 @@ async function validateSnapshotCompiledManifestRoots(input: {
   readonly manifestPath: string;
   readonly runtimeAppRoot: string;
 }): Promise<void> {
-  const manifest = JSON.parse(await readFile(input.manifestPath, "utf8")) as unknown;
+  const manifest = parseCompiledAgentManifest(
+    JSON.parse(await readFile(input.manifestPath, "utf8")),
+  );
   const rootPaths = collectManifestRootPaths(manifest);
 
   for (const path of rootPaths) {
@@ -620,27 +580,12 @@ async function validateSnapshotCompiledManifestRoots(input: {
   }
 }
 
-function collectManifestRootPaths(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.flatMap((entry) => collectManifestRootPaths(entry));
-  }
-
-  if (value === null || typeof value !== "object") {
-    return [];
-  }
-
-  const paths: string[] = [];
-
-  for (const [key, entryValue] of Object.entries(value)) {
-    if ((key === "appRoot" || key === "agentRoot") && typeof entryValue === "string") {
-      paths.push(entryValue);
-      continue;
-    }
-
-    paths.push(...collectManifestRootPaths(entryValue));
-  }
-
-  return paths;
+function collectManifestRootPaths(manifest: CompiledAgentManifest): readonly string[] {
+  return [
+    manifest.appRoot,
+    manifest.agentRoot,
+    ...manifest.subagents.flatMap((subagent) => [subagent.agent.appRoot, subagent.agent.agentRoot]),
+  ];
 }
 
 function isPathInsideOrEqual(path: string, directory: string): boolean {

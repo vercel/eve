@@ -1,7 +1,7 @@
 /**
- * Shared output truncation utilities for framework tool executors.
+ * Shared output truncation utilities for sandbox tool executors.
  *
- * Every framework tool that can return unbounded text output (bash,
+ * Every sandbox tool that can return unbounded text output (bash,
  * grep, glob, read_file, web_fetch) uses these helpers to enforce
  * consistent size limits inside its executor before the result enters
  * conversation history. Authored tools are expected to do the same —

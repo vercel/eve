@@ -51,7 +51,7 @@ import {
 import type {
   RuntimeActionRequest,
   RuntimeToolResultActionResult,
-} from "#runtime/actions/types.js";
+} from "#shared/runtime-actions.js";
 import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
 import { normalizeModelStreamError } from "#harness/model-call-error.js";
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";

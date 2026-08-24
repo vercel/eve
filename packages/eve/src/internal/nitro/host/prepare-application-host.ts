@@ -58,6 +58,7 @@ export async function prepareDevelopmentApplicationHost(
         publishedRoot: join(appRoot, ".eve"),
         writeRoot: workspace.compilerArtifactsDir,
       },
+      defaultWorkflowWorld: "local",
       startPath: appRoot,
     });
     const schedules = await resolveSchedules({ manifest: compileResult.manifest });
@@ -113,13 +114,13 @@ export async function prepareProductionApplicationHost(
       publishedRoot: join(workspace.publication.output.finalDir, ".eve"),
       writeRoot: workspace.compiler.artifactsDir,
     },
+    defaultWorkflowWorld: resolveProductionWorkflowWorldTarget(),
     startPath: workspace.appRoot,
   });
   const schedules = await resolveSchedules({ manifest: compileResult.manifest });
 
   const compiledArtifacts = await writeCompiledArtifactsFiles({
     compileResult,
-    defaultWorkflowWorld: resolveProductionWorkflowWorldTarget(),
     outDir: workspace.host.artifactsDir,
   });
 

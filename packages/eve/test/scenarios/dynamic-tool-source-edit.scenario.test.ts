@@ -128,7 +128,7 @@ describe("dynamic tool source edits across a restart", () => {
         await server.crash();
         await waitForCondition(async () => {
           try {
-            await readFile(join(app.appRoot, ".eve", "dev-server-state.v1.json"));
+            await readFile(join(app.appRoot, ".eve", "dev-server-state.v2.json"));
             return false;
           } catch (error) {
             return error instanceof Error && "code" in error && error.code === "ENOENT";

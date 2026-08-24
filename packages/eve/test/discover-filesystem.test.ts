@@ -27,9 +27,9 @@ describe("discovery filesystem classification", () => {
     expect(classifyAgentRootEntry("AGENT.ts", "file")).toBe("unknown");
     expect(classifyAgentRootEntry("TOOLS", "directory")).toBe("unknown");
     expect(classifyAgentRootEntry("instructions.js", "file")).toBe("instructions-module");
-    expect(classifyAgentRootEntry("system.js", "file")).toBe("system-module");
-    expect(classifyAgentRootEntry("system.md", "file")).toBe("system-markdown");
-    expect(classifyAgentRootEntry("SYSTEM.MD", "file")).toBe("system-markdown");
+    expect(classifyAgentRootEntry("system.js", "file")).toBe("unknown");
+    expect(classifyAgentRootEntry("system.md", "file")).toBe("unknown");
+    expect(classifyAgentRootEntry("SYSTEM.MD", "file")).toBe("unknown");
     expect(isProjectMarkerEntry("package.json", "file")).toBe(true);
   });
 
@@ -72,7 +72,7 @@ describe("discovery filesystem classification", () => {
   it("classifies additional cjs, cts, and mts extension variants", () => {
     expect(classifyAgentRootEntry("agent.cjs", "file")).toBe("agent-config-module");
     expect(classifyAgentRootEntry("instructions.cts", "file")).toBe("instructions-module");
-    expect(classifyAgentRootEntry("system.cts", "file")).toBe("system-module");
+    expect(classifyAgentRootEntry("system.cts", "file")).toBe("unknown");
     expect(classifyLocalSubagentEntry("agent.cts", "file")).toBe("agent-config-module");
     expect(getSupportedModuleBaseName("tools/get-weather.cts")).toBe("tools/get-weather");
     expect(getSupportedModuleBaseName("tools/get-weather.mts")).toBe("tools/get-weather");

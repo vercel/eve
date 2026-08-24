@@ -41,6 +41,10 @@ describe("application host preparation", () => {
       expect(preparedHost.compiledArtifacts.bootstrapPath).toBe(
         join(workspace.host.artifactsDir, "compiled-artifacts-bootstrap.mjs"),
       );
+      expect(preparedHost.compiledArtifacts.instrumentationPluginPath).toBeUndefined();
+      expect(
+        existsSync(join(workspace.host.artifactsDir, "compiled-artifacts-instrumentation.mjs")),
+      ).toBe(false);
       expect(preparedHost.workflowBuildDir).toBe(workspace.workflow.buildDir);
       expect(existsSync(join(appRoot, ".eve", "compile"))).toBe(false);
       expect(existsSync(join(appRoot, ".eve", "host"))).toBe(false);
@@ -77,6 +81,35 @@ describe("application host preparation", () => {
     }
   });
 
+  it("writes the production instrumentation plugin when the plan activates", async () => {
+    const { agentRoot, appRoot } = await createAppRoot("eve-production-instrumentation-", {
+      files: {
+        "agent/instructions.md": "Use the configured model.",
+        "agent/instrumentation.mjs": "export default {};\n",
+      },
+      packageName: "production-instrumentation",
+    });
+    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    const workspace = await createApplicationBuildWorkspace(appRoot);
+
+    try {
+      const preparedHost = await prepareProductionApplicationHost(workspace);
+      const instrumentationPluginPath = preparedHost.compiledArtifacts.instrumentationPluginPath;
+      if (instrumentationPluginPath === undefined) {
+        throw new Error("Expected production instrumentation plugin.");
+      }
+
+      expect(instrumentationPluginPath).toBe(
+        join(workspace.host.artifactsDir, "compiled-artifacts-instrumentation.mjs"),
+      );
+      await expect(readFile(instrumentationPluginPath, "utf8")).resolves.toContain(
+        "installCompiledInstrumentationPlan",
+      );
+    } finally {
+      await removeApplicationBuildWorkspace(workspace);
+    }
+  });
+
   it("keeps Nitro host inputs outside retained runtime generations", async () => {
     const { agentRoot, appRoot } = await createAppRoot("eve-stable-dev-host-artifacts-", {
       files: {
@@ -108,15 +141,19 @@ describe("application host preparation", () => {
       join(firstHostDirectory, "compiled-artifacts-workflow-world.mjs"),
     );
     expect(firstHost.compiledArtifacts.bootstrapPath).not.toContain("/.eve/dev-runtime/snapshots/");
-    expect(firstHost.compiledArtifacts.instrumentationSourcePaths).toEqual([
-      join(firstHostDirectory, "compiled-artifacts-instrumentation-source.mjs"),
-    ]);
+    expect(firstHost.compiledArtifacts.instrumentationPluginPath).toBe(
+      join(firstHostDirectory, "compiled-artifacts-instrumentation.mjs"),
+    );
+    const firstInstrumentationPluginPath = firstHost.compiledArtifacts.instrumentationPluginPath;
+    if (firstInstrumentationPluginPath === undefined) {
+      throw new Error("Expected development instrumentation plugin.");
+    }
     expect(await readFile(firstBootstrapPath, "utf8")).not.toContain(
       normalizeEsmImportSpecifier(agentModulePath),
     );
-    await expect(
-      readFile(firstHost.compiledArtifacts.instrumentationPluginPath!, "utf8"),
-    ).resolves.not.toContain(normalizeEsmImportSpecifier(instrumentationModulePath));
+    await expect(readFile(firstInstrumentationPluginPath, "utf8")).resolves.not.toContain(
+      normalizeEsmImportSpecifier(instrumentationModulePath),
+    );
     expect(existsSync(snapshotBootstrapPath)).toBe(false);
 
     await writeFile(

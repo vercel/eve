@@ -101,5 +101,6 @@ function createResolvedToolDefinition(input: {
     name: input.name,
     sourceId: input.sourceId,
     sourceKind: "module",
+    sourceOwner: { kind: "application" },
   };
 }

@@ -1,7 +1,10 @@
-import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
-import { resolveWorkflowWorldImport } from "#internal/workflow/world-target.js";
+import type { CompiledWorkflowWorldPlan } from "#compiler/workflow-world-plan.js";
+import {
+  EVE_DEV_WORKFLOW_STREAM_ROUTE_PATH,
+  EVE_DEV_WORKFLOW_WORLD_ROUTE_PATH,
+} from "#protocol/routes.js";
 
-export const DEVELOPMENT_WORKFLOW_WORLD_ROUTE = "/eve/v1/dev/internal/workflow-world";
+export const DEVELOPMENT_WORKFLOW_WORLD_ROUTE = EVE_DEV_WORKFLOW_WORLD_ROUTE_PATH;
 
 /**
  * Whether development serves this app's Workflow World from the CLI parent.
@@ -11,14 +14,12 @@ export const DEVELOPMENT_WORKFLOW_WORLD_ROUTE = "/eve/v1/dev/internal/workflow-w
  * `world: "local"` resolves to the same vendored world as an absent config,
  * so both take the parent-owned path.
  */
-export function usesParentDevelopmentWorkflowWorld(
-  configuredWorld: AgentWorkflowWorldDefinition | undefined,
-): boolean {
-  return resolveWorkflowWorldImport(configuredWorld ?? "local") === "@workflow/world-local";
+export function usesParentDevelopmentWorkflowWorld(worldPlan: CompiledWorkflowWorldPlan): boolean {
+  return worldPlan.kind === "native" && worldPlan.target === "local";
 }
 export const DEVELOPMENT_WORKFLOW_SECRET_ENV = "EVE_DEV_WORKFLOW_TRANSPORT_SECRET";
 export const DEVELOPMENT_WORKER_APP_ROOT_ENV = "EVE_DEV_WORKER_APP_ROOT";
-export const DEVELOPMENT_WORKFLOW_STREAM_ROUTE = `${DEVELOPMENT_WORKFLOW_WORLD_ROUTE}/stream`;
+export const DEVELOPMENT_WORKFLOW_STREAM_ROUTE = EVE_DEV_WORKFLOW_STREAM_ROUTE_PATH;
 export const DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER = "x-eve-dev-workflow-transport";
 export const DEVELOPMENT_WORKFLOW_DELIVERY_HEADER = "x-eve-dev-workflow-delivery";
 

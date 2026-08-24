@@ -5,11 +5,11 @@ import {
   cancelRemoteAgentTurn,
   resolveRemoteAgentForAction,
 } from "#execution/remote-agent-dispatch.js";
-import { executeTaskControlAction } from "#execution/tasks/parent/dispatch.js";
+import { executeTaskControlAction, isTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import { readLatestTaskView, sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
-import type { RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeToolCallActionRequest } from "#shared/runtime-actions.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { SESSION_TASKS_STATE_KEY } from "#tasks/session-index.js";
 
@@ -107,12 +107,18 @@ describe("task cancellation identity", () => {
     });
   });
 
+  it("does not dispatch an authored tool that occupies the task_cancel slot", () => {
+    expect(isTaskControlAction(action, undefined)).toBe(false);
+    expect(isTaskControlAction(action, "task_cancel")).toBe(true);
+  });
+
   it.each(["local", "remote"] as const)(
     "guards %s cancellation with the task's child turn",
     async (mode) => {
       const result = await executeTaskControlAction({
         action,
         bundle: { subagentRegistry: { subagentsByNodeId: new Map() } } as never,
+        capability: "task_cancel",
         parentTurnId: "turn-parent",
         session: createSession(mode),
       });
@@ -151,6 +157,7 @@ describe("task cancellation identity", () => {
     await executeTaskControlAction({
       action,
       bundle: {} as CompiledBundle,
+      capability: "task_cancel",
       parentTurnId: "turn-parent",
       session: createSession("local"),
     });
@@ -168,6 +175,7 @@ describe("task cancellation identity", () => {
     await executeTaskControlAction({
       action,
       bundle: {} as CompiledBundle,
+      capability: "task_cancel",
       parentTurnId: "turn-parent",
       session: createSession("local"),
     });
@@ -187,6 +195,7 @@ describe("task cancellation identity", () => {
       const pending = executeTaskControlAction({
         action,
         bundle: {} as CompiledBundle,
+        capability: "task_cancel",
         parentTurnId: "turn-parent",
         session: createSession("local"),
       });

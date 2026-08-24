@@ -26,9 +26,7 @@ export function createDevelopmentWorkflowWorld(input: {
   // worker replacement. The predicate is shared with the generated worker
   // plugin so the two sides cannot disagree.
   if (
-    !usesParentDevelopmentWorkflowWorld(
-      input.preparedHost.compileResult.manifest.config.experimental?.workflow?.world,
-    )
+    !usesParentDevelopmentWorkflowWorld(input.preparedHost.compileResult.manifest.workflowWorld)
   ) {
     return undefined;
   }

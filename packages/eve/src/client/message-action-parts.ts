@@ -1,5 +1,5 @@
-import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/runtime-actions.js";
+import type { InputRequest } from "#shared/input.js";
 import type {
   EveDynamicToolPart,
   EveMessageInputRequest,

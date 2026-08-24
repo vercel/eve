@@ -5,7 +5,7 @@ import { stubSpawnProcess } from "./_helpers/sandbox-session-stub.js";
 import { ContextContainer, contextStorage } from "../src/context/container.js";
 import { SandboxKey } from "../src/context/keys.js";
 import type { SandboxAccess } from "../src/sandbox/state.js";
-import { defineGrepTool } from "../src/public/tools/define-grep-tool.js";
+import { defineGrepTool } from "../src/public/tools/grep.js";
 import { serializeInputSchema } from "../src/shared/tool-schema.js";
 
 function createFakeAccess(

@@ -51,7 +51,7 @@ function makeSlackChannelEntry(): {
       adapter: channel.adapter,
       definition: channel,
       receive: channel.receive,
-      fetch: async () => new Response("ok"),
+      handler: async () => new Response("ok"),
     },
   };
 }

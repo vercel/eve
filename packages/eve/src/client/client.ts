@@ -1,7 +1,9 @@
 import { EVE_HEALTH_ROUTE_PATH, EVE_INFO_ROUTE_PATH } from "#protocol/routes.js";
 import { AgentInfoResponseError } from "#client/agent-info-error.js";
+import { HealthResponseError } from "#client/health-response-error.js";
 import { encodeBasicCredentials } from "#internal/http/basic-auth.js";
 import { AgentInfoResultSchema } from "#client/agent-info-schema.js";
+import { HealthResultSchema } from "#client/health-schema.js";
 import { ClientError } from "#client/client-error.js";
 import { ClientSessions } from "#client/sessions.js";
 import { createClientUrl } from "#client/url.js";
@@ -47,6 +49,7 @@ export class Client {
    * Checks the health of the eve agent server.
    *
    * @throws {ClientError} If the server returns a non-successful status.
+   * @throws {HealthResponseError} If a successful response is not valid health JSON.
    */
   async health(): Promise<HealthResult> {
     const url = createClientUrl(this.#host, EVE_HEALTH_ROUTE_PATH);
@@ -58,7 +61,23 @@ export class Client {
       throw new ClientError(response.status, body, response.headers);
     }
 
-    return (await response.json()) as HealthResult;
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new HealthResponseError();
+    }
+
+    const result = HealthResultSchema.safeParse(payload);
+    if (!result.success) {
+      throw new HealthResponseError(
+        result.error.issues.map((issue) => {
+          const path = issue.path.join(".");
+          return path.length === 0 ? issue.message : `${path}: ${issue.message}`;
+        }),
+      );
+    }
+    return result.data;
   }
 
   /**

@@ -71,6 +71,7 @@ describe("development sandbox prewarm coordination", () => {
     const appRoot = "/tmp/eve-app";
     const snapshotRoot = "/tmp/eve-app/.eve/dev-runtime/snapshots/current/app";
     const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(snapshotRoot, {
+      moduleMapLoaderKind: "materialized-generation",
       moduleMapLoaderPath: "/tmp/eve-package/authored-module-map-loader.ts",
       sandboxAppRoot: appRoot,
     });

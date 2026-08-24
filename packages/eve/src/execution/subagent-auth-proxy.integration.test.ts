@@ -11,6 +11,7 @@ import { emitProxiedSubagentEvent } from "#execution/subagent-event-proxy-step.j
 import { projectToDurableSession } from "#execution/session.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
+import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
 import { deserializeRuntimeAdapter } from "#runtime/channels/registry.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import {
@@ -56,7 +57,7 @@ function buildBundle(adapter: ChannelAdapter): CompiledBundle {
     graph: {
       nodesByNodeId: new Map(),
       root: {
-        sandboxRegistry: { sandbox: null },
+        sandboxRegistry: createStubSandboxRegistry(),
         turnAgent,
       },
     },

@@ -1,5 +1,5 @@
 import { getRuntimeActionResultKey } from "#runtime/actions/keys.js";
-import type { RuntimeActionResult } from "#runtime/actions/types.js";
+import type { RuntimeActionResult } from "#shared/runtime-actions.js";
 
 /** Returns results in pending-key order once every requested action has completed. */
 export function resolveRuntimeActionResultsForKeys<TResult extends RuntimeActionResult>(input: {

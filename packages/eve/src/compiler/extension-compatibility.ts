@@ -31,7 +31,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
     dropped: {},
   },
-  channel: { current: 7, supported: [1, 2, 3, 4, 5, 6, 7], dropped: {} },
+  channel: { current: 8, supported: [1, 2, 3, 4, 5, 6, 7, 8], dropped: {} },
   schedule: { current: 3, supported: [1, 2, 3], dropped: {} },
   subagent: { current: 2, supported: [1, 2], dropped: {} },
   connection: { current: 5, supported: [1, 2, 3, 4, 5], dropped: {} },
@@ -58,6 +58,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
     dropped: {},
   },
+  instrumentation: { current: 1, supported: [1], dropped: {} },
   config: { current: 1, supported: [1], dropped: {} },
   state: { current: 3, supported: [1, 2, 3], dropped: {} },
 } as const satisfies Record<string, ExtensionCapabilityContract>;
@@ -99,11 +100,11 @@ export type ExtensionCapabilitySupport = Readonly<Record<string, readonly number
 /** Compatibility-only metadata emitted by `eve extension build`. */
 export interface ExtensionCompatibilityManifest {
   readonly kind: typeof EXTENSION_COMPATIBILITY_MANIFEST_KIND;
-  readonly formatVersion: 1 | typeof EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION;
+  readonly formatVersion: typeof EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION;
   /** Diagnostic producer version; capability requirements decide compatibility. */
   readonly builtWithEve: string;
   readonly requires: Readonly<Record<string, number>>;
-  readonly build?: {
+  readonly build: {
     readonly externalDependencies: readonly string[];
   };
 }
@@ -115,27 +116,19 @@ export interface UnsupportedExtensionCapability {
   readonly supportedVersions: readonly number[];
 }
 
-const extensionCompatibilityManifestV1Schema = z
+const extensionCompatibilityManifestSchema: z.ZodType<ExtensionCompatibilityManifest> = z
   .object({
     kind: z.literal(EXTENSION_COMPATIBILITY_MANIFEST_KIND),
-    formatVersion: z.literal(1),
+    formatVersion: z.literal(EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION),
     builtWithEve: z.string().min(1),
     requires: z.record(z.string(), z.number().int().positive()),
+    build: z
+      .object({
+        externalDependencies: z.array(z.string().min(1)).readonly(),
+      })
+      .strict(),
   })
   .strict();
-const extensionCompatibilityManifestV2Schema = extensionCompatibilityManifestV1Schema.extend({
-  formatVersion: z.literal(EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION),
-  build: z
-    .object({
-      externalDependencies: z.array(z.string().min(1)).readonly(),
-    })
-    .strict()
-    .optional(),
-});
-const extensionCompatibilityManifestSchema: z.ZodType<ExtensionCompatibilityManifest> = z.union([
-  extensionCompatibilityManifestV1Schema,
-  extensionCompatibilityManifestV2Schema,
-]);
 
 /** Serializes a compatibility manifest deterministically. */
 export function serializeExtensionCompatibilityManifest(

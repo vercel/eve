@@ -197,7 +197,7 @@ Writing `instrumentation.ts` replaces this: your `setup` takes over and nothing 
 | `compiled-agent-manifest.json`  | the serialized surface eve loads at runtime |
 | `module-map.mjs`                | compiled module entrypoints eve imports     |
 
-When `eve build` fails on discovery errors, the CLI prints the full diagnostics report (severity, message, source path) and the path to the diagnostics artifact.
+When `eve build` fails on discovery errors, the CLI prints the full diagnostics report (severity, message, owning agent node, and source locator) and the path to the diagnostics artifact.
 
 ### Common failures
 

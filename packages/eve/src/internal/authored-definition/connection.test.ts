@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { normalizeMcpClientConnectionDefinition } from "#internal/authored-definition/connection.js";
-import type {
-  ConnectionAuthDefinition,
-  ConnectionAuthProvider,
-} from "#runtime/connections/types.js";
+import type { ConnectionAuthDefinition, ConnectionAuthProvider } from "#shared/connections.js";
 
 const MSG = "Expected the connection export to match the public eve shape.";
 

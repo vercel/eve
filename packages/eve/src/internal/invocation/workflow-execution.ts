@@ -20,10 +20,10 @@ import {
   invocationInputRequestId,
   invocationOwnerKey,
 } from "#internal/invocation/metadata.js";
-import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
+import type { RouteSessionCreator } from "#channel/route-context.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { parseJsonValue } from "#shared/json.js";
 

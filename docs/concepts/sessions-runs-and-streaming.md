@@ -244,13 +244,19 @@ Start with the [Client SDK](../guides/client/overview) guide. It covers basic us
 
 ## Inspect the agent over HTTP
 
-`GET /eve/v1/info` returns a JSON inspection snapshot for the running agent: model, static instructions, authored and framework tools, skills, channels, schedules, subagents, sandbox, connections, hooks, workflow, and workspace metadata. Static instructions are an ordered array whose entries expose `content` and `role`; dynamic resolver output is runtime context and is not included. The route uses the resolved `eveChannel()` auth when `agent/channels/eve.ts` authors one; otherwise it falls back to the framework default of Vercel OIDC plus local development access.
+`GET /eve/v1/info` returns the strict v3 inspection snapshot compiled for the running agent. It includes the agent config, model routing, static and dynamic capability declarations, effective channels, schedules, local subagents, declared remote agents, sandbox, connections, hooks, source-composition diagnostics, and workspace metadata. Every graph-backed source entry has a `sourceId` and an explicit `owner` (`application`, `framework`, or `extension`).
+
+The response reports compiled state, not runtime reconstruction. `channels` contains the effective compiled routes, while `composition.routes.shadowed` retains routes that lost selection. Local subagents and declared remote agents use separate flat collections and counts that cover the complete compiled graph. `agent.nodeId` identifies the root, and every local or remote entry carries its opaque `nodeId` and `parentNodeId`; use those fields instead of deriving ancestry from path-like values. Dynamic model and local-subagent config entries identify their resolver source and subscribed event names; resolver output remains runtime context and is not included.
+
+`kernel.availability` is `"prepared-potential"`. Its entries describe capabilities prepared for the agent before a session starts, not the tools available to a particular model call. Session context, model support, and runtime authorization can narrow what a model sees later.
+
+See [Inspect the compiled agent](../channels/eve#inspect-the-compiled-agent) for the complete field groups and their boundaries.
 
 ```bash
 curl http://127.0.0.1:2000/eve/v1/info
 ```
 
-With the default auth chain (`[vercelOidc(), localDev(), placeholderAuth()]`), a Vercel OIDC bearer takes precedence, an `eve dev` or `vercel dev` server authenticates local requests, and everything else is rejected. A deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).
+The route uses the selected `eveChannel()` auth. An authored `agent/channels/eve.ts` source replaces the framework default. With the default auth chain (`[vercelOidc(), localDev(), placeholderAuth()]`), a Vercel OIDC bearer takes precedence, an `eve dev` or `vercel dev` server authenticates local requests, and everything else is rejected. A deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).
 
 ## Dispatch order
 

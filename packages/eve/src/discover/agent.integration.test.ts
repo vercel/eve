@@ -14,10 +14,8 @@ import {
   DISCOVER_EXTENSION_MOUNT_AMBIGUOUS,
   DISCOVER_EXTENSION_MOUNT_MISSING_DECLARATION,
   DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
-  DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT,
 } from "#discover/extensions.js";
 import {
-  DISCOVER_DEPRECATED_SYSTEM_SLOT,
   DISCOVER_EXTENSION_NAME_INVALID,
   DISCOVER_HOOK_NAME_INVALID,
   DISCOVER_MODULE_SLOT_COLLISION,
@@ -35,8 +33,9 @@ import {
 
 const EXTENSION_COMPATIBILITY_MANIFEST = JSON.stringify({
   kind: "eve-extension",
-  formatVersion: 1,
+  formatVersion: 2,
   builtWithEve: "0.0.0-test",
+  build: { externalDependencies: [] },
   requires: { extension: 1, tool: 1 },
 });
 
@@ -154,7 +153,7 @@ describe("discoverAgent (memory)", () => {
     ]);
   });
 
-  it("falls back to the deprecated system.md slot with a deprecation warning", async () => {
+  it("requires canonical instructions when only a former system slot is authored", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {
         "system.md": "You are a precise assistant.",
@@ -168,48 +167,12 @@ describe("discoverAgent (memory)", () => {
     });
 
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
-      DISCOVER_DEPRECATED_SYSTEM_SLOT,
+      DISCOVER_REQUIRED_INSTRUCTIONS_MISSING,
     ]);
-    expect(result.diagnostics[0]?.severity).toBe("warning");
-    expect(result.manifest.instructions).toEqual([
-      {
-        definition: {
-          content: "You are a precise assistant.",
-          role: "system",
-        },
-        sourceKind: "markdown",
-        logicalPath: "system.md",
-        sourceId: "system.md",
-      },
-    ]);
+    expect(result.manifest.instructions).toEqual([]);
   });
 
-  it("falls back to the deprecated system.ts module slot with a deprecation warning", async () => {
-    const project = buildMemoryAgentProject({
-      agentFiles: {
-        "system.ts": 'export default { markdown: "From legacy system module." };\n',
-      },
-    });
-
-    const result = await discoverAgent({
-      agentRoot: project.agentRoot,
-      appRoot: project.appRoot,
-      source: project.source,
-    });
-
-    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
-      DISCOVER_DEPRECATED_SYSTEM_SLOT,
-    ]);
-    expect(result.manifest.instructions).toEqual([
-      {
-        sourceKind: "module",
-        logicalPath: "system.ts",
-        sourceId: "system.ts",
-      },
-    ]);
-  });
-
-  it("prefers instructions.md over the deprecated system.md without emitting a warning", async () => {
+  it("ignores a former system slot when canonical instructions are authored", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {
         "instructions.md": "Preferred instructions.",
@@ -720,6 +683,32 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.extensions).toEqual([]);
   });
 
+  it("rejects extension mount namespaces containing the reserved separator", async () => {
+    const project = buildMemoryAgentProject({
+      agentFiles: {
+        "extensions/a__b.ts": "export default {};\n",
+        "extensions/c__d/extension.ts": "export default {};\n",
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(
+      result.diagnostics.filter(
+        (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_NAME_INVALID,
+      ),
+    ).toHaveLength(2);
+    expect(result.diagnostics.map((diagnostic) => diagnostic.message)).toEqual(
+      expect.arrayContaining([expect.stringContaining("consecutive underscores are reserved")]),
+    );
+    expect(result.manifest.extensions).toEqual([]);
+  });
+
   it("resolves a mounted extension package to its discovered source tree", async () => {
     const project = buildMemoryAgentProject({
       appFiles: {
@@ -976,7 +965,7 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.resolvedExtensions).toEqual([]);
   });
 
-  it("rejects agent-root contributions that override a mounted extension's namespace", async () => {
+  it("accepts agent-root contributions at a mounted extension's qualified slots", async () => {
     const project = buildMemoryAgentProject({
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
@@ -988,8 +977,6 @@ describe("discoverAgent (memory)", () => {
       },
       agentFiles: {
         "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
-        // A root tool using the mounted `crm__` prefix would shadow the
-        // extension from outside its mount directory.
         "tools/crm__search.ts": "export default {};\n",
         "subagents/crm__reviewer.ts": "export default {};\n",
         "instructions.md": "You are a precise assistant.",
@@ -1002,11 +989,7 @@ describe("discoverAgent (memory)", () => {
       source: project.source,
     });
 
-    const collisions = result.diagnostics.filter(
-      (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT,
-    );
-    expect(collisions).toHaveLength(2);
-    expect(collisions[0]?.message).toContain("extensions/crm/");
+    expect(result.diagnostics).toEqual([]);
   });
 
   it("rejects a mounted extension that requires an unsupported capability version", async () => {
@@ -1022,8 +1005,9 @@ describe("discoverAgent (memory)", () => {
         }),
         "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
           kind: "eve-extension",
-          formatVersion: 1,
+          formatVersion: 2,
           builtWithEve: "9.0.0",
+          build: { externalDependencies: [] },
           requires: { extension: 1, tool: unsupportedToolVersion },
         }),
         "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
@@ -1176,11 +1160,7 @@ describe("discoverAgent (memory)", () => {
       source: project.source,
     });
 
-    expect(
-      result.diagnostics.some(
-        (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT,
-      ),
-    ).toBe(false);
+    expect(result.diagnostics).toEqual([]);
   });
 
   it("rejects an extension distribution without generated compatibility metadata", async () => {
@@ -1207,6 +1187,39 @@ describe("discoverAgent (memory)", () => {
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
       DISCOVER_EXTENSION_COMPATIBILITY_INVALID,
     );
+    expect(result.manifest.resolvedExtensions).toEqual([]);
+  });
+
+  it("rejects a format v1 extension distribution with an actionable rebuild diagnostic", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: { source: "source", dist: "extension" } },
+        }),
+        "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
+          kind: "eve-extension",
+          formatVersion: 1,
+          builtWithEve: "0.39.0",
+          requires: { extension: 1 },
+        }),
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    const diagnostic = result.diagnostics.find(
+      (entry) => entry.code === DISCOVER_EXTENSION_COMPATIBILITY_INVALID,
+    );
+    expect(diagnostic?.message).toContain("Rebuild or reinstall the extension");
     expect(result.manifest.resolvedExtensions).toEqual([]);
   });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/compiled-agent-node-id.js";
 import { buildMemoryAgentProject } from "../internal/testing/memory-agent-source.js";
 import { discoverNamedSourceDirectory, readSortedDirectoryEntries } from "./grammar.js";
 
@@ -28,6 +29,7 @@ describe("discoverNamedSourceDirectory", () => {
       directoryName: "hooks",
       invalidDirectoryCode: "test/invalid",
       invalidDirectoryMessage: "expected hooks/ to be a directory",
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       recursive: true,
       rootEntries,
       rootPath: project.agentRoot,
@@ -55,6 +57,7 @@ describe("discoverNamedSourceDirectory", () => {
       directoryName: "hooks",
       invalidDirectoryCode: "test/invalid",
       invalidDirectoryMessage: "should not appear",
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       recursive: true,
       rootEntries,
       rootPath: project.agentRoot,
@@ -81,6 +84,7 @@ describe("discoverNamedSourceDirectory", () => {
       invalidDirectoryCode: "test/invalid",
       invalidDirectoryMessage: "expected schedules/ to be a directory",
       markdownLowerer: (markdown) => ({ markdown }),
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       recursive: true,
       rootEntries,
       rootPath: project.agentRoot,
@@ -115,6 +119,7 @@ describe("discoverNamedSourceDirectory", () => {
       invalidDirectoryCode: "test/invalid",
       invalidDirectoryMessage: "should not appear",
       markdownLowerer: (markdown) => ({ markdown }),
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       recursive: true,
       rootEntries,
       rootPath: project.agentRoot,
@@ -140,6 +145,7 @@ describe("discoverNamedSourceDirectory", () => {
       directoryName: "lib",
       invalidDirectoryCode: "test/invalid",
       invalidDirectoryMessage: "should not appear",
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       recursive: true,
       rootEntries,
       rootPath: project.agentRoot,
@@ -167,6 +173,7 @@ describe("discoverNamedSourceDirectory", () => {
       directoryName: "tools",
       invalidDirectoryCode: "test/invalid",
       invalidDirectoryMessage: "should not appear",
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       recursive: false,
       rootEntries,
       rootPath: project.agentRoot,

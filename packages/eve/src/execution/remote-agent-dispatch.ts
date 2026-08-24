@@ -17,7 +17,7 @@ import {
   normalizeRequestedOutputSchema,
 } from "#execution/subagent-invocation.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeRemoteAgentCallActionRequest } from "#shared/runtime-actions.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -363,13 +363,18 @@ export function resolveRemoteAgentForAction(input: {
   const registered = input.registry.get(input.nodeId);
   const definition = registered?.definition;
   if (input.dynamicRemoteAgent !== undefined) {
-    if (definition === undefined) {
+    if (
+      definition === undefined ||
+      definition.kind !== "subagent" ||
+      definition.dynamic === undefined
+    ) {
       throw new Error(`Missing remote agent "${input.remoteAgentName}" in runtime registry.`);
     }
     const credentials = resolveDynamicRemoteAgentCredentials(input.dynamicRemoteAgent);
     const config = input.dynamicRemoteAgent;
     const remote: {
       auth?: ResolvedRuntimeRemoteAgentNode["auth"];
+      configResolver: ResolvedRuntimeRemoteAgentNode["configResolver"];
       description: string;
       forwardPrincipal?: boolean;
       headers?: HeadersValue;
@@ -380,9 +385,15 @@ export function resolveRemoteAgentForAction(input: {
       outputSchema?: ResolvedRuntimeRemoteAgentNode["outputSchema"];
       path: string;
       sourceId: string;
-      sourceKind: "module";
+      sourceKind: "subagent";
       url: string;
     } = {
+      configResolver: {
+        exportName: definition.dynamic.exportName,
+        logicalPath: definition.dynamic.logicalPath,
+        sourceId: definition.dynamic.sourceId,
+        sourceKind: "module",
+      },
       description: config.description,
       kind: "remote",
       logicalPath: definition.logicalPath,
@@ -391,7 +402,7 @@ export function resolveRemoteAgentForAction(input: {
       outputSchema: config.outputSchema,
       path: config.path,
       sourceId: definition.sourceId,
-      sourceKind: "module",
+      sourceKind: "subagent",
       url: config.url,
     };
     if (config.forwardPrincipal !== undefined) {

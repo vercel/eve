@@ -286,14 +286,17 @@ async function installScenarioDependencies(input: {
     return;
   }
   if (input.descriptor.packageManager === "bun") {
-    // A local bunfig overrides any host-global minimumReleaseAge gate, which
-    // would otherwise reject the workspace's freshly published dependency
-    // versions and make the test outcome depend on host configuration.
+    // Local config keeps host-global release-age and registry credentials from
+    // making the public-package scenario depend on the developer's machine.
     await writeFile(
       join(input.appRoot, "bunfig.toml"),
       ["[install]", "minimumReleaseAge = 0", ""].join("\n"),
     );
-    await runInstallCommand(input.appRoot, "bun", ["install", "--ignore-scripts"]);
+    await runInstallCommand(input.appRoot, "bun", [
+      "install",
+      "--ignore-scripts",
+      "--registry=https://registry.npmjs.org/",
+    ]);
     return;
   }
 

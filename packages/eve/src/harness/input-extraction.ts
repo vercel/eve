@@ -1,8 +1,10 @@
 import type { ContentPart, ModelMessage, ToolSet, TypedToolCall } from "ai";
 import { z } from "zod";
 
-import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import { isKernelInputRequestToolName } from "#kernel/capabilities.js";
+import { isKernelInputRequestCapability } from "#kernel/executable-capabilities.js";
+import type { HarnessToolMap } from "#harness/types.js";
+import type { InputRequest } from "#shared/input.js";
 import { createRuntimeToolCallActionFromToolCall } from "#harness/tool-call-action.js";
 
 // Persisted history parts lose AI SDK typing on the storage round trip. The
@@ -33,13 +35,22 @@ const ToolApprovalRequestSchema = z.object({
 
 /**
  * Extracts question input requests from tool calls that target the
- * `ask_question` framework tool.
+ * native `ask_question` kernel capability.
  */
 export function extractQuestionInputRequests(input: {
   readonly excludedCallIds: ReadonlySet<string>;
   readonly toolCalls: readonly TypedToolCall<ToolSet>[];
+  readonly tools: HarnessToolMap;
 }): InputRequest[] {
-  return extractQuestionRequests(input);
+  return extractQuestionRequests({
+    excludedCallIds: input.excludedCallIds,
+    toolCalls: input.toolCalls.filter((toolCall) => {
+      const capability = input.tools.get(toolCall.toolName)?.kernelCapability;
+      return (
+        capability !== undefined && isKernelInputRequestCapability(capability, toolCall.toolName)
+      );
+    }),
+  });
 }
 
 function extractQuestionRequests(input: {
@@ -49,10 +60,6 @@ function extractQuestionRequests(input: {
   const requests: InputRequest[] = [];
 
   for (const toolCall of input.toolCalls) {
-    if (toolCall.toolName !== ASK_QUESTION_TOOL_NAME) {
-      continue;
-    }
-
     if (input.excludedCallIds.has(toolCall.toolCallId)) {
       continue;
     }
@@ -190,7 +197,9 @@ export function extractHistoricalInputRequests(input: {
 
     const toolCalls = message.content.flatMap((part: unknown) => {
       const toolCall = PersistedToolCallSchema.safeParse(part);
-      return toolCall.success && input.requestIds.has(toolCall.data.toolCallId)
+      return toolCall.success &&
+        input.requestIds.has(toolCall.data.toolCallId) &&
+        isKernelInputRequestToolName(toolCall.data.toolName)
         ? [toolCall.data]
         : [];
     });

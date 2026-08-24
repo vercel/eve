@@ -1,5 +1,5 @@
-import { normalizeModelPath } from "#runtime/framework-tools/file-state.js";
-import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
+import { normalizeModelPath } from "#execution/tools/file-state.js";
+import { resolveAbsoluteFilePath } from "#execution/sandbox/resolve-file-path.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { ripgrepIsAvailable } from "#execution/sandbox/ripgrep-probe.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";

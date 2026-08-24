@@ -76,8 +76,8 @@ export type VercelEveAgentEntry = VercelEveAgentEntryBase &
 /**
  * Authored agent instructions resolved at build time from the agent's
  * `instructions.md` or `instructions.{ts,cts,mts,js,cjs,mjs}` source.
- * Agents without authored instructions fall back to the framework default
- * and the summary's `instructions` field is empty.
+ * Agents without an authored instructions source have an empty
+ * `instructions` field.
  *
  * The dashboard renders the content verbatim, so the field carries
  * the full resolved content rather than a preview. For module-backed
@@ -211,8 +211,8 @@ export interface VercelEveAgentSummary {
   readonly generatorVersion: string;
   readonly agent: VercelEveAgentEntry;
   /**
-   * Ordered authored agent instructions. Empty when the agent relies on the
-   * framework default.
+   * Ordered authored agent instructions. Empty when the agent has no selected
+   * authored instructions source.
    */
   readonly instructions: readonly VercelEveInstructionsEntry[];
   readonly schedules: readonly VercelEveScheduleEntry[];
@@ -220,7 +220,7 @@ export interface VercelEveAgentSummary {
   readonly skills: readonly VercelEveSkillEntry[];
   readonly connections: readonly VercelEveConnectionEntry[];
   readonly channels: readonly VercelEveChannelEntry[];
-  readonly sandbox: VercelEveSandboxEntry | null;
+  readonly sandbox: VercelEveSandboxEntry;
   readonly subagents: readonly VercelEveSubagentEntry[];
   readonly diagnostics: VercelEveDiagnosticsSummary;
 }

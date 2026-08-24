@@ -4,10 +4,11 @@ import { join } from "node:path";
 import { z } from "#compiled/zod/index.js";
 import { httpServerUrlSchema } from "#shared/network-address.js";
 
-const STATE_FILE_NAME = "dev-server-state.v1.json";
+const STATE_FILE_NAME = "dev-server-state.v2.json";
 
 const developmentServerStateSchema = z
   .object({
+    serverId: z.string().min(1),
     url: httpServerUrlSchema,
   })
   .strict();
@@ -30,8 +31,8 @@ export class DevelopmentServerState {
     this.#statePath = join(this.#stateDir, STATE_FILE_NAME);
   }
 
-  /** Returns the recorded URL, if the record exists and is valid. */
-  async read(): Promise<string | undefined> {
+  /** Returns the recorded server identity, if the record exists and is valid. */
+  async read(): Promise<DevelopmentServerStateRecord | undefined> {
     let raw: string;
 
     try {
@@ -45,15 +46,15 @@ export class DevelopmentServerState {
 
     try {
       const parsed = developmentServerStateSchema.safeParse(JSON.parse(raw));
-      return parsed.success ? parsed.data.url : undefined;
+      return parsed.success ? parsed.data : undefined;
     } catch {
       return undefined;
     }
   }
 
   /** Records a server after it is ready to accept clients. */
-  async write(url: string): Promise<void> {
-    const state = developmentServerStateSchema.parse({ url });
+  async write(input: DevelopmentServerStateRecord): Promise<void> {
+    const state = developmentServerStateSchema.parse(input);
     await mkdir(this.#stateDir, { recursive: true });
     await writeFile(this.#statePath, `${JSON.stringify(state)}\n`, "utf8");
   }
@@ -62,6 +63,11 @@ export class DevelopmentServerState {
   async remove(): Promise<void> {
     await rm(this.#statePath, { force: true });
   }
+}
+
+export interface DevelopmentServerStateRecord {
+  readonly serverId: string;
+  readonly url: string;
 }
 
 function isErrnoException(error: unknown, code: string): error is NodeJS.ErrnoException {

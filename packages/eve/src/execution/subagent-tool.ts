@@ -12,7 +12,7 @@ import type {
   SessionTraceContext,
 } from "#channel/types.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeSubagentCallActionRequest } from "#shared/runtime-actions.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 import { resolveRemainingSessionTokenLimits } from "#harness/subagent-token-budget.js";
@@ -57,7 +57,7 @@ export interface SubagentSandboxGraph {
       readonly sandboxRegistry: {
         readonly sandbox: {
           readonly definition: { readonly inheritsParent?: boolean };
-        } | null;
+        };
       };
     }
   >;
@@ -102,6 +102,7 @@ export function buildSubagentRunInput(input: {
    * children run as one-shot task sessions.
    */
   readonly persistentSessions?: boolean;
+  readonly selfDelegation?: boolean;
   readonly session: HarnessSession;
   readonly source: SubagentInputSource;
 }): SubagentRunInputBuild {
@@ -140,8 +141,8 @@ export function buildSubagentRunInput(input: {
     subagentName: action.subagentName,
   };
   const sharesSandbox =
-    input.graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox?.definition
-      .inheritsParent === true || action.subagentName === "agent";
+    input.graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox.definition
+      .inheritsParent === true || input.selfDelegation === true;
   if (sharesSandbox) {
     if (session.sandboxState !== undefined) {
       adapterState.parentSandboxState = session.sandboxState;

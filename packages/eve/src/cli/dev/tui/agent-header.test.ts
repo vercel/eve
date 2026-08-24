@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AgentInfoResult, AgentInfoToolEntry } from "#client/index.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info.js";
 
 import { AGENT_HEADER_TIPS, buildAgentHeader, pickAgentHeaderTip } from "./agent-header.js";
 import { createTheme } from "./theme.js";
@@ -13,11 +14,10 @@ const FRAMEWORK_TOOL: AgentInfoToolEntry = {
   hasModelOutputProjection: false,
   hasOutputSchema: true,
   inputSchema: { type: "object" },
-  logicalPath: "eve:framework/bash",
+  logicalPath: "tools/bash.ts",
   name: "bash",
-  origin: "framework",
+  owner: { feature: "bash", kind: "framework" },
   outputSchema: { type: "object" },
-  replacesFrameworkTool: false,
   requiresApproval: false,
   sourceId: "eve:bash-tool",
   sourceKind: "module",
@@ -30,16 +30,15 @@ const AUTHORED_TOOL: AgentInfoToolEntry = {
   hasModelOutputProjection: false,
   hasOutputSchema: false,
   inputSchema: { type: "object" },
-  logicalPath: "agent/tools/get_weather.ts",
+  logicalPath: "tools/get_weather.ts",
   name: "get_weather",
-  origin: "authored",
-  outputSchema: null,
-  replacesFrameworkTool: false,
+  owner: { kind: "application" },
   requiresApproval: false,
+  sourceId: "test:get-weather",
   sourceKind: "module",
 };
 
-const INFO: AgentInfoResult = {
+const INFO: AgentInfoResult = createTestAgentInfoResult({
   agent: {
     agentRoot: "/tmp/weather-agent/agent",
     appRoot: "/tmp/weather-agent",
@@ -49,21 +48,6 @@ const INFO: AgentInfoResult = {
     },
     name: "Weather Agent",
   },
-  capabilities: {
-    devRoutes: true,
-  },
-  channels: {
-    authored: [],
-    available: [],
-    disabledFramework: [],
-    framework: [],
-  },
-  connections: [],
-  diagnostics: {
-    discoveryErrors: 0,
-    discoveryWarnings: 0,
-  },
-  hooks: [],
   instructions: {
     dynamic: [],
     static: [
@@ -71,48 +55,18 @@ const INFO: AgentInfoResult = {
         content: "You are a weather assistant.",
         logicalPath: "instructions.md",
         name: "instructions",
+        owner: { kind: "application" },
         role: "system",
+        sourceId: "test:instructions",
         sourceKind: "markdown",
       },
     ],
   },
-  kind: "eve-agent-info",
-  mode: "development",
-  sandbox: null,
-  schedules: [],
-  skills: {
-    dynamic: [],
-    static: [],
-  },
-  subagents: {
-    local: [],
-    total: 0,
-  },
   tools: {
-    authored: [AUTHORED_TOOL],
-    available: [FRAMEWORK_TOOL, AUTHORED_TOOL],
-    disabledFramework: [],
     dynamic: [],
-    framework: [
-      {
-        ...FRAMEWORK_TOOL,
-        disabledByAuthor: false,
-        replacedByAuthoredTool: false,
-        status: "active",
-      },
-    ],
-    reserved: [],
+    static: [FRAMEWORK_TOOL, AUTHORED_TOOL],
   },
-  version: 2,
-  workflow: {
-    enabled: false,
-    toolName: "Workflow",
-  },
-  workspace: {
-    resourceRoot: null,
-    rootEntries: [],
-  },
-};
+});
 
 describe("buildAgentHeader", () => {
   const theme = createTheme({ color: false, unicode: false });
@@ -157,10 +111,10 @@ describe("buildAgentHeader", () => {
     expect(line).toContain(colorTheme.colors.blue("/add"));
   });
 
-  it("keeps the discovery-diagnostics line when the compiler reported problems", () => {
+  it("keeps the compiler-diagnostics line when the compiler reported problems", () => {
     const info: AgentInfoResult = {
       ...INFO,
-      diagnostics: { discoveryErrors: 1, discoveryWarnings: 2 },
+      diagnostics: { errors: 1, warnings: 2 },
     };
     const lines = buildAgentHeader({ name: "weather-agent", info, theme, width: 120 });
 

@@ -3,10 +3,14 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createCompiledAgentManifest } from "#compiler/manifest.js";
 import type { DevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
 import { STRUCTURAL_RELOAD_LOG_LINE } from "#internal/nitro/host/dev-watcher-log.js";
+import {
+  createStubCompiledAgentManifest as createCompiledAgentManifest,
+  TEST_COMPILED_AGENT_CONFIG_BINDING,
+  TEST_COMPILED_AGENT_CONFIG_SOURCE,
+} from "#internal/testing/compiled-manifest.js";
 
 const mockedWatcher = vi.hoisted(() => {
   let onAllHandler: ((event: string, changedPath: string) => void) | undefined;
@@ -135,6 +139,73 @@ describe("startAuthoredSourceWatcher", () => {
       expect(ignored(join(host.appRoot, ".eve", "dev-hosts", "candidate"))).toBe(true);
       expect(ignored(join(host.appRoot, "node_modules", "eve"))).toBe(true);
       expect(ignored(join(host.appRoot, "agent", "tools", "weather.ts"))).toBe(false);
+    } finally {
+      await watcher.close();
+    }
+  });
+
+  it("watches custom World backing inside node_modules and rebuilds on content edits", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "eve-dev-watch-world-"));
+    const packageRoot = join(appRoot, "node_modules", "@acme", "world");
+    const materializedPackageRoot = join(appRoot, ".eve", "compile", "workflow-world", "world");
+    const entryPath = join(packageRoot, "index.js");
+    temporaryDirectories.push(appRoot);
+    await mkdir(join(appRoot, "agent"), { recursive: true });
+    await mkdir(packageRoot, { recursive: true });
+    await writeFile(join(appRoot, "package.json"), '{"name":"watch-agent","type":"module"}\n');
+    await writeFile(entryPath, "export const world = true;\n");
+    const baseHost = createPreparedHost(appRoot);
+    const workflowWorld = {
+      backing: {
+        entryPackageId: "root",
+        entryPath: join(materializedPackageRoot, "index.js"),
+        identitySha256: "1".repeat(64),
+        mode: "materialized",
+        packages: [
+          {
+            contentSha256: "2".repeat(64),
+            dependencies: {},
+            id: "root",
+            manifestPath: join(materializedPackageRoot, "package.json"),
+            name: "@acme/world",
+            rootPath: materializedPackageRoot,
+            sourceManifestPath: join(packageRoot, "package.json"),
+            sourceRootPath: packageRoot,
+            version: "1.0.0",
+          },
+        ],
+      },
+      kind: "host-module",
+      packageName: "@acme/world",
+      protocol: {
+        declaredPackageName: "@workflow/core",
+        declaredRange: "^5.0.0-beta.43",
+        expectedVersion: "5.0.0-beta.43",
+      },
+      selection: "configured",
+    } as const;
+    const host: PreparedDevelopmentApplicationHost = {
+      ...baseHost,
+      compileResult: {
+        ...baseHost.compileResult,
+        manifest: { ...baseHost.compileResult.manifest, workflowWorld },
+      },
+    };
+    const coordinator = createCoordinator(host);
+    const watcher = await startAuthoredSourceWatcher({ coordinator, preparedHost: host });
+
+    try {
+      expect(getInitialWatchPaths()).toContain(packageRoot);
+      expect(getIgnoredPredicate()(entryPath)).toBe(false);
+      expect(getIgnoredPredicate()(packageRoot)).toBe(false);
+      expect(
+        getIgnoredPredicate()(join(packageRoot, "node_modules", "transitive", "index.js")),
+      ).toBe(true);
+      expect(getIgnoredPredicate()(join(packageRoot, "dist", "generated.js"))).toBe(true);
+      mockedWatcher.emit("change", entryPath);
+      await vi.advanceTimersByTimeAsync(200);
+      await watcher.flush();
+      expect(coordinator.rebuild).toHaveBeenCalledWith({ changedPaths: [entryPath] });
     } finally {
       await watcher.close();
     }
@@ -377,24 +448,28 @@ function createPreparedHost(
   appRoot: string = DEFAULT_APP_ROOT,
 ): PreparedDevelopmentApplicationHost {
   const agentRoot = join(appRoot, "agent");
+  const manifest = createCompiledAgentManifest({
+    agentRoot,
+    appRoot,
+    bindings: [TEST_COMPILED_AGENT_CONFIG_BINDING],
+    config: {
+      model: { id: "openai/gpt-5-mini", routing: { kind: "gateway", target: "openai" } },
+      name: "watch-agent",
+      source: TEST_COMPILED_AGENT_CONFIG_SOURCE,
+    },
+  });
   return {
     appRoot,
     compileResult: {
       diagnostics: [],
-      manifest: createCompiledAgentManifest({
-        agentRoot,
-        appRoot,
-        config: {
-          model: { id: "openai/gpt-5-mini", routing: { kind: "gateway", target: "openai" } },
-          name: "watch-agent",
-        },
-      }),
+      manifest,
       metadata: {} as PreparedDevelopmentApplicationHost["compileResult"]["metadata"],
       paths: {} as PreparedDevelopmentApplicationHost["compileResult"]["paths"],
       project: { agentRoot, appRoot, layout: "flat" },
     },
     compiledArtifacts: {
       bootstrapPath: join(appRoot, ".eve", "dev-hosts", "test", "bootstrap.mjs"),
+      instrumentationPluginPath: join(appRoot, ".eve", "dev-hosts", "test", "instrumentation.mjs"),
       workflowWorldPluginPath: join(appRoot, ".eve", "dev-hosts", "test", "world.mjs"),
     },
     generation: {

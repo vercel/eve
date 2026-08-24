@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createResolvedRuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
-import { AGENT_TOOL_NAME } from "#runtime/framework-tools/agent.js";
+import { AGENT_TOOL_NAME } from "#kernel/agent.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import type { ResolvedAgent } from "#runtime/types.js";
 
@@ -9,7 +9,7 @@ function createResolvedAgentForTest(overrides: Partial<ResolvedAgent> = {}): Res
   const agent: Partial<ResolvedAgent> = {
     config: { name: "test-agent" } as ResolvedAgent["config"],
     connections: [],
-    disabledFrameworkTools: [],
+    kernelPlan: { prepared: ["agent", "ask_question"] },
     instructions: [],
     skills: [],
     ...overrides,
@@ -26,6 +26,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
             content: "System policy.",
             logicalPath: "instructions/system.ts",
             name: "instructions/system",
+            owner: { kind: "application" },
             role: "system",
             sourceId: "instructions/system.ts",
             sourceKind: "module",
@@ -34,6 +35,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
             content: "  Pinned user context.  ",
             logicalPath: "instructions/user.ts",
             name: "instructions/user",
+            owner: { kind: "application" },
             role: "user",
             sourceId: "instructions/user.ts",
             sourceKind: "module",
@@ -42,6 +44,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
             content: " \n ",
             logicalPath: "instructions/empty.ts",
             name: "instructions/empty",
+            owner: { kind: "application" },
             role: "user",
             sourceId: "instructions/empty.ts",
             sourceKind: "module",
@@ -58,7 +61,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
     );
   });
 
-  it("includes the messaging instruction for an opted-in root agent (framework agent tool)", () => {
+  it("defers native agent messaging until session availability is known", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest({
         config: {
@@ -70,8 +73,8 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
       tools: [],
     });
 
-    expect(turnAgent.instructions).toContainEqual(expect.stringContaining("Pass `agentId`"));
-    expect(turnAgent.instructions).toContainEqual(expect.stringContaining("Tool execution"));
+    expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("Pass `agentId`"));
+    expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("Tool execution"));
   });
 
   it("omits the messaging instruction for a root agent without the experimental opt-in", () => {
@@ -84,7 +87,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
     expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("Pass `agentId`"));
   });
 
-  it("explains task-derived busy agents when tasks imply persistent sessions", () => {
+  it("defers native task agent messaging until session availability is known", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest({
         config: {
@@ -96,22 +99,23 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
       tools: [],
     });
 
-    expect(turnAgent.instructions).toContainEqual(expect.stringContaining("availability=busy"));
-    expect(turnAgent.instructions).toContainEqual(expect.stringContaining("taskId"));
+    expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("availability=busy"));
+    expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("taskId"));
   });
 
-  it("omits the messaging instruction when an authored tool named agent shadows the framework tool", () => {
+  it("omits the messaging instruction when an authored tool replaces the native agent capability", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest({
         config: {
           experimental: { subagentPersistentSessions: true },
           name: "test-agent",
         } as ResolvedAgent["config"],
+        kernelPlan: { prepared: [] },
       }),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
       tools: [
         {
-          description: "Authored replacement for the framework agent tool.",
+          description: "Authored replacement for the native agent capability.",
           inputSchema: null,
           kind: "authored-tool",
           logicalPath: `tools/${AGENT_TOOL_NAME}.ts`,
@@ -124,14 +128,14 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
     expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("Pass `agentId`"));
   });
 
-  it("omits the messaging instruction when the root disables the framework agent tool", () => {
+  it("omits the messaging instruction when the compiled plan omits agent", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest({
         config: {
           experimental: { subagentPersistentSessions: true },
           name: "test-agent",
         } as ResolvedAgent["config"],
-        disabledFrameworkTools: [AGENT_TOOL_NAME],
+        kernelPlan: { prepared: [] },
       } as Partial<ResolvedAgent>),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
       tools: [],
@@ -147,6 +151,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
           experimental: { subagentPersistentSessions: true },
           name: "test-agent",
         } as ResolvedAgent["config"],
+        kernelPlan: { prepared: [] },
       }),
       nodeId: "subagents/researcher",
       tools: [],

@@ -55,9 +55,6 @@ export async function transformDynamicToolExecute(
   return callbacks.length === 0 ? null : applyTransform(source, callbacks);
 }
 
-// Keep the old export name for backward compatibility with the plugin.
-export { transformDynamicToolExecute as transformDynamicToolAwait };
-
 function findDefineToolAliases(ast: AstNode): ReadonlySet<string> {
   const aliases = new Set<string>();
   walkNode(ast, (node) => {

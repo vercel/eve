@@ -16,8 +16,8 @@ import type {
   RuntimeActionRequest,
   RuntimeActionResult,
   RuntimeToolResultActionResult,
-} from "#runtime/actions/types.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+} from "#shared/runtime-actions.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 

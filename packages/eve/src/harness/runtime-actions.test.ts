@@ -55,7 +55,7 @@ describe("createRuntimeActionRequestFromToolCall", () => {
             "load_skill",
             {
               description: "Load a skill.",
-              frameworkAction: "load-skill" as const,
+              kernelCapability: "load_skill" as const,
               inputSchema: jsonSchema({ type: "object" }),
               name: "load_skill",
             },
@@ -81,6 +81,56 @@ describe("createRuntimeActionRequestFromToolCall", () => {
       kind: "tool-call",
       toolName: "load_skill",
     });
+  });
+
+  it("keeps native dispatch identity beside the public action shape", () => {
+    const taskCancelCall = {
+      input: { taskIds: ["task-1"] },
+      toolCallId: "call-cancel",
+      toolName: "task_cancel",
+      type: "tool-call" as const,
+    };
+    const native = createRuntimeActionRequestFromToolCall({
+      toolCall: taskCancelCall,
+      tools: new Map([
+        [
+          "task_cancel",
+          {
+            description: "Cancel tasks.",
+            inputSchema: jsonSchema({ type: "object" }),
+            kernelCapability: "task_cancel" as const,
+            name: "task_cancel",
+            runtimeAction: { kind: "task-control" as const },
+          },
+        ],
+      ]),
+    });
+    const session = setPendingRuntimeActionBatch({
+      actions: [native],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      kernelCapabilities: { "call-cancel": "task_cancel" },
+      responseMessages: [],
+      session: createParkedSession(),
+    });
+    const batch = getPendingRuntimeActionBatch(session.state);
+
+    expect(native).not.toHaveProperty("kernelCapability");
+    expect(batch?.kernelCapabilities).toEqual({ "call-cancel": "task_cancel" });
+  });
+
+  it("rejects malformed persisted kernel capability identity", () => {
+    const session = createParkedSession();
+    const key = "eve.runtime.pendingActionBatch";
+    const stored = session.state?.[key] as Record<string, unknown>;
+    expect(
+      getPendingRuntimeActionBatch({
+        ...session.state,
+        [key]: {
+          ...stored,
+          kernelCapabilities: { "call-1": "not-a-kernel-capability" },
+        },
+      }),
+    ).toBeUndefined();
   });
 });
 
@@ -120,6 +170,7 @@ function createParkedSession(): HarnessSession {
       },
     ],
     event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+    kernelCapabilities: {},
     responseMessages: [],
     session: withUsage,
   });
@@ -141,6 +192,7 @@ describe("runtime action batch identity", () => {
       setPendingRuntimeActionBatch({
         actions: [action, { ...action, name: "other", subagentName: "other" }],
         event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+        kernelCapabilities: {},
         responseMessages: [],
         session: createParkedSession(),
       }),
@@ -466,6 +518,7 @@ describe("resolvePendingRuntimeActions", () => {
         },
       ],
       event: { sequence: 1, stepIndex: 0, turnId: "turn_1" },
+      kernelCapabilities: {},
       responseMessages: [],
       session: continued.session,
     });
@@ -573,6 +626,7 @@ describe("resolvePendingRuntimeActions", () => {
         },
       ],
       event: { sequence: 1, stepIndex: 0, turnId: "turn_1" },
+      kernelCapabilities: {},
       responseMessages: [],
       session: continued.session,
     });

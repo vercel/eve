@@ -198,6 +198,23 @@ async function assertSupportedNodeVersion(
   );
 }
 
+function assertSupportedRuntime(
+  bunVersion = process.versions.bun,
+  requiredRange = packageNodeEngine,
+) {
+  if (typeof bunVersion !== "string") {
+    return;
+  }
+
+  throw new Error(
+    [
+      `eve requires Node.js ${requiredRange}.`,
+      `You are running Bun ${bunVersion}.`,
+      "Please run eve with a compatible Node.js executable.",
+    ].join(" "),
+  );
+}
+
 function resolveTscCliPath({ tscCliPath }) {
   if (tscCliPath) {
     return tscCliPath;
@@ -299,6 +316,7 @@ export async function ensureBuiltCli(overrides = {}, dependencies = {}) {
  */
 export async function runEveCli(argv = process.argv.slice(2), overrides = {}, dependencies = {}) {
   const options = createBootstrapOptions(overrides);
+  assertSupportedRuntime(dependencies.bunVersion, dependencies.nodeEngineRequirement);
   await assertSupportedNodeVersion(
     dependencies.nodeVersion,
     dependencies.nodeEngineRequirement,

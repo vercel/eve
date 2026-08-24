@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import type { ScheduleDefinition } from "#public/definitions/schedule.js";
 import { lowerScheduleMarkdown } from "#internal/helpers/markdown.js";
-import type { DiscoverDiagnostic } from "#discover/diagnostics.js";
+import type { CompilerDiagnostic } from "#shared/compiler-diagnostics.js";
 import { discoverNamedSourceDirectory } from "#discover/grammar.js";
 import type { ScheduleSourceRef } from "#discover/manifest.js";
 import type { ProjectSource, ProjectSourceEntry } from "#discover/project-source.js";
@@ -24,6 +24,7 @@ export const DISCOVER_SCHEDULE_FILE_UNSUPPORTED = "discover/schedule-file-unsupp
  */
 interface DiscoverScheduleSourcesInput {
   agentRoot: string;
+  nodeId: string;
   rootEntries: readonly ProjectSourceEntry[];
   source: ProjectSource;
 }
@@ -32,7 +33,7 @@ interface DiscoverScheduleSourcesInput {
  * Result of discovering authored schedules under `schedules/`.
  */
 interface DiscoverScheduleSourcesResult {
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
   schedules: ScheduleSourceRef[];
 }
 
@@ -47,6 +48,7 @@ interface DiscoverScheduleSourcesResult {
 export async function discoverScheduleSources(
   input: DiscoverScheduleSourcesInput,
 ): Promise<DiscoverScheduleSourcesResult> {
+  const { nodeId } = input;
   const schedulesRoot = join(input.agentRoot, "schedules");
 
   const result = await discoverNamedSourceDirectory<ScheduleDefinition>({
@@ -55,6 +57,7 @@ export async function discoverScheduleSources(
     invalidDirectoryCode: DISCOVER_SCHEDULES_DIRECTORY_INVALID,
     invalidDirectoryMessage: `Expected "${schedulesRoot}" to be a directory of authored schedules.`,
     markdownLowerer: (markdown) => lowerScheduleMarkdown(markdown),
+    nodeId,
     recursive: true,
     rootEntries: input.rootEntries,
     rootPath: input.agentRoot,

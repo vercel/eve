@@ -1,4 +1,4 @@
-import type { ConnectionProtocol } from "#runtime/connections/types.js";
+import type { ConnectionProtocol } from "#shared/connections.js";
 
 /**
  * Cross-instance symbol marking which protocol a connection definition

@@ -198,15 +198,17 @@ export interface InstrumentationDefinition {
  */
 export function defineInstrumentation<
   const TDefinition extends InstrumentationDefinition | ProviderDefinition,
->(definition: TDefinition): InstrumentationDeclaration<TDefinition> {
-  return { ...definition, [PROVIDER]: true };
+>(definition: TDefinition): TDefinition;
+export function defineInstrumentation(
+  definition: InstrumentationDefinition | ProviderDefinition,
+): InstrumentationDefinition | ProviderDefinition {
+  const branded = { ...definition, [PROVIDER]: true } as const;
+  return branded;
 }
 
-/** The branded result of {@link defineInstrumentation}. */
+/** The literal-preserving result of {@link defineInstrumentation}. */
 export type InstrumentationDeclaration<
   TDefinition extends InstrumentationDefinition | ProviderDefinition =
     | InstrumentationDefinition
     | ProviderDefinition,
-> = TDefinition & {
-  readonly [PROVIDER]: true;
-};
+> = TDefinition;

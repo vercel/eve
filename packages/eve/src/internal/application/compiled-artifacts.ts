@@ -1,32 +1,34 @@
-import { copyFile, mkdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { CompileMetadata } from "#compiler/artifacts.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
-import { createCompiledModuleMapSource } from "#compiler/module-map.js";
+import { parseCompiledAgentManifest } from "#compiler/compiled-manifest-validation.js";
+import { compiledInstrumentationPlanActivatesInMode } from "#compiler/instrumentation-plan-activation.js";
+import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import {
+  createCompiledModuleMapDescriptorSource,
+  createCompiledModuleMapIdentity,
+} from "#compiler/module-map.js";
 import { stringifyEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import {
   resolvePackageCompiledFilePath,
   resolvePackageSourceFilePath,
 } from "#internal/application/package.js";
 import { buildPackageUserAgent } from "#internal/user-agent.js";
-import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
+import type { CompiledWorkflowWorldPlan } from "#compiler/workflow-world-plan.js";
 import {
-  readMaterializedAuthoredModuleIndex,
-  type MaterializedInstrumentation,
-} from "#internal/materialized-authored-modules.js";
-import {
-  resolveInstrumentationLayout,
-  type InstrumentationLayout,
-} from "#internal/instrumentation-layout.js";
+  assertCompilerDiagnosticsArtifactSemantics,
+  compilerDiagnosticsArtifactSchema,
+} from "#protocol/compiler-diagnostics-artifact.js";
+import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
+import { loadCompiledArtifactEnvelope } from "#runtime/loaders/compiled-artifact-set.js";
+import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
-import { resolveWorkflowWorldImport } from "#internal/workflow/world-target.js";
+import { resolveBuiltInWorkflowWorldPackage } from "#internal/workflow/world-target.js";
 
-export type BuiltInWorkflowWorldTarget = "local" | "vercel";
-
-export type GeneratedInstrumentationLayout =
-  | { readonly kind: "file" }
-  | { readonly kind: "directory"; readonly slots: readonly string[] };
+export type { BuiltInWorkflowWorldTarget } from "#internal/workflow/world-target.js";
 
 /**
  * Paths to the generated compiled-artifacts files shared by Nitro and the
@@ -41,18 +43,10 @@ export interface GeneratedCompiledArtifactsFiles {
   /** Nitro plugin that installs the selected vendored Workflow world. */
   workflowWorldPluginPath: string;
   /**
-   * Optional Nitro plugin that imports the authored instrumentation modules
-   * from the application when present.
+   * Nitro plugin generated only when the instrumentation plan has an active
+   * entry for the host mode.
    */
   instrumentationPluginPath?: string;
-  /** Layout identity used by dev plugin selection and structural fingerprinting. */
-  instrumentationLayout?: GeneratedInstrumentationLayout;
-  /**
-   * Absolute paths to the authored instrumentation modules when present — one
-   * for the file layout, one per provider in the directory layout. Nitro uses these
-   * to preserve each module's side effects during bundling.
-   */
-  instrumentationSourcePaths?: readonly string[];
 }
 
 /**
@@ -64,17 +58,17 @@ export interface GeneratedCompiledArtifactsFiles {
  */
 export async function writeCompiledArtifactsFiles(input: {
   compileResult: CompileAgentResult;
-  defaultWorkflowWorld: BuiltInWorkflowWorldTarget;
   outDir: string;
 }): Promise<GeneratedCompiledArtifactsFiles> {
   const bootstrapPath = join(input.outDir, "compiled-artifacts-bootstrap.mjs");
-  const instrumentationPluginPath = join(input.outDir, "compiled-artifacts-instrumentation.mjs");
   const workflowWorldPluginPath = join(input.outDir, "compiled-artifacts-workflow-world.mjs");
-  const layout = resolveInstrumentationLayout({
-    agentRoot: input.compileResult.manifest.agentRoot,
-    providersEnabled:
-      input.compileResult.manifest.config.experimental?.instrumentationProviders ?? false,
-  });
+  const instrumentationPluginPath = compiledInstrumentationPlanActivatesInMode(
+    input.compileResult.manifest.instrumentation,
+    "production",
+  )
+    ? join(input.outDir, "compiled-artifacts-instrumentation.mjs")
+    : undefined;
+  const worldPlan = input.compileResult.manifest.workflowWorld;
 
   await mkdir(input.outDir, { recursive: true });
   await writeFile(
@@ -90,53 +84,47 @@ export async function writeCompiledArtifactsFiles(input: {
     workflowWorldPluginPath,
     createWorkflowWorldPluginSource({
       compiledArtifactsBootstrapPath: bootstrapPath,
-      configuredWorld: input.compileResult.manifest.config.experimental?.workflow?.world,
-      defaultWorld: input.defaultWorkflowWorld,
+      worldPlan,
     }),
   );
+  if (instrumentationPluginPath !== undefined) {
+    await writeFile(
+      instrumentationPluginPath,
+      createProductionInstrumentationPluginSource({
+        compiledArtifactsBootstrapPath: bootstrapPath,
+      }),
+    );
+  }
 
   const generatedArtifacts: GeneratedCompiledArtifactsFiles = {
     bootstrapPath,
     workflowWorldPluginPath,
   };
-
-  if (layout !== undefined) {
-    await writeFile(
-      instrumentationPluginPath,
-      createInstrumentationPluginSource({
-        agentName: input.compileResult.manifest.config.name,
-        layout,
-      }),
-    );
+  if (instrumentationPluginPath !== undefined) {
     generatedArtifacts.instrumentationPluginPath = instrumentationPluginPath;
-    generatedArtifacts.instrumentationLayout = generatedInstrumentationLayout(layout);
-    generatedArtifacts.instrumentationSourcePaths = instrumentationSourcePathsOf(layout);
   }
 
   return generatedArtifacts;
 }
 
-function instrumentationSourcePathsOf(layout: InstrumentationLayout): readonly string[] {
-  return layout.kind === "file" ? [layout.modulePath] : Object.values(layout.modulePathsBySlot);
-}
-
 // The dev host's Nitro inputs outlive any single generation, so nothing
 // written here may point into authored source or a prunable snapshot: the
-// bootstrap references no authored module, and the instrumentation bundle is
-// copied out of the generation into the stable host directory.
+// bootstrap references no authored module, while instrumentation is copied out
+// of the generation into the stable host directory.
 export async function writeDevelopmentCompiledArtifactsFiles(input: {
   readonly compileResult: CompileAgentResult;
   readonly outDir: string;
   readonly runtimeAppRoot: string;
 }): Promise<GeneratedCompiledArtifactsFiles> {
   const bootstrapPath = join(input.outDir, "compiled-artifacts-bootstrap.mjs");
-  const instrumentationPluginPath = join(input.outDir, "compiled-artifacts-instrumentation.mjs");
   const workflowWorldPluginPath = join(input.outDir, "compiled-artifacts-workflow-world.mjs");
-  const materializedIndex = await readMaterializedAuthoredModuleIndex(input.runtimeAppRoot);
-
-  if (materializedIndex === undefined) {
-    throw new Error(`Development generation at "${input.runtimeAppRoot}" is not materialized.`);
-  }
+  const instrumentationPluginPath = compiledInstrumentationPlanActivatesInMode(
+    input.compileResult.manifest.instrumentation,
+    "development",
+  )
+    ? join(input.outDir, "compiled-artifacts-instrumentation.mjs")
+    : undefined;
+  const worldPlan = input.compileResult.manifest.workflowWorld;
 
   await mkdir(input.outDir, { recursive: true });
   await writeFile(
@@ -147,74 +135,49 @@ export async function writeDevelopmentCompiledArtifactsFiles(input: {
     workflowWorldPluginPath,
     createDevelopmentWorkflowWorldPluginSource({
       compiledArtifactsBootstrapPath: bootstrapPath,
-      configuredWorld: input.compileResult.manifest.config.experimental?.workflow?.world,
+      worldPlan,
     }),
   );
+  if (instrumentationPluginPath !== undefined) {
+    const envelope = await loadCompiledArtifactEnvelope({
+      compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(input.runtimeAppRoot),
+    });
+    const materializedIndex = await readMaterializedAuthoredModuleIndex({
+      metadata: envelope.metadata,
+      runtimeAppRoot: input.runtimeAppRoot,
+    });
+    if (materializedIndex === undefined) {
+      throw new Error(`Development generation at "${input.runtimeAppRoot}" is not materialized.`);
+    }
+    const descriptorSha256 = createHash("sha256")
+      .update(materializedIndex.moduleMapCode)
+      .digest("hex");
+    const descriptorPath = join(
+      input.outDir,
+      `compiled-artifacts-module-map-${descriptorSha256}.mjs`,
+    );
+    await writeFile(descriptorPath, materializedIndex.moduleMapCode);
+    await writeFile(
+      instrumentationPluginPath,
+      createDevelopmentInstrumentationPluginSource({
+        descriptorPath,
+        descriptorSha256,
+        diagnostics: envelope.diagnostics,
+        manifest: envelope.manifest,
+        metadata: envelope.metadata,
+      }),
+    );
+  }
 
   const generatedArtifacts: GeneratedCompiledArtifactsFiles = {
     bootstrapPath,
     workflowWorldPluginPath,
   };
-
-  if (materializedIndex.instrumentation !== undefined) {
-    const layout = await copyMaterializedInstrumentation({
-      instrumentation: materializedIndex.instrumentation,
-      outDir: input.outDir,
-      runtimeAppRoot: input.runtimeAppRoot,
-    });
-
-    await writeFile(
-      instrumentationPluginPath,
-      createInstrumentationPluginSource({
-        agentName: input.compileResult.manifest.config.name,
-        layout,
-      }),
-    );
+  if (instrumentationPluginPath !== undefined) {
     generatedArtifacts.instrumentationPluginPath = instrumentationPluginPath;
-    generatedArtifacts.instrumentationLayout = generatedInstrumentationLayout(layout);
-    generatedArtifacts.instrumentationSourcePaths = instrumentationSourcePathsOf(layout);
   }
 
   return generatedArtifacts;
-}
-
-function generatedInstrumentationLayout(
-  layout: InstrumentationLayout,
-): GeneratedInstrumentationLayout {
-  return layout.kind === "file"
-    ? { kind: "file" }
-    : { kind: "directory", slots: Object.keys(layout.modulePathsBySlot) };
-}
-
-/**
- * Copies each materialized instrumentation bundle out of the prunable
- * generation and into the stable dev-host directory, returning the layout in
- * terms of the copies.
- */
-async function copyMaterializedInstrumentation(input: {
-  readonly instrumentation: MaterializedInstrumentation;
-  readonly outDir: string;
-  readonly runtimeAppRoot: string;
-}): Promise<InstrumentationLayout> {
-  const compileRoot = join(input.runtimeAppRoot, ".eve", "compile");
-  const copyOne = async (sourceId: string, modulePath: string): Promise<string> => {
-    const destination = join(input.outDir, `compiled-artifacts-instrumentation-${sourceId}.mjs`);
-    await copyFile(join(compileRoot, modulePath), destination);
-    return destination;
-  };
-
-  if (input.instrumentation.kind === "file") {
-    return {
-      kind: "file",
-      modulePath: await copyOne("source", input.instrumentation.modulePath),
-    };
-  }
-
-  const modulePathsBySlot: Record<string, string> = {};
-  for (const [slot, modulePath] of Object.entries(input.instrumentation.modulePathsBySlot)) {
-    modulePathsBySlot[slot] = await copyOne(slot, modulePath);
-  }
-  return { kind: "directory", modulePathsBySlot };
 }
 
 function createDevelopmentCompiledArtifactsBootstrapSource(agentName: string): string {
@@ -229,49 +192,62 @@ function createDevelopmentCompiledArtifactsBootstrapSource(agentName: string): s
   ].join("\n");
 }
 
-function stripCompiledModuleMapExports(source: string): string {
-  return source
-    .replace(/^export const moduleMap = /m, "const moduleMap = ")
-    .replace(/\nexport default moduleMap;\n?$/, "\n");
-}
-
 export async function createCompiledArtifactsBootstrapSource(input: {
   compileResult: CompileAgentResult;
   installModulePath: string;
   metadata: CompileMetadata;
   moduleMapPath: string;
 }): Promise<string> {
-  const agentName = input.compileResult.manifest.config.name;
-  const moduleMapSource = stripCompiledModuleMapExports(
-    createCompiledModuleMapSource({
-      importSpecifierStyle: "absolute",
-      manifest: input.compileResult.manifest,
-      moduleMapPath: input.moduleMapPath,
-    }),
-  ).trim();
+  const [manifestSource, diagnosticsSource] = await Promise.all([
+    readFile(input.compileResult.paths.compiledManifestPath, "utf8"),
+    readFile(input.compileResult.paths.diagnosticsPath, "utf8"),
+  ]);
+  const manifest = parseCompiledAgentManifest(JSON.parse(manifestSource) as unknown);
+  const diagnostics = compilerDiagnosticsArtifactSchema.parse(
+    JSON.parse(diagnosticsSource) as unknown,
+  );
+  const agentName = manifest.config.name;
+  assertCompilerDiagnosticsArtifactSemantics({
+    artifact: diagnostics,
+    manifest,
+  });
+  const moduleMapIdentity = await createCompiledModuleMapIdentity(manifest);
+  if (moduleMapIdentity !== input.metadata.compile.moduleMap.identitySha256) {
+    throw new Error(
+      "Cannot generate a bundled compiled-artifacts bootstrap because selected module source content changed after compilation.",
+    );
+  }
+  const moduleMapDescriptorSource = createCompiledModuleMapDescriptorSource({
+    identity: moduleMapIdentity,
+    importSpecifierStyle: "absolute",
+    manifest,
+    moduleMapPath: input.moduleMapPath,
+  });
 
   return [
     "// Generated by eve. Do not edit by hand.",
-    `import { installBundledCompiledArtifacts } from ${stringifyEsmImportSpecifier(input.installModulePath)};`,
+    `import { installBundledCompiledArtifactsFromDescriptor } from ${stringifyEsmImportSpecifier(input.installModulePath)};`,
     `import { installEveWorkflowQueueNamespace } from ${stringifyEsmImportSpecifier(resolvePackageSourceFilePath("src/internal/workflow/queue-namespace.ts"))};`,
     "",
-    `installEveWorkflowQueueNamespace(${JSON.stringify(agentName)});`,
-    "",
-    moduleMapSource,
+    `const diagnostics = ${JSON.stringify(diagnostics, null, 2)};`,
     "",
     `const metadata = ${JSON.stringify(input.metadata, null, 2)};`,
     "",
-    `const manifest = ${JSON.stringify(input.compileResult.manifest, null, 2)};`,
+    `const manifest = ${JSON.stringify(manifest, null, 2)};`,
     "",
-    "export function installCompiledArtifactsBootstrap() {",
-    "  installBundledCompiledArtifacts({",
+    `const moduleMapDescriptor = ${moduleMapDescriptorSource};`,
+    "",
+    "export async function installCompiledArtifactsBootstrap() {",
+    "  await installBundledCompiledArtifactsFromDescriptor({",
+    "    diagnostics,",
     "    manifest,",
     "    metadata,",
-    "    moduleMap,",
+    "    moduleMapDescriptor,",
     "  });",
+    `  installEveWorkflowQueueNamespace(${JSON.stringify(agentName)});`,
     "}",
     "",
-    "installCompiledArtifactsBootstrap();",
+    "await installCompiledArtifactsBootstrap();",
     "",
     "// Default export satisfies the Nitro plugin contract so this file",
     "// can be used directly as a Nitro plugin without a separate wrapper.",
@@ -299,7 +275,13 @@ interface WorkflowWorldWiring {
  * `createWorld(config)` call must not import `createWorldFromModule`, and
  * only the vendored local World needs the data-directory resolver import.
  */
-function resolveWorkflowWorldWiring(packageName: string): WorkflowWorldWiring {
+function resolveWorkflowWorldWiring(input: {
+  readonly worldPlan: CompiledWorkflowWorldPlan;
+}): WorkflowWorldWiring {
+  const packageName =
+    input.worldPlan.kind === "host-module"
+      ? input.worldPlan.packageName
+      : resolveBuiltInWorkflowWorldPackage(input.worldPlan.target);
   if (packageName === "@workflow/world-local") {
     const dataDirectoryImportSpecifier = stringifyEsmImportSpecifier(
       resolvePackageSourceFilePath("src/internal/workflow/local-world-data-directory.ts"),
@@ -338,7 +320,8 @@ const workflowWorld = await workflowWorldModule.createWorld({
   }
 
   return {
-    moduleImportSpecifier: packageName,
+    moduleImportSpecifier:
+      input.worldPlan.kind === "host-module" ? input.worldPlan.backing.entryPath : packageName,
     extraImportLines: [],
     runtimeImports: "createWorldFromModule, getWorld, setWorld",
     createWorldSource: "const workflowWorld = await createWorldFromModule(workflowWorldModule);",
@@ -347,12 +330,9 @@ const workflowWorld = await workflowWorldModule.createWorld({
 
 export function createWorkflowWorldPluginSource(input: {
   compiledArtifactsBootstrapPath: string;
-  configuredWorld: AgentWorkflowWorldDefinition | undefined;
-  defaultWorld: BuiltInWorkflowWorldTarget;
+  worldPlan: CompiledWorkflowWorldPlan;
 }): string {
-  const targetWorld = input.configuredWorld ?? input.defaultWorld;
-  const packageName = resolveWorkflowWorldImport(targetWorld);
-  const wiring = resolveWorkflowWorldWiring(packageName);
+  const wiring = resolveWorkflowWorldWiring(input);
   const workflowRuntimeImportSpecifier = resolvePackageCompiledFilePath(
     "src/compiled/@workflow/core/runtime.js",
   );
@@ -363,13 +343,13 @@ export function createWorkflowWorldPluginSource(input: {
   return [
     "// Generated by eve. Do not edit by hand.",
     `import ${stringifyEsmImportSpecifier(input.compiledArtifactsBootstrapPath)};`,
-    `import * as workflowWorldModule from ${stringifyEsmImportSpecifier(wiring.moduleImportSpecifier)};`,
     ...wiring.extraImportLines,
     `import { ${wiring.runtimeImports} } from ${stringifyEsmImportSpecifier(workflowRuntimeImportSpecifier)};`,
     `import { validateWorkflowWorld } from ${stringifyEsmImportSpecifier(workflowWorldValidationImportSpecifier)};`,
     "",
+    `const workflowWorldModule = await import(${stringifyEsmImportSpecifier(wiring.moduleImportSpecifier)});`,
     wiring.createWorldSource,
-    `validateWorkflowWorld({ packageName: ${JSON.stringify(input.configuredWorld)}, world: workflowWorld });`,
+    "validateWorkflowWorld({ world: workflowWorld });",
     "setWorld(workflowWorld);",
     "await getWorld();",
     "await workflowWorld.start?.();",
@@ -390,12 +370,11 @@ export function createWorkflowWorldPluginSource(input: {
  */
 export function createDevelopmentWorkflowWorldPluginSource(input: {
   compiledArtifactsBootstrapPath: string;
-  configuredWorld: AgentWorkflowWorldDefinition | undefined;
+  worldPlan: CompiledWorkflowWorldPlan;
 }): string {
-  if (!usesParentDevelopmentWorkflowWorld(input.configuredWorld)) {
+  if (!usesParentDevelopmentWorkflowWorld(input.worldPlan)) {
     return createWorkflowWorldPluginSource({
       ...input,
-      defaultWorld: "local",
     });
   }
   const workflowRuntimeImportSpecifier = resolvePackageCompiledFilePath(
@@ -418,72 +397,80 @@ export function createDevelopmentWorkflowWorldPluginSource(input: {
   ].join("\n");
 }
 
-/**
- * Generates the Nitro plugin that registers the authored instrumentation.
- *
- * The file layout registers one default export; the directory layout
- * registers one per file, in slot order, awaiting each `setup` so a provider
- * cannot miss an event published while it is still starting up, then builds the
- * one OpenTelemetry pipeline their declarations add up to.
- */
-function createInstrumentationPluginSource(input: {
-  agentName: string;
-  layout: InstrumentationLayout;
+function createProductionInstrumentationPluginSource(input: {
+  readonly compiledArtifactsBootstrapPath: string;
 }): string {
-  const agentName = JSON.stringify(input.agentName);
-
-  if (input.layout.kind === "file") {
-    const registerConfigPath = resolvePackageSourceFilePath(
-      "src/harness/instrumentation/config.ts",
-    );
-    return [
-      "// Generated by eve. Do not edit by hand.",
-      `import * as instrumentationModule from ${stringifyEsmImportSpecifier(input.layout.modulePath)};`,
-      `import { registerInstrumentationConfig } from ${stringifyEsmImportSpecifier(registerConfigPath)};`,
-      "",
-      "if (instrumentationModule.default != null) {",
-      `  await registerInstrumentationConfig(instrumentationModule.default, { agentName: ${agentName} });`,
-      "}",
-      "",
-      "// Default export satisfies the Nitro plugin contract so this file",
-      "// can be used directly as a Nitro plugin without a separate wrapper.",
-      "export default function installInstrumentationPlugin() {}",
-      "",
-    ].join("\n");
-  }
-
-  const registerProviderPath = resolvePackageSourceFilePath(
-    "src/harness/instrumentation/providers.ts",
+  const bundledArtifactsPath = resolvePackageSourceFilePath(
+    "src/runtime/loaders/bundled-artifacts.ts",
   );
-  const slots = Object.entries(input.layout.modulePathsBySlot);
-
+  const runtimePath = resolvePackageSourceFilePath("src/internal/instrumentation-plan-runtime.ts");
   return [
     "// Generated by eve. Do not edit by hand.",
-    ...slots.map(
-      ([slot, modulePath], index) =>
-        `import * as provider${index} from ${stringifyEsmImportSpecifier(modulePath)}; // ${slot}`,
-    ),
-    `import { finalizeInstrumentationProviders, registerInstrumentationProvider, seedInstrumentationProviders, shutdownInstrumentationProviders } from ${stringifyEsmImportSpecifier(registerProviderPath)};`,
+    `import ${stringifyEsmImportSpecifier(input.compiledArtifactsBootstrapPath)};`,
+    `import { readBundledCompiledArtifacts } from ${stringifyEsmImportSpecifier(bundledArtifactsPath)};`,
+    `import { installCompiledInstrumentationPlan } from ${stringifyEsmImportSpecifier(runtimePath)};`,
     "",
-    "seedInstrumentationProviders();",
+    "const artifacts = readBundledCompiledArtifacts();",
+    "if (artifacts === null) throw new Error('Bundled compiled artifacts must be installed before instrumentation.');",
+    "const shutdown = await installCompiledInstrumentationPlan({",
+    "  appRoot: artifacts.manifest.appRoot,",
+    "  async loadModule(sourceId) {",
+    "    const namespace = artifacts.moduleMap.nodes.__root__?.modules[sourceId];",
+    '    if (namespace === undefined) throw new Error(`Compiled instrumentation source "${sourceId}" is missing from the module map.`);',
+    "    return namespace;",
+    "  },",
+    "  mode: 'production',",
+    "  plan: artifacts.manifest.instrumentation,",
+    "  serviceName: artifacts.manifest.config.name,",
+    "});",
     "",
-    ...slots.flatMap(([slot], index) => [
-      "await registerInstrumentationProvider({",
-      `  agentName: ${agentName},`,
-      `  slot: ${JSON.stringify(slot)},`,
-      `  value: provider${index}.default,`,
-      "});",
-    ]),
-    "",
-    `finalizeInstrumentationProviders({ serviceName: ${agentName} });`,
-    "",
-    "// Default export satisfies the Nitro plugin contract so this file",
-    "// can be used directly as a Nitro plugin without a separate wrapper.",
     "export default function installInstrumentationPlugin(nitroApp) {",
-    "  // The last point a buffered exporter can still reach the network.",
-    "  nitroApp?.hooks?.hook('close', async () => {",
-    "    await shutdownInstrumentationProviders();",
-    "  });",
+    "  nitroApp?.hooks?.hook('close', shutdown);",
+    "}",
+    "",
+  ].join("\n");
+}
+
+function createDevelopmentInstrumentationPluginSource(input: {
+  readonly descriptorPath: string;
+  readonly descriptorSha256: string;
+  readonly diagnostics: unknown;
+  readonly manifest: CompiledAgentManifest;
+  readonly metadata: CompileMetadata;
+}): string {
+  const capturedDescriptorPath = resolvePackageSourceFilePath(
+    "src/runtime/loaders/captured-module-map-descriptor.ts",
+  );
+  const runtimePath = resolvePackageSourceFilePath("src/internal/instrumentation-plan-runtime.ts");
+  return [
+    "// Generated by eve. Do not edit by hand.",
+    `import { withAuthenticatedCompiledModuleMapDescriptor } from ${stringifyEsmImportSpecifier(capturedDescriptorPath)};`,
+    `import { installCompiledInstrumentationPlan } from ${stringifyEsmImportSpecifier(runtimePath)};`,
+    "",
+    "const shutdown = await withAuthenticatedCompiledModuleMapDescriptor({",
+    `  descriptorPath: ${JSON.stringify(input.descriptorPath)},`,
+    `  descriptorSha256: ${JSON.stringify(input.descriptorSha256)},`,
+    `  diagnostics: ${JSON.stringify(input.diagnostics, null, 2)},`,
+    `  manifest: ${JSON.stringify(input.manifest, null, 2)},`,
+    `  metadata: ${JSON.stringify(input.metadata, null, 2)},`,
+    `  runtimeAppRoot: ${JSON.stringify(input.manifest.appRoot)},`,
+    "  async run(descriptor) {",
+    "    return await installCompiledInstrumentationPlan({",
+    `      appRoot: ${JSON.stringify(input.manifest.appRoot)},`,
+    "      async loadModule(sourceId) {",
+    "        const loader = descriptor.nodes.__root__?.modules[sourceId];",
+    '        if (loader === undefined) throw new Error(`Compiled instrumentation source "${sourceId}" is missing from the module-map descriptor.`);',
+    "        return await loader.load();",
+    "      },",
+    "      mode: 'development',",
+    `      plan: ${JSON.stringify(input.manifest.instrumentation, null, 2)},`,
+    `      serviceName: ${JSON.stringify(input.manifest.config.name)},`,
+    "    });",
+    "  },",
+    "});",
+    "",
+    "export default function installInstrumentationPlugin(nitroApp) {",
+    "  nitroApp?.hooks?.hook('close', shutdown);",
     "}",
     "",
   ].join("\n");

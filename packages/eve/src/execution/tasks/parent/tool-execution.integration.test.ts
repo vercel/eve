@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { generateText } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -21,6 +23,7 @@ import { getAgentHandleStore } from "#harness/handles/store.js";
 import { buildToolSet } from "#harness/tools.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
+import { createTestCompiledRemoteAgentNode } from "#internal/testing/compiled-manifest.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { getRun } from "#internal/workflow/runtime.js";
 import type {
@@ -28,11 +31,12 @@ import type {
   SandboxBackendCreateInput,
 } from "#public/definitions/sandbox-backend.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { readSubagentTaskMetadata } from "#tasks/types.js";
+import { identifyCompiledModuleMap } from "#protocol/compiled-module-map-identity.js";
+import { serializeArtifactJson } from "#protocol/artifact-json.js";
 
 const usage = {
   inputTokens: { cacheRead: undefined, cacheWrite: undefined, noCache: 1, total: 1 },
@@ -45,34 +49,99 @@ describe("background subagent tool execution", () => {
   });
 
   it("runs concurrent local and remote defineTool calls as independent durable tasks", async () => {
-    const runtime = createTestRuntime({ agent: { name: "background-subagent" } });
+    const runtime = await createTestRuntime({ agent: { name: "background-subagent" } });
 
     await runtime.run(async () => {
-      const remoteNode = {
+      const remoteNode = createTestCompiledRemoteAgentNode({
+        backing: {
+          externalDependencies: [],
+          kind: "filesystem",
+          sourcePath: "/virtual/eve-memory-app/agent/subagents/reviewer.ts",
+        },
+        configResolver: {
+          logicalPath: "subagents/reviewer/agent.ts",
+          sourceId: "subagents/reviewer::config",
+          sourceKind: "module",
+        },
         description: "Remote reviewer",
         entryPath: "/virtual/eve-memory-app/agent/subagents/reviewer.ts",
-        logicalPath: "subagents/reviewer.ts",
+        logicalPath: "subagents/reviewer",
         name: "reviewer",
         nodeId: "remote/reviewer",
+        owner: { kind: "application" },
         path: "/eve/v1/session",
         rootPath: "/virtual/eve-memory-app/agent",
-        sourceId: "subagents/reviewer.ts",
-        sourceKind: "module",
+        sourceId: "subagents/reviewer",
+        sourceKind: "subagent",
         url: "https://remote.example.com",
-      } as const;
+      });
+      const manifest = {
+        ...runtime.manifest,
+        remoteAgents: [remoteNode],
+        sourceComposition: {
+          ...runtime.manifest.sourceComposition,
+          selected: [
+            ...runtime.manifest.sourceComposition.selected,
+            {
+              slot: "subagents/reviewer",
+              source: {
+                backing: remoteNode.backing,
+                layer: "application" as const,
+                logicalPath: remoteNode.logicalPath,
+                owner: remoteNode.owner,
+                sourceId: remoteNode.sourceId,
+                sourceKind: "subagent" as const,
+              },
+              sourceKind: "non-module" as const,
+            },
+          ],
+        },
+      };
+      const existingMetadata = runtime.session.compiledArtifacts!.metadata;
+      const manifestHash = createHash("sha256")
+        .update(serializeArtifactJson(manifest))
+        .digest("hex");
+      const moduleMapIdentity = createHash("sha256")
+        .update(`${existingMetadata.compile.moduleMap.identitySha256}:${remoteNode.sourceId}`)
+        .digest("hex");
       runtime.session.compiledArtifacts = {
-        manifest: { ...runtime.manifest, remoteAgents: [remoteNode] },
-        moduleMap: {
-          nodes: {
-            ...runtime.moduleMap.nodes,
-            [ROOT_COMPILED_AGENT_NODE_ID]: {
-              modules: {
-                ...runtime.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules,
-                [remoteNode.sourceId]: { default: { url: remoteNode.url } },
+        diagnostics: runtime.session.compiledArtifacts!.diagnostics,
+        manifest,
+        metadata: {
+          ...existingMetadata,
+          compile: {
+            ...existingMetadata.compile,
+            manifest: {
+              ...existingMetadata.compile.manifest,
+              sha256: manifestHash,
+            },
+            moduleMap: {
+              ...existingMetadata.compile.moduleMap,
+              identitySha256: moduleMapIdentity,
+            },
+          },
+          discovery: {
+            ...existingMetadata.discovery,
+            sourceGraphHash: createHash("sha256")
+              .update(
+                `${existingMetadata.discovery.manifest.sha256}:${manifestHash}:${existingMetadata.discovery.diagnostics.sha256}:${existingMetadata.compile.moduleMap.sha256}:${moduleMapIdentity}`,
+              )
+              .digest("hex"),
+          },
+        },
+        moduleMap: identifyCompiledModuleMap(
+          {
+            nodes: {
+              ...runtime.moduleMap.nodes,
+              [remoteNode.nodeId]: {
+                modules: {
+                  [remoteNode.configResolver.sourceId]: { default: { url: remoteNode.url } },
+                },
               },
             },
           },
-        },
+          moduleMapIdentity,
+        ),
       };
       const bundle = await getCompiledRuntimeAgentBundle({
         compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),

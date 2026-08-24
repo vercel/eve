@@ -4,7 +4,7 @@
  * {@link ToolContext.requireAuth}.
  *
  * Mirrors the connection authorization flow (see
- * `runtime/framework-tools/connection-search-dynamic.ts`) but scopes the
+ * `execution/tools/connection-search.ts`) but scopes the
  * per-step token cache and framework-owned callback URL by the tool's
  * path-derived name and provider key instead of a connection name. All the shared
  * machinery — principal resolution, cache reads/writes, the park/resume
@@ -27,8 +27,8 @@ import {
   type AuthorizationDefinition,
   supportsInteractiveAuthorization,
   type TokenResult,
-} from "#runtime/connections/types.js";
-import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
+} from "#shared/connections.js";
+import { normalizeAuthorizationSpec } from "#shared/validate-connection-authorization.js";
 import {
   completeScopedAuthorization,
   evictScopedToken,

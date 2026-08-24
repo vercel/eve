@@ -71,10 +71,9 @@ export function classifyRemoteError(error: unknown, phase: RemoteProbePhase): Re
 }
 
 /**
- * Confirms the target is a live eve deployment via the always-public health
- * route. Used to corroborate a missing info route before declaring a connection
- * ready, so a host that simply 404s everything is not mistaken for a degraded
- * deployment whose `/eve/v1/info` is absent.
+ * Confirms the target through its effective public health contract when that
+ * route is available. This corroborates a missing info route without mistaking
+ * a host that simply 404s everything for an eve deployment.
  */
 async function probeDeploymentHealth(client: Client): Promise<boolean> {
   try {

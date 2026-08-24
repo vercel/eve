@@ -6,7 +6,7 @@ import {
   DEFAULT_WORKFLOW_MAX_SUBAGENTS,
   planWorkflowSubagentDispatch,
 } from "#harness/workflow-subagent-limit.js";
-import type { RuntimeActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeActionRequest } from "#shared/runtime-actions.js";
 import type { WorkflowSandboxInterrupt } from "#shared/workflow-sandbox.js";
 
 type LedgerEntry = WorkflowSandboxInterrupt["continuation"]["ledger"][number];

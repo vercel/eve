@@ -2,6 +2,7 @@ import pc from "picocolors";
 import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { createStubCompiledAgentManifest } from "#internal/testing/compiled-manifest.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import type { GatewayCatalogModel } from "#setup/boxes/select-model.js";
 import type {
@@ -14,10 +15,17 @@ import { WizardCancelledError } from "#setup/step.js";
 
 import {
   MODEL_MENU_MESSAGE,
+  modelChangeRefusalForUneditableModel,
   runModelFlow,
   type ModelFlowDeps,
   type ModelSettingsRequest,
 } from "./model.js";
+
+const mocks = vi.hoisted(() => ({ inspectApplication: vi.fn() }));
+
+vi.mock("#services/inspect-application.js", () => ({
+  inspectApplication: mocks.inspectApplication,
+}));
 
 const APP_ROOT = "/app/my-agent";
 
@@ -85,6 +93,45 @@ function flowDeps(overrides: Partial<ModelFlowDeps> = {}): Partial<ModelFlowDeps
   };
 }
 
+function createConfigProvenanceManifest(input: {
+  readonly backing:
+    | {
+        readonly externalDependencies: readonly string[];
+        readonly kind: "filesystem";
+        readonly sourcePath: string;
+      }
+    | {
+        readonly kind: "programmatic";
+        readonly moduleId: string;
+        readonly registryId: string;
+        readonly revision: string;
+      };
+  readonly owner:
+    | { readonly kind: "application" }
+    | { readonly feature: string; readonly kind: "framework" };
+}) {
+  const sourceId = "selected:agent.ts";
+  return createStubCompiledAgentManifest({
+    agentRoot: "/app/agent",
+    appRoot: "/app",
+    bindings: [
+      {
+        binding: { backing: input.backing, owner: input.owner },
+        logicalPath: "agent.ts",
+        sourceId,
+      },
+    ],
+    config: {
+      model: {
+        id: DEFAULT_AGENT_MODEL_ID,
+        routing: { kind: "gateway", target: "anthropic" },
+      },
+      name: "app",
+      source: { logicalPath: "agent.ts", sourceId, sourceKind: "module" },
+    },
+  });
+}
+
 /** One painted menu: its option rows plus the notice lines shown with them. */
 interface MenuPaint {
   options: SelectOption<PrompterValue>[];
@@ -121,6 +168,39 @@ function scriptedPrompter(input: { menu: (PrompterValue | "esc")[] }) {
   });
   return { ...fake, menuPaints };
 }
+
+describe("compiled model editability", () => {
+  it("does not advertise edits for the framework default config", async () => {
+    const manifest = createConfigProvenanceManifest({
+      backing: {
+        kind: "programmatic",
+        moduleId: "agent.ts",
+        registryId: "eve.framework-defaults",
+        revision: "test-revision",
+      },
+      owner: { feature: "eve.framework-defaults", kind: "framework" },
+    });
+    mocks.inspectApplication.mockResolvedValue({ compiledState: { manifest } });
+
+    await expect(modelChangeRefusalForUneditableModel(APP_ROOT)).resolves.toBe(
+      "The selected agent config is not backed by an editable application agent.ts; add or edit `agent.ts` to change the model.",
+    );
+  });
+
+  it("keeps a filesystem-backed application config editable", async () => {
+    const manifest = createConfigProvenanceManifest({
+      backing: {
+        externalDependencies: [],
+        kind: "filesystem",
+        sourcePath: "/app/agent/agent.ts",
+      },
+      owner: { kind: "application" },
+    });
+    mocks.inspectApplication.mockResolvedValue({ compiledState: { manifest } });
+
+    await expect(modelChangeRefusalForUneditableModel(APP_ROOT)).resolves.toBeNull();
+  });
+});
 
 describe("runModelFlow", () => {
   it("paints a stacked menu with the running model and configured provider", async () => {
@@ -414,7 +494,7 @@ describe("runModelFlow", () => {
       value: "model",
       label: "Change model",
       disabled: true,
-      description: "Set via an SDK model call in agent.ts; edit the source to change it",
+      description: "Add or edit an application agent.ts to change the model",
     });
     expect(menuPaints[0]?.initialValue).toBe("provider");
   });

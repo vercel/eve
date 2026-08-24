@@ -12,6 +12,7 @@ export function createAuthoredSourceRuntimeCompiledArtifactsSource(
   appRoot: string,
 ): RuntimeDiskCompiledArtifactsSource {
   return createDiskRuntimeCompiledArtifactsSource(appRoot, {
+    moduleMapLoaderKind: "authored-source",
     moduleMapLoaderPath: resolvePackageSourceFilePath("src/internal/authored-module-map-loader.ts"),
   });
 }

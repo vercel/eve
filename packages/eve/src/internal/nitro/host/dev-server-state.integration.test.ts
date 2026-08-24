@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { DevelopmentServerState } from "#internal/nitro/host/dev-server-state.js";
 
-const STATE_FILE_NAME = "dev-server-state.v1.json";
+const STATE_FILE_NAME = "dev-server-state.v2.json";
 const temporaryRoots: string[] = [];
 
 async function createState(): Promise<DevelopmentServerState> {
@@ -31,11 +31,14 @@ describe("DevelopmentServerState", () => {
   it("writes and reads the ready server URL", async () => {
     const state = await createState();
 
-    await state.write("http://127.0.0.1:2000/");
+    await state.write({ serverId: "server-1", url: "http://127.0.0.1:2000/" });
 
-    await expect(state.read()).resolves.toBe("http://127.0.0.1:2000/");
+    await expect(state.read()).resolves.toEqual({
+      serverId: "server-1",
+      url: "http://127.0.0.1:2000/",
+    });
     await expect(readFile(join(state.appRoot, ".eve", STATE_FILE_NAME), "utf8")).resolves.toBe(
-      '{"url":"http://127.0.0.1:2000/"}\n',
+      '{"serverId":"server-1","url":"http://127.0.0.1:2000/"}\n',
     );
   });
 
@@ -49,7 +52,7 @@ describe("DevelopmentServerState", () => {
 
   it("removes the state record", async () => {
     const state = await createState();
-    await state.write("http://127.0.0.1:2000/");
+    await state.write({ serverId: "server-1", url: "http://127.0.0.1:2000/" });
 
     await state.remove();
 

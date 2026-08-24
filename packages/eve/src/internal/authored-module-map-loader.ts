@@ -1,214 +1,133 @@
-import { join } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import type {
-  CompiledAgentManifest,
-  CompiledAgentNodeManifest,
-  CompiledAgentResources,
-} from "#compiler/manifest.js";
-import type { ModuleSourceRef } from "#shared/source-ref.js";
-import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import {
-  collectModuleRefsForManifest,
-  compiledModuleMapSchema,
-  type CompiledModuleMap,
-} from "#compiler/module-map.js";
-import type { RuntimeDiskCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
-import { formatValidationError } from "#runtime/validation.js";
-import { loadAuthoredModuleNamespace } from "#internal/authored-module-loader.js";
+import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import { compiledModuleMapSchema, type CompiledModuleMap } from "#compiler/module-map.js";
+import { bundleAuthoredModuleMapForGeneration } from "#internal/authored-module-loader.js";
+import { materializeCompiledExternalDependencyPlan } from "#internal/materialize-external-dependencies.js";
 import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
+import type { CompileMetadata } from "#protocol/compile-metadata.js";
+import type { CompilerDiagnosticsArtifact } from "#protocol/compiler-diagnostics-artifact.js";
+import { readCompiledModuleMapIdentity } from "#protocol/compiled-module-map-identity.js";
+import {
+  assertCompiledModuleMapDescriptorSemantics,
+  hydrateCompiledModuleMapDescriptor,
+  parseCompiledModuleMapDescriptor,
+  validateCompiledModuleMapDescriptorRegistries,
+} from "#runtime/loaders/bundled-artifacts.js";
 
 /**
- * Ambient namespace read by `defineExtension` when it is evaluated from a module
- * the bundler could not scope — specifically a mount's extension package, which
- * resolves cross-package and so loads unbundled in the dev/eval loader. Set only
- * around the synchronous evaluation of one mount module (see below), so it never
- * leaks into consumer code.
+ * Hydrates the exact manifest already validated by the artifact-set loader.
+ * Authored-source mode bundles the digest-validated descriptor bytes from the
+ * same snapshot; both modes then capture one immutable lazy descriptor,
+ * validate its compiler-owned identity and every selected registry binding,
+ * and only then execute namespaces. Materialized-generation mode never falls
+ * back to live authored source.
  */
-const EXT_CONFIG_SCOPE = Symbol.for("eve.ext-config-scope");
-
-/**
- * Loads a disk-backed module map by hydrating authored modules directly from
- * source. This is for dev/build flows that need tsconfig alias support and
- * source reloads without relying on Node's module cache for module-map.mjs.
- */
-export async function loadCompiledModuleMapFromAuthoredSource(input: {
-  readonly compiledArtifactsSource: RuntimeDiskCompiledArtifactsSource;
+export async function loadCompiledModuleMapFromValidatedManifest(input: {
+  readonly diagnostics: CompilerDiagnosticsArtifact;
+  readonly expectedIdentity: string;
+  readonly manifest: CompiledAgentManifest;
+  readonly metadata: CompileMetadata;
+  readonly mode: "authored-source" | "materialized-generation";
+  readonly moduleMapPath: string;
+  readonly moduleMapSource: string;
+  readonly runtimeAppRoot: string;
 }): Promise<CompiledModuleMap> {
-  const manifest = await loadCompiledManifest({
-    compiledArtifactsSource: input.compiledArtifactsSource,
-  });
-
-  return await hydrateCompiledModuleMapFromManifest(
-    manifest,
-    input.compiledArtifactsSource.appRoot,
-  );
-}
-
-interface ExtensionScopeIndex {
-  /** Mount namespace (from `ext:<ns>:` source ids) to package namespace. */
-  readonly byMountNamespace: ReadonlyMap<string, string>;
-  /** Mount module source id to package namespace. */
-  readonly byMountSourceId: ReadonlyMap<string, string>;
-}
-
-async function hydrateCompiledModuleMapFromManifest(
-  manifest: CompiledAgentManifest,
-  runtimeAppRoot: string,
-): Promise<CompiledModuleMap> {
-  const materializedIndex = await readMaterializedAuthoredModuleIndex(runtimeAppRoot);
-  if (materializedIndex !== undefined) {
-    return await loadMaterializedCompiledModuleMap({
-      moduleMapPath: materializedIndex.moduleMap,
-      runtimeAppRoot,
+  if (input.mode === "materialized-generation") {
+    const materializedIndex = await readMaterializedAuthoredModuleIndex({
+      metadata: input.metadata,
+      runtimeAppRoot: input.runtimeAppRoot,
+    });
+    if (materializedIndex === undefined) {
+      throw new Error(
+        `Expected immutable runtime generation "${input.runtimeAppRoot}" to contain a materialized authored module index.`,
+      );
+    }
+    return await loadCapturedCompiledModuleMapDescriptor({
+      diagnostics: input.diagnostics,
+      expectedIdentity: input.expectedIdentity,
+      manifest: input.manifest,
+      metadata: input.metadata,
+      moduleMapPath: join(input.runtimeAppRoot, ".eve", "compile", materializedIndex.moduleMap),
+      moduleMapSource: materializedIndex.moduleMapCode,
     });
   }
 
-  const nodes: CompiledModuleMap["nodes"] = {};
-  const nodeManifests: Array<{
-    additionalModuleRef?: ModuleSourceRef;
-    agentRoot: string;
-    externalDependencies: readonly string[];
-    manifest: CompiledAgentNodeManifest | CompiledAgentResources;
-    nodeId: string;
-  }> = [
-    {
-      agentRoot: manifest.agentRoot,
-      externalDependencies: manifest.config.build?.externalDependencies ?? [],
-      manifest,
-      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
-    },
-    ...[...manifest.subagents]
-      .sort((left, right) => left.nodeId.localeCompare(right.nodeId))
-      .map((subagent) => ({
-        additionalModuleRef: subagent.configResolver,
-        agentRoot: subagent.agent.agentRoot,
-        externalDependencies:
-          subagent.configResolver === undefined
-            ? (subagent.agent.config.build?.externalDependencies ?? [])
-            : (subagent.configResolver.build?.externalDependencies ?? []),
-        manifest: subagent.agent,
-        nodeId: subagent.nodeId,
-      })),
-  ];
-  const nodeManifestById = new Map(nodeManifests.map((entry) => [entry.nodeId, entry.manifest]));
-  const parentNodeIdByChild = new Map(
-    manifest.subagentEdges.map((edge) => [edge.childNodeId, edge.parentNodeId]),
-  );
-  const extensionNamespacesByNodeId = new Map<string, ReadonlyMap<string, string>>();
-  const extensionNamespacesForNode = (nodeId: string): ReadonlyMap<string, string> => {
-    const cached = extensionNamespacesByNodeId.get(nodeId);
-    if (cached !== undefined) return cached;
-
-    const parentNodeId = parentNodeIdByChild.get(nodeId);
-    const namespaces = new Map(
-      parentNodeId === undefined ? [] : extensionNamespacesForNode(parentNodeId),
-    );
-    for (const mount of nodeManifestById.get(nodeId)?.extensionMounts ?? []) {
-      namespaces.set(mount.namespace, mount.packageNamespace);
-    }
-    extensionNamespacesByNodeId.set(nodeId, namespaces);
-    return namespaces;
-  };
-
-  for (const nodeManifest of nodeManifests) {
-    const scopeIndex: ExtensionScopeIndex = {
-      byMountNamespace: extensionNamespacesForNode(nodeManifest.nodeId),
-      byMountSourceId: new Map(
-        nodeManifest.manifest.extensionMounts.map((mount) => [
-          mount.mountSourceId,
-          mount.packageNamespace,
-        ]),
-      ),
-    };
-    nodes[nodeManifest.nodeId] = {
-      modules: await hydrateCompiledNodeScope({
-        agentRoot: nodeManifest.agentRoot,
-        additionalModuleRef: nodeManifest.additionalModuleRef,
-        externalDependencies: nodeManifest.externalDependencies,
-        manifest: nodeManifest.manifest,
-        scopeIndex,
-      }),
-    };
-  }
-
-  return {
-    nodes,
-  };
+  const capturedDependencies = await materializeCompiledExternalDependencyPlan({
+    destinationRoot: join(input.runtimeAppRoot, ".eve", "compile", "runtime-external-dependencies"),
+    plan: input.manifest.externalDependencyPlan,
+  });
+  const bundledModuleMapSource = await bundleAuthoredModuleMapForGeneration({
+    expectedIdentity: input.expectedIdentity,
+    externalDependencyMode: "resolved-path",
+    externalDependencyPlan: capturedDependencies.plan,
+    manifest: input.manifest,
+    moduleMapPath: resolve(input.manifest.appRoot, input.metadata.compile.moduleMap.path),
+    moduleMapSource: input.moduleMapSource,
+  });
+  return await loadCapturedCompiledModuleMapDescriptor({
+    diagnostics: input.diagnostics,
+    expectedIdentity: input.expectedIdentity,
+    manifest: input.manifest,
+    metadata: input.metadata,
+    moduleMapPath: input.moduleMapPath,
+    moduleMapSource: bundledModuleMapSource,
+  });
 }
 
-async function loadMaterializedCompiledModuleMap(input: {
+async function loadCapturedCompiledModuleMapDescriptor(input: {
+  readonly diagnostics: CompilerDiagnosticsArtifact;
+  readonly expectedIdentity: string;
+  readonly manifest: CompiledAgentManifest;
+  readonly metadata: CompileMetadata;
   readonly moduleMapPath: string;
-  readonly runtimeAppRoot: string;
+  readonly moduleMapSource: string;
 }): Promise<CompiledModuleMap> {
-  const moduleMapPath = join(input.runtimeAppRoot, ".eve", "compile", input.moduleMapPath);
-  const moduleNamespace = (await import(
-    `${pathToFileURL(moduleMapPath).href}?generation=${encodeURIComponent(input.moduleMapPath)}`
-  )) as { readonly default?: unknown; readonly moduleMap?: unknown };
-  const parsed = compiledModuleMapSchema.safeParse(
-    moduleNamespace.moduleMap ?? moduleNamespace.default,
-  );
-
-  if (!parsed.success) {
-    throw new Error(
-      `Expected materialized authored module map "${moduleMapPath}" to export a valid compiled eve module map. ${formatValidationError(parsed.error)}`,
+  const capturedPath = await writePrivateCapturedDescriptor(input);
+  try {
+    const moduleNamespace = (await import(
+      `${pathToFileURL(capturedPath).href}?capture=${encodeURIComponent(capturedPath)}`
+    )) as { readonly default?: unknown; readonly moduleMapDescriptor?: unknown };
+    const descriptor = parseCompiledModuleMapDescriptor(
+      moduleNamespace.moduleMapDescriptor ?? moduleNamespace.default,
     );
+    if (descriptor.identity !== input.expectedIdentity) {
+      throw new Error(
+        `Compiled module map identity mismatch: expected "${input.expectedIdentity}", received "${descriptor.identity}".`,
+      );
+    }
+    assertCompiledModuleMapDescriptorSemantics({
+      descriptor,
+      diagnostics: input.diagnostics,
+      manifest: input.manifest,
+      metadata: input.metadata,
+    });
+    await validateCompiledModuleMapDescriptorRegistries(descriptor);
+    const moduleMap = await hydrateCompiledModuleMapDescriptor(descriptor);
+    compiledModuleMapSchema.parse(moduleMap);
+    const identity = readCompiledModuleMapIdentity(moduleMap);
+    if (identity !== input.expectedIdentity) {
+      throw new Error(
+        `Hydrated compiled module map identity mismatch: expected "${input.expectedIdentity}", received "${identity ?? "none"}".`,
+      );
+    }
+    return moduleMap;
+  } finally {
+    await rm(capturedPath, { force: true });
   }
-
-  return parsed.data;
 }
 
-/**
- * Resolves the package namespace an extension-owned source id belongs to.
- * Composed sources are keyed `ext:<mountNamespace>:<originalSourceId>`.
- */
-function extensionNamespaceForSourceId(
-  sourceId: string,
-  index: ExtensionScopeIndex,
-): string | undefined {
-  const match = sourceId.match(/^ext:([^:]+):/);
-  return match === null ? undefined : index.byMountNamespace.get(match[1]!);
-}
-
-async function hydrateCompiledNodeScope(input: {
-  additionalModuleRef?: ModuleSourceRef;
-  agentRoot: string;
-  externalDependencies: readonly string[];
-  manifest: CompiledAgentNodeManifest | CompiledAgentResources;
-  scopeIndex: ExtensionScopeIndex;
-}): Promise<CompiledModuleMap["nodes"][string]["modules"]> {
-  const refs = [
-    ...collectModuleRefsForManifest(input.manifest),
-    ...(input.additionalModuleRef === undefined ? [] : [input.additionalModuleRef]),
-  ].sort((left, right) => left.sourceId.localeCompare(right.sourceId));
-  const container = globalThis as Record<symbol, unknown>;
-  const modules: CompiledModuleMap["nodes"][string]["modules"] = {};
-
-  for (const ref of refs) {
-    const modulePath = join(input.agentRoot, ref.logicalPath);
-    const extensionScopeNamespace = extensionNamespaceForSourceId(ref.sourceId, input.scopeIndex);
-
-    // A mount module (e.g. `agent/extensions/crm.ts`) imports the extension
-    // package cross-package, so its config handle loads unbundled and the
-    // bundler cannot scope it. Set the ambient config scope around this one
-    // synchronous load so the mount's `defineExtension` binds under the package
-    // namespace — matching what the extension's own bundled tools read.
-    const mountConfigScope = input.scopeIndex.byMountSourceId.get(ref.sourceId);
-    if (mountConfigScope !== undefined) {
-      container[EXT_CONFIG_SCOPE] = mountConfigScope;
-    }
-    try {
-      modules[ref.sourceId] = await loadAuthoredModuleNamespace(modulePath, {
-        externalDependencies: input.externalDependencies,
-        extensionScopeNamespace,
-      });
-    } finally {
-      if (mountConfigScope !== undefined) {
-        container[EXT_CONFIG_SCOPE] = undefined;
-      }
-    }
-  }
-
-  return modules;
+async function writePrivateCapturedDescriptor(input: {
+  readonly moduleMapPath: string;
+  readonly moduleMapSource: string;
+}): Promise<string> {
+  const directory = dirname(input.moduleMapPath);
+  await mkdir(directory, { recursive: true });
+  const digest = createHash("sha256").update(input.moduleMapSource).digest("hex");
+  const path = join(directory, `.eve-verified-module-map-${digest}-${randomUUID()}.mjs`);
+  await writeFile(path, input.moduleMapSource, { encoding: "utf8", flag: "wx", mode: 0o600 });
+  return path;
 }

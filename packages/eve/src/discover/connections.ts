@@ -1,6 +1,9 @@
 import { join } from "node:path";
 
-import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discover/diagnostics.js";
+import {
+  createCompilerErrorDiagnostic,
+  type CompilerDiagnostic,
+} from "#shared/compiler-diagnostics.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
 import {
   createConnectionNameDiagnostic,
@@ -42,17 +45,19 @@ const CONNECTION_DEFINITION_BASE_NAME = "connection";
  */
 interface DiscoverConnectionSourcesResult {
   connections: ConnectionSourceRef[];
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
 }
 
 /**
  * Discovers authored connections under `agent/connections/`.
  */
 export async function discoverConnectionSources(input: {
+  nodeId: string;
   rootEntries: readonly ProjectSourceEntry[];
   rootPath: string;
   source: ProjectSource;
 }): Promise<DiscoverConnectionSourcesResult> {
+  const { nodeId } = input;
   const directoryName = "connections";
   const directoryPath = join(input.rootPath, directoryName);
   const directoryEntry = input.rootEntries.find((entry) => entry.name === directoryName);
@@ -68,9 +73,10 @@ export async function discoverConnectionSources(input: {
     return {
       connections: [],
       diagnostics: [
-        createDiscoverErrorDiagnostic({
+        createCompilerErrorDiagnostic({
           code: DISCOVER_CONNECTIONS_DIRECTORY_INVALID,
           message: `Expected "${directoryPath}" to be a directory of authored connections.`,
+          nodeId,
           sourcePath: directoryPath,
         }),
       ],
@@ -79,7 +85,7 @@ export async function discoverConnectionSources(input: {
 
   const directoryEntries = await readSortedDirectoryEntries(input.source, directoryPath);
   const connections: ConnectionSourceRef[] = [];
-  const diagnostics: DiscoverDiagnostic[] = [];
+  const diagnostics: CompilerDiagnostic[] = [];
 
   const fileFormNames = new Set<string>();
   for (const candidates of collectNamedSlotCandidates(directoryEntries, {
@@ -95,6 +101,7 @@ export async function discoverConnectionSources(input: {
           directoryPath,
           slotLogicalPath,
           candidates.moduleFileNames,
+          nodeId,
         ),
       );
       continue;
@@ -110,6 +117,7 @@ export async function discoverConnectionSources(input: {
     const slotDiagnostic = createConnectionNameDiagnostic(
       candidates.slotName,
       join(directoryPath, moduleFileName),
+      nodeId,
     );
 
     if (slotDiagnostic !== null) {
@@ -135,12 +143,13 @@ export async function discoverConnectionSources(input: {
 
     if (fileFormNames.has(connectionName)) {
       diagnostics.push(
-        createDiscoverErrorDiagnostic({
+        createCompilerErrorDiagnostic({
           code: DISCOVER_CONNECTION_FILE_FOLDER_COLLISION,
           message:
             `Connection "${connectionName}" is defined twice. ` +
             `Found both file-form "connections/${connectionName}.ts" and folder-form "connections/${connectionName}/". ` +
             `Use one form, not both.`,
+          nodeId,
           sourcePath: folderPath,
         }),
       );
@@ -153,7 +162,7 @@ export async function discoverConnectionSources(input: {
       continue;
     }
 
-    const slotDiagnostic = createConnectionNameDiagnostic(connectionName, folderPath);
+    const slotDiagnostic = createConnectionNameDiagnostic(connectionName, folderPath, nodeId);
     if (slotDiagnostic !== null) {
       diagnostics.push(slotDiagnostic);
       continue;
@@ -164,11 +173,12 @@ export async function discoverConnectionSources(input: {
 
     if (moduleCandidates.length > 1) {
       diagnostics.push(
-        createDiscoverErrorDiagnostic({
+        createCompilerErrorDiagnostic({
           code: DISCOVER_MODULE_SLOT_COLLISION,
           message:
             `Found multiple connection definition modules inside "${normalizeLogicalPath(join(directoryName, connectionName))}": ` +
             moduleCandidates.map((name) => `"${name}"`).join(", "),
+          nodeId,
           sourcePath: folderPath,
         }),
       );
@@ -179,11 +189,12 @@ export async function discoverConnectionSources(input: {
 
     if (moduleFileName === undefined) {
       diagnostics.push(
-        createDiscoverErrorDiagnostic({
+        createCompilerErrorDiagnostic({
           code: DISCOVER_CONNECTION_FOLDER_EMPTY,
           message:
             `Connection folder "connections/${connectionName}/" contains no "connection.ts" definition. ` +
             `Add "connections/${connectionName}/connection.ts" or use the file form "connections/${connectionName}.ts".`,
+          nodeId,
           sourcePath: folderPath,
         }),
       );

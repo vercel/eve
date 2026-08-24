@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { createCompiledExternalDependencyPlan } from "#compiler/external-dependency-plan.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import {
@@ -55,6 +56,34 @@ describe("loadAuthoredModuleNamespace", () => {
         globals[cacheKey] = previousCache;
       }
     }
+  });
+
+  it("reloads changed installed dependency code without editing the authored entry", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/tools/use-sdk.ts":
+          'import { implementation } from "mutable-definition-sdk";\nexport { implementation };\n',
+        "node_modules/mutable-definition-sdk/index.js": 'export const implementation = "first";\n',
+        "node_modules/mutable-definition-sdk/package.json": JSON.stringify({
+          exports: "./index.js",
+          name: "mutable-definition-sdk",
+          type: "module",
+        }),
+      },
+      name: "authored-loader-installed-dependency-revision",
+    });
+    const modulePath = join(app.appRoot, "agent", "tools", "use-sdk.ts");
+
+    await expect(loadAuthoredModuleNamespace(modulePath)).resolves.toMatchObject({
+      implementation: "first",
+    });
+    await writeFile(
+      join(app.appRoot, "node_modules", "mutable-definition-sdk", "index.js"),
+      'export const implementation = "second";\n',
+    );
+    await expect(loadAuthoredModuleNamespace(modulePath)).resolves.toMatchObject({
+      implementation: "second",
+    });
   });
 
   it("explains when an installed package contains Node-incompatible extensionless ESM", async () => {
@@ -544,6 +573,28 @@ describe("loadAuthoredModuleNamespace", () => {
     }
   });
 
+  it("requires the compiler-selected plan for configured dependencies", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/tools/use_external.ts":
+          'import { value } from "external-only";\nexport const result = value;\n',
+        "node_modules/external-only/index.js": 'export const value = "external";\n',
+        "node_modules/external-only/package.json": JSON.stringify({
+          exports: "./index.js",
+          name: "external-only",
+          type: "module",
+        }),
+      },
+      name: "configured-external-requires-plan",
+    });
+
+    await expect(
+      loadAuthoredModuleNamespace(join(app.appRoot, "agent", "tools", "use_external.ts"), {
+        externalDependencies: ["external-only"],
+      }),
+    ).rejects.toThrow("before the compiler selects their plan");
+  });
+
   it("keeps configured dependencies external when they are imported from workspace packages", async () => {
     const app = await scenarioApp({
       files: {
@@ -613,9 +664,12 @@ describe("loadAuthoredModuleNamespace", () => {
         "junction",
       );
 
+      const externalDependencyPlan = await createApplicationExternalDependencyPlan(app.appRoot, [
+        "external-only",
+      ]);
       const moduleNamespace = await loadAuthoredModuleNamespace(
         join(app.appRoot, "agent", "channels", "api", "contact-sales", "webhook.ts"),
-        { externalDependencies: ["external-only"] },
+        { externalDependencies: ["external-only"], externalDependencyPlan },
       );
 
       expect(moduleNamespace.result).toBe("externalized");
@@ -873,7 +927,15 @@ describe("loadAuthoredModuleNamespace", () => {
       await mkdir(join(externalPackageRoot, "ext"), { recursive: true });
       await writeFile(
         join(externalPackageRoot, "package.json"),
-        JSON.stringify({ main: "index.js", name: "external-only", type: "commonjs" }, null, 2),
+        JSON.stringify(
+          {
+            exports: { "./ext/tags": "./ext/tags.js" },
+            name: "external-only",
+            type: "commonjs",
+          },
+          null,
+          2,
+        ),
       );
       await writeFile(
         join(externalPackageRoot, "ext", "tags.js"),
@@ -887,9 +949,12 @@ describe("loadAuthoredModuleNamespace", () => {
         "junction",
       );
 
+      const externalDependencyPlan = await createApplicationExternalDependencyPlan(app.appRoot, [
+        "external-only",
+      ]);
       const moduleNamespace = await loadAuthoredModuleNamespace(
         join(app.appRoot, "agent", "channels", "api", "contact-sales", "webhook.ts"),
-        { externalDependencies: ["external-only"] },
+        { externalDependencies: ["external-only"], externalDependencyPlan },
       );
 
       expect(moduleNamespace.result).toBe("external-subpath");
@@ -898,7 +963,7 @@ describe("loadAuthoredModuleNamespace", () => {
     }
   });
 
-  it("resolves configured dependency subpaths from the importing package", async () => {
+  it("resolves configured conditional subpaths from the owner plan instead of an importer decoy", async () => {
     const app = await scenarioApp({
       files: {
         "agent/channels/api/contact-sales/webhook.ts": [
@@ -914,8 +979,10 @@ describe("loadAuthoredModuleNamespace", () => {
 
     try {
       const packageRoot = join(workspaceRoot, "packages", "enrichment");
-      const externalPackageRoot = join(packageRoot, "node_modules", "external-only");
+      const decoyPackageRoot = join(packageRoot, "node_modules", "external-only");
+      const externalPackageRoot = join(app.appRoot, "node_modules", "external-only");
       await mkdir(join(packageRoot, "src"), { recursive: true });
+      await mkdir(join(decoyPackageRoot, "ext"), { recursive: true });
       await mkdir(join(externalPackageRoot, "ext"), { recursive: true });
       await writeFile(
         join(packageRoot, "package.json"),
@@ -943,12 +1010,50 @@ describe("loadAuthoredModuleNamespace", () => {
         ].join("\n"),
       );
       await writeFile(
+        join(decoyPackageRoot, "package.json"),
+        JSON.stringify(
+          {
+            exports: { "./ext/tags": { import: "./ext/tags.js" } },
+            name: "external-only",
+            type: "module",
+          },
+          null,
+          2,
+        ),
+      );
+      await writeFile(
+        join(decoyPackageRoot, "ext", "tags.js"),
+        "module.exports = { value: 'nested-external-subpath' };\n",
+      );
+      await writeFile(
         join(externalPackageRoot, "package.json"),
-        JSON.stringify({ main: "index.js", name: "external-only", type: "commonjs" }, null, 2),
+        JSON.stringify(
+          {
+            exports: {
+              "./ext/tags": {
+                "eve-source": "./ext/eve-source.ts",
+                import: "./ext/tags.js",
+                default: "./ext/default.js",
+              },
+            },
+            name: "external-only",
+            type: "module",
+          },
+          null,
+          2,
+        ),
+      );
+      await writeFile(
+        join(externalPackageRoot, "ext", "eve-source.ts"),
+        'export default { value: "eve-source-decoy" };\n',
       );
       await writeFile(
         join(externalPackageRoot, "ext", "tags.js"),
-        "module.exports = { value: 'nested-external-subpath' };\n",
+        'export default { value: "owner-import" };\n',
+      );
+      await writeFile(
+        join(externalPackageRoot, "ext", "default.js"),
+        'export default { value: "owner-default" };\n',
       );
 
       await mkdir(join(app.appRoot, "node_modules", "@repo"), { recursive: true });
@@ -958,12 +1063,22 @@ describe("loadAuthoredModuleNamespace", () => {
         "junction",
       );
 
+      const externalDependencyPlan = await createApplicationExternalDependencyPlan(app.appRoot, [
+        "external-only",
+      ]);
       const moduleNamespace = await loadAuthoredModuleNamespace(
         join(app.appRoot, "agent", "channels", "api", "contact-sales", "webhook.ts"),
-        { externalDependencies: ["external-only"] },
+        { externalDependencies: ["external-only"], externalDependencyPlan },
       );
 
-      expect(moduleNamespace.result).toBe("nested-external-subpath");
+      expect(moduleNamespace.result).toBe("owner-import");
+
+      const generation = await bundleAuthoredModuleForGeneration(
+        join(app.appRoot, "agent", "channels", "api", "contact-sales", "webhook.ts"),
+        { externalDependencies: ["external-only"], externalDependencyPlan },
+      );
+      expect(generation).toContain('from "external-only/ext/tags"');
+      expect(generation).not.toContain("eve-source-decoy");
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
@@ -1057,13 +1172,13 @@ describe("loadAuthoredModuleNamespace", () => {
       const manifest = await compileAgentManifest(discovered.manifest);
 
       expect(manifest.config.build?.externalDependencies).toEqual(["external-only"]);
-      expect(manifest.tools).toHaveLength(1);
+      expect(manifest.tools.some((tool) => tool.name === "read_external")).toBe(true);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
   });
 
-  it("inherits root build externals while compiling subagent authored modules", async () => {
+  it("applies root build externals to subagent modules without fabricating subagent config", async () => {
     const app = await scenarioApp({
       files: {
         "agent/agent.ts": [
@@ -1162,8 +1277,22 @@ describe("loadAuthoredModuleNamespace", () => {
       }
 
       expect(manifest.config.build?.externalDependencies).toEqual(["external-only"]);
-      expect(subagent?.agent.config.build?.externalDependencies).toEqual(["external-only"]);
-      expect(subagent?.agent.tools).toHaveLength(1);
+      expect(subagent?.agent.config.build?.externalDependencies).toBeUndefined();
+      expect(
+        Object.values(subagent?.agent.bindings ?? {}).some(
+          (binding) =>
+            binding.backing.kind === "filesystem" &&
+            binding.backing.externalDependencies.includes("external-only"),
+        ),
+      ).toBe(true);
+      expect(manifest.externalDependencyPlan.entries[0]?.scopes).toEqual([
+        {
+          kind: "application",
+          nodeId: "__root__",
+          sourceRoot: app.appRoot,
+        },
+      ]);
+      expect(subagent?.agent.tools.some((tool) => tool.name === "read_external")).toBe(true);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
@@ -1286,3 +1415,15 @@ describe("loadAuthoredModuleNamespace", () => {
     ).rejects.toThrow(/build\.externalDependencies|asset import/);
   });
 });
+
+async function createApplicationExternalDependencyPlan(
+  appRoot: string,
+  packageNames: readonly string[],
+) {
+  return await createCompiledExternalDependencyPlan(
+    packageNames.map((packageName) => ({
+      packageName,
+      scope: { kind: "application" as const, nodeId: "__root__", sourceRoot: appRoot },
+    })),
+  );
+}

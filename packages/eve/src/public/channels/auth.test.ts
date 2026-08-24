@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import type { SessionAuthContext } from "#channel/types.js";
-import { withVercelOidcProjectResolver } from "#runtime/governance/auth/vercel-oidc-project.js";
+import { withVercelOidcProjectResolver } from "#execution/governance/auth/vercel-oidc-project.js";
 import {
   type AuthFn,
   createIpAllowList,

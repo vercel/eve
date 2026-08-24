@@ -1,7 +1,6 @@
-import { join } from "node:path";
+import { join, posix as pathPosix } from "node:path";
 
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
-import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "#internal/application/runtime-compiled-artifacts-source.js";
 import type {
@@ -18,16 +17,24 @@ import {
   type RuntimeDiskCompiledArtifactsSource,
 } from "#runtime/compiled-artifacts-source.js";
 import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
-import { loadCompileMetadata } from "#runtime/loaders/compile-metadata.js";
 import { withBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
-import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
+import { loadCompiledArtifactSet } from "#runtime/loaders/compiled-artifact-set.js";
 import { resolveRuntimeCompilerArtifactPaths } from "#runtime/loaders/artifact-paths.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { createRuntimeSandboxTemplateKey } from "#runtime/sandbox/keys.js";
 import type { RuntimeRegisteredSandbox } from "#runtime/sandbox/registry.js";
 import { createRuntimeSandboxTemplatePlan } from "#runtime/sandbox/template-plan.js";
 import { materializeWorkspaceDirectory } from "#runtime/workspace/seed-files.js";
+import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { MODEL_SKILL_ROOT } from "#shared/skill-paths.js";
+import {
+  hashWorkspaceResourceFiles,
+  inspectWorkspaceResourceRoot,
+  resolveWorkspaceResourceRootPath,
+  WORKSPACE_RESOURCES_DIRECTORY,
+  workspaceResourceLogicalPath,
+} from "#shared/workspace-resource-identity.js";
 import { withSandboxTemplatePrewarmLock } from "./template-prewarm-lock.js";
 
 interface PrewarmTarget {
@@ -195,25 +202,19 @@ export async function prewarmBuiltAppSandboxes(input: {
 }): Promise<void> {
   const builtArtifactsRoot = join(input.appRoot, ".output");
   const builtArtifactsSource = createDiskRuntimeCompiledArtifactsSource(builtArtifactsRoot, {
+    moduleMapLoaderKind: "authored-source",
     moduleMapLoaderPath: resolvePackageSourceFilePath("src/internal/authored-module-map-loader.ts"),
     sandboxAppRoot: input.appRoot,
   });
-  const [metadata, manifest, moduleMap] = await Promise.all([
-    loadCompileMetadata({
-      compiledArtifactsSource: builtArtifactsSource,
-    }),
-    loadCompiledManifest({
-      compiledArtifactsSource: builtArtifactsSource,
-    }),
-    loadCompiledModuleMapFromAuthoredSource({
-      compiledArtifactsSource: builtArtifactsSource,
-    }),
-  ]);
+  const { diagnostics, manifest, metadata, moduleMap } = await loadCompiledArtifactSet({
+    compiledArtifactsSource: builtArtifactsSource,
+  });
 
   await withBundledCompiledArtifacts(
     {
+      diagnostics,
       manifest,
-      metadata: metadata ?? undefined,
+      metadata,
       moduleMap,
       sessionId: "built-app-prewarm",
     },
@@ -272,6 +273,7 @@ async function collectPrewarmTargets(input: {
           bootstrap: definition.bootstrap,
           seedFiles: await loadResourceRootSeedFiles({
             compileDirectoryPath: input.compileDirectoryPath,
+            nodeId,
             workspaceResourceRoot,
           }),
           runtimeContext,
@@ -297,31 +299,75 @@ async function collectPrewarmTargets(input: {
  */
 async function loadResourceRootSeedFiles(input: {
   readonly compileDirectoryPath: string;
+  readonly nodeId: string;
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
 }): Promise<readonly SandboxSeedFile[]> {
+  const expectedLogicalPath = workspaceResourceLogicalPath(input.nodeId);
+  if (input.workspaceResourceRoot.logicalPath !== expectedLogicalPath) {
+    throw new Error(
+      `Compiled node "${input.nodeId}" workspace resource path "${input.workspaceResourceRoot.logicalPath}" does not match canonical path "${expectedLogicalPath}".`,
+    );
+  }
   if (
     input.workspaceResourceRoot.contentHash === undefined &&
     input.workspaceResourceRoot.rootEntries.length === 0
   ) {
     return [];
   }
-  const materialized = await materializeWorkspaceDirectory(
-    `${input.compileDirectoryPath}/${input.workspaceResourceRoot.logicalPath}`,
+  const resourceRootPath = resolveWorkspaceResourceRootPath(
+    input.compileDirectoryPath,
+    input.nodeId,
   );
+  const identity = await inspectWorkspaceResourceRoot(resourceRootPath, {
+    resourcesRootPath: join(input.compileDirectoryPath, WORKSPACE_RESOURCES_DIRECTORY),
+  });
+  if (identity.contentHash !== input.workspaceResourceRoot.contentHash) {
+    throw new Error(
+      `Compiled node "${input.nodeId}" workspace resource bytes do not match contentHash "${input.workspaceResourceRoot.contentHash ?? "<missing>"}".`,
+    );
+  }
+  if (!sameStrings(identity.rootEntries, input.workspaceResourceRoot.rootEntries)) {
+    throw new Error(
+      `Compiled node "${input.nodeId}" workspace resource entries do not match the materialized tree.`,
+    );
+  }
+  const materialized = await materializeWorkspaceDirectory(resourceRootPath);
+  const materializedHash = hashWorkspaceResourceFiles(
+    materialized.map((file) => ({
+      content: file.content,
+      logicalPath: seedFileResourceLogicalPath(file.path),
+    })),
+  );
+  if (materializedHash !== input.workspaceResourceRoot.contentHash) {
+    throw new Error(
+      `Compiled node "${input.nodeId}" workspace resource bytes changed while preparing its sandbox seed.`,
+    );
+  }
   return materialized.map((file) => ({ content: file.content, path: file.path }));
+}
+
+function seedFileResourceLogicalPath(path: string): string {
+  for (const [targetRoot, resourceRoot] of [
+    [WORKSPACE_ROOT, "workspace"],
+    [MODEL_SKILL_ROOT, "skills"],
+  ] as const) {
+    if (path.startsWith(`${targetRoot}/`)) {
+      return pathPosix.join(resourceRoot, path.slice(targetRoot.length + 1));
+    }
+  }
+  throw new Error(`Sandbox seed path "${path}" is outside the compiled workspace resource roots.`);
+}
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((entry, index) => entry === right[index]);
 }
 
 async function loadGraphFromArtifacts(input: {
   readonly compiledArtifactsSource: RuntimeDiskCompiledArtifactsSource;
 }): Promise<ResolvedAgentGraphBundle> {
-  const [manifest, moduleMap] = await Promise.all([
-    loadCompiledManifest({
-      compiledArtifactsSource: input.compiledArtifactsSource,
-    }),
-    loadCompiledModuleMapFromAuthoredSource({
-      compiledArtifactsSource: input.compiledArtifactsSource,
-    }),
-  ]);
+  const { manifest, moduleMap } = await loadCompiledArtifactSet({
+    compiledArtifactsSource: input.compiledArtifactsSource,
+  });
 
   return await resolveRuntimeAgentGraph({
     manifest,

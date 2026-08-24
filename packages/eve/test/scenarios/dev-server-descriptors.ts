@@ -39,17 +39,24 @@ export const TRANSACTIONAL_REBUILD_DESCRIPTOR: ScenarioAppDescriptor = {
 };
 
 export function createInstrumentationSource(marker: string): string {
+  // Retained generation graphs evaluate instrumentation modules, but only the
+  // active worker installs one. Keep worker probes inside setup so they report
+  // the installed generation instead of whichever retained graph loaded last.
   return [
     'import { randomUUID } from "node:crypto";',
+    'import { defineInstrumentation } from "eve/instrumentation";',
     "",
     "declare global {",
     "  var __EVE_INSTRUMENTATION_MARKER__: string | undefined;",
     "  var __EVE_WORKER_ID__: string | undefined;",
     "}",
     "",
-    `globalThis.__EVE_INSTRUMENTATION_MARKER__ = ${JSON.stringify(marker)};`,
-    "globalThis.__EVE_WORKER_ID__ = randomUUID();",
-    "export default {};",
+    "export default defineInstrumentation({",
+    "  setup() {",
+    `    globalThis.__EVE_INSTRUMENTATION_MARKER__ = ${JSON.stringify(marker)};`,
+    "    globalThis.__EVE_WORKER_ID__ = randomUUID();",
+    "  },",
+    "});",
     "",
   ].join("\n");
 }

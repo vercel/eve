@@ -101,11 +101,9 @@ function isTransientHttpStatus(status: number | undefined): boolean {
  * structured `data` field and the raw `responseBody` JSON. Returns an
  * empty array for errors that are not of this shape.
  *
- * Used by the harness recovery path to identify which framework tools
- * to drop before retrying the failing step. Detection is by string
- * match on the upstream tool type — see
- * {@link resolveFrameworkToolFromUpstreamType} for the mapping back to
- * framework tool names.
+ * Used by the harness recovery path to identify rejected upstream types. The
+ * kernel then resolves them against provider capabilities installed for the
+ * failed call.
  */
 export function extractUnsupportedProviderToolTypes(error: unknown): readonly string[] {
   const found = new Set<string>();

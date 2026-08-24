@@ -428,7 +428,7 @@ describe("runCli", () => {
     }
   }, 120_000);
 
-  it("surfaces discovery diagnostics in build failures", async () => {
+  it("surfaces compiler diagnostics in build failures", async () => {
     const workspaceRoot = await createScratchDirectory("eve-cli-build-diagnostics-");
     const resolvedWorkspaceRoot = await realpath(workspaceRoot);
     const previousCwd = process.cwd();
@@ -469,14 +469,16 @@ describe("runCli", () => {
       throw new Error("Expected runCli build to throw an Error.");
     }
 
-    expect(thrownError.message).toContain("Discovery failed with 1 error(s) and 0 warning(s).");
+    expect(thrownError.message).toContain("Compilation failed with 1 error(s) and 0 warning(s).");
     expect(thrownError.message).not.toContain("Diagnostics artifact:");
     expect(thrownError.message).not.toContain(`${join(resolvedWorkspaceRoot, ".eve", "builds")}/`);
-    expect(thrownError.message).toContain("Discovery diagnostics:");
+    expect(thrownError.message).toContain("Compiler diagnostics:");
     expect(thrownError.message).toContain(
       'Expected authored instructions at "instructions.md", "instructions.ts", "instructions.cts", "instructions.mts", "instructions.js", "instructions.cjs", "instructions.mjs", or "instructions/" directory.',
     );
-    expect(thrownError.message).toContain(`source: ${join(resolvedWorkspaceRoot, "agent")}`);
+    expect(thrownError.message).toContain(
+      `source: __root__ · ${join(resolvedWorkspaceRoot, "agent")}`,
+    );
   });
 
   it("loads development env files before running build", async () => {

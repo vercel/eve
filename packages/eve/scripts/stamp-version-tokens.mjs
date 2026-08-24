@@ -2,6 +2,8 @@ import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { resolveEveRuntimeSourceRevision } from "#framework-sources/revision.js";
+
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const monorepoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const workspaceYamlPath = join(monorepoRoot, "pnpm-workspace.yaml");
@@ -44,6 +46,8 @@ const evePackageDependencyVersion = process.env.EVE_MAIN_DEPENDENCY_URL ?? packa
 const replacements = {
   __EVE_PACKAGE_VERSION__: packageJson.version,
   __EVE_PACKAGE_DEPENDENCY_VERSION__: evePackageDependencyVersion,
+  // Raw tsc modules ship beside Rolldown bundles, so the post-build pass must stamp both.
+  __EVE_RUNTIME_SOURCE_REVISION__: resolveEveRuntimeSourceRevision({ fresh: true }),
   __NODE_ENGINE__: nodeEngine,
   __AI_SDK_VERSION__: await resolveCatalogVersion("ai"),
   __BETTER_AUTH_VERSION__: await resolveCatalogVersion("better-auth"),

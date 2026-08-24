@@ -5,7 +5,10 @@ import {
   findUnsupportedExtensionCapabilities,
   parseExtensionCompatibilityManifest,
 } from "#compiler/extension-compatibility.js";
-import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discover/diagnostics.js";
+import {
+  createCompilerErrorDiagnostic,
+  type CompilerDiagnostic,
+} from "#shared/compiler-diagnostics.js";
 import { parseExtensionMountSpecifier } from "#discover/extension-specifier.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "#discover/filesystem.js";
 import type { ExtensionSourceRef } from "#discover/manifest.js";
@@ -37,14 +40,6 @@ export const DISCOVER_EXTENSION_MOUNT_MISSING_DECLARATION =
  */
 export const DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED =
   "discover/extension-nested-mount-unsupported";
-
-/**
- * Emitted when a consumer's agent-root contribution (e.g. `agent/tools/crm__x.ts`)
- * uses a mounted extension's `<ns>__` prefix. That prefix is reserved for the
- * extension and its co-located overrides, not the agent root.
- */
-export const DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT =
-  "discover/extension-override-outside-mount";
 
 /**
  * Emitted when a resolved package is not a valid eve extension.
@@ -143,21 +138,6 @@ export function mountRefNamespace(logicalPath: string): string {
 }
 
 /**
- * Derives the namespace that scopes an extension's durable state keys and config
- * binding from its package name. Unlike the mount namespace, this stays keyed to
- * the package (e.g. `@acme/crm` → `acme-crm`) so renaming the consumer's mount
- * file never orphans persisted state.
- */
-export function packageStateNamespace(packageName: string): string {
-  return (
-    packageName
-      .replace(/^@/, "")
-      .replace(/[^a-zA-Z0-9._-]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "extension"
-  );
-}
-
-/**
  * Resolves one extension mount to its package and agent-shaped source root
  * without importing the mount module. Reads the mount source text to extract
  * the package specifier, resolves the package, and reads
@@ -168,12 +148,13 @@ export async function locateExtensionMount(input: {
   readonly agentRoot: string;
   readonly appRoot: string;
   readonly mount: ExtensionSourceRef;
+  readonly nodeId: string;
   /**
    * Mount namespace the caller derived from the mount path — passed in because
    * the file and directory mount forms name it at different path positions.
    */
   readonly namespace: string;
-}): Promise<{ location?: ExtensionMountLocation; diagnostics: DiscoverDiagnostic[] }> {
+}): Promise<{ location?: ExtensionMountLocation; diagnostics: CompilerDiagnostic[] }> {
   const locatedPackage = await locateExtensionMountPackage(input);
   if (locatedPackage.location === undefined) {
     return { diagnostics: locatedPackage.diagnostics };
@@ -190,9 +171,10 @@ export async function locateExtensionMount(input: {
   } catch (error) {
     return {
       diagnostics: [
-        createDiscoverErrorDiagnostic({
+        createCompilerErrorDiagnostic({
           code: DISCOVER_EXTENSION_COMPATIBILITY_INVALID,
           message: `Extension "${location.packageName}" has no valid compatibility manifest at "${compatibilityPath}". Rebuild or reinstall the extension. ${error instanceof Error ? error.message : String(error)}`,
+          nodeId: input.nodeId,
           sourcePath: compatibilityPath,
         }),
       ],
@@ -203,9 +185,10 @@ export async function locateExtensionMount(input: {
   if (unsupportedCapabilities.length > 0) {
     return {
       diagnostics: unsupportedCapabilities.map((unsupported) =>
-        createDiscoverErrorDiagnostic({
+        createCompilerErrorDiagnostic({
           code: DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
           message: `Extension "${location.packageName}" requires ${unsupported.capability} contract v${unsupported.requiredVersion}, but this eve supports ${unsupported.capability} contract ${formatSupportedVersions(unsupported.supportedVersions)}. Upgrade eve or install an extension release that requires a supported ${unsupported.capability} contract.`,
+          nodeId: input.nodeId,
           sourcePath: compatibilityPath,
         }),
       ),
@@ -219,7 +202,7 @@ export async function locateExtensionMount(input: {
       packageName: location.packageName,
       packageRoot: location.packageRoot,
       sourceRoot: location.distRoot,
-      externalDependencies: compatibility.build?.externalDependencies ?? [],
+      externalDependencies: compatibility.build.externalDependencies,
     },
     diagnostics: [],
   };
@@ -235,9 +218,10 @@ export async function locateExtensionMountPackage(input: {
   readonly appRoot: string;
   readonly mount: ExtensionSourceRef;
   readonly namespace: string;
+  readonly nodeId: string;
 }): Promise<{
   location?: ExtensionMountPackageLocation;
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
 }> {
   const mountPath = join(input.agentRoot, input.mount.logicalPath);
   const { namespace } = input;
@@ -248,9 +232,10 @@ export async function locateExtensionMountPackage(input: {
   } catch {
     return {
       diagnostics: [
-        createDiscoverErrorDiagnostic({
+        createCompilerErrorDiagnostic({
           code: DISCOVER_EXTENSION_MOUNT_UNRESOLVED,
           message: `Could not read extension mount "${input.mount.logicalPath}".`,
+          nodeId: input.nodeId,
           sourcePath: mountPath,
         }),
       ],
@@ -261,11 +246,12 @@ export async function locateExtensionMountPackage(input: {
   if (specifier === null) {
     return {
       diagnostics: [
-        createDiscoverErrorDiagnostic({
+        createCompilerErrorDiagnostic({
           code: DISCOVER_EXTENSION_MOUNT_UNRESOLVED,
           message:
             `Extension mount "${input.mount.logicalPath}" must default-export a mounted extension, ` +
             `e.g. \`export default crm({ ... })\` or \`export { default } from "@acme/crm"\`.`,
+          nodeId: input.nodeId,
           sourcePath: mountPath,
         }),
       ],
@@ -281,9 +267,10 @@ export async function locateExtensionMountPackage(input: {
   if (packageRoot === null) {
     return {
       diagnostics: [
-        createDiscoverErrorDiagnostic({
+        createCompilerErrorDiagnostic({
           code: DISCOVER_EXTENSION_MOUNT_UNRESOLVED,
           message: `Could not resolve extension package "${specifier}" mounted by "${input.mount.logicalPath}".`,
+          nodeId: input.nodeId,
           sourcePath: mountPath,
         }),
       ],
@@ -297,9 +284,10 @@ export async function locateExtensionMountPackage(input: {
   } catch {
     return {
       diagnostics: [
-        createDiscoverErrorDiagnostic({
+        createCompilerErrorDiagnostic({
           code: DISCOVER_EXTENSION_PACKAGE_INVALID,
           message: `Extension package "${specifier}" has no readable package.json at "${manifestPath}".`,
+          nodeId: input.nodeId,
           sourcePath: manifestPath,
         }),
       ],
@@ -310,9 +298,10 @@ export async function locateExtensionMountPackage(input: {
   if (extension === null) {
     return {
       diagnostics: [
-        createDiscoverErrorDiagnostic({
+        createCompilerErrorDiagnostic({
           code: DISCOVER_EXTENSION_PACKAGE_INVALID,
           message: `Package "${specifier}" is not an eve extension: its package.json must declare \`eve.extension.dist\`.`,
+          nodeId: input.nodeId,
           sourcePath: manifestPath,
         }),
       ],

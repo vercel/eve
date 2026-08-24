@@ -3,10 +3,12 @@ import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import {
   Client,
   ClientError,
+  HealthResponseError,
   type AgentInfoResult,
   type HandleMessageStreamEvent,
   type MessageStreamEvent,
 } from "../src/client/index.js";
+import { createTestAgentInfoResult } from "../src/internal/testing/agent-info.js";
 import {
   EVE_SESSION_ID_HEADER,
   createMessageCompletedEvent,
@@ -132,7 +134,7 @@ describe("Client.health", () => {
     expect(result).toEqual({ ok: true, status: "ready", workflowId: "wf_001" });
   });
 
-  it("throws ClientError on non-200 response", async () => {
+  it("throws ClientError on a non-success response", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response('{"ok":false,"error":"Unauthorized"}', { status: 401 }),
     );
@@ -147,6 +149,25 @@ describe("Client.health", () => {
       expect((error as ClientError).status).toBe(401);
       expect((error as ClientError).body).toContain("Unauthorized");
     }
+  });
+
+  it("throws HealthResponseError when a successful response is not JSON", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("ready"));
+
+    await expect(new Client({ host: "http://localhost:3000" }).health()).rejects.toBeInstanceOf(
+      HealthResponseError,
+    );
+  });
+
+  it("throws HealthResponseError with schema issues for an invalid success payload", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      Response.json({ ok: true, status: "starting", workflowId: "wf_001" }),
+    );
+
+    await expect(new Client({ host: "http://localhost:3000" }).health()).rejects.toMatchObject({
+      issues: [expect.stringContaining("status")],
+      name: "HealthResponseError",
+    });
   });
 
   it("sends bearer auth header when configured with a static token", async () => {
@@ -229,7 +250,7 @@ describe("Client.health", () => {
 
 describe("Client.info", () => {
   it("fetches the agent info payload from the info route", async () => {
-    const payload = {
+    const basePayload = createTestAgentInfoResult({
       agent: {
         agentRoot: "/tmp/weather-agent/agent",
         appRoot: "/tmp/weather-agent",
@@ -239,75 +260,66 @@ describe("Client.info", () => {
         },
         name: "Weather Agent",
       },
-      capabilities: { devRoutes: true },
-      channels: {
-        authored: [],
-        available: [],
-        disabledFramework: [],
-        framework: [],
+    });
+    const instructions = {
+      content: "You are a weather assistant.",
+      logicalPath: "instructions.md",
+      name: "instructions",
+      owner: { kind: "application" as const },
+      role: "system" as const,
+      sourceId: "test:instructions",
+      sourceKind: "markdown" as const,
+    };
+    const tool = {
+      description: "Get the weather.",
+      hasAuth: false,
+      hasExecute: true,
+      hasModelOutputProjection: false,
+      hasOutputSchema: false,
+      inputSchema: { type: "object" },
+      logicalPath: "tools/get_weather.ts",
+      name: "get_weather",
+      owner: { kind: "application" as const },
+      requiresApproval: false,
+      sourceId: "test:get-weather",
+      sourceKind: "module" as const,
+    };
+    const payload = {
+      ...basePayload,
+      composition: {
+        ...basePayload.composition,
+        selected: [
+          ...basePayload.composition.selected,
+          {
+            slot: "instructions",
+            source: {
+              layer: "application" as const,
+              logicalPath: instructions.logicalPath,
+              owner: instructions.owner,
+              sourceId: instructions.sourceId,
+              sourceKind: instructions.sourceKind,
+            },
+            sourceKind: "non-module" as const,
+          },
+          {
+            slot: "tools/get_weather",
+            source: {
+              logicalPath: tool.logicalPath,
+              owner: tool.owner,
+              sourceId: tool.sourceId,
+              sourceKind: tool.sourceKind,
+            },
+            sourceKind: "module" as const,
+          },
+        ],
       },
-      connections: [],
-      diagnostics: {
-        discoveryErrors: 0,
-        discoveryWarnings: 0,
-      },
-      hooks: [],
       instructions: {
         dynamic: [],
-        static: [
-          {
-            content: "You are a weather assistant.",
-            logicalPath: "agent/instructions.md",
-            name: "instructions",
-            role: "system",
-            sourceKind: "markdown",
-          },
-        ],
-      },
-      kind: "eve-agent-info",
-      mode: "development",
-      sandbox: null,
-      schedules: [],
-      skills: {
-        dynamic: [],
-        static: [],
-      },
-      subagents: {
-        local: [],
-        total: 0,
+        static: [instructions],
       },
       tools: {
-        authored: [
-          {
-            description: "Get the weather.",
-            hasAuth: false,
-            hasExecute: true,
-            hasModelOutputProjection: false,
-            hasOutputSchema: false,
-            inputSchema: { type: "object" },
-            logicalPath: "agent/tools/get_weather.ts",
-            name: "get_weather",
-            origin: "authored",
-            outputSchema: null,
-            replacesFrameworkTool: false,
-            requiresApproval: false,
-            sourceKind: "module",
-          },
-        ],
-        available: [],
-        disabledFramework: [],
         dynamic: [],
-        framework: [],
-        reserved: [],
-      },
-      version: 2,
-      workflow: {
-        enabled: false,
-        toolName: "Workflow",
-      },
-      workspace: {
-        resourceRoot: null,
-        rootEntries: [],
+        static: [tool],
       },
     } satisfies AgentInfoResult;
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(Response.json(payload));

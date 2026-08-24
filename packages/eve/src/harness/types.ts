@@ -4,9 +4,9 @@ import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js"
 import type { AlsContext } from "#context/container.js";
 import type { UnstampedMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
-import type { RuntimeActionResult } from "#runtime/actions/types.js";
+import type { RuntimeActionResult } from "#shared/runtime-actions.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import type { InputResponse } from "#shared/input.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
@@ -16,6 +16,10 @@ import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessInstrumentation } from "#harness/instrumentation/runtime.js";
 import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
+import type {
+  KernelCapabilityPlan,
+  SessionKernelCapabilityResolution,
+} from "#kernel/capabilities.js";
 
 /**
  * Serializable tool definition stored on the session.
@@ -284,14 +288,9 @@ export interface ToolLoopHarnessConfig {
   readonly clearOnly?: boolean;
   /** Forces one context-compaction pass without running a model turn. */
   readonly compactOnly?: boolean;
-  /**
-   * Exposes the `Workflow` orchestration tool — an isolated JavaScript sandbox
-   * whose only callable operations are this agent's subagents and remote
-   * agents. Resolved from the `experimental_workflow(...)` definition exported
-   * by `agent/tools/workflow.ts`. Only root sessions ever see the tool.
-   * Defaults to `false`.
-   */
-  readonly workflow?: boolean;
+  /** Compiler-prepared native potential for this graph node. */
+  readonly kernelPlan: KernelCapabilityPlan;
+  readonly taskControl?: SessionKernelCapabilityResolution["taskControl"];
   /**
    * Maximum subagent calls one `Workflow` invocation may dispatch, from the
    * authored Workflow tool definition. Advertised in the tool description;
@@ -344,6 +343,8 @@ export interface ToolLoopHarnessConfig {
     readonly messages: readonly ModelMessage[];
   }) => Promise<void>;
   readonly resolveModel: (reference: RuntimeModelReference) => Promise<LanguageModel>;
+  /** Names owned by the native kernel that runtime-resolved tools cannot replace. */
+  readonly reservedToolNames?: ReadonlySet<string>;
   /**
    * Runtime identity metadata attached to the `session.started` event.
    *

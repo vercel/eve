@@ -12,6 +12,7 @@ import {
   resolveDevelopmentSourceRoot,
 } from "#internal/nitro/dev-runtime-source-snapshot.js";
 import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extension.js";
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/compiled-agent-node-id.js";
 
 const mocks = vi.hoisted(() => ({
   buildExtensionPackage: vi.fn(async () => undefined),
@@ -44,6 +45,7 @@ describe("prepareDevelopmentWorkspaceExtensions", () => {
 
     const mounts = await discoverExtensionMountDeclarations({
       agentRoot: join(appRoot, "agent"),
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
     });
     await expect(resolveDiscoveryProject(appRoot)).resolves.toMatchObject({
       agentRoot: join(appRoot, "agent"),
@@ -57,6 +59,7 @@ describe("prepareDevelopmentWorkspaceExtensions", () => {
       appRoot,
       mount: mounts.mounts[0]!.mountRef,
       namespace: mounts.mounts[0]!.namespace,
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
     });
     expect(located.diagnostics).toEqual([]);
     expect(located.location?.authoredSourceRoot).toBe(

@@ -6,7 +6,7 @@ import {
   attachAgentInfoRouteResponse,
   attachRouteChannelName,
   attachRouteSessionCreator,
-} from "#internal/nitro/routes/channel-route-context.js";
+} from "#channel/route-context.js";
 import { MCP_LEGACY_PROTOCOL_VERSION } from "#internal/mcp/streamable-http-server.js";
 import { ForbiddenError, none, oauthResource, withAuthChallenges } from "#public/channels/auth.js";
 import { mcpChannel } from "#public/channels/mcp.js";

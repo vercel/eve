@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import type { CompileMetadata } from "#compiler/artifacts.js";
-import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   getRuntimeCompiledArtifactsSandboxAppRoot,
   getRuntimeCompiledArtifactsCacheKey,
@@ -13,10 +12,11 @@ import type { RuntimeSandboxTemplatePlan } from "#runtime/sandbox/template-plan.
 
 /*
  * Template keys include this version for sandbox runtime contract changes
- * that are not captured by source or resource hashes. Version 7 writes static
- * skill seed files to the sandbox user's $HOME/.agents/skills directory.
+ * that are not captured by source or resource hashes. Version 8 separates
+ * template absence from the selected sandbox definition identity.
  */
-const RUNTIME_SANDBOX_CONTRACT_VERSION = 7;
+const RUNTIME_SANDBOX_CONTRACT_VERSION = 8;
+const EMPTY_SANDBOX_CONTENT_IDENTITY = "no-content";
 
 /**
  * Input for deriving the stable runtime keys used for one sandbox definition.
@@ -35,8 +35,8 @@ interface CreateRuntimeSandboxKeysInput {
  * definition under the current artifact source and backend.
  *
  * Both keys derive from one {@link RuntimeSandboxKeyParts} value, so the
- * coupling holds by construction: the session key rotates exactly when
- * the template content rotates.
+ * coupling holds by construction: the session key rotates when the template
+ * content or selected executable source rotates.
  */
 export async function createRuntimeSandboxKeys(input: CreateRuntimeSandboxKeysInput): Promise<{
   readonly sessionKey: string;
@@ -70,13 +70,14 @@ export async function createRuntimeSandboxTemplateKey(input: {
 
 /**
  * The facts both keys derive from, computed once per derivation:
- * compile metadata, the partition scope, and the sandbox definition's
- * version hash (`null` when the sandbox needs no template).
+ * compile metadata, the partition scope, whether the sandbox needs a
+ * template, and the selected sandbox definition's version hash.
  */
 interface RuntimeSandboxKeyParts {
-  readonly metadata: CompileMetadata | null;
+  readonly hasTemplate: boolean;
+  readonly metadata: CompileMetadata;
   readonly scope: string;
-  readonly versionHash: string | null;
+  readonly versionHash: string;
 }
 
 async function deriveRuntimeSandboxKeyParts(input: {
@@ -88,24 +89,24 @@ async function deriveRuntimeSandboxKeyParts(input: {
 }): Promise<RuntimeSandboxKeyParts> {
   const metadata = await loadCompileMetadataForKeys(input.compiledArtifactsSource);
   const scope = await resolveRuntimeSandboxScope(input);
-  const versionHash =
-    input.templatePlan.kind === "none"
-      ? null
-      : resolveRuntimeSandboxVersionHash({
-          compiledArtifactsSource: input.compiledArtifactsSource,
-          metadata,
-          nodeId: input.nodeId,
-          sourceId: input.sourceId,
-          templatePlan: input.templatePlan,
-        });
-  return { metadata, scope, versionHash };
+  const versionHash = resolveRuntimeSandboxVersionHash({
+    nodeId: input.nodeId,
+    sourceId: input.sourceId,
+    templatePlan: input.templatePlan,
+  });
+  return {
+    hasTemplate: input.templatePlan.kind !== "none",
+    metadata,
+    scope,
+    versionHash,
+  };
 }
 
 function buildRuntimeSandboxTemplateKey(
   input: { readonly backendName: string },
   parts: RuntimeSandboxKeyParts,
 ): string | null {
-  if (parts.versionHash === null) {
+  if (!parts.hasTemplate) {
     return null;
   }
 
@@ -125,8 +126,8 @@ function buildRuntimeSandboxTemplateKey(
  * deployments so a session reattaches to the same sandbox after a redeploy
  * and keeps its `/workspace` state. The key also folds in the sandbox
  * definition's version hash, so changing the sandbox itself (bootstrap
- * source, `revalidationKey`, or workspace seed content) rotates the
- * session sandbox onto the new template — unrelated source changes do not.
+ * source, `revalidationKey`, or workspace seed content) rotates the session
+ * sandbox onto the new template.
  * The eve package version deliberately does not participate: upgrading
  * eve must not discard session sandbox state.
  */
@@ -135,7 +136,7 @@ function buildRuntimeSandboxSessionKey(
   parts: RuntimeSandboxKeyParts,
 ): string {
   const version = createStableHash(
-    `${RUNTIME_SANDBOX_CONTRACT_VERSION}:${parts.versionHash ?? "none"}`,
+    `${RUNTIME_SANDBOX_CONTRACT_VERSION}:${parts.versionHash}`,
   ).slice(0, 12);
   const nodeScope = sanitizeRuntimeSandboxKey(input.nodeId);
 
@@ -153,20 +154,14 @@ function buildRuntimeSandboxSessionKey(
  * generator version ships inside the artifacts both phases read, so both
  * derive the same key from it.
  */
-function resolvePackageVersionForTemplateKey(metadata: CompileMetadata | null): string {
-  return metadata?.generator.version ?? resolveInstalledPackageInfo().version;
+function resolvePackageVersionForTemplateKey(metadata: CompileMetadata): string {
+  return metadata.generator.version;
 }
 
 async function loadCompileMetadataForKeys(
   compiledArtifactsSource: RuntimeCompiledArtifactsSource,
-): Promise<CompileMetadata | null> {
-  try {
-    return await loadCompileMetadata({ compiledArtifactsSource });
-  } catch {
-    // Key derivation must work from whatever artifacts exist; unreadable
-    // metadata degrades to the same fallbacks as absent metadata.
-    return null;
-  }
+): Promise<CompileMetadata> {
+  return await loadCompileMetadata({ compiledArtifactsSource });
 }
 
 /**
@@ -206,33 +201,26 @@ async function resolveRuntimeSandboxScope(input: {
 }
 
 function resolveRuntimeSandboxVersionHash(input: {
-  readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
-  readonly metadata: CompileMetadata | null;
   readonly nodeId: string;
   readonly sourceId: string;
-  readonly templatePlan: Exclude<RuntimeSandboxTemplatePlan, { readonly kind: "none" }>;
+  readonly templatePlan: RuntimeSandboxTemplatePlan;
 }): string {
   const contentHash =
-    input.templatePlan.contentHash ??
-    resolveSourceGraphHash(input.metadata, input.compiledArtifactsSource);
-
-  if (input.templatePlan.kind === "bootstrap") {
-    const revalidationKey = input.templatePlan.revalidationKey ?? "";
-    return createStableHash(
-      `bootstrap:${revalidationKey}:${input.templatePlan.sourceHash}:${contentHash}:${input.nodeId}:${input.sourceId}`,
-    );
-  }
-
-  return createStableHash(`workspace-content:${contentHash}:${input.nodeId}:${input.sourceId}`);
-}
-
-function resolveSourceGraphHash(
-  metadata: CompileMetadata | null,
-  compiledArtifactsSource: RuntimeCompiledArtifactsSource,
-): string {
-  return (
-    metadata?.discovery.sourceGraphHash ??
-    getRuntimeCompiledArtifactsCacheKey(compiledArtifactsSource)
+    input.templatePlan.kind === "none"
+      ? EMPTY_SANDBOX_CONTENT_IDENTITY
+      : (input.templatePlan.contentHash ?? EMPTY_SANDBOX_CONTENT_IDENTITY);
+  return createStableHash(
+    JSON.stringify({
+      contentHash,
+      kind: input.templatePlan.kind,
+      nodeId: input.nodeId,
+      revalidationKey:
+        input.templatePlan.kind === "bootstrap"
+          ? (input.templatePlan.revalidationKey ?? "")
+          : undefined,
+      sourceHash: input.templatePlan.sourceHash,
+      sourceId: input.sourceId,
+    }),
   );
 }
 

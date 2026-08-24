@@ -41,6 +41,8 @@ import type {
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import type { ResolvedSandboxDefinition } from "#runtime/types.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
+import { compileFromMemory } from "#compiler/compile-from-memory.js";
+import { withBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
 
 const mocks = vi.hoisted(() => ({
   continueRemoteAgentSession: vi.fn(),
@@ -317,11 +319,13 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       session,
     });
 
-    await dispatchRuntimeActionsStep({
-      parentContinuationToken: "turn-inbox",
-      parentWritable: createWritable(),
-      serializedContext: {},
-      sessionState: BASE_STATE,
+    await withTestBundledArtifacts(async () => {
+      await dispatchRuntimeActionsStep({
+        parentContinuationToken: "turn-inbox",
+        parentWritable: createWritable(),
+        serializedContext: {},
+        sessionState: BASE_STATE,
+      });
     });
 
     expect(observedSessionIds).toEqual(["parent-session", "parent-session"]);
@@ -356,11 +360,13 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     });
     vi.spyOn(taskRunControl, "sendTaskCommandToOwner").mockResolvedValue({ runId: "task-run-1" });
 
-    await dispatchTaskStep({
-      parentContinuationToken: "turn-inbox",
-      parentWritable: createWritable(),
-      serializedContext: {},
-      sessionState: BASE_STATE,
+    await withTestBundledArtifacts(async () => {
+      await dispatchTaskStep({
+        parentContinuationToken: "turn-inbox",
+        parentWritable: createWritable(),
+        serializedContext: {},
+        sessionState: BASE_STATE,
+      });
     });
 
     expect(create).toHaveBeenCalledTimes(1);
@@ -1017,6 +1023,7 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
         subagentName: "research",
       })),
       event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
+      kernelCapabilities: {},
       responseMessages: [],
       session: createBaseSession(LOCAL_PARKED_HANDLE),
     });
@@ -1216,6 +1223,7 @@ function createStartSession(input: {
           },
     ],
     event: input.event ?? { sequence: 1, stepIndex: 2, turnId: "turn-1" },
+    kernelCapabilities: {},
     responseMessages: [],
     session: createBaseSession(),
   });
@@ -1239,6 +1247,7 @@ function createNamedStartSession(input: {
       },
     ],
     event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
+    kernelCapabilities: {},
     responseMessages: [],
     session: { ...createBaseSession(), ...input.session },
   });
@@ -1261,6 +1270,7 @@ function createPendingSession(input: {
       },
     ],
     event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
+    kernelCapabilities: {},
     responseMessages: [],
     session: createBaseSession(input.handle),
   });
@@ -1336,6 +1346,7 @@ function createSandboxRegistry(
         backend,
         logicalPath: "agent/sandbox.ts",
         onSession,
+        sourceHash: "dispatch-runtime-actions-test-sandbox",
         sourceId: "agent/sandbox",
         sourceKind: "module",
       },
@@ -1400,4 +1411,12 @@ function createWritable(writes: Uint8Array[] = []): WritableStream<Uint8Array> {
       writes.push(chunk);
     },
   });
+}
+
+async function withTestBundledArtifacts<T>(fn: () => Promise<T>): Promise<T> {
+  const compiled = await compileFromMemory({ model: "openai/gpt-5-mini" });
+  return await withBundledCompiledArtifacts(
+    { ...compiled, sessionId: "dispatch-runtime-actions-integration-artifacts" },
+    fn,
+  );
 }

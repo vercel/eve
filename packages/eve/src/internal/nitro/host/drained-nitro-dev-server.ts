@@ -16,6 +16,7 @@ import { stampDevelopmentClientAddress } from "#internal/nitro/dev-client-addres
 import { toErrorMessage } from "#shared/errors.js";
 
 const RUNNER_READY_TIMEOUT_MS = 60_000;
+const DEV_SERVER_KEEP_ALIVE_TIMEOUT_MS = 30_000;
 
 export interface DrainedDevServerListener {
   close(): Promise<void>;
@@ -163,6 +164,9 @@ export class DrainedNitroDevServer {
     const server = createServer((request, response) => {
       void this.#handleRequest(request, response);
     });
+    // Structural rebuilds can outlast Node's five-second default, but swapping
+    // workers should remain transparent to idle keep-alive connections.
+    server.keepAliveTimeout = DEV_SERVER_KEEP_ALIVE_TIMEOUT_MS;
     server.on("connection", (socket) => {
       sockets.add(socket);
       socket.once("close", () => sockets.delete(socket));

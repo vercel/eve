@@ -1,9 +1,15 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
-import { createCompiledModuleMapSource } from "#compiler/module-map.js";
+import type {
+  CompiledExternalDependencyPlan,
+  CompiledExternalDependencyPlanSession,
+} from "#compiler/external-dependency-plan.js";
+import { createCompiledExternalDependencyPlanIdentity } from "#compiler/external-dependency-plan.js";
+import { externalDependencyPlanPackageNames } from "#compiler/external-dependency-package-names.js";
+import { createCompiledModuleMapIntegrityPlugin } from "#compiler/module-map-integrity-plugin.js";
 import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
 import { assertNoWorkflowDirectivePrologue } from "#internal/authored-directive-prologue.js";
 import { createAuthoredModuleBundleError } from "#internal/authored-module-bundle.js";
@@ -22,15 +28,33 @@ import {
   createRuntimeLoaderPackageBoundaryPlugin,
   isNodeModulesPath,
   normalizeExternalDependencies,
+  type GenerationExternalDependencyMode,
   type RolldownResolveContext,
 } from "#internal/authored-package-boundary.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
+import { materializeCompiledExternalDependencyPlan } from "#internal/materialize-external-dependencies.js";
 import {
   buildSingleRolldownChunk,
   buildWithNitroRolldown,
 } from "#internal/bundler/nitro-rolldown.js";
+import {
+  createOptionalSandboxEngineDependencyPlugin,
+  OPTIONAL_SANDBOX_ENGINE_PACKAGES_BY_BACKEND_NAME,
+} from "#internal/bundler/optional-sandbox-engine-dependency-plugin.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 import { createDynamicCapabilityTransformPlugin } from "#internal/workflow-bundle/dynamic-capability-transform-plugin.js";
+import {
+  resolvePackageCompiledFilePath,
+  resolvePackageRoot,
+  resolvePackageSourceFilePath,
+} from "#internal/application/package.js";
+import { createFrameworkSourceRevisionPlugin } from "#framework-sources/revision-plugin.js";
+import { readCompiledFrameworkSourceRevision } from "#framework-sources/revision.js";
+import { verifyCompiledExternalDependencyPlanFiles } from "#compiler/external-dependency-plan.js";
+import {
+  createGenerationModuleMapBundleEntry,
+  type GenerationModuleMapDescriptorProjection,
+} from "#internal/generation-module-map-projection.js";
 
 const AUTHORED_BUNDLED_MODULE_EXTENSION = /\.[cm]?[jt]sx?$/;
 const AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH = join(
@@ -42,7 +66,10 @@ const AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH = join(
 const CHANNEL_MODULE_CACHE_KEY = "__eveChannelModuleCache__";
 
 export interface AuthoredModuleLoadOptions {
+  readonly captureExternalDependencyWitnesses?: boolean;
   readonly externalDependencies?: readonly string[];
+  readonly externalDependencyPlan?: CompiledExternalDependencyPlan;
+  readonly externalDependencyPlanSession?: CompiledExternalDependencyPlanSession;
   /**
    * When set, the module being loaded is extension-owned: its
    * `defineState`/`defineExtension` calls (and those of its same-package
@@ -139,18 +166,42 @@ function createFileImportSpecifier(modulePath: string): string {
 }
 
 /**
- * Bundles one authored entry for immediate dev/eval loading. Package dependencies
- * remain external while relative authored source is inlined.
+ * Bundles one authored entry for immediate compile-time loading. Installed
+ * package imports execute from content-addressed captures so a subsequent
+ * compile cannot reuse an earlier package revision from Node's module cache.
  */
 export async function bundleAuthoredModuleCode(
   modulePath: string,
   options: AuthoredModuleLoadOptions = {},
 ): Promise<string> {
+  const packageRoot = resolveAuthoredPackageRoot(modulePath);
+  const externalDependencyPlanSession = options.externalDependencyPlanSession;
+  const externalDependencyPlan = await resolveAuthoredExternalDependencyPlan(packageRoot, options);
+  const materialized = await materializeCompiledExternalDependencyPlan({
+    destinationRoot: join(
+      packageRoot,
+      "node_modules",
+      ".cache",
+      "eve",
+      "authored-external-dependencies",
+    ),
+    plan: externalDependencyPlan,
+  });
   return await buildAuthoredModuleBundle(modulePath, options, {
     channelIdentity: true,
     packageBoundaryPlugin: createRuntimeLoaderPackageBoundaryPlugin({
-      externalDependencies: normalizeExternalDependencies(options.externalDependencies),
-      packageRoot: resolveAuthoredPackageRoot(modulePath),
+      captureExternalDependencyPlan:
+        externalDependencyPlanSession === undefined
+          ? undefined
+          : async (capture) =>
+              await externalDependencyPlanSession.captureResolvedPackage({
+                ...capture,
+                ...(options.captureExternalDependencyWitnesses === true
+                  ? { witnessSourceRoot: packageRoot }
+                  : {}),
+              }),
+      externalDependencyPlan: materialized.plan,
+      packageRoot,
     }),
     plugins: [],
     sourcemap: "inline",
@@ -167,20 +218,51 @@ export async function bundleAuthoredModuleForGeneration(
   modulePath: string,
   options: AuthoredModuleLoadOptions = {},
 ): Promise<string> {
+  const externalDependencyPlan = await resolveAuthoredExternalDependencyPlan(
+    resolveAuthoredPackageRoot(modulePath),
+    options,
+  );
   const code = await buildAuthoredModuleBundle(modulePath, options, {
     // Generation bundles must not reference process state: the channel
     // identity plugin emits reads of a process-global cache keyed by live
     // source paths, which an immutable retained artifact cannot depend on.
     channelIdentity: false,
     packageBoundaryPlugin: createGenerationPackageBoundaryPlugin({
-      externalDependencies: normalizeExternalDependencies(options.externalDependencies),
-      packageRoot: resolveAuthoredPackageRoot(modulePath),
+      externalDependencyMode: "preserve-specifier",
+      externalDependencyPlan,
     }),
     plugins: [createAuthoredDirectiveGuardPlugin()],
     sourcemap: false,
   });
 
   return removeRolldownModuleRegionComments(code);
+}
+
+async function resolveAuthoredExternalDependencyPlan(
+  packageRoot: string,
+  options: AuthoredModuleLoadOptions,
+): Promise<CompiledExternalDependencyPlan> {
+  const dependencyIds = externalDependencyPlanPackageNames(
+    normalizeExternalDependencies(options.externalDependencies),
+  );
+  if (options.externalDependencyPlan !== undefined) {
+    const entries = dependencyIds.map((dependencyId) => {
+      const entry = options.externalDependencyPlan!.entries.find(
+        (candidate) => candidate.id === dependencyId,
+      );
+      if (entry === undefined) {
+        throw new Error(
+          `Cannot load authored package "${packageRoot}" without external dependency plan entry "${dependencyId}".`,
+        );
+      }
+      return entry;
+    });
+    return { entries };
+  }
+  if (dependencyIds.length === 0) return { entries: [] };
+  throw new Error(
+    `Cannot load authored package "${packageRoot}" with configured external dependencies before the compiler selects their plan.`,
+  );
 }
 
 /** One path-preserving entry in an extension distribution graph. */
@@ -250,26 +332,25 @@ export async function bundleExtensionDistributionGraph(input: {
 }
 
 /**
- * Bundles every runtime-authored module in one immutable generation graph.
- * Shared dependencies are parsed and emitted once instead of once per authored
- * entry.
+ * Bundles the exact compiled module-map descriptor and every runtime-authored
+ * module it selects into one immutable generation graph. Shared dependencies
+ * are parsed and emitted once instead of once per authored entry.
  */
 export async function bundleAuthoredModuleMapForGeneration(input: {
+  readonly descriptorProjection?: GenerationModuleMapDescriptorProjection;
+  readonly expectedIdentity: string;
+  readonly externalDependencyMode: GenerationExternalDependencyMode;
+  readonly externalDependencyPlan: CompiledExternalDependencyPlan;
   readonly manifest: CompiledAgentManifest;
   readonly moduleMapPath: string;
+  readonly moduleMapSource: string;
 }): Promise<string> {
   const packageRoot = resolveAuthoredPackageRoot(input.manifest.agentRoot);
-  const externalDependencies = normalizeExternalDependencies([
-    ...(input.manifest.config.build?.externalDependencies ?? []),
-    ...input.manifest.subagents.flatMap((subagent) =>
-      subagent.configResolver === undefined
-        ? (subagent.agent.config.build?.externalDependencies ?? [])
-        : (subagent.configResolver.build?.externalDependencies ?? []),
-    ),
-  ]);
-  const moduleMapSource = createCompiledModuleMapSource({
-    manifest: input.manifest,
+  const bundleEntry = createGenerationModuleMapBundleEntry({
     moduleMapPath: input.moduleMapPath,
+    moduleMapSource: input.moduleMapSource,
+    projection: input.descriptorProjection,
+    sourceManifest: input.manifest,
   });
   const extensionScopePlugin = createExtensionScopePlugin(
     [input.manifest, ...input.manifest.subagents.map((subagent) => subagent.agent)].flatMap(
@@ -281,10 +362,24 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
     ),
   );
   const plugins = [
-    createVirtualGenerationModuleMapPlugin({
-      id: input.moduleMapPath,
-      source: moduleMapSource,
+    bundleEntry.plugin,
+    createCompiledModuleMapIntegrityPlugin({
+      expectedIdentity: input.expectedIdentity,
+      manifest: input.manifest,
     }),
+    {
+      name: "eve-compiled-external-dependency-integrity",
+      async buildStart() {
+        await verifyCompiledExternalDependencyPlanFiles(input.externalDependencyPlan);
+      },
+      async buildEnd() {
+        await verifyCompiledExternalDependencyPlanFiles(input.externalDependencyPlan);
+      },
+    },
+    createFrameworkSourceRevisionPlugin({
+      expectedRevision: readCompiledFrameworkSourceRevision(input.manifest),
+    }),
+    createEvePackageImportResolverPlugin(),
     createDynamicCapabilityTransformPlugin(),
     createAuthoredDirectiveGuardPlugin(),
     extensionScopePlugin,
@@ -295,13 +390,19 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
       extensions: RESOLVE_EXTENSIONS,
     }),
     createNodeEsmCompatBannerPlugin({ includeRequire: true }),
-    createGenerationPackageBoundaryPlugin({ externalDependencies, packageRoot }),
+    createOptionalSandboxEngineDependencyPlugin(
+      Object.values(OPTIONAL_SANDBOX_ENGINE_PACKAGES_BY_BACKEND_NAME),
+    ),
+    createGenerationPackageBoundaryPlugin({
+      externalDependencyMode: input.externalDependencyMode,
+      externalDependencyPlan: input.externalDependencyPlan,
+    }),
   ].filter((plugin) => plugin !== null);
 
   try {
     const chunk = await buildSingleRolldownChunk("authored module map", {
       cwd: packageRoot,
-      input: input.moduleMapPath,
+      input: bundleEntry.inputPath,
       platform: "node",
       plugins,
       resolve: {
@@ -321,19 +422,58 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
   }
 }
 
-function createVirtualGenerationModuleMapPlugin(input: {
-  readonly id: string;
-  readonly source: string;
-}): Record<string, unknown> {
+/**
+ * Resolves eve's private package imports to the files present in the executing
+ * installation. Generation bundling opts into the `eve-source` condition for
+ * linked workspace packages, but published eve packages intentionally omit
+ * `src/`; resolving these edges explicitly keeps package-owned programmatic
+ * sources bundleable in both layouts.
+ */
+function createEvePackageImportResolverPlugin(): Record<string, unknown> {
+  const packageRoot = realpathSync.native(resolvePackageRoot());
+
   return {
-    name: "eve-generation-module-map",
-    resolveId(id: string) {
-      return id === input.id ? id : undefined;
-    },
-    load(id: string) {
-      return id === input.id ? { code: input.source, moduleType: "js" as const } : undefined;
+    name: "eve-package-imports",
+    resolveId(source: string, importer: string | undefined) {
+      if (importer === undefined || !source.startsWith("#")) return undefined;
+
+      const importerPath = resolve(importer);
+      if (!isPathInsideOrEqual(realpathExistingAncestor(importerPath), packageRoot)) {
+        return undefined;
+      }
+
+      if (source.startsWith("#compiled/")) {
+        return {
+          id: resolvePackageCompiledFilePath(`src/compiled/${source.slice("#compiled/".length)}`),
+        };
+      }
+
+      const match = source.match(/^#(.+)\.js$/);
+      if (match === null) return undefined;
+
+      return {
+        id: resolvePackageSourceFilePath(`src/${match[1]}.ts`),
+      };
     },
   };
+}
+
+function realpathExistingAncestor(path: string): string {
+  let candidate = path;
+  while (!existsSync(candidate)) {
+    const parent = dirname(candidate);
+    if (parent === candidate) return path;
+    candidate = parent;
+  }
+  return realpathSync.native(candidate);
+}
+
+function isPathInsideOrEqual(path: string, root: string): boolean {
+  const relativePath = relative(root, path);
+  return (
+    relativePath === "" ||
+    (relativePath !== ".." && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath))
+  );
 }
 
 async function buildAuthoredModuleBundle(
@@ -399,6 +539,7 @@ async function buildAuthoredModuleBundle(
   const plugins = [
     channelIdentityPlugin,
     ...configuration.plugins,
+    createFrameworkSourceRevisionPlugin(),
     options.extensionScopeNamespace === undefined
       ? null
       : createFixedNamespaceScopePlugin(options.extensionScopeNamespace),
@@ -462,11 +603,22 @@ async function loadBundledAuthoredModule(
 ): Promise<unknown> {
   const code = await bundleAuthoredModuleCode(modulePath, options);
   const externalDependencies = normalizeExternalDependencies(options.externalDependencies);
+  const externalDependencyPlanIdentity =
+    options.externalDependencyPlan === undefined
+      ? ""
+      : createCompiledExternalDependencyPlanIdentity(options.externalDependencyPlan);
+  const externalDependencySessionIdentity = options.externalDependencyPlanSession?.cacheKey ?? "";
 
   const bundleHash = createHash("sha1")
     .update(modulePath)
     .update("\0")
     .update(externalDependencies.join("\0"))
+    .update("\0")
+    .update(externalDependencyPlanIdentity)
+    .update("\0")
+    .update(externalDependencySessionIdentity)
+    .update("\0")
+    .update(options.captureExternalDependencyWitnesses === true ? "witness" : "ordinary")
     .update("\0")
     .update(options.extensionScopeNamespace ?? "")
     .update("\0")
@@ -495,8 +647,13 @@ function createInFlightModuleLoadKey(
   options: AuthoredModuleLoadOptions,
 ): string {
   const externalDependencies = normalizeExternalDependencies(options.externalDependencies);
+  const externalDependencyPlanIdentity =
+    options.externalDependencyPlan === undefined
+      ? ""
+      : createCompiledExternalDependencyPlanIdentity(options.externalDependencyPlan);
+  const externalDependencySessionIdentity = options.externalDependencyPlanSession?.cacheKey ?? "";
 
-  return `${modulePath}\0${externalDependencies.join("\0")}\0${options.extensionScopeNamespace ?? ""}`;
+  return `${modulePath}\0${externalDependencies.join("\0")}\0${externalDependencyPlanIdentity}\0${externalDependencySessionIdentity}\0${options.captureExternalDependencyWitnesses === true ? "witness" : "ordinary"}\0${options.extensionScopeNamespace ?? ""}`;
 }
 
 function resolveAuthoredTsConfigPath(packageRoot: string): string | false {

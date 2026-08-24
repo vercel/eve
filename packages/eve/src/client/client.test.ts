@@ -4,41 +4,19 @@ import { AgentInfoResponseError } from "#client/agent-info-error.js";
 import { Client } from "#client/client.js";
 import { ClientError } from "#client/client-error.js";
 import type { AgentInfoResult } from "#client/types.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
 import { resolveRemoteDevelopmentClientOptions } from "#services/dev-client/client-options.js";
 import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
 
-const AGENT_INFO: AgentInfoResult = {
+const AGENT_INFO: AgentInfoResult = createTestAgentInfoResult({
   agent: {
     agentRoot: "/tmp/weather-agent/agent",
     appRoot: "/tmp/weather-agent",
     model: { id: "openai/gpt-5.5", routing: { kind: "gateway", target: "openai" } },
     name: "Weather Agent",
   },
-  capabilities: { devRoutes: true },
-  channels: { authored: [], available: [], disabledFramework: [], framework: [] },
-  connections: [],
-  diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
-  hooks: [],
-  instructions: { dynamic: [], static: [] },
-  kind: "eve-agent-info",
-  mode: "development",
-  sandbox: null,
-  schedules: [],
-  skills: { dynamic: [], static: [] },
-  subagents: { local: [], total: 0 },
-  tools: {
-    authored: [],
-    available: [],
-    disabledFramework: [],
-    dynamic: [],
-    framework: [],
-    reserved: [],
-  },
-  version: 2,
-  workflow: { enabled: false, toolName: "Workflow" },
-  workspace: { resourceRoot: null, rootEntries: [] },
-};
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -194,19 +172,35 @@ describe("Client request policy", () => {
       hasModelOutputProjection: false,
       hasOutputSchema: false,
       inputSchema: null,
-      logicalPath: "eve:framework/web-search",
+      logicalPath: "tools/web_search.ts",
       name: "web_search",
-      origin: "framework",
-      replacesFrameworkTool: false,
+      owner: { kind: "application" },
       requiresApproval: false,
+      sourceId: "test:web-search",
       sourceKind: "module",
     };
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({
         ...AGENT_INFO,
+        composition: {
+          ...AGENT_INFO.composition,
+          selected: [
+            ...AGENT_INFO.composition.selected,
+            {
+              slot: "tools/web_search",
+              source: {
+                logicalPath: toolWithoutOutputSchema.logicalPath,
+                owner: toolWithoutOutputSchema.owner,
+                sourceId: toolWithoutOutputSchema.sourceId,
+                sourceKind: toolWithoutOutputSchema.sourceKind,
+              },
+              sourceKind: "module",
+            },
+          ],
+        },
         tools: {
           ...AGENT_INFO.tools,
-          available: [toolWithoutOutputSchema],
+          static: [toolWithoutOutputSchema],
         },
       }),
     );
@@ -214,22 +208,74 @@ describe("Client request policy", () => {
 
     const info = await client.info();
 
-    expect(info.tools.available[0]).toMatchObject({
+    expect(info.tools.static[0]).toMatchObject({
       hasOutputSchema: false,
       name: "web_search",
     });
-    expect(info.tools.available[0]).not.toHaveProperty("outputSchema");
+    expect(info.tools.static[0]).not.toHaveProperty("outputSchema");
   });
 
-  it("returns the parsed agent info payload", async () => {
+  it("rejects unknown fields in the strict agent info payload", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({ ...AGENT_INFO, ignoredByClient: true }),
     );
     const client = new Client({ host: "https://eve.test" });
 
-    const info = await client.info();
+    await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
+  });
 
-    expect(info).not.toHaveProperty("ignoredByClient");
+  it("rejects an empty remote agent URL in the agent info payload", async () => {
+    const remoteAgent = {
+      configResolver: {
+        logicalPath: "subagents/remote/agent.ts",
+        owner: { kind: "application" as const },
+        sourceId: "test:remote-config",
+        sourceKind: "module" as const,
+      },
+      description: "Call the remote agent",
+      entryPath: "/tmp/weather-agent/agent/subagents/remote/agent.ts",
+      logicalPath: "subagents/remote",
+      name: "remote",
+      nodeId: "test:remote-node",
+      owner: { kind: "application" as const },
+      parentNodeId: AGENT_INFO.agent.nodeId,
+      path: "/eve/v1/session",
+      rootPath: "/tmp/weather-agent/agent/subagents/remote",
+      sourceId: "test:remote-source",
+      sourceKind: "subagent" as const,
+      url: "",
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        ...AGENT_INFO,
+        composition: {
+          ...AGENT_INFO.composition,
+          selected: [
+            ...AGENT_INFO.composition.selected,
+            {
+              slot: "subagents/remote",
+              source: {
+                layer: "application",
+                logicalPath: remoteAgent.logicalPath,
+                owner: remoteAgent.owner,
+                sourceId: remoteAgent.sourceId,
+                sourceKind: remoteAgent.sourceKind,
+              },
+              sourceKind: "non-module",
+            },
+          ],
+        },
+        remoteAgents: { entries: [remoteAgent], total: 1 },
+      }),
+    );
+    const client = new Client({ host: "https://eve.test" });
+
+    const error = await client.info().catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(AgentInfoResponseError);
+    expect((error as AgentInfoResponseError).issues).toEqual([
+      expect.stringMatching(/^remoteAgents\.entries\.0\.url:/),
+    ]);
   });
 
   it("rejects a non-Eve response from the agent info route", async () => {

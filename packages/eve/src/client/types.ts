@@ -7,25 +7,29 @@ import type { ClearStatus } from "#protocol/clear-session.js";
 import type { CompactStatus } from "#protocol/compact-session.js";
 import type { ResetStatus } from "#protocol/reset-session.js";
 import type { TurnPolicy } from "#channel/types.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 
 export type {
   AgentInfoChannelEntry,
   AgentInfoChannels,
   AgentInfoConnectionEntry,
+  AgentInfoComposition,
   AgentInfoDynamicResolverEntry,
   AgentInfoEntry,
-  AgentInfoFrameworkChannelEntry,
-  AgentInfoFrameworkToolEntry,
   AgentInfoHookEntry,
   AgentInfoInstructions,
   AgentInfoInstructionsEntry,
+  AgentInfoKernelCapabilityEntry,
+  AgentInfoNamedDynamicResolverEntry,
+  AgentInfoOwner,
+  AgentInfoRemoteAgentEntry,
   AgentInfoResult,
   AgentInfoSandboxEntry,
   AgentInfoScheduleEntry,
   AgentInfoSkillEntry,
   AgentInfoSource,
+  AgentInfoShadowedChannelRoute,
   AgentInfoSubagentEntry,
   AgentInfoToolEntry,
   AgentInfoTools,

@@ -39,6 +39,11 @@ vi.mock("#execution/sandbox/prewarm.js", () => ({
 vi.mock("#execution/sandbox/template-prewarm-lock.js", () => ({
   waitForSandboxTemplatePrewarmLock: mocks.waitForSandboxTemplatePrewarmLock,
 }));
+vi.mock("#runtime/loaders/compile-metadata.js", () => ({
+  loadCompileMetadata: vi.fn(async () => ({
+    generator: { version: "0.0.0-test" },
+  })),
+}));
 
 function createTestRegistry(
   definition: Partial<ResolvedSandboxDefinition>,
@@ -211,6 +216,7 @@ describe("ensureSandboxAccess", () => {
     const appRoot = process.cwd();
     const snapshotRoot = `${appRoot}/.eve/dev-runtime/snapshots/current/app`;
     const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(snapshotRoot, {
+      moduleMapLoaderKind: "materialized-generation",
       moduleMapLoaderPath: "/tmp/eve-package/authored-module-map-loader.ts",
       sandboxAppRoot: appRoot,
     });
@@ -346,11 +352,12 @@ describe("ensureSandboxAccess", () => {
     );
   });
 
-  it("derives an inherited sandbox from the parent owner identity", async () => {
+  it("derives an inherited sandbox from the exact parent owner identity", async () => {
     const parentBackend = createBackend();
     const childBackend = createBackend();
     const registry = createTestRegistry({ inheritsParent: true }, childBackend);
     const parentDefinition: ResolvedSandboxDefinition = {
+      async bootstrap() {},
       backend: parentBackend,
       logicalPath: "agent/sandbox.ts",
       sourceHash: "parent-source-hash",
@@ -368,15 +375,25 @@ describe("ensureSandboxAccess", () => {
       },
     };
 
-    const access = await ensure({ registry: inheritedRegistry });
-    await access.get();
+    const parentAccess = await ensure({
+      registry: {
+        sandbox: {
+          definition: parentDefinition,
+          workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
+        },
+      },
+    });
+    await parentAccess.get();
+    const inheritedAccess = await ensure({ registry: inheritedRegistry });
+    await inheritedAccess.get();
 
     expect(childBackend.create).not.toHaveBeenCalled();
-    expect(parentBackend.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sessionKey: expect.stringContaining("session_1-__root__"),
-      }),
-    );
+    expect(parentBackend.create).toHaveBeenCalledTimes(2);
+    const directInput = vi.mocked(parentBackend.create).mock.calls[0]?.[0];
+    const inheritedInput = vi.mocked(parentBackend.create).mock.calls[1]?.[0];
+    expect(inheritedInput?.sessionKey).toBe(directInput?.sessionKey);
+    expect(inheritedInput?.templateKey).toBe(directInput?.templateKey);
+    expect(inheritedInput?.sessionKey).toContain("session_1-__root__");
   });
 
   it("passes runtime tags to the sandbox backend", async () => {

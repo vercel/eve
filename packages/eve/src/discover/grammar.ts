@@ -5,10 +5,10 @@ import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { InstructionsDefinition } from "#public/definitions/instructions.js";
 import { lowerInstructionsMarkdown } from "#internal/helpers/markdown.js";
 import {
-  createDiscoverErrorDiagnostic,
-  createDiscoverWarningDiagnostic,
-  type DiscoverDiagnostic,
-} from "#discover/diagnostics.js";
+  createCompilerErrorDiagnostic,
+  createCompilerWarningDiagnostic,
+  type CompilerDiagnostic,
+} from "#shared/compiler-diagnostics.js";
 import { type DirectoryEntryType, getDirectoryEntryType } from "#discover/filesystem.js";
 import { type InstructionsSourceRef, createModuleSourceRef } from "#discover/manifest.js";
 import { discoverMarkdownSource } from "#discover/markdown.js";
@@ -26,14 +26,6 @@ export const DISCOVER_MODULE_SLOT_COLLISION = "discover/module-slot-collision";
  * is missing.
  */
 export const DISCOVER_REQUIRED_INSTRUCTIONS_MISSING = "discover/required-instructions-missing";
-
-/**
- * Shared diagnostic emitted when discovery falls back to the deprecated
- * `system.{md,ts,...}` slot because no `instructions.{md,ts,...}` source
- * was found. The fallback resolves successfully; the warning prompts the
- * author to rename the file.
- */
-export const DISCOVER_DEPRECATED_SYSTEM_SLOT = "discover/deprecated-system-slot";
 
 /**
  * Shared diagnostic emitted when a slot has both markdown and module sources.
@@ -144,9 +136,9 @@ export const HOOK_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
  * consumer's build prefixes onto every contribution (`crm` → `crm__search`),
  * so it uses the same restrictive charset as tool slugs: ASCII letters,
  * digits, underscores, and dashes, starting with a letter, up to 64
- * characters.
+ * characters. Consecutive underscores are reserved for that prefix boundary.
  */
-export const EXTENSION_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
+export const EXTENSION_SLUG_PATTERN = /^(?!.*__)[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 
 /**
  * Shared diagnostic emitted when discovery ignores one unsupported directory.
@@ -181,29 +173,31 @@ export async function readSortedDirectoryEntries(
 /**
  * Discovers instructions sources from a root directory.
  *
- * Supports three forms:
+ * Supports two forms:
  * 1. **Directory**: `agent/instructions/` with multiple `.md` and `.ts` files.
  * 2. **Flat file**: `agent/instructions.md` or `agent/instructions.{ts,...}`.
- * 3. **Legacy**: `agent/system.{md,ts,...}` with a deprecation warning.
  *
  * A flat file and a directory can coexist — the flat file appears first
  * in the returned array.
  */
 export async function discoverInstructionsSource(input: {
+  nodeId: string;
   required?: boolean;
   rootEntries: readonly ProjectSourceEntry[];
   rootPath: string;
   source: ProjectSource;
 }): Promise<{
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
   instructions: InstructionsSourceRef[];
 }> {
+  const { nodeId } = input;
   const hasDirectory = input.rootEntries.some((e) => e.name === "instructions" && e.isDirectory());
 
   // Check for flat-file candidates alongside the directory.
   const flatResult = await discoverSlotSource({
     markdownFileName: "instructions.md",
     moduleBaseName: "instructions",
+    nodeId,
     rootEntries: input.rootEntries,
     rootPath: input.rootPath,
     slotLabel: "instructions",
@@ -217,6 +211,7 @@ export async function discoverInstructionsSource(input: {
       invalidDirectoryCode: DISCOVER_INSTRUCTIONS_DIRECTORY_INVALID,
       invalidDirectoryMessage: `Expected "${join(input.rootPath, "instructions")}" to be a directory of authored instructions.`,
       markdownLowerer: (markdown) => lowerInstructionsMarkdown(markdown),
+      nodeId,
       recursive: false,
       rootEntries: input.rootEntries,
       rootPath: input.rootPath,
@@ -240,39 +235,6 @@ export async function discoverInstructionsSource(input: {
     };
   }
 
-  // Legacy system.{md,ts,...} fallback.
-  const legacyResult = await discoverSlotSource({
-    markdownFileName: "system.md",
-    moduleBaseName: "system",
-    rootEntries: input.rootEntries,
-    rootPath: input.rootPath,
-    slotLabel: "system",
-    source: input.source,
-  });
-
-  if (legacyResult.source !== undefined) {
-    const fileName =
-      legacyResult.source.sourceKind === "markdown" ? "system.md" : legacyResult.source.logicalPath;
-    return {
-      diagnostics: [
-        createDiscoverWarningDiagnostic({
-          code: DISCOVER_DEPRECATED_SYSTEM_SLOT,
-          message: `The "${fileName}" slot is deprecated. Rename it to "${fileName.replace(/^system/, "instructions")}" — the runtime still loads the legacy slot for now, but support will be removed in a future release.`,
-          sourcePath: join(input.rootPath, fileName),
-        }),
-        ...legacyResult.diagnostics,
-      ],
-      instructions: [legacyResult.source],
-    };
-  }
-
-  if (legacyResult.diagnostics.length > 0) {
-    return {
-      diagnostics: legacyResult.diagnostics,
-      instructions: [],
-    };
-  }
-
   if (input.required === false) {
     return {
       diagnostics: [],
@@ -282,10 +244,11 @@ export async function discoverInstructionsSource(input: {
 
   return {
     diagnostics: [
-      createDiscoverErrorDiagnostic({
+      createCompilerErrorDiagnostic({
         code: DISCOVER_REQUIRED_INSTRUCTIONS_MISSING,
         message:
           'Expected authored instructions at "instructions.md", "instructions.ts", "instructions.cts", "instructions.mts", "instructions.js", "instructions.cjs", "instructions.mjs", or "instructions/" directory.',
+        nodeId,
         sourcePath: input.rootPath,
       }),
     ],
@@ -296,12 +259,13 @@ export async function discoverInstructionsSource(input: {
 async function discoverSlotSource(input: {
   markdownFileName: string;
   moduleBaseName: string;
+  nodeId: string;
   rootEntries: readonly ProjectSourceEntry[];
   rootPath: string;
   slotLabel: string;
   source: ProjectSource;
 }): Promise<{
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
   source?: InstructionsSourceRef;
 }> {
   const candidates = collectFlatSlotCandidates(input.rootEntries, {
@@ -312,10 +276,12 @@ async function discoverSlotSource(input: {
   if (candidates.markdownFileName !== undefined && candidates.moduleFileNames.length > 0) {
     return {
       diagnostics: [
-        createSlotCollisionDiagnostic(input.rootPath, input.slotLabel, [
-          candidates.markdownFileName,
-          ...candidates.moduleFileNames,
-        ]),
+        createSlotCollisionDiagnostic(
+          input.rootPath,
+          input.slotLabel,
+          [candidates.markdownFileName, ...candidates.moduleFileNames],
+          input.nodeId,
+        ),
       ],
     };
   }
@@ -327,6 +293,7 @@ async function discoverSlotSource(input: {
           input.rootPath,
           input.slotLabel,
           candidates.moduleFileNames,
+          input.nodeId,
         ),
       ],
     };
@@ -366,13 +333,15 @@ export function discoverFlatModuleSource(input: {
     code: string;
     message: string;
   };
+  nodeId: string;
   rootEntries: readonly ProjectSourceEntry[];
   rootPath: string;
   slotName: string;
 }): {
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
   module?: ModuleSourceRef;
 } {
+  const { nodeId } = input;
   const candidates = collectFlatSlotCandidates(input.rootEntries, {
     moduleBaseName: input.slotName,
   });
@@ -384,6 +353,7 @@ export function discoverFlatModuleSource(input: {
           input.rootPath,
           input.slotName,
           candidates.moduleFileNames,
+          nodeId,
         ),
       ],
     };
@@ -408,9 +378,10 @@ export function discoverFlatModuleSource(input: {
 
   return {
     diagnostics: [
-      createDiscoverErrorDiagnostic({
+      createCompilerErrorDiagnostic({
         code: input.missingDiagnostic.code,
         message: input.missingDiagnostic.message,
+        nodeId,
         sourcePath: input.rootPath,
       }),
     ],
@@ -428,16 +399,18 @@ export function discoverFlatModuleSource(input: {
 export function createToolNameDiagnostic(
   slotName: string,
   sourcePath: string,
-): DiscoverDiagnostic | null {
+  nodeId: string,
+): CompilerDiagnostic | null {
   if (TOOL_SLUG_PATTERN.test(slotName)) {
     return null;
   }
 
-  return createDiscoverErrorDiagnostic({
+  return createCompilerErrorDiagnostic({
     code: DISCOVER_TOOL_NAME_INVALID,
     message:
       `Tool filename "${slotName}" is not a legal tool name. ` +
       `Expected ASCII letters, digits, underscores, and dashes only, starting with a letter, up to 64 characters.`,
+    nodeId,
     sourcePath,
   });
 }
@@ -449,16 +422,18 @@ export function createToolNameDiagnostic(
 export function createConnectionNameDiagnostic(
   slotName: string,
   sourcePath: string,
-): DiscoverDiagnostic | null {
+  nodeId: string,
+): CompilerDiagnostic | null {
   if (CONNECTION_SLUG_PATTERN.test(slotName)) {
     return null;
   }
 
-  return createDiscoverErrorDiagnostic({
+  return createCompilerErrorDiagnostic({
     code: DISCOVER_CONNECTION_NAME_INVALID,
     message:
       `Connection filename "${slotName}" is not a legal connection name. ` +
       `Expected lowercase ASCII letters, digits, and dashes only, starting with a letter, up to 64 characters.`,
+    nodeId,
     sourcePath,
   });
 }
@@ -474,16 +449,18 @@ export function createConnectionNameDiagnostic(
 export function createChannelNameDiagnostic(
   segment: string,
   sourcePath: string,
-): DiscoverDiagnostic | null {
+  nodeId: string,
+): CompilerDiagnostic | null {
   if (CHANNEL_SLUG_PATTERN.test(segment)) {
     return null;
   }
 
-  return createDiscoverErrorDiagnostic({
+  return createCompilerErrorDiagnostic({
     code: DISCOVER_CHANNEL_NAME_INVALID,
     message:
       `Channel path segment "${segment}" is not a legal channel name. ` +
       `Expected lowercase kebab-case (\`my-channel\`), optionally with a leading dot (\`.well-known\`), or a path parameter form (\`[sessionId]\`).`,
+    nodeId,
     sourcePath,
   });
 }
@@ -498,16 +475,18 @@ export function createChannelNameDiagnostic(
 export function createHookNameDiagnostic(
   segment: string,
   sourcePath: string,
-): DiscoverDiagnostic | null {
+  nodeId: string,
+): CompilerDiagnostic | null {
   if (HOOK_SLUG_PATTERN.test(segment)) {
     return null;
   }
 
-  return createDiscoverErrorDiagnostic({
+  return createCompilerErrorDiagnostic({
     code: DISCOVER_HOOK_NAME_INVALID,
     message:
       `Hook path segment "${segment}" is not a legal hook name. ` +
       `Expected ASCII letters, digits, underscores, and dashes only, starting with a letter, up to 64 characters.`,
+    nodeId,
     sourcePath,
   });
 }
@@ -523,16 +502,18 @@ export function createHookNameDiagnostic(
 export function createExtensionNameDiagnostic(
   slotName: string,
   sourcePath: string,
-): DiscoverDiagnostic | null {
+  nodeId: string,
+): CompilerDiagnostic | null {
   if (EXTENSION_SLUG_PATTERN.test(slotName)) {
     return null;
   }
 
-  return createDiscoverErrorDiagnostic({
+  return createCompilerErrorDiagnostic({
     code: DISCOVER_EXTENSION_NAME_INVALID,
     message:
       `Extension mount filename "${slotName}" is not a legal extension namespace. ` +
-      `Expected ASCII letters, digits, underscores, and dashes only, starting with a letter, up to 64 characters.`,
+      `Expected ASCII letters, digits, underscores, and dashes only, starting with a letter, up to 64 characters; consecutive underscores are reserved for namespaced contributions.`,
+    nodeId,
     sourcePath,
   });
 }
@@ -549,9 +530,10 @@ export {
 export function createUnsupportedRootDirectoryDiagnostics(input: {
   classifyEntry: (name: string, entryType: DirectoryEntryType) => string;
   createUnsupportedDirectoryMessage: (directoryName: string) => string;
+  nodeId: string;
   rootEntries: readonly ProjectSourceEntry[];
   rootPath: string;
-}): DiscoverDiagnostic[] {
+}): CompilerDiagnostic[] {
   return input.rootEntries.flatMap((entry) => {
     if (!entry.isDirectory()) {
       return [];
@@ -562,9 +544,10 @@ export function createUnsupportedRootDirectoryDiagnostics(input: {
     }
 
     return [
-      createDiscoverWarningDiagnostic({
+      createCompilerWarningDiagnostic({
         code: DISCOVER_UNSUPPORTED_DIRECTORY,
         message: input.createUnsupportedDirectoryMessage(entry.name),
+        nodeId: input.nodeId,
         sourcePath: join(input.rootPath, entry.name),
       }),
     ];
@@ -578,10 +561,12 @@ export function createSlotCollisionDiagnostic(
   directoryPath: string,
   slotLogicalPath: string,
   fileNames: readonly string[],
-): DiscoverDiagnostic {
-  return createDiscoverErrorDiagnostic({
+  nodeId: string,
+): CompilerDiagnostic {
+  return createCompilerErrorDiagnostic({
     code: DISCOVER_SLOT_COLLISION,
     message: `Found conflicting authored sources for "${slotLogicalPath}": ${formatQuotedFileList(fileNames)}.`,
+    nodeId,
     sourcePath: directoryPath,
   });
 }
@@ -593,10 +578,12 @@ export function createModuleSlotCollisionDiagnostic(
   directoryPath: string,
   slotLogicalPath: string,
   fileNames: readonly string[],
-): DiscoverDiagnostic {
-  return createDiscoverErrorDiagnostic({
+  nodeId: string,
+): CompilerDiagnostic {
+  return createCompilerErrorDiagnostic({
     code: DISCOVER_MODULE_SLOT_COLLISION,
     message: `Found multiple authored module sources for "${slotLogicalPath}": ${formatQuotedFileList(fileNames)}.`,
+    nodeId,
     sourcePath: directoryPath,
   });
 }

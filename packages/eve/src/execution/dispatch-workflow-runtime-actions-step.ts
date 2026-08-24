@@ -21,7 +21,7 @@ import type {
   RuntimeActionRequest,
   RuntimeSubagentDispatchFailure,
   RuntimeActionResult,
-} from "#runtime/actions/types.js";
+} from "#shared/runtime-actions.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 
 const log = createLogger("execution.dispatch-workflow-runtime-actions");
@@ -92,6 +92,7 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
   const sessionWithBatch = setPendingRuntimeActionBatch({
     actions: plan.allowed,
     event: { sequence: 0, stepIndex: 0, turnId: "workflow-dispatch" },
+    kernelCapabilities: {},
     responseMessages: [],
     session,
   });

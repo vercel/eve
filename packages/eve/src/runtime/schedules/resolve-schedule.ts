@@ -47,21 +47,24 @@ class ResolveScheduleError extends Error {
 export async function resolveSchedules(
   input: ResolveSchedulesInput,
 ): Promise<ResolvedScheduleDefinition[]> {
-  return [...input.manifest.schedules].map((schedule) => {
+  return [...input.manifest.schedules].map((schedule): ResolvedScheduleDefinition => {
     const base = {
       cron: schedule.cron,
       hasRun: schedule.hasRun,
       logicalPath: schedule.logicalPath,
       name: schedule.name,
       sourceId: schedule.sourceId,
-      sourceKind: schedule.sourceKind,
     };
+    const resolved: ResolvedScheduleDefinition =
+      schedule.sourceKind === "module"
+        ? { ...base, exportName: schedule.exportName, sourceKind: "module" }
+        : { ...base, sourceKind: "markdown" };
 
     if (schedule.markdown !== undefined) {
-      return { ...base, markdown: schedule.markdown } as ResolvedScheduleDefinition;
+      return { ...resolved, markdown: schedule.markdown };
     }
 
-    return base as ResolvedScheduleDefinition;
+    return resolved;
   });
 }
 

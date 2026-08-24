@@ -3,17 +3,13 @@ import type {
   CompiledAgentResources,
   CompiledInstructionsDefinition,
 } from "#compiler/manifest.js";
+import type { AgentSourceOwner } from "#compiler/module-binding.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { resolveChannelDefinition } from "#runtime/resolve-channel.js";
 
-// Re-exported so external consumers (tests, integrations) can keep
-// importing the error class from this path even though it now lives
-// in resolve-helpers.ts.
-export { ResolveAgentError } from "#runtime/resolve-helpers.js";
-
 import { resolveConnectionDefinition } from "#runtime/resolve-connection.js";
 import { resolveHookDefinition } from "#runtime/resolve-hook.js";
-import { createResolvedModuleSourceRef } from "#runtime/resolve-helpers.js";
+import { createResolvedModuleSourceRef, ResolveAgentError } from "#runtime/resolve-helpers.js";
 import { resolveSandboxDefinition } from "#runtime/resolve-sandbox.js";
 import { resolveDynamicInstructionsDefinition } from "#runtime/resolve-dynamic-instructions.js";
 import { resolveDynamicSkillDefinition } from "#runtime/resolve-dynamic-skill.js";
@@ -48,33 +44,30 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
             ...skill.metadata,
           },
   })) satisfies ResolvedSkillDefinition[];
-  // Disabled channel entries (kind === "disabled") are filtered out here
-  // and surfaced separately on `ResolvedAgent.disabledFrameworkChannels`
-  // so the graph resolver can remove the corresponding framework defaults.
   const resolvedChannels: ResolvedChannelDefinition[] = [];
-  const disabledFrameworkChannels: string[] = [];
 
-  for (const channelEntry of input.manifest.channels) {
-    if (channelEntry.kind === "disabled") {
-      disabledFrameworkChannels.push(channelEntry.name);
-      continue;
-    }
+  for (const channelEntry of input.manifest.channelRoutes.effective) {
     resolvedChannels.push(
       await resolveChannelDefinition(channelEntry, input.moduleMap, input.nodeId),
     );
   }
   const resolvedTools = await Promise.all(
     input.manifest.tools.map((toolDefinition) =>
-      resolveToolDefinition(toolDefinition, input.moduleMap, input.nodeId),
+      resolveToolDefinition(
+        toolDefinition,
+        input.moduleMap,
+        input.nodeId,
+        resolveModuleOwner(toolDefinition, input.manifest, "tool"),
+      ),
     ),
   );
   const resolvedDynamicInstructionsResolvers = await Promise.all(
-    (input.manifest.dynamicInstructions ?? []).map((def) =>
+    input.manifest.dynamicInstructions.map((def) =>
       resolveDynamicInstructionsDefinition(def, input.moduleMap, input.nodeId),
     ),
   );
   const resolvedDynamicSkillResolvers = await Promise.all(
-    (input.manifest.dynamicSkills ?? []).map((def) =>
+    input.manifest.dynamicSkills.map((def) =>
       resolveDynamicSkillDefinition(def, input.moduleMap, input.nodeId),
     ),
   );
@@ -96,22 +89,24 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
       resolveConnectionDefinition(connectionDefinition, input.moduleMap, input.nodeId),
     ),
   );
-  const authoredSandbox =
-    input.manifest.sandbox === null
-      ? null
-      : await resolveSandboxDefinition(input.manifest.sandbox, input.moduleMap, input.nodeId);
-  const instructions = input.manifest.instructions.map(createResolvedInstructionsDefinition);
+  const sandbox = await resolveSandboxDefinition(
+    input.manifest.sandbox,
+    input.moduleMap,
+    input.nodeId,
+  );
+  const instructions = input.manifest.instructions.map((definition) =>
+    createResolvedInstructionsDefinition(definition, input.manifest),
+  );
   const workspaceResourceRoot = input.manifest.workspaceResourceRoot;
   const resolvedAgent: ResolvedAgent = {
     channels: resolvedChannels,
     connections: resolvedConnections,
-    disabledFrameworkChannels,
-    disabledFrameworkTools: [...input.manifest.disabledFrameworkTools],
+    kernelPlan: { prepared: [...input.manifest.kernelPlan.prepared] },
     workflowTool:
       input.manifest.workflowTool === undefined
         ? undefined
         : { maxSubagents: input.manifest.workflowTool.maxSubagents },
-    webSearchProvider: input.manifest.webSearchProvider,
+    webSearchProvider: input.manifest.webSearchProvider?.provider,
     dynamicInstructionsResolvers: resolvedDynamicInstructionsResolvers,
     dynamicSkillResolvers: resolvedDynamicSkillResolvers,
     dynamicToolResolvers: resolvedDynamicToolResolvers,
@@ -122,7 +117,7 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
       appRoot: input.manifest.appRoot,
       diagnosticsSummary: input.manifest.diagnosticsSummary,
     },
-    sandbox: authoredSandbox,
+    sandbox,
     workspaceResourceRoot,
     skills: resolvedSkills,
     tools: resolvedTools,
@@ -136,15 +131,59 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
 
 function createResolvedInstructionsDefinition(
   instructions: CompiledInstructionsDefinition,
+  manifest: CompiledAgentNodeManifest | CompiledAgentResources,
 ): ResolvedInstructionsDefinition {
-  return {
+  const base = {
     content: instructions.content,
     name: instructions.name,
     logicalPath: instructions.logicalPath,
+    owner: resolveInstructionsOwner(instructions, manifest),
     role: instructions.role,
     sourceId: instructions.sourceId,
-    sourceKind: instructions.sourceKind,
   };
+  return instructions.sourceKind === "module"
+    ? { ...base, exportName: instructions.exportName, sourceKind: "module" }
+    : { ...base, sourceKind: "markdown" };
+}
+
+function resolveInstructionsOwner(
+  instructions: CompiledInstructionsDefinition,
+  manifest: CompiledAgentNodeManifest | CompiledAgentResources,
+): AgentSourceOwner {
+  if (instructions.sourceKind === "module") {
+    return resolveModuleOwner(instructions, manifest, "instructions");
+  }
+
+  const selected = manifest.sourceComposition.selected.find(
+    (entry) => entry.sourceKind === "non-module" && entry.source.sourceId === instructions.sourceId,
+  );
+  if (
+    selected === undefined ||
+    selected.sourceKind !== "non-module" ||
+    selected.source.sourceKind !== instructions.sourceKind ||
+    selected.source.logicalPath !== instructions.logicalPath
+  ) {
+    throw new ResolveAgentError(
+      `Cannot resolve instructions source "${instructions.logicalPath}" because its selected source descriptor "${instructions.sourceId}" is missing or inconsistent.`,
+      { logicalPath: instructions.logicalPath, sourceId: instructions.sourceId },
+    );
+  }
+  return { ...selected.source.owner };
+}
+
+function resolveModuleOwner(
+  source: { readonly logicalPath: string; readonly sourceId: string },
+  manifest: CompiledAgentNodeManifest | CompiledAgentResources,
+  kindLabel: string,
+): AgentSourceOwner {
+  const binding = manifest.bindings[source.sourceId];
+  if (binding === undefined) {
+    throw new ResolveAgentError(
+      `Cannot resolve ${kindLabel} source "${source.logicalPath}" because compiled binding "${source.sourceId}" is missing.`,
+      { logicalPath: source.logicalPath, sourceId: source.sourceId },
+    );
+  }
+  return { ...binding.owner };
 }
 
 function createResolvedAgentConfig(
@@ -156,10 +195,11 @@ function createResolvedAgentConfig(
     name: string;
     outputSchema?: NonNullable<ResolvedAgent["config"]>["outputSchema"];
     reasoning?: NonNullable<ResolvedAgent["config"]>["reasoning"];
-    source?: NonNullable<ResolvedAgent["config"]>["source"];
+    source: NonNullable<ResolvedAgent["config"]>["source"];
     limits?: NonNullable<ResolvedAgent["config"]>["limits"];
   } = {
     name: manifest.config.name,
+    source: createResolvedModuleSourceRef(manifest.config.source),
   };
 
   if (manifest.config.compaction !== undefined) {
@@ -203,10 +243,6 @@ function createResolvedAgentConfig(
       instrumentationProviders: manifest.config.experimental.instrumentationProviders,
       subagentPersistentSessions: manifest.config.experimental.subagentPersistentSessions,
       tasks: manifest.config.experimental.tasks,
-      workflow:
-        manifest.config.experimental.workflow === undefined
-          ? undefined
-          : { world: manifest.config.experimental.workflow.world },
     };
   }
 
@@ -216,10 +252,6 @@ function createResolvedAgentConfig(
 
   if (manifest.config.reasoning !== undefined) {
     config.reasoning = manifest.config.reasoning;
-  }
-
-  if (manifest.config.source !== undefined) {
-    config.source = createResolvedModuleSourceRef(manifest.config.source);
   }
 
   if (manifest.config.limits !== undefined) {

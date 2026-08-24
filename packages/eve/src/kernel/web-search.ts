@@ -1,0 +1,320 @@
+import type { JsonObject } from "#shared/json.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { UNSPECIFIED_INPUT_SCHEMA } from "#shared/tool-schema.js";
+
+/**
+ * Output schema for OpenAI's provider-managed `webSearch` tool.
+ */
+export const WEB_SEARCH_OPENAI_OUTPUT_SCHEMA: JsonObject = {
+  $schema: "http://json-schema.org/draft-07/schema#",
+  additionalProperties: false,
+  properties: {
+    action: {
+      oneOf: [
+        {
+          additionalProperties: false,
+          properties: {
+            queries: {
+              items: { type: "string" },
+              type: "array",
+            },
+            query: { type: "string" },
+            type: {
+              const: "search",
+              type: "string",
+            },
+          },
+          required: ["type"],
+          type: "object",
+        },
+        {
+          additionalProperties: false,
+          properties: {
+            type: {
+              const: "openPage",
+              type: "string",
+            },
+            url: {
+              anyOf: [{ type: "string" }, { type: "null" }],
+            },
+          },
+          required: ["type"],
+          type: "object",
+        },
+        {
+          additionalProperties: false,
+          properties: {
+            pattern: {
+              anyOf: [{ type: "string" }, { type: "null" }],
+            },
+            type: {
+              const: "findInPage",
+              type: "string",
+            },
+            url: {
+              anyOf: [{ type: "string" }, { type: "null" }],
+            },
+          },
+          required: ["type"],
+          type: "object",
+        },
+      ],
+    },
+    sources: {
+      items: {
+        oneOf: [
+          {
+            additionalProperties: false,
+            properties: {
+              type: {
+                const: "url",
+                type: "string",
+              },
+              url: { type: "string" },
+            },
+            required: ["type", "url"],
+            type: "object",
+          },
+          {
+            additionalProperties: false,
+            properties: {
+              name: { type: "string" },
+              type: {
+                const: "api",
+                type: "string",
+              },
+            },
+            required: ["type", "name"],
+            type: "object",
+          },
+        ],
+      },
+      type: "array",
+    },
+  },
+  type: "object",
+};
+
+/**
+ * Output schema for Anthropic's stable provider-managed `webSearch_20250305` tool.
+ */
+export const WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA: JsonObject = {
+  $schema: "http://json-schema.org/draft-07/schema#",
+  items: {
+    additionalProperties: false,
+    properties: {
+      encryptedContent: { type: "string" },
+      pageAge: {
+        anyOf: [{ type: "string" }, { type: "null" }],
+      },
+      title: {
+        anyOf: [{ type: "string" }, { type: "null" }],
+      },
+      type: {
+        const: "web_search_result",
+        type: "string",
+      },
+      url: { type: "string" },
+    },
+    required: ["url", "title", "pageAge", "encryptedContent", "type"],
+    type: "object",
+  },
+  type: "array",
+};
+
+/**
+ * Output schema for Google's provider-managed `googleSearch` grounding tool.
+ */
+export const WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA: JsonObject = {
+  $schema: "http://json-schema.org/draft-07/schema#",
+  additionalProperties: false,
+  properties: {},
+  type: "object",
+};
+
+/**
+ * Output schema for AI Gateway's provider-managed `exaSearch` tool.
+ */
+export const WEB_SEARCH_EXA_OUTPUT_SCHEMA: JsonObject = {
+  $schema: "http://json-schema.org/draft-07/schema#",
+  anyOf: [
+    {
+      properties: {
+        costDollars: {
+          additionalProperties: false,
+          properties: {
+            search: {
+              additionalProperties: { type: "number" },
+              type: "object",
+            },
+            total: { type: "number" },
+          },
+          type: "object",
+        },
+        requestId: { type: "string" },
+        resolvedSearchType: { type: "string" },
+        results: {
+          items: {
+            properties: {
+              author: {
+                anyOf: [{ type: "string" }, { type: "null" }],
+              },
+              entities: {
+                items: {
+                  properties: {
+                    id: { type: "string" },
+                    properties: { type: "object" },
+                    type: { type: "string" },
+                    version: { type: "number" },
+                  },
+                  required: ["id", "type", "version", "properties"],
+                  type: "object",
+                },
+                type: "array",
+              },
+              extras: {
+                additionalProperties: false,
+                properties: {
+                  imageLinks: {
+                    items: { type: "string" },
+                    type: "array",
+                  },
+                  links: {
+                    items: { type: "string" },
+                    type: "array",
+                  },
+                },
+                type: "object",
+              },
+              favicon: {
+                anyOf: [{ type: "string" }, { type: "null" }],
+              },
+              highlightScores: {
+                items: { type: "number" },
+                type: "array",
+              },
+              highlights: {
+                items: { type: "string" },
+                type: "array",
+              },
+              id: { type: "string" },
+              image: {
+                anyOf: [{ type: "string" }, { type: "null" }],
+              },
+              publishedDate: {
+                anyOf: [{ type: "string" }, { type: "null" }],
+              },
+              score: {
+                anyOf: [{ type: "number" }, { type: "null" }],
+              },
+              subpages: {
+                items: {},
+                type: "array",
+              },
+              summary: { type: "string" },
+              text: { type: "string" },
+              title: {
+                anyOf: [{ type: "string" }, { type: "null" }],
+              },
+              url: { type: "string" },
+            },
+            required: ["url", "id"],
+            type: "object",
+          },
+          type: "array",
+        },
+        searchTime: { type: "number" },
+        searchType: { type: "string" },
+      },
+      required: ["requestId", "results"],
+      type: "object",
+    },
+    {
+      additionalProperties: false,
+      properties: {
+        error: {
+          enum: [
+            "api_error",
+            "rate_limit",
+            "timeout",
+            "invalid_input",
+            "configuration_error",
+            "execution_error",
+            "unknown",
+          ],
+          type: "string",
+        },
+        message: { type: "string" },
+        statusCode: { type: "number" },
+      },
+      required: ["error", "message"],
+      type: "object",
+    },
+  ],
+};
+
+/**
+ * Output schema for AI Gateway's provider-managed `parallelSearch` tool.
+ */
+export const WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA: JsonObject = {
+  $schema: "http://json-schema.org/draft-07/schema#",
+  anyOf: [
+    {
+      additionalProperties: false,
+      properties: {
+        results: {
+          items: {
+            additionalProperties: false,
+            properties: {
+              excerpt: { type: "string" },
+              publishDate: {
+                anyOf: [{ type: "string" }, { type: "null" }],
+              },
+              relevanceScore: { type: "number" },
+              title: { type: "string" },
+              url: { type: "string" },
+            },
+            required: ["url", "title", "excerpt"],
+            type: "object",
+          },
+          type: "array",
+        },
+        searchId: { type: "string" },
+      },
+      required: ["searchId", "results"],
+      type: "object",
+    },
+    {
+      additionalProperties: false,
+      properties: {
+        error: {
+          enum: [
+            "api_error",
+            "rate_limit",
+            "timeout",
+            "invalid_input",
+            "configuration_error",
+            "unknown",
+          ],
+          type: "string",
+        },
+        message: { type: "string" },
+        statusCode: { type: "number" },
+      },
+      required: ["error", "message"],
+      type: "object",
+    },
+  ],
+};
+export const WEB_SEARCH_TOOL_NAME = "web_search";
+
+export const WEB_SEARCH_TOOL_DESCRIPTION =
+  "Search the web for real-time information. Use this to find up-to-date information about current events, recent developments, or topics that may have changed since the knowledge cutoff.";
+
+export function createWebSearchHarnessDefinition(): HarnessToolDefinition {
+  return {
+    description: WEB_SEARCH_TOOL_DESCRIPTION,
+    inputSchema: UNSPECIFIED_INPUT_SCHEMA,
+    name: WEB_SEARCH_TOOL_NAME,
+  };
+}

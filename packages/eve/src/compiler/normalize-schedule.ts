@@ -8,6 +8,11 @@ import {
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
 
+interface ScheduleCompileOptions {
+  readonly name?: string;
+}
+type ModuleScheduleCompileOptions = ScheduleCompileOptions & ModuleBackedDefinitionLoadOptions;
+
 /**
  * Compiles one authored schedule into the normalized shape consumed by
  * the runtime scheduler.
@@ -19,41 +24,64 @@ import {
  * path under `schedules/` minus the extension
  * (`schedules/billing/invoice-sweep.ts` → `"billing/invoice-sweep"`).
  */
+export function compileScheduleDefinition(
+  source: Extract<ScheduleSourceRef, { readonly sourceKind: "module" }>,
+  options: ModuleScheduleCompileOptions,
+): Promise<CompiledScheduleDefinition>;
+export function compileScheduleDefinition(
+  source: Exclude<ScheduleSourceRef, { readonly sourceKind: "module" }>,
+  options?: ScheduleCompileOptions,
+): Promise<CompiledScheduleDefinition>;
 export async function compileScheduleDefinition(
-  agentRoot: string,
   source: ScheduleSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
+  options: ScheduleCompileOptions | ModuleScheduleCompileOptions = {},
 ): Promise<CompiledScheduleDefinition> {
-  const definition: ScheduleDefinition =
-    source.sourceKind === "markdown"
-      ? normalizeScheduleDefinition(
-          source.definition,
-          `Expected the compiled schedule definition at "${source.logicalPath}" to match the public eve shape.`,
-        )
-      : normalizeScheduleDefinition(
-          await loadModuleBackedDefinition({
-            agentRoot,
-            externalDependencies: options.externalDependencies,
-            kind: "schedule",
-            source,
-          }),
-          `Expected the schedule export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
-        );
+  let definition: ScheduleDefinition;
+  if (source.sourceKind === "markdown") {
+    definition = normalizeScheduleDefinition(
+      source.definition,
+      `Expected the compiled schedule definition at "${source.logicalPath}" to match the public eve shape.`,
+    );
+  } else {
+    const moduleOptions = requireModuleOptions(options, source.logicalPath);
+    definition = normalizeScheduleDefinition(
+      await loadModuleBackedDefinition({
+        binding: moduleOptions.binding,
+        kind: "schedule",
+        moduleLoader: moduleOptions.moduleLoader,
+        source,
+      }),
+      `Expected the schedule export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
+    );
+  }
 
-  const compiled: CompiledScheduleDefinition = {
+  const base = {
     cron: definition.cron,
     hasRun: definition.run !== undefined,
     logicalPath: source.logicalPath,
-    name: deriveScheduleName(source.logicalPath),
+    name: options.name ?? deriveScheduleName(source.logicalPath),
     sourceId: source.sourceId,
-    sourceKind: source.sourceKind,
   };
+  const compiled: CompiledScheduleDefinition =
+    source.sourceKind === "module"
+      ? { ...base, exportName: source.exportName, sourceKind: "module" }
+      : { ...base, sourceKind: "markdown" };
 
   if (definition.markdown !== undefined) {
     return { ...compiled, markdown: definition.markdown.trim() };
   }
 
   return compiled;
+}
+
+function requireModuleOptions(
+  options: ScheduleCompileOptions | ModuleScheduleCompileOptions,
+  logicalPath: string,
+): ModuleScheduleCompileOptions {
+  if (!("binding" in options) || options.binding === undefined) {
+    throw new Error(`Module-backed schedule "${logicalPath}" requires a selected binding.`);
+  }
+  return options;
 }
 
 function deriveScheduleName(logicalPath: string): string {

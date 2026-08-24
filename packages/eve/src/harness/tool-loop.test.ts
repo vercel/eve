@@ -54,10 +54,13 @@ import {
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { appendMissingToolResultMessages, createToolLoopHarness } from "#harness/tool-loop.js";
+import { createAskQuestionHarnessDefinition } from "#kernel/ask-question.js";
+import { createTaskCancelHarnessDefinition } from "#kernel/task-cancel.js";
 import { isSessionLimitDecline, TurnCancelledError } from "#harness/turn-cancellation.js";
 import {
   getSessionTokenLimitViolation,
@@ -186,6 +189,7 @@ function createTestConfig(
 ): ToolLoopHarnessConfig {
   return {
     handleEvent: emit,
+    kernelPlan: { prepared: ["final_output"] },
     mode,
     resolveModel: vi.fn().mockResolvedValue({} as LanguageModel),
     tools: new Map([
@@ -228,6 +232,13 @@ function createDelegationToolMap(): ToolLoopHarnessConfig["tools"] {
       },
     ],
   ]);
+}
+
+function createNativeAskQuestionDefinition() {
+  return {
+    ...createAskQuestionHarnessDefinition(),
+    kernelCapability: "ask_question" as const,
+  };
 }
 
 function createScheduleContext(): ContextContainer {
@@ -1325,6 +1336,80 @@ describe("createToolLoopHarness", () => {
     expect(result.session.compaction.threshold).toBe(180_000);
   });
 
+  it.each([
+    ["gateway", { id: "openai/gpt-5" }, true],
+    [
+      "unsupported direct provider",
+      {
+        id: "mistral/large",
+        source: {
+          logicalPath: "agent.ts",
+          sourceId: "agent.ts",
+          sourceKind: "module" as const,
+        },
+      },
+      false,
+    ],
+  ] as const)(
+    "keeps dynamic %s provider prompt, advertisement, and installation in agreement",
+    async (_, reference, expectedAvailable) => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const selectedModel = new MockLanguageModelV3({
+        modelId: reference.id,
+        provider: "test.provider",
+      });
+      const dispatchDynamicModelEvent: NonNullable<
+        ToolLoopHarnessConfig["dispatchDynamicModelEvent"]
+      > = vi.fn(async ({ ctx }) => {
+        ctx.setVirtualContext(LiveStepDynamicModelSelectionKey, {
+          model: selectedModel,
+          reference,
+        });
+      });
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          dispatchDynamicModelEvent,
+          kernelPlan: { prepared: ["web_search", "final_output"] },
+          tools: new Map([
+            [
+              "web_search",
+              {
+                description: "Web search.",
+                inputSchema: jsonSchema({ type: "object" }),
+                kernelCapability: "web_search",
+                name: "web_search",
+              },
+            ],
+          ]),
+        }),
+      );
+      await contextStorage.run(new ContextContainer(), () =>
+        runStep(
+          createTestSession({
+            agent: {
+              dynamicModel: true,
+              system: "You are a test assistant.",
+              tools: [{ description: "Web search.", inputSchema: null, name: "web_search" }],
+            },
+          }),
+          { message: "Search" },
+        ),
+      );
+
+      const settings = vi.mocked(ToolLoopAgent).mock.calls[0]![0];
+      expect(Object.hasOwn(settings.tools ?? {}, "web_search")).toBe(expectedAvailable);
+      expect(JSON.stringify(settings.instructions).includes("Tool execution")).toBe(
+        expectedAvailable,
+      );
+    },
+  );
+
   it("keeps the compaction threshold stable and fails when no dynamic selection remains", async () => {
     setupMockAgent({
       finishReason: "stop",
@@ -1506,6 +1591,59 @@ describe("createToolLoopHarness", () => {
         subagentName: "worker",
       },
     ]);
+  });
+
+  it("records native kernel identity beside a pending task-control action", async () => {
+    setupMockAgent({
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [
+              {
+                input: { taskIds: ["task-1"] },
+                toolCallId: "call-cancel",
+                toolName: "task_cancel",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [
+        {
+          input: { taskIds: ["task-1"] },
+          toolCallId: "call-cancel",
+          toolName: "task_cancel",
+          type: "tool-call",
+        },
+      ],
+      toolResults: [],
+    });
+    const taskCancel = createTaskCancelHarnessDefinition();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, {
+        kernelPlan: { prepared: ["task_cancel", "final_output"] },
+        tools: new Map([
+          [taskCancel.name, { ...taskCancel, kernelCapability: "task_cancel" as const }],
+        ]),
+      }),
+    );
+
+    const result = await runStep(createTestSession(), { message: "Cancel the task." });
+    const batch = getPendingRuntimeActionBatch(result.session.state);
+
+    expect(batch?.actions).toEqual([
+      {
+        callId: "call-cancel",
+        input: { taskIds: ["task-1"] },
+        kind: "tool-call",
+        toolName: "task_cancel",
+      },
+    ]);
+    expect(batch?.kernelCapabilities).toEqual({ "call-cancel": "task_cancel" });
   });
 
   it("parks dynamic subagent calls as pending runtime actions", async () => {
@@ -1750,7 +1888,7 @@ describe("createToolLoopHarness", () => {
     });
 
     const config = createTestConfig("conversation", undefined, {
-      workflow: true,
+      kernelPlan: { prepared: ["Workflow", "final_output"] },
       tools: new Map([
         [
           "delegate",
@@ -1789,7 +1927,7 @@ describe("createToolLoopHarness", () => {
     });
 
     const config = createTestConfig("conversation", undefined, {
-      workflow: true,
+      kernelPlan: { prepared: ["Workflow", "final_output"] },
       tools: createDelegationToolMap(),
     });
     const runStep = createToolLoopHarness(config);
@@ -2262,6 +2400,7 @@ describe("createToolLoopHarness", () => {
       },
     });
     const config: ToolLoopHarnessConfig = {
+      kernelPlan: { prepared: ["final_output"] },
       mode: "conversation",
       resolveModel: vi.fn().mockResolvedValue({} as LanguageModel),
       tools: new Map([
@@ -4677,6 +4816,7 @@ describe("createToolLoopHarness", () => {
         },
       });
       const config: ToolLoopHarnessConfig = {
+        kernelPlan: { prepared: ["web_search", "final_output"] },
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
         tools: new Map([
@@ -4694,6 +4834,7 @@ describe("createToolLoopHarness", () => {
             {
               description: "Web search.",
               inputSchema: jsonSchema({}),
+              kernelCapability: "web_search",
               name: "web_search",
             },
           ],
@@ -4759,6 +4900,7 @@ describe("createToolLoopHarness", () => {
         },
       });
       const config: ToolLoopHarnessConfig = {
+        kernelPlan: { prepared: ["web_search", "final_output"] },
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
         tools: new Map([
@@ -4767,6 +4909,7 @@ describe("createToolLoopHarness", () => {
             {
               description: "Web search.",
               inputSchema: jsonSchema({}),
+              kernelCapability: "web_search",
               name: "web_search",
             },
           ],
@@ -4829,6 +4972,7 @@ describe("createToolLoopHarness", () => {
         },
       });
       const config: ToolLoopHarnessConfig = {
+        kernelPlan: { prepared: ["web_search", "final_output"] },
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
         tools: new Map([
@@ -4837,6 +4981,7 @@ describe("createToolLoopHarness", () => {
             {
               description: "Web search.",
               inputSchema: jsonSchema({}),
+              kernelCapability: "web_search",
               name: "web_search",
             },
           ],
@@ -4865,7 +5010,9 @@ describe("createToolLoopHarness", () => {
     it("retries with the offending tool dropped and a one-shot system note", async () => {
       const resolveRuntimeContext = vi.fn((input: InstrumentationStepStartedEventInput) => ({
         runtimeContext: {
-          "test.attempt": typeof input.modelInput.instructions === "string" ? "original" : "retry",
+          "test.attempt": JSON.stringify(input.modelInput.instructions).includes("not available")
+            ? "retry"
+            : "original",
         },
       }));
       declareTelemetry({
@@ -4899,6 +5046,7 @@ describe("createToolLoopHarness", () => {
           hooks: createInstrumentationHooks([]),
           runInContext: (_operation, execute) => execute(),
         },
+        kernelPlan: { prepared: ["web_search", "final_output"] },
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
         tools: new Map([
@@ -4916,6 +5064,7 @@ describe("createToolLoopHarness", () => {
             {
               description: "Web search.",
               inputSchema: jsonSchema({}),
+              kernelCapability: "web_search",
               name: "web_search",
             },
           ],
@@ -4990,6 +5139,7 @@ describe("createToolLoopHarness", () => {
         },
       });
       const config: ToolLoopHarnessConfig = {
+        kernelPlan: { prepared: ["web_search", "final_output"] },
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
         tools: new Map([
@@ -4998,6 +5148,7 @@ describe("createToolLoopHarness", () => {
             {
               description: "Web search.",
               inputSchema: jsonSchema({}),
+              kernelCapability: "web_search",
               name: "web_search",
             },
           ],
@@ -5018,6 +5169,45 @@ describe("createToolLoopHarness", () => {
       expect(types).toContain("step.failed");
       expect(types).toContain("turn.failed");
       expect(types).toContain("session.failed");
+    });
+
+    it("does not drop a same-named authored tool for a provider rejection", async () => {
+      setupMockAgentError(
+        createGatewayUnsupportedToolError({ unsupportedTypes: ["web_search_20250305"] }),
+      );
+      const execute = vi.fn(async () => "authored");
+      const { emit, events } = createEventCollector();
+      const runStep = createToolLoopHarness({
+        handleEvent: emit,
+        kernelPlan: { prepared: ["final_output"] },
+        mode: "conversation",
+        resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
+        tools: new Map([
+          [
+            "web_search",
+            {
+              description: "Authored web search.",
+              execute,
+              inputSchema: jsonSchema({}),
+              name: "web_search",
+            },
+          ],
+        ]),
+      });
+      await runStep(
+        createTestSession({
+          agent: {
+            modelReference: { id: "anthropic/claude-opus-4.7" },
+            system: "You are a test assistant.",
+            tools: [{ description: "Authored web search.", name: "web_search", inputSchema: null }],
+          },
+        }),
+        { message: "Hi" },
+      );
+
+      expect(vi.mocked(ToolLoopAgent).mock.calls).toHaveLength(1);
+      expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].tools).toHaveProperty("web_search");
+      expect(events.map((event) => event.type)).toContain("session.failed");
     });
 
     it("does not retry when the error is unrelated to unsupported provider tools", async () => {
@@ -5428,6 +5618,7 @@ describe("createToolLoopHarness", () => {
       },
     });
     const config: ToolLoopHarnessConfig = {
+      kernelPlan: { prepared: ["final_output"] },
       mode: "conversation",
       resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
       tools: new Map([
@@ -6666,7 +6857,11 @@ describe("createToolLoopHarness", () => {
     });
 
     const harness = createToolLoopHarness(
-      createTestConfig("conversation", undefined, { tools: new Map() }),
+      createTestConfig("conversation", undefined, {
+        capabilities: { requestInput: true },
+        kernelPlan: { prepared: ["ask_question", "final_output"] },
+        tools: new Map([["ask_question", createNativeAskQuestionDefinition()]]),
+      }),
     );
     const result = await harness(
       createTestSession({
@@ -7931,7 +8126,9 @@ describe("createToolLoopHarness", () => {
       }),
     });
     const config = createTestConfig("conversation", undefined, {
-      tools: new Map([
+      capabilities: { requestInput: true },
+      kernelPlan: { prepared: ["ask_question", "final_output"] },
+      tools: new Map<string, HarnessToolDefinition>([
         [
           "bash",
           {
@@ -7941,6 +8138,7 @@ describe("createToolLoopHarness", () => {
             name: "bash",
           },
         ],
+        ["ask_question", createNativeAskQuestionDefinition()],
       ]),
     });
 
@@ -8642,7 +8840,9 @@ describe("createToolLoopHarness", () => {
       },
     };
     const config = createTestConfig("conversation", undefined, {
-      tools: new Map([
+      capabilities: { requestInput: true },
+      kernelPlan: { prepared: ["ask_question", "final_output"] },
+      tools: new Map<string, HarnessToolDefinition>([
         [
           "bash",
           {
@@ -8652,14 +8852,7 @@ describe("createToolLoopHarness", () => {
             name: "bash",
           },
         ],
-        [
-          "ask_question",
-          {
-            description: "Ask the user a question.",
-            inputSchema: jsonSchema({ type: "object" }),
-            name: "ask_question",
-          },
-        ],
+        ["ask_question", createNativeAskQuestionDefinition()],
       ]),
     });
     const runStep = createToolLoopHarness(config);
@@ -8721,7 +8914,13 @@ describe("createToolLoopHarness", () => {
     });
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        capabilities: { requestInput: true },
+        kernelPlan: { prepared: ["ask_question", "final_output"] },
+        tools: new Map([["ask_question", createNativeAskQuestionDefinition()]]),
+      }),
+    );
     const session = createTestSession({
       agent: {
         modelReference: { id: "test-model" },
@@ -8817,7 +9016,13 @@ describe("createToolLoopHarness", () => {
     vi.mocked(ToolLoopAgent).mockImplementationOnce(nextQuestionImplementation!);
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        capabilities: { requestInput: true },
+        kernelPlan: { prepared: ["ask_question", "final_output"] },
+        tools: new Map([["ask_question", createNativeAskQuestionDefinition()]]),
+      }),
+    );
     const questionInput = {
       allowFreeform: true,
       options: [
@@ -9878,6 +10083,7 @@ describe("createToolLoopHarness", () => {
     it("gateway-auto path: merges gateway.caching='auto' into providerOptions for string model ids", async () => {
       setupStopResult();
       const config: ToolLoopHarnessConfig = {
+        kernelPlan: { prepared: ["final_output"] },
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
         tools: new Map([
@@ -9925,6 +10131,7 @@ describe("createToolLoopHarness", () => {
         },
       });
       const config: ToolLoopHarnessConfig = {
+        kernelPlan: { prepared: ["final_output"] },
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
         tools: new Map([
@@ -9972,6 +10179,7 @@ describe("createToolLoopHarness", () => {
         },
       });
       const config: ToolLoopHarnessConfig = {
+        kernelPlan: { prepared: ["final_output"] },
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
         tools: new Map([
@@ -10009,6 +10217,7 @@ describe("createToolLoopHarness", () => {
     it("anthropic-direct path: adds prepareStep and marks the last tool", async () => {
       setupStopResult();
       const config: ToolLoopHarnessConfig = {
+        kernelPlan: { prepared: ["final_output"] },
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue({
           provider: "anthropic.messages",
@@ -10048,6 +10257,7 @@ describe("createToolLoopHarness", () => {
     it("anthropic-direct path: prepareStep marks last user and last assistant messages", async () => {
       setupStopResult();
       const config: ToolLoopHarnessConfig = {
+        kernelPlan: { prepared: ["final_output"] },
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue({
           provider: "anthropic.messages",
@@ -10107,6 +10317,7 @@ describe("createToolLoopHarness", () => {
     it("none path: direct OpenAI instance gets no caching changes", async () => {
       setupStopResult();
       const config: ToolLoopHarnessConfig = {
+        kernelPlan: { prepared: ["final_output"] },
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue({
           provider: "openai.chat",
@@ -10252,6 +10463,7 @@ describe("createToolLoopHarness", () => {
       process.env.VERCEL_PROJECT_PRODUCTION_URL = "my-agent.vercel.app";
       try {
         const config: ToolLoopHarnessConfig = {
+          kernelPlan: { prepared: ["final_output"] },
           mode: "conversation",
           resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
           runtimeIdentity: {
@@ -10287,6 +10499,7 @@ describe("createToolLoopHarness", () => {
       delete process.env.VERCEL_URL;
       try {
         const config: ToolLoopHarnessConfig = {
+          kernelPlan: { prepared: ["final_output"] },
           mode: "conversation",
           resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
           runtimeIdentity: {
@@ -10321,6 +10534,7 @@ describe("createToolLoopHarness", () => {
       process.env.VERCEL_URL = "preview-123.vercel.app";
       try {
         const config: ToolLoopHarnessConfig = {
+          kernelPlan: { prepared: ["final_output"] },
           mode: "conversation",
           resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
           runtimeIdentity: {
@@ -10354,6 +10568,7 @@ describe("createToolLoopHarness", () => {
     it("does not set attribution headers for non-gateway model objects", async () => {
       setupStopResultForAttribution();
       const config: ToolLoopHarnessConfig = {
+        kernelPlan: { prepared: ["final_output"] },
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue({
           provider: "anthropic.messages",
@@ -10377,6 +10592,7 @@ describe("createToolLoopHarness", () => {
     it("sets the eve user-agent for explicit Gateway model objects", async () => {
       setupStopResultForAttribution();
       const config: ToolLoopHarnessConfig = {
+        kernelPlan: { prepared: ["final_output"] },
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue(
           new MockLanguageModelV3({
@@ -10403,6 +10619,7 @@ describe("createToolLoopHarness", () => {
       delete process.env.VERCEL_URL;
       try {
         const config: ToolLoopHarnessConfig = {
+          kernelPlan: { prepared: ["final_output"] },
           mode: "conversation",
           resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
           tools: new Map(),
@@ -10438,6 +10655,7 @@ describe("createToolLoopHarness", () => {
         const { emit } = createEventCollector();
         const config: ToolLoopHarnessConfig = {
           handleEvent: emit,
+          kernelPlan: { prepared: ["final_output"] },
           mode: "conversation",
           resolveModel: vi.fn().mockImplementation(async (reference) =>
             reference.id === "compaction-model"

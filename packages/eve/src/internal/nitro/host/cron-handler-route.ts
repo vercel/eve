@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 
 import type { Nitro } from "nitro/types";
 
-import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { createEveProductionCronRoutePath } from "#protocol/routes.js";
 
 /**
  * Builds an unguessable route path for eve's Vercel cron handler.
@@ -16,7 +16,7 @@ import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
  * eve sidesteps the manual env var by giving each build a unique random
  * handler path under the framework's protocol prefix — the path itself is
  * the secret. Vercel's cron infra reads the path from the deploy's
- * `config.crons[]` so the platform always knows where to POST, and the same
+ * `config.crons[]` so the platform always knows where to request, and the same
  * path is registered as a Nitro route handler in the function. The path is
  * never logged, exposed in HTTP responses, or persisted, so it is
  * unguessable to anyone without access to the deploy's build artifacts.
@@ -27,7 +27,7 @@ import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
  */
 export function createEveCronHandlerRoute(): string {
   const token = randomBytes(32).toString("base64url");
-  return `${EVE_ROUTE_PREFIX}/cron/${token}`;
+  return createEveProductionCronRoutePath(token);
 }
 
 /**

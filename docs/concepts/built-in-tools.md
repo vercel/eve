@@ -7,7 +7,7 @@ eve provides a default tool set for every agent and additional framework tools y
 
 ## Default tools
 
-Default tools require no imports. The exact set depends on the agent and session. `agent` is available only in the root session; `load_skill` and `connection_search` appear only when the agent declares the corresponding resources; `ask_question` requires a session that can request user input; and `web_search` requires a supported model provider. The harness advertises only the tools available to the current session.
+Default tools require no imports. Most defaults compile from the same path-derived slots as authored tools, so a file such as `agent/tools/bash.ts` replaces or disables the default before the agent starts. Session-dependent capabilities are prepared separately: `agent` is available only in the root session; `load_skill` and `connection_search` appear only when the agent declares the corresponding resources; `ask_question` requires a session that can request user input; and `web_search` requires a supported model provider. The harness advertises only the tools available to the current session.
 
 The default shell and file tools (`bash`, `read_file`, and `write_file`) run in the app and proxy their work into the agent's [sandbox](../sandbox). The table shows where each tool's effect lands.
 
@@ -81,9 +81,9 @@ export default defineTool({
 });
 ```
 
-Framework tool definitions are importable from `eve/tools/defaults` (`bash`, `readFile`, `writeFile`, `glob`, `grep`, `webFetch`, `todo`, `loadSkill`), so you can spread, wrap, or patch them. Importing a definition does not add it to an agent; export it from the corresponding `agent/tools/*.ts` file. Skip the spread and your replacement owns its own context. A fresh `defineTool` for `todo` won't inherit the framework's durable state key.
+Canonical built-in definitions are importable from `eve/tools/defaults` (`bash`, `readFile`, `writeFile`, `glob`, `grep`, `webFetch`, `todo`, `loadSkill`, `connectionSearch`, `webSearch`). You can spread, wrap, or patch the executable definitions; re-export the `connectionSearch` or `webSearch` sentinel unchanged when you want the built-in behavior. Importing a definition does not add it to an agent: export it from the corresponding `agent/tools/*.ts` file. Skip the spread and your replacement owns its own context. A fresh `defineTool` for `todo` won't inherit eve's durable state key.
 
-Provider-managed web search has a dedicated configuration helper instead of an executable default:
+Provider-managed web search also has a dedicated configuration helper:
 
 ```ts title="agent/tools/web_search.ts"
 import { webSearch } from "eve/tools";

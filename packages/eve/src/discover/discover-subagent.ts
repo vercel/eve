@@ -1,8 +1,10 @@
 import { join, relative, resolve } from "node:path";
 import { discoverConnectionSources } from "#discover/connections.js";
-import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discover/diagnostics.js";
 import {
-  detectRootNamespaceCollisions,
+  createCompilerErrorDiagnostic,
+  type CompilerDiagnostic,
+} from "#shared/compiler-diagnostics.js";
+import {
   discoverExtensionMountDeclarations,
   resolveExtensionMounts,
 } from "#discover/discover-agent.js";
@@ -39,14 +41,13 @@ import {
 } from "#discover/project-source.js";
 import { discoverSandboxSource } from "#discover/sandbox.js";
 import { discoverSkills } from "#discover/skills.js";
+import { createCompiledSubagentNodeId } from "#compiler/compiled-agent-node-id.js";
 
 /**
  * Diagnostics emitted while discovering subagent source graphs.
  */
 export const DISCOVER_LOCAL_SUBAGENT_SCHEDULES_INVALID =
   "discover/local-subagent-schedules-invalid";
-export const DISCOVER_REQUIRED_SUBAGENT_CONFIG_MODULE_MISSING =
-  "discover/required-subagent-config-module-missing";
 export const DISCOVER_SUBAGENTS_DIRECTORY_INVALID = "discover/subagents-directory-invalid";
 
 /**
@@ -55,6 +56,7 @@ export const DISCOVER_SUBAGENTS_DIRECTORY_INVALID = "discover/subagents-director
 interface DiscoverSubagentsInput {
   agentRoot: string;
   appRoot: string;
+  parentNodeId: string;
   /**
    * Optional {@link ProjectSource} used for all filesystem reads. Defaults
    * to a disk-backed source so disk callers keep their current behaviour.
@@ -62,13 +64,14 @@ interface DiscoverSubagentsInput {
   source?: ProjectSource;
   subagentsDirectoryPath?: string;
   subagentsLogicalPath?: string;
+  sourceIdPrefix?: string;
 }
 
 /**
  * Result of discovering local subagent packages.
  */
 interface DiscoverSubagentsResult {
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
   subagents: SubagentSourceRef[];
 }
 
@@ -80,6 +83,7 @@ export async function discoverSubagents(
   input: DiscoverSubagentsInput,
 ): Promise<DiscoverSubagentsResult> {
   const source = input.source ?? createDiskProjectSource();
+  const { parentNodeId } = input;
   const agentRoot = resolve(input.agentRoot);
   const subagentsDirectoryPath = resolve(
     input.subagentsDirectoryPath ?? join(agentRoot, "subagents"),
@@ -99,9 +103,10 @@ export async function discoverSubagents(
   if (subagentsDirectoryType !== "directory") {
     return {
       diagnostics: [
-        createDiscoverErrorDiagnostic({
+        createCompilerErrorDiagnostic({
           code: DISCOVER_SUBAGENTS_DIRECTORY_INVALID,
           message: `Expected "${subagentsDirectoryPath}" to be a directory of authored subagents.`,
+          nodeId: parentNodeId,
           sourcePath: subagentsDirectoryPath,
         }),
       ],
@@ -110,7 +115,7 @@ export async function discoverSubagents(
   }
 
   const entries = await readSortedDirectoryEntries(source, subagentsDirectoryPath);
-  const diagnostics: DiscoverDiagnostic[] = [];
+  const diagnostics: CompilerDiagnostic[] = [];
   const subagents: SubagentSourceRef[] = [];
 
   for (const entry of entries) {
@@ -137,13 +142,25 @@ export async function discoverSubagents(
       continue;
     }
 
-    const localSubagentResult = await discoverLocalSubagentPackage({
+    const localSubagentInput = {
       appRoot: input.appRoot,
+      nodeId: createCompiledSubagentNodeId(
+        parentNodeId,
+        scopeSourceId(
+          normalizeLogicalPath(join(subagentsLogicalPath, entry.name)),
+          input.sourceIdPrefix,
+        ),
+      ),
       source,
       subagentId: entry.name,
       subagentLogicalPath: join(subagentsLogicalPath, entry.name),
       subagentRoot: join(subagentsDirectoryPath, entry.name),
-    });
+    };
+    const localSubagentResult = await discoverLocalSubagentPackage(
+      input.sourceIdPrefix === undefined
+        ? localSubagentInput
+        : { ...localSubagentInput, sourceIdPrefix: input.sourceIdPrefix },
+    );
 
     diagnostics.push(...localSubagentResult.diagnostics);
     subagents.push(localSubagentResult.subagent);
@@ -183,15 +200,17 @@ function discoverSingleFileSubagent(input: {
 
 async function discoverLocalSubagentPackage(input: {
   appRoot: string;
+  nodeId: string;
   source: ProjectSource;
+  sourceIdPrefix?: string;
   subagentId: string;
   subagentLogicalPath: string;
   subagentRoot: string;
 }): Promise<{
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
   subagent: LocalSubagentSourceRef;
 }> {
-  const diagnostics: DiscoverDiagnostic[] = [];
+  const diagnostics: CompilerDiagnostic[] = [];
   const rootEntries = await readSortedDirectoryEntries(input.source, input.subagentRoot);
 
   diagnostics.push(
@@ -200,12 +219,14 @@ async function discoverLocalSubagentPackage(input: {
       createUnsupportedDirectoryMessage(directoryName) {
         return `Ignoring unsupported directory "${directoryName}/" in the local subagent root.`;
       },
+      nodeId: input.nodeId,
       rootEntries,
       rootPath: input.subagentRoot,
     }),
   );
 
   const instructionsResult = await discoverInstructionsSource({
+    nodeId: input.nodeId,
     required: false,
     rootEntries,
     rootPath: input.subagentRoot,
@@ -214,11 +235,7 @@ async function discoverLocalSubagentPackage(input: {
   diagnostics.push(...instructionsResult.diagnostics);
 
   const configModuleResult = discoverFlatModuleSource({
-    missingDiagnostic: {
-      code: DISCOVER_REQUIRED_SUBAGENT_CONFIG_MODULE_MISSING,
-      message:
-        'Expected one authored subagent config module at "agent.ts", "agent.cts", "agent.mts", "agent.js", "agent.cjs", or "agent.mjs".',
-    },
+    nodeId: input.nodeId,
     rootEntries,
     rootPath: input.subagentRoot,
     slotName: "agent",
@@ -226,6 +243,7 @@ async function discoverLocalSubagentPackage(input: {
   diagnostics.push(...configModuleResult.diagnostics);
 
   const connectionsResult = await discoverConnectionSources({
+    nodeId: input.nodeId,
     rootEntries,
     rootPath: input.subagentRoot,
     source: input.source,
@@ -233,6 +251,7 @@ async function discoverLocalSubagentPackage(input: {
   diagnostics.push(...connectionsResult.diagnostics);
 
   const sandboxResult = await discoverSandboxSource({
+    nodeId: input.nodeId,
     rootEntries,
     rootPath: input.subagentRoot,
     source: input.source,
@@ -243,6 +262,7 @@ async function discoverLocalSubagentPackage(input: {
     directoryName: "tools",
     invalidDirectoryCode: DISCOVER_TOOLS_DIRECTORY_INVALID,
     invalidDirectoryMessage: `Expected "${join(input.subagentRoot, "tools")}" to be a directory of authored tools.`,
+    nodeId: input.nodeId,
     recursive: true,
     rootEntries,
     rootPath: input.subagentRoot,
@@ -255,6 +275,7 @@ async function discoverLocalSubagentPackage(input: {
     directoryName: "hooks",
     invalidDirectoryCode: DISCOVER_HOOKS_DIRECTORY_INVALID,
     invalidDirectoryMessage: `Expected "${join(input.subagentRoot, "hooks")}" to be a directory of authored hooks.`,
+    nodeId: input.nodeId,
     recursive: true,
     rootEntries,
     rootPath: input.subagentRoot,
@@ -265,48 +286,48 @@ async function discoverLocalSubagentPackage(input: {
 
   const libResult = await discoverLibSources({
     agentRoot: input.subagentRoot,
+    nodeId: input.nodeId,
     rootEntries,
     source: input.source,
   });
   diagnostics.push(...libResult.diagnostics);
 
-  diagnostics.push(...createLocalSubagentScheduleDiagnostics(input.subagentRoot, rootEntries));
+  diagnostics.push(
+    ...createLocalSubagentScheduleDiagnostics(input.subagentRoot, input.nodeId, rootEntries),
+  );
 
   const skillsResult = await discoverSkills({
     agentRoot: input.subagentRoot,
+    nodeId: input.nodeId,
     source: input.source,
   });
   diagnostics.push(...skillsResult.diagnostics);
 
-  const subagentsResult = await discoverSubagents({
+  const subagentsInput = {
     agentRoot: input.subagentRoot,
     appRoot: input.appRoot,
+    parentNodeId: input.nodeId,
     source: input.source,
-  });
+  };
+  const subagentsResult = await discoverSubagents(
+    input.sourceIdPrefix === undefined
+      ? subagentsInput
+      : { ...subagentsInput, sourceIdPrefix: input.sourceIdPrefix },
+  );
   diagnostics.push(...subagentsResult.diagnostics);
 
   const extensionsResult = await discoverExtensionMountDeclarations({
     agentRoot: input.subagentRoot,
+    nodeId: input.nodeId,
     source: input.source,
   });
   diagnostics.push(...extensionsResult.diagnostics);
-  diagnostics.push(
-    ...detectRootNamespaceCollisions({
-      agentRoot: input.subagentRoot,
-      namespaces: extensionsResult.mounts.map((mount) => mount.namespace),
-      sources: [
-        ...toolsResult.sources,
-        ...connectionsResult.connections,
-        ...skillsResult.skills,
-        ...subagentsResult.subagents,
-      ],
-    }),
-  );
 
   const resolvedExtensions = await resolveExtensionMounts({
     agentRoot: input.subagentRoot,
     appRoot: input.appRoot,
     mounts: extensionsResult.mounts,
+    nodeId: input.nodeId,
     source: input.source,
   });
   diagnostics.push(...resolvedExtensions.diagnostics);
@@ -349,8 +370,9 @@ async function discoverLocalSubagentPackage(input: {
 
 function createLocalSubagentScheduleDiagnostics(
   subagentRoot: string,
+  nodeId: string,
   rootEntries: readonly ProjectSourceEntry[],
-): DiscoverDiagnostic[] {
+): CompilerDiagnostic[] {
   return rootEntries.flatMap((entry) => {
     if (
       classifyLocalSubagentEntry(entry.name, getDirectoryEntryType(entry)) !==
@@ -360,11 +382,16 @@ function createLocalSubagentScheduleDiagnostics(
     }
 
     return [
-      createDiscoverErrorDiagnostic({
+      createCompilerErrorDiagnostic({
         code: DISCOVER_LOCAL_SUBAGENT_SCHEDULES_INVALID,
         message: `Local subagent packages cannot define schedules at "${join(subagentRoot, entry.name)}".`,
+        nodeId,
         sourcePath: join(subagentRoot, entry.name),
       }),
     ];
   });
+}
+
+function scopeSourceId(sourceId: string, prefix: string | undefined): string {
+  return prefix === undefined ? sourceId : `${prefix}:${sourceId}`;
 }

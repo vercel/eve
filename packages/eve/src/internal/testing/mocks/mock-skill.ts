@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach } from "vitest";
 
-import type { CompiledSkillDefinition } from "#compiler/manifest.js";
+import type { CompileFromMemorySkillInput } from "#compiler/compile-from-memory.js";
 
 /**
  * Declarative description of one synthetic authored skill.
@@ -12,7 +12,7 @@ import type { CompiledSkillDefinition } from "#compiler/manifest.js";
  * Resource files are materialized under one tmpdir and cleaned up through
  * an automatically registered `afterEach`.
  */
-export interface MockSkillInput {
+export interface MockSkillInput extends CompileFromMemorySkillInput {
   /** Stable skill name exposed to the runtime. */
   readonly name: string;
   /** Semantic description of the skill. */
@@ -41,10 +41,10 @@ export interface MockSkillInput {
  * A materialized mock skill returned from {@link mockSkill}.
  */
 export interface MockSkill {
-  /**
-   * Compiled skill definition suitable for AppHarness descriptors.
-   */
-  readonly source: CompiledSkillDefinition;
+  /** Authored skill input suitable for AppHarness descriptors. */
+  readonly input: CompileFromMemorySkillInput;
+  /** Materialized paths exposed only for filesystem-focused mock tests. */
+  readonly paths: MockSkillMaterializedPaths;
   /**
    * Removes any on-disk files written on behalf of this skill.
    *
@@ -55,6 +55,15 @@ export interface MockSkill {
    * missing reference files). Calling it more than once is safe.
    */
   cleanup(): Promise<void>;
+}
+
+/** Filesystem paths materialized for one {@link MockSkill}. */
+export interface MockSkillMaterializedPaths {
+  readonly assetsPath?: string;
+  readonly referencesPath?: string;
+  readonly rootPath: string;
+  readonly scriptsPath?: string;
+  readonly skillFilePath: string;
 }
 
 /**
@@ -86,7 +95,7 @@ afterEach(async () => {
  * Builds a {@link MockSkill} for the AppHarness.
  *
  * File subtree materialization happens eagerly at construction time so the
- * returned `source.referencesPath` / `scriptsPath` / `assetsPath` are
+ * returned `paths.referencesPath` / `scriptsPath` / `assetsPath` are
  * ready before the first test read. Cleanup of any materialized directory
  * runs automatically via this module's `afterEach` hook.
  */
@@ -95,13 +104,14 @@ export async function mockSkill(input: MockSkillInput): Promise<MockSkill> {
   const hasScripts = input.scripts !== undefined && Object.keys(input.scripts).length > 0;
   const hasAssets = input.assets !== undefined && Object.keys(input.assets).length > 0;
 
-  let rootPath: string | undefined;
   let referencesPath: string | undefined;
   let scriptsPath: string | undefined;
   let assetsPath: string | undefined;
 
-  rootPath = await mkdtemp(join(tmpdir(), `eve-mock-skill-${input.name}-`));
-  await writeFile(join(rootPath, "SKILL.md"), input.markdown ?? input.description);
+  const rootPath = await mkdtemp(join(tmpdir(), `eve-mock-skill-${input.name}-`));
+  const markdown = input.markdown ?? input.description;
+  const skillFilePath = join(rootPath, "SKILL.md");
+  await writeFile(skillFilePath, markdown);
 
   if (hasReferences) {
     referencesPath = join(rootPath, "references");
@@ -118,15 +128,40 @@ export async function mockSkill(input: MockSkillInput): Promise<MockSkill> {
     await materializeSubtree(assetsPath, input.assets ?? {});
   }
 
-  const source: CompiledSkillDefinition = buildSkillSource({
-    assetsPath,
+  const authoredInput: {
+    description: string;
+    license?: string;
+    markdown: string;
+    metadata?: Readonly<Record<string, string>>;
+    name: string;
+  } = {
     description: input.description,
-    markdown: input.markdown ?? input.description,
+    markdown,
     name: input.name,
-    referencesPath,
-    rootPath,
-    scriptsPath,
-  });
+  };
+  if (input.license !== undefined) {
+    authoredInput.license = input.license;
+  }
+  if (input.metadata !== undefined) {
+    authoredInput.metadata = input.metadata;
+  }
+
+  const paths: {
+    assetsPath?: string;
+    referencesPath?: string;
+    rootPath: string;
+    scriptsPath?: string;
+    skillFilePath: string;
+  } = { rootPath, skillFilePath };
+  if (assetsPath !== undefined) {
+    paths.assetsPath = assetsPath;
+  }
+  if (referencesPath !== undefined) {
+    paths.referencesPath = referencesPath;
+  }
+  if (scriptsPath !== undefined) {
+    paths.scriptsPath = scriptsPath;
+  }
 
   let cleanedUp = false;
   const cleanup = async (): Promise<void> => {
@@ -136,18 +171,15 @@ export async function mockSkill(input: MockSkillInput): Promise<MockSkill> {
 
     cleanedUp = true;
 
-    if (rootPath !== undefined) {
-      await rm(rootPath, { force: true, recursive: true });
-    }
+    await rm(rootPath, { force: true, recursive: true });
   };
 
-  if (rootPath !== undefined) {
-    pendingMockSkillCleanups.push(cleanup);
-  }
+  pendingMockSkillCleanups.push(cleanup);
 
   return {
     cleanup,
-    source,
+    input: authoredInput,
+    paths,
   };
 }
 
@@ -160,44 +192,4 @@ async function materializeSubtree(
   for (const [name, content] of Object.entries(files)) {
     await writeFile(join(directory, name), content);
   }
-}
-
-function buildSkillSource(input: {
-  assetsPath: string | undefined;
-  description: string;
-  markdown: string;
-  name: string;
-  referencesPath: string | undefined;
-  rootPath: string;
-  scriptsPath: string | undefined;
-}): CompiledSkillDefinition {
-  const source: CompiledSkillDefinition = {
-    description: input.description,
-    logicalPath: `skills/${input.name}/SKILL.md`,
-    markdown: input.markdown,
-    name: input.name,
-    sourceId: `skills/${input.name}/SKILL.md`,
-    sourceKind: "skill-package",
-    skillId: input.name,
-    skillFilePath: join(input.rootPath, "SKILL.md"),
-    rootPath: input.rootPath,
-  };
-
-  const mutable = source as {
-    assetsPath?: string;
-    referencesPath?: string;
-    scriptsPath?: string;
-  };
-
-  if (input.assetsPath !== undefined) {
-    mutable.assetsPath = input.assetsPath;
-  }
-  if (input.referencesPath !== undefined) {
-    mutable.referencesPath = input.referencesPath;
-  }
-  if (input.scriptsPath !== undefined) {
-    mutable.scriptsPath = input.scriptsPath;
-  }
-
-  return source;
 }

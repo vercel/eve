@@ -23,7 +23,7 @@ export interface WebSearchToolDefinition {
 }
 
 /**
- * Configures the framework-provided `web_search` tool.
+ * Configures eve's `web_search` primitive.
  *
  * When no configuration file is present, eve uses Exa for AI Gateway
  * models.
@@ -42,6 +42,9 @@ export function webSearch(input: WebSearchToolInput): WebSearchToolDefinition {
     provider: input.provider,
   };
 }
+
+/** eve's canonical default web-search provider selection. */
+export const defaultWebSearch = webSearch({ provider: "exa" });
 
 /** Returns whether a value is a provider-managed web search definition. */
 export function isWebSearchToolDefinition(value: unknown): value is WebSearchToolDefinition {

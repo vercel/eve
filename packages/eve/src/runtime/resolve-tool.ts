@@ -1,4 +1,5 @@
 import type { CompiledToolDefinition } from "#compiler/manifest.js";
+import type { AgentSourceOwner } from "#compiler/module-binding.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
@@ -21,6 +22,7 @@ export async function resolveToolDefinition(
   definition: CompiledToolDefinition,
   moduleMap: CompiledModuleMap,
   nodeId: string | undefined,
+  sourceOwner: AgentSourceOwner,
 ): Promise<ResolvedToolDefinition> {
   try {
     const resolvedExportValue = await loadResolvedModuleExport({
@@ -67,6 +69,7 @@ export async function resolveToolDefinition(
       outputSchema,
       sourceId: definition.sourceId,
       sourceKind: "module",
+      sourceOwner,
       ...extractOptionalHooks(resolvedRecord, definition),
     };
   } catch (error) {

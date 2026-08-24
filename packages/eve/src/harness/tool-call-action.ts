@@ -1,4 +1,4 @@
-import type { RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeToolCallActionRequest } from "#shared/runtime-actions.js";
 import { resolveToolCallInputObject } from "#harness/runtime-actions.js";
 
 /** Creates a runtime tool-call action shape from an AI SDK tool call. */

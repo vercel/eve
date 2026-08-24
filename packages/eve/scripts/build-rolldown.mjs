@@ -17,6 +17,8 @@ import { readdir } from "node:fs/promises";
 import { isBuiltin } from "node:module";
 import { join, parse, relative } from "node:path";
 
+import { createFrameworkSourceRevisionPlugin } from "#framework-sources/revision-plugin.js";
+
 import { buildWithNitroRolldown } from "./nitro-rolldown.mjs";
 import { createVendoredDependencyWarningFilter } from "./vendor-warning-log.mjs";
 
@@ -76,29 +78,6 @@ function createStripUnusedRolldownRuntimeImportPlugin() {
       }
 
       return { code: `${before}${after}`, map: null };
-    },
-  };
-}
-
-/**
- * Applies the same `defineDynamic` execute-hoisting transform that the
- * agent's Nitro build applies to authored `agent/tools/*.ts` files. This
- * lets framework dynamic tools ship pre-transformed so they replay
- * across workflow step boundaries identically to authored tools.
- */
-function createDynamicToolTransformPlugin() {
-  let transformFn;
-  return {
-    name: "eve:dynamic-tool-transform",
-    async transform(code, id) {
-      if (!id.includes("/framework-tools/")) return null;
-      if (!code.includes("defineDynamic")) return null;
-      if (!transformFn) {
-        const mod = await import("../src/internal/workflow-bundle/dynamic-tool-transform.ts");
-        transformFn = mod.transformDynamicToolExecute;
-      }
-      const result = await transformFn(id, code);
-      return result ? { code: result.code, map: null } : null;
     },
   };
 }
@@ -233,7 +212,7 @@ await buildWithNitroRolldown({
   input,
   external: isExternalPackageSpecifier,
   platform: "node",
-  plugins: [createStripUnusedRolldownRuntimeImportPlugin(), createDynamicToolTransformPlugin()],
+  plugins: [createFrameworkSourceRevisionPlugin(), createStripUnusedRolldownRuntimeImportPlugin()],
   resolve: {
     // `eve-source` makes `#*.js` resolve to `./src/*.ts` at build time so
     // sibling source files become part of the graph instead of bare

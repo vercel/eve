@@ -8,8 +8,11 @@ import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import type { ScheduleDefinition } from "#public/definitions/schedule.js";
 import type { SkillDefinition } from "#public/definitions/skill.js";
 import type { InstructionsDefinition } from "#public/definitions/instructions.js";
-import type { DiscoverDiagnostic, DiscoverDiagnosticsSummary } from "#discover/diagnostics.js";
-import { summarizeDiscoverDiagnostics } from "#discover/diagnostics.js";
+import type {
+  CompilerDiagnostic,
+  CompilerDiagnosticsSummary,
+} from "#shared/compiler-diagnostics.js";
+import { summarizeCompilerDiagnostics } from "#shared/compiler-diagnostics.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
 
 /**
@@ -46,6 +49,12 @@ export interface ConnectionSourceRef extends ModuleSourceRef {
  * Hook source reference preserved by the discovery manifest.
  */
 export type HookSourceRef = ModuleSourceRef;
+
+/** Compiler-neutral refs for both instrumentation authoring layouts. */
+export interface InstrumentationSourceRefs {
+  readonly file?: ModuleSourceRef;
+  readonly providers: readonly ModuleSourceRef[];
+}
 
 /**
  * Instructions source reference preserved by discovery for compiler
@@ -188,7 +197,7 @@ export interface AgentSourceManifest {
   channels: ChannelSourceRef[];
   connections: ConnectionSourceRef[];
   configModule?: ModuleSourceRef;
-  diagnosticsSummary: DiscoverDiagnosticsSummary;
+  diagnosticsSummary: CompilerDiagnosticsSummary;
   /**
    * Mounted extension source references discovered under `agent/extensions/`.
    * Each entry's logical-path basename is the mount namespace the compiler
@@ -197,20 +206,20 @@ export interface AgentSourceManifest {
   extensions: ExtensionSourceRef[];
   /**
    * Mounted extensions resolved to their packages and discovered source trees.
-   * Populated only for the agent root; extension trees do not mount further
-   * extensions (transitive mounting is a non-goal).
+   * Populated for each independently discovered agent node. Extension package
+   * source trees cannot themselves mount further extensions.
    */
   resolvedExtensions: ResolvedExtensionMount[];
   hooks: ModuleSourceRef[];
+  instrumentation: InstrumentationSourceRefs;
   lib: LibSourceRef[];
   kind: typeof AGENT_SOURCE_MANIFEST_KIND;
   /**
    * Authored instructions prompt sources discovered at the agent root.
    *
-   * Supports three forms:
+   * Supports two forms:
    * 1. Flat file: `instructions.md` or `instructions.{ts,...}` → single element.
    * 2. Directory: `instructions/` with `.md` and `.ts` files → multiple elements.
-   * 3. Legacy: `system.{md,ts,...}` → single element with deprecation warning.
    *
    * Empty when no instructions are authored.
    */
@@ -244,10 +253,11 @@ export interface CreateAgentSourceManifestInput {
   channels?: readonly ChannelSourceRef[];
   connections?: readonly ConnectionSourceRef[];
   configModule?: ModuleSourceRef;
-  diagnostics?: readonly DiscoverDiagnostic[];
+  diagnostics?: readonly CompilerDiagnostic[];
   extensions?: readonly ExtensionSourceRef[];
   resolvedExtensions?: readonly ResolvedExtensionMount[];
   hooks?: readonly ModuleSourceRef[];
+  instrumentation?: InstrumentationSourceRefs;
   lib?: readonly LibSourceRef[];
   /**
    * Optional package name read from the app root's package.json.
@@ -313,16 +323,23 @@ export function createAgentSourceManifest(
 ): AgentSourceManifest {
   const appRoot = resolve(input.appRoot);
   const agentRoot = resolve(input.agentRoot);
+  const instrumentation: { file?: ModuleSourceRef; providers: ModuleSourceRef[] } = {
+    providers: [...(input.instrumentation?.providers ?? [])],
+  };
+  if (input.instrumentation?.file !== undefined) {
+    instrumentation.file = input.instrumentation.file;
+  }
   const manifest: AgentSourceManifest = {
     agentId: input.agentId ?? deriveAgentIdFromRoots(appRoot, agentRoot, input.packageName),
     agentRoot,
     appRoot,
     channels: [...(input.channels ?? [])],
     connections: [...(input.connections ?? [])],
-    diagnosticsSummary: summarizeDiscoverDiagnostics(input.diagnostics ?? []),
+    diagnosticsSummary: summarizeCompilerDiagnostics(input.diagnostics ?? []),
     extensions: [...(input.extensions ?? [])],
     resolvedExtensions: [...(input.resolvedExtensions ?? [])],
     hooks: [...(input.hooks ?? [])],
+    instrumentation,
     instructions: [...(input.instructions ?? [])],
     lib: [...(input.lib ?? [])],
     kind: AGENT_SOURCE_MANIFEST_KIND,

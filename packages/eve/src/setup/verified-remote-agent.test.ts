@@ -3,41 +3,19 @@ import { describe, expect, it, vi } from "vitest";
 import { ClientError } from "#client/client-error.js";
 import type { AgentInfoResult, ClientOptions } from "#client/types.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info.js";
 import { createHeadlessPrompter } from "#setup/headless.js";
 
 import { inspectVerifiedRemoteAgent } from "./verified-remote-agent.js";
 
-const info: AgentInfoResult = {
+const info: AgentInfoResult = createTestAgentInfoResult({
   agent: {
     agentRoot: "/tmp/weather-agent/agent",
     appRoot: "/tmp/weather-agent",
     model: { id: "openai/gpt-5.5", routing: { kind: "gateway", target: "openai" } },
     name: "Weather Agent",
   },
-  capabilities: { devRoutes: true },
-  channels: { authored: [], available: [], disabledFramework: [], framework: [] },
-  connections: [],
-  diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
-  hooks: [],
-  instructions: { dynamic: [], static: [] },
-  kind: "eve-agent-info",
-  mode: "development",
-  sandbox: null,
-  schedules: [],
-  skills: { dynamic: [], static: [] },
-  subagents: { local: [], total: 0 },
-  tools: {
-    authored: [],
-    available: [],
-    disabledFramework: [],
-    dynamic: [],
-    framework: [],
-    reserved: [],
-  },
-  version: 2,
-  workflow: { enabled: false, toolName: "Workflow" },
-  workspace: { resourceRoot: null, rootEntries: [] },
-};
+});
 
 const target = await resolveTestVercelTarget({
   host: "agent.example.com",

@@ -20,34 +20,20 @@ describe("mockChannelContext", () => {
 });
 
 describe("mockTool", () => {
-  it("assigns deterministic defaults from the tool name", () => {
-    const tool = mockTool({ name: "get_weather", execute: () => 42 });
+  it("builds an authored in-memory tool descriptor", () => {
+    const execute = vi.fn(() => 42);
+    const tool = mockTool({ name: "get_weather", execute });
 
     expect(tool.name).toBe("get_weather");
-    expect(tool.logicalPath).toBe("tools/get_weather.ts");
-    expect(tool.sourceId).toBe("tools/get_weather.ts");
     expect(tool.description).toBe("get_weather mock tool.");
     expect(tool.inputSchema).toBeNull();
-    expect(tool.sourceKind).toBe("module");
+    expect(tool.execute).toBe(execute);
   });
 
   it("omits execute when the descriptor does not define one", () => {
     const tool = mockTool({ name: "get_weather" });
 
     expect(tool.execute).toBeUndefined();
-  });
-
-  it("sanitizes characters that are not valid in a logical path", () => {
-    const tool = mockTool({ name: "weird name!" });
-
-    expect(tool.logicalPath).toBe("tools/weird-name-.ts");
-  });
-
-  it("honours explicit logical path overrides", () => {
-    const tool = mockTool({ name: "hello", logicalPath: "custom/tools/hello.ts" });
-
-    expect(tool.logicalPath).toBe("custom/tools/hello.ts");
-    expect(tool.sourceId).toBe("custom/tools/hello.ts");
   });
 });
 

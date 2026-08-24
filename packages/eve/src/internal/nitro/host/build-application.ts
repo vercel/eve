@@ -411,6 +411,7 @@ async function buildApplicationInWorkspace(
           compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(
             workspace.compiler.rootDir,
             {
+              moduleMapLoaderKind: "authored-source",
               moduleMapLoaderPath: resolvePackageSourceFilePath(
                 "src/internal/authored-module-map-loader.ts",
               ),

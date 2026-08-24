@@ -1,24 +1,28 @@
-import { join, relative } from "node:path";
-
-import {
-  type AgentSourceManifest,
-  createPathDerivedSourceId,
-  type LocalSubagentSourceRef,
-} from "#discover/manifest.js";
+import type { AgentSourceManifest, LocalSubagentSourceRef } from "#discover/manifest.js";
 import {
   type CompiledAgentNodeManifest,
   type CompiledAgentResources,
   type CompiledRemoteAgentNode,
   type CompiledSubagentEdge,
   type CompiledSubagentNode,
+  createCompiledAgentNodeManifest,
+  createCompiledAgentResources,
   createCompiledSubagentNodeId,
 } from "#compiler/manifest.js";
-import { composeAgentSubagentSources } from "#compiler/normalize-extension.js";
 import type { CompiledDynamicSubagentDefinition } from "#compiler/remote-agent-node.js";
+import type { ManifestCompileContext } from "#compiler/normalize-helpers.js";
+import { normalizeSelectedSource } from "#compiler/normalize-helpers.js";
 import {
-  loadModuleBackedDefinition,
-  type ManifestCompileContext,
-} from "#compiler/normalize-helpers.js";
+  prepareAgentConfigPhase,
+  isEffectiveModuleSource,
+  type AgentNodeSourceOrigin,
+  type EffectiveAgentSourceCandidate,
+  type PreparedAgentConfigPhase,
+} from "#compiler/effective-agent-source-graph.js";
+import type {
+  CompileAgentNodeOptions,
+  CompileAgentResourcesOptions,
+} from "#compiler/normalize-manifest.js";
 import {
   expectBoolean,
   expectFunction,
@@ -29,93 +33,109 @@ import {
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import { serializeOutputSchema, type ToolSchemaSource } from "#shared/tool-schema.js";
 import type { JsonObject } from "#shared/json.js";
-import { isDynamicSentinel, type DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
+import {
+  ALLOWED_DYNAMIC_SUBAGENT_EVENTS,
+  isDynamicSentinel,
+  type DynamicToolEventName,
+} from "#shared/dynamic-tool-definition.js";
+import type { KernelSemanticSubagentSource } from "#compiler/kernel-plan-semantics.js";
+import { withSelectedConfigExternalDependencies } from "#compiler/compiled-external-dependencies.js";
 
-const ALLOWED_DYNAMIC_SUBAGENT_EVENTS = new Set<DynamicToolEventName>([
-  "session.started",
-  "turn.started",
-]);
+export interface SelectedSubagentSource {
+  readonly candidate: EffectiveAgentSourceCandidate;
+  readonly source: LocalSubagentSourceRef;
+}
 
-/**
- * Callback the subagent compiler uses to recurse into the per-node
- * manifest compiler. Injected by `normalize-manifest.ts` so this module
- * does not have to import the orchestrator (which would create a
- * circular dependency).
- */
+export function toKernelSemanticSubagentSources(
+  selected: readonly SelectedSubagentSource[],
+): readonly KernelSemanticSubagentSource[] {
+  return selected.map(({ candidate, source }) => {
+    if (candidate.descriptor.sourceKind !== "subagent") {
+      throw new Error(`Selected source "${candidate.descriptor.sourceId}" is not a subagent.`);
+    }
+    return {
+      backing: candidate.descriptor.backing,
+      logicalPath: source.logicalPath,
+      name: source.subagentId,
+      owner: candidate.descriptor.owner,
+      sourceId: source.sourceId,
+    };
+  });
+}
+
+export interface CompiledAgentNodeCompilation {
+  readonly agent: CompiledAgentNodeManifest;
+  readonly subagents: readonly SelectedSubagentSource[];
+}
+
+export interface CompiledAgentResourcesCompilation {
+  readonly resources: CompiledAgentResources;
+  readonly subagents: readonly SelectedSubagentSource[];
+}
+
 export type CompileAgentNodeManifestFn = (
   manifest: AgentSourceManifest,
   context: ManifestCompileContext,
-  options?: {
-    readonly agentConfigDefinition?: unknown;
-    readonly externalDependencies?: readonly string[];
-    readonly allowRootOnlyConfig?: boolean;
-  },
-) => Promise<CompiledAgentNodeManifest>;
+  options: CompileAgentNodeOptions,
+) => Promise<CompiledAgentNodeCompilation>;
 
 export type CompileAgentResourcesFn = (
   manifest: AgentSourceManifest,
   context: ManifestCompileContext,
-  options?: { readonly externalDependencies?: readonly string[] },
-) => Promise<CompiledAgentResources>;
+  options: CompileAgentResourcesOptions,
+) => Promise<CompiledAgentResourcesCompilation>;
 
-/**
- * Compiles every local subagent reachable from one parent node into a
- * flat node list and the parent→child edges that connect them.
- *
- * Recursive: each subagent may itself declare further subagents, which
- * are compiled depth-first via the injected `compileAgentNodeManifest`
- * callback.
- */
 export async function compileSubagentGraph(input: {
   readonly appRoot: string;
   readonly compileAgentNodeManifest: CompileAgentNodeManifestFn;
   readonly compileAgentResources: CompileAgentResourcesFn;
   readonly context: ManifestCompileContext;
   readonly externalDependencies?: readonly string[];
-  readonly parentAgentRoot: string;
   readonly parentNodeId: string;
-  readonly subagents: readonly LocalSubagentSourceRef[];
+  readonly subagents: readonly SelectedSubagentSource[];
 }): Promise<{
   readonly edges: readonly CompiledSubagentEdge[];
   readonly nodes: readonly CompiledSubagentNode[];
   readonly remoteAgents: readonly CompiledRemoteAgentNode[];
 }> {
-  const compiledNodes: CompiledSubagentNode[] = [];
-  const compiledEdges: CompiledSubagentEdge[] = [];
-  const compiledRemoteAgents: CompiledRemoteAgentNode[] = [];
+  const nodes: CompiledSubagentNode[] = [];
+  const edges: CompiledSubagentEdge[] = [];
+  const remoteAgents: CompiledRemoteAgentNode[] = [];
 
-  for (const subagentSource of input.subagents) {
-    const compiledSubagent = await compileSubagentDefinition({
-      appRoot: input.appRoot,
-      compileAgentNodeManifest: input.compileAgentNodeManifest,
-      compileAgentResources: input.compileAgentResources,
-      context: input.context,
-      externalDependencies: input.externalDependencies,
-      parentAgentRoot: input.parentAgentRoot,
-      parentNodeId: input.parentNodeId,
-      source: subagentSource,
-    });
-
-    if (compiledSubagent.kind === "remote") {
-      compiledRemoteAgents.push(compiledSubagent.node);
+  for (const selected of input.subagents) {
+    const compiled = await normalizeSelectedSource(
+      toSubagentNormalizationSource(selected.candidate),
+      () => compileSubagentDefinition({ ...input, selected }),
+    );
+    if (compiled.kind === "remote") {
+      remoteAgents.push(compiled.node);
       continue;
     }
-
-    compiledNodes.push(compiledSubagent.node, ...compiledSubagent.descendants.nodes);
-    compiledEdges.push(
-      {
-        childNodeId: compiledSubagent.node.nodeId,
-        parentNodeId: input.parentNodeId,
-      },
-      ...compiledSubagent.descendants.edges,
+    nodes.push(compiled.node, ...compiled.descendants.nodes);
+    edges.push(
+      { childNodeId: compiled.node.nodeId, parentNodeId: input.parentNodeId },
+      ...compiled.descendants.edges,
     );
   }
 
-  return {
-    edges: compiledEdges,
-    nodes: compiledNodes,
-    remoteAgents: compiledRemoteAgents,
-  };
+  return { edges, nodes, remoteAgents };
+}
+
+function toSubagentNormalizationSource(candidate: EffectiveAgentSourceCandidate): {
+  readonly kind: "subagent";
+  readonly logicalPath: string;
+  readonly nodeId: string;
+  readonly sourceId: string;
+  readonly sourcePath?: string;
+} {
+  const backing = "backing" in candidate.descriptor ? candidate.descriptor.backing : undefined;
+  const source = {
+    kind: "subagent",
+    logicalPath: candidate.descriptor.logicalPath,
+    nodeId: candidate.nodeId,
+    sourceId: candidate.descriptor.sourceId,
+  } as const;
+  return backing?.kind === "filesystem" ? { ...source, sourcePath: backing.sourcePath } : source;
 }
 
 async function compileSubagentDefinition(input: {
@@ -124,17 +144,12 @@ async function compileSubagentDefinition(input: {
   readonly compileAgentResources: CompileAgentResourcesFn;
   readonly context: ManifestCompileContext;
   readonly externalDependencies?: readonly string[];
-  readonly parentAgentRoot: string;
   readonly parentNodeId: string;
-  readonly source: LocalSubagentSourceRef;
+  readonly selected: SelectedSubagentSource;
 }): Promise<
   | {
       readonly kind: "local";
-      readonly descendants: {
-        readonly edges: readonly CompiledSubagentEdge[];
-        readonly nodes: readonly CompiledSubagentNode[];
-        readonly remoteAgents: readonly CompiledRemoteAgentNode[];
-      };
+      readonly descendants: Awaited<ReturnType<typeof compileSubagentGraph>>;
       readonly node: CompiledSubagentNode;
     }
   | {
@@ -142,185 +157,278 @@ async function compileSubagentDefinition(input: {
       readonly node: CompiledRemoteAgentNode;
     }
 > {
-  const configModule = input.source.manifest.configModule;
-
-  if (configModule === undefined) {
-    throw new Error(`Subagent "${input.source.logicalPath}" is missing an agent config module.`);
-  }
-
-  const configModuleSource = createSubagentConfigModuleSourceRef(
-    input.source,
-    configModule,
-    input.parentAgentRoot,
+  const source = input.selected.source;
+  const nodeId = createCompiledSubagentNodeId(input.parentNodeId, source.sourceId);
+  const origin = childOrigin(input.selected.candidate);
+  const sourceManifest = { ...source.manifest, appRoot: input.appRoot };
+  const selectedBacking = readSubagentBacking(input.selected.candidate);
+  const selectedExternalDependencies = mergeExternalDependencies(
+    input.externalDependencies,
+    selectedBacking.kind === "filesystem" ? selectedBacking.externalDependencies : [],
   );
-  const definition = await loadModuleBackedDefinition({
-    agentRoot: input.source.manifest.agentRoot,
-    displayPath: configModuleSource.logicalPath,
-    externalDependencies: input.externalDependencies,
-    kind: "subagent config",
-    source: configModule,
+  const preparedConfig = await prepareAgentConfigPhase({
+    context: input.context,
+    externalDependencies: selectedExternalDependencies,
+    isRoot: false,
+    manifest: sourceManifest,
+    nodeId,
+    origin,
   });
+  const configCandidate = preparedConfig.candidate;
   const dynamic = normalizeDynamicSubagentDefinition(
-    definition,
-    `Expected the dynamic subagent config export "${configModule.exportName ?? "default"}" from "${configModuleSource.logicalPath}" to match the public eve shape.`,
+    preparedConfig.definition,
+    `Expected the dynamic subagent config export "${readExportName(configCandidate)}" from "${configCandidate.source.logicalPath}" to match the public eve shape.`,
   );
-  if (dynamic === undefined && readAgentDefinitionKind(definition) === "remote") {
-    return {
-      kind: "remote",
-      node: compileRemoteAgent({
-        parentAgentRoot: input.parentAgentRoot,
-        source: input.source,
-        value: definition,
-      }),
-    };
+  if (dynamic === undefined && readAgentDefinitionKind(preparedConfig.definition) === "remote") {
+    return compileRemoteAgent({
+      configCandidate,
+      parentNodeId: input.parentNodeId,
+      preparedConfig,
+      sourceCandidate: input.selected.candidate,
+      source,
+      value: preparedConfig.definition,
+    });
   }
 
   return {
     kind: "local",
     ...(await compileLocalSubagent({
       ...input,
-      agentConfigDefinition: dynamic === undefined ? definition : undefined,
-      configResolver:
-        dynamic === undefined
-          ? undefined
-          : { ...configModule, ...dynamic.definition, build: dynamic.build },
+      dynamic,
+      externalDependencies: selectedExternalDependencies,
+      nodeId,
+      origin,
+      preparedConfig,
+      sourceManifest,
     })),
   };
 }
 
-async function compileSubagent(input: {
+async function compileLocalSubagent(input: {
   readonly appRoot: string;
   readonly compileAgentNodeManifest: CompileAgentNodeManifestFn;
   readonly compileAgentResources: CompileAgentResourcesFn;
   readonly context: ManifestCompileContext;
-  readonly agentConfigDefinition?: unknown;
-  readonly configResolver?: CompiledDynamicSubagentDefinition;
+  readonly dynamic?: ReturnType<typeof normalizeDynamicSubagentDefinition>;
   readonly externalDependencies?: readonly string[];
-  readonly parentAgentRoot: string;
+  readonly nodeId: string;
+  readonly origin: AgentNodeSourceOrigin;
   readonly parentNodeId: string;
-  readonly source: LocalSubagentSourceRef;
+  readonly preparedConfig: PreparedAgentConfigPhase;
+  readonly selected: SelectedSubagentSource;
+  readonly sourceManifest: AgentSourceManifest;
 }): Promise<{
-  readonly descendants: {
-    readonly edges: readonly CompiledSubagentEdge[];
-    readonly nodes: readonly CompiledSubagentNode[];
-    readonly remoteAgents: readonly CompiledRemoteAgentNode[];
-  };
+  readonly descendants: Awaited<ReturnType<typeof compileSubagentGraph>>;
   readonly node: CompiledSubagentNode;
 }> {
-  const nodeId = createCompiledSubagentNodeId(input.parentNodeId, input.source.sourceId);
-  const subagentName = input.source.subagentId;
-  const sourceManifest = {
-    ...input.source.manifest,
-    appRoot: input.appRoot,
-  };
-  const inheritedExternalDependencies = mergeExternalDependencies(
+  const source = input.selected.source;
+  const configCandidate = input.preparedConfig.candidate;
+  const backing = readSubagentBacking(input.selected.candidate);
+  const inheritedDependencies = mergeExternalDependencies(
     input.externalDependencies,
-    input.configResolver?.build?.externalDependencies,
+    input.dynamic?.build?.externalDependencies,
   );
   const nodeBase = {
-    entryPath: input.source.entryPath,
-    logicalPath: input.source.logicalPath,
-    name: subagentName,
-    nodeId,
-    rootPath: input.source.rootPath,
-    sourceId: input.source.sourceId,
-    sourceKind: "module" as const,
+    backing,
+    entryPath: backing.kind === "filesystem" ? backing.sourcePath : source.entryPath,
+    logicalPath: source.logicalPath,
+    name: source.subagentId,
+    nodeId: input.nodeId,
+    owner: input.origin.owner,
+    rootPath: source.rootPath,
+    sourceId: source.sourceId,
+    sourceKind: "subagent" as const,
   };
 
-  if (input.configResolver === undefined) {
-    const agent = await input.compileAgentNodeManifest(sourceManifest, input.context, {
-      agentConfigDefinition: input.agentConfigDefinition,
+  if (input.dynamic === undefined) {
+    const compilation = await input.compileAgentNodeManifest(input.sourceManifest, input.context, {
       allowRootOnlyConfig: false,
-      externalDependencies: inheritedExternalDependencies,
+      externalDependencies: inheritedDependencies,
+      isRoot: false,
+      nodeId: input.nodeId,
+      origin: input.origin,
+      preparedConfig: input.preparedConfig,
     });
+    let agent = compilation.agent;
     const description = agent.config.description;
     if (!description) {
       throw new Error(
-        `Local subagent "${input.source.logicalPath}" is missing a "description" field on its agent config. Add \`description\` to \`defineAgent({ ... })\` so the parent agent can decide when to delegate to this subagent.`,
+        `Local subagent "${source.logicalPath}" requires a model-visible "description". Author its \`agent.ts\` with \`defineAgent({ description, model })\` so the parent agent can decide when to delegate to this subagent.`,
       );
     }
-
-    const descendants = await compileSubagentGraph({
-      appRoot: input.appRoot,
-      compileAgentNodeManifest: input.compileAgentNodeManifest,
-      context: input.context,
-      compileAgentResources: input.compileAgentResources,
-      externalDependencies:
-        agent.config.build?.externalDependencies ?? inheritedExternalDependencies,
-      parentAgentRoot: input.source.manifest.agentRoot,
-      parentNodeId: nodeId,
-      subagents: composeAgentSubagentSources(input.source.manifest),
+    const descendants = await compileDescendants({
+      ...input,
+      externalDependencies: mergeExternalDependencies(
+        inheritedDependencies,
+        agent.config.build?.externalDependencies,
+      ),
+      subagents: compilation.subagents,
     });
-    return {
-      descendants,
-      node: {
-        ...nodeBase,
-        agent: { ...agent, remoteAgents: [...descendants.remoteAgents] },
-        description,
-      },
-    };
+    agent = attachRemoteSources(agent, descendants.remoteAgents, {
+      isRoot: false,
+      nodeId: input.nodeId,
+      subagentSources: toKernelSemanticSubagentSources(compilation.subagents),
+    });
+    return { descendants, node: { ...nodeBase, agent, description } };
   }
 
-  const resources = await input.compileAgentResources(sourceManifest, input.context, {
-    externalDependencies: inheritedExternalDependencies,
-  });
-  const descendants = await compileSubagentGraph({
-    appRoot: input.appRoot,
-    compileAgentNodeManifest: input.compileAgentNodeManifest,
-    context: input.context,
-    compileAgentResources: input.compileAgentResources,
-    externalDependencies: inheritedExternalDependencies,
-    parentAgentRoot: input.source.manifest.agentRoot,
-    parentNodeId: nodeId,
-    subagents: composeAgentSubagentSources(input.source.manifest),
-  });
-  return {
-    descendants,
-    node: {
-      ...nodeBase,
-      agent: { ...resources, remoteAgents: [...descendants.remoteAgents] },
-      configResolver: input.configResolver,
-    },
+  const configResolver: CompiledDynamicSubagentDefinition = {
+    ...toModuleSource(configCandidate),
+    ...input.dynamic.definition,
+    build: input.dynamic.build,
   };
+  const configGraph = withSelectedConfigExternalDependencies(
+    input.preparedConfig.graph,
+    configCandidate.descriptor.sourceId,
+    inheritedDependencies,
+  );
+  const compilation = await input.compileAgentResources(input.sourceManifest, input.context, {
+    additionalConfigReference: configResolver,
+    configGraph,
+    declaredExternalDependencies: input.dynamic.build?.externalDependencies ?? [],
+    externalDependencies: inheritedDependencies,
+    isRoot: false,
+    nodeId: input.nodeId,
+    origin: input.origin,
+  });
+  let resources = compilation.resources;
+  const descendants = await compileDescendants({
+    ...input,
+    externalDependencies: inheritedDependencies,
+    subagents: compilation.subagents,
+  });
+  resources = attachRemoteSources(resources, descendants.remoteAgents, {
+    isRoot: false,
+    nodeId: input.nodeId,
+    subagentSources: toKernelSemanticSubagentSources(compilation.subagents),
+  });
+  return { descendants, node: { ...nodeBase, agent: resources, configResolver } };
 }
 
-const compileLocalSubagent = compileSubagent;
+function readSubagentBacking(candidate: EffectiveAgentSourceCandidate) {
+  if (candidate.descriptor.sourceKind !== "subagent") {
+    throw new Error(`Selected source "${candidate.descriptor.sourceId}" is not a subagent.`);
+  }
+  return candidate.descriptor.backing;
+}
+
+async function compileDescendants(input: {
+  readonly appRoot: string;
+  readonly compileAgentNodeManifest: CompileAgentNodeManifestFn;
+  readonly compileAgentResources: CompileAgentResourcesFn;
+  readonly context: ManifestCompileContext;
+  readonly externalDependencies?: readonly string[];
+  readonly nodeId: string;
+  readonly subagents: readonly SelectedSubagentSource[];
+}): Promise<Awaited<ReturnType<typeof compileSubagentGraph>>> {
+  return await compileSubagentGraph({
+    appRoot: input.appRoot,
+    compileAgentNodeManifest: input.compileAgentNodeManifest,
+    compileAgentResources: input.compileAgentResources,
+    context: input.context,
+    externalDependencies: input.externalDependencies,
+    parentNodeId: input.nodeId,
+    subagents: input.subagents,
+  });
+}
+
+export function attachRemoteSources<T extends CompiledAgentNodeManifest | CompiledAgentResources>(
+  resources: T,
+  remoteAgents: readonly CompiledRemoteAgentNode[],
+  options: {
+    readonly isRoot: boolean;
+    readonly nodeId: string;
+    readonly subagentSources?: readonly KernelSemanticSubagentSource[];
+  },
+): T {
+  if (remoteAgents.length === 0) return resources;
+  const input = {
+    ...resources,
+    remoteAgents: [...resources.remoteAgents, ...remoteAgents],
+  };
+  return (
+    "config" in resources
+      ? createCompiledAgentNodeManifest(
+          input as Parameters<typeof createCompiledAgentNodeManifest>[0],
+          options,
+        )
+      : createCompiledAgentResources(input, options)
+  ) as T;
+}
 
 function compileRemoteAgent(input: {
-  readonly parentAgentRoot: string;
+  readonly configCandidate: EffectiveAgentSourceCandidate;
+  readonly parentNodeId: string;
+  readonly preparedConfig: PreparedAgentConfigPhase;
+  readonly sourceCandidate: EffectiveAgentSourceCandidate;
   readonly source: LocalSubagentSourceRef;
   readonly value: unknown;
-}): CompiledRemoteAgentNode {
-  const configModule = input.source.manifest.configModule;
-
-  if (configModule === undefined) {
-    throw new Error(`Remote agent "${input.source.logicalPath}" is missing a config module.`);
-  }
-
+}): {
+  readonly kind: "remote";
+  readonly node: CompiledRemoteAgentNode;
+} {
   assertRemoteAgentDefinitionHasNoLocalPackageEntries(input.source);
-
-  const moduleSource = createSubagentConfigModuleSourceRef(
-    input.source,
-    configModule,
-    input.parentAgentRoot,
-  );
   const definition = normalizeRemoteAgentDefinition(
     input.value,
-    `Expected the remote agent config export "${configModule.exportName ?? "default"}" from "${moduleSource.logicalPath}" to match the public eve shape.`,
+    `Expected the remote agent config export "${readExportName(input.configCandidate)}" from "${input.configCandidate.source.logicalPath}" to match the public eve shape.`,
   );
-  const node = {
-    ...moduleSource,
+  const moduleSource = toModuleSource(input.configCandidate);
+  const backing = readSubagentBacking(input.sourceCandidate);
+  const nodeBase: CompiledRemoteAgentNode = {
+    backing,
+    bindings: input.preparedConfig.graph.bindings,
+    configResolver: moduleSource,
     description: definition.description,
-    entryPath: input.source.entryPath,
+    entryPath: backing.kind === "filesystem" ? backing.sourcePath : input.source.entryPath,
+    logicalPath: input.source.logicalPath,
     name: input.source.subagentId,
-    nodeId: input.source.sourceId,
+    nodeId: createCompiledSubagentNodeId(input.parentNodeId, input.source.sourceId),
+    owner: input.sourceCandidate.descriptor.owner,
     outputSchema: definition.outputSchema,
     path: definition.path,
     rootPath: input.source.rootPath,
+    sourceId: input.source.sourceId,
+    sourceKind: "subagent",
+    sourceComposition: input.preparedConfig.graph.composition,
   };
+  const node = definition.url === undefined ? nodeBase : { ...nodeBase, url: definition.url };
+  return { kind: "remote", node };
+}
 
-  // A function `url` is deferred, so the compiled node omits it entirely.
-  return definition.url === undefined ? node : { ...node, url: definition.url };
+function childOrigin(candidate: EffectiveAgentSourceCandidate): AgentNodeSourceOrigin {
+  if (candidate.descriptor.sourceKind !== "subagent") {
+    throw new Error(`Selected source "${candidate.descriptor.sourceId}" is not a subagent source.`);
+  }
+  const origin: {
+    extensionScope?: AgentNodeSourceOrigin["extensionScope"];
+    layer: AgentNodeSourceOrigin["layer"];
+    owner: AgentNodeSourceOrigin["owner"];
+  } = {
+    layer: candidate.descriptor.layer,
+    owner: candidate.descriptor.owner,
+  };
+  if (
+    candidate.descriptor.backing.kind === "filesystem" &&
+    candidate.descriptor.backing.extensionScope !== undefined
+  ) {
+    origin.extensionScope = candidate.descriptor.backing.extensionScope;
+  }
+  return origin;
+}
+
+function toModuleSource(candidate: EffectiveAgentSourceCandidate) {
+  if (!isEffectiveModuleSource(candidate.source)) {
+    throw new Error(`Subagent config source "${candidate.descriptor.sourceId}" must be a module.`);
+  }
+  return candidate.source;
+}
+
+function readOptionalExportName(candidate: EffectiveAgentSourceCandidate): string | undefined {
+  return isEffectiveModuleSource(candidate.source) ? candidate.source.exportName : undefined;
+}
+
+function readExportName(candidate: EffectiveAgentSourceCandidate): string {
+  return readOptionalExportName(candidate) ?? "default";
 }
 
 function normalizeDynamicSubagentDefinition(
@@ -332,18 +440,13 @@ function normalizeDynamicSubagentDefinition(
       readonly definition: { readonly eventNames: readonly DynamicToolEventName[] };
     }
   | undefined {
-  if (!isDynamicSentinel(value)) {
-    return undefined;
-  }
-
+  if (!isDynamicSentinel(value)) return undefined;
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(record, ["build", "events", "kind"], message);
-
   const build =
     record.build === undefined ? undefined : normalizeDynamicSubagentBuild(record.build, message);
   const rawEvents = expectObjectRecord(record.events, message);
   const eventNames: DynamicToolEventName[] = [];
-
   for (const [eventName, handler] of Object.entries(rawEvents)) {
     if (!ALLOWED_DYNAMIC_SUBAGENT_EVENTS.has(eventName as DynamicToolEventName)) {
       throw new Error(
@@ -353,17 +456,9 @@ function normalizeDynamicSubagentDefinition(
     expectFunction(handler, message);
     eventNames.push(eventName as DynamicToolEventName);
   }
-
-  const normalized: {
-    build?: { readonly externalDependencies?: readonly string[] };
-    readonly definition: { readonly eventNames: readonly DynamicToolEventName[] };
-  } = {
-    definition: { eventNames },
-  };
-  if (build !== undefined) {
-    normalized.build = build;
-  }
-  return normalized;
+  return build === undefined
+    ? { definition: { eventNames } }
+    : { build, definition: { eventNames } };
 }
 
 function normalizeDynamicSubagentBuild(
@@ -379,54 +474,12 @@ function normalizeDynamicSubagentBuild(
   };
 }
 
-function mergeExternalDependencies(
-  ...lists: ReadonlyArray<readonly string[] | undefined>
-): readonly string[] {
-  return [...new Set(lists.flatMap((list) => list ?? []))];
-}
-
-function createSubagentConfigModuleSourceRef(
-  source: LocalSubagentSourceRef,
-  configModule: NonNullable<LocalSubagentSourceRef["manifest"]["configModule"]>,
-  parentAgentRoot: string,
-): {
-  readonly exportName?: string;
-  readonly logicalPath: string;
-  readonly sourceId: string;
-  readonly sourceKind: "module";
-} {
-  const logicalPath = relative(
-    parentAgentRoot,
-    join(source.manifest.agentRoot, configModule.logicalPath),
-  ).replaceAll("\\", "/");
-  const sourceId =
-    configModule.sourceId.startsWith("ext:") || configModule.sourceId.startsWith("ext-override:")
-      ? configModule.sourceId
-      : createPathDerivedSourceId(logicalPath);
-  const moduleSource: {
-    exportName?: string;
-    logicalPath: string;
-    sourceId: string;
-    sourceKind: "module";
-  } = {
-    logicalPath,
-    sourceId,
-    sourceKind: "module",
-  };
-
-  if (configModule.exportName !== undefined) {
-    moduleSource.exportName = configModule.exportName;
-  }
-
-  return moduleSource;
-}
-
 function readAgentDefinitionKind(value: unknown): "local" | "remote" {
-  if (value === null || typeof value !== "object") {
-    return "local";
-  }
-
-  return (value as { readonly kind?: unknown }).kind === "remote" ? "remote" : "local";
+  return value !== null &&
+    typeof value === "object" &&
+    (value as { readonly kind?: unknown }).kind === "remote"
+    ? "remote"
+    : "local";
 }
 
 function normalizeRemoteAgentDefinition(
@@ -444,27 +497,22 @@ function normalizeRemoteAgentDefinition(
     ["auth", "description", "forwardPrincipal", "headers", "kind", "outputSchema", "path", "url"],
     message,
   );
-
-  if (record.kind !== "remote") {
-    throw new Error(`${message} Expected "kind" to be "remote".`);
-  }
-
-  // `forwardPrincipal` rides the module-backed runtime definition (like
-  // `auth` and `headers`), so it is validated here but never baked into the
-  // manifest.
+  if (record.kind !== "remote") throw new Error(`${message} Expected "kind" to be "remote".`);
   if (record.forwardPrincipal !== undefined) {
     expectBoolean(
       record.forwardPrincipal,
       `${message} Expected "forwardPrincipal" to be a boolean.`,
     );
   }
-
+  const url = typeof record.url === "function" ? undefined : expectString(record.url, message);
+  if (url !== undefined && url.length === 0) {
+    throw new Error(`${message} Expected "url" to be a non-empty string or function.`);
+  }
   return {
     description: expectString(record.description, message),
     outputSchema: serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined),
     path: record.path === undefined ? EVE_SESSION_ROUTE_PATH : expectString(record.path, message),
-    // A function `url` is resolved at runtime, not baked into the manifest.
-    url: typeof record.url === "function" ? undefined : expectString(record.url, message),
+    url,
   };
 }
 
@@ -472,6 +520,9 @@ function assertRemoteAgentDefinitionHasNoLocalPackageEntries(source: LocalSubage
   const manifest = source.manifest;
   const extraEntries = [
     manifest.connections.length > 0 ? "connections/" : undefined,
+    manifest.extensions.length > 0 || manifest.resolvedExtensions.length > 0
+      ? "extensions/"
+      : undefined,
     manifest.hooks.length > 0 ? "hooks/" : undefined,
     manifest.instructions.length > 0 ? "instructions" : undefined,
     manifest.lib.length > 0 ? "lib/" : undefined,
@@ -482,12 +533,14 @@ function assertRemoteAgentDefinitionHasNoLocalPackageEntries(source: LocalSubage
     manifest.subagents.length > 0 ? "subagents/" : undefined,
     manifest.tools.length > 0 ? "tools/" : undefined,
   ].filter((entry) => entry !== undefined);
-
-  if (extraEntries.length === 0) {
-    return;
-  }
-
+  if (extraEntries.length === 0) return;
   throw new Error(
     `Remote subagent definition "${source.logicalPath}" cannot include local package entries. Remove unsupported entries: ${extraEntries.join(", ")}.`,
   );
+}
+
+function mergeExternalDependencies(
+  ...lists: ReadonlyArray<readonly string[] | undefined>
+): readonly string[] {
+  return [...new Set(lists.flatMap((list) => list ?? []))];
 }

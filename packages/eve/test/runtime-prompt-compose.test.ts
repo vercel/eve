@@ -10,6 +10,7 @@ describe("composeRuntimeBasePrompt", () => {
             content: "You are a weather assistant.\n",
             name: "instructions",
             logicalPath: "instructions.md",
+            owner: { kind: "application" },
             role: "system",
             sourceId: "instructions.md",
             sourceKind: "markdown",
@@ -17,6 +18,40 @@ describe("composeRuntimeBasePrompt", () => {
         ],
       }),
     ).toEqual(["Instructions (instructions)\nYou are a weather assistant."]);
+  });
+
+  it("uses explicit ownership instead of decoding opaque source ids", () => {
+    expect(
+      composeRuntimeBasePrompt({
+        instructions: [
+          {
+            content: "Application policy.",
+            name: "application-policy",
+            logicalPath: "instructions/application-policy.md",
+            owner: { kind: "application" },
+            role: "system",
+            sourceId: "ext:looks-like-an-extension",
+            sourceKind: "markdown",
+          },
+        ],
+      }),
+    ).toEqual(["Instructions (application-policy)\nApplication policy."]);
+
+    expect(
+      composeRuntimeBasePrompt({
+        instructions: [
+          {
+            content: "Extension policy.",
+            name: "crm-policy",
+            logicalPath: "instructions/crm-policy.md",
+            owner: { kind: "extension", namespace: "crm", packageName: "@acme/crm" },
+            role: "system",
+            sourceId: "opaque-source-without-a-prefix",
+            sourceKind: "markdown",
+          },
+        ],
+      }),
+    ).toEqual(["Instructions (instructions)\nExtension policy."]);
   });
 
   it("adds a parallel tool execution instruction when tools are available", () => {
@@ -40,6 +75,7 @@ describe("composeRuntimeBasePrompt", () => {
             content: "   \n",
             name: "instructions",
             logicalPath: "instructions.md",
+            owner: { kind: "application" },
             role: "system",
             sourceId: "instructions.md",
             sourceKind: "markdown",
@@ -57,6 +93,7 @@ describe("composeRuntimeBasePrompt", () => {
             content: "First system block.",
             logicalPath: "instructions/10-first.md",
             name: "instructions/10-first",
+            owner: { kind: "application" },
             role: "system",
             sourceId: "instructions/10-first.md",
             sourceKind: "markdown",
@@ -65,6 +102,7 @@ describe("composeRuntimeBasePrompt", () => {
             content: "Durable user context.",
             logicalPath: "instructions/20-user.ts",
             name: "instructions/20-user",
+            owner: { kind: "application" },
             role: "user",
             sourceId: "instructions/20-user.ts",
             sourceKind: "module",
@@ -73,6 +111,7 @@ describe("composeRuntimeBasePrompt", () => {
             content: "Second system block.",
             logicalPath: "instructions/30-second.ts",
             name: "instructions/30-second",
+            owner: { kind: "application" },
             role: "system",
             sourceId: "instructions/30-second.ts",
             sourceKind: "module",
@@ -89,6 +128,7 @@ describe("composeRuntimeBasePrompt", () => {
           content: "  First system block.  ",
           logicalPath: "instructions/a.ts",
           name: "instructions/a",
+          owner: { kind: "application" },
           role: "system",
           sourceId: "instructions/a.ts",
           sourceKind: "module",
@@ -97,6 +137,7 @@ describe("composeRuntimeBasePrompt", () => {
           content: "\tSecond system block.\n",
           logicalPath: "instructions/b.ts",
           name: "instructions/b",
+          owner: { kind: "application" },
           role: "system",
           sourceId: "instructions/b.ts",
           sourceKind: "module",

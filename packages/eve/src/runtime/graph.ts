@@ -16,10 +16,8 @@ export const ROOT_RUNTIME_AGENT_NODE_ID = "__root__";
 export interface ResolvedRuntimeAgentNode {
   readonly agent: ResolvedAgent;
   /**
-   * The merged set of channels (framework defaults + authored overrides
-   * minus authored disables) that the Nitro mounting loop should mount.
-   * Computed by `resolve-agent-graph.ts` so the host plumbing never has to
-   * combine framework defaults with the resolved-agent's authored channels.
+   * Active channels selected by source composition, then resolved from the
+   * compiled route plan for runtime dispatch.
    */
   readonly channels: readonly ResolvedChannelDefinition[];
   /**

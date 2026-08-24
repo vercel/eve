@@ -22,7 +22,7 @@
     "fix:deps": "syncpack fix-mismatches && syncpack format",
     "fmt": "oxfmt",
     "guard:fixtures": "node ./scripts/guard-test-fixtures.mjs",
-    "guard:invariants": "node ./scripts/guard-invariants.mjs",
+    "guard:invariants": "node --test ./scripts/guard-invariants.test.mjs && node ./scripts/guard-invariants.mjs",
     "lint": "oxlint --fix",
     "prepare": "node ./scripts/install-git-hooks.mjs",
     "test": "pnpm test:unit && pnpm test:integration",

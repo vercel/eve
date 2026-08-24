@@ -1,4 +1,4 @@
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
@@ -7,21 +7,25 @@ import { serializeOutputSchema } from "#shared/tool-schema.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
-import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import {
+  type AgentExperimentalDefinition,
   isDynamicModelDefinition,
   type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
-import type { DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
+import {
+  ALLOWED_DYNAMIC_MODEL_EVENTS,
+  type DynamicToolEventName,
+} from "#shared/dynamic-tool-definition.js";
 import type { CompiledAgentDefinition, CompiledRuntimeModelReference } from "#compiler/manifest.js";
 import type { CompiledRuntimeModelLimits } from "#compiler/model-catalog.js";
-import {
-  loadModuleBackedDefinition,
-  type ManifestCompileContext,
-} from "#compiler/normalize-helpers.js";
+import type { ManifestCompileContext } from "#compiler/normalize-helpers.js";
+import type { CompiledModuleBinding } from "#compiler/module-binding.js";
+import { compileWorkflowWorldPlan } from "#compiler/workflow-world-plan.js";
+import type { CompiledWorkflowWorldPlan } from "#compiler/workflow-world-plan.js";
+import type { BuiltInWorkflowWorldTarget } from "#internal/workflow/world-target.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -33,28 +37,44 @@ export async function compileAgentConfig(
   manifest: AgentSourceManifest,
   context: ManifestCompileContext,
   options: {
-    readonly definition?: unknown;
-  } = {},
+    readonly allowWorkflowRuntime?: boolean;
+    readonly binding: CompiledModuleBinding;
+    readonly definition: unknown;
+    readonly workflowWorld?: {
+      readonly defaultTarget: BuiltInWorkflowWorldTarget;
+      readonly setPlan: (plan: CompiledWorkflowWorldPlan) => void;
+    };
+  },
 ): Promise<CompiledAgentDefinition> {
   const configModule = manifest.configModule;
-  const configModulePath =
-    configModule === undefined ? undefined : formatAgentConfigModulePath(manifest, configModule);
-  const hasInjectedDefinition = Object.hasOwn(options, "definition");
+  if (configModule === undefined) {
+    throw new Error(`Agent "${manifest.agentId}" has no selected agent config module.`);
+  }
+  if (options.binding.logicalPath !== configModule.logicalPath) {
+    throw new Error(
+      `Selected agent config binding "${configModule.sourceId}" targets "${options.binding.logicalPath}" instead of "${configModule.logicalPath}".`,
+    );
+  }
+  const configSourceLocator = formatAgentConfigSourceLocator(manifest, options.binding);
   const definition = normalizeAgentDefinition(
-    hasInjectedDefinition
-      ? options.definition
-      : configModule === undefined
-        ? { model: DEFAULT_AGENT_MODEL_ID }
-        : await loadModuleBackedDefinition({
-            agentRoot: manifest.agentRoot,
-            displayPath: configModulePath!,
-            kind: "agent config",
-            source: configModule,
-          }),
-    configModule === undefined
-      ? `Expected the default agent config to match the public eve shape.`
-      : `Expected the agent config export "${configModule.exportName ?? "default"}" from "${configModulePath}" to match the public eve shape.`,
+    options.definition,
+    `Expected the agent config export "${configModule.exportName ?? "default"}" from "${configSourceLocator}" to match the public eve shape.`,
   );
+  const authoredWorkflowWorld = definition.experimental?.workflow?.world;
+  if (definition.experimental?.workflow !== undefined && options.allowWorkflowRuntime !== true) {
+    throw new Error(
+      `Workflow runtime configuration is only supported on the root agent config. Remove "experimental.workflow" from "${manifest.agentId}".`,
+    );
+  }
+  if (options.workflowWorld !== undefined) {
+    options.workflowWorld.setPlan(
+      await compileWorkflowWorldPlan({
+        appRoot: manifest.appRoot,
+        selection: authoredWorkflowWorld === undefined ? "host-default" : "configured",
+        target: authoredWorkflowWorld ?? options.workflowWorld.defaultTarget,
+      }),
+    );
+  }
   const dynamicModelDefinition = isDynamicModelDefinition(definition.model)
     ? definition.model
     : undefined;
@@ -66,7 +86,7 @@ export async function compileAgentConfig(
           contextWindowTokens: definition.modelContextWindowTokens,
           providerOptions: definition.modelOptions?.providerOptions,
           source: configModule,
-          sourcePath: configModulePath,
+          sourceLocator: configSourceLocator,
           value: definition.model as PublicAgentStaticModelDefinition,
         })
       : undefined;
@@ -86,11 +106,17 @@ export async function compileAgentConfig(
     name: string;
     outputSchema?: JsonObject;
     reasoning?: CompiledAgentDefinition["reasoning"];
-    source?: ModuleSourceRef;
+    source: ModuleSourceRef;
     limits?: CompiledAgentDefinition["limits"];
   } = {
     compaction,
     name: manifest.agentId,
+    source: {
+      exportName: configModule.exportName,
+      sourceKind: "module",
+      logicalPath: configModule.logicalPath,
+      sourceId: configModule.sourceId,
+    },
   };
 
   if (definition.description !== undefined) {
@@ -99,11 +125,17 @@ export async function compileAgentConfig(
 
   let dynamicModel: CompiledAgentDefinition["dynamicModel"] | undefined;
   if (dynamicModelDefinition !== undefined) {
-    if (configModule === undefined) {
-      throw new Error("Expected dynamic model definitions to be authored in agent.ts.");
+    const eventNames = Object.keys(dynamicModelDefinition.events);
+    const unsupportedEvent = eventNames.find(
+      (eventName) => !ALLOWED_DYNAMIC_MODEL_EVENTS.has(eventName),
+    );
+    if (unsupportedEvent !== undefined) {
+      throw new Error(
+        `Expected the agent config export "${configModule.exportName ?? "default"}" from "${configSourceLocator}" to use only supported dynamic model events. Unsupported event: "${unsupportedEvent}".`,
+      );
     }
     dynamicModel = {
-      eventNames: Object.keys(dynamicModelDefinition.events) as DynamicToolEventName[],
+      eventNames: eventNames as DynamicToolEventName[],
       exportName: configModule.exportName,
       sourceKind: "module",
       logicalPath: configModule.logicalPath,
@@ -111,7 +143,9 @@ export async function compileAgentConfig(
     };
   }
 
-  const experimental = normalizeExperimentalDefinition(definition.experimental);
+  const experimental = normalizeExperimentalDefinition({
+    experimental: definition.experimental,
+  });
   if (experimental !== undefined) {
     compiledConfig.experimental = experimental;
   }
@@ -141,15 +175,6 @@ export async function compileAgentConfig(
     };
   }
 
-  if (configModule !== undefined) {
-    compiledConfig.source = {
-      exportName: configModule.exportName,
-      sourceKind: "module",
-      logicalPath: configModule.logicalPath,
-      sourceId: configModule.sourceId,
-    };
-  }
-
   if (definition.compaction?.model !== undefined) {
     compaction.model = await normalizeAuthoredModelReference({
       modelCatalog: context.modelCatalog,
@@ -157,7 +182,7 @@ export async function compileAgentConfig(
       contextWindowTokens: definition.compaction.modelContextWindowTokens,
       providerOptions: definition.modelOptions?.providerOptions,
       source: configModule,
-      sourcePath: configModulePath,
+      sourceLocator: configSourceLocator,
       value: definition.compaction.model,
     });
   }
@@ -177,34 +202,28 @@ export async function compileAgentConfig(
   return { ...compiledConfig, model };
 }
 
-function normalizeExperimentalDefinition(
-  experimental: CompiledAgentDefinition["experimental"] | undefined,
-): CompiledAgentDefinition["experimental"] | undefined {
-  if (experimental === undefined) {
+function normalizeExperimentalDefinition(input: {
+  readonly experimental: AgentExperimentalDefinition | undefined;
+}): CompiledAgentDefinition["experimental"] | undefined {
+  if (input.experimental === undefined) {
     return undefined;
   }
 
   const compiledExperimental: Mutable<NonNullable<CompiledAgentDefinition["experimental"]>> = {};
 
-  if (experimental.instrumentationProviders !== undefined) {
-    compiledExperimental.instrumentationProviders = experimental.instrumentationProviders;
+  if (input.experimental.instrumentationProviders !== undefined) {
+    compiledExperimental.instrumentationProviders = input.experimental.instrumentationProviders;
   }
 
-  if (experimental.subagentPersistentSessions !== undefined) {
-    compiledExperimental.subagentPersistentSessions = experimental.subagentPersistentSessions;
+  if (input.experimental.subagentPersistentSessions !== undefined) {
+    compiledExperimental.subagentPersistentSessions = input.experimental.subagentPersistentSessions;
   }
 
-  if (experimental.tasks !== undefined) {
-    compiledExperimental.tasks = experimental.tasks;
+  if (input.experimental.tasks !== undefined) {
+    compiledExperimental.tasks = input.experimental.tasks;
   }
 
-  if (experimental.workflow !== undefined) {
-    compiledExperimental.workflow = {
-      world: experimental.workflow.world,
-    };
-  }
-
-  return compiledExperimental;
+  return Object.keys(compiledExperimental).length === 0 ? undefined : compiledExperimental;
 }
 
 async function normalizeAuthoredModelReference(input: {
@@ -213,7 +232,7 @@ async function normalizeAuthoredModelReference(input: {
   readonly contextWindowTokens?: number;
   readonly providerOptions?: Record<string, JsonObject>;
   readonly source?: ModuleSourceRef;
-  readonly sourcePath?: string;
+  readonly sourceLocator?: string;
   readonly value: PublicAgentStaticModelDefinition;
 }): Promise<CompiledRuntimeModelReference> {
   if (typeof input.value === "string") {
@@ -245,7 +264,7 @@ async function normalizeAuthoredModelReference(input: {
     specificationVersion !== "v4"
   ) {
     throw new Error(
-      `Expected the authored agent config export "${source.exportName ?? "default"}" from "${input.sourcePath ?? source.logicalPath}" to provide a valid AI SDK language model.`,
+      `Expected the authored agent config export "${source.exportName ?? "default"}" from "${input.sourceLocator ?? source.logicalPath}" to provide a valid AI SDK language model.`,
     );
   }
 
@@ -256,7 +275,7 @@ async function normalizeAuthoredModelReference(input: {
     typeof languageModel.doStream !== "function"
   ) {
     throw new Error(
-      `Expected the authored agent config export "${source.exportName ?? "default"}" from "${input.sourcePath ?? source.logicalPath}" to provide a valid AI SDK language model.`,
+      `Expected the authored agent config export "${source.exportName ?? "default"}" from "${input.sourceLocator ?? source.logicalPath}" to provide a valid AI SDK language model.`,
     );
   }
 
@@ -303,12 +322,16 @@ async function normalizeAuthoredModelReference(input: {
   return await withCompiledRuntimeModelLimits(sourceBackedModel, input);
 }
 
-function formatAgentConfigModulePath(
+function formatAgentConfigSourceLocator(
   manifest: AgentSourceManifest,
-  configModule: ModuleSourceRef,
+  binding: CompiledModuleBinding,
 ): string {
-  const configPath = join(manifest.agentRoot, configModule.logicalPath);
-  return normalizeLogicalPath(relative(resolveTopLevelAgentRoot(manifest), configPath));
+  if (binding.backing.kind === "programmatic") {
+    return `${binding.backing.registryId}:${binding.backing.moduleId}`;
+  }
+  return normalizeLogicalPath(
+    relative(resolveTopLevelAgentRoot(manifest), binding.backing.sourcePath),
+  );
 }
 
 function resolveTopLevelAgentRoot(manifest: AgentSourceManifest): string {

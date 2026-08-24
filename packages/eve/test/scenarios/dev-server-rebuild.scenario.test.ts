@@ -50,7 +50,9 @@ describe("eve dev server rebuild transactions", () => {
         const initialRevision = await readDevelopmentRevision(server.url);
         const initialWorkerId = await fetchText(server.url, "/worker-id");
         expect(
-          (await fetchAgentInfo(server.url)).tools.authored.map((tool) => tool.name),
+          (await fetchAgentInfo(server.url)).tools.static
+            .filter((tool) => tool.owner.kind === "application")
+            .map((tool) => tool.name),
         ).toContain("get_weather");
 
         await rm(join(app.appRoot, "agent", "tools", "get_weather.ts"));
@@ -59,7 +61,9 @@ describe("eve dev server rebuild transactions", () => {
         await expect(readDevelopmentRevision(server.url)).resolves.not.toBe(initialRevision);
         await expect(fetchText(server.url, "/worker-id")).resolves.toBe(initialWorkerId);
         expect(
-          (await fetchAgentInfo(server.url)).tools.authored.map((tool) => tool.name),
+          (await fetchAgentInfo(server.url)).tools.static
+            .filter((tool) => tool.owner.kind === "application")
+            .map((tool) => tool.name),
         ).not.toContain("get_weather");
         expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
       } finally {

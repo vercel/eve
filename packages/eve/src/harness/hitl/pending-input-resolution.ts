@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 
-import type { RuntimeToolResultActionResult } from "#runtime/actions/types.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import type { RuntimeToolResultActionResult } from "#shared/runtime-actions.js";
+import type { InputResponse } from "#shared/input.js";
 import type { ResolvedInputBatch } from "#harness/input-request-resolution.js";
 import type { PendingInputBatch, PendingInputBatchEvent } from "#harness/pending-input-batches.js";
 import { queueDeferredStepInput } from "#harness/pending-input-batches.js";

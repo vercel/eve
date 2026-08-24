@@ -4,7 +4,10 @@ import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
-import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import {
+  readDevelopmentServerReadiness,
+  waitForDevelopmentServerReadiness,
+} from "#shared/development-server-readiness.js";
 
 const EVE_BASE_URL_ENV = "EVE_BASE_URL";
 const DEFAULT_SERVER_READY_TIMEOUT_MS = 180_000;
@@ -24,6 +27,10 @@ interface EveProcessHandle {
   readonly process?: ChildProcess;
 }
 
+interface IdentifiedEveProcessHandle extends EveProcessHandle {
+  readonly serverId: string;
+}
+
 interface EveNextGlobalState {
   readonly servers: Map<string, Promise<EveProcessHandle>>;
 }
@@ -32,6 +39,7 @@ interface EveDevServerRegistry {
   readonly appRoot: string;
   readonly origin: string;
   readonly pid: number | null;
+  readonly serverId: string;
   readonly updatedAt: string;
 }
 
@@ -47,10 +55,6 @@ function getGlobalState(): EveNextGlobalState {
   };
 
   return globalWithState[globalStateSymbol];
-}
-
-function joinRoutePrefix(prefix: string, path: string): string {
-  return `${prefix.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
 }
 
 function normalizeOrigin(origin: string): string {
@@ -99,6 +103,8 @@ function normalizeDevServerRegistry(value: unknown): EveDevServerRegistry | unde
   if (
     typeof value.appRoot !== "string" ||
     typeof value.origin !== "string" ||
+    typeof value.serverId !== "string" ||
+    value.serverId.length === 0 ||
     typeof value.updatedAt !== "string"
   ) {
     return undefined;
@@ -113,29 +119,11 @@ function normalizeDevServerRegistry(value: unknown): EveDevServerRegistry | unde
       appRoot: value.appRoot,
       origin: normalizeOrigin(value.origin),
       pid: value.pid,
+      serverId: value.serverId,
       updatedAt: value.updatedAt,
     };
   } catch {
     return undefined;
-  }
-}
-
-async function isEveServerHealthy(origin: string): Promise<boolean> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, 1_000);
-
-  try {
-    const response = await fetch(joinRoutePrefix(origin, `${EVE_ROUTE_PREFIX}/health`), {
-      signal: controller.signal,
-    });
-
-    return response.ok;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -149,7 +137,11 @@ async function readUsableEveDevServerRegistry(appRoot: string): Promise<string |
       return undefined;
     }
 
-    if (!(await isEveServerHealthy(registry.origin))) {
+    if (
+      (await readDevelopmentServerReadiness(registry.origin, {
+        expectedServerId: registry.serverId,
+      })) === undefined
+    ) {
       return undefined;
     }
 
@@ -163,7 +155,10 @@ async function readUsableEveDevServerRegistry(appRoot: string): Promise<string |
   }
 }
 
-async function writeEveDevServerRegistry(appRoot: string, handle: EveProcessHandle): Promise<void> {
+async function writeEveDevServerRegistry(
+  appRoot: string,
+  handle: IdentifiedEveProcessHandle,
+): Promise<void> {
   await mkdir(resolveEveCacheDirectory(appRoot), {
     recursive: true,
   });
@@ -174,6 +169,7 @@ async function writeEveDevServerRegistry(appRoot: string, handle: EveProcessHand
         appRoot,
         origin: handle.origin,
         pid: handle.process?.pid ?? null,
+        serverId: handle.serverId,
         updatedAt: new Date().toISOString(),
       } satisfies EveDevServerRegistry,
       null,
@@ -430,7 +426,7 @@ function startServerProcess(input: {
   });
 }
 
-function installProcessShutdown(handle: EveProcessHandle): EveProcessHandle {
+function installProcessShutdown<THandle extends EveProcessHandle>(handle: THandle): THandle {
   const childProcess = handle.process;
 
   if (childProcess === undefined) {
@@ -449,20 +445,25 @@ function installProcessShutdown(handle: EveProcessHandle): EveProcessHandle {
   return handle;
 }
 
-function startEveDevServer(
+async function startEveDevServer(
   appRoot: string,
   timeoutMs: number,
   logLabel: string | undefined,
-): Promise<EveProcessHandle> {
-  return startServerProcess({
+): Promise<IdentifiedEveProcessHandle> {
+  const handle = await startServerProcess({
     args: [createEveBinaryPath(), "dev", "--no-ui", "--port", "0"],
     command: process.execPath,
     cwd: appRoot,
     logLabel,
     timeoutMs,
-  }).then((handle) => {
-    return installProcessShutdown(handle);
   });
+  try {
+    const readiness = await waitForDevelopmentServerReadiness(handle.origin, { timeoutMs });
+    return installProcessShutdown({ ...handle, serverId: readiness.serverId });
+  } catch (error) {
+    handle.process?.kill();
+    throw error;
+  }
 }
 
 function startEveProductionServer(input: {

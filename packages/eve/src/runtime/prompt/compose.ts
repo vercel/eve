@@ -45,12 +45,24 @@ export function composeRuntimeBasePrompt(input: ComposeRuntimeBasePromptInput): 
   return [
     ...createInstructionsPromptBlocks(input.instructions),
     ...createWorkspacePromptBlocks(input.workspaceSpec),
+    ...createRuntimeActionPromptBlocks(input),
+    ...createConnectionsPromptBlocks(input.connections),
+    ...createSkillsPromptBlocks(input.skills),
+  ];
+}
+
+/** Composes action guidance after authored and session-native availability are known. */
+export function createRuntimeActionPromptBlocks(
+  input: Pick<
+    ComposeRuntimeBasePromptInput,
+    "persistentSubagentSessions" | "subagentsAvailable" | "tasksEnabled" | "toolsAvailable"
+  >,
+): readonly string[] {
+  return [
     ...(input.toolsAvailable ? [PARALLEL_ACTION_INSTRUCTION] : []),
     ...(input.subagentsAvailable && input.persistentSubagentSessions
       ? [input.tasksEnabled ? TASK_AGENT_MESSAGING_INSTRUCTION : AGENT_MESSAGING_INSTRUCTION]
       : []),
-    ...createConnectionsPromptBlocks(input.connections),
-    ...createSkillsPromptBlocks(input.skills),
   ];
 }
 
@@ -65,12 +77,7 @@ function createInstructionsPromptBlocks(
   }
 
   const only = systemInstructions.length === 1 ? systemInstructions[0] : undefined;
-  const name =
-    only !== undefined &&
-    !only.sourceId.startsWith("ext:") &&
-    !only.sourceId.startsWith("ext-override:")
-      ? only.name
-      : "instructions";
+  const name = only !== undefined && only.owner.kind !== "extension" ? only.name : "instructions";
   const content = systemInstructions
     .map((entry) => entry.content)
     .join("\n\n")

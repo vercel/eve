@@ -37,6 +37,7 @@ import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import { createInputRequestedEvent } from "#protocol/message.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
 import {
   createDurableSessionState,
   DURABLE_SESSION_VERSION,
@@ -161,6 +162,10 @@ vi.mock("../runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: vi.fn(),
 }));
 
+vi.mock("../runtime/cache-key.js", () => ({
+  resolveRuntimeCompiledArtifactsVersionedCacheKey: vi.fn(async () => "test-runtime-revision"),
+}));
+
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   getHookByToken: vi.fn(async (token: string) => currentSessionHook(token)),
   getRun: (...args: unknown[]) => getRunMock(...args),
@@ -216,12 +221,13 @@ function createSerializedContext(
     graph: {
       nodesByNodeId: new Map(),
       root: {
-        sandboxRegistry: { sandbox: null },
+        agent: { kernelPlan: { prepared: [] } },
+        sandboxRegistry: createStubSandboxRegistry(),
         turnAgent: TestTurnAgent,
       },
     },
     hookRegistry: createEmptyHookRegistry(),
-    resolvedAgent: { config: {} },
+    resolvedAgent: { config: {}, kernelPlan: { prepared: [] } },
     subagentRegistry: {},
     toolRegistry: {},
     turnAgent: TestTurnAgent,
@@ -774,12 +780,13 @@ describe("dispatchRuntimeActionsStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
+      resolvedAgent: { config: {}, kernelPlan: { prepared: [] } },
       subagentRegistry: {
         subagentsByNodeId: new Map([
           [
@@ -831,6 +838,7 @@ describe("dispatchRuntimeActionsStep", () => {
         },
       ],
       event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      kernelCapabilities: {},
       responseMessages: [],
       session: createStubSession({
         continuationToken: "http:parent",
@@ -958,12 +966,13 @@ describe("dispatchRuntimeActionsStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
+      resolvedAgent: { config: {}, kernelPlan: { prepared: [] } },
       subagentRegistry: {
         subagentsByNodeId: new Map([["remote/research", remote]]),
       },
@@ -987,6 +996,7 @@ describe("dispatchRuntimeActionsStep", () => {
         },
       ],
       event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      kernelCapabilities: {},
       responseMessages: [],
       session: createStubSession({
         continuationToken: "http:parent",
@@ -1051,12 +1061,13 @@ describe("dispatchRuntimeActionsStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
+      resolvedAgent: { config: {}, kernelPlan: { prepared: [] } },
       subagentRegistry: {
         subagentsByNodeId: new Map([["remote/research", remote]]),
       },
@@ -1091,6 +1102,7 @@ describe("dispatchRuntimeActionsStep", () => {
         },
       ],
       event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      kernelCapabilities: {},
       responseMessages: [],
       session: createStubSession({
         continuationToken: "http:parent",
@@ -1135,12 +1147,13 @@ describe("dispatchRuntimeActionsStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
+      resolvedAgent: { config: {}, kernelPlan: { prepared: [] } },
       subagentRegistry: {
         dynamicNodeIds: new Set([nodeId]),
         subagentsByNodeId: new Map([
@@ -1148,12 +1161,19 @@ describe("dispatchRuntimeActionsStep", () => {
             nodeId,
             {
               definition: {
+                dynamic: {
+                  eventNames: ["session.started"],
+                  events: { "session.started": () => null },
+                  logicalPath: "subagents/research/agent.ts",
+                  sourceId: "config:research",
+                  sourceKind: "module",
+                },
                 kind: "subagent",
                 logicalPath: "subagents/research.ts",
                 name: "research",
                 nodeId,
                 sourceId: "subagents/research.ts",
-                sourceKind: "module",
+                sourceKind: "subagent",
               },
             },
           ],
@@ -1194,6 +1214,7 @@ describe("dispatchRuntimeActionsStep", () => {
         },
       ],
       event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      kernelCapabilities: {},
       responseMessages: [],
       session: createStubSession({
         continuationToken: "http:parent",
@@ -1247,12 +1268,13 @@ describe("dispatchRuntimeActionsStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
+      resolvedAgent: { config: {}, kernelPlan: { prepared: [] } },
       subagentRegistry: {
         subagentsByNodeId: new Map(),
       },
@@ -1275,6 +1297,7 @@ describe("dispatchRuntimeActionsStep", () => {
         },
       ],
       event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      kernelCapabilities: {},
       responseMessages: [],
       session: createStubSession({
         continuationToken: "http:parent",
@@ -1336,12 +1359,13 @@ describe("dispatchRuntimeActionsStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
+      resolvedAgent: { config: {}, kernelPlan: { prepared: [] } },
       subagentRegistry: {
         dynamicNodeIds: new Set([nodeId]),
         dynamicResolvers: [],
@@ -1376,6 +1400,7 @@ describe("dispatchRuntimeActionsStep", () => {
         },
       ],
       event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      kernelCapabilities: {},
       responseMessages: [],
       session: createStubSession({
         continuationToken: "http:parent",
@@ -1453,13 +1478,18 @@ describe("turnStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {}, dynamicToolResolvers: [dynamicToolResolver] },
+      resolvedAgent: {
+        config: {},
+        dynamicToolResolvers: [dynamicToolResolver],
+        kernelPlan: { prepared: [] },
+      },
       subagentRegistry: { dynamicResolvers: [dynamicSubagentResolver] },
       toolRegistry: {},
       turnAgent: TestTurnAgent,
@@ -1537,12 +1567,17 @@ describe("turnStep", () => {
       compiledArtifactsSource: {} as never,
       graph: {
         nodesByNodeId: new Map(),
-        root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
+        root: {
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
+          turnAgent: TestTurnAgent,
+        },
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
       resolvedAgent: {
         config: {},
+        kernelPlan: { prepared: [] },
         dynamicToolResolvers: [
           {
             eventNames: ["session.started"],
@@ -1609,13 +1644,14 @@ describe("turnStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
+      resolvedAgent: { config: {}, kernelPlan: { prepared: [] } },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,
@@ -1671,13 +1707,17 @@ describe("turnStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: { experimental: { tasks: true } } },
+      resolvedAgent: {
+        config: { experimental: { tasks: true } },
+        kernelPlan: { prepared: [] },
+      },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,
@@ -1760,13 +1800,14 @@ describe("turnStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
+      resolvedAgent: { config: {}, kernelPlan: { prepared: [] } },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,
@@ -1864,13 +1905,14 @@ describe("turnStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
+      resolvedAgent: { config: {}, kernelPlan: { prepared: [] } },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,
@@ -1924,13 +1966,17 @@ describe("turnStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: { experimental: { tasks: true } } },
+      resolvedAgent: {
+        config: { experimental: { tasks: true } },
+        kernelPlan: { prepared: [] },
+      },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,
@@ -1986,13 +2032,17 @@ describe("turnStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: { experimental: { tasks: true } } },
+      resolvedAgent: {
+        config: { experimental: { tasks: true } },
+        kernelPlan: { prepared: [] },
+      },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,
@@ -2243,6 +2293,7 @@ describe("turnStep", () => {
             },
           ],
           event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+          kernelCapabilities: {},
           responseMessages: [],
           session,
         }),
@@ -2383,13 +2434,17 @@ describe("turnStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: { experimental: { tasks: true } } },
+      resolvedAgent: {
+        config: { experimental: { tasks: true } },
+        kernelPlan: { prepared: [] },
+      },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,
@@ -2500,13 +2555,14 @@ describe("turnStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
+      resolvedAgent: { config: {}, kernelPlan: { prepared: [] } },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,
@@ -2590,13 +2646,14 @@ describe("turnStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
+      resolvedAgent: { config: {}, kernelPlan: { prepared: [] } },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,
@@ -2654,13 +2711,14 @@ describe("turnStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent,
         },
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
+      resolvedAgent: { config: {}, kernelPlan: { prepared: [] } },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent,
@@ -2749,7 +2807,8 @@ describe("turnStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
@@ -2757,6 +2816,7 @@ describe("turnStep", () => {
       hookRegistry: createEmptyHookRegistry(),
       resolvedAgent: {
         config: {},
+        kernelPlan: { prepared: [] },
         dynamicToolResolvers: [dynamicToolResolver],
       },
       subagentRegistry: {},
@@ -2859,13 +2919,14 @@ describe("turnStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
+      resolvedAgent: { config: {}, kernelPlan: { prepared: [] } },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,
@@ -2945,7 +3006,8 @@ describe("turnStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
@@ -2953,6 +3015,7 @@ describe("turnStep", () => {
       hookRegistry: createEmptyHookRegistry(),
       resolvedAgent: {
         config: {},
+        kernelPlan: { prepared: [] },
         dynamicInstructionsResolvers: [
           {
             eventNames: ["session.started", "turn.started"],
@@ -3035,12 +3098,13 @@ describe("emitTerminalSessionFailureStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
+      resolvedAgent: { config: {}, kernelPlan: { prepared: [] } },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,
@@ -3208,12 +3272,13 @@ describe("runProxySubagentEventStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
-          sandboxRegistry: { sandbox: null },
+          agent: { kernelPlan: { prepared: [] } },
+          sandboxRegistry: createStubSandboxRegistry(),
           turnAgent: TestTurnAgent,
         },
       },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
+      resolvedAgent: { config: {}, kernelPlan: { prepared: [] } },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,

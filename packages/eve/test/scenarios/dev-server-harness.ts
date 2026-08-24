@@ -4,6 +4,7 @@ import { existsSync, watch as watchFileSystem } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Readable } from "node:stream";
 
+import { AgentInfoResultSchema } from "../../src/client/agent-info-schema.js";
 import {
   EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH,
   EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH,
@@ -103,7 +104,7 @@ export async function startEveDev(
       child,
       getOutput: () => ({ stderr, stdout }),
     });
-    await waitForPath(join(appRoot, ".eve", "dev-server-state.v1.json"));
+    await waitForPath(join(appRoot, ".eve", "dev-server-state.v2.json"));
   } catch (error) {
     await stopEveDevChild(child);
     throw error;
@@ -348,7 +349,7 @@ export async function fetchAgentInfo(serverUrl: string): Promise<AgentInfoRespon
   if (!response.ok) {
     throw new Error(`Expected agent info to succeed, received ${String(response.status)}.`);
   }
-  return (await response.json()) as AgentInfoResponse;
+  return AgentInfoResultSchema.parse(await response.json());
 }
 
 export async function forceDevelopmentRebuild(serverUrl: string): Promise<void> {

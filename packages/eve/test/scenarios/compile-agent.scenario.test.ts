@@ -1,37 +1,52 @@
 import { execFile } from "node:child_process";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
+  COMPILER_DIAGNOSTICS_ARTIFACT_KIND,
+  COMPILER_DIAGNOSTICS_ARTIFACT_VERSION,
   COMPILE_METADATA_KIND,
   COMPILE_METADATA_VERSION,
+  compilerDiagnosticsArtifactSchema,
   createCompileMetadata,
   resolveCompilerArtifactPaths,
   writeCompilerArtifacts,
 } from "../../src/compiler/artifacts.js";
-import { CompileAgentError, compileAgent } from "../../src/compiler/compile-agent.js";
+import {
+  CompileAgentDiagnosticError,
+  CompileAgentError,
+  compileAgent,
+} from "../../src/compiler/compile-agent.js";
 import {
   COMPILED_AGENT_MANIFEST_VERSION,
   ROOT_COMPILED_AGENT_NODE_ID,
 } from "../../src/compiler/manifest.js";
-import { createDiscoverWarningDiagnostic } from "../../src/discover/diagnostics.js";
+import { createCompilerWarningDiagnostic } from "../../src/shared/compiler-diagnostics.js";
 import {
   createAgentSourceManifest,
   createLocalSubagentSourceRef,
   createModuleSourceRef,
 } from "../../src/discover/manifest.js";
 import { resolveInstalledPackageInfo } from "../../src/internal/application/package.js";
-import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
+import {
+  type ScenarioAppDescriptor,
+  useScenarioApp,
+} from "../../src/internal/testing/scenario-app.js";
 import {
   EXTENSION_AGENT_DESCRIPTOR,
   TOOL_OVERRIDES_DESCRIPTOR,
-  VERBOSE_BUNDLING_DESCRIPTOR,
 } from "../../src/internal/testing/scenario-apps/index.js";
 import { defineInstructions } from "../../src/public/instructions/index.js";
+import {
+  createBundledRuntimeCompiledArtifactsSource,
+  createDiskRuntimeCompiledArtifactsSource,
+} from "../../src/runtime/compiled-artifacts-source.js";
+import { withBundledCompiledArtifacts } from "../../src/runtime/loaders/bundled-artifacts.js";
+import { loadCompiledArtifactSet } from "../../src/runtime/loaders/compiled-artifact-set.js";
 import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 const scenarioApp = useScenarioApp();
@@ -47,6 +62,43 @@ const TSC_BIN_PATH = fileURLToPath(
   new URL("../../../../node_modules/typescript/bin/tsc", import.meta.url),
 );
 const DEFAULT_AGENT_MODEL_ID = "zai/glm-5.2";
+const ALIAS_BUNDLING_DESCRIPTOR: ScenarioAppDescriptor = {
+  files: {
+    "agent/agent.ts": `export default { model: "openai/gpt-5.4-mini" };\n`,
+    "agent/alias-root/shared/alias-route.ts":
+      'export const rootAliasRoute = "@/shared/alias-route.ts";\n',
+    "agent/instructions.md": "You are an alias bundling test agent.\n",
+    "agent/lib/alias/lib-route.ts": 'export const libAliasRoute = "@/lib/alias/lib-route.ts";\n',
+    "agent/tools/check_alias_paths.ts": `import { libAliasRoute } from "@/lib/alias/lib-route.ts";
+import { rootAliasRoute } from "@/shared/alias-route.ts";
+
+export default {
+  description: "Return alias path markers from @/ and @/lib/ imports.",
+  async execute() {
+    return { libAliasRoute, rootAliasRoute };
+  },
+};
+`,
+    "tsconfig.json": `${JSON.stringify(
+      {
+        compilerOptions: {
+          baseUrl: ".",
+          module: "esnext",
+          moduleResolution: "bundler",
+          paths: {
+            "@/lib/*": ["./agent/lib/*"],
+            "@/*": ["./agent/alias-root/*"],
+          },
+          target: "ES2024",
+        },
+        include: ["agent/**/*"],
+      },
+      null,
+      2,
+    )}\n`,
+  },
+  name: "alias-bundling",
+};
 
 describe("compiler artifacts", () => {
   it("uses the framework default model when agent.ts is omitted", async () => {
@@ -66,7 +118,12 @@ describe("compiler artifacts", () => {
       },
       name: "test-agent",
     });
-    expect(withoutConfig.manifest.config.source).toBeUndefined();
+    expect(withoutConfig.manifest.config.source).toEqual({
+      exportName: undefined,
+      logicalPath: "agent.ts",
+      sourceId: "eve.framework-defaults:agent.ts",
+      sourceKind: "module",
+    });
 
     await writeFile(join(agentRoot, "agent.mjs"), "export default {};\n");
     await expect(compileAgent({ startPath: appRoot })).rejects.toThrow(
@@ -109,9 +166,10 @@ describe("compiler artifacts", () => {
         logicalPath: "agent.mjs",
       }),
       diagnostics: [
-        createDiscoverWarningDiagnostic({
+        createCompilerWarningDiagnostic({
           code: "discover/unsupported-directory",
           message: 'Ignoring unsupported directory "drafts/" in the agent root.',
+          nodeId: ROOT_COMPILED_AGENT_NODE_ID,
           sourcePath: join(agentRoot, "drafts"),
         }),
       ],
@@ -133,10 +191,12 @@ describe("compiler artifacts", () => {
         publishedRoot: join(appRoot, ".eve"),
         writeRoot: join(appRoot, ".eve"),
       },
+      defaultWorkflowWorld: "local",
       diagnostics: [
-        createDiscoverWarningDiagnostic({
+        createCompilerWarningDiagnostic({
           code: "discover/unsupported-directory",
           message: 'Ignoring unsupported directory "drafts/" in the agent root.',
+          nodeId: ROOT_COMPILED_AGENT_NODE_ID,
           sourcePath: join(agentRoot, "drafts"),
         }),
       ],
@@ -200,26 +260,30 @@ describe("compiler artifacts", () => {
         errors: 0,
         warnings: 1,
       },
-      channels: [
-        {
-          kind: "channel",
-          logicalPath: "channels/support.mjs",
-          method: "POST",
-          name: "support",
-          sourceId: "channels/support.mjs",
-          sourceKind: "module",
-          urlPath: "/support",
-        },
-        {
-          kind: "channel",
-          logicalPath: "channels/support.mjs",
-          method: "GET",
-          name: "support",
-          sourceId: "channels/support.mjs",
-          sourceKind: "module",
-          urlPath: "/support/events",
-        },
-      ],
+      channelRoutes: {
+        effective: expect.arrayContaining([
+          expect.objectContaining({
+            kind: "channel",
+            logicalPath: "channels/support.mjs",
+            method: "POST",
+            name: "support",
+            sourceId: "channels/support.mjs",
+            sourceKind: "module",
+            urlPath: "/support",
+          }),
+          expect.objectContaining({
+            kind: "channel",
+            logicalPath: "channels/support.mjs",
+            method: "GET",
+            name: "support",
+            sourceId: "channels/support.mjs",
+            sourceKind: "module",
+            urlPath: "/support/events",
+          }),
+        ]),
+        preflight: [],
+        shadowed: [],
+      },
       kind: "eve-agent-compiled-manifest",
       instructions: [
         {
@@ -242,12 +306,12 @@ describe("compiler artifacts", () => {
           sourcePath: "<app-root>/agent/drafts",
         },
       ],
-      kind: "eve-discovery-diagnostics",
+      kind: COMPILER_DIAGNOSTICS_ARTIFACT_KIND,
       summary: {
         errors: 0,
         warnings: 1,
       },
-      version: 1,
+      version: COMPILER_DIAGNOSTICS_ARTIFACT_VERSION,
     });
     const compileMetadata = JSON.parse(metadataText) as {
       generator: {
@@ -259,6 +323,10 @@ describe("compiler artifacts", () => {
     expect(compileMetadata.generator).toEqual(resolveInstalledPackageInfo());
     expect(normalizeCompileMetadata(compileMetadata)).toMatchObject({
       compile: {
+        manifest: {
+          path: ".eve/compile/compiled-agent-manifest.json",
+          sha256: "<sha256>",
+        },
         moduleMap: {
           path: ".eve/compile/module-map.mjs",
           sha256: "<sha256>",
@@ -285,12 +353,134 @@ describe("compiler artifacts", () => {
       },
       kind: "eve-compile-metadata",
       status: "ready",
-      version: 5,
+      version: COMPILE_METADATA_VERSION,
     });
     expect(moduleMapText).toContain('"nodes": Object.freeze({');
     expect(moduleMapText).toContain(`"${ROOT_COMPILED_AGENT_NODE_ID}": Object.freeze({`);
-    expect(moduleMapText).toContain('"agent.mjs": module_0');
+    expect(moduleMapText).toContain('"agent.mjs": Object.freeze({');
     expect(moduleMapText).not.toContain('"subagents": Object.freeze({');
+  });
+
+  it("persists route-selection warnings through artifacts, summaries, and hashes", async () => {
+    const { agentRoot, appRoot } = await createAppRoot(
+      "eve-compiler-route-warning-",
+      APP_ROOT_OPTIONS,
+    );
+    await mkdir(join(agentRoot, "channels"), { recursive: true });
+    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    const channelModule = [
+      "export default {",
+      '  __kind: "eve:channel",',
+      '  routes: [{ method: "GET", path: "/shared", async handler() { return new Response("ok"); } }],',
+      '  adapter: { kind: "defineChannel" },',
+      "};",
+      "",
+    ].join("\n");
+    await Promise.all([
+      writeFile(join(agentRoot, "channels", "alpha.mjs"), channelModule),
+      writeFile(join(agentRoot, "channels", "beta.mjs"), channelModule),
+    ]);
+
+    const written = await writeCompilerArtifacts({
+      appRoot,
+      artifactLocations: {
+        publishedRoot: join(appRoot, ".eve"),
+        writeRoot: join(appRoot, ".eve"),
+      },
+      defaultWorkflowWorld: "local",
+      diagnostics: [],
+      manifest: createAgentSourceManifest({
+        agentId: "test-agent",
+        agentRoot,
+        appRoot,
+        channels: [
+          createModuleSourceRef({ logicalPath: "channels/alpha.mjs" }),
+          createModuleSourceRef({ logicalPath: "channels/beta.mjs" }),
+        ],
+        configModule: createModuleSourceRef({ logicalPath: "agent.mjs" }),
+      }),
+    });
+
+    expect(
+      written.compiledManifest.channelRoutes.effective.filter(
+        (route) => route.urlPath === "/shared",
+      ),
+    ).toEqual([expect.objectContaining({ sourceId: "channels/alpha.mjs", urlPath: "/shared" })]);
+    expect(written.compiledManifest.channelRoutes.shadowed).toEqual([
+      expect.objectContaining({
+        loser: expect.objectContaining({
+          binding: expect.objectContaining({ logicalPath: "channels/beta.mjs" }),
+          route: expect.objectContaining({ sourceId: "channels/beta.mjs" }),
+        }),
+        method: "GET",
+        pathPattern: "/shared",
+        winningSourceId: "channels/alpha.mjs",
+      }),
+    ]);
+    expect(written.diagnosticsArtifact.diagnostics).toEqual([
+      expect.objectContaining({
+        channelRoute: { method: "GET", pathPattern: "/shared" },
+        code: "compile/channel-route-shadowed",
+        logicalPath: "channels/beta.mjs",
+        related: [
+          expect.objectContaining({
+            logicalPath: "channels/alpha.mjs",
+            sourceId: "channels/alpha.mjs",
+          }),
+        ],
+        severity: "warning",
+        sourceId: "channels/beta.mjs",
+      }),
+    ]);
+    expect(written.compiledManifest.diagnosticsSummary).toEqual({ errors: 0, warnings: 1 });
+    expect(written.metadata.discovery.summary).toEqual({ errors: 0, warnings: 1 });
+
+    const persistedDiagnostics = JSON.parse(
+      await readFile(written.paths.diagnosticsPath, "utf8"),
+    ) as unknown;
+    expect(compilerDiagnosticsArtifactSchema.parse(persistedDiagnostics)).toEqual(
+      written.diagnosticsArtifact,
+    );
+    expect(written.metadata.discovery.sourceGraphHash).toMatch(/^[a-f\d]{64}$/u);
+  });
+
+  it("renders route-planning failures with primary and related provenance without artifacts", async () => {
+    const { agentRoot, appRoot } = await createAppRoot(
+      "eve-compiler-route-failure-",
+      APP_ROOT_OPTIONS,
+    );
+    await mkdir(join(agentRoot, "channels"), { recursive: true });
+    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
+    await writeFile(
+      join(agentRoot, "channels", "duplicate.mjs"),
+      [
+        "export default {",
+        '  __kind: "eve:channel",',
+        "  routes: [",
+        '    { method: "GET", path: "/duplicate/:id", async handler() { return new Response("ok"); } },',
+        '    { method: "GET", path: "/duplicate/:name", async handler() { return new Response("ok"); } },',
+        "  ],",
+        '  adapter: { kind: "defineChannel" },',
+        "};",
+        "",
+      ].join("\n"),
+    );
+
+    const error = await compileAgent({ startPath: appRoot }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(CompileAgentDiagnosticError);
+    expect((error as Error).message).toContain("Error [compile/channel-route-duplicate]");
+    expect((error as Error).message).toContain(
+      "source: __root__ · channels/duplicate.mjs · channels/duplicate.mjs",
+    );
+    expect((error as Error).message).toContain(
+      "related (first declaration): __root__ · channels/duplicate.mjs · channels/duplicate.mjs",
+    );
+    expect((error as Error).message).not.toContain("Diagnostics artifact:");
+    await expect(
+      readFile(resolveCompilerArtifactPaths(appRoot).diagnosticsPath, "utf8"),
+    ).rejects.toThrow();
   });
 
   it("generates a recursive module map for module-backed authored sources", async () => {
@@ -402,6 +592,7 @@ describe("compiler artifacts", () => {
         publishedRoot: join(appRoot, ".eve"),
         writeRoot: join(appRoot, ".eve"),
       },
+      defaultWorkflowWorld: "local",
       diagnostics: [],
       manifest,
     });
@@ -412,23 +603,17 @@ describe("compiler artifacts", () => {
     // Authored instructions modules execute once at build time and are baked into the
     // compiled manifest as markdown. They never appear in the module map.
     expect(normalizedModuleMapText).not.toContain("instructions.mjs");
-    expect(normalizedModuleMapText).toContain('import * as module_0 from "../../agent/agent.mjs";');
-    expect(normalizedModuleMapText).toContain(
-      'import * as module_1 from "../../agent/tools/get_weather.mjs";',
-    );
-    expect(normalizedModuleMapText).toContain(
-      'import * as module_2 from "../../agent/subagents/reviewer/agent.mjs";',
-    );
-    expect(normalizedModuleMapText).toContain(
-      'import * as module_3 from "../../agent/subagents/reviewer/tools/review.mjs";',
-    );
+    expect(normalizedModuleMapText).toContain('"load": () => import("../../agent/agent.mjs")');
+    expect(normalizedModuleMapText).toContain("../../agent/tools/get_weather.mjs");
+    expect(normalizedModuleMapText).toContain("../../agent/subagents/reviewer/agent.mjs");
+    expect(normalizedModuleMapText).toContain("../../agent/subagents/reviewer/tools/review.mjs");
     expect(normalizedModuleMapText).toContain('"nodes": Object.freeze({');
     expect(normalizedModuleMapText).toContain(`"${ROOT_COMPILED_AGENT_NODE_ID}": Object.freeze({`);
-    expect(normalizedModuleMapText).toContain('"agent.mjs": module_0');
-    expect(normalizedModuleMapText).toContain('"tools/get_weather.mjs": module_1');
+    expect(normalizedModuleMapText).toContain('"agent.mjs": Object.freeze({');
+    expect(normalizedModuleMapText).toContain('"tools/get_weather.mjs": Object.freeze({');
     expect(normalizedModuleMapText).toContain('"subagents/reviewer": Object.freeze({');
-    expect(normalizedModuleMapText).toContain('"agent.mjs": module_2');
-    expect(normalizedModuleMapText).toContain('"tools/review.mjs": module_3');
+    expect(normalizedModuleMapText).toContain('"agent.mjs": Object.freeze({');
+    expect(normalizedModuleMapText).toContain('"tools/review.mjs": Object.freeze({');
   });
 
   it("records versioned artifact hashes in compile metadata", () => {
@@ -436,24 +621,41 @@ describe("compiler artifacts", () => {
     const paths = resolveCompilerArtifactPaths(appRoot);
     const firstMetadata = createCompileMetadata({
       appRoot,
-      diagnosticsArtifactJson: '{"kind":"eve-discovery-diagnostics"}\n',
+      compiledManifestJson: '{"kind":"eve-agent-compiled-manifest"}\n',
+      diagnosticsArtifactJson: '{"kind":"eve-compiler-diagnostics"}\n',
       diagnosticsSummary: {
         errors: 0,
         warnings: 1,
       },
       discoveryManifestJson: '{"kind":"eve-agent-discovery-manifest","agentId":"weather-agent"}\n',
+      moduleMapIdentity: "f".repeat(64),
       moduleMapSource: "export const moduleMap = {};\n",
       paths,
     });
     const secondMetadata = createCompileMetadata({
       appRoot,
-      diagnosticsArtifactJson: '{"kind":"eve-discovery-diagnostics"}\n',
+      compiledManifestJson: '{"kind":"eve-agent-compiled-manifest"}\n',
+      diagnosticsArtifactJson: '{"kind":"eve-compiler-diagnostics"}\n',
       diagnosticsSummary: {
         errors: 0,
         warnings: 1,
       },
       discoveryManifestJson:
         '{"kind":"eve-agent-discovery-manifest","agentId":"weather-agent-v2"}\n',
+      moduleMapIdentity: "f".repeat(64),
+      moduleMapSource: "export const moduleMap = {};\n",
+      paths,
+    });
+    const changedCompiledManifestMetadata = createCompileMetadata({
+      appRoot,
+      compiledManifestJson: '{"kind":"eve-agent-compiled-manifest","routes":[]}\n',
+      diagnosticsArtifactJson: '{"kind":"eve-compiler-diagnostics"}\n',
+      diagnosticsSummary: {
+        errors: 0,
+        warnings: 1,
+      },
+      discoveryManifestJson: '{"kind":"eve-agent-discovery-manifest","agentId":"weather-agent"}\n',
+      moduleMapIdentity: "f".repeat(64),
       moduleMapSource: "export const moduleMap = {};\n",
       paths,
     });
@@ -471,10 +673,70 @@ describe("compiler artifacts", () => {
     expect(firstMetadata.discovery.sourceGraphHash).not.toBe(
       secondMetadata.discovery.sourceGraphHash,
     );
+    expect(firstMetadata.compile.manifest.sha256).not.toBe(
+      changedCompiledManifestMetadata.compile.manifest.sha256,
+    );
+    expect(firstMetadata.discovery.sourceGraphHash).not.toBe(
+      changedCompiledManifestMetadata.discovery.sourceGraphHash,
+    );
   });
 });
 
 describe("compileAgent", () => {
+  it("renders and transports a successful route-shadow warning exactly", async () => {
+    const { agentRoot, appRoot } = await createAppRoot(
+      "eve-compile-agent-route-warning-",
+      APP_ROOT_OPTIONS,
+    );
+    await mkdir(join(agentRoot, "channels"), { recursive: true });
+    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(join(agentRoot, "instructions.md"), "Answer precisely.\n");
+    const channelModule = [
+      "export default {",
+      '  __kind: "eve:channel",',
+      '  routes: [{ method: "GET", path: "/shared", async handler() { return new Response("ok"); } }],',
+      '  adapter: { kind: "defineChannel" },',
+      "};",
+      "",
+    ].join("\n");
+    await Promise.all([
+      writeFile(join(agentRoot, "channels", "alpha.mjs"), channelModule),
+      writeFile(join(agentRoot, "channels", "beta.mjs"), channelModule),
+    ]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      const compiled = await compileAgent({ startPath: appRoot });
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        [
+          'Warning [compile/channel-route-shadowed]: GET /shared from "channels/beta.mjs" is shadowed by "channels/alpha.mjs".',
+          "  source: __root__ · channels/beta.mjs · channels/beta.mjs",
+          "  related (winner): __root__ · channels/alpha.mjs · channels/alpha.mjs",
+        ].join("\n"),
+      );
+
+      const diskArtifacts = await loadCompiledArtifactSet({
+        compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(appRoot),
+      });
+      expect(diskArtifacts.diagnostics.diagnostics).toEqual(compiled.diagnostics);
+
+      await withBundledCompiledArtifacts(
+        { ...diskArtifacts, sessionId: "route-warning-artifact-transport" },
+        async () => {
+          const bundledArtifacts = await loadCompiledArtifactSet({
+            compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+          });
+
+          expect(bundledArtifacts.diagnostics).toEqual(diskArtifacts.diagnostics);
+        },
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("narrows authored channel metadata without generated declarations", async () => {
     const app = await scenarioApp({
       files: {
@@ -556,8 +818,9 @@ describe("compileAgent", () => {
         })}\n`,
         "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
           kind: "eve-extension",
-          formatVersion: 1,
+          formatVersion: 2,
           builtWithEve: "0.0.0-test",
+          build: { externalDependencies: [] },
           requires: { extension: 1, tool: 1, instructions: 1 },
         }),
         "node_modules/@acme/crm/extension/index.mjs": "export default {};\n",
@@ -591,6 +854,57 @@ describe("compileAgent", () => {
     const moduleMapText = await readFile(result.paths.moduleMapPath, "utf8");
     expect(moduleMapText).toContain("@acme/crm/extension/tools/crm_search.mjs");
     expect(moduleMapText).toContain('"ext:crm:tools/crm_search.mjs"');
+  });
+
+  it("never evaluates or emits a shadowed extension definition", async () => {
+    const app = await scenarioApp({
+      name: "shadowed-extension-definition",
+      installDependencies: true,
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "agent/instructions.md": "Use the selected application tool.\n",
+        "agent/tools/crm__search.mjs": [
+          "export default {",
+          '  description: "Application search winner.",',
+          '  inputSchema: { type: "object", properties: {}, additionalProperties: false },',
+          "  async execute() { return { selected: true }; },",
+          "};",
+          "",
+        ].join("\n"),
+        "node_modules/@acme/crm/package.json": `${JSON.stringify({
+          name: "@acme/crm",
+          type: "module",
+          eve: { extension: { source: "source", dist: "extension" } },
+          exports: { ".": "./extension/index.mjs" },
+        })}\n`,
+        "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
+          kind: "eve-extension",
+          formatVersion: 2,
+          builtWithEve: "0.0.0-test",
+          build: { externalDependencies: [] },
+          requires: { extension: 1, tool: 1 },
+        }),
+        "node_modules/@acme/crm/extension/index.mjs": "export default {};\n",
+        "node_modules/@acme/crm/extension/tools/search.mjs": [
+          'throw new Error("shadowed extension tool executed");',
+          "export default {};",
+          "",
+        ].join("\n"),
+      },
+    });
+
+    const result = await compileAgent({ startPath: app.appRoot });
+    const selected = result.manifest.tools.find((tool) => tool.name === "crm__search");
+    const moduleMapText = await readFile(result.paths.moduleMapPath, "utf8");
+
+    expect(selected).toMatchObject({
+      description: "Application search winner.",
+      sourceId: "tools/crm__search.mjs",
+    });
+    expect(result.manifest.bindings).not.toHaveProperty("ext:crm:tools/search.mjs");
+    expect(moduleMapText).not.toContain("@acme/crm/extension/tools/search.mjs");
+    expect(moduleMapText).not.toContain('"ext:crm:tools/search.mjs"');
   });
 
   it("compiles extension-variant authored modules from a fixture app", async () => {
@@ -633,55 +947,58 @@ describe("compileAgent", () => {
         sourceKind: "module",
       },
     ]);
-    expect(result.manifest.tools).toEqual([
-      {
-        description:
-          "Get weather details using lib extension imports through mixed extension loading across cjs/js/mts/mjs modules.",
-        inputSchema: null,
-        logicalPath: "tools/get_weather.mts",
-        name: "get_weather",
-        sourceId: "tools/get_weather.mts",
-        sourceKind: "module",
-      },
-    ]);
+    expect(
+      result.manifest.tools.find((tool) => tool.sourceId === "tools/get_weather.mts"),
+    ).toMatchObject({
+      description:
+        "Get weather details using lib extension imports through mixed extension loading across cjs/js/mts/mjs modules.",
+      inputSchema: null,
+      logicalPath: "tools/get_weather.mts",
+      name: "get_weather",
+      sourceId: "tools/get_weather.mts",
+      sourceKind: "module",
+    });
     expect(result.manifest.sandbox).toEqual({
+      backendName: undefined,
       description: undefined,
       exportName: undefined,
+      hasBootstrap: false,
+      hasOnSession: true,
+      inheritsParent: undefined,
       logicalPath: "sandbox/sandbox.cjs",
       revalidationKey: undefined,
       sourceHash: expect.any(String),
       sourceId: "sandbox/sandbox.cjs",
       sourceKind: "module",
     });
-    expect(normalizeArtifactValue(moduleMapText, app.appRoot)).toContain('"agent.cjs": module_0');
     expect(normalizeArtifactValue(moduleMapText, app.appRoot)).toContain(
-      '"sandbox/sandbox.cjs": module_1',
+      '"agent.cjs": Object.freeze({',
     );
     expect(normalizeArtifactValue(moduleMapText, app.appRoot)).toContain(
-      '"tools/get_weather.mts": module_2',
+      '"sandbox/sandbox.cjs": Object.freeze({',
+    );
+    expect(normalizeArtifactValue(moduleMapText, app.appRoot)).toContain(
+      '"tools/get_weather.mts": Object.freeze({',
     );
   });
 
-  it("compiles verbose-bundling fixture tools that import from @/ and @/lib/* aliases", async () => {
-    const app = await scenarioApp(VERBOSE_BUNDLING_DESCRIPTOR);
-    const toolsRoot = join(app.appRoot, "agent", "tools");
-
-    await rm(join(toolsRoot, "inspect_snowflake_module.ts"), { force: true });
+  it("compiles tools that import from @/ and @/lib/* aliases", async () => {
+    const app = await scenarioApp(ALIAS_BUNDLING_DESCRIPTOR);
 
     const result = await compileAgent({
       startPath: app.appRoot,
     });
 
-    expect(result.manifest.tools).toEqual([
-      {
-        description: "Return alias path markers from @/ and @/lib/ imports.",
-        inputSchema: null,
-        logicalPath: "tools/check_alias_paths.ts",
-        name: "check_alias_paths",
-        sourceId: "tools/check_alias_paths.ts",
-        sourceKind: "module",
-      },
-    ]);
+    expect(
+      result.manifest.tools.find((tool) => tool.sourceId === "tools/check_alias_paths.ts"),
+    ).toMatchObject({
+      description: "Return alias path markers from @/ and @/lib/ imports.",
+      inputSchema: null,
+      logicalPath: "tools/check_alias_paths.ts",
+      name: "check_alias_paths",
+      sourceId: "tools/check_alias_paths.ts",
+      sourceKind: "module",
+    });
   });
 
   it("compiles a fixture that wraps, disables, and replaces framework tools", async () => {
@@ -691,20 +1008,20 @@ describe("compileAgent", () => {
       startPath: app.appRoot,
     });
 
-    // The disable sentinel reaches the compiled manifest as a name in the
-    // dedicated array, not as a tool entry.
-    expect([...result.manifest.disabledFrameworkTools].sort()).toEqual([
-      "agent",
-      "web_fetch",
-      "web_search",
-    ]);
+    expect(result.manifest.kernelPlan.prepared).toEqual(["ask_question", "final_output"]);
 
     // Both the wrapped bash and the replacement todo land in `tools` as
     // ordinary CompiledToolDefinitions. The web_fetch override is intentionally
     // absent — the disable sentinel is partitioned out before this point.
     const toolsByName = new Map(result.manifest.tools.map((tool) => [tool.name, tool]));
 
-    expect([...toolsByName.keys()].sort()).toEqual(["bash", "todo"]);
+    expect([...toolsByName.keys()].sort()).toEqual([
+      "bash",
+      "load_skill",
+      "read_file",
+      "todo",
+      "write_file",
+    ]);
 
     expect(toolsByName.get("bash")).toMatchObject({
       description: "Run a vetted shell command in the project sandbox.",
@@ -855,7 +1172,9 @@ describe("compileAgent", () => {
       startPath: appRoot,
     });
 
-    expect(result.manifest.tools).toEqual([
+    expect(
+      result.manifest.tools.filter((tool) => tool.sourceId.startsWith("tools/")),
+    ).toMatchObject([
       {
         description: "Refund a charge.",
         inputSchema: null,
@@ -1124,7 +1443,7 @@ describe("compileAgent", () => {
         description: "Answer niche follow-up questions remotely.",
         logicalPath: "subagents/qux.ts",
         name: "qux",
-        nodeId: "subagents/qux.ts",
+        nodeId: "subagents/researcher::subagents/qux.ts",
         path: "/eve/v1/session",
         sourceId: "subagents/qux.ts",
         url: "https://qux.example.com",
@@ -1169,8 +1488,12 @@ describe("compileAgent", () => {
     });
 
     expect(result.manifest.sandbox).toEqual({
+      backendName: undefined,
       description: undefined,
       exportName: undefined,
+      hasBootstrap: true,
+      hasOnSession: false,
+      inheritsParent: undefined,
       logicalPath: "sandbox/sandbox.mjs",
       revalidationKey: "bootstrap-revalidation-key-v1",
       sourceHash: expect.any(String),
@@ -1208,8 +1531,12 @@ describe("compileAgent", () => {
     });
 
     expect(result.manifest.sandbox).toEqual({
+      backendName: undefined,
       description: undefined,
       exportName: undefined,
+      hasBootstrap: true,
+      hasOnSession: false,
+      inheritsParent: undefined,
       logicalPath: "sandbox/sandbox.mjs",
       revalidationKey: undefined,
       sourceHash: expect.any(String),
@@ -1289,15 +1616,13 @@ describe("compileAgent", () => {
       nodeId: "subagents/researcher",
       sourceId: "subagents/researcher",
     });
-    expect(normalizedModuleMapText).toContain('import * as module_0 from "../../agent/agent.mjs";');
+    expect(normalizedModuleMapText).toContain('"load": () => import("../../agent/agent.mjs")');
+    expect(normalizedModuleMapText).toContain("../../agent/subagents/researcher/agent.mjs");
     expect(normalizedModuleMapText).toContain(
-      'import * as module_1 from "../../agent/subagents/researcher/agent.mjs";',
-    );
-    expect(normalizedModuleMapText).toContain(
-      'import * as module_2 from "../../agent/subagents/researcher/sandbox/sandbox.mjs";',
+      "../../agent/subagents/researcher/sandbox/sandbox.mjs",
     );
     expect(normalizedModuleMapText).toContain('"subagents/researcher": Object.freeze({');
-    expect(normalizedModuleMapText).toContain('"sandbox/sandbox.mjs": module_2');
+    expect(normalizedModuleMapText).toContain('"sandbox/sandbox.mjs": Object.freeze({');
   });
 
   it("fails fast on discovery errors after writing inspectable artifacts", async () => {
@@ -1340,15 +1665,15 @@ describe("compileAgent", () => {
       status: string;
     };
 
-    expect(thrownError.message).toContain("Discovery failed with 1 error(s) and 0 warning(s).");
+    expect(thrownError.message).toContain("Compilation failed with 1 error(s) and 0 warning(s).");
     expect(thrownError.message).toContain(
       `Diagnostics artifact: ${thrownError.result.paths.diagnosticsPath}`,
     );
-    expect(thrownError.message).toContain("Discovery diagnostics:");
+    expect(thrownError.message).toContain("Compiler diagnostics:");
     expect(thrownError.message).toContain(
       'Expected authored instructions at "instructions.md", "instructions.ts", "instructions.cts", "instructions.mts", "instructions.js", "instructions.cjs", "instructions.mjs", or "instructions/" directory.',
     );
-    expect(thrownError.message).toContain(`source: ${agentRoot}`);
+    expect(thrownError.message).toContain(`source: __root__ · ${agentRoot}`);
     expect(thrownError.result.project.agentRoot).toBe(agentRoot);
     expect(thrownError.result.metadata.status).toBe("failed");
     expect(JSON.parse(discoveryManifestText)).toMatchObject({

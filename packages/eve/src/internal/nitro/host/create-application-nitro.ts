@@ -18,10 +18,7 @@ import {
 import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { createCompiledSandboxBackendPrunePlugin } from "#internal/nitro/host/compiled-sandbox-backend-prune-plugin.js";
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
-import {
-  createExtensionExternalDependencyPlugin,
-  resolveExtensionExternalDependencyPaths,
-} from "#internal/nitro/host/extension-external-dependency-plugin.js";
+import { createCompiledExternalDependencyPlugin } from "#internal/nitro/host/compiled-external-dependency-plugin.js";
 import {
   configureDevelopmentNitroRoutes,
   configureProductionNitroRoutes,
@@ -29,9 +26,9 @@ import {
 import { applyEveCronHandlerRoute } from "#internal/nitro/host/cron-handler-route.js";
 import { createNitroBundlerConfig } from "#internal/nitro/host/nitro-bundler-config.js";
 import {
-  createOptionalEngineDependencyPlugin,
-  OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME,
-} from "#internal/nitro/host/optional-engine-dependency-plugin.js";
+  createOptionalSandboxEngineDependencyPlugin,
+  OPTIONAL_SANDBOX_ENGINE_PACKAGES_BY_BACKEND_NAME,
+} from "#internal/bundler/optional-sandbox-engine-dependency-plugin.js";
 import { addNitroRoutingImportSpecifierPlugin } from "#internal/nitro/host/nitro-routing-import-specifier-plugin.js";
 import { registerScheduleTaskHandlers } from "#internal/nitro/host/schedule-task-routes.js";
 import type {
@@ -42,6 +39,11 @@ import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
 import { createDynamicCapabilityTransformPlugin } from "#internal/workflow-bundle/dynamic-capability-transform-plugin.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import { createCompiledModuleMapIntegrityPlugin } from "#compiler/module-map-integrity-plugin.js";
+import { createFrameworkSourceRevisionPlugin } from "#framework-sources/revision-plugin.js";
+import { readCompiledFrameworkSourceRevision } from "#framework-sources/revision.js";
+import { createWorkflowWorldPlanIntegrityPlugin } from "#compiler/workflow-world-plan-integrity-plugin.js";
+import { materializeCompiledExternalDependencyPlan } from "#internal/materialize-external-dependencies.js";
 
 /**
  * Bare `workflow/*` specifiers that appear in pre-built workflow bundles.
@@ -73,7 +75,7 @@ const WORKFLOW_CACHE_PATH_FRAGMENT = "/.eve/workflow-cache/";
 const FRAMEWORK_HOSTED_EXTERNAL_PACKAGES: readonly string[] = ["@napi-rs/keyring"];
 const LOCAL_SANDBOX_BACKEND_NAMES = new Set([
   "docker",
-  ...Object.keys(OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME),
+  ...Object.keys(OPTIONAL_SANDBOX_ENGINE_PACKAGES_BY_BACKEND_NAME),
 ]);
 
 function resolveWorkflowAliases(): Record<string, string> {
@@ -95,26 +97,14 @@ function manifestEnablesWorkflow(manifest: CompiledAgentManifest): boolean {
 }
 
 function manifestHasWebSocketChannel(manifest: CompiledAgentManifest): boolean {
-  return manifest.channels.some(
-    (entry) => entry.kind === "channel" && entry.method === "WEBSOCKET",
-  );
+  return manifest.channelRoutes.effective.some((entry) => entry.method === "WEBSOCKET");
 }
 
 function collectHostedTraceDependencies(
   preparedHost: PreparedApplicationHost,
   configuredOptionalEnginePackages: readonly string[],
 ): string[] {
-  const extensionExternalDependencies = new Set(
-    collectExtensionExternalDependencies(preparedHost.compileResult.manifest),
-  );
-  const configuredExternalDependencies = [
-    ...(preparedHost.compileResult.manifest.config.build?.externalDependencies ?? []),
-    ...preparedHost.compileResult.manifest.subagents.flatMap((subagent) =>
-      subagent.configResolver === undefined
-        ? (subagent.agent.config.build?.externalDependencies ?? [])
-        : (subagent.configResolver.build?.externalDependencies ?? []),
-    ),
-  ];
+  const planEntries = preparedHost.compileResult.manifest.externalDependencyPlan.entries;
   // Nitro already classifies known native and non-bundleable packages through
   // its nf3 database. traceDeps is only for eve-owned or author-configured
   // additions to that upstream policy.
@@ -123,22 +113,23 @@ function collectHostedTraceDependencies(
     // Optional engine packages (just-bash, microsandbox) join the
     // externalize-and-trace path only when the compiled sandbox config
     // selects their backend — the app's opt-in. Otherwise
-    // createOptionalEngineDependencyPlugin pins them as plain externals
+    // createOptionalSandboxEngineDependencyPlugin pins them as plain externals
     // so a resolvable-but-unrequested install adds nothing to hosted
     // output.
     ...configuredOptionalEnginePackages,
-    ...configuredExternalDependencies,
-    ...[...extensionExternalDependencies].map((dependencyName) => `${dependencyName}*`),
+    ...planEntries.flatMap((entry) => [
+      ...(entry.scopes.some((scope) => scope.kind === "application") ? [entry.packageName] : []),
+      ...(entry.scopes.some((scope) => scope.kind === "extension")
+        ? [`${entry.packageName}*`]
+        : []),
+    ]),
+    ...(preparedHost.compileResult.manifest.workflowWorld.kind === "host-module"
+      ? [`${preparedHost.compileResult.manifest.workflowWorld.packageName}*`]
+      : []),
   ]);
   return [...merged].filter(
     (dependencyName) =>
       dependencyName !== EVE_PACKAGE_NAME && dependencyName !== `${EVE_PACKAGE_NAME}*`,
-  );
-}
-
-function collectExtensionExternalDependencies(manifest: CompiledAgentManifest): string[] {
-  return [manifest, ...manifest.subagents.map((subagent) => subagent.agent)].flatMap((node) =>
-    node.extensionMounts.flatMap((mount) => mount.externalDependencies),
   );
 }
 
@@ -151,7 +142,7 @@ function collectConfiguredSandboxBackendNames(manifest: CompiledAgentManifest): 
   const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
   return new Set(
     nodes
-      .map((node) => node.sandbox?.backendName)
+      .map((node) => node.sandbox.backendName)
       .filter((backendName): backendName is string => typeof backendName === "string"),
   );
 }
@@ -531,40 +522,6 @@ function addDynamicCapabilityTransformPlugin(nitro: Nitro): void {
 }
 
 /**
- * Marks the authored instrumentation module as side-effectful so Nitro's final
- * Rollup/Rolldown pass preserves its eager evaluation from the generated
- * instrumentation plugin.
- */
-function addInstrumentationModuleSideEffectsPlugin(
-  nitro: Nitro,
-  instrumentationModulePaths: readonly string[],
-): void {
-  const normalizedInstrumentationModulePaths = new Set(
-    instrumentationModulePaths.map(normalizePath),
-  );
-
-  nitro.hooks.hook("rollup:before", (_nitro, config) => {
-    if (!Array.isArray(config.plugins)) {
-      return;
-    }
-
-    config.plugins.unshift({
-      name: "eve:instrumentation-module-side-effects",
-      resolveId(source: string) {
-        if (!normalizedInstrumentationModulePaths.has(normalizePath(source))) {
-          return null;
-        }
-
-        return {
-          id: source,
-          moduleSideEffects: "no-treeshake" as const,
-        };
-      },
-    });
-  });
-}
-
-/**
  * Extends the Workflow Nitro transform exclusion list to include eve's
  * package-owned workflow cache directory.
  *
@@ -617,10 +574,15 @@ function patchWorkflowTransformExcludePath(nitro: Nitro, workflowBuildDir: strin
   });
 }
 
-function createApplicationNitroBundlerConfiguration(
+async function createApplicationNitroBundlerConfiguration(
   preparedHost: PreparedApplicationHost,
   preset: "vercel" | undefined,
-) {
+): Promise<{
+  nitroRolldownConfig: ReturnType<typeof createNitroBundlerConfig>;
+  nitroRollupConfig: ReturnType<typeof createNitroBundlerConfig>;
+  tracedAppDependencies: string[];
+  tracedAppDependencyPaths: Record<string, string>;
+}> {
   const configuredBackendNames = collectConfiguredSandboxBackendNames(
     preparedHost.compileResult.manifest,
   );
@@ -633,7 +595,7 @@ function createApplicationNitroBundlerConfiguration(
   const configuredOptionalEnginePackages: string[] = [];
   const unconfiguredOptionalEnginePackages: string[] = [];
   for (const [backendName, packageName] of Object.entries(
-    OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME,
+    OPTIONAL_SANDBOX_ENGINE_PACKAGES_BY_BACKEND_NAME,
   )) {
     (configuredBackendNames.has(backendName)
       ? configuredOptionalEnginePackages
@@ -651,14 +613,30 @@ function createApplicationNitroBundlerConfiguration(
       })),
     ),
   );
-  const extensionMounts = [
-    preparedHost.compileResult.manifest,
-    ...preparedHost.compileResult.manifest.subagents.map((subagent) => subagent.agent),
-  ].flatMap((node) => node.extensionMounts);
+  const externalDependencyPlan = (
+    await materializeCompiledExternalDependencyPlan({
+      destinationRoot: join(dirname(preparedHost.workflowBuildDir), "external-dependencies"),
+      plan: preparedHost.compileResult.manifest.externalDependencyPlan,
+    })
+  ).plan;
+  const tracedAppDependencyPaths: Record<string, string> = {};
   const nitroBundlerPlugins = [
     compiledSandboxBackendPrunePlugin,
-    createOptionalEngineDependencyPlugin(unconfiguredOptionalEnginePackages),
-    createExtensionExternalDependencyPlugin(extensionMounts),
+    createCompiledModuleMapIntegrityPlugin({
+      expectedIdentity: preparedHost.compileResult.metadata.compile.moduleMap.identitySha256,
+      manifest: preparedHost.compileResult.manifest,
+    }),
+    createFrameworkSourceRevisionPlugin({
+      expectedRevision: readCompiledFrameworkSourceRevision(preparedHost.compileResult.manifest),
+    }),
+    createWorkflowWorldPlanIntegrityPlugin({
+      plan: preparedHost.compileResult.manifest.workflowWorld,
+    }),
+    createOptionalSandboxEngineDependencyPlugin(unconfiguredOptionalEnginePackages),
+    createCompiledExternalDependencyPlugin({
+      plan: externalDependencyPlan,
+      tracedPaths: tracedAppDependencyPaths,
+    }),
     extensionScopePlugin,
   ].filter((plugin) => plugin !== null);
   const nitroRolldownConfig = createNitroBundlerConfig(nitroBundlerPlugins);
@@ -667,7 +645,10 @@ function createApplicationNitroBundlerConfiguration(
     preparedHost,
     configuredOptionalEnginePackages,
   );
-  const tracedAppDependencyPaths = resolveExtensionExternalDependencyPaths(extensionMounts);
+  const workflowWorldPlan = preparedHost.compileResult.manifest.workflowWorld;
+  if (workflowWorldPlan.kind === "host-module") {
+    tracedAppDependencyPaths[workflowWorldPlan.packageName] = workflowWorldPlan.backing.entryPath;
+  }
 
   return {
     nitroRolldownConfig,
@@ -682,15 +663,14 @@ function createApplicationNitroPlugins(preparedHost: PreparedApplicationHost): s
     preparedHost.compiledArtifacts.bootstrapPath,
     preparedHost.compiledArtifacts.workflowWorldPluginPath,
   ];
+  if (preparedHost.compiledArtifacts.instrumentationPluginPath !== undefined) {
+    nitroPlugins.push(preparedHost.compiledArtifacts.instrumentationPluginPath);
+  }
   if (manifestEnablesWorkflow(preparedHost.compileResult.manifest)) {
     nitroPlugins.push(
       resolvePackageSourceFilePath("src/internal/nitro/host/workflow-sandbox-runtime-plugin.ts"),
     );
   }
-  if (preparedHost.compiledArtifacts.instrumentationPluginPath !== undefined) {
-    nitroPlugins.push(preparedHost.compiledArtifacts.instrumentationPluginPath);
-  }
-
   return nitroPlugins;
 }
 
@@ -707,13 +687,6 @@ function configureSharedApplicationNitro(
   patchWorkflowTransformExcludePath(nitro, preparedHost.workflowBuildDir);
 
   addDynamicCapabilityTransformPlugin(nitro);
-
-  if (preparedHost.compiledArtifacts.instrumentationSourcePaths !== undefined) {
-    addInstrumentationModuleSideEffectsPlugin(
-      nitro,
-      preparedHost.compiledArtifacts.instrumentationSourcePaths,
-    );
-  }
 }
 
 function configureNitroStepPlugins(nitro: Nitro, stepEntrypointPath: string): Array<() => void> {
@@ -755,13 +728,8 @@ export async function createDevelopmentApplicationNitro(
   preparedHost: PreparedDevelopmentApplicationHost,
 ): Promise<Nitro> {
   const nitroBuildDir = preparedHost.workspace.nitroBuildDir;
-  const bundler = createApplicationNitroBundlerConfiguration(preparedHost, undefined);
+  const bundler = await createApplicationNitroBundlerConfiguration(preparedHost, undefined);
   const plugins = createApplicationNitroPlugins(preparedHost);
-  if (preparedHost.compiledArtifacts.instrumentationPluginPath === undefined) {
-    plugins.unshift(
-      resolvePackageSourceFilePath("src/internal/nitro/host/local-tracing-runtime-plugin.ts"),
-    );
-  }
 
   await prepareEveVersionedCacheDirectory(nitroBuildDir);
   const nitro = await createNitro(
@@ -828,7 +796,7 @@ export async function createProductionApplicationNitro(
   options: ProductionApplicationNitroOptions,
 ): Promise<Nitro> {
   const preset = resolveProductionNitroPreset();
-  const bundler = createApplicationNitroBundlerConfiguration(preparedHost, preset);
+  const bundler = await createApplicationNitroBundlerConfiguration(preparedHost, preset);
   const nitroPlugins = createApplicationNitroPlugins(preparedHost);
   nitroPlugins.push(
     resolvePackageSourceFilePath("src/internal/nitro/host/sandbox-shutdown-plugin.ts"),

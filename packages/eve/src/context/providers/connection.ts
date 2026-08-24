@@ -1,6 +1,6 @@
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
-import type { ConnectionRegistry } from "#runtime/connections/types.js";
+import type { ConnectionRegistry } from "#shared/connections.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getActiveRuntimeNode } from "#context/node.js";
 import type { FrameworkContextProvider } from "#context/provider.js";

@@ -1,10 +1,12 @@
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import {
-  defineSubagent,
+  createLocalSubagentExecute,
   registerLocalSubagentExecutor,
-} from "#runtime/framework-tools/subagent/local.js";
-import { defineRemoteSubagent } from "#runtime/framework-tools/subagent/remote.js";
+} from "#kernel/subagent/local.js";
+import { createRemoteSubagentExecute } from "#kernel/subagent/remote.js";
+import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#kernel/subagent/task-receipt.js";
+import { PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA } from "#runtime/subagents/registry.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import {
   UNSPECIFIED_INPUT_SCHEMA,
@@ -19,7 +21,6 @@ type HarnessDelegationTool = Pick<
 > & {
   readonly inputSchema?: ToolSchemaSource | null;
   readonly outputSchema?: ToolSchemaSource | null;
-  readonly rootOnly?: boolean;
 };
 
 export function createHarnessDelegationToolDefinition(
@@ -44,7 +45,6 @@ export function createHarnessDelegationToolDefinition(
     inputSchema: toInputSchema(tool.inputSchema) ?? UNSPECIFIED_INPUT_SCHEMA,
     name: tool.name,
     outputSchema: toOutputSchema(tool.outputSchema) ?? undefined,
-    rootOnly: tool.rootOnly,
     runtimeAction,
     workflowCallable: true,
   };
@@ -53,32 +53,31 @@ export function createHarnessDelegationToolDefinition(
 export function createBackgroundSubagentHarnessDefinition(
   tool: HarnessDelegationTool,
 ): HarnessToolDefinition {
-  const definition =
+  const rawExecute =
     tool.kind === "remote"
-      ? defineRemoteSubagent({
+      ? createRemoteSubagentExecute({
           description: tool.description ?? "",
           name: tool.name,
           nodeId: tool.nodeId,
         })
-      : defineSubagent({
+      : createLocalSubagentExecute({
           description: tool.description ?? "",
           name: tool.name,
           nodeId: tool.nodeId,
         });
   const execute = createToolExecuteWithAuth({
-    execute: definition.execute,
-    execution: definition.execution,
+    execute: rawExecute,
+    execution: "background",
     scope: tool.name,
   });
   if (tool.kind !== "remote") registerLocalSubagentExecutor(execute);
   return {
-    description: definition.description,
+    description: tool.description ?? "",
     execute,
-    execution: definition.execution,
-    inputSchema: toInputSchema(definition.inputSchema) ?? UNSPECIFIED_INPUT_SCHEMA,
+    execution: "background",
+    inputSchema: toInputSchema(PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA) ?? UNSPECIFIED_INPUT_SCHEMA,
     name: tool.name,
-    outputSchema: toOutputSchema(definition.outputSchema) ?? undefined,
-    rootOnly: tool.rootOnly,
+    outputSchema: toOutputSchema(SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA) ?? undefined,
     workflowCallable: true,
   };
 }

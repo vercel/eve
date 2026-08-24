@@ -35,6 +35,7 @@ describe("prewarmAppSandboxes", () => {
         publishedRoot: join(compilerAppRoot, ".eve"),
         writeRoot: join(compilerAppRoot, ".eve"),
       },
+      defaultWorkflowWorld: "vercel",
       startPath: appRoot,
     });
     const events = createPrewarmEvents();
@@ -42,6 +43,7 @@ describe("prewarmAppSandboxes", () => {
     await prewarmAppSandboxes({
       appRoot,
       compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(compilerAppRoot, {
+        moduleMapLoaderKind: "authored-source",
         moduleMapLoaderPath: resolvePackageSourceFilePath(
           "src/internal/authored-module-map-loader.ts",
         ),
@@ -104,7 +106,10 @@ describe("prewarmAppSandboxes", () => {
     await prewarmAppSandboxes({
       appRoot,
       compiledArtifactsSource: resolveNitroCompiledArtifactsSource(
-        createDevelopmentNitroArtifactsConfig({ appRoot }),
+        createDevelopmentNitroArtifactsConfig({
+          appRoot,
+          worldPlan: compileResult.manifest.workflowWorld,
+        }),
       ),
       dispatch: createRecordingDispatch(events),
     });
@@ -270,11 +275,6 @@ describe("prewarmAppSandboxes", () => {
 
     await compileAgent({
       startPath: firstAppRoot,
-    });
-    await writeBootstrapRevalidationKeySandbox({
-      appRoot: firstAppRoot,
-      revalidationKeyExpression:
-        '() => { throw new Error("revalidationKey should not run during prewarm"); }',
     });
     await prewarmAppSandboxes({
       appRoot: firstAppRoot,

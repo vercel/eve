@@ -2,11 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
-import {
-  createEveVercelOptions,
-  EVE_WORKFLOW_FLOW_ROUTE_PATH,
-} from "#internal/nitro/host/vercel-build-output-config.js";
+import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
 import { deriveEveWorkflowQueueTopic } from "#internal/workflow/queue-namespace.js";
+import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#protocol/routes.js";
 
 describe("createEveVercelOptions", () => {
   it("returns undefined when the Vercel build output is disabled", () => {

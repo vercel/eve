@@ -7,9 +7,8 @@ import {
   WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
   WEB_SEARCH_OPENAI_OUTPUT_SCHEMA,
   WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA,
-} from "#runtime/framework-tools/web-search.js";
+} from "#kernel/web-search.js";
 import {
-  resolveFrameworkToolFromUpstreamType,
   resolveWebSearchBackend,
   resolveWebSearchOutputSchema,
   resolveWebSearchProviderTool,
@@ -214,16 +213,5 @@ describe("resolveWebSearchBackend", () => {
     expect(resolveWebSearchOutputSchema("google")).toBe(WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA);
     expect(resolveWebSearchOutputSchema("openai")).toBe(WEB_SEARCH_OPENAI_OUTPUT_SCHEMA);
     expect(resolveWebSearchOutputSchema("parallel")).toBe(WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA);
-  });
-});
-
-describe("resolveFrameworkToolFromUpstreamType", () => {
-  it("maps the Anthropic web_search_20250305 type back to web_search", () => {
-    expect(resolveFrameworkToolFromUpstreamType("web_search_20250305")).toBe("web_search");
-  });
-
-  it("returns null for unknown upstream tool types", () => {
-    expect(resolveFrameworkToolFromUpstreamType("computer_20251022")).toBeNull();
-    expect(resolveFrameworkToolFromUpstreamType("some.future.tool")).toBeNull();
   });
 });

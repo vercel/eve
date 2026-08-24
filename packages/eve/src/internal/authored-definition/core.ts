@@ -20,6 +20,7 @@ import {
   type DynamicEvents,
   type DynamicToolEventName,
 } from "#shared/dynamic-tool-definition.js";
+import { isWorkflowWorldPackageName } from "#internal/workflow/world-target.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 type MutableDynamicEvents = {
@@ -246,8 +247,10 @@ function normalizeAgentWorkflowWorldDefinition(
   message: string,
 ): NonNullable<AgentWorkflowDefinition["world"]> {
   const packageName = expectString(value, message);
-  if (packageName.trim() === "") {
-    throw new Error(`${message} "experimental.workflow.world" must be a non-empty package name.`);
+  if (!isWorkflowWorldPackageName(packageName)) {
+    throw new Error(
+      `${message} "experimental.workflow.world" must be "local", "vercel", or a bare package name.`,
+    );
   }
 
   return packageName;

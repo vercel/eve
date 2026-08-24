@@ -25,7 +25,7 @@ interface ChannelRouteNitro {
 export type NitroChannelRouteRegistration = ApplicationChannelRouteRegistration;
 
 /**
- * Computes the merged set of channel routes the Nitro host should mount.
+ * Projects the effective compiler-owned channel routes used by host fingerprints.
  */
 export function computeChannelRouteRegistrations(
   preparedHost: PreparedApplicationHost,
@@ -81,6 +81,7 @@ function addChannelVirtualHandler(
   if (input.route.method === "WEBSOCKET") {
     nitro.options.handlers.push({
       handler: virtualId,
+      method: "GET",
       route: input.route.path,
     });
     nitro.options.virtual[virtualId] = [
@@ -92,29 +93,44 @@ function addChannelVirtualHandler(
     return;
   }
 
+  const hasCors = input.route.cors !== undefined;
+  const authoredOptionsCors = hasCors && input.route.method === "OPTIONS";
   nitro.options.handlers.push({
     handler: virtualId,
     method: input.route.method,
     route: input.route.path,
   });
   nitro.options.virtual[virtualId] = [
-    ...(input.route.cors === undefined
+    ...(!hasCors
       ? []
-      : [
-          `import { handleCors } from ${nitroH3ModulePath};`,
-          `const cors = ${JSON.stringify(input.route.cors)};`,
-        ]),
+      : authoredOptionsCors
+        ? [
+            `import { appendCorsHeaders, appendCorsPreflightHeaders, isPreflightRequest } from ${nitroH3ModulePath};`,
+            `const cors = ${JSON.stringify(input.route.cors)};`,
+          ]
+        : [
+            `import { handleCors } from ${nitroH3ModulePath};`,
+            `const cors = ${JSON.stringify(input.route.cors)};`,
+          ]),
     `import { dispatchChannelRequest } from ${dispatchModulePath};`,
     `const config = ${JSON.stringify(input.artifactsConfig)};`,
-    input.route.cors === undefined
+    !hasCors
       ? `export default (event) => dispatchChannelRequest(event, ${JSON.stringify(routeKey)}, config);`
-      : [
-          `export default (event) => {`,
-          `  const corsResponse = handleCors(event, cors);`,
-          `  if (corsResponse !== false) return corsResponse;`,
-          `  return dispatchChannelRequest(event, ${JSON.stringify(routeKey)}, config);`,
-          `};`,
-        ].join("\n"),
+      : authoredOptionsCors
+        ? [
+            `export default (event) => {`,
+            `  if (isPreflightRequest(event)) appendCorsPreflightHeaders(event, cors);`,
+            `  else appendCorsHeaders(event, cors);`,
+            `  return dispatchChannelRequest(event, ${JSON.stringify(routeKey)}, config);`,
+            `};`,
+          ].join("\n")
+        : [
+            `export default (event) => {`,
+            `  const corsResponse = handleCors(event, cors);`,
+            `  if (corsResponse !== false) return corsResponse;`,
+            `  return dispatchChannelRequest(event, ${JSON.stringify(routeKey)}, config);`,
+            `};`,
+          ].join("\n"),
   ].join("\n");
 }
 

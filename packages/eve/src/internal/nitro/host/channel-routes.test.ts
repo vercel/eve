@@ -3,6 +3,12 @@ import { describe, expect, it } from "vitest";
 import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { registerChannelVirtualHandlers } from "#internal/nitro/host/channel-routes.js";
 
+const localWorldPlan = {
+  kind: "native",
+  selection: "host-default",
+  target: "local",
+} as const;
+
 describe("registerChannelVirtualHandlers", () => {
   it("wraps CORS-enabled HTTP routes and registers preflight handlers", () => {
     const nitro = {
@@ -15,6 +21,7 @@ describe("registerChannelVirtualHandlers", () => {
     registerChannelVirtualHandlers(nitro, {
       artifactsConfig: createDevelopmentNitroArtifactsConfig({
         appRoot: "/app",
+        worldPlan: localWorldPlan,
       }),
       routes: [
         { cors: {}, kind: "channel", method: "POST", path: "/eve/v1/session" },
@@ -61,6 +68,7 @@ describe("registerChannelVirtualHandlers", () => {
     registerChannelVirtualHandlers(nitro, {
       artifactsConfig: createDevelopmentNitroArtifactsConfig({
         appRoot: "/app",
+        worldPlan: localWorldPlan,
       }),
       routes: [
         {
@@ -92,6 +100,31 @@ describe("registerChannelVirtualHandlers", () => {
     ).toHaveLength(1);
   });
 
+  it("lets an authored CORS-enabled OPTIONS handler own its response", () => {
+    const nitro = {
+      options: {
+        handlers: [] as any[],
+        virtual: {} as Record<string, string>,
+      },
+    };
+
+    registerChannelVirtualHandlers(nitro, {
+      artifactsConfig: createDevelopmentNitroArtifactsConfig({
+        appRoot: "/app",
+        worldPlan: localWorldPlan,
+      }),
+      routes: [{ cors: {}, kind: "channel", method: "OPTIONS", path: "/custom-options" }],
+    });
+
+    const source = nitro.options.virtual["#nitro/virtual/eve-channel/OPTIONS /custom-options"];
+    expect(source).toContain("dispatchChannelRequest");
+    expect(source).toContain("appendCorsPreflightHeaders");
+    expect(source).toContain("appendCorsHeaders");
+    expect(source).toContain("isPreflightRequest");
+    expect(source).not.toContain("handleCors");
+    expect(source).not.toContain("return new Response(null, { status: 204 })");
+  });
+
   it("registers websocket routes with the websocket dispatcher", () => {
     const nitro = {
       options: {
@@ -103,6 +136,7 @@ describe("registerChannelVirtualHandlers", () => {
     registerChannelVirtualHandlers(nitro, {
       artifactsConfig: createDevelopmentNitroArtifactsConfig({
         appRoot: "/app",
+        worldPlan: localWorldPlan,
       }),
       routes: [{ kind: "channel", method: "WEBSOCKET", path: "/voice" }],
     });
@@ -110,6 +144,7 @@ describe("registerChannelVirtualHandlers", () => {
     expect(nitro.options.handlers).toEqual([
       {
         handler: "#nitro/virtual/eve-channel/WEBSOCKET /voice",
+        method: "GET",
         route: "/voice",
       },
     ]);

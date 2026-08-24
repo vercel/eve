@@ -18,6 +18,10 @@ import {
   tryReadExtensionBuildConfig,
   type ExtensionBuildConfig,
 } from "#internal/nitro/host/build-extension.js";
+import {
+  createCompiledSubagentNodeId,
+  ROOT_COMPILED_AGENT_NODE_ID,
+} from "#compiler/compiled-agent-node-id.js";
 
 /** Build inputs retained with a prepared dev host for path-scoped extension HMR. */
 export interface DevelopmentWorkspaceExtension {
@@ -42,6 +46,7 @@ export async function prepareDevelopmentWorkspaceExtensions(input: {
   const source = createDiskProjectSource();
   const discoveredMounts = await discoverExtensionMountGraph({
     agentRoot: project.agentRoot,
+    nodeId: ROOT_COMPILED_AGENT_NODE_ID,
     source,
   });
   const workspaceSourceRoot = await toCanonicalPath(resolveDevelopmentSourceRoot(appRoot));
@@ -52,6 +57,7 @@ export async function prepareDevelopmentWorkspaceExtensions(input: {
       appRoot,
       agentRoot: discovered.agentRoot,
       mount: discovered.mount,
+      nodeId: discovered.nodeId,
       source,
       workspaceSourceRoot,
     });
@@ -91,10 +97,15 @@ export async function prepareDevelopmentWorkspaceExtensions(input: {
 
 async function discoverExtensionMountGraph(input: {
   readonly agentRoot: string;
+  readonly nodeId: string;
   readonly source: ReturnType<typeof createDiskProjectSource>;
-}): Promise<readonly { agentRoot: string; mount: ExtensionMountDescriptor }[]> {
+}): Promise<readonly { agentRoot: string; mount: ExtensionMountDescriptor; nodeId: string }[]> {
   const discovered = await discoverExtensionMountDeclarations(input);
-  const mounts = discovered.mounts.map((mount) => ({ agentRoot: input.agentRoot, mount }));
+  const mounts = discovered.mounts.map((mount) => ({
+    agentRoot: input.agentRoot,
+    mount,
+    nodeId: input.nodeId,
+  }));
   const subagentsRoot = join(input.agentRoot, "subagents");
   if ((await input.source.stat(subagentsRoot)) !== "directory") return mounts;
 
@@ -106,6 +117,7 @@ async function discoverExtensionMountGraph(input: {
         async (entry) =>
           await discoverExtensionMountGraph({
             agentRoot: join(subagentsRoot, entry.name),
+            nodeId: createCompiledSubagentNodeId(input.nodeId, `subagents/${entry.name}`),
             source: input.source,
           }),
       ),
@@ -117,6 +129,7 @@ async function resolveWorkspaceExtension(input: {
   readonly appRoot: string;
   readonly agentRoot: string;
   readonly mount: ExtensionMountDescriptor;
+  readonly nodeId: string;
   readonly source: ReturnType<typeof createDiskProjectSource>;
   readonly workspaceSourceRoot: string;
 }): Promise<DevelopmentWorkspaceExtension | undefined> {
@@ -126,6 +139,7 @@ async function resolveWorkspaceExtension(input: {
     appRoot: input.appRoot,
     mount: input.mount.mountRef,
     namespace: input.mount.namespace,
+    nodeId: input.nodeId,
   });
   if (located.location?.authoredSourceRoot === undefined) {
     return undefined;

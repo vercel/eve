@@ -5,7 +5,7 @@ import type {
   ProductionNitroArtifactsConfig,
 } from "#internal/nitro/routes/runtime-artifacts.js";
 import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
-import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
+import type { CompiledWorkflowWorldPlan } from "#compiler/workflow-world-plan.js";
 
 /**
  * Runtime-artifacts wiring for the dev server: routes read compiled
@@ -14,7 +14,7 @@ import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
  */
 export function createDevelopmentNitroArtifactsConfig(input: {
   readonly appRoot: string;
-  readonly configuredWorld?: AgentWorkflowWorldDefinition;
+  readonly worldPlan: CompiledWorkflowWorldPlan;
 }): DevelopmentNitroArtifactsConfig {
   return {
     appRoot: input.appRoot,
@@ -22,7 +22,7 @@ export function createDevelopmentNitroArtifactsConfig(input: {
     // Only parent-World deliveries install the generation context that a
     // logical durable selector needs; a custom World's payloads must pin
     // their exact snapshot instead.
-    durableArtifactsReference: usesParentDevelopmentWorkflowWorld(input.configuredWorld)
+    durableArtifactsReference: usesParentDevelopmentWorkflowWorld(input.worldPlan)
       ? "development-generation"
       : undefined,
     kind: "development",

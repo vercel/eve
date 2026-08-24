@@ -250,8 +250,20 @@ describe("normalizeAgentDefinition", () => {
         },
         FAILURE_MESSAGE,
       ),
-    ).toThrow('"experimental.workflow.world" must be a non-empty package name');
+    ).toThrow('"experimental.workflow.world" must be "local", "vercel", or a bare package name');
   });
+
+  it.each(["./world.js", "/opt/world.js", "file:///opt/world.js", "@acme/world/subpath"])(
+    "rejects path-like workflow world target %s",
+    (world) => {
+      expect(() =>
+        normalizeAgentDefinition(
+          { model: "openai/gpt-5.5", experimental: { workflow: { world } } },
+          FAILURE_MESSAGE,
+        ),
+      ).toThrow("bare package name");
+    },
+  );
 
   it("accepts a boolean subagentPersistentSessions flag", () => {
     const definition = normalizeAgentDefinition(

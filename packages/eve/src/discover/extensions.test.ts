@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  locateExtensionMountPackage,
-  mountNamespace,
-  packageStateNamespace,
-} from "#discover/extensions.js";
+import { locateExtensionMountPackage, mountNamespace } from "#discover/extensions.js";
+import { packageStateNamespace } from "#shared/extension-state-namespace.js";
 import { createModuleSourceRef } from "#discover/manifest.js";
 import { createMemoryProjectSource } from "#discover/project-source.js";
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/compiled-agent-node-id.js";
 
 describe("mountNamespace", () => {
   it("derives the namespace from the mount filename", () => {
@@ -54,6 +52,7 @@ describe("locateExtensionMountPackage", () => {
       appRoot,
       mount: createModuleSourceRef({ logicalPath: "extensions/crm.ts" }),
       namespace: "crm",
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
     });
 
     expect(result.diagnostics).toEqual([]);

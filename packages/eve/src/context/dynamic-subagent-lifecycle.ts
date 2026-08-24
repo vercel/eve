@@ -25,9 +25,9 @@ import {
 import { normalizeDynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { normalizeDynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { ALLOWED_DYNAMIC_SUBAGENT_EVENTS } from "#shared/dynamic-tool-definition.js";
 
 const log = createLogger("dynamic-subagents");
-const ALLOWED_DYNAMIC_SUBAGENT_EVENTS = new Set(["session.started", "turn.started"]);
 
 type DynamicSubagentSelections = Readonly<Record<string, DurableDynamicSubagentSelection>>;
 
@@ -57,15 +57,21 @@ async function resolveSelections(input: {
         });
         const prepared = createPreparedRuntimeSubagentTool(
           {
+            configResolver: {
+              exportName: resolver.exportName,
+              logicalPath: resolver.logicalPath,
+              sourceId: resolver.sourceId,
+              sourceKind: "module",
+            },
             description: remoteAgent.description,
             kind: "remote",
-            logicalPath: resolver.logicalPath,
+            logicalPath: resolver.subagentSource.logicalPath,
             name: resolver.name,
             nodeId: resolver.nodeId,
             outputSchema: remoteAgent.outputSchema,
             path: remoteAgent.path,
-            sourceId: resolver.sourceId,
-            sourceKind: resolver.sourceKind,
+            sourceId: resolver.subagentSource.sourceId,
+            sourceKind: "subagent",
             url: remoteAgent.url,
           },
           inputSchema,
@@ -84,11 +90,11 @@ async function resolveSelections(input: {
         {
           description: resolvedAgentConfig.description,
           kind: "subagent",
-          logicalPath: resolver.logicalPath,
+          logicalPath: resolver.subagentSource.logicalPath,
           name: resolver.name,
           nodeId: resolver.nodeId,
-          sourceId: resolver.sourceId,
-          sourceKind: resolver.sourceKind,
+          sourceId: resolver.subagentSource.sourceId,
+          sourceKind: "subagent",
         },
         inputSchema,
       );

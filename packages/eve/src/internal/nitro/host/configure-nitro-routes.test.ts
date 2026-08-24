@@ -2,6 +2,7 @@ import type { Nitro } from "nitro/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PreparedApplicationHost } from "./types.js";
+import type { CompiledWorkflowWorldPlan } from "#compiler/workflow-world-plan.js";
 
 interface NitroStub {
   hookHandlers: Map<string, Array<() => unknown>>;
@@ -24,11 +25,23 @@ interface PreparedApplicationHostStub {
   appRoot: string;
   compileResult: {
     manifest: {
-      channels: [];
+      channelRoutes: {
+        effective: Array<{
+          kind: "channel";
+          logicalPath: string;
+          method: "GET" | "HEAD";
+          name: string;
+          sourceId: string;
+          sourceKind: "module";
+          urlPath: string;
+        }>;
+        preflight: [];
+        shadowed: [];
+      };
       config: {
         name: string;
-        experimental?: { workflow?: { world?: string } };
       };
+      workflowWorld: CompiledWorkflowWorldPlan;
     };
     project: {
       agentRoot: string;
@@ -57,6 +70,7 @@ const fsMocks = vi.hoisted(() => ({
 vi.mock("node:fs/promises", () => fsMocks);
 
 vi.mock("../../application/package.js", () => ({
+  resolveInstalledPackageInfo: () => ({ name: "eve", version: "0.3.0" }),
   resolvePackageDependencyPath: (specifier: string) =>
     `G:\\projects\\test-eve\\node_modules\\.pnpm\\${specifier}@1.0.0\\node_modules\\${specifier}\\dist\\index.js`,
   resolvePackageRoot: () =>
@@ -70,6 +84,13 @@ vi.mock("../../application/package.js", () => ({
       .replace(/^workflow\/(?:api|runtime)$/, "@workflow\\core\\runtime")
       .replace(/^workflow\/internal\/private$/, "@workflow\\core\\private")
       .replaceAll("/", "\\")}.js`,
+}));
+
+vi.mock("#framework-sources/revision.js", () => ({
+  EVE_RUNTIME_SOURCE_REVISION_TOKEN: "test-runtime-source-revision",
+  readCompiledFrameworkSourceRevision: () => "eve@0.3.0:test-runtime-source-revision",
+  resolveEveRuntimeSourceRevision: () => "test-runtime-source-revision",
+  resolveFrameworkAgentSourceRevision: () => "eve@0.3.0:test-runtime-source-revision",
 }));
 
 vi.mock("../../workflow-bundle/builder.js", () => ({
@@ -126,19 +147,68 @@ function createPreparedHost(
 ): PreparedApplicationHost {
   const appRoot = input.appRoot ?? "G:\\projects\\test-eve";
   const pathSeparator = appRoot.includes("\\") ? "\\" : "/";
+  const workflowWorld =
+    input.workflowWorld === undefined
+      ? ({ kind: "native", selection: "host-default", target: "local" } as const)
+      : input.workflowWorld === "local" || input.workflowWorld === "vercel"
+        ? ({ kind: "native", selection: "configured", target: input.workflowWorld } as const)
+        : ({
+            backing: {
+              entryPackageId: "root",
+              entryPath: `${appRoot}${pathSeparator}node_modules${pathSeparator}${input.workflowWorld}${pathSeparator}index.js`,
+              identitySha256: "0".repeat(64),
+              mode: "materialized",
+              packages: [],
+            },
+            kind: "host-module",
+            packageName: input.workflowWorld,
+            protocol: {
+              declaredPackageName: "@workflow/core",
+              declaredRange: "^5.0.0-beta.43",
+              expectedVersion: "5.0.0-beta.43",
+            },
+            selection: "configured",
+          } as const);
 
   const preparedHost: PreparedApplicationHostStub = {
     appRoot,
     compileResult: {
       manifest: {
-        channels: [],
-        config:
-          input.workflowWorld === undefined
-            ? { name: input.agentName ?? "test-agent" }
-            : {
-                name: input.agentName ?? "test-agent",
-                experimental: { workflow: { world: input.workflowWorld } },
-              },
+        channelRoutes: {
+          effective: [
+            {
+              kind: "channel",
+              logicalPath: "channels/home.ts",
+              method: "GET",
+              name: "home",
+              sourceId: "framework:home",
+              sourceKind: "module",
+              urlPath: "/",
+            },
+            ...(["GET", "HEAD"] as const).map((method) => ({
+              kind: "channel" as const,
+              logicalPath: "channels/eve/v1/health.ts",
+              method,
+              name: "eve/v1/health",
+              sourceId: "framework:health",
+              sourceKind: "module" as const,
+              urlPath: EVE_HEALTH_ROUTE_PATH,
+            })),
+            {
+              kind: "channel",
+              logicalPath: "channels/eve.ts",
+              method: "GET",
+              name: "eve",
+              sourceId: "framework:eve",
+              sourceKind: "module",
+              urlPath: EVE_INFO_ROUTE_PATH,
+            },
+          ],
+          preflight: [],
+          shadowed: [],
+        },
+        config: { name: input.agentName ?? "test-agent" },
+        workflowWorld,
       },
       project: {
         agentRoot: `${appRoot}\\agent`,
@@ -168,7 +238,7 @@ describe("Nitro route configuration", () => {
     vi.unstubAllEnvs();
   });
 
-  it("registers package-owned route files through file-url virtual handlers", async () => {
+  it("registers framework home and health through ordinary channel dispatch", async () => {
     const nitro = createNitroStub();
 
     await configureProductionNitroRoutes(nitro, createPreparedHost());
@@ -176,16 +246,14 @@ describe("Nitro route configuration", () => {
     const healthHandler = nitro.options.handlers.find(
       (handler) => handler.route === EVE_HEALTH_ROUTE_PATH && handler.method === "GET",
     );
-    expect(healthHandler?.handler).toBe(`#eve-route-handler/GET ${EVE_HEALTH_ROUTE_PATH}`);
+    expect(healthHandler?.handler).toBe(`#nitro/virtual/eve-channel/GET ${EVE_HEALTH_ROUTE_PATH}`);
 
     const virtualSource = nitro.options.virtual[healthHandler?.handler ?? ""];
-    expect(virtualSource).toContain(
-      'import handler from "file:///G:/projects/test-eve/node_modules/.pnpm/eve@0.3.0/node_modules/eve/dist/src/internal/nitro/routes/health.js";',
-    );
-    expect(virtualSource).not.toContain('"G:\\');
+    expect(virtualSource).toContain("dispatchChannelRequest");
+    expect(virtualSource).not.toContain("routes/health.js");
   });
 
-  it("bakes the agent name into the home page route", async () => {
+  it("does not bake agent configuration into the ordinary home route", async () => {
     const nitro = createNitroStub();
 
     await configureProductionNitroRoutes(nitro, createPreparedHost({ agentName: "support-agent" }));
@@ -193,11 +261,12 @@ describe("Nitro route configuration", () => {
     const homeHandler = nitro.options.handlers.find(
       (handler) => handler.route === "/" && handler.method === "GET",
     );
-    expect(homeHandler?.handler).toBe("#eve-route/");
+    expect(homeHandler?.handler).toBe("#nitro/virtual/eve-channel/GET /");
 
     const virtualSource = nitro.options.virtual[homeHandler?.handler ?? ""];
-    expect(virtualSource).toContain("handleHomePageRequest");
-    expect(virtualSource).toContain('{"agentName":"support-agent"}');
+    expect(virtualSource).toContain("dispatchChannelRequest");
+    expect(virtualSource).not.toContain("handleHomePageRequest");
+    expect(virtualSource).not.toContain("support-agent");
   });
 
   it("registers the health route for HEAD so load balancers probing with HEAD see 200", async () => {
@@ -214,12 +283,10 @@ describe("Nitro route configuration", () => {
     const headHandler = nitro.options.handlers.find(
       (handler) => handler.route === EVE_HEALTH_ROUTE_PATH && handler.method === "HEAD",
     );
-    expect(headHandler?.handler).toBe(`#eve-route-handler/HEAD ${EVE_HEALTH_ROUTE_PATH}`);
+    expect(headHandler?.handler).toBe(`#nitro/virtual/eve-channel/HEAD ${EVE_HEALTH_ROUTE_PATH}`);
 
     const virtualSource = nitro.options.virtual[headHandler?.handler ?? ""];
-    expect(virtualSource).toContain(
-      'import handler from "file:///G:/projects/test-eve/node_modules/.pnpm/eve@0.3.0/node_modules/eve/dist/src/internal/nitro/routes/health.js";',
-    );
+    expect(virtualSource).toContain("dispatchChannelRequest");
   });
 
   it("registers workflow routes through physical handlers with relative bundle imports", async () => {

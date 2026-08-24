@@ -12,7 +12,7 @@ import {
   rejectAgentEffect,
 } from "#harness/handles/transitions.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeRemoteAgentCallActionRequest } from "#shared/runtime-actions.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 
 const log = createLogger("execution.subagent-start-remote");

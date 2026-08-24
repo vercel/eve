@@ -1,75 +1,58 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { lstat, mkdir, readFile, readdir, readlink, writeFile } from "node:fs/promises";
-import { join, relative, sep } from "node:path";
+import { lstat, mkdir, readFile, readdir, readlink, rename, rm, writeFile } from "node:fs/promises";
+import { basename, join, posix, relative, sep } from "node:path";
 
+import { z } from "#compiled/zod/index.js";
+import { publishCompileMetadataCommitMarker } from "#compiler/artifacts.js";
+import { parseCompiledAgentManifest } from "#compiler/compiled-manifest-validation.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
-import { COMPILED_AGENT_MANIFEST_KIND, ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import {
-  bundleAuthoredModuleForGeneration,
-  bundleAuthoredModuleMapForGeneration,
-} from "#internal/authored-module-loader.js";
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
+import { bundleAuthoredModuleMapForGeneration } from "#internal/authored-module-loader.js";
 import { serializeCompiledManifestForFingerprint } from "#internal/compiled-manifest-fingerprint.js";
-import { resolveInstrumentationLayout } from "#internal/instrumentation-layout.js";
+import { compileMetadataSchema, type CompileMetadata } from "#protocol/compile-metadata.js";
+import type { GenerationModuleMapDescriptorProjection } from "#internal/generation-module-map-projection.js";
 
 const MATERIALIZED_MODULES_DIRECTORY = "authored-modules";
 const MATERIALIZED_MODULES_INDEX = "authored-modules.json";
 
-/**
- * The materialized instrumentation modules, mirroring the layout they were
- * authored in. Paths are relative to `.eve/compile`.
- */
-export type MaterializedInstrumentation =
-  | { readonly kind: "file"; readonly modulePath: string }
-  | { readonly kind: "directory"; readonly modulePathsBySlot: Readonly<Record<string, string>> };
-
 export interface MaterializedAuthoredModuleIndex {
   readonly fingerprint: string;
-  readonly instrumentation?: MaterializedInstrumentation;
   readonly moduleMap: string;
-  readonly version: 3;
+  readonly version: 4;
 }
 
-type PreparedMaterializedInstrumentation =
-  | { readonly kind: "file"; readonly moduleCode: string }
-  | {
-      readonly kind: "directory";
-      readonly moduleCodeBySlot: Readonly<Record<string, string>>;
-    };
-
-export interface PreparedMaterializedAuthoredModules {
-  readonly instrumentation?: PreparedMaterializedInstrumentation;
+export interface ValidatedMaterializedAuthoredModuleIndex extends MaterializedAuthoredModuleIndex {
+  /** Exact authenticated descriptor bytes read while validating the committed index. */
   readonly moduleMapCode: string;
 }
 
+const materializedAuthoredModuleIndexSchema = z
+  .object({
+    fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    moduleMap: z.string().min(1),
+    version: z.literal(4),
+  })
+  .strict();
+
+export interface PreparedMaterializedAuthoredModules {
+  readonly moduleMapCode: string;
+}
+
+/** Bundles authenticated compiler loaders with the relocated generation projection. */
 export async function prepareMaterializedAuthoredModules(input: {
+  readonly descriptorProjection?: GenerationModuleMapDescriptorProjection;
+  readonly expectedIdentity: string;
   readonly manifest: CompiledAgentManifest;
   readonly moduleMapPath: string;
+  readonly moduleMapSource: string;
 }): Promise<PreparedMaterializedAuthoredModules> {
-  const moduleMapCode = await bundleAuthoredModuleMapForGeneration(input);
-  const layout = resolveInstrumentationLayout({
-    agentRoot: input.manifest.agentRoot,
-    providersEnabled: input.manifest.config.experimental?.instrumentationProviders ?? false,
+  const moduleMapCode = await bundleAuthoredModuleMapForGeneration({
+    ...input,
+    externalDependencyMode: "preserve-specifier",
+    externalDependencyPlan: input.manifest.externalDependencyPlan,
   });
-  const externalDependencies = input.manifest.config.build?.externalDependencies ?? [];
-  const bundleInstrumentationModule = async (sourcePath: string): Promise<string> =>
-    await bundleAuthoredModuleForGeneration(sourcePath, { externalDependencies });
-  let instrumentation: PreparedMaterializedInstrumentation | undefined;
-
-  if (layout?.kind === "file") {
-    instrumentation = {
-      kind: "file",
-      moduleCode: await bundleInstrumentationModule(layout.modulePath),
-    };
-  } else if (layout?.kind === "directory") {
-    const moduleCodeBySlot: Record<string, string> = {};
-    for (const [slot, sourcePath] of Object.entries(layout.modulePathsBySlot)) {
-      moduleCodeBySlot[slot] = await bundleInstrumentationModule(sourcePath);
-    }
-    instrumentation = { kind: "directory", moduleCodeBySlot };
-  }
-
-  return instrumentation === undefined ? { moduleMapCode } : { instrumentation, moduleMapCode };
+  return { moduleMapCode };
 }
 
 export async function writeMaterializedAuthoredModules(input: {
@@ -96,43 +79,10 @@ export async function writeMaterializedAuthoredModules(input: {
     "module-map",
     input.prepared.moduleMapCode,
   );
-  const moduleMapPath = join(MATERIALIZED_MODULES_DIRECTORY, moduleMapFileName);
+  const moduleMapPath = posix.join(MATERIALIZED_MODULES_DIRECTORY, moduleMapFileName);
 
   await writeFile(join(modulesRoot, moduleMapFileName), input.prepared.moduleMapCode);
   fingerprint.update("module-map\0").update(input.prepared.moduleMapCode).update("\0");
-
-  const materializeInstrumentationModule = async (
-    sourceId: string,
-    code: string,
-  ): Promise<string> => {
-    const fileName = createMaterializedModuleFileName(
-      ROOT_COMPILED_AGENT_NODE_ID,
-      `instrumentation:${sourceId}`,
-      code,
-    );
-
-    await writeFile(join(modulesRoot, fileName), code);
-    fingerprint.update(`instrumentation:${sourceId}\0`).update(code).update("\0");
-    return join(MATERIALIZED_MODULES_DIRECTORY, fileName);
-  };
-
-  let instrumentation: MaterializedInstrumentation | undefined;
-
-  if (input.prepared.instrumentation?.kind === "file") {
-    instrumentation = {
-      kind: "file",
-      modulePath: await materializeInstrumentationModule(
-        "file",
-        input.prepared.instrumentation.moduleCode,
-      ),
-    };
-  } else if (input.prepared.instrumentation?.kind === "directory") {
-    const modulePathsBySlot: Record<string, string> = {};
-    for (const [slot, code] of Object.entries(input.prepared.instrumentation.moduleCodeBySlot)) {
-      modulePathsBySlot[slot] = await materializeInstrumentationModule(slot, code);
-    }
-    instrumentation = { kind: "directory", modulePathsBySlot };
-  }
 
   await hashDirectoryIfPresent({
     fingerprint,
@@ -141,74 +91,159 @@ export async function writeMaterializedAuthoredModules(input: {
   });
   const index: {
     fingerprint: string;
-    instrumentation?: MaterializedInstrumentation;
     moduleMap: string;
-    version: 3;
+    version: 4;
   } = {
     fingerprint: fingerprint.digest("hex"),
     moduleMap: moduleMapPath,
-    version: 3,
+    version: 4,
   };
-  if (instrumentation !== undefined) {
-    index.instrumentation = instrumentation;
+  const indexSource = `${JSON.stringify(index)}\n`;
+  const indexPath = join(compileRoot, MATERIALIZED_MODULES_INDEX);
+  const temporaryIndexPath = `${indexPath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporaryIndexPath, indexSource);
+    await rename(temporaryIndexPath, indexPath);
+  } finally {
+    await rm(temporaryIndexPath, { force: true });
   }
-  await writeFile(join(compileRoot, MATERIALIZED_MODULES_INDEX), `${JSON.stringify(index)}\n`);
+  await commitMaterializedAuthoredModuleIndex({
+    compileRoot,
+    index,
+    indexSource,
+  });
   return index;
 }
 
-export async function readMaterializedAuthoredModuleIndex(
-  runtimeAppRoot: string,
-): Promise<MaterializedAuthoredModuleIndex | undefined> {
-  const indexPath = join(runtimeAppRoot, ".eve", "compile", MATERIALIZED_MODULES_INDEX);
-  if (!existsSync(indexPath)) {
+export async function readMaterializedAuthoredModuleIndex(input: {
+  readonly metadata: CompileMetadata;
+  readonly runtimeAppRoot: string;
+}): Promise<ValidatedMaterializedAuthoredModuleIndex | undefined> {
+  const committed = input.metadata.compile.materializedAuthoredModules;
+  if (committed === undefined) {
     return undefined;
   }
+  if (committed.path !== `.eve/compile/${MATERIALIZED_MODULES_INDEX}`) {
+    throw new Error(`Invalid materialized authored module metadata path "${committed.path}".`);
+  }
+  const compileRoot = join(input.runtimeAppRoot, ".eve", "compile");
+  const indexPath = join(compileRoot, MATERIALIZED_MODULES_INDEX);
+  const indexSource = await readFile(indexPath, "utf8");
+  assertDigest("materialized authored module index", committed.sha256, indexSource);
 
-  const parsed = JSON.parse(
-    await readFile(indexPath, "utf8"),
-  ) as Partial<MaterializedAuthoredModuleIndex>;
-  if (
-    parsed.version !== 3 ||
-    typeof parsed.fingerprint !== "string" ||
-    parsed.fingerprint.length === 0 ||
-    typeof parsed.moduleMap !== "string" ||
-    parsed.moduleMap.length === 0 ||
-    !isMaterializedInstrumentation(parsed.instrumentation)
-  ) {
+  const parsed = materializedAuthoredModuleIndexSchema.safeParse(JSON.parse(indexSource));
+  if (!parsed.success) {
     throw new Error(`Invalid materialized authored module index at "${indexPath}".`);
   }
-
-  return parsed as MaterializedAuthoredModuleIndex;
-}
-
-function isMaterializedInstrumentation(value: unknown): boolean {
-  if (value === undefined) return true;
-  if (typeof value !== "object" || value === null) return false;
-
-  const candidate = value as Partial<MaterializedInstrumentation>;
-  if (candidate.kind === "file") {
-    return typeof (candidate as { modulePath?: unknown }).modulePath === "string";
-  }
-  if (candidate.kind === "directory") {
-    const paths = (candidate as { modulePathsBySlot?: unknown }).modulePathsBySlot;
-    return (
-      typeof paths === "object" &&
-      paths !== null &&
-      Object.values(paths).every((path) => typeof path === "string")
+  if (parsed.data.fingerprint !== committed.fingerprintSha256) {
+    throw new Error(
+      `Materialized authored module fingerprint mismatch: expected "${committed.fingerprintSha256}", received "${parsed.data.fingerprint}".`,
     );
   }
 
-  return false;
+  const manifest = await readCompiledManifest(join(compileRoot, "compiled-agent-manifest.json"));
+  const moduleMapCode = await readValidatedMaterializedModule({
+    compileRoot,
+    modulePath: parsed.data.moduleMap,
+    sourceId: "module-map",
+  });
+  const fingerprint = createHash("sha256");
+  fingerprint
+    .update("manifest\0")
+    .update(
+      serializeCompiledManifestForFingerprint({
+        manifest,
+        runtimeAppRoot: input.runtimeAppRoot,
+      }),
+    )
+    .update("\0")
+    .update("module-map\0")
+    .update(moduleMapCode)
+    .update("\0");
+
+  await hashDirectoryIfPresent({
+    fingerprint,
+    path: join(compileRoot, "workspace-resources"),
+    root: join(compileRoot, "workspace-resources"),
+  });
+  const actualFingerprint = fingerprint.digest("hex");
+  if (actualFingerprint !== parsed.data.fingerprint) {
+    throw new Error(
+      `Materialized authored module content fingerprint mismatch: expected "${parsed.data.fingerprint}", received "${actualFingerprint}".`,
+    );
+  }
+
+  return { ...parsed.data, moduleMapCode };
+}
+
+async function commitMaterializedAuthoredModuleIndex(input: {
+  readonly compileRoot: string;
+  readonly index: MaterializedAuthoredModuleIndex;
+  readonly indexSource: string;
+}): Promise<void> {
+  const metadataPath = join(input.compileRoot, "compile-metadata.json");
+  const previous = compileMetadataSchema.parse(JSON.parse(await readFile(metadataPath, "utf8")));
+  const metadata: CompileMetadata = {
+    ...previous,
+    compile: {
+      ...previous.compile,
+      materializedAuthoredModules: {
+        fingerprintSha256: input.index.fingerprint,
+        path: `.eve/compile/${MATERIALIZED_MODULES_INDEX}`,
+        sha256: createHash("sha256").update(input.indexSource).digest("hex"),
+      },
+    },
+  };
+  await publishCompileMetadataCommitMarker({
+    contents: `${JSON.stringify(metadata, null, 2)}\n`,
+    path: metadataPath,
+  });
+}
+
+async function readValidatedMaterializedModule(input: {
+  readonly compileRoot: string;
+  readonly modulePath: string;
+  readonly sourceId: string;
+}): Promise<string> {
+  assertMaterializedModulePath(input.modulePath);
+  const path = join(input.compileRoot, input.modulePath);
+  const code = await readFile(path, "utf8");
+  const expectedFileName = createMaterializedModuleFileName(
+    ROOT_COMPILED_AGENT_NODE_ID,
+    input.sourceId,
+    code,
+  );
+  if (basename(path) !== expectedFileName) {
+    throw new Error(
+      `Materialized authored module "${input.modulePath}" does not match its content-addressed file name "${expectedFileName}".`,
+    );
+  }
+  return code;
+}
+
+function assertMaterializedModulePath(path: string): void {
+  if (
+    path.includes("\\") ||
+    posix.isAbsolute(path) ||
+    posix.normalize(path) !== path ||
+    posix.dirname(path) !== MATERIALIZED_MODULES_DIRECTORY ||
+    !/^[a-f0-9]{64}\.mjs$/.test(posix.basename(path))
+  ) {
+    throw new Error(
+      `Materialized authored module path "${path}" must name a content-addressed file directly under "${MATERIALIZED_MODULES_DIRECTORY}".`,
+    );
+  }
+}
+
+function assertDigest(label: string, expected: string, contents: string): void {
+  const actual = createHash("sha256").update(contents).digest("hex");
+  if (actual !== expected) {
+    throw new Error(`${label} digest mismatch: expected "${expected}", received "${actual}".`);
+  }
 }
 
 async function readCompiledManifest(path: string): Promise<CompiledAgentManifest> {
-  const manifest = JSON.parse(await readFile(path, "utf8")) as CompiledAgentManifest;
-
-  if (manifest.kind !== COMPILED_AGENT_MANIFEST_KIND) {
-    throw new Error(`Invalid compiled agent manifest at "${path}".`);
-  }
-
-  return manifest;
+  return parseCompiledAgentManifest(JSON.parse(await readFile(path, "utf8")) as unknown);
 }
 
 function createMaterializedModuleFileName(nodeId: string, sourceId: string, code: string): string {

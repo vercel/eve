@@ -9,6 +9,12 @@ import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
+
+interface InstructionsCompileOptions {
+  readonly name?: string;
+}
+type ModuleInstructionsCompileOptions = InstructionsCompileOptions &
+  ModuleBackedDefinitionLoadOptions;
 import {
   assertResolverOnlyDynamicSentinel,
   ALLOWED_DYNAMIC_INSTRUCTION_EVENTS,
@@ -43,10 +49,17 @@ export type CompiledInstructionsEntry =
  * classified and their event names recorded; the resolver runs at
  * runtime.
  */
+export function compileInstructionsEntry(
+  source: Extract<InstructionsSourceRef, { readonly sourceKind: "module" }>,
+  options: ModuleInstructionsCompileOptions,
+): Promise<CompiledInstructionsEntry>;
+export function compileInstructionsEntry(
+  source: Exclude<InstructionsSourceRef, { readonly sourceKind: "module" }>,
+  options?: InstructionsCompileOptions,
+): Promise<CompiledInstructionsEntry>;
 export async function compileInstructionsEntry(
-  agentRoot: string,
   source: InstructionsSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
+  options: InstructionsCompileOptions | ModuleInstructionsCompileOptions = {},
 ): Promise<CompiledInstructionsEntry> {
   if (source.sourceKind === "markdown") {
     const definition = normalizeInstructionsDefinition(
@@ -56,7 +69,7 @@ export async function compileInstructionsEntry(
     return {
       kind: "instructions",
       definition: {
-        name: stripLogicalPathExtension(source.logicalPath),
+        name: options.name ?? stripLogicalPathExtension(source.logicalPath),
         logicalPath: source.logicalPath,
         content: definition.content,
         role: definition.role,
@@ -66,10 +79,11 @@ export async function compileInstructionsEntry(
     };
   }
 
+  const moduleOptions = requireModuleOptions(options, source.logicalPath);
   const exportValue = await loadModuleBackedDefinition({
-    agentRoot,
-    externalDependencies: options.externalDependencies,
+    binding: moduleOptions.binding,
     kind: "instructions",
+    moduleLoader: moduleOptions.moduleLoader,
     source,
   });
 
@@ -87,7 +101,8 @@ export async function compileInstructionsEntry(
         `Expected the instructions export "${source.exportName ?? "default"}" from "${source.logicalPath}" to use only "session.started" or "turn.started" events. Unsupported event: "${unsupportedEvent}".`,
       );
     }
-    const slug = stripLogicalPathExtension(source.logicalPath).replace(/^instructions\//, "");
+    const slug =
+      options.name ?? stripLogicalPathExtension(source.logicalPath).replace(/^instructions\//, "");
     return {
       kind: "dynamic-instructions",
       definition: {
@@ -109,9 +124,10 @@ export async function compileInstructionsEntry(
   return {
     kind: "instructions",
     definition: {
-      name: stripLogicalPathExtension(source.logicalPath),
+      name: options.name ?? stripLogicalPathExtension(source.logicalPath),
       logicalPath: source.logicalPath,
       content: definition.content,
+      exportName: source.exportName,
       role: definition.role,
       sourceId: source.sourceId,
       sourceKind: source.sourceKind,
@@ -119,20 +135,12 @@ export async function compileInstructionsEntry(
   };
 }
 
-/**
- * @deprecated Use {@link compileInstructionsEntry} instead. Kept for
- * backwards compatibility with callers that pass a single source.
- */
-export async function compileInstructions(
-  agentRoot: string,
-  source: InstructionsSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
-): Promise<CompiledInstructionsDefinition> {
-  const entry = await compileInstructionsEntry(agentRoot, source, options);
-  if (entry.kind === "dynamic-instructions") {
-    throw new Error(
-      `Expected static instructions from "${source.logicalPath}" but got a dynamic resolver. Use compileInstructionsEntry instead.`,
-    );
+function requireModuleOptions(
+  options: InstructionsCompileOptions | ModuleInstructionsCompileOptions,
+  logicalPath: string,
+): ModuleInstructionsCompileOptions {
+  if (!("binding" in options) || options.binding === undefined) {
+    throw new Error(`Module-backed instructions "${logicalPath}" requires a selected binding.`);
   }
-  return entry.definition;
+  return options;
 }

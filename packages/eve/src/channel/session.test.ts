@@ -9,7 +9,7 @@ import {
 import type { Runtime } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
 import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
-import { type InputResponse, parseInputResponses } from "#runtime/input/types.js";
+import { type InputResponse, parseInputResponses } from "#shared/input.js";
 
 function fixedSessionRespondTypeChecks(session: Session): void {
   const responsesWithMetadata = [

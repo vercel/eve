@@ -16,10 +16,11 @@ import { AuthKey, InitiatorAuthKey } from "#context/keys.js";
 import { buildRunContext } from "#execution/runtime-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { isConnectionAuthorizationFailedError } from "#public/connections/errors.js";
-import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
-import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { principalKey, resolveConnectionPrincipal } from "#execution/connections/principal.js";
 import { eveChannel, type EveChannelInput } from "#public/channels/eve.js";
-import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
+import { attachRouteSessionCreator } from "#channel/route-context.js";
+
+type CompiledBundle = Parameters<typeof buildRunContext>[0]["bundle"];
 
 const ROUTER_CALLER: SessionAuthContext = {
   attributes: {},

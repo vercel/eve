@@ -2,9 +2,9 @@ import type {
   ConnectionAuthDefinition,
   HeadersDefinition,
   ToolFilterDefinition,
-} from "#runtime/connections/types.js";
+} from "#shared/connections.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
-import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
+import { normalizeAuthorizationSpec } from "#shared/validate-connection-authorization.js";
 import { stampConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import type { Approval } from "#public/definitions/approval.js";
 import { stampDefinitionKey } from "#public/tool-result-narrowing.js";

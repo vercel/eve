@@ -17,9 +17,9 @@ export interface RuntimeAdapterRegistry {
 }
 
 /**
- * Framework-provided adapter configs.
+ * Built-in transport adapter implementations.
  *
- * Framework kinds cannot be shadowed with route-authored behavior.
+ * Their protocol kinds cannot be shadowed with channel-authored behavior.
  */
 const FRAMEWORK_ADAPTERS: readonly ChannelAdapter[] = [
   HTTP_ADAPTER,
@@ -44,10 +44,10 @@ const ADAPTER_NON_EVENT_FIELDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Builds the runtime-owned adapter registry from framework adapters plus any
- * custom adapters declared on resolved route definitions.
+ * Builds the runtime-owned adapter registry from built-in transports and the
+ * custom adapters attached to selected, resolved channel definitions.
  *
- * Route-declared adapters may share framework kinds only as pass-throughs.
+ * Channel adapters may share built-in kinds only as pass-throughs.
  */
 export function createRuntimeAdapterRegistry(input: {
   readonly channels: readonly ResolvedChannelDefinition[];
@@ -55,8 +55,8 @@ export function createRuntimeAdapterRegistry(input: {
   const adaptersByKind = new Map<string, ChannelAdapter>();
   const frameworkKinds = new Set<string>();
 
-  // Pass 1: register framework adapters. Each owns its kind
-  // permanently — route-declared adapters can share the kind only
+  // Pass 1: register built-in transports. Each owns its protocol kind
+  // permanently — channel adapters can share the kind only
   // if they carry no authored behavior (strictly additive
   // pass-through).
   for (const adapter of FRAMEWORK_ADAPTERS) {
@@ -65,8 +65,8 @@ export function createRuntimeAdapterRegistry(input: {
     adaptersByKind.set(kind, adapter);
   }
 
-  // Pass 2: register route-declared adapters. Validates that
-  // authored adapters do not shadow a framework kind with
+  // Pass 2: register selected channel adapters. Validates that
+  // authored adapters do not shadow a built-in kind with
   // behavior.
   for (const channelDefinition of input.channels) {
     if (channelDefinition.adapter === undefined) {
@@ -96,9 +96,8 @@ export function createRuntimeAdapterRegistry(input: {
       continue;
     }
 
-    // Non-framework kind. The last route-declared adapter for this
-    // kind wins, matching the pre-Phase-4 behavior for authored
-    // kinds.
+    // Custom kinds are path-derived from their selected channel. A channel
+    // with multiple effective routes repeats the same source-owned adapter.
     adaptersByKind.set(kind, adapter);
   }
 
@@ -108,9 +107,9 @@ export function createRuntimeAdapterRegistry(input: {
 /**
  * Rehydrates one serialized adapter from the runtime-owned registry.
  *
- * Looks up the adapter config by `kind`, then merges the serialized state
- * onto it. The result is a full adapter with behavior functions and
- * restored state.
+ * Looks up the selected adapter implementation by `kind`, then restores its
+ * serialized state. The result retains the implementation's behavior
+ * functions across workflow boundaries.
  */
 export function deserializeRuntimeAdapter(
   registry: RuntimeAdapterRegistry,
@@ -129,9 +128,8 @@ export function deserializeRuntimeAdapter(
     );
   }
 
-  // Merge the serialized state onto the adapter config. The behavior
-  // functions come from the registry entry; the state comes from the
-  // serialized context.
+  // Behavior comes from the selected channel implementation; state comes
+  // from the serialized workflow context.
   return { ...adapterConfig, state: serialized.state };
 }
 

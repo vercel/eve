@@ -2,7 +2,7 @@ import type { RuntimeSession } from "#execution/agent-handle-dispatch.js";
 import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { getAgentHandleStore, type AgentHandle } from "#harness/handles/store.js";
-import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#shared/runtime-actions.js";
 import { taskViewsToJson } from "#tasks/json.js";
 import {
   findSessionTaskEntry,

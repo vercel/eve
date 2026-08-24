@@ -8,26 +8,24 @@ import {
   bundleExtensionDistributionGraph,
   type ExtensionDistributionGraphEntry,
 } from "#internal/authored-module-loader.js";
+import type { ExtensionDeclarationBinding } from "#internal/nitro/host/extension-declaration-binding.js";
 import { emitExtensionDeclarations } from "#internal/nitro/host/extension-declarations.js";
-import type { ModuleSourceRef } from "#shared/source-ref.js";
 
 /** Emits the runnable, agent-shaped tree and its package entrypoints into staging. */
 export async function emitExtensionDistribution(input: {
   readonly appRoot: string;
-  readonly declarationModule: ModuleSourceRef;
+  readonly declarationBinding: ExtensionDeclarationBinding;
   readonly declarationsRoot: string;
   readonly manifest: AgentSourceManifest;
-  readonly runtimeDependencies: readonly string[];
-  readonly shortName: string;
-  readonly sourceRoot: string;
   readonly stagedDistRoot: string;
   readonly stagedOutDir: string;
   readonly transactionRoot: string;
 }): Promise<void> {
-  const sourceFiles = await collectExtensionSourceFiles(input.sourceRoot);
+  const sourceRoot = input.declarationBinding.backing.extensionScope.sourceRoot;
+  const sourceFiles = await collectExtensionSourceFiles(sourceRoot);
   const skillPackageRoots = input.manifest.skills
     .filter((skill) => skill.sourceKind === "skill-package")
-    .map((skill) => relative(input.sourceRoot, skill.rootPath).replaceAll("\\", "/"));
+    .map((skill) => relative(sourceRoot, skill.rootPath).replaceAll("\\", "/"));
   const moduleFiles = sourceFiles.filter(
     (file) =>
       isAuthoredModule(file.logicalPath) &&
@@ -42,7 +40,7 @@ export async function emitExtensionDistribution(input: {
   const emitted = await bundleExtensionDistributionGraph({
     entries,
     packageRoot: input.appRoot,
-    runtimeDependencies: input.runtimeDependencies,
+    runtimeDependencies: input.declarationBinding.backing.externalDependencies,
   });
   for (const [fileName, code] of emitted) {
     const outputPath = join(input.stagedOutDir, fileName);
@@ -54,9 +52,9 @@ export async function emitExtensionDistribution(input: {
     appRoot: input.appRoot,
     declarationsRoot: input.declarationsRoot,
     moduleLogicalPaths: moduleFiles.map((file) => file.logicalPath),
-    sourceRoot: input.sourceRoot,
+    sourceRoot,
   });
-  const sourceRelativePath = relative(input.appRoot, input.sourceRoot);
+  const sourceRelativePath = relative(input.appRoot, sourceRoot);
   try {
     await cp(join(input.declarationsRoot, sourceRelativePath), input.stagedDistRoot, {
       recursive: true,
@@ -173,15 +171,14 @@ async function copyDistributionDataFiles(input: {
 }
 
 async function createDistributionEntries(input: {
-  readonly declarationModule: ModuleSourceRef;
+  readonly declarationBinding: ExtensionDeclarationBinding;
   readonly manifest: AgentSourceManifest;
   readonly moduleFiles: readonly ExtensionSourceFile[];
-  readonly shortName: string;
-  readonly sourceRoot: string;
   readonly stagedDistRoot: string;
   readonly stagedOutDir: string;
   readonly transactionRoot: string;
 }): Promise<ExtensionDistributionGraphEntry[]> {
+  const sourceRoot = input.declarationBinding.backing.extensionScope.sourceRoot;
   const outputPrefix = relative(input.stagedOutDir, input.stagedDistRoot).replaceAll("\\", "/");
   const entries = input.moduleFiles.map((file) => ({
     name: `${outputPrefix}/${stripAuthoredModuleExtension(file.logicalPath)}`,
@@ -201,10 +198,10 @@ async function createDistributionEntries(input: {
       barrelPath: join(barrelRoot, "index.mjs"),
       name: "index",
       reexports: [
-        { name: "default", path: join(input.sourceRoot, input.declarationModule.logicalPath) },
+        { name: "default", path: input.declarationBinding.backing.sourcePath },
         {
-          name: input.shortName,
-          path: join(input.sourceRoot, input.declarationModule.logicalPath),
+          name: input.declarationBinding.owner.namespace,
+          path: input.declarationBinding.backing.sourcePath,
         },
       ],
     }),
@@ -213,7 +210,7 @@ async function createDistributionEntries(input: {
       name: "tools/index",
       reexports: input.manifest.tools.map((tool) => ({
         name: toolExportName(tool.logicalPath),
-        path: join(input.sourceRoot, tool.logicalPath),
+        path: join(sourceRoot, tool.logicalPath),
       })),
     }),
   );
@@ -234,22 +231,21 @@ async function stageRuntimeBarrel(input: {
 }
 
 async function emitDeclarationBarrels(input: {
-  readonly declarationModule: ModuleSourceRef;
+  readonly declarationBinding: ExtensionDeclarationBinding;
   readonly manifest: AgentSourceManifest;
-  readonly shortName: string;
   readonly stagedDistRoot: string;
   readonly stagedOutDir: string;
 }): Promise<void> {
   await mkdir(join(input.stagedOutDir, "tools"), { recursive: true });
   const declarationSpecifier = relativeImport(
     input.stagedOutDir,
-    join(input.stagedDistRoot, input.declarationModule.logicalPath),
+    join(input.stagedDistRoot, input.declarationBinding.logicalPath),
   );
   await writeDeclarationBarrel({
     path: join(input.stagedOutDir, "index.d.ts"),
     reexports: [
       { name: "default", specifier: declarationSpecifier },
-      { name: input.shortName, specifier: declarationSpecifier },
+      { name: input.declarationBinding.owner.namespace, specifier: declarationSpecifier },
     ],
   });
   await writeDeclarationBarrel({

@@ -66,6 +66,9 @@ describe("resolveEveDestinationPrefix", () => {
       return true;
     });
     spawnMock.mockReturnValue(child);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ revision: "test", serverId: "server-1" }),
+    );
 
     const destination = resolveEveDestinationPrefix({
       appRoot,
@@ -85,7 +88,10 @@ describe("resolveEveDestinationPrefix", () => {
     child.stderr.emit("data", Buffer.from("dev server listening at http://127.0.0.1:33449\n"));
 
     await expect(destination).resolves.toBe("http://127.0.0.1:33449");
-    await expect(readRegisteredOrigin(appRoot)).resolves.toBe("http://127.0.0.1:33449");
+    await expect(readRegisteredServer(appRoot)).resolves.toEqual({
+      origin: "http://127.0.0.1:33449",
+      serverId: "server-1",
+    });
     expect(stdoutWrites).toContain(
       '[eve:dev:support] dependency metadata: "homepage": "https://rolldown.rs/"\n',
     );
@@ -104,6 +110,9 @@ describe("resolveEveDestinationPrefix", () => {
       return true;
     });
     spawnMock.mockReturnValue(child);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ revision: "test", serverId: "server-1" }),
+    );
 
     const destination = resolveEveDestinationPrefix({
       appRoot,
@@ -127,6 +136,26 @@ describe("resolveEveDestinationPrefix", () => {
       "[eve:dev:billing] server listening at http://127.0.0.1:33450\n",
     ]);
   });
+
+  it("stops a spawned server that never exposes its development identity", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const appRoot = await createTempAppRoot();
+    const child = createMockChildProcess();
+    spawnMock.mockReturnValue(child);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ revision: "test" }));
+
+    const destination = resolveEveDestinationPrefix({
+      appRoot,
+      devServerTimeoutMs: 250,
+      phase: "phase-development-server",
+      productionDestinationPrefix: "/internal/eve",
+    });
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledOnce());
+    child.stdout.emit("data", Buffer.from("server listening at http://127.0.0.1:33451\n"));
+
+    await expect(destination).rejects.toThrow("eve dev server did not become ready");
+    expect(child.killed).toBe(true);
+  });
 });
 
 async function createTempAppRoot(): Promise<string> {
@@ -135,12 +164,14 @@ async function createTempAppRoot(): Promise<string> {
   return root;
 }
 
-async function readRegisteredOrigin(appRoot: string): Promise<string> {
+async function readRegisteredServer(
+  appRoot: string,
+): Promise<{ readonly origin: string; readonly serverId: string }> {
   const registry = JSON.parse(
     await readFile(join(appRoot, ".eve", "next-dev-server.json"), "utf8"),
-  ) as { readonly origin?: unknown };
-  if (typeof registry.origin !== "string") {
-    throw new Error("eve dev server registry did not record a string origin.");
+  ) as { readonly origin?: unknown; readonly serverId?: unknown };
+  if (typeof registry.origin !== "string" || typeof registry.serverId !== "string") {
+    throw new Error("eve dev server registry did not record its origin and identity.");
   }
-  return registry.origin;
+  return { origin: registry.origin, serverId: registry.serverId };
 }

@@ -1,6 +1,6 @@
 /**
  * Builds the startup header the dev TUI commits to scrollback before the
- * first prompt: one `eve <agent name>` brand line, a discovery-diagnostics
+ * first prompt: one `eve <agent name>` brand line, a compiler-diagnostics
  * line when the compiler reported problems, and a rotating tip for local
  * sessions. The resolved model is not repeated here — it lives on the
  * persistent status line at the bottom.
@@ -54,22 +54,14 @@ export function buildAgentHeader(input: AgentHeaderInput): string[] {
   const brand = c.bold("eve");
   lines.push(` ${brand} ${c.dim(truncate(name, Math.max(8, width - 8)))}`);
 
-  if (info && (info.diagnostics.discoveryErrors > 0 || info.diagnostics.discoveryWarnings > 0)) {
+  if (info && (info.diagnostics.errors > 0 || info.diagnostics.warnings > 0)) {
     const parts: string[] = [];
-    if (info.diagnostics.discoveryErrors > 0) {
-      parts.push(
-        c.red(
-          `${info.diagnostics.discoveryErrors} error${plural(info.diagnostics.discoveryErrors)}`,
-        ),
-      );
+    if (info.diagnostics.errors > 0) {
+      parts.push(c.red(`${info.diagnostics.errors} error${plural(info.diagnostics.errors)}`));
     }
-    if (info.diagnostics.discoveryWarnings > 0) {
+    if (info.diagnostics.warnings > 0) {
       parts.push(
-        c.yellow(
-          `${info.diagnostics.discoveryWarnings} warning${plural(
-            info.diagnostics.discoveryWarnings,
-          )}`,
-        ),
+        c.yellow(`${info.diagnostics.warnings} warning${plural(info.diagnostics.warnings)}`),
       );
     }
     lines.push(` ${c.dim(theme.glyph.warning)} ${parts.join(c.dim(" · "))}`);

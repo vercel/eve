@@ -4,12 +4,14 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { mockSkill } from "#internal/testing/mocks/mock-skill.js";
 import { mockTool } from "#internal/testing/mocks/mock-tool.js";
+import type { CompileFromMemoryToolInput } from "#compiler/compile-from-memory.js";
+import type { TaskExec } from "#shared/tool-task.js";
 
 /**
  * Integration coverage for authored tool execution through the harness.
  *
  * Replaces the `test/harness-tool-execution.integration.test.ts` fixture —
- * the seven cases here exercise the same seam (tool execute, error
+ * the cases here exercise the same seam (tool execute, error
  * propagation, session/skill/sandbox exposure) through the AppHarness.
  * No test body touches `mkdtemp`, `installBundledCompiledArtifacts`, or
  * real sandboxes. The skill test delegates materialization to
@@ -41,10 +43,10 @@ describe("authored tool execution", () => {
         };
       },
     });
-    const runtime = createTestRuntime({ tools: [weatherTool] });
+    const runtime = await createTestRuntime({ tools: [weatherTool] });
 
     const result = await runtime.runAsSession(undefined, async () => {
-      return await runtime.executeTool(weatherTool, { city: "Brooklyn" });
+      return await runtime.executeTool(weatherTool.name, { city: "Brooklyn" });
     });
 
     expect(result).toEqual({
@@ -62,13 +64,106 @@ describe("authored tool execution", () => {
         throw new Error("weather upstream unavailable");
       },
     });
-    const runtime = createTestRuntime({ tools: [weatherTool] });
+    const runtime = await createTestRuntime({ tools: [weatherTool] });
 
     await expect(
       runtime.runAsSession(undefined, async () => {
-        return await runtime.executeTool(weatherTool, { city: "Brooklyn" });
+        return await runtime.executeTool(weatherTool.name, { city: "Brooklyn" });
       }),
     ).rejects.toThrow("weather upstream unavailable");
+  });
+
+  it("executes the installed definition by compiled identity, not a caller-owned object", async () => {
+    const installed = mockTool({
+      name: "identity_probe",
+      execute: () => "installed",
+    });
+    const runtime = await createTestRuntime({ tools: [installed] });
+    const compiled = runtime.manifest.tools.find((tool) => tool.name === installed.name);
+    if (compiled === undefined) throw new Error("Missing compiled identity_probe tool.");
+    const callerOwnedReplacement = { ...installed, execute: () => "caller-owned" };
+
+    const result = await runtime.runAsSession(undefined, async () =>
+      runtime.executeTool({ sourceId: compiled.sourceId }, {}),
+    );
+    runtime.reset();
+    const coldStartResult = await runtime.runAsSession(undefined, async () =>
+      runtime.executeTool({ sourceId: compiled.sourceId }, {}),
+    );
+
+    expect(callerOwnedReplacement.execute()).toBe("caller-owned");
+    expect(result).toBe("installed");
+    expect(coldStartResult).toBe("installed");
+  });
+
+  it("provides the public call identity and abort signal from installed execution", async () => {
+    const controller = new AbortController();
+    const metadataProbe = mockTool({
+      name: "metadata_probe",
+      execute(_input, ctx) {
+        return {
+          callId: ctx.callId,
+          sameAbortSignal: ctx.abortSignal === controller.signal,
+          toolName: ctx.toolName,
+        };
+      },
+    });
+    const runtime = await createTestRuntime({ tools: [metadataProbe] });
+
+    const result = await runtime.runAsSession(undefined, async () =>
+      runtime.executeTool(
+        metadataProbe.name,
+        {},
+        {
+          abortSignal: controller.signal,
+          toolCallId: "call_metadata_probe",
+        },
+      ),
+    );
+
+    expect(result).toEqual({
+      callId: "call_metadata_probe",
+      sameAbortSignal: true,
+      toolName: "metadata_probe",
+    });
+  });
+
+  it("passes the task runtime to an installed background tool", async () => {
+    const task = {} as TaskExec;
+    const backgroundTool: CompileFromMemoryToolInput = {
+      description: "Observe the background task runtime.",
+      execution: "background",
+      execute(_input, ctx, receivedTask) {
+        return {
+          callId: ctx.callId,
+          sameTask: receivedTask === task,
+          toolName: ctx.toolName,
+        };
+      },
+      inputSchema: {},
+      name: "background_probe",
+    };
+    const runtime = await createTestRuntime({
+      agent: { tasks: true },
+      tools: [backgroundTool],
+    });
+
+    const result = await runtime.runAsSession(undefined, async () =>
+      runtime.executeTool(
+        backgroundTool.name,
+        {},
+        {
+          task,
+          toolCallId: "call_background_probe",
+        },
+      ),
+    );
+
+    expect(result).toEqual({
+      callId: "call_background_probe",
+      sameTask: true,
+      toolName: "background_probe",
+    });
   });
 
   it("exposes session metadata to authored tool execution across async work", async () => {
@@ -79,14 +174,14 @@ describe("authored tool execution", () => {
         return ctx.session;
       },
     });
-    const runtime = createTestRuntime({ tools: [sessionProbe] });
+    const runtime = await createTestRuntime({ tools: [sessionProbe] });
 
     const result = await runtime.runAsSession(
       {
         sessionId: "session_async_session",
         turn: { id: "turn_async_session_001", sequence: 1 },
       },
-      async () => runtime.executeTool(sessionProbe, {}),
+      async () => runtime.executeTool(sessionProbe.name, {}),
     );
 
     expect(result).toEqual({
@@ -109,7 +204,7 @@ describe("authored tool execution", () => {
         return ctx.session;
       },
     });
-    const runtime = createTestRuntime({ tools: [sessionProbe] });
+    const runtime = await createTestRuntime({ tools: [sessionProbe] });
 
     const result = await runtime.runAsSession(
       {
@@ -122,7 +217,7 @@ describe("authored tool execution", () => {
         sessionId: "session_child",
         turn: { id: "turn_child_001", sequence: 1 },
       },
-      async () => runtime.executeTool(sessionProbe, {}),
+      async () => runtime.executeTool(sessionProbe.name, {}),
     );
 
     expect(result).toEqual({
@@ -157,9 +252,9 @@ describe("authored tool execution", () => {
         return await ctx.getSkill("semantic-model").file("references/catalog.yml").text();
       },
     });
-    const runtime = createTestRuntime({
+    const runtime = await createTestRuntime({
       tools: [skillReader],
-      skills: [semanticModel.source],
+      skills: [semanticModel.input],
     });
 
     const sandbox = mockSandbox({
@@ -170,7 +265,7 @@ describe("authored tool execution", () => {
     });
 
     const result = await runtime.runAsSession({ sandbox }, async () =>
-      runtime.executeTool(skillReader, {}),
+      runtime.executeTool(skillReader.name, {}),
     );
 
     expect(result).toBe("entities: []\n");
@@ -187,10 +282,10 @@ describe("authored tool execution", () => {
         return { content, id: live.id };
       },
     });
-    const runtime = createTestRuntime({ tools: [sandboxTool] });
+    const runtime = await createTestRuntime({ tools: [sandboxTool] });
 
     const result = (await runtime.runAsSession({ sandbox }, async () =>
-      runtime.executeTool(sandboxTool, {}),
+      runtime.executeTool(sandboxTool.name, {}),
     )) as { content: string; id: string };
 
     expect(result.content).toBe("sandbox-note");
@@ -222,10 +317,10 @@ describe("authored tool execution", () => {
         return { reportPath, stdout: result.stdout.trim() };
       },
     });
-    const runtime = createTestRuntime({ tools: [resolveTool] });
+    const runtime = await createTestRuntime({ tools: [resolveTool] });
 
     const result = await runtime.runAsSession({ sandbox }, async () =>
-      runtime.executeTool(resolveTool, {}),
+      runtime.executeTool(resolveTool.name, {}),
     );
 
     expect(result).toEqual({

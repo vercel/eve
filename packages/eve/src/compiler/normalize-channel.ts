@@ -2,38 +2,38 @@ import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import type { ChannelSourceRef } from "#discover/manifest.js";
 import { normalizeChannelDefinition } from "#internal/authored-definition/channel.js";
 import { type ChannelRouteMethod, isDisabledRouteSentinel } from "#public/definitions/channel.js";
-import type { CompiledChannelEntry } from "#compiler/manifest.js";
+import type { CompiledChannelDefinition } from "#compiler/manifest.js";
 import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
 
 /**
- * Compiles one authored channel module into the normalized channel
- * entries stored on the compiled agent manifest.
+ * Compiles one selected channel module into the normalized channel candidates
+ * used to construct the compiler-owned route plan.
  *
- * Recognizes the `disableRoute()` sentinel and emits a `disabled`
- * entry so the runtime can short-circuit channel registration without
- * losing the source path for diagnostics.
+ * Recognizes the `disableRoute()` sentinel and emits a `disabled` marker
+ * consumed during source normalization. Disabled markers never enter the
+ * compiled manifest.
  *
- * Authored channels are always `CompiledChannel` values (from
- * `defineChannel`). Each route in the channel's `routes` array becomes
- * a separate compiled channel entry. The channel name is derived from
- * the filesystem path; the URL path comes from the route's `path` field.
+ * Channels are always `CompiledChannel` values (from `defineChannel`). Each
+ * route in the channel's `routes` array becomes a separate compiled route
+ * candidate. The channel name is derived from the filesystem path; the URL
+ * path comes from the route's `path` field.
  */
 export async function compileChannelDefinition(
-  agentRoot: string,
   source: ChannelSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
-): Promise<CompiledChannelEntry | readonly CompiledChannelEntry[]> {
+  options: ModuleBackedDefinitionLoadOptions & { readonly name?: string },
+): Promise<CompiledChannelCandidate | readonly CompiledChannelCandidate[]> {
   const rawValue = await loadModuleBackedDefinition({
-    agentRoot,
-    externalDependencies: options.externalDependencies,
+    binding: options.binding,
     kind: "channel",
+    moduleLoader: options.moduleLoader,
     source,
   });
 
-  const channelName = stripLogicalPathExtension(source.logicalPath).replace(/^channels\//, "");
+  const channelName =
+    options.name ?? stripLogicalPathExtension(source.logicalPath).replace(/^channels\//, "");
 
   if (isDisabledRouteSentinel(rawValue)) {
     return {
@@ -61,6 +61,14 @@ export async function compileChannelDefinition(
     cors: definition.cors,
   }));
 }
+
+type CompiledChannelCandidate =
+  | CompiledChannelDefinition
+  | {
+      readonly kind: "disabled";
+      readonly logicalPath: string;
+      readonly name: string;
+    };
 
 function extractAdapterKind(adapter: unknown): string | undefined {
   if (adapter === null || typeof adapter !== "object") {

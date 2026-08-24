@@ -28,7 +28,7 @@ import {
 import type { ResolvedInputBatch } from "#harness/input-requests.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import type { HandleEventFn } from "#harness/types.js";
-import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
+import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/runtime-actions.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 
 export interface CreateInstrumentationHandleEventInput {

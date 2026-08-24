@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/compiled-agent-node-id.js";
 import { buildMemoryAgentProject } from "#internal/testing/memory-agent-source.js";
 import { DISCOVER_MODULE_SLOT_COLLISION } from "#discover/grammar.js";
 import {
@@ -18,6 +19,7 @@ describe("discoverSandboxSource (memory)", () => {
 
     const rootEntries = await readSortedDirectoryEntries(project.source, project.agentRoot);
     const result = await discoverSandboxSource({
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       rootEntries,
       rootPath: project.agentRoot,
       source: project.source,
@@ -37,6 +39,7 @@ describe("discoverSandboxSource (memory)", () => {
 
     const rootEntries = await readSortedDirectoryEntries(project.source, project.agentRoot);
     const result = await discoverSandboxSource({
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       rootEntries,
       rootPath: project.agentRoot,
       source: project.source,
@@ -60,6 +63,7 @@ describe("discoverSandboxSource (memory)", () => {
 
     const rootEntries = await readSortedDirectoryEntries(project.source, project.agentRoot);
     const result = await discoverSandboxSource({
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       rootEntries,
       rootPath: project.agentRoot,
       source: project.source,
@@ -82,6 +86,7 @@ describe("discoverSandboxSource (memory)", () => {
 
     const rootEntries = await readSortedDirectoryEntries(project.source, project.agentRoot);
     const result = await discoverSandboxSource({
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       rootEntries,
       rootPath: project.agentRoot,
       source: project.source,
@@ -109,6 +114,7 @@ describe("discoverSandboxSource (memory)", () => {
 
     const rootEntries = await readSortedDirectoryEntries(project.source, project.agentRoot);
     const result = await discoverSandboxSource({
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       rootEntries,
       rootPath: project.agentRoot,
       source: project.source,
@@ -131,6 +137,7 @@ describe("discoverSandboxSource (memory)", () => {
 
     const rootEntries = await readSortedDirectoryEntries(project.source, project.agentRoot);
     const result = await discoverSandboxSource({
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       rootEntries,
       rootPath: project.agentRoot,
       source: project.source,
@@ -152,6 +159,7 @@ describe("discoverSandboxSource (memory)", () => {
 
     const rootEntries = await readSortedDirectoryEntries(project.source, project.agentRoot);
     const result = await discoverSandboxSource({
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       rootEntries,
       rootPath: project.agentRoot,
       source: project.source,
@@ -170,6 +178,7 @@ describe("discoverSandboxSource (memory)", () => {
 
     const rootEntries = await readSortedDirectoryEntries(project.source, project.agentRoot);
     const result = await discoverSandboxSource({
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       rootEntries,
       rootPath: project.agentRoot,
       source: project.source,
@@ -194,6 +203,7 @@ describe("discoverSandboxSource (memory)", () => {
 
     const rootEntries = await readSortedDirectoryEntries(project.source, project.agentRoot);
     const result = await discoverSandboxSource({
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       rootEntries,
       rootPath: project.agentRoot,
       source: project.source,
@@ -218,6 +228,7 @@ describe("discoverSandboxSource (memory)", () => {
 
     const rootEntries = await readSortedDirectoryEntries(project.source, project.agentRoot);
     const result = await discoverSandboxSource({
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       rootEntries,
       rootPath: project.agentRoot,
       source: project.source,
@@ -239,6 +250,7 @@ describe("discoverSandboxSource (memory)", () => {
 
     const rootEntries = await readSortedDirectoryEntries(project.source, project.agentRoot);
     const result = await discoverSandboxSource({
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       rootEntries,
       rootPath: project.agentRoot,
       source: project.source,

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
-import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
+import { attachRouteSessionCreator } from "#channel/route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";

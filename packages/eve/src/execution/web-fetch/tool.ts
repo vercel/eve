@@ -46,7 +46,7 @@ export interface WebFetchResult {
 }
 
 /**
- * Executes the `web_fetch` framework tool.
+ * Executes eve's `web_fetch` primitive.
  *
  * Fetches the content at the given URL and returns it in the requested
  * format. HTML responses are automatically converted to Markdown or

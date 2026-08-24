@@ -7,7 +7,7 @@ import {
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 import { resolveConnectionDefinition } from "#runtime/resolve-connection.js";
-import type { ConnectionAuthResolver, HeadersDefinition } from "#runtime/connections/types.js";
+import type { ConnectionAuthResolver, HeadersDefinition } from "#shared/connections.js";
 
 describe("resolveConnectionDefinition", () => {
   it("preserves live MCP callbacks for request-time resolution", async () => {
@@ -21,6 +21,9 @@ describe("resolveConnectionDefinition", () => {
     const definition: CompiledConnectionDefinition = {
       connectionName: "warehouse",
       description: "Tenant warehouse",
+      hasApproval: false,
+      hasAuthorization: true,
+      hasHeaders: true,
       logicalPath: "connections/warehouse.ts",
       protocol: "mcp",
       sourceId: "connections/warehouse",

@@ -26,6 +26,8 @@ export const ALLOWED_DYNAMIC_TOOL_EVENTS: ReadonlySet<string> = new Set<DynamicT
   "step.started",
 ]);
 
+export const ALLOWED_DYNAMIC_MODEL_EVENTS: ReadonlySet<string> = ALLOWED_DYNAMIC_TOOL_EVENTS;
+
 /**
  * Instructions and skills are restricted to session/turn boundaries.
  * Keeping their resolved context stable within a turn avoids changing the
@@ -38,6 +40,9 @@ export const ALLOWED_DYNAMIC_SKILL_EVENTS: ReadonlySet<string> = new Set<Dynamic
   "session.started",
   "turn.started",
 ]);
+
+export const ALLOWED_DYNAMIC_SUBAGENT_EVENTS: ReadonlySet<string> =
+  ALLOWED_DYNAMIC_INSTRUCTION_EVENTS;
 
 /**
  * Context passed to a dynamic resolver's event handler.

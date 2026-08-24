@@ -82,7 +82,10 @@ const mocks = vi.hoisted(() => {
     prepareDevelopmentApplicationHost: vi.fn(async () => ({
       appRoot: "/tmp/eve-test",
       compileResult: {
-        manifest: { config: { name: "test-agent" } },
+        manifest: {
+          config: { name: "test-agent" },
+          workflowWorld: { kind: "native", selection: "host-default", target: "local" },
+        },
       },
       generation: {
         fingerprint: "test",
@@ -108,7 +111,7 @@ const mocks = vi.hoisted(() => {
     removeDevelopmentHostWorkspace: vi.fn(async () => undefined),
     readFile: vi.fn(async (path: string) => {
       if (
-        path.endsWith("/.eve/dev-server-state.v1.json") &&
+        path.endsWith("/.eve/dev-server-state.v2.json") &&
         fsControl.stateReadError !== undefined
       ) {
         throw fsControl.stateReadError;
@@ -141,7 +144,7 @@ const mocks = vi.hoisted(() => {
     startAuthoredSourceWatcher: vi.fn(async () => authoredSourceWatcher),
     writeFile: vi.fn(async (path: string, value: string) => {
       if (
-        path.endsWith("/.eve/dev-server-state.v1.json") &&
+        path.endsWith("/.eve/dev-server-state.v2.json") &&
         fsControl.stateWriteError !== undefined
       ) {
         throw fsControl.stateWriteError;
@@ -217,7 +220,7 @@ vi.mock("#execution/sandbox/bindings/local.js", async (importOriginal) => {
   };
 });
 
-const developmentServerStatePath = join("/tmp/eve-test", ".eve", "dev-server-state.v1.json");
+const developmentServerStatePath = join("/tmp/eve-test", ".eve", "dev-server-state.v2.json");
 
 function readStateRecord(
   path: string = developmentServerStatePath,
@@ -230,7 +233,7 @@ function seedStateRecord(
   record: Record<string, unknown>,
   path: string = developmentServerStatePath,
 ): void {
-  mocks.files.set(path, `${JSON.stringify(record)}\n`);
+  mocks.files.set(path, `${JSON.stringify({ serverId: "server-existing", ...record })}\n`);
 }
 
 function createDeferred<T>(): {
@@ -314,7 +317,7 @@ describe("isActiveDevelopmentServerForApp", () => {
   it("matches only this app's recorded healthy loopback server", async () => {
     const { isActiveDevelopmentServerForApp } = await import("./start-development-server.js");
     seedStateRecord({ url: "http://127.0.0.1:42123/" });
-    mocks.fetch.mockResolvedValue(new Response(null, { status: 200 }));
+    mocks.fetch.mockResolvedValue(Response.json({ revision: "test", serverId: "server-existing" }));
     vi.stubGlobal("fetch", mocks.fetch);
 
     try {
@@ -340,7 +343,10 @@ describe("isActiveDevelopmentServerForApp", () => {
 describe("createDevelopmentServer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.fetch.mockResolvedValue(new Response(null, { status: 200 }));
+    mocks.fetch.mockImplementation(async () => {
+      const serverId = readStateRecord()?.serverId;
+      return Response.json({ revision: "test", serverId });
+    });
     mocks.fsControl.stateReadError = undefined;
     mocks.fsControl.stateWriteError = undefined;
     mocks.authoredSourceWatcher.close.mockResolvedValue(undefined);
@@ -428,10 +434,8 @@ describe("createDevelopmentServer", () => {
       ...preparedHost,
       compileResult: {
         manifest: {
-          config: {
-            experimental: { workflow: { world: "local" } },
-            name: "test-agent",
-          },
+          config: { name: "test-agent" },
+          workflowWorld: { kind: "native", selection: "configured", target: "local" },
         },
       },
     } as never);
@@ -453,9 +457,23 @@ describe("createDevelopmentServer", () => {
       ...preparedHost,
       compileResult: {
         manifest: {
-          config: {
-            experimental: { workflow: { world: "@workflow/world-postgres" } },
-            name: "test-agent",
+          config: { name: "test-agent" },
+          workflowWorld: {
+            backing: {
+              entryPackageId: "root",
+              entryPath: "/tmp/eve-test/node_modules/@workflow/world-postgres/index.js",
+              identitySha256: "0".repeat(64),
+              mode: "materialized",
+              packages: [],
+            },
+            kind: "host-module",
+            packageName: "@workflow/world-postgres",
+            protocol: {
+              declaredPackageName: "@workflow/core",
+              declaredRange: "^5.0.0-beta.43",
+              expectedVersion: "5.0.0-beta.43",
+            },
+            selection: "configured",
           },
         },
       },
@@ -535,7 +553,10 @@ describe("createDevelopmentServer", () => {
     const server = await startDevelopmentServer("/tmp/eve-test");
 
     const record = readStateRecord();
-    expect(record).toEqual({ url: "http://localhost:2000/" });
+    expect(record).toEqual({
+      serverId: expect.any(String),
+      url: "http://localhost:2000/",
+    });
 
     await server.close();
 
@@ -558,9 +579,38 @@ describe("createDevelopmentServer", () => {
     const response = await callControlHandler("http://localhost/eve/v1/dev/runtime-artifacts");
 
     if (!(response instanceof Response)) throw new Error("Expected a Response.");
-    await expect(response.json()).resolves.toEqual({ revision: "/tmp/eve-test" });
+    await expect(response.json()).resolves.toEqual({
+      revision: "/tmp/eve-test",
+      serverId: expect.any(String),
+    });
     expect(mocks.authoredSourceWatcher.flush).not.toHaveBeenCalled();
     expect(mocks.authoredSourceWatcher.rebuild).not.toHaveBeenCalled();
+
+    await server.close();
+  });
+
+  it("publishes its control-route identity only after startup is complete", async () => {
+    const watcher = createDeferred<typeof mocks.authoredSourceWatcher>();
+    mocks.startAuthoredSourceWatcher.mockReturnValueOnce(watcher.promise);
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+
+    const starting = startDevelopmentServer("/tmp/eve-test");
+    await vi.waitFor(() => expect(mocks.devServer.setControlHandler).toHaveBeenCalledOnce());
+
+    const startingResponse = await callControlHandler(
+      "http://localhost/eve/v1/dev/runtime-artifacts",
+    );
+    if (!(startingResponse instanceof Response)) throw new Error("Expected a Response.");
+    await expect(startingResponse.json()).resolves.toEqual({ revision: "/tmp/eve-test" });
+
+    watcher.resolve(mocks.authoredSourceWatcher);
+    const server = await starting;
+    const readyResponse = await callControlHandler("http://localhost/eve/v1/dev/runtime-artifacts");
+    if (!(readyResponse instanceof Response)) throw new Error("Expected a Response.");
+    await expect(readyResponse.json()).resolves.toEqual({
+      revision: "/tmp/eve-test",
+      serverId: expect.any(String),
+    });
 
     await server.close();
   });
@@ -606,7 +656,10 @@ describe("createDevelopmentServer", () => {
     expect(mocks.authoredSourceWatcher.rebuild).toHaveBeenCalledOnce();
     expect(mocks.authoredSourceWatcher.flush).not.toHaveBeenCalled();
     if (!(response instanceof Response)) throw new Error("Expected a Response.");
-    await expect(response.json()).resolves.toEqual({ revision: "/tmp/eve-test" });
+    await expect(response.json()).resolves.toEqual({
+      revision: "/tmp/eve-test",
+      serverId: expect.any(String),
+    });
 
     await server.close();
   });
@@ -644,7 +697,10 @@ describe("createDevelopmentServer", () => {
 
     expect(mocks.nitro.close).toHaveBeenCalledOnce();
     expect(mocks.stopDevelopmentSandboxResources).toHaveBeenCalledOnce();
-    expect(readStateRecord()).toEqual({ url: "http://localhost:2000/" });
+    expect(readStateRecord()).toEqual({
+      serverId: expect.any(String),
+      url: "http://localhost:2000/",
+    });
   });
 
   it("closes the server when its state record cannot be written", async () => {
@@ -697,7 +753,7 @@ describe("createDevelopmentServer", () => {
     expect(attached.kind).toBe("existing");
     expect(attached.url).toBe(owner.url);
     expect(mocks.createDevelopmentApplicationNitro).toHaveBeenCalledOnce();
-    expect(mocks.fetch).toHaveBeenCalledWith("http://localhost:2000/eve/v1/health", {
+    expect(mocks.fetch).toHaveBeenCalledWith("http://localhost:2000/eve/v1/dev/runtime-artifacts", {
       redirect: "error",
       signal: expect.any(AbortSignal),
     });
@@ -705,7 +761,10 @@ describe("createDevelopmentServer", () => {
 
     expect(mocks.devServer.close).not.toHaveBeenCalled();
     expect(process.env.EVE_DEVELOPMENT_SANDBOX_RUN_ID).toBe(ownerSandboxRunId);
-    expect(readStateRecord()).toEqual({ url: "http://localhost:2000/" });
+    expect(readStateRecord()).toEqual({
+      serverId: expect.any(String),
+      url: "http://localhost:2000/",
+    });
 
     await owner.close();
     expect(process.env.EVE_DEVELOPMENT_SANDBOX_RUN_ID).toBeUndefined();
@@ -731,7 +790,10 @@ describe("createDevelopmentServer", () => {
     // The attaching instance owns nothing, so close() is a no-op: it neither
     // closes the listener nor disturbs the owner's published state.
     expect(mocks.devServer.close).not.toHaveBeenCalled();
-    expect(readStateRecord()).toEqual({ url: "http://localhost:2000/" });
+    expect(readStateRecord()).toEqual({
+      serverId: expect.any(String),
+      url: "http://localhost:2000/",
+    });
 
     await owner.close();
   });
@@ -817,13 +879,35 @@ describe("createDevelopmentServer", () => {
       existing: "attach-if-unconfigured",
     });
 
-    expect(mocks.fetch).toHaveBeenCalledWith("http://localhost:2000/eve/v1/health", {
+    expect(mocks.fetch).toHaveBeenCalledWith("http://localhost:2000/eve/v1/dev/runtime-artifacts", {
       redirect: "error",
       signal: expect.any(AbortSignal),
     });
     expect(mocks.fetch).toHaveBeenCalledOnce();
     expect(mocks.createDevelopmentApplicationNitro).toHaveBeenCalledOnce();
-    expect(readStateRecord()).toEqual({ url: "http://localhost:2000/" });
+    expect(readStateRecord()).toEqual({
+      serverId: expect.any(String),
+      url: "http://localhost:2000/",
+    });
+
+    await server.close();
+  });
+
+  it("does not reuse a healthy control route with a different recorded identity", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    mocks.fetch.mockResolvedValue(Response.json({ revision: "test", serverId: "server-other" }));
+    seedStateRecord({ url: "http://localhost:2000/" });
+
+    const server = await startDevelopmentServer("/tmp/eve-test", {
+      existing: "attach-if-unconfigured",
+    });
+
+    expect(server.kind).toBe("started");
+    expect(mocks.createDevelopmentApplicationNitro).toHaveBeenCalledOnce();
+    expect(readStateRecord()).toEqual({
+      serverId: expect.not.stringMatching(/^server-existing$/),
+      url: "http://localhost:2000/",
+    });
 
     await server.close();
   });
@@ -848,7 +932,7 @@ describe("createDevelopmentServer", () => {
 
     seedStateRecord(
       { url: "http://127.0.0.1:2999/" },
-      join(otherAppRoot, ".eve", "dev-server-state.v1.json"),
+      join(otherAppRoot, ".eve", "dev-server-state.v2.json"),
     );
 
     const server = await startDevelopmentServer("/tmp/eve-test", {
@@ -871,7 +955,10 @@ describe("createDevelopmentServer", () => {
 
     const server = await startDevelopmentServer("/tmp/eve-test");
 
-    expect(readStateRecord()).toEqual({ url: "http://localhost:2000/" });
+    expect(readStateRecord()).toEqual({
+      serverId: expect.any(String),
+      url: "http://localhost:2000/",
+    });
 
     await server.close();
   });

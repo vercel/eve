@@ -42,7 +42,7 @@ export default defineAgent({
 });
 ```
 
-The package must export a default factory or `createWorld()` function. Read credentials and host options from runtime environment variables. Install a world built against the same `@workflow/*` line as your eve release. The current line is `5.0.0-beta`, and the runtime rejects incompatible protocol versions.
+Set `world` to a bare package name; package subpaths, filesystem paths, and URLs are not supported. The package must export a default factory or `createWorld()` function and declare a dependency or peer dependency on `@workflow/core` or `@workflow/world`. Read credentials and host options from runtime environment variables. Install a world built against the same `@workflow/*` line as your eve release. The current line is `5.0.0-beta`, and eve rejects incompatible packages during `eve build` before loading their code.
 
 See [Workflow Worlds](https://workflow-sdk.dev/worlds) for the underlying Workflow software development kit (SDK) abstraction.
 

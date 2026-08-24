@@ -1,8 +1,14 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { isBuiltin } from "node:module";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
+import type { CompiledExternalDependencyPlan } from "#compiler/external-dependency-plan.js";
+import {
+  createCompiledExternalDependencyCaptureFromPackagePath,
+  resolveCompiledExternalDependencyImport,
+} from "#compiler/external-dependency-plan.js";
+import { materializeCompiledExternalDependencyPlan } from "#internal/materialize-external-dependencies.js";
 
 export const CACHED_CHANNEL_PREFIX = "eve-cached-channel:";
 
@@ -30,23 +36,15 @@ export type RolldownResolveContext = {
   ): Promise<RolldownResolveResult | null>;
 };
 
-interface ResolvedAuthoredExternalModule {
-  readonly packageName: string;
-  readonly resolvedId: string;
-}
+export type GenerationExternalDependencyMode = "preserve-specifier" | "resolved-path";
 
 export function createGenerationPackageBoundaryPlugin(input: {
-  readonly externalDependencies: readonly string[];
-  readonly packageRoot: string;
+  readonly externalDependencyMode: GenerationExternalDependencyMode;
+  readonly externalDependencyPlan: CompiledExternalDependencyPlan;
 }): Record<string, unknown> {
   return {
     name: "eve-generation-package-boundary",
-    async resolveId(
-      this: RolldownResolveContext,
-      source: string,
-      importer: string | undefined,
-      options: { kind: string },
-    ) {
+    async resolveId(source: string, importer: string | undefined) {
       if (!isPackageImport(source)) {
         return undefined;
       }
@@ -58,24 +56,31 @@ export function createGenerationPackageBoundaryPlugin(input: {
         };
       }
 
-      const externalModule = await resolveConfiguredExternalModule.call(this, {
-        externalDependencies: input.externalDependencies,
-        importer,
-        kind: options.kind,
-        packageRoot: input.packageRoot,
+      const resolution = resolveCompiledExternalDependencyImport(
+        input.externalDependencyPlan,
         source,
-      });
-      if (externalModule === undefined) {
+      );
+      if (resolution === undefined) {
         return undefined;
       }
 
-      return { external: true, id: source };
+      return {
+        external: true,
+        id:
+          input.externalDependencyMode === "preserve-specifier"
+            ? source
+            : normalizeEsmImportSpecifier(resolution.resolvedPath),
+      };
     },
   };
 }
 
 export function createRuntimeLoaderPackageBoundaryPlugin(input: {
-  readonly externalDependencies: readonly string[];
+  readonly captureExternalDependencyPlan?: (input: {
+    readonly packageName: string;
+    readonly resolvedPackagePath: string;
+  }) => Promise<CompiledExternalDependencyPlan>;
+  readonly externalDependencyPlan: CompiledExternalDependencyPlan;
   readonly packageRoot: string;
 }): Record<string, unknown> {
   const canonicalPackageRoot = toCanonicalPath(input.packageRoot);
@@ -96,20 +101,14 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
         return { external: true, id: source };
       }
 
-      const externalModule = await resolveConfiguredExternalModule.call(this, {
-        externalDependencies: input.externalDependencies,
-        importer,
-        kind: options.kind,
-        packageRoot: input.packageRoot,
+      const externalModule = resolveCompiledExternalDependencyImport(
+        input.externalDependencyPlan,
         source,
-      });
+      );
       if (externalModule !== undefined) {
-        const resolvedId =
-          resolveExistingExternalFilePath(externalModule.resolvedId) ?? externalModule.resolvedId;
-
         return {
           external: true,
-          id: normalizeEsmImportSpecifier(resolvedId),
+          id: normalizeEsmImportSpecifier(externalModule.resolvedPath),
         };
       }
 
@@ -120,10 +119,10 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
           ? undefined
           : resolve(importer);
 
-      // Keep package imports authored directly by the app external by
-      // default, but let symlinked/file workspace packages compile as
-      // source. Those packages often export `.ts` files and rely on the
-      // bundler's extension resolution for their own relative imports.
+      // Resolve app-authored package imports eagerly so compile-time
+      // definitions execute from the content-addressed bundle, not Node's
+      // process-wide package module cache. Runtime generation bundling uses a
+      // separate boundary that preserves explicitly configured externals.
       if (
         importerPath !== undefined &&
         isPathInsideOrEqual(toCanonicalPath(importerPath), canonicalPackageRoot)
@@ -151,14 +150,80 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
         if (isNodeModulesPath(resolved.id)) {
           return {
             external: true,
-            id: source,
+            id: normalizeEsmImportSpecifier(
+              await captureCompileTimeExternalPackage({
+                packageName: packageImportName(source),
+                packageRoot: input.packageRoot,
+                planProvider: input.captureExternalDependencyPlan,
+                resolvedId: resolved.id,
+              }),
+            ),
           };
         }
+        return resolved;
+      }
+
+      const resolved = await this.resolve(source, importer, {
+        kind: options.kind,
+        skipSelf: true,
+      });
+      if (resolved !== null && typeof resolved.id === "string" && isNodeModulesPath(resolved.id)) {
+        return {
+          external: true,
+          id: normalizeEsmImportSpecifier(
+            await captureCompileTimeExternalPackage({
+              packageName: packageImportName(source),
+              packageRoot: input.packageRoot,
+              planProvider: input.captureExternalDependencyPlan,
+              resolvedId: resolved.id,
+            }),
+          ),
+        };
       }
 
       return undefined;
     },
   };
+}
+
+async function captureCompileTimeExternalPackage(input: {
+  readonly packageName: string;
+  readonly packageRoot: string;
+  readonly planProvider?: (input: {
+    readonly packageName: string;
+    readonly resolvedPackagePath: string;
+  }) => Promise<CompiledExternalDependencyPlan>;
+  readonly resolvedId: string;
+}): Promise<string> {
+  const plan =
+    input.planProvider === undefined
+      ? await createCompiledExternalDependencyCaptureFromPackagePath({
+          packageName: input.packageName,
+          resolvedPackagePath: input.resolvedId,
+        })
+      : await input.planProvider({
+          packageName: input.packageName,
+          resolvedPackagePath: input.resolvedId,
+        });
+  const entry = plan.entries[0]!;
+  const rootPackage = entry.packages.find((pkg) => pkg.id === entry.rootPackageId)!;
+  if (!isPathInsideOrEqual(input.resolvedId, rootPackage.resolvedPackageRoot)) {
+    throw new Error(
+      `Resolved external package import "${input.resolvedId}" escapes package "${input.packageName}".`,
+    );
+  }
+  const materialized = await materializeCompiledExternalDependencyPlan({
+    destinationRoot: join(
+      input.packageRoot,
+      "node_modules",
+      ".cache",
+      "eve",
+      "authored-external-dependencies",
+    ),
+    plan,
+  });
+  const capturedRoot = materialized.entryPackageRoots.get(entry.id)!;
+  return join(capturedRoot, relative(rootPackage.resolvedPackageRoot, input.resolvedId));
 }
 
 /**
@@ -237,38 +302,6 @@ export function createDistributionPackageBoundaryPlugin(input: {
   };
 }
 
-async function resolveConfiguredExternalModule(
-  this: RolldownResolveContext,
-  input: {
-    readonly externalDependencies: readonly string[];
-    readonly importer: string | undefined;
-    readonly kind: string;
-    readonly packageRoot: string;
-    readonly source: string;
-  },
-): Promise<ResolvedAuthoredExternalModule | undefined> {
-  const packageName = resolveConfiguredExternalDependency(input.source, input.externalDependencies);
-  if (packageName === undefined) {
-    return undefined;
-  }
-
-  let resolved = await this.resolve(input.source, input.importer, {
-    kind: input.kind,
-    skipSelf: true,
-  });
-  if (resolved === null) {
-    resolved = await this.resolve(input.source, join(input.packageRoot, "package.json"), {
-      kind: input.kind,
-      skipSelf: true,
-    });
-  }
-  if (resolved === null || typeof resolved.id !== "string") {
-    throw new Error(`Cannot resolve external package "${input.source}".`);
-  }
-
-  return { packageName, resolvedId: resolved.id };
-}
-
 export function normalizeExternalDependencies(
   externalDependencies: readonly string[] = [],
 ): string[] {
@@ -276,15 +309,6 @@ export function normalizeExternalDependencies(
   // classification; applying its trace set to authored generation bundles
   // would turn bundleable packages into a second dev-only packaging graph.
   return [...new Set(externalDependencies)].sort();
-}
-
-function resolveConfiguredExternalDependency(
-  source: string,
-  externalDependencies: readonly string[],
-): string | undefined {
-  return externalDependencies.find(
-    (dependencyName) => source === dependencyName || source.startsWith(`${dependencyName}/`),
-  );
 }
 
 function packageImportName(source: string): string {
@@ -311,22 +335,6 @@ function nearestPackageName(filePath: string): string | undefined {
     }
     directory = parent;
   }
-}
-
-function resolveExistingExternalFilePath(id: string): string | undefined {
-  if (existsSync(id)) {
-    return id;
-  }
-
-  for (const extension of RESOLVE_EXTENSIONS) {
-    const candidate = `${id}${extension}`;
-
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  return undefined;
 }
 
 function isPackageImport(source: string): boolean {

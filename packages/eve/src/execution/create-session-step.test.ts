@@ -17,19 +17,69 @@ const TestTurnAgent: RuntimeTurnAgent = {
   workspaceSpec: { rootEntries: [] },
 };
 
+function withRootGraph<T extends { readonly graph?: unknown; readonly resolvedAgent: unknown }>(
+  bundle: T,
+): never {
+  return {
+    ...bundle,
+    graph: bundle.graph ?? { root: { agent: bundle.resolvedAgent } },
+  } as never;
+}
+
 describe("createSessionStep", () => {
+  it("adds native agent guidance only to a session where agent is advertised", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(
+      withRootGraph({
+        resolvedAgent: {
+          config: { experimental: { subagentPersistentSessions: true } },
+          kernelPlan: { prepared: ["agent"] },
+        },
+        turnAgent: TestTurnAgent,
+      }),
+    );
+
+    const root = await createSessionStep({
+      compiledArtifactsSource: { kind: "bundled" },
+      continuationToken: "http:root",
+      sessionId: "sess-root",
+    });
+    const selfDelegated = await createSessionStep({
+      compiledArtifactsSource: { kind: "bundled" },
+      continuationToken: "subagent:self",
+      rootSessionId: "sess-root",
+      sessionId: "sess-self",
+      subagentDepth: 1,
+    });
+
+    expect(root.state.snapshot?.session.agent.system).toContain("Pass `agentId`");
+    expect(root.state.snapshot?.session.agent.system).toContain("Tool execution");
+    expect(selfDelegated.state.snapshot?.session.agent.system).not.toContain("Pass `agentId`");
+    expect(selfDelegated.state.snapshot?.session.agent.system).not.toContain("Tool execution");
+  });
+
   it("adds task_update guidance to a task-owned session system prompt", async () => {
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      resolvedAgent: {
-        config: { experimental: { tasks: true } },
-        disabledFrameworkTools: [],
-      },
-      turnAgent: TestTurnAgent,
-    } as never);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(
+      withRootGraph({
+        graph: {
+          nodesByNodeId: new Map([
+            ["__root__", { agent: { kernelPlan: { prepared: ["task_update"] } } }],
+            ["subagents/researcher", { agent: { kernelPlan: { prepared: [] } } }],
+          ]),
+          root: { agent: { kernelPlan: { prepared: ["task_update"] } } },
+        },
+        nodeId: "subagents/researcher",
+        resolvedAgent: {
+          config: { experimental: { tasks: true } },
+          kernelPlan: { prepared: [] },
+        },
+        turnAgent: TestTurnAgent,
+      }),
+    );
 
     const { state } = await createSessionStep({
       compiledArtifactsSource: { kind: "bundled" },
       continuationToken: "subagent:test",
+      nodeId: "subagents/researcher",
       sessionId: "sess-child",
       taskOwned: true,
     });
@@ -40,13 +90,19 @@ describe("createSessionStep", () => {
   });
 
   it("does not add task_update guidance to a task-owned node without the tool", async () => {
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      resolvedAgent: {
-        config: {},
-        disabledFrameworkTools: [],
-      },
-      turnAgent: TestTurnAgent,
-    } as never);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(
+      withRootGraph({
+        graph: {
+          nodesByNodeId: new Map([["__root__", { agent: { kernelPlan: { prepared: [] } } }]]),
+          root: { agent: { kernelPlan: { prepared: [] } } },
+        },
+        resolvedAgent: {
+          config: {},
+          kernelPlan: { prepared: [] },
+        },
+        turnAgent: TestTurnAgent,
+      }),
+    );
 
     const { state } = await createSessionStep({
       compiledArtifactsSource: { kind: "bundled" },
@@ -59,12 +115,15 @@ describe("createSessionStep", () => {
   });
 
   it("defaults root sessions to the root input token budget", async () => {
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      resolvedAgent: {
-        config: {},
-      },
-      turnAgent: TestTurnAgent,
-    } as never);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(
+      withRootGraph({
+        resolvedAgent: {
+          config: {},
+          kernelPlan: { prepared: [] },
+        },
+        turnAgent: TestTurnAgent,
+      }),
+    );
 
     const { state } = await createSessionStep({
       compiledArtifactsSource: { kind: "bundled" },
@@ -78,12 +137,15 @@ describe("createSessionStep", () => {
   });
 
   it("limits delegated subagent sessions to the inherited token budget", async () => {
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      resolvedAgent: {
-        config: {},
-      },
-      turnAgent: TestTurnAgent,
-    } as never);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(
+      withRootGraph({
+        resolvedAgent: {
+          config: {},
+          kernelPlan: { prepared: [] },
+        },
+        turnAgent: TestTurnAgent,
+      }),
+    );
 
     const { state } = await createSessionStep({
       compiledArtifactsSource: { kind: "bundled" },
@@ -99,12 +161,15 @@ describe("createSessionStep", () => {
   });
 
   it("leaves delegated subagent sessions uncapped with uncapped inherited axes", async () => {
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      resolvedAgent: {
-        config: {},
-      },
-      turnAgent: TestTurnAgent,
-    } as never);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(
+      withRootGraph({
+        resolvedAgent: {
+          config: {},
+          kernelPlan: { prepared: [] },
+        },
+        turnAgent: TestTurnAgent,
+      }),
+    );
 
     const { state } = await createSessionStep({
       compiledArtifactsSource: { kind: "bundled" },
@@ -118,14 +183,17 @@ describe("createSessionStep", () => {
   });
 
   it("caps configured child token limits at the inherited token budget", async () => {
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      resolvedAgent: {
-        config: {
-          limits: { maxInputTokensPerSession: 10_000_000 },
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(
+      withRootGraph({
+        resolvedAgent: {
+          config: {
+            limits: { maxInputTokensPerSession: 10_000_000 },
+          },
+          kernelPlan: { prepared: [] },
         },
-      },
-      turnAgent: TestTurnAgent,
-    } as never);
+        turnAgent: TestTurnAgent,
+      }),
+    );
 
     const { state } = await createSessionStep({
       compiledArtifactsSource: { kind: "bundled" },
@@ -139,14 +207,17 @@ describe("createSessionStep", () => {
   });
 
   it("keeps tighter configured child token limits under inherited token budget", async () => {
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      resolvedAgent: {
-        config: {
-          limits: { maxInputTokensPerSession: 1_000_000 },
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(
+      withRootGraph({
+        resolvedAgent: {
+          config: {
+            limits: { maxInputTokensPerSession: 1_000_000 },
+          },
+          kernelPlan: { prepared: [] },
         },
-      },
-      turnAgent: TestTurnAgent,
-    } as never);
+        turnAgent: TestTurnAgent,
+      }),
+    );
 
     const { state } = await createSessionStep({
       compiledArtifactsSource: { kind: "bundled" },
@@ -160,14 +231,17 @@ describe("createSessionStep", () => {
   });
 
   it("still applies inherited token budget when configured child limit is false", async () => {
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      resolvedAgent: {
-        config: {
-          limits: { maxInputTokensPerSession: false },
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(
+      withRootGraph({
+        resolvedAgent: {
+          config: {
+            limits: { maxInputTokensPerSession: false },
+          },
+          kernelPlan: { prepared: [] },
         },
-      },
-      turnAgent: TestTurnAgent,
-    } as never);
+        turnAgent: TestTurnAgent,
+      }),
+    );
 
     const { state } = await createSessionStep({
       compiledArtifactsSource: { kind: "bundled" },
@@ -181,17 +255,20 @@ describe("createSessionStep", () => {
   });
 
   it("seeds session token limits from resolved agent config", async () => {
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      resolvedAgent: {
-        config: {
-          limits: {
-            maxInputTokensPerSession: 200_000,
-            maxOutputTokensPerSession: 20_000,
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(
+      withRootGraph({
+        resolvedAgent: {
+          config: {
+            limits: {
+              maxInputTokensPerSession: 200_000,
+              maxOutputTokensPerSession: 20_000,
+            },
           },
+          kernelPlan: { prepared: [] },
         },
-      },
-      turnAgent: TestTurnAgent,
-    } as never);
+        turnAgent: TestTurnAgent,
+      }),
+    );
 
     const { state } = await createSessionStep({
       compiledArtifactsSource: { kind: "bundled" },
@@ -206,13 +283,16 @@ describe("createSessionStep", () => {
   });
 
   it("seeds workflow max subagents from the authored Workflow tool", async () => {
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      resolvedAgent: {
-        config: {},
-        workflowTool: { maxSubagents: 5 },
-      },
-      turnAgent: TestTurnAgent,
-    } as never);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(
+      withRootGraph({
+        resolvedAgent: {
+          config: {},
+          kernelPlan: { prepared: [] },
+          workflowTool: { maxSubagents: 5 },
+        },
+        turnAgent: TestTurnAgent,
+      }),
+    );
 
     const { state } = await createSessionStep({
       compiledArtifactsSource: { kind: "bundled" },

@@ -42,7 +42,7 @@ import {
   settleTaskDispatchError,
   type PersistedContinuationTask,
 } from "#execution/tasks/parent/continuation-dispatch.js";
-import type { RuntimeActionResult } from "#runtime/actions/types.js";
+import type { RuntimeActionResult } from "#shared/runtime-actions.js";
 
 export async function dispatchTaskStep(
   input: RuntimeActionDispatchInput,
@@ -79,6 +79,7 @@ export async function dispatchTaskStep(
           action: entry.action,
           adapter: prepared.adapter,
           bundle,
+          capability: entry.capability,
           parentStepIndex: batch.event.stepIndex,
           parentTurnId: batch.event.turnId,
           serializedContext: prepared.serializedContext,

@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import { compileAgent } from "../../src/compiler/compile-agent.js";
-import { createDiskRuntimeCompiledArtifactsSource } from "../../src/runtime/compiled-artifacts-source.js";
-import { loadCompiledManifest } from "../../src/runtime/loaders/manifest.js";
-import { loadCompiledModuleMapFromAuthoredSource } from "../../src/internal/authored-module-map-loader.js";
+import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "../../src/internal/application/runtime-compiled-artifacts-source.js";
+import { loadCompiledArtifactSet } from "../../src/runtime/loaders/compiled-artifact-set.js";
 import { resolveRuntimeAgentGraph } from "../../src/runtime/resolve-agent-graph.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 
 const scenarioApp = useScenarioApp();
 const compatibilityManifest = JSON.stringify({
   kind: "eve-extension",
-  formatVersion: 1,
+  formatVersion: 2,
   builtWithEve: "0.0.0-test",
+  build: { externalDependencies: [] },
   requires: { extension: 1, tool: 1, dynamicTool: 1, config: 1 },
 });
 
@@ -126,11 +126,8 @@ describe("mounted extension via directory form with override", () => {
 
     await compileAgent({ startPath: app.appRoot });
 
-    const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(app.appRoot);
-    const [manifest, moduleMap] = await Promise.all([
-      loadCompiledManifest({ compiledArtifactsSource }),
-      loadCompiledModuleMapFromAuthoredSource({ compiledArtifactsSource }),
-    ]);
+    const compiledArtifactsSource = createAuthoredSourceRuntimeCompiledArtifactsSource(app.appRoot);
+    const { manifest, moduleMap } = await loadCompiledArtifactSet({ compiledArtifactsSource });
     const graph = await resolveRuntimeAgentGraph({ manifest, moduleMap });
 
     const echo = graph.root.agent.tools.find((entry) => entry.name === "crm__crm_echo");

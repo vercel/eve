@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { buildApprovalResponseAuth, createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import { buildApprovalResponseAuth } from "#execution/tool-auth.js";
+import type { CompileFromMemoryToolInput } from "#compiler/compile-from-memory.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
 import { loadContext } from "#context/container.js";
 import { AuthKey, SessionIdKey } from "#context/keys.js";
@@ -16,12 +17,11 @@ import type {
   AuthorizationDefinition,
   ConnectionPrincipal,
   TokenResult,
-} from "#runtime/connections/types.js";
-import type { ResolvedToolDefinition } from "#runtime/types.js";
+} from "#shared/connections.js";
 
 /**
  * Integration coverage for tool-hosted authorization: the
- * {@link createToolExecuteWithAuth} wrapper drives token resolution,
+ * installed authored-tool wrapper drives token resolution,
  * the per-step cache, the park-on-`Required` flow, callback completion
  * on resume, and the loop guard — all scoped by the tool's name.
  */
@@ -61,19 +61,12 @@ const TEST_USER_PRINCIPAL = {
 function authoredTool(input: {
   readonly name: string;
   readonly execute: (toolInput: unknown, ctx: ToolContext) => unknown;
-}): ResolvedToolDefinition {
-  const logicalPath = `tools/${input.name}.ts`;
+}): CompileFromMemoryToolInput {
   return {
     description: `${input.name} auth tool.`,
-    execute: createToolExecuteWithAuth({
-      execute: input.execute as (toolInput: unknown, ctx: unknown) => unknown,
-      scope: input.name,
-    }),
+    execute: input.execute,
     inputSchema: null,
-    logicalPath,
     name: input.name,
-    sourceId: logicalPath,
-    sourceKind: "module",
   };
 }
 
@@ -93,7 +86,7 @@ describe("approval response authorization", () => {
         return { token: "linear-token" };
       },
     };
-    const runtime = createTestRuntime({ tools: [] });
+    const runtime = await createTestRuntime({ tools: [] });
 
     const tokens = await runtime.runAsSession(undefined, async () => {
       const auth = buildApprovalResponseAuth({
@@ -123,7 +116,7 @@ describe("approval response authorization", () => {
         return { token: "bound-responder-token" };
       },
     };
-    const runtime = createTestRuntime({ tools: [] });
+    const runtime = await createTestRuntime({ tools: [] });
 
     await runtime.runAsSession(undefined, async () => {
       loadContext().set(AuthKey, {
@@ -172,9 +165,11 @@ describe("tool-hosted authorization", () => {
         return { first: first.token, second: second.token };
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
-    const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
+    const result = await runtime.runAsSession(undefined, async () =>
+      runtime.executeTool(tool.name, {}),
+    );
 
     // Both reads return the same cached token; getToken ran once.
     expect(result).toEqual({ first: "tok-1", second: "tok-1" });
@@ -188,9 +183,11 @@ describe("tool-hosted authorization", () => {
         return { callId: ctx.callId, toolName: ctx.toolName };
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
-    const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
+    const result = await runtime.runAsSession(undefined, async () =>
+      runtime.executeTool(tool.name, {}),
+    );
 
     // The test harness dispatches every executeTool call as "call_test".
     expect(result).toEqual({ callId: "call_test", toolName: "observe_call_metadata" });
@@ -213,9 +210,11 @@ describe("tool-hosted authorization", () => {
         return { first: first.token, second: second.token };
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
-    const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
+    const result = await runtime.runAsSession(undefined, async () =>
+      runtime.executeTool(tool.name, {}),
+    );
 
     expect(result).toEqual({ first: "inline-1", second: "inline-1" });
     expect(calls).toBe(1);
@@ -242,9 +241,11 @@ describe("tool-hosted authorization", () => {
         return { github: github.token, linear: linear.token };
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
-    const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
+    const result = await runtime.runAsSession(undefined, async () =>
+      runtime.executeTool(tool.name, {}),
+    );
 
     expect(result).toEqual({ github: "github-token", linear: "linear-token" });
   });
@@ -269,10 +270,10 @@ describe("tool-hosted authorization", () => {
         await ctx.getToken(linearAuth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     await expect(
-      runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {})),
+      runtime.runAsSession(undefined, async () => runtime.executeTool(tool.name, {})),
     ).rejects.toThrow(/explicit auth keys/);
   });
 
@@ -283,10 +284,10 @@ describe("tool-hosted authorization", () => {
         return await (ctx.getToken as () => Promise<TokenResult>)();
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     await expect(
-      runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {})),
+      runtime.runAsSession(undefined, async () => runtime.executeTool(tool.name, {})),
     ).rejects.toThrow(/Pass an auth provider/);
   });
 
@@ -310,14 +311,14 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(inlineAuth, { displayName: "Linear" });
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession(
       { sessionId: "session_inline_auth_park" },
       async () => {
         seedUserPrincipal();
         loadContext().set(CallbackBaseUrlKey, "https://app.example");
-        return runtime.executeTool(tool, {});
+        return runtime.executeTool(tool.name, {});
       },
     );
 
@@ -352,14 +353,14 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(inlineAuth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession(
       { sessionId: "session_connect_callback" },
       async () => {
         seedUserPrincipal();
         loadContext().set(CallbackBaseUrlKey, "http://[::1]:2000");
-        return runtime.executeTool(tool, {});
+        return runtime.executeTool(tool.name, {});
       },
     );
 
@@ -390,12 +391,12 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession({ sessionId: "session_auth_park" }, async () => {
       seedUserPrincipal();
       loadContext().set(CallbackBaseUrlKey, "https://app.example");
-      return runtime.executeTool(tool, {});
+      return runtime.executeTool(tool.name, {});
     });
 
     expect(isAuthorizationSignal(result)).toBe(true);
@@ -429,12 +430,12 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession({ sessionId: "session_display_name" }, async () => {
       seedUserPrincipal();
       loadContext().set(CallbackBaseUrlKey, "https://app.example");
-      return runtime.executeTool(tool, {});
+      return runtime.executeTool(tool.name, {});
     });
 
     expect(isAuthorizationSignal(result)).toBe(true);
@@ -465,14 +466,14 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession(
       { sessionId: "session_display_name_strategy" },
       async () => {
         seedUserPrincipal();
         loadContext().set(CallbackBaseUrlKey, "https://app.example");
-        return runtime.executeTool(tool, {});
+        return runtime.executeTool(tool.name, {});
       },
     );
 
@@ -500,12 +501,12 @@ describe("tool-hosted authorization", () => {
         ctx.requireAuth(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession({ sessionId: "session_require_auth" }, async () => {
       seedUserPrincipal();
       loadContext().set(CallbackBaseUrlKey, "https://app.example");
-      return runtime.executeTool(tool, {});
+      return runtime.executeTool(tool.name, {});
     });
 
     expect(isAuthorizationSignal(result)).toBe(true);
@@ -535,7 +536,7 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession({ sessionId: "session_resume" }, async () => {
       seedUserPrincipal();
@@ -552,7 +553,7 @@ describe("tool-hosted authorization", () => {
           },
         },
       ]);
-      return runtime.executeTool(tool, {});
+      return runtime.executeTool(tool.name, {});
     });
 
     expect(completeCalls).toBe(1);
@@ -581,7 +582,7 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(inlineAuth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession({ sessionId: "session_inline_resume" }, async () => {
       seedUserPrincipal();
@@ -598,7 +599,7 @@ describe("tool-hosted authorization", () => {
           },
         },
       ]);
-      return runtime.executeTool(tool, {});
+      return runtime.executeTool(tool.name, {});
     });
 
     expect(completeCalls).toBe(1);
@@ -630,12 +631,12 @@ describe("tool-hosted authorization", () => {
         ctx.requireAuth(inlineAuth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession({ sessionId: "session_inline_require" }, async () => {
       seedUserPrincipal();
       loadContext().set(CallbackBaseUrlKey, "https://app.example");
-      return runtime.executeTool(tool, {});
+      return runtime.executeTool(tool.name, {});
     });
 
     expect(evicted).toHaveLength(1);
@@ -670,7 +671,7 @@ describe("tool-hosted authorization", () => {
         ctx.requireAuth(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const error = await runtime
       .runAsSession({ sessionId: "session_loop_guard" }, async () => {
@@ -688,7 +689,7 @@ describe("tool-hosted authorization", () => {
             },
           },
         ]);
-        return runtime.executeTool(tool, {});
+        return runtime.executeTool(tool.name, {});
       })
       .then(
         () => null,
@@ -719,7 +720,7 @@ describe("tool-hosted authorization", () => {
         ctx.requireAuth(inlineAuth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const error = await runtime
       .runAsSession({ sessionId: "session_inline_loop_guard" }, async () => {
@@ -737,7 +738,7 @@ describe("tool-hosted authorization", () => {
             },
           },
         ]);
-        return runtime.executeTool(tool, {});
+        return runtime.executeTool(tool.name, {});
       })
       .then(
         () => null,
@@ -757,7 +758,7 @@ describe("tool-hosted authorization", () => {
       },
     };
     const scoped = { authorization: auth, connection: { url: "" }, scope: "list_groups" };
-    const runtime = createTestRuntime({ tools: [] });
+    const runtime = await createTestRuntime({ tools: [] });
 
     const tokens = await runtime.runAsSession({ sessionId: "session_evict" }, async () => {
       seedUserPrincipal();
@@ -788,7 +789,7 @@ describe("tool-hosted authorization", () => {
       },
     };
     const scoped = { authorization: auth, connection: { url: "" }, scope: "list_groups" };
-    const runtime = createTestRuntime({ tools: [] });
+    const runtime = await createTestRuntime({ tools: [] });
 
     await runtime.runAsSession({ sessionId: "session_evict_cascade" }, async () => {
       seedUserPrincipal();
@@ -819,7 +820,7 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     // No CallbackBaseUrlKey set → getHookUrl returns undefined → no park
     // signal. The interactive path must NOT leak the raw Required into the
@@ -827,7 +828,7 @@ describe("tool-hosted authorization", () => {
     const err = await runtime
       .runAsSession({ sessionId: "session_no_url" }, async () => {
         seedUserPrincipal();
-        return runtime.executeTool(tool, {});
+        return runtime.executeTool(tool.name, {});
       })
       .catch((e: unknown) => e);
 
@@ -851,14 +852,14 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     // Non-interactive strategies have no consent flow to park on, so the
     // model should see the original failure.
     await expect(
       runtime.runAsSession({ sessionId: "session_noninteractive" }, async () => {
         seedUserPrincipal();
-        return runtime.executeTool(tool, {});
+        return runtime.executeTool(tool.name, {});
       }),
     ).rejects.toThrow("auth required");
   });

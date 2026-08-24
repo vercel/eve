@@ -1,13 +1,11 @@
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { createEveWorkflowQueueTrigger } from "#internal/workflow/queue-namespace.js";
-import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/eve-service-route-output.js";
+import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#protocol/routes.js";
 import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
   normalizePublicRoutePrefix,
 } from "#shared/public-route-prefix.js";
-
-export { EVE_WORKFLOW_FLOW_ROUTE_PATH };
 
 /**
  * Builds eve's Vercel preset options.

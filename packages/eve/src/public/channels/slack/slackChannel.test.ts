@@ -41,7 +41,7 @@ import {
   type SlackEventContext,
 } from "#public/channels/slack/slackChannel.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import { type InputResponse, parseInputResponses } from "#runtime/input/types.js";
+import { type InputResponse, parseInputResponses } from "#shared/input.js";
 
 function slackRespondTypeChecks(
   interaction: SlackInteractionContext,

@@ -6,7 +6,7 @@ import type {
   SessionAuthContext,
   TurnCaller,
 } from "#channel/types.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import type { InputResponse } from "#shared/input.js";
 import type { StepInput } from "#harness/types.js";
 
 /**

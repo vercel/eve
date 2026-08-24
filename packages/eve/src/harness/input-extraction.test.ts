@@ -4,6 +4,12 @@ import {
   extractQuestionInputRequests,
   extractToolApprovalInputRequests,
 } from "#harness/input-extraction.js";
+import { createAskQuestionHarnessDefinition } from "#kernel/ask-question.js";
+
+const questionDefinition = createAskQuestionHarnessDefinition();
+const nativeQuestionTools = new Map([
+  [questionDefinition.name, { ...questionDefinition, kernelCapability: "ask_question" as const }],
+]);
 
 describe("extractQuestionInputRequests", () => {
   it("extracts a question request from an ask_question tool call", () => {
@@ -20,6 +26,7 @@ describe("extractQuestionInputRequests", () => {
           type: "tool-call",
         },
       ],
+      tools: nativeQuestionTools,
     });
 
     expect(result).toEqual([
@@ -53,6 +60,7 @@ describe("extractQuestionInputRequests", () => {
           type: "tool-call",
         },
       ],
+      tools: nativeQuestionTools,
     });
 
     expect(result[0]?.allowFreeform).toBe(true);
@@ -69,6 +77,7 @@ describe("extractQuestionInputRequests", () => {
           type: "tool-call",
         },
       ],
+      tools: nativeQuestionTools,
     });
 
     expect(result).toEqual([]);
@@ -85,6 +94,24 @@ describe("extractQuestionInputRequests", () => {
           type: "tool-call",
         },
       ],
+      tools: nativeQuestionTools,
+    });
+
+    expect(result).toEqual([]);
+  });
+
+  it("does not give an authored canonical replacement native input semantics", () => {
+    const result = extractQuestionInputRequests({
+      excludedCallIds: new Set(),
+      toolCalls: [
+        {
+          input: { prompt: "Run the authored tool." },
+          toolCallId: "call-1",
+          toolName: "ask_question",
+          type: "tool-call",
+        },
+      ],
+      tools: new Map([[questionDefinition.name, questionDefinition]]),
     });
 
     expect(result).toEqual([]);

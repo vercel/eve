@@ -27,13 +27,14 @@ import {
 } from "#harness/instrumentation/config.js";
 import type { Runtime } from "#channel/types.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
-import { resolveVercelOidcCurrentProject } from "#runtime/governance/auth/vercel-oidc-project.js";
+import { resolveVercelOidcCurrentProject } from "#execution/governance/auth/vercel-oidc-project.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import {
   dispatchChannelRequest,
   dispatchChannelWebSocketRequest,
 } from "#internal/nitro/routes/channel-dispatch.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
+import { readRouteAgentName } from "#channel/route-context.js";
 
 vi.mock("#internal/nitro/routes/runtime-stack.js", () => ({
   resolveNitroChannelRuntimeBundle: vi.fn(),
@@ -107,6 +108,32 @@ function createEvent(input?: {
 }
 
 describe("dispatchChannelRequest", () => {
+  it("supplies the resolved agent name to ordinary framework route handlers", async () => {
+    let receivedAgentName: string | undefined;
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "support-agent",
+      channels: [
+        {
+          handler: async (_request, args) => {
+            receivedAgentName = readRouteAgentName(args);
+            return new Response("ok");
+          },
+          logicalPath: "channels/home.ts",
+          method: "GET",
+          name: "home",
+          sourceId: "eve.framework-root:channels/home.ts",
+          sourceKind: "module",
+          urlPath: "/",
+        } satisfies ResolvedChannelDefinition,
+      ],
+      runtime,
+    });
+
+    await dispatchChannelRequest(createEvent({ url: "https://eve.test/" }), "GET /", {} as never);
+
+    expect(receivedAgentName).toBe("support-agent");
+  });
+
   it("supplies the current linked project to Vercel OIDC during local development", async () => {
     mockedReadVercelProjectLink
       .mockResolvedValueOnce({ orgId: "team_1", projectId: "prj_first" })
@@ -119,7 +146,6 @@ describe("dispatchChannelRequest", () => {
             currentProjects.push(await resolveVercelOidcCurrentProject(request));
             return new Response("ok");
           },
-          fetch: async () => new Response("not used"),
           logicalPath: "agent/channels/eve.ts",
           method: "POST",
           name: "eve",
@@ -157,7 +183,7 @@ describe("dispatchChannelRequest", () => {
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       channels: [
         {
-          fetch: async (_request: Request, ctx: { waitUntil: (t: Promise<unknown>) => void }) => {
+          handler: async (_request: Request, ctx) => {
             ctx.waitUntil(deferred.promise);
             return new Response("ok");
           },
@@ -247,7 +273,6 @@ describe("dispatchChannelRequest", () => {
             });
             return new Response("ok");
           },
-          fetch: async () => new Response("ok"),
           adapter: { kind: "channel:source" },
           logicalPath: "agent/channels/webhook.ts",
           method: "POST",
@@ -258,7 +283,6 @@ describe("dispatchChannelRequest", () => {
         } satisfies ResolvedChannelDefinition,
         {
           handler: async () => new Response("ok"),
-          fetch: async () => new Response("ok"),
           adapter: { kind: "channel:target" },
           definition: targetDefinition,
           receive: targetReceive,
@@ -305,7 +329,6 @@ describe("dispatchChannelRequest", () => {
             });
             return new Response("ok");
           },
-          fetch: async () => new Response("ok"),
           adapter: { kind: "channel:webhook" },
           logicalPath: "agent/channels/webhook.ts",
           method: "POST",
@@ -350,7 +373,6 @@ describe("dispatchChannelRequest", () => {
                 reason: "User requested /new",
               }),
             ),
-          fetch: async () => new Response("ok"),
           logicalPath: "agent/channels/imessage.ts",
           method: "POST",
           name: "imessage",
@@ -390,7 +412,6 @@ describe("dispatchChannelRequest", () => {
         {
           handler: async (_req, args) =>
             Response.json(await args.from("direct:+15551234567:+15557654321").clear()),
-          fetch: async () => new Response("ok"),
           logicalPath: "agent/channels/imessage.ts",
           method: "POST",
           name: "imessage",
@@ -435,7 +456,6 @@ describe("dispatchChannelRequest", () => {
             });
             return new Response("ok");
           },
-          fetch: async () => new Response("ok"),
           adapter: { kind: "channel:webhook" },
           logicalPath: "agent/channels/webhook.ts",
           method: "POST",
@@ -467,7 +487,6 @@ describe("dispatchChannelRequest", () => {
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       channels: [
         {
-          fetch: async () => new Response("not used"),
           websocket: async (_req, args) => {
             capturedArgs = args;
             args.waitUntil(Promise.resolve());
@@ -534,7 +553,7 @@ describe("dispatchChannelRequest", () => {
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       channels: [
         {
-          fetch: async () => {
+          handler: async () => {
             throw new Error("handler exploded");
           },
           logicalPath: "agent/channels/slack.ts",
@@ -577,7 +596,7 @@ describe("dispatchChannelRequest", () => {
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       channels: [
         {
-          fetch: async (_req, ctx: { waitUntil: (t: Promise<unknown>) => void }) => {
+          handler: async (_req, ctx) => {
             ctx.waitUntil(Promise.reject(new Error("background blew up")));
             return new Response("ok");
           },
@@ -616,7 +635,7 @@ describe("dispatchChannelRequest", () => {
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       channels: [
         {
-          fetch: async () => new Response("ok"),
+          handler: async () => new Response("ok"),
           logicalPath: "agent/channels/slack.ts",
           method: "POST",
           name: "slack",
@@ -679,11 +698,11 @@ function parentSpanId(span: ReadableSpan): string | undefined {
 }
 
 function slackChannel(
-  fetch: ResolvedChannelDefinition["fetch"],
+  handler: NonNullable<ResolvedChannelDefinition["handler"]>,
   overrides: Partial<ResolvedChannelDefinition> = {},
 ): ResolvedChannelDefinition {
   return {
-    fetch,
+    handler,
     logicalPath: "agent/channels/slack.ts",
     method: "POST",
     name: "slack",
@@ -958,7 +977,7 @@ describe("dispatchChannelRequest tracing", () => {
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       channels: [
         {
-          fetch: async () => new Response("ok"),
+          handler: async () => new Response("ok"),
           logicalPath: "agent/channels/eve.ts",
           method: "POST",
           name: "eve",

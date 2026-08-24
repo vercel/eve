@@ -33,7 +33,7 @@ import { turnStep } from "#execution/workflow-steps.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { getRuntimeActionResultKey } from "#runtime/actions/keys.js";
 import { resolveRuntimeActionResultsForKeys } from "#runtime/actions/results.js";
-import type { RuntimeActionResult } from "#runtime/actions/types.js";
+import type { RuntimeActionResult } from "#shared/runtime-actions.js";
 
 const TASK_MODE_WAIT_ERROR_MESSAGE = "Task mode cannot wait for follow-up input (`next: null`).";
 
@@ -189,15 +189,17 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       // A pending runtime-action batch (model-driven `park` or dynamic-workflow
       // interrupt) is resolved in-line so the turn stays alive across the wait;
       // the arms differ only in their dispatch path: the workflow adapter for
-      // interrupt-sourced batches, and the task-mode sibling when the agent
-      // runs `experimental.tasks`.
+      // interrupt-sourced batches, and the task-control sibling when either
+      // the parent owns task mode or a task-owned child can report progress.
       if (pendingActionKeys !== undefined) {
         await cursor.adopt(result);
-        const hasPendingTasks = result.action === "park" && result.tasksEnabled;
+        const useTaskControlDispatch =
+          result.action === "park" &&
+          (result.tasksEnabled === true || result.taskControlsEnabled === true);
         let dispatch;
         if (result.action === "dispatch-workflow-runtime-actions") {
           dispatch = dispatchWorkflowRuntimeActionsStep;
-        } else if (hasPendingTasks) {
+        } else if (useTaskControlDispatch) {
           dispatch = dispatchTaskStep;
         } else {
           dispatch = dispatchRuntimeActionsStep;

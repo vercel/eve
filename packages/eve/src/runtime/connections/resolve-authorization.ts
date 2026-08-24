@@ -2,12 +2,17 @@ import { buildCallbackContext } from "#context/build-callback-context.js";
 import { type AlsContext, ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { ResolvedConnectionDefinition } from "#runtime/types.js";
-import type { AuthorizationDefinition } from "#runtime/connections/types.js";
-import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
+import type {
+  AuthorizationDefinition,
+  RegisteredConnectionDefinition,
+} from "#shared/connections.js";
+import { normalizeAuthorizationSpec } from "#shared/validate-connection-authorization.js";
 
 type ResolvedAuthorization = Readonly<AuthorizationDefinition> | undefined;
-type AuthorizationResolverCache = Map<ResolvedConnectionDefinition, Promise<ResolvedAuthorization>>;
+type AuthorizationResolverCache = Map<
+  RegisteredConnectionDefinition,
+  Promise<ResolvedAuthorization>
+>;
 
 const ConnectionAuthorizationResolversKey = new ContextKey<AuthorizationResolverCache>(
   "eve.connectionAuthorizationResolvers",
@@ -19,7 +24,7 @@ const ConnectionAuthorizationResolversKey = new ContextKey<AuthorizationResolver
  * interactive OAuth, and eviction all use the same provider instance.
  */
 export async function resolveConnectionAuthorization(
-  connection: ResolvedConnectionDefinition,
+  connection: RegisteredConnectionDefinition,
   ctx?: SessionContext,
 ): Promise<ResolvedAuthorization> {
   const authorization = connection.authorization;
@@ -42,7 +47,7 @@ export async function resolveConnectionAuthorization(
 }
 
 async function resolveDynamicAuthorization(
-  connection: ResolvedConnectionDefinition,
+  connection: RegisteredConnectionDefinition,
   ctx?: SessionContext,
 ): Promise<ResolvedAuthorization> {
   const authorization = connection.authorization;

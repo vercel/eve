@@ -1,6 +1,6 @@
 import type { HarnessRuntimeActionDefinition } from "#harness/execute-tool.js";
 import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
-import type { RuntimeActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeActionRequest } from "#shared/runtime-actions.js";
 import type { JsonObject } from "#shared/json.js";
 import type { WorkflowSandboxInterrupt } from "#shared/workflow-sandbox.js";
 

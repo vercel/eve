@@ -4,9 +4,9 @@ import { join } from "node:path";
 import type { H3Event } from "nitro";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { AgentInfoResultSchema } from "../../src/client/agent-info-schema.js";
 import { compileAgent } from "../../src/compiler/compile-agent.js";
 import { createDevelopmentNitroArtifactsConfig } from "../../src/internal/nitro/host/artifacts-config.js";
-import type { AgentInfoResponse } from "../../src/internal/nitro/routes/agent-info/build-agent-info-response.js";
 import { dispatchChannelRequest } from "../../src/internal/nitro/routes/channel-dispatch.js";
 import { EVE_INFO_ROUTE_PATH, EVE_SESSION_ROUTE_PATH } from "../../src/protocol/routes.js";
 import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-app-roots.js";
@@ -86,7 +86,10 @@ async function requestAgentInfo(appRoot: string, request: Request): Promise<Resp
   return await dispatchChannelRequest(
     createInfoEvent(request),
     INFO_ROUTE_KEY,
-    createDevelopmentNitroArtifactsConfig({ configuredWorld: undefined, appRoot }),
+    createDevelopmentNitroArtifactsConfig({
+      appRoot,
+      worldPlan: { kind: "native", selection: "host-default", target: "local" },
+    }),
   );
 }
 
@@ -119,34 +122,29 @@ describe("eve agent info route", () => {
     expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
     expect(response.headers.get("cache-control")).toBe("no-store");
 
-    const payload = (await response.json()) as AgentInfoResponse;
+    const payload = AgentInfoResultSchema.parse(await response.json());
 
     expect(payload.kind).toBe("eve-agent-info");
-    expect(payload.version).toBe(2);
+    expect(payload.version).toBe(3);
     expect(payload.mode).toBe("development");
     expect(payload.agent.model.id).toBe("openai/gpt-5.4");
     expect(payload.instructions.static[0]?.content).toContain("precise assistant");
     expect(payload.instructions.static[0]?.role).toBe("system");
     expect(payload.instructions.dynamic).toEqual([]);
-    expect(payload.tools.authored.map((tool) => tool.name)).toEqual(["get_weather"]);
-    expect(payload.tools.available.map((tool) => tool.name)).toContain("bash");
-    expect(payload.tools.available.map((tool) => tool.name)).toContain("agent");
-    expect(payload.tools.available.map((tool) => tool.name)).toContain("get_weather");
-    expect(payload.tools.framework.find((tool) => tool.name === "bash")).toMatchObject({
-      origin: "framework",
-      status: "active",
-    });
-    expect(payload.tools.framework.find((tool) => tool.name === "agent")).toMatchObject({
-      origin: "framework",
-      status: "active",
-    });
-    expect(payload.channels.available.map((channel) => channel.urlPath)).toContain(
-      EVE_SESSION_ROUTE_PATH,
-    );
-    expect(payload.channels.framework.length).toBeGreaterThan(0);
+    expect(
+      payload.tools.static
+        .filter((tool) => tool.owner.kind === "application")
+        .map((tool) => tool.name),
+    ).toEqual(["get_weather"]);
+    expect(payload.tools.static.map((tool) => tool.name)).toContain("bash");
+    expect(payload.kernel.native.map((capability) => capability.name)).toContain("agent");
+    expect(payload.tools.static.map((tool) => tool.name)).toContain("get_weather");
+    expect(payload.tools.static.find((tool) => tool.name === "bash")?.owner.kind).toBe("framework");
+    expect(payload.channels.map((channel) => channel.urlPath)).toContain(EVE_SESSION_ROUTE_PATH);
+    expect(payload.channels.some((channel) => channel.owner.kind === "framework")).toBe(true);
     expect(payload.diagnostics).toEqual({
-      discoveryErrors: 0,
-      discoveryWarnings: 0,
+      errors: 0,
+      warnings: 0,
     });
 
     await writeFile(
@@ -155,15 +153,13 @@ describe("eve agent info route", () => {
     );
     await compileAgent({ startPath: appRoot });
 
-    const disabledPayload = (await (
-      await requestAgentInfo(appRoot, LOOPBACK_REQUEST)
-    ).json()) as AgentInfoResponse;
+    const disabledPayload = AgentInfoResultSchema.parse(
+      await (await requestAgentInfo(appRoot, LOOPBACK_REQUEST)).json(),
+    );
 
-    expect(disabledPayload.tools.available.map((tool) => tool.name)).not.toContain("agent");
-    expect(disabledPayload.tools.framework.find((tool) => tool.name === "agent")).toMatchObject({
-      disabledByAuthor: true,
-      status: "disabled",
-    });
+    expect(disabledPayload.kernel.native.map((capability) => capability.name)).not.toContain(
+      "agent",
+    );
   });
 
   it("returns 401 for a deployment request without a Vercel OIDC bearer token", async () => {
@@ -232,7 +228,7 @@ export default eveChannel({ auth: issue389Auth });
     const accepted = await requestAgentInfo(appRoot, AUTHORIZED_DEPLOYED_REQUEST);
     expect(accepted.status).toBe(200);
 
-    const payload = (await accepted.json()) as AgentInfoResponse;
+    const payload = AgentInfoResultSchema.parse(await accepted.json());
     expect(payload.kind).toBe("eve-agent-info");
     expect(payload.agent.model.id).toBe("openai/gpt-5.4");
   });

@@ -553,7 +553,7 @@ describe("withEve Vercel config", () => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response(null, { status: 200 })),
+      vi.fn(async () => Response.json({ revision: "test", serverId: "server-1" })),
     );
     await mkdir(join(resolvedAppRoot, ".eve"), {
       recursive: true,
@@ -565,6 +565,7 @@ describe("withEve Vercel config", () => {
           appRoot: resolvedAppRoot,
           origin: "http://127.0.0.1:49152",
           pid: null,
+          serverId: "server-1",
           updatedAt: new Date().toISOString(),
         },
         null,
@@ -575,7 +576,8 @@ describe("withEve Vercel config", () => {
     const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
 
-    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:49152/eve/v1/health", {
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:49152/eve/v1/dev/runtime-artifacts", {
+      redirect: "error",
       signal: expect.any(AbortSignal),
     });
     expect(getBeforeFiles(rewrites)).toContainEqual({

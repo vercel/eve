@@ -47,6 +47,7 @@ function createEventCollector(): {
 function createConfig(model: LanguageModel, emit: HarnessEmitFn): ToolLoopHarnessConfig {
   return {
     handleEvent: emit,
+    kernelPlan: { prepared: ["final_output"] },
     mode: "task",
     resolveModel: vi.fn().mockResolvedValue(model),
     tools: new Map(),

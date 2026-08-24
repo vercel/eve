@@ -1,10 +1,9 @@
 import { basename, dirname, join, resolve } from "node:path";
 
 import {
-  createDiscoverErrorDiagnostic,
-  DISCOVER_PROJECT_NOT_FOUND,
-  type DiscoverDiagnostic,
-} from "#discover/diagnostics.js";
+  createCompilerErrorDiagnostic,
+  type CompilerDiagnostic,
+} from "#shared/compiler-diagnostics.js";
 import {
   classifyAgentRootEntry,
   type DirectoryEntryType,
@@ -12,6 +11,10 @@ import {
   isProjectMarkerEntry,
 } from "#discover/filesystem.js";
 import { createDiskProjectSource, type ProjectSource } from "#discover/project-source.js";
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/compiled-agent-node-id.js";
+
+/** Stable error code emitted when discovery cannot locate an eve agent. */
+export const DISCOVER_PROJECT_NOT_FOUND = "discover/project-not-found";
 
 /**
  * Supported project layouts for filesystem-based agents.
@@ -32,9 +35,9 @@ export interface ResolvedDiscoveryProject {
  * {@link ProjectSource}.
  */
 export class DiscoveryProjectResolutionError extends Error {
-  readonly diagnostic: DiscoverDiagnostic;
+  readonly diagnostic: CompilerDiagnostic;
 
-  constructor(diagnostic: DiscoverDiagnostic) {
+  constructor(diagnostic: CompilerDiagnostic) {
     super(diagnostic.message);
     this.name = "DiscoveryProjectResolutionError";
     this.diagnostic = diagnostic;
@@ -94,9 +97,10 @@ export async function resolveDiscoveryProject(
   }
 
   throw new DiscoveryProjectResolutionError(
-    createDiscoverErrorDiagnostic({
+    createCompilerErrorDiagnostic({
       code: DISCOVER_PROJECT_NOT_FOUND,
       message: `Could not resolve an eve agent root from "${startDirectory}".`,
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       sourcePath: startDirectory,
     }),
   );

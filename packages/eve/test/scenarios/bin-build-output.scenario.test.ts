@@ -175,7 +175,7 @@ describe("eve build process output", () => {
     expect(result.stdout).toContain(".output");
   }, 120_000);
 
-  it("prints discovery diagnostics to stderr when build fails", async () => {
+  it("prints compiler diagnostics to stderr when build fails", async () => {
     const appRoot = await createTemporaryAppRoot({
       omitInstructionsSource: true,
       prefix: "eve-bin-build-output-failure-",
@@ -186,14 +186,14 @@ describe("eve build process output", () => {
     expect(result.code).toBe(1);
     expect(result.signal).toBeNull();
     expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("Discovery failed with 1 error(s) and 0 warning(s).");
+    expect(result.stderr).toContain("Compilation failed with 1 error(s) and 0 warning(s).");
     expect(result.stderr).not.toContain("Diagnostics artifact:");
     expect(result.stderr).not.toContain(`${join(resolvedAppRoot, ".eve", "builds")}/`);
-    expect(result.stderr).toContain("Discovery diagnostics:");
+    expect(result.stderr).toContain("Compiler diagnostics:");
     expect(result.stderr).toContain(
       'Expected authored instructions at "instructions.md", "instructions.ts", "instructions.cts", "instructions.mts", "instructions.js", "instructions.cjs", "instructions.mjs", or "instructions/" directory.',
     );
-    expect(result.stderr).toContain(`source: ${join(resolvedAppRoot, "agent")}`);
+    expect(result.stderr).toContain(`source: __root__ · ${join(resolvedAppRoot, "agent")}`);
   }, 120_000);
 
   it("prints bundled missing-import errors to stderr when build fails", async () => {

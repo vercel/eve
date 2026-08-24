@@ -2,11 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CompiledWorkspaceResourceRoot } from "../src/compiler/manifest.js";
 import { docker } from "../src/public/sandbox/backends/docker.js";
-import {
-  createFrameworkSandboxDefinition,
-  createRuntimeSandboxRegistry,
-  DEFAULT_SANDBOX_SOURCE_ID,
-} from "../src/runtime/sandbox/registry.js";
+import { createRuntimeSandboxRegistry } from "../src/runtime/sandbox/registry.js";
 import type { ResolvedSandboxDefinition } from "../src/runtime/types.js";
 
 const EMPTY_RESOURCE_ROOT: CompiledWorkspaceResourceRoot = {
@@ -15,29 +11,23 @@ const EMPTY_RESOURCE_ROOT: CompiledWorkspaceResourceRoot = {
 };
 
 describe("createRuntimeSandboxRegistry", () => {
-  it("falls back to the framework default sandbox when no authored override is present", () => {
-    const registry = createRuntimeSandboxRegistry({
-      authoredSandbox: null,
-      workspaceResourceRoot: EMPTY_RESOURCE_ROOT,
+  it("attaches the workspace resource root descriptor to the selected sandbox", () => {
+    const resolvedSandbox = createResolvedSandboxDefinition({
+      logicalPath: "sandbox.ts",
+      sourceId: "eve-framework:sandbox.ts",
     });
-
-    expect(registry.sandbox?.definition.sourceId).toBe(DEFAULT_SANDBOX_SOURCE_ID);
-    expect(registry.sandbox?.workspaceResourceRoot).toBe(EMPTY_RESOURCE_ROOT);
-  });
-
-  it("attaches the workspace resource root descriptor to the framework default", () => {
     const workspaceResourceRoot: CompiledWorkspaceResourceRoot = {
       logicalPath: "workspace-resources/__root__",
       rootEntries: ["skills/"],
     };
 
     const registry = createRuntimeSandboxRegistry({
-      authoredSandbox: null,
+      resolvedSandbox,
       workspaceResourceRoot,
     });
 
-    expect(registry.sandbox?.definition.sourceId).toBe(DEFAULT_SANDBOX_SOURCE_ID);
-    expect(registry.sandbox?.workspaceResourceRoot).toBe(workspaceResourceRoot);
+    expect(registry.sandbox.definition).toBe(resolvedSandbox);
+    expect(registry.sandbox.workspaceResourceRoot).toBe(workspaceResourceRoot);
   });
 
   it("uses the authored sandbox when provided, replacing the framework default", () => {
@@ -47,11 +37,11 @@ describe("createRuntimeSandboxRegistry", () => {
     });
 
     const registry = createRuntimeSandboxRegistry({
-      authoredSandbox,
+      resolvedSandbox: authoredSandbox,
       workspaceResourceRoot: EMPTY_RESOURCE_ROOT,
     });
 
-    expect(registry.sandbox?.definition).toBe(authoredSandbox);
+    expect(registry.sandbox.definition).toBe(authoredSandbox);
   });
 
   it("attaches the workspace resource root descriptor to the authored sandbox", () => {
@@ -65,20 +55,12 @@ describe("createRuntimeSandboxRegistry", () => {
     };
 
     const registry = createRuntimeSandboxRegistry({
-      authoredSandbox,
+      resolvedSandbox: authoredSandbox,
       workspaceResourceRoot,
     });
 
-    expect(registry.sandbox?.definition).toBe(authoredSandbox);
-    expect(registry.sandbox?.workspaceResourceRoot).toBe(workspaceResourceRoot);
-  });
-
-  it("createFrameworkSandboxDefinition resolves a fresh default backend on each call", () => {
-    const definition = createFrameworkSandboxDefinition();
-
-    expect(definition.sourceId).toBe(DEFAULT_SANDBOX_SOURCE_ID);
-    expect(definition.sourceKind).toBe("module");
-    expect(typeof definition.backend.name).toBe("string");
+    expect(registry.sandbox.definition).toBe(authoredSandbox);
+    expect(registry.sandbox.workspaceResourceRoot).toBe(workspaceResourceRoot);
   });
 });
 
@@ -89,6 +71,7 @@ function createResolvedSandboxDefinition(input: {
   return {
     backend: docker(),
     logicalPath: input.logicalPath,
+    sourceHash: `test:${input.sourceId}`,
     sourceId: input.sourceId,
     sourceKind: "module",
   };

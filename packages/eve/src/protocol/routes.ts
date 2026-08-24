@@ -4,9 +4,10 @@
  */
 export const EVE_ROUTE_PREFIX = "/eve/v1";
 
-/**
- * Stable framework-owned health route.
- */
+/** Queue-triggered endpoint owned by the Workflow runtime. */
+export const EVE_WORKFLOW_FLOW_ROUTE_PATH = "/.well-known/workflow/v1/flow";
+
+/** Stable eve health protocol path. Its selected channel source owns behavior. */
 export const EVE_HEALTH_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/health`;
 
 /**
@@ -79,6 +80,15 @@ export const EVE_DEV_RUNTIME_ARTIFACTS_SUSPEND_ROUTE_PATH = `${EVE_DEV_RUNTIME_A
 /** Dev-only route that resumes authored-source rebuilding after setup subprocess completion. */
 export const EVE_DEV_RUNTIME_ARTIFACTS_RESUME_ROUTE_PATH = `${EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH}/resume`;
 
+/** Parent-owned RPC endpoint for the local development Workflow World. */
+export const EVE_DEV_WORKFLOW_WORLD_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/dev/internal/workflow-world`;
+
+/** Parent-owned streaming endpoint for the local development Workflow World. */
+export const EVE_DEV_WORKFLOW_STREAM_ROUTE_PATH = `${EVE_DEV_WORKFLOW_WORLD_ROUTE_PATH}/stream`;
+
+/** Match space reserved for the per-build Vercel cron capability route. */
+export const EVE_PRODUCTION_CRON_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/cron/:token`;
+
 /**
  * Builds the dev-only schedule dispatch URL for one named authored
  * schedule. The path encodes the schedule id so reserved characters in
@@ -86,6 +96,11 @@ export const EVE_DEV_RUNTIME_ARTIFACTS_RESUME_ROUTE_PATH = `${EVE_DEV_RUNTIME_AR
  */
 export function createEveDevDispatchSchedulePath(scheduleId: string): string {
   return `${EVE_ROUTE_PREFIX}/dev/schedules/${encodeURIComponent(scheduleId)}`;
+}
+
+/** Builds the per-deployment cron capability route from its random token. */
+export function createEveProductionCronRoutePath(token: string): string {
+  return `${EVE_ROUTE_PREFIX}/cron/${encodeURIComponent(token)}`;
 }
 
 /**

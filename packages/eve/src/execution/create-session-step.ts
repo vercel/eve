@@ -7,14 +7,13 @@ import {
   createDurableSessionState,
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
-import { createSession } from "#execution/session.js";
+import { createKernelSessionPromptAdditions, createSession } from "#execution/session.js";
 import { resolveInheritedTokenLimit } from "#execution/run-session-limits.js";
-import type { RunSessionLimits } from "#channel/types.js";
+import type { RunSessionLimits, SessionCapabilities } from "#channel/types.js";
 import type { JsonObject } from "#shared/json.js";
 import { resolveEffectiveAgentRuntimeFromConfig } from "#execution/effective-agent-config.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
-import { TASK_UPDATE_SESSION_INSTRUCTION } from "#execution/tasks/child/instructions.js";
-import { isTaskToolAvailable, TASK_UPDATE_TOOL_NAME } from "#runtime/framework-tools/tasks.js";
+import { resolveSessionKernelPlan } from "#kernel/capabilities.js";
 
 /**
  * Result returned by {@link createSessionStep}.
@@ -34,6 +33,7 @@ export interface CreateSessionStepResult {
  */
 export async function createSessionStep(input: {
   readonly compiledArtifactsSource: DurableCompiledArtifactsSource;
+  readonly capabilities?: SessionCapabilities;
   readonly continuationToken: string;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   readonly inheritedLimits?: RunSessionLimits;
@@ -54,16 +54,23 @@ export async function createSessionStep(input: {
     bundle,
     input.dynamicSubagentAgentConfig,
   );
-  const taskUpdatesEnabled =
-    input.taskOwned === true &&
-    isTaskToolAvailable({
-      disabledFrameworkTools: bundle.resolvedAgent.disabledFrameworkTools ?? [],
-      hasAuthoredTool: effectiveAgent.turnAgent.tools.some(
-        (tool) => tool.name === TASK_UPDATE_TOOL_NAME,
-      ),
-      tasksEnabled: bundle.resolvedAgent.config?.experimental?.tasks === true,
-      toolName: TASK_UPDATE_TOOL_NAME,
-    });
+  const sessionKernel = resolveSessionKernelPlan({
+    nodePlan: bundle.resolvedAgent.kernelPlan,
+    rootPlan: bundle.graph.root.agent.kernelPlan,
+    taskOwned: input.taskOwned === true,
+  });
+  const tasksEnabled = bundle.resolvedAgent.config?.experimental?.tasks === true;
+  const systemPromptAdditions = createKernelSessionPromptAdditions({
+    capabilities: input.capabilities,
+    kernelPlan: sessionKernel.plan,
+    persistentSubagentSessions:
+      tasksEnabled ||
+      bundle.resolvedAgent.config?.experimental?.subagentPersistentSessions === true,
+    session: { rootSessionId: input.rootSessionId, subagentDepth: input.subagentDepth },
+    taskControl: sessionKernel.taskControl,
+    tasksEnabled,
+    turnAgent: effectiveAgent.turnAgent,
+  });
 
   // Both token axes resolve tighter-wins against the cap inherited from the
   // delegating parent: a child may narrow what its parent granted, never widen
@@ -90,7 +97,7 @@ export async function createSessionStep(input: {
     rootSessionId: input.rootSessionId,
     sessionId: input.sessionId,
     subagentDepth: input.subagentDepth,
-    systemPromptAdditions: taskUpdatesEnabled ? [TASK_UPDATE_SESSION_INSTRUCTION] : undefined,
+    systemPromptAdditions,
     turnAgent: effectiveAgent.turnAgent,
     workflowMaxSubagents: bundle.resolvedAgent.workflowTool?.maxSubagents,
   });

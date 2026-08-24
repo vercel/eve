@@ -1,4 +1,4 @@
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 import { isApprovalRequest } from "#harness/input-request-class.js";
 
 /** Label prefixing the framework-injected pending-approval notice. */

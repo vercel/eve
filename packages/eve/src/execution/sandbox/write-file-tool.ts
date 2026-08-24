@@ -6,8 +6,8 @@ import {
   type ReadFileState,
   ReadFileStateKey,
   setReadFileStamp,
-} from "#runtime/framework-tools/file-state.js";
-import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
+} from "#execution/tools/file-state.js";
+import { resolveAbsoluteFilePath } from "#execution/sandbox/resolve-file-path.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
 // ---------------------------------------------------------------------------

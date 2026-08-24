@@ -51,7 +51,7 @@ import { verifyDiscordInbound } from "#public/channels/discord/verifyInbound.js"
 import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
-import type { ValidatedInputResponse } from "#runtime/input/types.js";
+import type { ValidatedInputResponse } from "#shared/input.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import { discordAudience, discordInstrumentationMetadata } from "./audience.js";
 

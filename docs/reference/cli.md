@@ -31,7 +31,7 @@ Relevant `eve` commands can run from the application root or any directory benea
 | `eve add <item>`              | Install an item from the official or a configured shadcn registry                                                                  |
 | `eve registry <command>`      | Add sources and list, search, or view registry catalog items                                                                       |
 
-When `eve build` fails on discovery errors, it prints the full diagnostics report (severity, message, source path) and the diagnostics artifact path.
+When `eve build` fails on discovery errors, it prints the full diagnostics report (severity, message, owning agent node, and source locator) and the diagnostics artifact path.
 
 ## `eve init`
 

@@ -1,4 +1,4 @@
-import type { RuntimeActionResult, RuntimeSubagentChildResult } from "#runtime/actions/types.js";
+import type { RuntimeActionResult, RuntimeSubagentChildResult } from "#shared/runtime-actions.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/state-key.js";
 import type { AgentHandle } from "#harness/handles/store.js";
 import type { SessionStateMap } from "#harness/types.js";

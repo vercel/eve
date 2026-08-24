@@ -5,9 +5,9 @@ import { stubSpawnProcess } from "./_helpers/sandbox-session-stub.js";
 import { ContextContainer, contextStorage } from "../src/context/container.js";
 import { SandboxKey } from "../src/context/keys.js";
 import type { SandboxAccess } from "../src/sandbox/state.js";
-import { defineReadFileTool } from "../src/public/tools/define-read-file-tool.js";
+import { defineReadFileTool } from "../src/public/tools/read-file.js";
 import { serializeInputSchema } from "../src/shared/tool-schema.js";
-import { ReadFileStateKey } from "../src/runtime/framework-tools/file-state.js";
+import { ReadFileStateKey } from "../src/execution/tools/file-state.js";
 
 function createFakeAccess(files: Record<string, string>): SandboxAccess {
   return {

@@ -2,6 +2,7 @@ import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/compiled-agent-node-id.js";
 import { buildMemoryAgentProject } from "#internal/testing/memory-agent-source.js";
 import { createAgentSourceManifest } from "#discover/manifest.js";
 import {
@@ -43,6 +44,7 @@ describe("discoverSkills (memory)", () => {
 
     const result = await discoverSkills({
       agentRoot: project.agentRoot,
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       source: project.source,
     });
     const packagedSkillRoot = join(resolve(project.agentRoot), "skills", "get-weather");
@@ -101,6 +103,7 @@ describe("discoverSkills (memory)", () => {
 
     const result = await discoverSkills({
       agentRoot: project.agentRoot,
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       source: project.source,
     });
 
@@ -125,6 +128,7 @@ describe("discoverSkills (memory)", () => {
 
     const result = await discoverSkills({
       agentRoot: project.agentRoot,
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       source: project.source,
     });
 
@@ -176,6 +180,7 @@ describe("discoverSkills (memory)", () => {
 
     const result = await discoverSkills({
       agentRoot: project.agentRoot,
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       source: project.source,
     });
     const namedPackageRoot = join(resolve(project.agentRoot), "skills", "named-package");
@@ -229,6 +234,7 @@ describe("discoverSkills (memory)", () => {
 
     const result = await discoverSkills({
       agentRoot: project.agentRoot,
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
       source: project.source,
     });
 

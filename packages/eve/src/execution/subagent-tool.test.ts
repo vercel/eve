@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeSubagentCallActionRequest } from "#shared/runtime-actions.js";
 import { buildSubagentRunInput } from "#execution/subagent-tool.js";
 
 type BuildSubagentRunInput = Parameters<typeof buildSubagentRunInput>[0];
@@ -335,6 +335,7 @@ describe("buildSubagentRunInput", () => {
       auth: null,
       batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
+      selfDelegation: true,
       session,
     });
 

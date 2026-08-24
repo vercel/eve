@@ -21,13 +21,13 @@ import type {
   RuntimeActionRequest,
   RuntimeActionResult,
   RuntimeToolCallActionRequest,
-} from "#runtime/actions/types.js";
+} from "#shared/runtime-actions.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import type { KernelCapabilityName } from "#kernel/capabilities.js";
 import {
-  TASK_CANCEL_TOOL_NAME,
-  TASK_CONTROL_TOOL_NAMES,
-  TASK_UPDATE_TOOL_NAME,
-} from "#runtime/framework-tools/tasks.js";
+  dispatchKernelTaskControl,
+  isKernelTaskControlAction as isKernelTaskControlCapabilityAction,
+} from "#kernel/executable-capabilities.js";
 import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
 import {
   isTerminalTaskStatus,
@@ -45,8 +45,13 @@ const CANCEL_COMMIT_POLL_DELAY_MS = 250;
 /** True for task-control calls dispatched outside the model loop. */
 export function isTaskControlAction(
   action: RuntimeActionRequest,
+  capability: KernelCapabilityName | undefined,
 ): action is RuntimeToolCallActionRequest {
-  return action.kind === "tool-call" && TASK_CONTROL_TOOL_NAMES.has(action.toolName);
+  return (
+    action.kind === "tool-call" &&
+    capability !== undefined &&
+    isKernelTaskControlCapabilityAction(capability, action.toolName)
+  );
 }
 
 /**
@@ -60,6 +65,7 @@ export async function executeTaskControlAction(input: {
   readonly action: RuntimeToolCallActionRequest;
   readonly adapter?: ChannelAdapter;
   readonly bundle: CompiledBundle;
+  readonly capability: KernelCapabilityName;
   readonly parentStepIndex?: number;
   readonly parentTurnId: string;
   readonly serializedContext?: Record<string, unknown>;
@@ -69,21 +75,41 @@ export async function executeTaskControlAction(input: {
   readonly session: RuntimeSession;
   readonly pendingTask?: DelegatedTask;
 }> {
-  const { action, session } = input;
-
-  if (action.toolName === TASK_UPDATE_TOOL_NAME) {
-    return {
+  const dispatched = dispatchKernelTaskControl(input.capability, {
+    cancel: async () => executeTaskCancelControl(input),
+    update: async () => ({
       result: await executeTaskUpdate({
-        action,
+        action: input.action,
         adapter: input.adapter,
         updateIndex: input.parentStepIndex ?? 0,
         updateEpoch: input.parentTurnId,
         serializedContext: input.serializedContext,
       }),
-      session,
+      session: input.session,
+    }),
+  });
+  if (dispatched === undefined) {
+    return {
+      result: createTaskControlError(
+        input.action,
+        `Unsupported task control "${input.action.toolName}".`,
+      ),
+      session: input.session,
     };
   }
+  return await dispatched;
+}
 
+async function executeTaskCancelControl(input: {
+  readonly action: RuntimeToolCallActionRequest;
+  readonly bundle: CompiledBundle;
+  readonly session: RuntimeSession;
+}): Promise<{
+  readonly result: RuntimeActionResult;
+  readonly session: RuntimeSession;
+  readonly pendingTask?: DelegatedTask;
+}> {
+  const { action, session } = input;
   const taskIds = readTaskIds(action.input);
   if (taskIds === undefined || taskIds.length === 0) {
     return {
@@ -97,13 +123,6 @@ export async function executeTaskControlAction(input: {
     return { result: createUnknownTasksError(action, lookup.unknown), session };
   }
   const entries = lookup.entries;
-
-  if (action.toolName !== TASK_CANCEL_TOOL_NAME) {
-    return {
-      result: createTaskControlError(action, `Unsupported task control "${action.toolName}".`),
-      session,
-    };
-  }
 
   const views: TaskView[] = [];
   for (const entry of entries) {

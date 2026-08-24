@@ -31,7 +31,14 @@ function runEveBin(
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(process.execPath, [EVE_BIN_PATH, ...args], {
       cwd,
-      env,
+      // Scaffold assertions must not inherit a developer's interactive commit
+      // signer, which can block the child process while waiting for user input.
+      env: {
+        ...env,
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "commit.gpgSign",
+        GIT_CONFIG_VALUE_0: "false",
+      },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";

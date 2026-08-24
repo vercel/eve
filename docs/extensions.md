@@ -3,7 +3,7 @@ title: "Extensions"
 description: "Package reusable eve capabilities and mount them from npm or a monorepo workspace."
 ---
 
-Extensions package eve tools, channels, connections, skills, schedules, subagents, instruction fragments, and hooks. An author builds an extension package; each agent that uses it declares the package as a dependency and mounts it. The package can be published to a package registry or kept private inside a monorepo workspace.
+Extensions package eve tools, channels, connections, skills, schedules, subagents, instruction fragments, hooks, and root instrumentation. An author builds an extension package; each agent that uses it declares the package as a dependency and mounts it. The package can be published to a package registry or kept private inside a monorepo workspace.
 
 Ready-made extensions can also be distributed through an eve integration registry. See [Add Integrations](./install-integrations) to discover and add one with `eve add`; this page explains how extension packages are authored, mounted, configured, and overridden.
 
@@ -35,6 +35,7 @@ An extension uses the same file conventions as an agent for its contributions:
     schedules/sync.ts
     subagents/reviewer/agent.ts
     instructions.md
+    instrumentation.ts
     hooks/audit.ts
     lib/http.ts
 ```
@@ -44,6 +45,8 @@ Each listed slot accepts the same authored forms as its agent counterpart. Stati
 Names come from paths, so call the tool `search`, not `crm_search`; the consumer's mount adds the `crm__` prefix. The same prefix applies to channel, schedule, and parent-visible subagent IDs, while channel route paths and schedule cron expressions stay unchanged. Keep shared code in `extension/lib/`.
 
 The extension root cannot declare agent configuration, a sandbox, or nested extensions. A subagent contributed under `extension/subagents/` owns its own agent configuration and sandbox like any other [declared subagent](./subagents).
+
+[Instrumentation](./guides/instrumentation) is root-only, as it is for an agent. When the extension is mounted on the root agent, `extension/instrumentation.ts` can contribute the root instrumentation primitive. Instrumentation slots do not receive the mount namespace prefix, so do not mount two extensions that provide the same slot. Instrumentation inside a contributed subagent is not a runtime slot. The extension build records instrumentation as its own versioned compatibility requirement.
 
 ### Add configuration and contributions
 
@@ -181,6 +184,8 @@ export default crm({ apiKey: process.env.CRM_API_KEY! });
 
 Set `CRM_API_KEY` in the consumer's environment, such as `.env.local` for local development.
 
+Mount namespaces cannot contain `__`. eve reserves that separator for the public names it derives from a mount and a contribution, such as `crm__search`.
+
 The mount adds `crm__` to named contributions: `tools/search.ts` becomes `crm__search`, `channels/webhook.ts` becomes `crm__webhook`, `schedules/sync.ts` becomes `crm__sync`, `connections/api.ts` becomes `crm__api`, and `subagents/reviewer/` becomes `crm__reviewer`. Channels keep their declared route paths, and schedules keep their cron expressions.
 
 For an extension with no configuration, mount its default export directly:
@@ -273,7 +278,9 @@ Production `eve build` expects the extension distribution to exist already. Keep
 
 ### Override a contribution
 
-Use a directory mount to replace or remove an extension contribution. Put the mount declaration in `extension.ts` and add overrides beside it:
+The most ergonomic way to replace or remove an extension contribution is a
+directory mount. Put the mount declaration in `extension.ts` and add overrides
+beside it:
 
 ```
 agent/extensions/crm/
@@ -305,9 +312,19 @@ import { disableTool } from "eve/tools";
 export default disableTool();
 ```
 
-Hooks and instruction fragments are additive, so they cannot be replaced. To replace a dynamic tool, use a dynamic definition in the same slot; dynamic tools win over same-named static tools at runtime. `disableTool()` removes either kind.
+Hooks and instruction fragments follow the same compile-time slot rules. Define
+one at the mounted definition's qualified path to replace it. Static and dynamic
+tools do not have separate precedence systems: a definition in the same slot
+replaces the mounted candidate, while definitions in different slots that expose
+the same public name fail compilation. `disableTool()` removes the tool in its
+matching slot.
 
-The `crm__` prefix is reserved for this directory mount. A consumer cannot override the extension from `agent/tools/`, `agent/connections/`, `agent/subagents/`, or another agent-root slot.
+An application can also replace the extension at its final qualified path. For
+example, `agent/tools/crm__search.ts` occupies the same effective slot as the
+mounted `search` tool and wins at the application layer. Export `disableTool()`
+there to remove it. This form is useful when the application already organizes
+capabilities by their public names; the directory form keeps overrides beside
+the mount and makes imports from the extension package easier to follow.
 
 ### Use an extension tool result in a hook
 

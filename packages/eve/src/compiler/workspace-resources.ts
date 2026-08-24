@@ -1,18 +1,23 @@
-import { createHash } from "node:crypto";
-import { cp, mkdir, readdir, readFile, rm } from "node:fs/promises";
-import { join, posix as pathPosix } from "node:path";
+import { cp, mkdir, readdir, rm } from "node:fs/promises";
+import { join, posix as pathPosix, resolve } from "node:path";
 
 import type {
   CompiledAgentManifest,
+  CompiledAgentNodeManifest,
   CompiledAgentResources,
   CompiledSkillDefinition,
   CompiledWorkspaceResourceRoot,
 } from "#compiler/manifest.js";
-import { deriveResourceRootEntries, ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import { normalizeLogicalPath } from "#discover/filesystem.js";
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { normalizeSkillPackage, writeSkillPackageDirectory } from "#shared/skill-package.js";
+import {
+  hashWorkspaceResourceFiles,
+  inspectWorkspaceResourceRoot,
+  resolveWorkspaceResourceRootPath,
+  WORKSPACE_RESOURCES_DIRECTORY,
+  workspaceResourceLogicalPath,
+} from "#shared/workspace-resource-identity.js";
 
-const RESOURCES_DIRECTORY = "workspace-resources";
 const RESOURCE_WORKSPACE_DIRECTORY = "workspace";
 const RESOURCE_SKILLS_DIRECTORY = "skills";
 
@@ -29,12 +34,12 @@ export async function materializeWorkspaceResources(input: {
   readonly compileDirectoryPath: string;
   readonly manifest: CompiledAgentManifest;
 }): Promise<CompiledAgentManifest> {
-  const resourcesRoot = join(input.compileDirectoryPath, RESOURCES_DIRECTORY);
+  const resourcesRoot = resolve(input.compileDirectoryPath, WORKSPACE_RESOURCES_DIRECTORY);
   await rm(resourcesRoot, { force: true, recursive: true });
 
   const rootAgent = await materializeNode({
     nodeId: ROOT_COMPILED_AGENT_NODE_ID,
-    resourcesRoot,
+    compileDirectoryPath: input.compileDirectoryPath,
     manifest: input.manifest,
   });
   const subagents = await Promise.all(
@@ -44,7 +49,7 @@ export async function materializeWorkspaceResources(input: {
           ...subagent,
           agent: await materializeNode({
             nodeId: subagent.nodeId,
-            resourcesRoot,
+            compileDirectoryPath: input.compileDirectoryPath,
             manifest: subagent.agent,
           }),
         };
@@ -53,7 +58,7 @@ export async function materializeWorkspaceResources(input: {
         ...subagent,
         agent: await materializeNode({
           nodeId: subagent.nodeId,
-          resourcesRoot,
+          compileDirectoryPath: input.compileDirectoryPath,
           manifest: subagent.agent,
         }),
         configResolver: subagent.configResolver,
@@ -71,27 +76,66 @@ export async function materializeWorkspaceResources(input: {
   };
 }
 
+/**
+ * Finalizes the byte-free resource descriptor for an in-memory compilation.
+ * Programmatic fixtures have no discovered workspace directory, so their
+ * managed resource payload consists only of normalized static skill files.
+ */
+export function finalizeProgrammaticWorkspaceResources(input: {
+  readonly manifest: CompiledAgentManifest;
+}): CompiledAgentManifest {
+  const rootAgent = finalizeProgrammaticNode({
+    manifest: input.manifest,
+    nodeId: ROOT_COMPILED_AGENT_NODE_ID,
+  });
+  const subagents = input.manifest.subagents.map((subagent) => {
+    if (subagent.configResolver === undefined) {
+      return {
+        ...subagent,
+        agent: finalizeProgrammaticNode<CompiledAgentNodeManifest>({
+          manifest: subagent.agent,
+          nodeId: subagent.nodeId,
+        }),
+      };
+    }
+    return {
+      ...subagent,
+      agent: finalizeProgrammaticNode<CompiledAgentResources>({
+        manifest: subagent.agent,
+        nodeId: subagent.nodeId,
+      }),
+      configResolver: subagent.configResolver,
+    };
+  });
+
+  return {
+    ...rootAgent,
+    kind: input.manifest.kind,
+    extensionMounts: input.manifest.extensionMounts,
+    subagentEdges: input.manifest.subagentEdges,
+    subagents,
+    version: input.manifest.version,
+  };
+}
+
 function createResourceRoot(
-  manifest: CompiledAgentResources,
   nodeId: string,
   contentHash: string | undefined,
+  rootEntries: readonly string[],
 ): CompiledWorkspaceResourceRoot {
   return {
     contentHash,
-    logicalPath: normalizeLogicalPath(join(RESOURCES_DIRECTORY, nodeId)),
-    rootEntries: deriveResourceRootEntries({
-      sandboxWorkspaces: manifest.sandboxWorkspaces,
-      skills: manifest.skills,
-    }),
+    logicalPath: workspaceResourceLogicalPath(nodeId),
+    rootEntries,
   };
 }
 
 async function materializeNode<TManifest extends CompiledAgentResources>(input: {
+  readonly compileDirectoryPath: string;
   readonly manifest: TManifest;
   readonly nodeId: string;
-  readonly resourcesRoot: string;
 }): Promise<TManifest> {
-  const nodeRoot = join(input.resourcesRoot, input.nodeId);
+  const nodeRoot = resolveWorkspaceResourceRootPath(input.compileDirectoryPath, input.nodeId);
   await mkdir(nodeRoot, { recursive: true });
 
   const workspaceRoot = join(nodeRoot, RESOURCE_WORKSPACE_DIRECTORY);
@@ -106,12 +150,47 @@ async function materializeNode<TManifest extends CompiledAgentResources>(input: 
     await materializeSkill({ nodeRoot, skill });
   }
 
-  const contentHash = await hashWorkspaceResourceRoot(nodeRoot);
+  const identity = await inspectWorkspaceResourceRoot(nodeRoot, {
+    resourcesRootPath: resolve(input.compileDirectoryPath, WORKSPACE_RESOURCES_DIRECTORY),
+  });
 
   return {
     ...input.manifest,
     skills: input.manifest.skills.map(stripSkillPackageFiles),
-    workspaceResourceRoot: createResourceRoot(input.manifest, input.nodeId, contentHash),
+    workspaceResourceRoot: createResourceRoot(
+      input.nodeId,
+      identity.contentHash,
+      identity.rootEntries,
+    ),
+  };
+}
+
+function finalizeProgrammaticNode<TManifest extends CompiledAgentResources>(input: {
+  readonly manifest: TManifest;
+  readonly nodeId: string;
+}): TManifest {
+  if (input.manifest.sandboxWorkspaces.length > 0) {
+    throw new Error(
+      `Cannot finalize programmatic workspace resources for node "${input.nodeId}" with filesystem workspace sources.`,
+    );
+  }
+
+  const files = input.manifest.skills.flatMap((skill) => {
+    if (skill.sourceKind === "skill-package") {
+      throw new Error(
+        `Cannot finalize filesystem skill package "${skill.logicalPath}" as a programmatic workspace resource.`,
+      );
+    }
+    return normalizeSkillPackage(skill).files.map((file) => ({
+      content: file.content,
+      logicalPath: pathPosix.join(RESOURCE_SKILLS_DIRECTORY, skill.name, file.relativePath),
+    }));
+  });
+
+  return {
+    ...input.manifest,
+    skills: input.manifest.skills.map(stripSkillPackageFiles),
+    workspaceResourceRoot: createResourceRoot(input.nodeId, hashWorkspaceResourceFiles(files), []),
   };
 }
 
@@ -155,64 +234,4 @@ async function copyDirectoryContents(input: {
       recursive: true,
     });
   }
-}
-
-async function hashWorkspaceResourceRoot(rootPath: string): Promise<string | undefined> {
-  const files = await listWorkspaceResourceFiles({
-    logicalDirectoryPath: ".",
-    sourceDirectoryPath: rootPath,
-  });
-  files.sort((left, right) => left.logicalPath.localeCompare(right.logicalPath));
-
-  if (files.length === 0) {
-    return undefined;
-  }
-
-  const hash = createHash("sha256");
-  hash.update("eve-workspace-resource-root-v1\0");
-
-  for (const file of files) {
-    const content = await readFile(file.sourcePath);
-    hash.update(file.logicalPath);
-    hash.update("\0");
-    hash.update(String(content.byteLength));
-    hash.update("\0");
-    hash.update(content);
-    hash.update("\0");
-  }
-
-  return hash.digest("hex");
-}
-
-async function listWorkspaceResourceFiles(input: {
-  readonly logicalDirectoryPath: string;
-  readonly sourceDirectoryPath: string;
-}): Promise<Array<{ readonly logicalPath: string; readonly sourcePath: string }>> {
-  const files: Array<{ readonly logicalPath: string; readonly sourcePath: string }> = [];
-  const entries = await readdir(input.sourceDirectoryPath, {
-    withFileTypes: true,
-  });
-
-  for (const entry of entries) {
-    if (!entry.isDirectory() && !entry.isFile()) {
-      continue;
-    }
-
-    const sourcePath = join(input.sourceDirectoryPath, entry.name);
-    const logicalPath = pathPosix.join(input.logicalDirectoryPath, entry.name);
-
-    if (entry.isDirectory()) {
-      files.push(
-        ...(await listWorkspaceResourceFiles({
-          logicalDirectoryPath: logicalPath,
-          sourceDirectoryPath: sourcePath,
-        })),
-      );
-      continue;
-    }
-
-    files.push({ logicalPath, sourcePath });
-  }
-
-  return files;
 }

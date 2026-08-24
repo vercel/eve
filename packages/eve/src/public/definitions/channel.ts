@@ -77,40 +77,6 @@ export type ChannelMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE"
 export type ChannelRouteMethod = ChannelMethod | "WEBSOCKET";
 
 /**
- * Per-request surface exposed to a route's `fetch` handler. The
- * framework constructs this per request and passes it as the second
- * argument.
- *
- * Framework callback routes use this for request metadata and background work.
- */
-export interface RouteContext {
-  /**
-   * Hands a background promise to the request host so the serverless
-   * invocation stays alive until the promise resolves. Use this when the
-   * route responds to the platform immediately (e.g. a Slack `200 OK`
-   * acknowledgement) but still needs to finish background work.
-   */
-  readonly waitUntil: (task: Promise<unknown>) => void;
-  /**
-   * Path parameter values extracted from `[name]` segments in the route's
-   * filesystem path. For `agent/channels/sessions/[sessionId]/stream.ts`
-   * mounted at `GET /sessions/:sessionId/stream`, the matched value lives at
-   * `params.sessionId`.
-   * Empty for routes with no path parameters.
-   */
-  readonly params: Readonly<Record<string, string>>;
-  /**
-   * Trusted peer IP for this request, extracted by the host transport
-   * before the route handler runs. `null` when the host can't observe a
-   * peer address (e.g. unit tests calling `route.fetch` directly).
-   *
-   * Pass this to {@link isIpAllowed} from `eve/channels/auth`
-   * when implementing IP allowlisting in a route.
-   */
-  readonly requestIp: string | null;
-}
-
-/**
  * Marker discriminator written into every {@link DisabledRouteSentinel}.
  */
 const DISABLED_ROUTE_SENTINEL_KIND = "eve:disabled-channel";

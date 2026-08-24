@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { COMPILED_AGENT_MANIFEST_VERSION } from "#compiler/manifest.js";
+import { compileFromMemory } from "#compiler/compile-from-memory.js";
 import { installBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
 import { createRuntimeSession, withRuntimeSession } from "#runtime/sessions/runtime-session.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
@@ -11,41 +11,8 @@ import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runt
  * scope so the install targets the scoped session rather than the
  * process-default singleton.
  */
-function installEmptyBundledArtifacts(): void {
-  const manifest = {
-    agentId: "test-agent",
-    agentRoot: "/tmp/agent",
-    appRoot: "/tmp/app",
-    channels: [],
-    config: {
-      model: {
-        id: "openai/gpt-5.4-mini",
-      },
-      name: "Test Agent",
-    },
-    diagnosticsSummary: {
-      errors: 0,
-      warnings: 0,
-    },
-    disabledFrameworkTools: [],
-    kind: "eve-agent-compiled-manifest",
-    sandbox: null,
-    schedules: [],
-    skills: [],
-    subagentEdges: [],
-    subagents: [],
-    tools: [],
-    version: COMPILED_AGENT_MANIFEST_VERSION,
-  };
-
-  installBundledCompiledArtifacts({
-    manifest: manifest as unknown as Parameters<
-      typeof installBundledCompiledArtifacts
-    >[0]["manifest"],
-    moduleMap: {
-      nodes: {},
-    },
-  });
+async function installEmptyBundledArtifacts(): Promise<void> {
+  installBundledCompiledArtifacts(await compileFromMemory({ model: "openai/gpt-5.4-mini" }));
 }
 
 /**
@@ -64,8 +31,8 @@ async function withScopedRuntimeSession<T>(fn: () => T | Promise<T>): Promise<T>
 
 describe("resolveNitroCompiledArtifactsSource", () => {
   it("prefers disk artifacts in development mode even when bundled artifacts exist", async () => {
-    await withScopedRuntimeSession(() => {
-      installEmptyBundledArtifacts();
+    await withScopedRuntimeSession(async () => {
+      await installEmptyBundledArtifacts();
       const moduleMapLoaderPath = "/package/src/internal/authored-module-map-loader.ts";
 
       expect(
@@ -85,8 +52,8 @@ describe("resolveNitroCompiledArtifactsSource", () => {
   });
 
   it("uses bundled artifacts outside development mode when they exist", async () => {
-    await withScopedRuntimeSession(() => {
-      installEmptyBundledArtifacts();
+    await withScopedRuntimeSession(async () => {
+      await installEmptyBundledArtifacts();
 
       expect(
         resolveNitroCompiledArtifactsSource({

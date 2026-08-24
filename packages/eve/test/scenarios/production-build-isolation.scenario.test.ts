@@ -413,9 +413,9 @@ async function readPublishedCompilationState(appRoot: string): Promise<Published
 
   const moduleMapPath = join(appRoot, metadata.compile.moduleMap.path);
   const moduleMap = (await import(`${pathToFileURL(moduleMapPath).href}?test=${Date.now()}`)) as {
-    moduleMap: { nodes: Record<string, unknown> };
+    moduleMapDescriptor: { nodes: Record<string, unknown> };
   };
-  expect(Object.keys(moduleMap.moduleMap.nodes)).not.toHaveLength(0);
+  expect(Object.keys(moduleMap.moduleMapDescriptor.nodes)).not.toHaveLength(0);
 
   const serverSource = await readFile(join(appRoot, ".output", "server", "index.mjs"), "utf8");
   expect(serverSource).not.toContain("__eveInstallCompiledArtifactsStep");

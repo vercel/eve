@@ -8,10 +8,12 @@ import type { ResolvedSandboxDefinition } from "#runtime/types.js";
 export type RuntimeSandboxTemplatePlan =
   | {
       readonly kind: "none";
+      readonly sourceHash: string;
     }
   | {
       readonly contentHash?: string;
       readonly kind: "workspace-content";
+      readonly sourceHash: string;
     }
   | {
       readonly contentHash?: string;
@@ -27,18 +29,25 @@ export function createRuntimeSandboxTemplatePlan(input: {
   readonly definition: ResolvedSandboxDefinition;
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
 }): RuntimeSandboxTemplatePlan {
-  if (input.definition.bootstrap !== undefined) {
-    if (input.definition.sourceHash === undefined) {
-      throw new Error(
-        `Sandbox "${input.definition.logicalPath}" defines bootstrap() but has no compiled sourceHash.`,
-      );
-    }
+  const sourceHash = input.definition.sourceHash;
+  if (sourceHash === undefined) {
+    throw new Error(`Sandbox "${input.definition.logicalPath}" has no compiled sourceHash.`);
+  }
+  if (
+    input.workspaceResourceRoot.contentHash === undefined &&
+    input.workspaceResourceRoot.rootEntries.length > 0
+  ) {
+    throw new Error(
+      `Sandbox "${input.definition.logicalPath}" has managed workspace resources but no compiled contentHash.`,
+    );
+  }
 
+  if (input.definition.bootstrap !== undefined) {
     return {
       contentHash: input.workspaceResourceRoot.contentHash,
       kind: "bootstrap",
       revalidationKey: input.definition.revalidationKey,
-      sourceHash: input.definition.sourceHash,
+      sourceHash,
     };
   }
 
@@ -46,11 +55,12 @@ export function createRuntimeSandboxTemplatePlan(input: {
     input.workspaceResourceRoot.contentHash === undefined &&
     input.workspaceResourceRoot.rootEntries.length === 0
   ) {
-    return { kind: "none" };
+    return { kind: "none", sourceHash };
   }
 
   return {
     contentHash: input.workspaceResourceRoot.contentHash,
     kind: "workspace-content",
+    sourceHash,
   };
 }

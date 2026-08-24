@@ -5,6 +5,7 @@ import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import type {
   ResolvedDynamicSubagentDefinition,
   ResolvedRuntimeDelegationNode,
+  ResolvedRuntimeSubagentSource,
 } from "#runtime/types.js";
 import type { JsonObject } from "#shared/json.js";
 import { serializeInputSchema } from "#shared/tool-schema.js";
@@ -21,6 +22,7 @@ export interface ResolvedDynamicSubagentResolver extends ResolvedDynamicSubagent
   readonly kind: "subagent";
   readonly name: string;
   readonly nodeId: string;
+  readonly subagentSource: ResolvedRuntimeSubagentSource;
 }
 
 /**
@@ -137,11 +139,13 @@ export function createRuntimeSubagentRegistry(input: {
       dynamicResolvers.push({
         ...dynamic,
         kind: "subagent",
-        logicalPath: subagentDefinition.logicalPath,
         name: subagentDefinition.name,
         nodeId: subagentDefinition.nodeId,
-        sourceId: subagentDefinition.sourceId,
-        sourceKind: "module",
+        subagentSource: {
+          logicalPath: subagentDefinition.logicalPath,
+          sourceId: subagentDefinition.sourceId,
+          sourceKind: "subagent",
+        },
       });
       registeredSubagent = {
         definition: subagentDefinition,

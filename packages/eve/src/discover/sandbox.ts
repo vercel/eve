@@ -1,6 +1,9 @@
 import { join } from "node:path";
 
-import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discover/diagnostics.js";
+import {
+  createCompilerErrorDiagnostic,
+  type CompilerDiagnostic,
+} from "#shared/compiler-diagnostics.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
 import {
   DISCOVER_MODULE_SLOT_COLLISION,
@@ -44,7 +47,7 @@ export const DISCOVER_SANDBOX_FOLDER_EMPTY = "discover/sandbox-folder-empty";
  * Result of discovering the authored sandbox from a single agent root.
  */
 interface DiscoverSandboxSourceResult {
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
   sandbox: SandboxSourceRef | null;
   sandboxWorkspace: SandboxWorkspaceFolderSourceRef | null;
 }
@@ -58,17 +61,20 @@ interface DiscoverSandboxSourceResult {
  * shorthand for agents that don't need a workspace.
  */
 export async function discoverSandboxSource(input: {
+  nodeId: string;
   rootEntries: readonly ProjectSourceEntry[];
   rootPath: string;
   source: ProjectSource;
 }): Promise<DiscoverSandboxSourceResult> {
-  const diagnostics: DiscoverDiagnostic[] = [];
+  const { nodeId } = input;
+  const diagnostics: CompilerDiagnostic[] = [];
 
   const directoryEntry = input.rootEntries.find((entry) => entry.name === SANDBOX_DIRECTORY_NAME);
 
   if (directoryEntry === undefined) {
     return discoverRootSandboxModule({
       diagnostics,
+      nodeId,
       rootEntries: input.rootEntries,
       rootPath: input.rootPath,
     });
@@ -78,9 +84,10 @@ export async function discoverSandboxSource(input: {
 
   if (!directoryEntry.isDirectory()) {
     diagnostics.push(
-      createDiscoverErrorDiagnostic({
+      createCompilerErrorDiagnostic({
         code: DISCOVER_SANDBOX_DIRECTORY_INVALID,
         message: `Expected "${directoryPath}" to be the sandbox folder.`,
+        nodeId,
         sourcePath: directoryPath,
       }),
     );
@@ -100,11 +107,12 @@ export async function discoverSandboxSource(input: {
 
   if (sandboxModuleCandidates.length > 1) {
     diagnostics.push(
-      createDiscoverErrorDiagnostic({
+      createCompilerErrorDiagnostic({
         code: DISCOVER_MODULE_SLOT_COLLISION,
         message:
           `Found multiple sandbox definition modules inside "${normalizeLogicalPath(SANDBOX_DIRECTORY_NAME)}": ` +
           sandboxModuleCandidates.map((name) => `"${name}"`).join(", "),
+        nodeId,
         sourcePath: directoryPath,
       }),
     );
@@ -121,11 +129,12 @@ export async function discoverSandboxSource(input: {
 
   if (!hasModule && !hasWorkspace) {
     diagnostics.push(
-      createDiscoverErrorDiagnostic({
+      createCompilerErrorDiagnostic({
         code: DISCOVER_SANDBOX_FOLDER_EMPTY,
         message:
           `Sandbox folder "sandbox/" contains neither a "sandbox.<ext>" definition ` +
           `nor a "workspace/" subdirectory. Add one or the other, or remove the folder.`,
+        nodeId,
         sourcePath: directoryPath,
       }),
     );
@@ -173,7 +182,8 @@ export async function discoverSandboxSource(input: {
  * available whenever a `workspace/` subtree is required.
  */
 function discoverRootSandboxModule(input: {
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
+  nodeId: string;
   rootEntries: readonly ProjectSourceEntry[];
   rootPath: string;
 }): DiscoverSandboxSourceResult {
@@ -183,11 +193,12 @@ function discoverRootSandboxModule(input: {
 
   if (candidates.moduleFileNames.length > 1) {
     input.diagnostics.push(
-      createDiscoverErrorDiagnostic({
+      createCompilerErrorDiagnostic({
         code: DISCOVER_MODULE_SLOT_COLLISION,
         message:
           `Found multiple top-level sandbox definition modules: ` +
           candidates.moduleFileNames.map((name) => `"${name}"`).join(", "),
+        nodeId: input.nodeId,
         sourcePath: input.rootPath,
       }),
     );

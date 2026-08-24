@@ -1,14 +1,19 @@
 import { type ToolApprovalConfiguration, type ToolApprovalStatus, type ToolSet, tool } from "ai";
 
 import type { SessionCapabilities } from "#channel/types.js";
-import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import type { WebSearchProvider } from "#shared/web-search.js";
-import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
-import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
+import {
+  hasPreparedKernelCapability,
+  type KernelCapabilityName,
+  type KernelCapabilityPlan,
+} from "#kernel/capabilities.js";
+import { installKernelProviderTool } from "#kernel/executable-capabilities.js";
 import { isObject } from "#shared/guards.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { resolveApprovalPolicy, type ApprovalStatus } from "#public/definitions/approval.js";
-import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/provider-tools.js";
+import {
+  resolveWebSearchProviderTool,
+  type ModelProviderCapabilityAvailability,
+} from "#harness/provider-tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { loadContext } from "#context/container.js";
@@ -42,37 +47,17 @@ const toolApprovals = new WeakMap<
  * Tools without `execute` are surfaced to the model as client-side tools
  * (no server execution).
  *
- * The framework's `ask_question` tool is only exposed to the model when
- * {@link SessionCapabilities.requestInput} is `true`. Sessions without
- * the HITL capability (scheduled task roots and any subagent chain
- * descending from one) never see the tool.
- *
- * Entries listed in `disabledProviderTools` are skipped entirely. Used
- * by the harness recovery path when a gateway fallback provider has
- * rejected a provider-specific tool — the tool is dropped for the
- * retry call so the request can proceed without it.
  */
 export function buildToolSet(input: {
   readonly approvedTools?: ReadonlySet<string>;
   readonly backgroundBatch?: BackgroundToolCallBatch;
   readonly capabilities?: SessionCapabilities;
-  readonly disabledProviderTools?: ReadonlySet<string>;
   readonly tools: HarnessToolMap;
 }): ToolSet {
   const tools: Record<string, ToolSet[string]> = {};
   const backgroundBatch = input.backgroundBatch ?? createBackgroundToolCallBatch();
-  const canRequestInput = input.capabilities?.requestInput === true;
-  const disabled = input.disabledProviderTools;
 
   for (const definition of input.tools.values()) {
-    if (definition.name === ASK_QUESTION_TOOL_NAME && !canRequestInput) {
-      continue;
-    }
-
-    if (disabled?.has(definition.name)) {
-      continue;
-    }
-
     backgroundBatch.setTool(
       definition.name,
       definition.execution === "background" && definition.execute !== undefined
@@ -174,7 +159,6 @@ export function buildToolSetFromDefinitions(input: {
   readonly approvedTools?: ReadonlySet<string>;
   readonly backgroundBatch?: BackgroundToolCallBatch;
   readonly capabilities?: SessionCapabilities;
-  readonly disabledProviderTools?: ReadonlySet<string>;
   readonly tools: readonly HarnessToolDefinition[];
 }): ToolSet {
   const tools = new Map<string, HarnessToolDefinition>();
@@ -187,7 +171,6 @@ export function buildToolSetFromDefinitions(input: {
     approvedTools: input.approvedTools,
     backgroundBatch: input.backgroundBatch,
     capabilities: input.capabilities,
-    disabledProviderTools: input.disabledProviderTools,
     tools,
   });
 }
@@ -273,46 +256,66 @@ function normalizeToolExecuteOutput(
  * tool has a real executor and flows through the normal path — no
  * replacement occurs.
  *
- * Tool names listed in `disabledProviderTools` are skipped entirely —
- * both the framework definition and the injected provider tool are
- * omitted from the returned set. Used by the harness recovery path when
- * a gateway fallback provider has rejected a provider-specific tool.
+ * Capabilities listed in `disabledProviderCapabilities` omit only the
+ * kernel-owned provider injection. Same-named authored tools remain ordinary
+ * definitions and cannot be removed by provider recovery.
  */
+export interface BuiltToolSetWithProviderCapabilities {
+  readonly installedProviderCapabilities: ReadonlySet<KernelCapabilityName>;
+  readonly tools: ToolSet;
+}
+
 export async function buildToolSetWithProviderTools(input: {
   readonly approvedTools?: ReadonlySet<string>;
   readonly backgroundBatch?: BackgroundToolCallBatch;
   readonly capabilities?: SessionCapabilities;
-  readonly disabledProviderTools?: ReadonlySet<string>;
-  readonly modelReference: RuntimeModelReference;
+  readonly disabledProviderCapabilities?: ReadonlySet<KernelCapabilityName>;
+  readonly kernelPlan: KernelCapabilityPlan;
+  readonly providerAvailability: ModelProviderCapabilityAvailability;
   readonly tools: HarnessToolMap;
-  readonly webSearchProvider?: WebSearchProvider;
-}): Promise<ToolSet> {
-  const disabled = input.disabledProviderTools;
+}): Promise<BuiltToolSetWithProviderCapabilities> {
+  const disabled = input.disabledProviderCapabilities;
+  const { modelSupportsProviderTools, webSearchBackend } = input.providerAvailability;
   const tools: ToolSet = {
     ...buildToolSet({
       approvedTools: input.approvedTools,
       backgroundBatch: input.backgroundBatch,
       capabilities: input.capabilities,
-      disabledProviderTools: disabled,
       tools: input.tools,
     }),
   };
+  const installedProviderCapabilities = new Set<KernelCapabilityName>();
 
-  // Inject the real provider tool for web_search when the definition has
-  // no local execute (i.e. the framework definition uses the provider sentinel).
-  if (!disabled?.has(WEB_SEARCH_TOOL_DEFINITION.name)) {
-    const webSearchTool = input.tools.get(WEB_SEARCH_TOOL_DEFINITION.name);
-    if (webSearchTool !== undefined && webSearchTool.execute === undefined) {
-      const backend = resolveWebSearchBackend(input.modelReference, input.webSearchProvider);
-      if (backend === null) {
-        delete tools[WEB_SEARCH_TOOL_DEFINITION.name];
-      } else {
-        tools[WEB_SEARCH_TOOL_DEFINITION.name] = await resolveWebSearchProviderTool(backend);
-      }
+  for (const definition of input.tools.values()) {
+    const name = definition.kernelCapability;
+    if (name === undefined || definition.execute !== undefined) {
+      continue;
+    }
+    if (disabled?.has(name)) {
+      delete tools[definition.name];
+      continue;
+    }
+
+    const decision = await installKernelProviderTool(name, {
+      installWebSearch: async () => {
+        if (webSearchBackend === null) {
+          throw new Error("Web search provider installation requires a supported model backend.");
+        }
+        return await resolveWebSearchProviderTool(webSearchBackend);
+      },
+      modelSupportsProviderTools:
+        hasPreparedKernelCapability(input.kernelPlan, name) && modelSupportsProviderTools,
+    });
+    if (!decision.handled) continue;
+    if (decision.tool === undefined) {
+      delete tools[definition.name];
+    } else {
+      tools[definition.name] = decision.tool;
+      installedProviderCapabilities.add(name);
     }
   }
 
-  return tools;
+  return { installedProviderCapabilities, tools };
 }
 
 function buildApprovalFn(

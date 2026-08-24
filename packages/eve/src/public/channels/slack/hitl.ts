@@ -23,7 +23,7 @@ import {
   type InputRequest,
   parseInputResponse,
   type ValidatedInputResponse,
-} from "#runtime/input/types.js";
+} from "#shared/input.js";
 
 /**
  * Wire-format prefix every framework HITL widget mints onto its

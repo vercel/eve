@@ -10,28 +10,20 @@ import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { HeadersValue } from "#client/types.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
 import { createResolvedRuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
-import {
-  getAllFrameworkChannelNames,
-  getFrameworkChannelDefinitions,
-} from "#runtime/framework-channels/index.js";
-import {
-  getAllFrameworkToolNames,
-  getFrameworkDynamicToolResolvers,
-  getFrameworkToolDefinitions,
-} from "#runtime/framework-tools/index.js";
 import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
 import { resolveDynamicSubagentDefinition } from "#runtime/resolve-dynamic-subagent.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import { createRuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
-import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createRuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
-import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
+import {
+  getKernelReservedToolNames,
+  getReservedKernelCapabilityNames,
+} from "#kernel/capabilities.js";
 import type {
-  ResolvedChannelDefinition,
   ResolvedDynamicSubagentDefinition,
   ResolvedRuntimeDelegationNode,
   ResolvedRuntimeRemoteAgentNode,
@@ -143,82 +135,12 @@ async function resolveRuntimeAgentNode(
     moduleMap: input.moduleMap,
     nodeId: input.nodeId,
   });
-  const frameworkTools = getFrameworkToolDefinitions({
-    authoredSkills: agent.skills,
-  });
-  const frameworkToolNames = new Set(frameworkTools.map((t) => t.name));
-  const allFrameworkToolNames = getAllFrameworkToolNames();
-
-  // Authored tools whose filename slug matches a framework default replace
-  // it. Authored disable sentinels (whose target is also taken from the
-  // file's slug) remove a framework default. Both interactions happen here,
-  // before the registry is built, so the duplicate-name guard inside
-  // `createRuntimeToolRegistry` keeps doing its job for authored-vs-authored
-  // collisions.
-  const authoredToolNames = new Set(agent.tools.map((tool) => tool.name));
-
-  for (const disabledName of agent.disabledFrameworkTools) {
-    if (!allFrameworkToolNames.has(disabledName)) {
-      throw new ResolveRuntimeAgentGraphError(
-        `agent/tools/${disabledName}.ts exports disableTool() but "${disabledName}" is not a framework tool. ` +
-          `Rename the file to one of: ${[...allFrameworkToolNames].sort().join(", ")}.`,
-        {
-          nodeId,
-          sourceId: input.sourceId,
-        },
-      );
-    }
-  }
-
-  const disabledFrameworkTools = new Set(agent.disabledFrameworkTools);
-  const activeFrameworkTools = frameworkTools.filter(
-    (tool) => !authoredToolNames.has(tool.name) && !disabledFrameworkTools.has(tool.name),
-  );
-
   const toolRegistry = await createRuntimeToolRegistry(
-    {
-      tools: [...activeFrameworkTools, ...agent.tools],
-    },
-    {
-      reservedToolNames: [
-        WORKFLOW_TOOL_NAME,
-        ...(frameworkToolNames.has(LOAD_SKILL_TOOL_NAME) ||
-        authoredToolNames.has(LOAD_SKILL_TOOL_NAME)
-          ? []
-          : [LOAD_SKILL_TOOL_NAME]),
-      ],
-    },
+    { tools: agent.tools },
+    { reservedToolNames: getReservedKernelCapabilityNames() },
   );
-  // Authored channels override framework defaults by matching logical name;
-  // disable sentinels remove framework defaults with the same name.
-  const authoredChannelNames = new Set(agent.channels.map((channel) => channel.name));
-  const allFrameworkChannelNames = getAllFrameworkChannelNames();
-
-  for (const disabledName of agent.disabledFrameworkChannels) {
-    if (!allFrameworkChannelNames.has(disabledName)) {
-      throw new ResolveRuntimeAgentGraphError(
-        `agent/channels/${disabledName}.ts exports disableRoute() but "${disabledName}" is not a framework channel. ` +
-          `Rename the file to one of: ${[...allFrameworkChannelNames].sort().join(", ")}.`,
-        {
-          nodeId,
-          sourceId: input.sourceId,
-        },
-      );
-    }
-  }
-
-  const disabledFrameworkChannels = new Set(agent.disabledFrameworkChannels);
-  const activeFrameworkChannels = getFrameworkChannelDefinitions().filter(
-    (channel) =>
-      !authoredChannelNames.has(channel.name) && !disabledFrameworkChannels.has(channel.name),
-  );
-  const channels: readonly ResolvedChannelDefinition[] = [
-    ...activeFrameworkChannels,
-    ...agent.channels,
-  ];
-
   const sandboxRegistry = createRuntimeSandboxRegistry({
-    authoredSandbox: agent.sandbox,
+    resolvedSandbox: agent.sandbox,
     workspaceResourceRoot: agent.workspaceResourceRoot,
   });
   const subagentRegistry = createRuntimeSubagentRegistry({
@@ -226,8 +148,10 @@ async function resolveRuntimeAgentNode(
       agent.config?.experimental?.tasks === true ||
       agent.config?.experimental?.subagentPersistentSessions === true,
     reservedToolNames: [
-      LOAD_SKILL_TOOL_NAME,
-      ...toolRegistry.preparedTools.map((tool) => tool.name),
+      ...new Set([
+        ...getKernelReservedToolNames(agent.kernelPlan),
+        ...toolRegistry.preparedTools.map((tool) => tool.name),
+      ]),
     ],
     subagents: await resolveRuntimeSubagents({
       childNodeIdsByParentNodeId: input.childNodeIdsByParentNodeId,
@@ -238,14 +162,11 @@ async function resolveRuntimeAgentNode(
       subagentNodesById: input.subagentNodesById,
     }),
   });
-  const resolvedAgent = {
-    ...agent,
-    dynamicToolResolvers: [...agent.dynamicToolResolvers, ...getFrameworkDynamicToolResolvers()],
-  };
+  const resolvedAgent = agent;
 
   const node: ResolvedAgentGraphBundle["root"] = {
     agent: resolvedAgent,
-    channels,
+    channels: agent.channels,
     hookRegistry: createRuntimeHookRegistry(resolvedAgent.hooks),
     nodeId,
     sandboxRegistry,
@@ -304,7 +225,7 @@ async function resolveRuntimeSubagents(input: {
     resolvedSubagents.push(
       await resolveRuntimeRemoteAgent({
         moduleMap: input.moduleMap,
-        nodeScopeId: input.parentNodeId,
+        nodeScopeId: remoteAgent.nodeId,
         sourceRef: remoteAgent,
       }),
     );
@@ -339,7 +260,7 @@ async function resolveRuntimeSubagent(input: {
     name: input.sourceRef.name,
     nodeId: toRuntimeNodeId(input.sourceRef.nodeId),
     sourceId: input.sourceRef.sourceId,
-    sourceKind: "module",
+    sourceKind: "subagent",
   };
   await resolveRuntimeAgentNode({
     agentId: input.sourceRef.name,
@@ -361,7 +282,7 @@ async function resolveRuntimeRemoteAgent(input: {
   readonly sourceRef: CompiledRemoteAgentNode;
 }): Promise<ResolvedRuntimeRemoteAgentNode> {
   const resolvedExportValue = await loadResolvedModuleExport({
-    definition: input.sourceRef,
+    definition: input.sourceRef.configResolver,
     kindLabel: "remote agent",
     moduleMap: input.moduleMap,
     nodeId: input.nodeScopeId,
@@ -373,6 +294,7 @@ async function resolveRuntimeRemoteAgent(input: {
 
   const resolvedRemoteAgent: {
     auth?: ResolvedRuntimeRemoteAgentNode["auth"];
+    configResolver: ResolvedRuntimeRemoteAgentNode["configResolver"];
     description: string;
     forwardPrincipal?: boolean;
     headers?: HeadersValue;
@@ -383,9 +305,10 @@ async function resolveRuntimeRemoteAgent(input: {
     outputSchema?: ResolvedRuntimeRemoteAgentNode["outputSchema"];
     path: string;
     sourceId: string;
-    sourceKind: "module";
+    sourceKind: "subagent";
     url: string;
   } = {
+    configResolver: input.sourceRef.configResolver,
     description: input.sourceRef.description,
     kind: "remote",
     logicalPath: input.sourceRef.logicalPath,
@@ -394,7 +317,7 @@ async function resolveRuntimeRemoteAgent(input: {
     outputSchema: input.sourceRef.outputSchema,
     path: input.sourceRef.path,
     sourceId: input.sourceRef.sourceId,
-    sourceKind: "module",
+    sourceKind: "subagent",
     url: await resolveRemoteAgentUrl({
       bakedUrl: input.sourceRef.url,
       logicalPath: input.sourceRef.logicalPath,

@@ -5,7 +5,7 @@ import type { Session } from "#channel/session.js";
 import {
   attachRemoteAgentStreamHeadersResolver,
   type RemoteAgentStreamHeadersResolver,
-} from "#internal/nitro/routes/channel-route-context.js";
+} from "#channel/route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { stampTestEvent } from "#internal/testing/events.js";
 import { createSubagentCalledEvent, type MessageStreamEvent } from "#protocol/message.js";

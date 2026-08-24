@@ -1,5 +1,5 @@
 import type { ModuleSourceRef } from "#shared/source-ref.js";
-import type { DiscoverDiagnostic } from "#discover/diagnostics.js";
+import type { CompilerDiagnostic } from "#shared/compiler-diagnostics.js";
 import { discoverNamedSourceDirectory } from "#discover/grammar.js";
 import type { ProjectSource, ProjectSourceEntry } from "#discover/project-source.js";
 
@@ -20,6 +20,7 @@ export const DISCOVER_LIB_ENTRY_UNSUPPORTED = "discover/lib-entry-unsupported";
  */
 interface DiscoverLibSourcesInput {
   agentRoot: string;
+  nodeId: string;
   rootEntries: readonly ProjectSourceEntry[];
   source: ProjectSource;
 }
@@ -28,7 +29,7 @@ interface DiscoverLibSourcesInput {
  * Result of recursively discovering authored helper modules under `lib/`.
  */
 interface DiscoverLibSourcesResult {
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
   lib: ModuleSourceRef[];
 }
 
@@ -39,10 +40,12 @@ interface DiscoverLibSourcesResult {
 export async function discoverLibSources(
   input: DiscoverLibSourcesInput,
 ): Promise<DiscoverLibSourcesResult> {
+  const { nodeId } = input;
   const result = await discoverNamedSourceDirectory({
     directoryName: "lib",
     invalidDirectoryCode: DISCOVER_LIB_DIRECTORY_INVALID,
     invalidDirectoryMessage: `Expected "${input.agentRoot}/lib" to be a directory of authored helper modules.`,
+    nodeId,
     recursive: true,
     rootEntries: input.rootEntries,
     rootPath: input.agentRoot,

@@ -1,12 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  finalizeInstrumentationProviders,
-  getInstrumentationProviders,
-  registerInstrumentationProvider,
-  seedInstrumentationProviders,
-} from "#harness/instrumentation/providers.js";
-import { localTraces } from "#public/instrumentation/otel.js";
+import { getInstrumentationProviders } from "#harness/instrumentation/providers.js";
+import { installCompiledInstrumentationPlan } from "#internal/instrumentation-plan-runtime.js";
+import { agentRuns, localTraces } from "#public/instrumentation/otel.js";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -17,16 +13,40 @@ describe("instrumentation provider production defaults", () => {
     vi.stubEnv("EVE_DEV_WORKER_APP_ROOT", undefined);
     vi.stubEnv("VERCEL_ENV", "production");
 
-    seedInstrumentationProviders();
-    await registerInstrumentationProvider({
-      agentName: "weather",
-      slot: "local",
-      value: localTraces(),
+    const shutdown = await installCompiledInstrumentationPlan({
+      appRoot: "/virtual/weather",
+      async loadModule(sourceId) {
+        return { default: sourceId === "framework-agent-runs" ? agentRuns() : localTraces() };
+      },
+      mode: "production",
+      plan: {
+        entries: [
+          {
+            activation: "production",
+            implementation: "provider",
+            slot: "agent-runs",
+            source: {
+              logicalPath: "instrumentation/agent-runs.ts",
+              sourceId: "framework-agent-runs",
+              sourceKind: "module",
+            },
+          },
+          {
+            activation: "always",
+            implementation: "provider",
+            slot: "local",
+            source: {
+              logicalPath: "instrumentation/local.ts",
+              sourceId: "authored-local",
+              sourceKind: "module",
+            },
+          },
+        ],
+        kind: "providers",
+      },
+      serviceName: "weather",
     });
-
-    const runtime = finalizeInstrumentationProviders({ serviceName: "weather" });
-    await runtime.forceFlush();
-    await runtime.shutdown();
+    await shutdown();
 
     expect(getInstrumentationProviders().map(({ slot }) => slot)).toEqual(["agent-runs", "local"]);
   });

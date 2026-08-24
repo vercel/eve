@@ -2,12 +2,12 @@ import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/compiled-agent-node-id.js";
 import { buildMemoryAgentProject } from "#internal/testing/memory-agent-source.js";
 import { DISCOVER_SANDBOX_DIRECTORY_INVALID } from "#discover/grammar.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import {
   DISCOVER_LOCAL_SUBAGENT_SCHEDULES_INVALID,
-  DISCOVER_REQUIRED_SUBAGENT_CONFIG_MODULE_MISSING,
   discoverSubagents,
 } from "#discover/discover-subagent.js";
 
@@ -155,8 +155,9 @@ describe("discoverSubagents (memory)", () => {
         }),
         "node_modules/@acme/research/extension/_manifest.json": JSON.stringify({
           kind: "eve-extension",
-          formatVersion: 1,
+          formatVersion: 2,
           builtWithEve: "test",
+          build: { externalDependencies: [] },
           requires: { extension: 1, tool: 1 },
         }),
         "node_modules/@acme/research/extension/tools/search.ts": "export default {};",
@@ -240,6 +241,7 @@ describe("discoverSubagents (memory)", () => {
     const result = await discoverSubagents({
       agentRoot: project.agentRoot,
       appRoot: project.appRoot,
+      parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
       source: project.source,
     });
 
@@ -263,7 +265,7 @@ describe("discoverSubagents (memory)", () => {
     });
   });
 
-  it("reports missing local subagent config modules without dropping the subagent manifest", async () => {
+  it("leaves an omitted local subagent config for canonical source selection", async () => {
     const project = buildMemoryAgentProject({
       agentDirectories: ["subagents/broken"],
     });
@@ -271,23 +273,23 @@ describe("discoverSubagents (memory)", () => {
     const result = await discoverSubagents({
       agentRoot: project.agentRoot,
       appRoot: project.appRoot,
+      parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
       source: project.source,
     });
 
-    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
-      DISCOVER_REQUIRED_SUBAGENT_CONFIG_MODULE_MISSING,
-    ]);
+    expect(result.diagnostics).toEqual([]);
     expect(result.subagents).toHaveLength(1);
     expect(result.subagents[0]).toMatchObject({
       logicalPath: "subagents/broken",
       manifest: {
         diagnosticsSummary: {
-          errors: 1,
+          errors: 0,
           warnings: 0,
         },
       },
       subagentId: "broken",
     });
+    expect(result.subagents[0]?.manifest.configModule).toBeUndefined();
   });
 
   it("rejects schedules inside local subagent packages", async () => {
@@ -302,6 +304,7 @@ describe("discoverSubagents (memory)", () => {
     const result = await discoverSubagents({
       agentRoot: project.agentRoot,
       appRoot: project.appRoot,
+      parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
       source: project.source,
     });
 
@@ -332,6 +335,7 @@ describe("discoverSubagents (memory)", () => {
     const result = await discoverSubagents({
       agentRoot: project.agentRoot,
       appRoot: project.appRoot,
+      parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
       source: project.source,
     });
 
@@ -363,6 +367,7 @@ describe("discoverSubagents (memory)", () => {
     const result = await discoverSubagents({
       agentRoot: project.agentRoot,
       appRoot: project.appRoot,
+      parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
       source: project.source,
     });
 

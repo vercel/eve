@@ -1,4 +1,4 @@
-import type { RuntimeActionResult } from "#runtime/actions/types.js";
+import type { RuntimeActionResult } from "#shared/runtime-actions.js";
 import type { McpClientConnectionDefinition } from "#public/definitions/connections/mcp.js";
 import type { ToolDefinition } from "#public/definitions/tool.js";
 

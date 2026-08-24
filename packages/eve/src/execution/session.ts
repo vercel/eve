@@ -1,13 +1,23 @@
 import type { DurableSession } from "#execution/durable-session-store.js";
 import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
+import type { SessionCapabilities } from "#channel/types.js";
 import type {
   HarnessSession,
   SessionAgent,
   SessionLimits,
   SessionToolDefinition,
 } from "#harness/types.js";
+import { resolveSubagentDepth } from "#harness/subagent-depth.js";
+import {
+  getAdvertisedKernelPromptFeatures,
+  type KernelCapabilityPlan,
+  type SessionKernelCapabilityResolution,
+} from "#kernel/capabilities.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
+import { createRuntimeActionPromptBlocks } from "#runtime/prompt/compose.js";
+import { TASK_UPDATE_SESSION_INSTRUCTION } from "#execution/tasks/child/instructions.js";
 
+const MODEL_KERNEL_PROMPT_SCOPE = new Set(["model"] as const);
 const DEFAULT_COMPACTION_RECENT_WINDOW_SIZE = 10;
 const DEFAULT_COMPACTION_THRESHOLD_PERCENT = 0.9;
 const FALLBACK_COMPACTION_THRESHOLD = 100_000;
@@ -167,6 +177,42 @@ export function refreshSessionFromTurnAgent(input: {
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
   };
+}
+
+/** Adds only native action guidance not already represented by declared turn tools. */
+export function createKernelSessionPromptAdditions(input: {
+  readonly capabilities?: SessionCapabilities;
+  readonly kernelPlan: KernelCapabilityPlan;
+  readonly persistentSubagentSessions: boolean;
+  readonly session: Pick<HarnessSession, "rootSessionId" | "subagentDepth">;
+  readonly taskControl: SessionKernelCapabilityResolution["taskControl"];
+  readonly tasksEnabled: boolean;
+  readonly turnAgent: RuntimeTurnAgent;
+}): readonly string[] {
+  const promptFeatures = getAdvertisedKernelPromptFeatures(
+    input.kernelPlan,
+    {
+      delegatedCaller: input.taskControl.taskUpdate,
+      requestInput: input.capabilities?.requestInput,
+      rootSession: input.session.rootSessionId === undefined,
+      structuredOutput: false,
+      subagentDepth: resolveSubagentDepth(input.session).currentDepth,
+    },
+    { excludedScopes: MODEL_KERNEL_PROMPT_SCOPE },
+  );
+  const declaredSubagents = input.turnAgent.tools.some(
+    (tool) => tool.kind === "subagent" || tool.kind === "remote",
+  );
+
+  return [
+    ...createRuntimeActionPromptBlocks({
+      persistentSubagentSessions: input.persistentSubagentSessions,
+      subagentsAvailable: !declaredSubagents && promptFeatures.has("subagents-available"),
+      tasksEnabled: input.tasksEnabled,
+      toolsAvailable: input.turnAgent.tools.length === 0 && promptFeatures.has("tools-available"),
+    }),
+    ...(promptFeatures.has("task-update-guidance") ? [TASK_UPDATE_SESSION_INSTRUCTION] : []),
+  ];
 }
 
 function createSessionSystemPrompt(input: {

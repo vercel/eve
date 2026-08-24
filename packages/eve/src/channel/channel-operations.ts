@@ -22,7 +22,7 @@ import {
   type InputResponse,
   parseInputResponses,
   type StrictInputResponses,
-} from "#runtime/input/types.js";
+} from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
 

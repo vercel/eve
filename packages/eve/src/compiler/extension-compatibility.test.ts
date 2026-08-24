@@ -29,23 +29,33 @@ describe("extension compatibility manifest", () => {
     ).toEqual(manifest);
   });
 
-  it("continues to parse format v1 manifests", () => {
-    expect(
+  it("rejects format v1 manifests so stale distributions must be rebuilt", () => {
+    expect(() =>
       parseExtensionCompatibilityManifest(
         JSON.stringify({
           kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
           formatVersion: 1,
           builtWithEve: "0.39.0",
+          build: { externalDependencies: [] },
           requires: { extension: 1 },
         }),
         "/pkg/dist/extension/_manifest.json",
       ),
-    ).toEqual({
-      kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
-      formatVersion: 1,
-      builtWithEve: "0.39.0",
-      requires: { extension: 1 },
-    });
+    ).toThrow(/invalid/);
+  });
+
+  it("requires build metadata even when the dependency set is empty", () => {
+    expect(() =>
+      parseExtensionCompatibilityManifest(
+        JSON.stringify({
+          kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
+          formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+          builtWithEve: "0.39.0",
+          requires: { extension: 1 },
+        }),
+        "/pkg/dist/extension/_manifest.json",
+      ),
+    ).toThrow(/build/);
   });
 
   it("rejects executable or contribution fields", () => {
@@ -55,6 +65,7 @@ describe("extension compatibility manifest", () => {
           kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
           formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
           builtWithEve: "0.24.6",
+          build: { externalDependencies: [] },
           requires: { extension: 1 },
           contributions: { tools: [] },
         }),
@@ -68,6 +79,7 @@ describe("extension compatibility manifest", () => {
       kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
       formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
       builtWithEve: "0.24.6",
+      build: { externalDependencies: [] },
       requires: { extension: 1, tool: 1 },
     } as const;
 
@@ -89,11 +101,31 @@ describe("extension compatibility manifest", () => {
     ]);
   });
 
+  it("treats instrumentation as an independently versioned consumer contract", () => {
+    const unsupportedVersion = EXTENSION_CAPABILITY_VERSIONS.instrumentation + 1;
+    expect(
+      findUnsupportedExtensionCapabilities({
+        kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
+        formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+        builtWithEve: "0.24.6",
+        build: { externalDependencies: [] },
+        requires: { instrumentation: unsupportedVersion },
+      }),
+    ).toEqual([
+      {
+        capability: "instrumentation",
+        requiredVersion: unsupportedVersion,
+        supportedVersions: EXTENSION_CAPABILITY_SUPPORT.instrumentation,
+      },
+    ]);
+  });
+
   it("fails closed for capability names that collide with Object.prototype members", () => {
     const manifest = {
       kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
       formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
       builtWithEve: "0.24.6",
+      build: { externalDependencies: [] },
       requires: { toString: 1, constructor: 1, hasOwnProperty: 2 },
     } as const;
 
@@ -125,6 +157,7 @@ describe("extension compatibility manifest", () => {
             kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
             formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
             builtWithEve: "0.25.1",
+            build: { externalDependencies: [] },
             requires: { [capability]: supportedVersion },
           }),
         ).toEqual([]);
@@ -136,6 +169,7 @@ describe("extension compatibility manifest", () => {
           kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
           formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
           builtWithEve: "0.25.1",
+          build: { externalDependencies: [] },
           requires: { [capability]: unsupportedVersion },
         }),
       ).toEqual([{ capability, requiredVersion: unsupportedVersion, supportedVersions }]);

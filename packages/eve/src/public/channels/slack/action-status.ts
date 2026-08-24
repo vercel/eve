@@ -4,7 +4,7 @@
  * label is the action's name plus its most telling argument — `grep useEve`
  * or `read_file agent/agent.ts` instead of `Running grep...`.
  */
-import type { RuntimeActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeActionRequest } from "#shared/runtime-actions.js";
 
 /** Argument keys worth surfacing, most telling first, per tool. */
 const SALIENT_KEYS: Readonly<Record<string, readonly string[]>> = {

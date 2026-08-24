@@ -58,6 +58,10 @@ describe("dynamic subagent lifecycle", () => {
       },
     ]);
     expect(getDynamicSubagentSelection(ctx, resolver.nodeId)).toBeDefined();
+    expect(getDynamicSubagentSelection(ctx, resolver.nodeId)?.prepared).toMatchObject({
+      logicalPath: "subagents/researcher",
+      sourceId: "subagents/researcher",
+    });
   });
 
   it("lets a turn-scoped null hide a session-scoped selection", async () => {
@@ -294,6 +298,11 @@ function createResolver(
       nodeId: "subagents/researcher",
       sourceId: "agent.ts",
       sourceKind: "module",
+      subagentSource: {
+        logicalPath: "subagents/researcher",
+        sourceId: "subagents/researcher",
+        sourceKind: "subagent",
+      },
     },
   };
 }

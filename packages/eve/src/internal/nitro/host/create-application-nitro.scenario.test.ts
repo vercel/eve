@@ -12,10 +12,11 @@ import {
   resolveCompilerArtifactPaths,
 } from "#compiler/artifacts.js";
 import {
-  createCompiledAgentNodeManifest,
-  type CompiledChannelEntry,
+  type CompiledAgentManifest,
+  type CompiledChannelDefinition,
   type CompiledSubagentNode,
 } from "#compiler/manifest.js";
+import { createCompiledExternalDependencyPlan } from "#compiler/external-dependency-plan.js";
 import {
   resolvePackageSourceDirectoryPath,
   resolvePackageRoot,
@@ -23,20 +24,25 @@ import {
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
 import { resolveNitroBuildDirectory } from "#internal/application/paths.js";
+import {
+  createStubCompiledAgentManifest,
+  createStubCompiledAgentNodeManifest as createCompiledAgentNodeManifest,
+  TEST_COMPILED_AGENT_CONFIG_BINDING,
+  TEST_COMPILED_AGENT_CONFIG_SOURCE,
+} from "#internal/testing/compiled-manifest.js";
 import type {
   PreparedApplicationHost,
   PreparedDevelopmentApplicationHost,
 } from "#internal/nitro/host/types.js";
-import {
-  createEveVercelOptions,
-  EVE_WORKFLOW_FLOW_ROUTE_PATH,
-} from "#internal/nitro/host/vercel-build-output-config.js";
+import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
+import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#protocol/routes.js";
 
 const configureDevelopmentNitroRoutes = vi.fn(async () => undefined);
 const configureProductionNitroRoutes = vi.fn(async () => undefined);
 const createNitroMock = vi.fn();
 const registerScheduleTaskHandlers = vi.fn();
+const externalDependencyFixtureRoots: string[] = [];
 
 vi.mock("nitro/builder", () => ({
   createNitro: createNitroMock,
@@ -96,21 +102,26 @@ function createPreparedHost(): PreparedDevelopmentApplicationHost {
   const paths = resolveCompilerArtifactPaths(appRoot);
   const metadata: CompileMetadata = {
     compile: {
+      manifest: {
+        path: paths.compiledManifestPath,
+        sha256: "a".repeat(64),
+      },
       moduleMap: {
+        identitySha256: "f".repeat(64),
         path: paths.moduleMapPath,
-        sha256: "module-map-sha",
+        sha256: "b".repeat(64),
       },
     },
     discovery: {
       diagnostics: {
         path: paths.diagnosticsPath,
-        sha256: "diagnostics-sha",
+        sha256: "c".repeat(64),
       },
       manifest: {
         path: paths.discoveryManifestPath,
-        sha256: "manifest-sha",
+        sha256: "d".repeat(64),
       },
-      sourceGraphHash: "source-graph-sha",
+      sourceGraphHash: "e".repeat(64),
       summary: {
         errors: 0,
         warnings: 0,
@@ -129,13 +140,19 @@ function createPreparedHost(): PreparedDevelopmentApplicationHost {
     appRoot,
     compileResult: {
       diagnostics: [],
-      manifest: {
-        channels: [],
-        config: { name: "weather-agent" },
-        extensionMounts: [],
-        sandbox: null,
-        subagents: [],
-      },
+      manifest: createStubCompiledAgentManifest({
+        agentRoot: `${appRoot}/agent`,
+        appRoot,
+        bindings: [TEST_COMPILED_AGENT_CONFIG_BINDING],
+        config: {
+          model: {
+            id: "openai/gpt-5.4",
+            routing: { kind: "gateway", target: "openai" },
+          },
+          name: "weather-agent",
+          source: TEST_COMPILED_AGENT_CONFIG_SOURCE,
+        },
+      }),
       metadata,
       paths,
       project: {
@@ -146,6 +163,7 @@ function createPreparedHost(): PreparedDevelopmentApplicationHost {
     } as unknown as PreparedApplicationHost["compileResult"],
     compiledArtifacts: {
       bootstrapPath: `${appRoot}/.eve/bootstrap.mjs`,
+      instrumentationPluginPath: `${appRoot}/.eve/instrumentation.mjs`,
       workflowWorldPluginPath: `${appRoot}/.eve/workflow-world.mjs`,
     } as PreparedApplicationHost["compiledArtifacts"],
     scheduleRegistrations: [],
@@ -170,6 +188,74 @@ function createPreparedHost(): PreparedDevelopmentApplicationHost {
   };
 }
 
+async function installTestExternalDependencyPlan(
+  manifest: CompiledAgentManifest,
+  entries: readonly {
+    readonly application?: boolean;
+    readonly extension?: boolean;
+    readonly name: string;
+  }[],
+): Promise<void> {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), "eve-nitro-external-plan-"));
+  externalDependencyFixtureRoots.push(fixtureRoot);
+  for (const entry of entries) {
+    const packageRoot = join(fixtureRoot, "node_modules", ...entry.name.split("/"));
+    const entryRelativePath = entry.name === "sharp" ? "lib/index.js" : "index.js";
+    await mkdir(join(packageRoot, ...entryRelativePath.split("/").slice(0, -1)), {
+      recursive: true,
+    });
+    await writeFile(
+      join(packageRoot, "package.json"),
+      JSON.stringify({
+        exports: {
+          ".": `./${entryRelativePath}`,
+          "./feature": {
+            "eve-source": "./feature.source.ts",
+            import: "./feature.import.js",
+            default: "./feature.default.js",
+          },
+        },
+        name: entry.name,
+        type: "module",
+      }),
+    );
+    await writeFile(join(packageRoot, entryRelativePath), "export default null;\n");
+    await writeFile(join(packageRoot, "feature.source.ts"), "export default 'source';\n");
+    await writeFile(join(packageRoot, "feature.import.js"), "export default 'import';\n");
+    await writeFile(join(packageRoot, "feature.default.js"), "export default 'default';\n");
+  }
+  manifest.externalDependencyPlan = await createCompiledExternalDependencyPlan(
+    entries.flatMap((entry) => [
+      ...(entry.application === true
+        ? [
+            {
+              packageName: entry.name,
+              scope: {
+                kind: "application" as const,
+                nodeId: "__root__",
+                sourceRoot: fixtureRoot,
+              },
+            },
+          ]
+        : []),
+      ...(entry.extension === true
+        ? [
+            {
+              packageName: entry.name,
+              scope: {
+                kind: "extension" as const,
+                namespace: "layout",
+                nodeId: "__root__",
+                packageName: "layout-extension",
+                sourceRoot: fixtureRoot,
+              },
+            },
+          ]
+        : []),
+    ]),
+  );
+}
+
 function createProductionOptions(preparedHost: PreparedApplicationHost) {
   return {
     buildDir: resolveNitroBuildDirectory(preparedHost.appRoot),
@@ -183,72 +269,66 @@ describe("application Nitro creation", () => {
     vi.clearAllMocks();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     delete process.env.VERCEL;
+    await Promise.all(
+      externalDependencyFixtureRoots
+        .splice(0)
+        .map((root) => rm(root, { force: true, recursive: true })),
+    );
   });
 
-  it("installs local tracing and compiled artifacts before constructing the Workflow world", async () => {
+  it("installs the compiled instrumentation plan after artifacts and Workflow world", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
     const { createDevelopmentApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
     const preparedHost = createPreparedHost();
+    const instrumentationPluginPath = preparedHost.compiledArtifacts.instrumentationPluginPath;
+    if (instrumentationPluginPath === undefined) {
+      throw new Error("Expected instrumentation plugin fixture path.");
+    }
     await createDevelopmentApplicationNitro(preparedHost);
 
     const plugins = createNitroMock.mock.calls[0]?.[0].plugins as string[];
-    const localTracing = plugins.findIndex((plugin) =>
-      plugin.includes("local-tracing-runtime-plugin.ts"),
-    );
-
-    expect(localTracing).toBeGreaterThanOrEqual(0);
-    expect(localTracing).toBeLessThan(
-      plugins.indexOf(preparedHost.compiledArtifacts.bootstrapPath),
-    );
     expect(plugins.indexOf(preparedHost.compiledArtifacts.bootstrapPath)).toBeLessThan(
       plugins.indexOf(preparedHost.compiledArtifacts.workflowWorldPluginPath),
     );
-  });
-
-  it("preserves authored instrumentation instead of installing local tracing", async () => {
-    const nitroStub = createNitroStub();
-    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
-    const { createDevelopmentApplicationNitro } =
-      await import("#internal/nitro/host/create-application-nitro.js");
-    const preparedHost = createPreparedHost();
-    preparedHost.compiledArtifacts.instrumentationLayout = { kind: "file" };
-    preparedHost.compiledArtifacts.instrumentationPluginPath = "/app/instrumentation.mjs";
-
-    await createDevelopmentApplicationNitro(preparedHost);
-
-    const plugins = createNitroMock.mock.calls[0]?.[0].plugins as string[];
-    expect(plugins).toContain("/app/instrumentation.mjs");
+    expect(plugins.indexOf(preparedHost.compiledArtifacts.workflowWorldPluginPath)).toBeLessThan(
+      plugins.indexOf(instrumentationPluginPath),
+    );
     expect(plugins).not.toEqual(
       expect.arrayContaining([expect.stringContaining("local-tracing-runtime-plugin.ts")]),
     );
   });
 
-  it("lets the provider pipeline own default local tracing", async () => {
-    const { createDevelopmentApplicationNitro } =
+  it("omits instrumentation from Nitro when no plugin was generated for the mode", async () => {
+    const nitroStub = createNitroStub();
+    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
+
+    const { createProductionApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
+    const fixtureHost = createPreparedHost();
+    const preparedHost: PreparedDevelopmentApplicationHost = {
+      ...fixtureHost,
+      compiledArtifacts: {
+        bootstrapPath: fixtureHost.compiledArtifacts.bootstrapPath,
+        workflowWorldPluginPath: fixtureHost.compiledArtifacts.workflowWorldPluginPath,
+      },
+    };
+    await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
 
-    for (const slots of ["rows", "local"] as const) {
-      const nitroStub = createNitroStub();
-      createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
-      const preparedHost = createPreparedHost();
-      preparedHost.compiledArtifacts.instrumentationLayout = {
-        kind: "directory",
-        slots: [slots],
-      };
-      preparedHost.compiledArtifacts.instrumentationPluginPath = "/app/instrumentation.mjs";
-
-      await createDevelopmentApplicationNitro(preparedHost);
-
-      const plugins = createNitroMock.mock.calls.at(-1)?.[0].plugins as string[];
-      expect(plugins).not.toEqual(
-        expect.arrayContaining([expect.stringContaining("local-tracing-runtime-plugin.ts")]),
-      );
-    }
+    const plugins = createNitroMock.mock.calls[0]?.[0].plugins as string[];
+    expect(plugins).toEqual(
+      expect.arrayContaining([
+        preparedHost.compiledArtifacts.bootstrapPath,
+        preparedHost.compiledArtifacts.workflowWorldPluginPath,
+      ]),
+    );
+    expect(plugins).not.toEqual(
+      expect.arrayContaining([expect.stringContaining("instrumentation")]),
+    );
   });
 
   it("preserves workflow bundle side effects and skips workflow transform for cached bundles", async () => {
@@ -424,7 +504,7 @@ describe("application Nitro creation", () => {
     const { createProductionApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
     const preparedHost = createPreparedHost();
-    const websocketChannel: CompiledChannelEntry = {
+    const websocketChannel: CompiledChannelDefinition = {
       kind: "channel",
       logicalPath: "channels/voice.ts",
       method: "WEBSOCKET",
@@ -433,7 +513,9 @@ describe("application Nitro creation", () => {
       sourceKind: "module",
       urlPath: "/eve/v1/voice/ws",
     };
-    preparedHost.compileResult.manifest.channels = [websocketChannel];
+    Object.assign(preparedHost.compileResult.manifest, {
+      channelRoutes: { effective: [websocketChannel], preflight: [], shadowed: [] },
+    });
 
     await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
 
@@ -557,6 +639,11 @@ describe("application Nitro creation", () => {
         externalDependencies: ["fixture-external", "sharp", "eve"],
       },
     } as typeof preparedHost.compileResult.manifest.config;
+    await installTestExternalDependencyPlan(preparedHost.compileResult.manifest, [
+      { application: true, name: "fixture-external" },
+      { application: true, name: "sharp" },
+      { application: true, name: "eve" },
+    ]);
 
     await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
 
@@ -592,6 +679,10 @@ describe("application Nitro creation", () => {
       ...preparedHost.compileResult.manifest.config,
       build: { externalDependencies: ["sharp"] },
     } as typeof preparedHost.compileResult.manifest.config;
+    await installTestExternalDependencyPlan(preparedHost.compileResult.manifest, [
+      { extension: true, name: "zod" },
+      { application: true, extension: true, name: "sharp" },
+    ]);
 
     await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
 
@@ -599,15 +690,25 @@ describe("application Nitro creation", () => {
     expect(traceDeps).toEqual(expect.arrayContaining(["zod*", "sharp", "sharp*"]));
     const plugins = createNitroMock.mock.calls[0]?.[0].rolldownConfig.plugins;
     const externalPlugin = plugins.find(
-      (plugin: { name?: string }) => plugin.name === "eve-extension-external-dependency",
+      (plugin: { name?: string }) => plugin.name === "eve-compiled-external-dependency",
     );
-    expect(externalPlugin.resolveId("zod")).toEqual({
+    // Nitro shallow-copies traceOpts before bundling and nf3 enumerates the
+    // nested nft.paths object only in its post-build trace. Keep the exact
+    // object Nitro retained here to assert that lifecycle, not just the
+    // plugin's private map.
+    const nftOptionsRetainedForTrace = {
+      ...createNitroMock.mock.calls[0]?.[0].traceOpts.nft,
+    };
+    expect(nftOptionsRetainedForTrace.paths).toEqual({});
+    expect(externalPlugin.resolveId("zod/feature")).toEqual({
       external: true,
-      id: "zod",
+      id: "zod/feature",
     });
-    expect(createNitroMock.mock.calls[0]?.[0].traceOpts.nft.paths).toEqual({
-      zod: expect.stringMatching(/zod[/\\].*index\.(?:c?js|mjs)$/),
-      sharp: expect.stringMatching(/sharp[/\\]lib[/\\]index\.js$/),
+    const pathsConsumedByPostBuildTrace = { ...nftOptionsRetainedForTrace.paths };
+    expect(pathsConsumedByPostBuildTrace).toEqual({
+      "zod/feature": expect.stringMatching(
+        /external-dependencies[/\\]v2[/\\][a-f0-9]{64}[/\\]0[/\\]feature\.import\.js$/,
+      ),
     });
   });
 
@@ -619,30 +720,46 @@ describe("application Nitro creation", () => {
       await import("#internal/nitro/host/create-application-nitro.js");
     const preparedHost = createPreparedHost();
     const subagent: CompiledSubagentNode = {
-      agent: createCompiledAgentNodeManifest({
-        agentRoot: "/tmp/weather-agent/agent/subagents/investigator",
-        appRoot: "/tmp/weather-agent",
-        config: {
-          build: {
-            externalDependencies: ["subagent-external", "sharp"],
+      agent: createCompiledAgentNodeManifest(
+        {
+          kernelPlan: { prepared: [] },
+          agentRoot: "/tmp/weather-agent/agent/subagents/investigator",
+          appRoot: "/tmp/weather-agent",
+          bindings: [TEST_COMPILED_AGENT_CONFIG_BINDING],
+          config: {
+            build: {
+              externalDependencies: ["subagent-external", "sharp"],
+            },
+            model: {
+              id: "anthropic/claude-sonnet-5",
+              routing: { kind: "gateway", target: "anthropic" },
+            },
+            name: "investigator",
+            source: TEST_COMPILED_AGENT_CONFIG_SOURCE,
           },
-          model: {
-            id: "anthropic/claude-sonnet-5",
-            routing: { kind: "gateway", target: "anthropic" },
-          },
-          name: "investigator",
         },
-      }),
+        { isRoot: false, nodeId: "root:subagents/investigator" },
+      ),
+      backing: {
+        externalDependencies: [],
+        kind: "filesystem",
+        sourcePath: "/tmp/weather-agent/agent/subagents/investigator",
+      },
       description: "Investigates deployments.",
       entryPath: "subagents/investigator",
-      logicalPath: "subagents/investigator/agent.ts",
+      logicalPath: "subagents/investigator",
       name: "investigator",
       nodeId: "root:subagents/investigator",
+      owner: { kind: "application" },
       rootPath: "/tmp/weather-agent/agent/subagents/investigator",
-      sourceId: "subagents/investigator/agent.ts",
-      sourceKind: "module",
+      sourceId: "subagents/investigator",
+      sourceKind: "subagent",
     };
     preparedHost.compileResult.manifest.subagents = [subagent];
+    await installTestExternalDependencyPlan(preparedHost.compileResult.manifest, [
+      { application: true, name: "subagent-external" },
+      { application: true, name: "sharp" },
+    ]);
 
     await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
 
@@ -677,7 +794,11 @@ describe("application Nitro creation", () => {
 
     const directHost = createPreparedHost();
     const workflowHost = createPreparedHost();
-    workflowHost.compileResult.manifest.workflowTool = {};
+    workflowHost.compileResult.manifest.workflowTool = {
+      logicalPath: "tools/workflow.ts",
+      sourceId: "test:workflow",
+      sourceKind: "module",
+    };
 
     await createProductionApplicationNitro(directHost, createProductionOptions(directHost));
     await createProductionApplicationNitro(workflowHost, createProductionOptions(workflowHost));
@@ -730,6 +851,11 @@ describe("application Nitro creation", () => {
         externalDependencies: ["@napi-rs/keyring", "sharp", "fixture-external"],
       },
     } as typeof preparedHost.compileResult.manifest.config;
+    await installTestExternalDependencyPlan(preparedHost.compileResult.manifest, [
+      { application: true, name: "@napi-rs/keyring" },
+      { application: true, name: "sharp" },
+      { application: true, name: "fixture-external" },
+    ]);
 
     await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
 

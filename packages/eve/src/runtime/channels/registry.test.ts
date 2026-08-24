@@ -18,7 +18,7 @@ function makeChannelDefinition(
 ): ResolvedChannelDefinition {
   return {
     adapter,
-    fetch: async () => new Response(null),
+    handler: async () => new Response(null),
     logicalPath: "channels/test.ts",
     method: "POST",
     name: "test",

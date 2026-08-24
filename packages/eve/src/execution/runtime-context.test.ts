@@ -10,6 +10,7 @@ import {
   SessionKey,
 } from "#context/keys.js";
 import { buildRunContext } from "#execution/runtime-context.js";
+import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
 
 function createTestSession(
   input: { readonly auth?: SessionAuthContext | null; readonly parent?: Session["parent"] } = {},
@@ -135,7 +136,7 @@ function createMinimalBundle(): Parameters<typeof buildRunContext>[0]["bundle"] 
     graph: {
       nodesByNodeId: new Map(),
       root: {
-        sandboxRegistry: { sandbox: null },
+        sandboxRegistry: createStubSandboxRegistry(),
         turnAgent: { skills: [] },
       },
     },

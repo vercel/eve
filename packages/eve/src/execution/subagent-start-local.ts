@@ -11,7 +11,7 @@ import {
   rejectAgentEffect,
 } from "#harness/handles/transitions.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeSubagentCallActionRequest } from "#shared/runtime-actions.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { toErrorMessage } from "#shared/errors.js";
 
@@ -37,6 +37,7 @@ export async function startLocalSubagent(input: {
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly persistentSessions: boolean;
   readonly sandboxSessionId: string;
+  readonly selfDelegation: boolean;
   readonly session: RuntimeSession;
   readonly source: SubagentInputSource;
   readonly taskOwned: boolean;
@@ -60,11 +61,12 @@ export async function startLocalSubagent(input: {
     parentTraceContext: input.parentTraceContext,
     persistentSessions: input.persistentSessions,
     sandboxSessionId: input.sandboxSessionId,
+    selfDelegation: input.selfDelegation,
     session: input.session,
     source,
   });
 
-  const targetKind = source.type === "runtime" ? ("agent/self" as const) : ("agent/local" as const);
+  const targetKind = input.selfDelegation ? ("agent/self" as const) : ("agent/local" as const);
   const { identity, operation } = mintStartOperation({
     callId: action.callId,
     name: action.subagentName,

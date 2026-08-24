@@ -1,6 +1,9 @@
-import { rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile, rm } from "node:fs/promises";
+import { join, resolve } from "node:path";
 
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
+import { parseCompiledAgentManifest } from "#compiler/compiled-manifest-validation.js";
 import {
   prepareMaterializedAuthoredModules,
   writeMaterializedAuthoredModules,
@@ -27,13 +30,34 @@ const developmentGenerationPruneStates = new Map<string, DevelopmentGenerationPr
 export async function stageDevelopmentGeneration(
   compileResult: CompileAgentResult,
 ): Promise<DevelopmentGeneration> {
-  const prepared = await prepareMaterializedAuthoredModules({
-    manifest: compileResult.manifest,
-    moduleMapPath: compileResult.paths.moduleMapPath,
-  });
   const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot(compileResult);
 
   try {
+    const snapshotCompileRoot = join(snapshot.runtimeAppRoot, ".eve", "compile");
+    const [moduleMapSource, manifestSource] = await Promise.all([
+      readFile(join(snapshotCompileRoot, "module-map.mjs"), "utf8"),
+      readFile(join(snapshotCompileRoot, "compiled-agent-manifest.json"), "utf8"),
+    ]);
+    const expectedModuleMapDigest = compileResult.metadata.compile.moduleMap.sha256;
+    const actualModuleMapDigest = createHash("sha256").update(moduleMapSource).digest("hex");
+    if (actualModuleMapDigest !== expectedModuleMapDigest) {
+      throw new Error(
+        `Development generation module-map digest mismatch: expected "${expectedModuleMapDigest}", received "${actualModuleMapDigest}".`,
+      );
+    }
+    const prepared = await prepareMaterializedAuthoredModules({
+      descriptorProjection: {
+        manifest: parseCompiledAgentManifest(JSON.parse(manifestSource) as unknown),
+        runtimeAppRoot: snapshot.runtimeAppRoot,
+      },
+      expectedIdentity: compileResult.metadata.compile.moduleMap.identitySha256,
+      manifest: compileResult.manifest,
+      moduleMapPath: resolve(
+        compileResult.project.appRoot,
+        compileResult.metadata.compile.moduleMap.path,
+      ),
+      moduleMapSource,
+    });
     const materialized = await writeMaterializedAuthoredModules({
       prepared,
       runtimeAppRoot: snapshot.runtimeAppRoot,

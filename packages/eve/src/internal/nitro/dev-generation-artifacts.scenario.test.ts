@@ -1,23 +1,78 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
 import { compileAgent } from "#compiler/compile-agent.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
-import { resolvePackageRoot } from "#internal/application/package.js";
+import { collectCompiledModuleScopes } from "#compiler/module-scope.js";
+import { resolvePackageRoot, resolvePackageSourceFilePath } from "#internal/application/package.js";
 import {
   discardDevelopmentGeneration,
   stageDevelopmentGeneration,
 } from "#internal/nitro/development-generation.js";
 import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "#internal/application/runtime-compiled-artifacts-source.js";
-import type { MaterializedInstrumentation } from "#internal/materialized-authored-modules.js";
+import { writeDevelopmentCompiledArtifactsFiles } from "#internal/application/compiled-artifacts.js";
 import { useScenarioApp } from "#internal/testing/scenario-app.js";
+import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { loadCompiledArtifactSet } from "#runtime/loaders/compiled-artifact-set.js";
+
+function createMaterializedGenerationSource(runtimeAppRoot: string) {
+  return createDiskRuntimeCompiledArtifactsSource(runtimeAppRoot, {
+    moduleMapLoaderKind: "materialized-generation",
+    moduleMapLoaderPath: resolvePackageSourceFilePath("src/internal/authored-module-map-loader.ts"),
+  });
+}
 
 describe("development generation artifacts", () => {
   const scenarioApp = useScenarioApp();
+
+  it("preserves the exact production module scope across development materialization", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/instructions.md": "Use the available tools and agents.",
+        "agent/subagents/local/agent.mjs":
+          'export default { description: "Local helper.", model: "openai/gpt-5.4" };\n',
+        "agent/subagents/local/tools/check.mjs":
+          'export default { description: "Check.", execute: () => "local" };\n',
+        "agent/subagents/remote.mjs": [
+          'const defineDynamic = (definition) => ({ ...definition, kind: "eve:dynamic" });',
+          "export default defineDynamic({",
+          "  events: {",
+          '    "session.started": () => ({',
+          '      description: "Remote helper.",',
+          '      kind: "remote",',
+          '      path: "/eve/v1/session",',
+          '      url: "https://remote.example.com",',
+          "    }),",
+          "  },",
+          "});",
+          "",
+        ].join("\n"),
+        "agent/tools/check.mjs":
+          'export default { description: "Check.", execute: () => "root" };\n',
+      },
+      name: "development-production-module-scope-parity",
+    });
+
+    const compileResult = await compileAgent({ startPath: app.appRoot });
+    const production = await loadCompiledArtifactSet({
+      compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(app.appRoot),
+    });
+    const snapshot = await stageDevelopmentGeneration(compileResult);
+    const development = await loadCompiledArtifactSet({
+      compiledArtifactsSource: createMaterializedGenerationSource(snapshot.runtimeAppRoot),
+    });
+    const expected = collectCompiledModuleScopes(compileResult.manifest)
+      .flatMap((scope) => scope.refs.map((ref) => `${scope.nodeId}\0${ref.sourceId}`))
+      .sort();
+
+    expect(moduleScopeKeys(production.moduleMap)).toEqual(expected);
+    expect(moduleScopeKeys(development.moduleMap)).toEqual(expected);
+  });
 
   it("materializes one shared module graph for every authored entry", async () => {
     const sharedMarker = "eve-shared-generation-module-marker";
@@ -69,18 +124,76 @@ describe("development generation artifacts", () => {
     expect(materializedFiles).toEqual([basename(index.moduleMap!)]);
     expect(materializedCode.join("\n").split(sharedMarker)).toHaveLength(2);
 
-    const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
-      compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
-        snapshot.runtimeAppRoot,
-      ),
+    const { moduleMap } = await loadCompiledArtifactSet({
+      compiledArtifactsSource: createMaterializedGenerationSource(snapshot.runtimeAppRoot),
     });
     const subagent = compileResult.manifest.subagents[0];
-    const subagentToolSourceId = subagent?.agent.tools[0]?.sourceId;
+    const subagentToolSourceId = subagent?.agent.tools.find(
+      (tool) => tool.name === "read_shared",
+    )?.sourceId;
     expect(subagentToolSourceId).toBeDefined();
     const subagentTool = moduleMap.nodes[subagent!.nodeId]?.modules[subagentToolSourceId!] as {
       default: { execute(): string };
     };
     expect(subagentTool.default.execute()).toBe(sharedMarker);
+  });
+
+  it("authenticates the inert materialized descriptor before any namespace executes", async () => {
+    const evaluationMarker = "__eveAuthenticatedInstrumentationEvaluated__";
+    const globals = globalThis as Record<string, unknown>;
+    delete globals[evaluationMarker];
+    const app = await scenarioApp({
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/instructions.md": "Use authenticated instrumentation.",
+        "agent/instrumentation.mjs": [
+          `globalThis[${JSON.stringify(evaluationMarker)}] = true;`,
+          "export default null;",
+          "",
+        ].join("\n"),
+      },
+      name: "authenticated-materialized-instrumentation",
+    });
+    const compileResult = await compileAgent({ startPath: app.appRoot });
+    const snapshot = await stageDevelopmentGeneration(compileResult);
+    const outDir = join(app.appRoot, ".eve", "test-authenticated-instrumentation");
+    const generated = await writeDevelopmentCompiledArtifactsFiles({
+      compileResult,
+      outDir,
+      runtimeAppRoot: snapshot.runtimeAppRoot,
+    });
+
+    expect(globals[evaluationMarker]).toBeUndefined();
+    const instrumentationPluginPath = generated.instrumentationPluginPath;
+    if (instrumentationPluginPath === undefined) {
+      throw new Error("Expected development instrumentation plugin.");
+    }
+    const pluginSource = await readFile(instrumentationPluginPath, "utf8");
+    const invalidPluginPath = join(outDir, "compiled-artifacts-instrumentation-invalid.mjs");
+    const invalidPluginSource = pluginSource.replace('"status": "ready"', '"status": "failed"');
+    expect(invalidPluginSource).not.toBe(pluginSource);
+    await writeFile(invalidPluginPath, invalidPluginSource);
+
+    await expect(import(pathToFileURL(invalidPluginPath).href)).rejects.toThrow(
+      'status must be "ready"',
+    );
+    expect(globals[evaluationMarker]).toBeUndefined();
+
+    const descriptorFileName = (await readdir(outDir)).find((fileName) =>
+      fileName.startsWith("compiled-artifacts-module-map-"),
+    );
+    if (descriptorFileName === undefined)
+      throw new Error("Expected captured module-map descriptor.");
+    await writeFile(
+      join(outDir, descriptorFileName),
+      `globalThis[${JSON.stringify(evaluationMarker)}] = true; export default {};\n`,
+    );
+
+    await expect(
+      import(`${pathToFileURL(instrumentationPluginPath).href}?tampered-descriptor`),
+    ).rejects.toThrow("Compiled module-map descriptor digest mismatch");
+    expect(globals[evaluationMarker]).toBeUndefined();
+    delete globals[evaluationMarker];
   });
 
   it("materializes dynamic remote credential metadata for the development runtime", async () => {
@@ -113,10 +226,8 @@ describe("development generation artifacts", () => {
 
     const compileResult = await compileAgent({ startPath: app.appRoot });
     const snapshot = await stageDevelopmentGeneration(compileResult);
-    const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
-      compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
-        snapshot.runtimeAppRoot,
-      ),
+    const { moduleMap } = await loadCompiledArtifactSet({
+      compiledArtifactsSource: createMaterializedGenerationSource(snapshot.runtimeAppRoot),
     });
     const subagent = compileResult.manifest.subagents[0];
     const sourceId = subagent?.sourceId;
@@ -144,12 +255,14 @@ describe("development generation artifacts", () => {
 
   it("hydrates a dynamic directory subagent resolver relative to the child root", async () => {
     const app = await scenarioApp({
+      dependencies: { "dynamic-runtime": "1.0.0" },
       files: {
         "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
         "agent/instructions.md": "Use the available subagent.",
         "agent/subagents/conditional/agent.mjs": [
           'const defineDynamic = (definition) => ({ ...definition, kind: "eve:dynamic" });',
           "export default defineDynamic({",
+          '  build: { externalDependencies: ["dynamic-runtime"] },',
           "  events: {",
           '    "session.started": () => ({',
           '      description: "Conditionally available.",',
@@ -159,22 +272,50 @@ describe("development generation artifacts", () => {
           "});",
           "",
         ].join("\n"),
+        "node_modules/dynamic-runtime/index.mjs": "export default 'dynamic-runtime';\n",
+        "node_modules/dynamic-runtime/package.json": `${JSON.stringify({
+          exports: "./index.mjs",
+          name: "dynamic-runtime",
+          type: "module",
+          version: "1.0.0",
+        })}\n`,
       },
       name: "dynamic-directory-subagent-source-map",
     });
 
     const compileResult = await compileAgent({ startPath: app.appRoot });
-    const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
+    const disk = await loadCompiledArtifactSet({
       compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(app.appRoot),
+    });
+    const snapshot = await stageDevelopmentGeneration(compileResult);
+    const materialized = await loadCompiledArtifactSet({
+      compiledArtifactsSource: createMaterializedGenerationSource(snapshot.runtimeAppRoot),
     });
     const subagent = compileResult.manifest.subagents[0];
     if (subagent?.configResolver === undefined) throw new Error("expected a dynamic subagent");
 
-    const moduleNamespace = moduleMap.nodes[subagent.nodeId]?.modules[
-      subagent.configResolver.sourceId
-    ] as { default: { events: Record<string, Function> } };
+    for (const manifest of [compileResult.manifest, disk.manifest, materialized.manifest]) {
+      const loadedSubagent = manifest.subagents.find(
+        (candidate) => candidate.nodeId === subagent.nodeId,
+      );
+      if (loadedSubagent?.configResolver === undefined) {
+        throw new Error("expected a hydrated dynamic subagent");
+      }
+      expect(
+        loadedSubagent.agent.bindings[loadedSubagent.configResolver.sourceId]?.backing,
+      ).toMatchObject({
+        externalDependencies: ["dynamic-runtime"],
+        kind: "filesystem",
+      });
+    }
 
-    expect(moduleNamespace.default.events["session.started"]).toBeDefined();
+    for (const moduleMap of [disk.moduleMap, materialized.moduleMap]) {
+      const moduleNamespace = moduleMap.nodes[subagent.nodeId]?.modules[
+        subagent.configResolver.sourceId
+      ] as { default: { events: Record<string, Function> } };
+
+      expect(moduleNamespace.default.events["session.started"]).toBeDefined();
+    }
   });
 
   it("preserves extension scope in a shared generation graph", async () => {
@@ -215,8 +356,9 @@ describe("development generation artifacts", () => {
         })}\n`,
         "packages/shared-graph-extension/extension/_manifest.json": JSON.stringify({
           kind: "eve-extension",
-          formatVersion: 1,
+          formatVersion: 2,
           builtWithEve: "0.0.0-test",
+          build: { externalDependencies: [] },
           requires: { extension: 1, tool: 1, config: 1 },
         }),
         "pnpm-workspace.yaml": "packages:\n  - packages/*\n",
@@ -234,10 +376,8 @@ describe("development generation artifacts", () => {
 
     const compileResult = await compileAgent({ startPath: app.appRoot });
     const snapshot = await stageDevelopmentGeneration(compileResult);
-    const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
-      compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
-        snapshot.runtimeAppRoot,
-      ),
+    const { moduleMap } = await loadCompiledArtifactSet({
+      compiledArtifactsSource: createMaterializedGenerationSource(snapshot.runtimeAppRoot),
     });
     const toolSourceId = compileResult.manifest.tools.find((tool) =>
       tool.sourceId.startsWith("ext:acme:"),
@@ -279,8 +419,9 @@ describe("development generation artifacts", () => {
       join(packageRoot, "extension", "_manifest.json"),
       `${JSON.stringify({
         kind: "eve-extension",
-        formatVersion: 1,
+        formatVersion: 2,
         builtWithEve: "0.0.0-test",
+        build: { externalDependencies: [] },
         requires: { extension: 1, tool: 1 },
       })}\n`,
     );
@@ -313,10 +454,8 @@ describe("development generation artifacts", () => {
     await expect(realpath(snapshotPackageRoot)).resolves.toBe(await realpath(packageRoot));
     await rm(packageRoot, { force: true, recursive: true });
 
-    const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
-      compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
-        snapshot.runtimeAppRoot,
-      ),
+    const { moduleMap } = await loadCompiledArtifactSet({
+      compiledArtifactsSource: createMaterializedGenerationSource(snapshot.runtimeAppRoot),
     });
     const toolSourceId = compileResult.manifest.tools.find((tool) =>
       tool.sourceId.startsWith("ext:physical:"),
@@ -380,12 +519,12 @@ describe("development generation artifacts", () => {
     const snapshot = await stageDevelopmentGeneration(compileResult);
 
     await rm(join(app.appRoot, "node_modules"), { force: true, recursive: true });
-    const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
-      compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
-        snapshot.runtimeAppRoot,
-      ),
+    const { moduleMap } = await loadCompiledArtifactSet({
+      compiledArtifactsSource: createMaterializedGenerationSource(snapshot.runtimeAppRoot),
     });
-    const toolSourceId = compileResult.manifest.tools[0]?.sourceId;
+    const toolSourceId = compileResult.manifest.tools.find(
+      (tool) => tool.name === "read_dynamic",
+    )?.sourceId;
     expect(toolSourceId).toBeDefined();
     const tool = moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules[toolSourceId!] as {
       default: { execute(): Promise<string> };
@@ -433,9 +572,10 @@ describe("development generation artifacts", () => {
     const snapshot = await stageDevelopmentGeneration(compileResult);
     const externalPackagePath = join(snapshot.runtimeAppRoot, "node_modules", "fixture-external");
     const resolvedExternalPath = await realpath(externalPackagePath);
-    const canonicalSnapshotRoot = await realpath(snapshot.snapshotRoot);
 
-    expect(relative(canonicalSnapshotRoot, resolvedExternalPath)).toMatch(/^\.\.(?:[\\/]|$)/u);
+    expect(resolvedExternalPath).toContain(
+      join(snapshot.runtimeAppRoot, ".eve", "external-dependencies"),
+    );
     expect(existsSync(join(resolvedExternalPath, "binding.node"))).toBe(true);
     expect(existsSync(join(snapshot.runtimeAppRoot, "agent"))).toBe(false);
 
@@ -449,12 +589,12 @@ describe("development generation artifacts", () => {
       'throw new Error("mutated source loaded");\n',
     );
 
-    const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
-      compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
-        snapshot.runtimeAppRoot,
-      ),
+    const { moduleMap } = await loadCompiledArtifactSet({
+      compiledArtifactsSource: createMaterializedGenerationSource(snapshot.runtimeAppRoot),
     });
-    const toolSourceId = compileResult.manifest.tools[0]?.sourceId;
+    const toolSourceId = compileResult.manifest.tools.find(
+      (tool) => tool.name === "read_value",
+    )?.sourceId;
     expect(toolSourceId).toBeDefined();
     const tool = moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules[toolSourceId!] as {
       default: { execute(): string };
@@ -466,7 +606,7 @@ describe("development generation artifacts", () => {
     await rm(externalFixtureRoot, { force: true, recursive: true });
   });
 
-  it("uses a path-independent fingerprint that includes instrumentation", async () => {
+  it("uses a path-independent fingerprint that includes compiled instrumentation", async () => {
     const app = await scenarioApp({
       files: {
         "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
@@ -491,17 +631,14 @@ describe("development generation artifacts", () => {
         join(first.runtimeAppRoot, ".eve", "compile", "authored-modules.json"),
         "utf8",
       ),
-    ) as { readonly instrumentation?: MaterializedInstrumentation };
-    if (firstIndex.instrumentation?.kind !== "file") {
-      throw new Error("expected materialized file instrumentation");
-    }
-    const materializedInstrumentation = await readFile(
-      join(first.runtimeAppRoot, ".eve", "compile", firstIndex.instrumentation.modulePath),
+    ) as { readonly moduleMap: string };
+    const materializedModuleMap = await readFile(
+      join(first.runtimeAppRoot, ".eve", "compile", firstIndex.moduleMap),
       "utf8",
     );
 
     expect(first.fingerprint).toBe(identical.fingerprint);
-    expect(materializedInstrumentation).not.toContain("/.eve/dev-runtime/snapshots/");
+    expect(materializedModuleMap).not.toContain("/.eve/dev-runtime/snapshots/");
 
     await writeFile(
       join(app.appRoot, "agent", "instructions.md"),
@@ -528,7 +665,7 @@ describe("development generation artifacts", () => {
     expect(changed.fingerprint).not.toBe(first.fingerprint);
     await expect(
       readFile(join(changed.runtimeAppRoot, ".eve", "compile", "authored-modules.json"), "utf8"),
-    ).resolves.toContain('"instrumentation"');
+    ).resolves.not.toContain('"instrumentation"');
 
     await writeFile(
       join(app.appRoot, "agent", "skills", "guide.md"),
@@ -571,9 +708,7 @@ describe("development generation artifacts", () => {
         "",
       ].join("\n"),
     );
-    const invalidCompile = await compileAgent({ startPath: app.appRoot });
-
-    await expect(stageDevelopmentGeneration(invalidCompile)).rejects.toThrow(
+    await expect(compileAgent({ startPath: app.appRoot })).rejects.toThrow(
       /actual "use step" directive/u,
     );
     await expect(readdir(snapshotsRoot)).resolves.toEqual(stagedGenerations);
@@ -595,6 +730,18 @@ describe("development generation artifacts", () => {
     expect(existsSync(snapshot.snapshotRoot)).toBe(false);
   });
 });
+
+function moduleScopeKeys(moduleMap: {
+  readonly nodes: Readonly<
+    Record<string, { readonly modules: Readonly<Record<string, Record<string, unknown>>> }>
+  >;
+}): string[] {
+  return Object.entries(moduleMap.nodes)
+    .flatMap(([nodeId, scope]) =>
+      Object.keys(scope.modules).map((sourceId) => `${nodeId}\0${sourceId}`),
+    )
+    .sort();
+}
 
 async function writeDependencyFixture(appRoot: string): Promise<string> {
   const nodeModulesRoot = join(appRoot, "node_modules");

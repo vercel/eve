@@ -14,10 +14,10 @@ import { dirname, join, relative } from "node:path";
 
 import {
   EVE_SHARED_SERVER_FUNCTION_PATH,
-  EVE_WORKFLOW_FLOW_ROUTE_PATH,
   isEveVercelFunctionPath,
   normalizeEveVercelRoutes,
 } from "#internal/workflow-bundle/eve-service-route-output.js";
+import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#protocol/routes.js";
 
 // just-bash and microsandbox are optional peer dependencies (the
 // opt-in local sandbox engines) loaded lazily from the application's

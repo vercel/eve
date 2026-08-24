@@ -210,7 +210,7 @@ export interface AgentExperimentalDefinition {
   /**
    * Runs this agent's delegated subagent calls as durable background tasks.
    * The originating tool call returns a task receipt immediately and the
-   * model manages the work through the `task_*` framework tools. Implies
+   * model manages the work through the native `task_*` controls. Implies
    * persistent-session children for subagent dispatch. Root agents only.
    */
   readonly tasks?: boolean;

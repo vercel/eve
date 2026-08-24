@@ -13,15 +13,34 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { createCompileMetadata, resolveCompilerArtifactPaths } from "#compiler/artifacts.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
-import { createCompiledAgentManifest, ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import { createCompiledModuleMapSource } from "#compiler/module-map.js";
+import { compileFromMemory } from "#compiler/compile-from-memory.js";
+import { ROOT_COMPILED_AGENT_NODE_ID, type CompiledAgentManifest } from "#compiler/manifest.js";
+import {
+  createCompiledModuleMapDescriptorModuleSource,
+  createCompiledModuleMapIdentity,
+} from "#compiler/module-map.js";
+import {
+  assertCompiledWorkflowWorldPlanIntegrity,
+  compileWorkflowWorldPlan,
+  type CompiledWorkflowWorldPlan,
+} from "#compiler/workflow-world-plan.js";
+import { createCompilerDiagnosticsArtifact } from "#protocol/compiler-diagnostics-artifact.js";
+import {
+  createStubCompiledAgentManifest as createCompiledAgentManifest,
+  TEST_COMPILED_AGENT_CONFIG_BINDING,
+  TEST_COMPILED_AGENT_CONFIG_SOURCE,
+} from "#internal/testing/compiled-manifest.js";
+import { resolvePackageSourceFilePath } from "#internal/application/package.js";
+import { resolveExpectedWorkflowVersion } from "#internal/application/package.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { createRuntimeSession, withRuntimeSession } from "#runtime/sessions/runtime-session.js";
 import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { publishDevelopmentGeneration } from "#internal/nitro/development-generation.js";
+import { writeMaterializedAuthoredModules } from "#internal/materialized-authored-modules.js";
 import { resolveLocalWorkflowWorldDataDirectory } from "#internal/workflow/local-world-data-directory.js";
 import {
   activateDevelopmentRuntimeArtifactsSnapshot,
@@ -37,30 +56,113 @@ import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runt
 
 const createScratchDirectory = useTemporaryDirectories();
 
+function createSnapshotManifest(input: {
+  readonly agentRoot?: string;
+  readonly appRoot: string;
+  readonly bindings?: Parameters<typeof createCompiledAgentManifest>[0]["bindings"];
+  readonly extensionMounts?: CompiledAgentManifest["extensionMounts"];
+  readonly outputSchema?: CompiledAgentManifest["config"]["outputSchema"];
+  readonly tools?: Parameters<typeof createCompiledAgentManifest>[0]["tools"];
+}): CompiledAgentManifest {
+  return createCompiledAgentManifest({
+    agentRoot: input.agentRoot ?? join(input.appRoot, "agent"),
+    appRoot: input.appRoot,
+    bindings: [TEST_COMPILED_AGENT_CONFIG_BINDING, ...(input.bindings ?? [])],
+    config: {
+      model: {
+        id: "openai/gpt-5.4-mini",
+        routing: { kind: "gateway", target: "openai/gpt-5.4-mini" },
+      },
+      name: "development-snapshot-test",
+      outputSchema: input.outputSchema,
+      source: TEST_COMPILED_AGENT_CONFIG_SOURCE,
+    },
+    extensionMounts: input.extensionMounts,
+    tools: input.tools,
+  });
+}
+
 async function markSnapshotMaterialized(
   snapshot: DevelopmentRuntimeArtifactsSnapshot,
 ): Promise<DevelopmentRuntimeArtifactsSnapshot> {
-  const compileRoot = join(snapshot.runtimeAppRoot, ".eve", "compile");
-  const moduleMap = "authored-modules/test-module-map.mjs";
-  await mkdir(join(compileRoot, "authored-modules"), { recursive: true });
-  await writeFile(join(compileRoot, moduleMap), "export const moduleMap = { nodes: {} };\n");
+  const compiled = await compileFromMemory({
+    agentRoot: join(snapshot.runtimeAppRoot, "agent"),
+    appRoot: snapshot.runtimeAppRoot,
+    model: "openai/gpt-5.4-mini",
+    name: "dev-snapshot-test",
+  });
+  const paths = resolveCompilerArtifactPaths(snapshot.runtimeAppRoot);
+  const registryPath = join(paths.compileDirectoryPath, "test-programmatic-registry.mjs");
+  const moduleMapIdentity = compiled.metadata.compile.moduleMap.identitySha256;
+  const moduleMapSource = createCompiledModuleMapDescriptorModuleSource({
+    identity: moduleMapIdentity,
+    manifest: compiled.manifest,
+    moduleMapPath: paths.moduleMapPath,
+    programmaticRegistryImports: {
+      "eve-memory-application": {
+        exportName: "testProgrammaticRegistry",
+        importSpecifier: registryPath.replaceAll("\\", "/"),
+      },
+    },
+  });
+  const manifestSource = `${JSON.stringify(compiled.manifest, null, 2)}\n`;
+  const diagnosticsSource = `${JSON.stringify(compiled.diagnostics, null, 2)}\n`;
+  const discoverySource = `${JSON.stringify(
+    {
+      agentRoot: compiled.manifest.agentRoot,
+      appRoot: snapshot.runtimeAppRoot,
+      kind: "eve-test-development-snapshot",
+      name: compiled.manifest.config.name,
+    },
+    null,
+    2,
+  )}\n`;
+  const metadata = createCompileMetadata({
+    appRoot: snapshot.runtimeAppRoot,
+    compiledManifestJson: manifestSource,
+    diagnosticsArtifactJson: diagnosticsSource,
+    diagnosticsSummary: compiled.diagnostics.summary,
+    discoveryManifestJson: discoverySource,
+    moduleMapIdentity,
+    moduleMapSource,
+    paths,
+  });
+
+  await mkdir(paths.compileDirectoryPath, { recursive: true });
+  await mkdir(paths.discoveryDirectoryPath, { recursive: true });
   await writeFile(
-    join(compileRoot, "authored-modules.json"),
-    `${JSON.stringify({ fingerprint: "test", moduleMap, version: 3 })}\n`,
+    registryPath,
+    [
+      "export const testProgrammaticRegistry = Object.freeze({",
+      "  validateModules() {},",
+      "  async loadModule() { return Object.freeze({}); },",
+      "});",
+      "",
+    ].join("\n"),
   );
+  await Promise.all([
+    writeFile(paths.compiledManifestPath, manifestSource),
+    writeFile(paths.diagnosticsPath, diagnosticsSource),
+    writeFile(paths.discoveryManifestPath, discoverySource),
+    writeFile(paths.moduleMapPath, moduleMapSource),
+    writeFile(paths.compileMetadataPath, `${JSON.stringify(metadata, null, 2)}\n`),
+  ]);
+  await writeMaterializedAuthoredModules({
+    prepared: { moduleMapCode: moduleMapSource },
+    runtimeAppRoot: snapshot.runtimeAppRoot,
+  });
   return snapshot;
 }
 
 async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoot: string }> {
   const appRoot = await createScratchDirectory("eve-dev-runtime-next-imports-");
   const agentRoot = join(appRoot, "agent");
-  const compileDirectoryPath = join(appRoot, ".eve", "compile");
-  const manifestPath = join(compileDirectoryPath, "compiled-agent-manifest.json");
-  const moduleMapPath = join(compileDirectoryPath, "module-map.mjs");
+  const paths = resolveCompilerArtifactPaths(appRoot);
 
   await mkdir(agentRoot, { recursive: true });
   await mkdir(join(appRoot, "src", "features", "editor", "eve"), { recursive: true });
-  await mkdir(compileDirectoryPath, { recursive: true });
+  await mkdir(paths.compileDirectoryPath, { recursive: true });
+  await mkdir(paths.discoveryDirectoryPath, { recursive: true });
   await writeFile(join(appRoot, "package.json"), '{"name":"next-agent","type":"module"}\n');
   await writeFile(
     join(appRoot, "tsconfig.json"),
@@ -87,6 +189,7 @@ async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoo
       "",
     ].join("\n"),
   );
+  await writeFile(join(agentRoot, "sandbox.ts"), "export default () => ({});\n");
   await writeFile(
     join(agentRoot, "model-router.ts"),
     [
@@ -102,8 +205,35 @@ async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoo
   );
 
   const manifest = createCompiledAgentManifest({
+    kernelPlan: { prepared: [] },
     agentRoot,
     appRoot,
+    bindings: [
+      {
+        binding: {
+          backing: {
+            externalDependencies: [],
+            kind: "filesystem",
+            sourcePath: join(agentRoot, "agent.ts"),
+          },
+          owner: { kind: "application" },
+        },
+        logicalPath: "agent.ts",
+        sourceId: "agent.ts",
+      },
+      {
+        binding: {
+          backing: {
+            externalDependencies: [],
+            kind: "filesystem",
+            sourcePath: join(agentRoot, "sandbox.ts"),
+          },
+          owner: { kind: "application" },
+        },
+        logicalPath: "sandbox.ts",
+        sourceId: "sandbox.ts",
+      },
+    ],
     config: {
       model: {
         id: "openai/gpt-5.4-mini",
@@ -119,6 +249,14 @@ async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoo
         sourceKind: "module",
       },
     },
+    sandbox: {
+      hasBootstrap: false,
+      hasOnSession: false,
+      logicalPath: "sandbox.ts",
+      sourceHash: "a".repeat(64),
+      sourceId: "sandbox.ts",
+      sourceKind: "module",
+    },
     instructions: [
       {
         content: "Use the routed model.",
@@ -131,18 +269,39 @@ async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoo
     ],
   });
 
-  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  await writeFile(
-    moduleMapPath,
-    createCompiledModuleMapSource({
-      manifest,
-      moduleMapPath,
-    }),
-  );
+  const diagnosticsArtifact = createCompilerDiagnosticsArtifact([]);
+  const compiledManifestJson = `${JSON.stringify(manifest, null, 2)}\n`;
+  const diagnosticsArtifactJson = `${JSON.stringify(diagnosticsArtifact, null, 2)}\n`;
+  const discoveryManifestJson = `${JSON.stringify({ agentRoot, appRoot, kind: "next-imports-test-source" }, null, 2)}\n`;
+  const moduleMapIdentity = await createCompiledModuleMapIdentity(manifest);
+  const moduleMapSource = createCompiledModuleMapDescriptorModuleSource({
+    identity: moduleMapIdentity,
+    manifest,
+    moduleMapPath: paths.moduleMapPath,
+  });
+  const metadata = createCompileMetadata({
+    appRoot,
+    compiledManifestJson,
+    diagnosticsArtifactJson,
+    diagnosticsSummary: diagnosticsArtifact.summary,
+    discoveryManifestJson,
+    moduleMapIdentity,
+    moduleMapSource,
+    paths,
+  });
+  await Promise.all([
+    writeFile(paths.compiledManifestPath, compiledManifestJson),
+    writeFile(paths.diagnosticsPath, diagnosticsArtifactJson),
+    writeFile(paths.discoveryManifestPath, discoveryManifestJson),
+    writeFile(paths.moduleMapPath, moduleMapSource),
+    writeFile(paths.compileMetadataPath, `${JSON.stringify(metadata, null, 2)}\n`),
+  ]);
 
   await publishDevelopmentGeneration({
+    diagnostics: diagnosticsArtifact.diagnostics,
     manifest,
-    paths: { compileDirectoryPath, moduleMapPath },
+    metadata,
+    paths,
     project: { appRoot },
   } as CompileAgentResult);
 
@@ -150,6 +309,118 @@ async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoo
 }
 
 describe("development runtime artifact snapshots", () => {
+  it("binds custom World code into the immutable snapshot manifest", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-world-");
+    const agentRoot = join(appRoot, "agent");
+    const worldRoot = join(appRoot, "node_modules", "@acme", "world");
+    const workflowCoreRoot = join(appRoot, "node_modules", "@workflow", "core");
+    const worldEntryPath = join(worldRoot, "index.js");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+    await mkdir(agentRoot, { recursive: true });
+    await mkdir(worldRoot, { recursive: true });
+    await mkdir(workflowCoreRoot, { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(join(appRoot, "package.json"), '{"name":"world-app","type":"module"}\n');
+    await writeFile(
+      join(worldRoot, "package.json"),
+      `${JSON.stringify({
+        exports: "./index.js",
+        name: "@acme/world",
+        peerDependencies: {
+          "@workflow/core": resolveExpectedWorkflowVersion() ?? "5.0.0-beta.43",
+        },
+        type: "module",
+        version: "1.0.0",
+      })}\n`,
+    );
+    await writeFile(
+      join(workflowCoreRoot, "package.json"),
+      `${JSON.stringify({
+        exports: "./index.js",
+        name: "@workflow/core",
+        type: "module",
+        version: resolveExpectedWorkflowVersion() ?? "5.0.0-beta.43",
+      })}\n`,
+    );
+    await writeFile(worldEntryPath, "export const world = true;\n");
+    await writeFile(join(workflowCoreRoot, "index.js"), "export const protocol = true;\n");
+    const workflowWorld = await compileWorkflowWorldPlan({
+      appRoot,
+      selection: "configured",
+      target: "@acme/world",
+    });
+    const manifest = createCompiledAgentManifest({
+      agentRoot,
+      appRoot,
+      bindings: [TEST_COMPILED_AGENT_CONFIG_BINDING],
+      config: {
+        model: { id: "openai/gpt-5-mini", routing: { kind: "gateway", target: "openai" } },
+        name: "world-app",
+        source: TEST_COMPILED_AGENT_CONFIG_SOURCE,
+      },
+      workflowWorld,
+    });
+    await writeFile(
+      join(compileDirectoryPath, "compiled-agent-manifest.json"),
+      `${JSON.stringify(manifest, null, 2)}\n`,
+    );
+
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      manifest,
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+    const snapshotManifest = JSON.parse(
+      await readFile(
+        join(snapshot.runtimeAppRoot, ".eve", "compile", "compiled-agent-manifest.json"),
+        "utf8",
+      ),
+    ) as { workflowWorld: CompiledWorkflowWorldPlan };
+    if (snapshotManifest.workflowWorld.kind !== "host-module") {
+      throw new Error("Expected a host-module Workflow world plan.");
+    }
+    expect(snapshotManifest.workflowWorld.backing.entryPath).toContain(
+      await realpath(join(snapshot.runtimeAppRoot, ".eve", "workflow-world")),
+    );
+    await writeFile(worldEntryPath, "export const world = false;\n");
+    await expect(
+      assertCompiledWorkflowWorldPlanIntegrity(snapshotManifest.workflowWorld),
+    ).resolves.toBeUndefined();
+  });
+
+  it("refuses to activate a generation without discovery and diagnostics artifacts", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-incomplete-discovery-");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+    await mkdir(join(appRoot, "agent"), { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(join(appRoot, "package.json"), '{"type":"module"}\n');
+    await writeFile(
+      join(compileDirectoryPath, "compiled-agent-manifest.json"),
+      `${JSON.stringify({ agentRoot: join(appRoot, "agent"), appRoot })}\n`,
+    );
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      manifest: createSnapshotManifest({ appRoot }),
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+    const compileRoot = join(snapshot.runtimeAppRoot, ".eve", "compile");
+    await mkdir(join(compileRoot, "authored-modules"), { recursive: true });
+    await writeFile(join(compileRoot, "authored-modules", "map.mjs"), "export default {};\n");
+    await writeFile(
+      join(compileRoot, "authored-modules.json"),
+      `${JSON.stringify({ fingerprint: "test", moduleMap: "authored-modules/map.mjs", version: 4 })}\n`,
+    );
+
+    await expect(
+      activateDevelopmentRuntimeArtifactsSnapshot({ appRoot, snapshot }),
+    ).rejects.toThrow("Cannot activate incomplete development runtime generation");
+    expect(
+      readDevelopmentRuntimeArtifactsSnapshotRoot(
+        resolveDevelopmentRuntimeArtifactsPointerPath(appRoot),
+      ),
+    ).toBeUndefined();
+  });
+
   it("stages snapshots without moving the latest runtime pointer", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-stage-");
     const agentRoot = join(appRoot, "agent");
@@ -164,6 +435,7 @@ describe("development runtime artifact snapshots", () => {
     );
 
     const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      manifest: createSnapshotManifest({ agentRoot, appRoot }),
       paths: { compileDirectoryPath },
       project: { appRoot },
     } as CompileAgentResult);
@@ -202,6 +474,7 @@ describe("development runtime artifact snapshots", () => {
       `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`,
     );
     const compileResult = {
+      manifest: createSnapshotManifest({ agentRoot, appRoot }),
       paths: { compileDirectoryPath },
       project: { appRoot },
     } as CompileAgentResult;
@@ -235,6 +508,7 @@ describe("development runtime artifact snapshots", () => {
     );
 
     const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      manifest: createSnapshotManifest({ agentRoot: appRoot, appRoot }),
       paths: { compileDirectoryPath },
       project: { appRoot },
     } as CompileAgentResult);
@@ -282,6 +556,7 @@ describe("development runtime artifact snapshots", () => {
     await writeFile(manifestPath, `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`);
 
     const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      manifest: createSnapshotManifest({ agentRoot, appRoot }),
       paths: { compileDirectoryPath },
       project: { appRoot },
     } as CompileAgentResult);
@@ -333,6 +608,7 @@ describe("development runtime artifact snapshots", () => {
     );
 
     const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      manifest: createSnapshotManifest({ agentRoot, appRoot }),
       paths: { compileDirectoryPath },
       project: { appRoot },
     } as CompileAgentResult);
@@ -380,6 +656,7 @@ describe("development runtime artifact snapshots", () => {
     );
 
     const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      manifest: createSnapshotManifest({ agentRoot, appRoot }),
       paths: { compileDirectoryPath },
       project: { appRoot },
     } as CompileAgentResult);
@@ -431,6 +708,7 @@ describe("development runtime artifact snapshots", () => {
     );
 
     const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      manifest: createSnapshotManifest({ agentRoot: appRoot, appRoot }),
       paths: { compileDirectoryPath },
       project: { appRoot },
     } as CompileAgentResult);
@@ -677,6 +955,7 @@ describe("development runtime artifact snapshots", () => {
 
     await expect(
       stageDevelopmentRuntimeArtifactsSnapshot({
+        manifest: createSnapshotManifest({ agentRoot: "/outside-app", appRoot }),
         paths: { compileDirectoryPath },
         project: { appRoot },
       } as CompileAgentResult),
@@ -692,9 +971,11 @@ describe("development runtime artifact snapshots", () => {
     const toolPath = join(agentRoot, "tools", "get_weather.ts");
     const manifestPath = join(compileDirectoryPath, "compiled-agent-manifest.json");
 
+    await mkdir(join(agentRoot, "extensions"), { recursive: true });
     await mkdir(join(agentRoot, "tools"), { recursive: true });
     await mkdir(compileDirectoryPath, { recursive: true });
     await writeFile(join(appRoot, "package.json"), '{"type":"module"}\n');
+    await writeFile(join(agentRoot, "extensions", "weather.ts"), "export default {};\n");
     await writeFile(toolPath, "export const temperature = 72;\n");
     await writeFile(
       manifestPath,
@@ -702,6 +983,22 @@ describe("development runtime artifact snapshots", () => {
         {
           agentRoot,
           appRoot,
+          bindings: {
+            "tools/get_weather.ts": {
+              backing: {
+                extensionScope: { namespace: "acme-weather", sourceRoot: agentRoot },
+                externalDependencies: [],
+                kind: "filesystem",
+                sourcePath: toolPath,
+              },
+              logicalPath: "tools/get_weather.ts",
+              owner: {
+                kind: "extension",
+                namespace: "weather",
+                packageName: "@acme/weather",
+              },
+            },
+          },
           subagents: [
             {
               agent: {
@@ -717,12 +1014,94 @@ describe("development runtime artifact snapshots", () => {
     );
 
     const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      manifest: createSnapshotManifest({
+        agentRoot,
+        appRoot,
+        bindings: [
+          {
+            binding: {
+              backing: {
+                externalDependencies: [],
+                kind: "filesystem",
+                sourcePath: join(agentRoot, "extensions", "weather.ts"),
+              },
+              owner: { kind: "application" },
+            },
+            logicalPath: "extensions/weather.ts",
+            sourceId: "extensions/weather.ts",
+          },
+          {
+            binding: {
+              backing: {
+                extensionScope: { namespace: "acme-weather", sourceRoot: agentRoot },
+                externalDependencies: [],
+                kind: "filesystem",
+                sourcePath: toolPath,
+              },
+              owner: {
+                kind: "extension",
+                namespace: "weather",
+                packageName: "@acme/weather",
+              },
+            },
+            logicalPath: "tools/get_weather.ts",
+            sourceId: "tools/get_weather.ts",
+          },
+        ],
+        extensionMounts: [
+          {
+            externalDependencies: [],
+            mountLogicalPath: "extensions/weather.ts",
+            mountSourceId: "extensions/weather.ts",
+            namespace: "weather",
+            packageName: "@acme/weather",
+            packageNamespace: "acme-weather",
+            sourceRoot: agentRoot,
+          },
+        ],
+        outputSchema: {
+          agentRoot: "/opaque/schema/agent",
+          appRoot: "/opaque/schema/app",
+        },
+        tools: [
+          {
+            description: "Gets the current weather.",
+            inputSchema: null,
+            logicalPath: "tools/get_weather.ts",
+            name: "get_weather",
+            sourceId: "tools/get_weather.ts",
+            sourceKind: "module",
+          },
+        ],
+      }),
       paths: { compileDirectoryPath },
       project: { appRoot },
     } as CompileAgentResult);
+    const rewrittenManifestPath = join(
+      snapshot.runtimeAppRoot,
+      ".eve",
+      "compile",
+      "compiled-agent-manifest.json",
+    );
+    const rewrittenManifest = JSON.parse(await readFile(rewrittenManifestPath, "utf8")) as {
+      bindings: Record<
+        string,
+        { backing: { extensionScope: { sourceRoot: string }; sourcePath: string } }
+      >;
+    };
+    expect(rewrittenManifest.bindings["tools/get_weather.ts"]?.backing).toMatchObject({
+      extensionScope: { sourceRoot: join(snapshot.runtimeAppRoot, "agent") },
+      sourcePath: join(snapshot.runtimeAppRoot, "agent", "tools", "get_weather.ts"),
+    });
+    expect(existsSync(join(snapshot.runtimeAppRoot, "agent", "tools", "get_weather.ts"))).toBe(
+      false,
+    );
+    await expect(readFile(rewrittenManifestPath, "utf8")).resolves.toContain(
+      JSON.stringify(join(snapshot.runtimeAppRoot, "agent")),
+    );
     await expect(
       activateDevelopmentRuntimeArtifactsSnapshot({ appRoot, snapshot }),
-    ).rejects.toThrow("before its authored modules are materialized");
+    ).rejects.toThrow("Cannot activate incomplete development runtime generation");
     await activateDevelopmentRuntimeArtifactsSnapshot({
       appRoot,
       snapshot: await markSnapshotMaterialized(snapshot),
@@ -756,16 +1135,8 @@ describe("development runtime artifact snapshots", () => {
     ).toMatchObject({
       appRoot: snapshot.runtimeAppRoot,
       kind: "disk",
+      moduleMapLoaderKind: "materialized-generation",
     });
-    expect(existsSync(join(snapshot.runtimeAppRoot, "agent", "tools", "get_weather.ts"))).toBe(
-      false,
-    );
-    await expect(
-      readFile(
-        join(snapshot.runtimeAppRoot, ".eve", "compile", "compiled-agent-manifest.json"),
-        "utf8",
-      ),
-    ).resolves.toContain(JSON.stringify(join(snapshot.runtimeAppRoot, "agent")));
   });
 
   it("hydrates Next-style agent imports from dev runtime snapshots", async () => {
@@ -774,7 +1145,10 @@ describe("development runtime artifact snapshots", () => {
     await withRuntimeSession(createRuntimeSession("next-imports-regression"), async () => {
       const bundle = await getCompiledRuntimeAgentBundle({
         compiledArtifactsSource: resolveNitroCompiledArtifactsSource(
-          createDevelopmentNitroArtifactsConfig({ appRoot }),
+          createDevelopmentNitroArtifactsConfig({
+            appRoot,
+            worldPlan: { kind: "native", selection: "host-default", target: "local" },
+          }),
         ),
       });
       const agentModule = bundle.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules["agent.ts"];
@@ -795,7 +1169,12 @@ describe("development runtime artifact snapshots", () => {
 
     await withRuntimeSession(createRuntimeSession("next-imports-direct-disk-repro"), async () => {
       const bundle = await getCompiledRuntimeAgentBundle({
-        compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(runtimeAppRoot!),
+        compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(runtimeAppRoot!, {
+          moduleMapLoaderKind: "materialized-generation",
+          moduleMapLoaderPath: resolvePackageSourceFilePath(
+            "src/internal/authored-module-map-loader.ts",
+          ),
+        }),
       });
       const agentModule = bundle.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules["agent.ts"];
 
@@ -805,7 +1184,7 @@ describe("development runtime artifact snapshots", () => {
     });
   });
 
-  it("keeps compatibility with v1 dev runtime pointers", async () => {
+  it("rejects legacy v1 dev runtime pointers", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-pointer-v1-");
     const runtimeAppRoot = join(appRoot, ".eve", "dev-runtime", "snapshots", "legacy");
     const pointerPath = resolveDevelopmentRuntimeArtifactsPointerPath(appRoot);
@@ -824,7 +1203,7 @@ describe("development runtime artifact snapshots", () => {
       )}\n`,
     );
 
-    expect(readDevelopmentRuntimeArtifactsSnapshotRoot(pointerPath)).toBe(runtimeAppRoot);
+    expect(readDevelopmentRuntimeArtifactsSnapshotRoot(pointerPath)).toBeUndefined();
   });
 
   it("uses workspace tsconfig topology without retaining it in runtime snapshots", async () => {
@@ -853,6 +1232,7 @@ describe("development runtime artifact snapshots", () => {
     await writeFile(manifestPath, `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`);
 
     const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      manifest: createSnapshotManifest({ agentRoot, appRoot }),
       paths: { compileDirectoryPath },
       project: { appRoot },
     } as CompileAgentResult);
@@ -927,6 +1307,7 @@ describe("development runtime artifact snapshots", () => {
     await writeFile(manifestPath, `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`);
 
     const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      manifest: createSnapshotManifest({ agentRoot, appRoot }),
       paths: { compileDirectoryPath },
       project: { appRoot },
     } as CompileAgentResult);
@@ -998,11 +1379,35 @@ describe("development runtime artifact snapshots", () => {
     await writeFile(manifestPath, `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`);
 
     const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
-      manifest: {
+      manifest: createSnapshotManifest({
         agentRoot,
         appRoot,
-        extensionMounts: [{ sourceRoot: extensionRoot }],
-      },
+        bindings: [
+          {
+            binding: {
+              backing: {
+                externalDependencies: [],
+                kind: "filesystem",
+                sourcePath: join(extensionRoot, "extension.mjs"),
+              },
+              owner: { kind: "application" },
+            },
+            logicalPath: "extensions/acme.ts",
+            sourceId: "extensions/acme.ts",
+          },
+        ],
+        extensionMounts: [
+          {
+            externalDependencies: [],
+            mountLogicalPath: "extensions/acme.ts",
+            mountSourceId: "extensions/acme.ts",
+            namespace: "acme",
+            packageName: "@acme/extension",
+            packageNamespace: "acme-extension",
+            sourceRoot: extensionRoot,
+          },
+        ],
+      }),
       paths: { compileDirectoryPath },
       project: { appRoot },
     } as CompileAgentResult);
@@ -1074,6 +1479,7 @@ describe("development runtime artifact snapshots", () => {
     await writeFile(manifestPath, `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`);
 
     const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      manifest: createSnapshotManifest({ agentRoot, appRoot }),
       paths: { compileDirectoryPath },
       project: { appRoot },
     } as CompileAgentResult);

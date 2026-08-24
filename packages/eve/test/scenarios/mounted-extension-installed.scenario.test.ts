@@ -10,10 +10,9 @@ import {
   buildExtensionPackage,
   tryReadExtensionBuildConfig,
 } from "../../src/internal/nitro/host/build-extension.js";
-import { loadCompiledModuleMapFromAuthoredSource } from "../../src/internal/authored-module-map-loader.js";
+import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "../../src/internal/application/runtime-compiled-artifacts-source.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
-import { createDiskRuntimeCompiledArtifactsSource } from "../../src/runtime/compiled-artifacts-source.js";
-import { loadCompiledManifest } from "../../src/runtime/loaders/manifest.js";
+import { loadCompiledArtifactSet } from "../../src/runtime/loaders/compiled-artifact-set.js";
 import { resolveRuntimeAgentGraph } from "../../src/runtime/resolve-agent-graph.js";
 import { loadResolvedModuleExport } from "../../src/runtime/resolve-helpers.js";
 
@@ -249,7 +248,7 @@ describe("mounted extension installed under node_modules", () => {
     );
     expect(
       JSON.parse(extensionFiles[`node_modules/${PACKAGE_NAME}/dist/extension/_manifest.json`]!),
-    ).toMatchObject({ requires: { channel: 7, schedule: 3, subagent: 2 } });
+    ).toMatchObject({ requires: { channel: 8, schedule: 3, subagent: 2 } });
     const app = await scenarioApp({
       name: "mounted-extension-installed",
       installDependencies: true,
@@ -279,11 +278,8 @@ describe("mounted extension installed under node_modules", () => {
 
     await compileAgent({ startPath: app.appRoot });
 
-    const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(app.appRoot);
-    const [manifest, moduleMap] = await Promise.all([
-      loadCompiledManifest({ compiledArtifactsSource }),
-      loadCompiledModuleMapFromAuthoredSource({ compiledArtifactsSource }),
-    ]);
+    const compiledArtifactsSource = createAuthoredSourceRuntimeCompiledArtifactsSource(app.appRoot);
+    const { manifest, moduleMap } = await loadCompiledArtifactSet({ compiledArtifactsSource });
     const graph = await resolveRuntimeAgentGraph({ manifest, moduleMap });
 
     const echo = graph.root.agent.tools.find((entry) => entry.name === "crm__echo");
@@ -304,11 +300,11 @@ describe("mounted extension installed under node_modules", () => {
       urlPath: "/crm/status",
     });
     if (status === undefined) throw new Error("Expected the extension channel to resolve.");
-    const response = await status.fetch(new Request("https://example.com/crm/status"), {
-      params: {},
-      requestIp: null,
-      waitUntil() {},
-    });
+    if (status.handler === undefined) throw new Error("Expected an HTTP channel handler.");
+    const response = await status.handler(
+      new Request("https://example.com/crm/status"),
+      {} as Parameters<NonNullable<typeof status.handler>>[1],
+    );
     await expect(response.text()).resolves.toBe("sk-installed");
 
     const sync = manifest.schedules.find((entry) => entry.name === "crm__sync");

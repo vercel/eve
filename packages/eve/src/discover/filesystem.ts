@@ -45,6 +45,7 @@ export type AgentRootEntryKind =
   | "hooks-directory"
   | "ignored-directory"
   | "instrumentation-directory"
+  | "instrumentation-module"
   | "instructions-directory"
   | "instructions-markdown"
   | "instructions-module"
@@ -52,8 +53,6 @@ export type AgentRootEntryKind =
   | "sandbox-directory"
   | "schedules-directory"
   | "skills-directory"
-  | "system-markdown"
-  | "system-module"
   | "tools-directory"
   | "unknown"
   | "subagents-directory";
@@ -74,8 +73,6 @@ export type LocalSubagentEntryKind =
   | "lib-directory"
   | "sandbox-directory"
   | "skills-directory"
-  | "system-markdown"
-  | "system-module"
   | "tools-directory"
   | "unknown"
   | "subagents-directory";
@@ -144,12 +141,8 @@ export function classifyAgentRootEntry(
       return "instructions-module";
     }
 
-    if (name.toLowerCase() === "system.md") {
-      return "system-markdown";
-    }
-
-    if (matchesSupportedModuleBaseName(name, "system")) {
-      return "system-module";
+    if (matchesSupportedModuleBaseName(name, "instrumentation")) {
+      return "instrumentation-module";
     }
 
     return "unknown";
@@ -230,14 +223,6 @@ export function classifyLocalSubagentEntry(
 
     if (matchesSupportedModuleBaseName(name, "instructions")) {
       return "instructions-module";
-    }
-
-    if (name.toLowerCase() === "system.md") {
-      return "system-markdown";
-    }
-
-    if (matchesSupportedModuleBaseName(name, "system")) {
-      return "system-module";
     }
 
     return "unknown";

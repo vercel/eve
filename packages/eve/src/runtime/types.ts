@@ -2,9 +2,9 @@ import type { ChannelAdapter } from "#channel/adapter.js";
 import type { CompiledChannel } from "#channel/compiled-channel.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { HeadersValue } from "#client/types.js";
-import type { DiscoverDiagnosticsSummary } from "#discover/diagnostics.js";
+import type { CompilerDiagnosticsSummary } from "#shared/compiler-diagnostics.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
-import type { ChannelRouteMethod, RouteContext } from "#public/definitions/channel.js";
+import type { ChannelRouteMethod } from "#public/definitions/channel.js";
 import type { RouteHandler, WebSocketRouteHandler } from "#channel/routes.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import type { StreamEventHook } from "#public/definitions/hook.js";
@@ -17,9 +17,10 @@ import type {
   ConnectionProtocol,
   HeadersDefinition,
   ToolFilterDefinition,
-} from "#runtime/connections/types.js";
+} from "#shared/connections.js";
 import type { OpenAPISpecSource } from "#public/definitions/connections/openapi.js";
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
+import type { AgentSourceOwner } from "#compiler/module-binding.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
 import type { JsonObject } from "#shared/json.js";
 import type { Optional } from "#shared/optional.js";
@@ -35,6 +36,7 @@ import type { InternalAgentDefinition } from "#shared/agent-definition.js";
 import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
+import type { KernelCapabilityPlan } from "#kernel/capabilities.js";
 import type { SandboxBackend } from "#shared/sandbox-backend.js";
 import type { SandboxBootstrapContext, SandboxSessionContext } from "#shared/sandbox-definition.js";
 import type { ToolSchema } from "#shared/tool-schema.js";
@@ -56,6 +58,7 @@ export type ResolvedInstructionsDefinition = Readonly<
   SourceRef & {
     content: string;
     name: string;
+    owner: AgentSourceOwner;
     role: "system" | "user";
   } & (Omit<MarkdownSourceRef<undefined>, "definition"> | ModuleSourceRef)
 >;
@@ -126,16 +129,14 @@ export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
  * map.
  *
  * The resolved `backend` is non-optional: every sandbox in the runtime
- * graph carries a concrete SandboxBackend value, even when the
- * authored definition omits `backend`. The unauthored case is filled
- * in by `defaultSandbox()` (which itself selects between
- * `vercel()`, `docker()`, `microsandbox()`, and `justbash()` based on the current
- * environment).
+ * graph comes from one selected source and carries a concrete
+ * SandboxBackend value. A selected definition that omits `backend`
+ * resolves through `defaultSandbox()` for the current environment.
  */
 export type ResolvedSandboxDefinition = ResolvedModuleSourceRef & {
   readonly bootstrap?: (input: SandboxBootstrapContext) => Promise<void> | void;
   readonly revalidationKey?: string;
-  readonly sourceHash?: string;
+  readonly sourceHash: string;
   /**
    * Resolved backend value. The authored `SandboxDefinition.backend`
    * accepts either a `SandboxBackend` or a `() => SandboxBackend`; by
@@ -150,8 +151,7 @@ export type ResolvedSandboxDefinition = ResolvedModuleSourceRef & {
 };
 
 /**
- * Runtime-owned tool definition resolved from a compiled module map or
- * declared by the framework catalog.
+ * Runtime-owned tool definition resolved from a selected compiled source binding.
  * A tool without `execute` is surfaced to the client and never executed by eve.
  */
 export type ResolvedToolDefinition = Readonly<
@@ -161,6 +161,8 @@ export type ResolvedToolDefinition = Readonly<
   >
 > &
   ResolvedModuleSourceRef & {
+    /** Compiler-recorded owner of the source that won this logical tool slot. */
+    readonly sourceOwner: AgentSourceOwner;
     /**
      * Validated runtime input schema. Compiled and durable JSON Schemas are
      * rehydrated before entering this runtime-owned definition.
@@ -219,12 +221,9 @@ export interface ResolvedHookDefinition extends ResolvedModuleSourceRef {
 }
 
 /**
- * Runtime-owned authored channel definition resolved from the compiled
- * module map. Channels are uniform fetch handlers — there is no per-platform
- * subtype.
- *
- * Supports both old Route-style `fetch` handlers and new CompiledChannel
- * route handlers. The dispatch layer checks for `handler` first.
+ * Runtime-owned channel definition resolved from the compiled module map.
+ * Every HTTP or WebSocket handler comes from the selected `CompiledChannel`
+ * route recorded in the compiler-owned route plan.
  */
 export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
   readonly name: string;
@@ -233,7 +232,6 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
   readonly turnPolicy?: CompiledChannel["turnPolicy"];
   readonly cors?: NormalizedChannelCorsOptions;
   readonly urlPath: string;
-  readonly fetch: (req: Request, ctx: RouteContext) => Promise<Response>;
   /**
    * Universal entry point for new sessions, called by cross-channel
    * initiators (the schedule dispatcher today). Typed precisely as
@@ -241,38 +239,40 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
    * so any caller passing the wrong context shape is a typecheck error,
    * not a runtime crash.
    *
-   * Old Route-style channels do not flow `receive` through here. The
-   * resolver sets it to `undefined` for those; callers that need
-   * `receive` then throw with a clear error rather than silently
-   * accepting a different shape.
    */
   readonly receive?: CompiledChannel["receive"];
   /**
-   * Reference to the authored {@link CompiledChannel} value the channel
-   * module exported. Preserved so callers of `ctx.to(channel, target)`
-   * can identify a target by the same imported reference. `undefined`
-   * for framework-internal channels constructed without going through
-   * `defineChannel`.
+   * Reference to the {@link CompiledChannel} value the channel module
+   * exported. Preserved so callers of `ctx.to(channel, target)` can identify
+   * a target by the same imported reference.
    */
   readonly definition?: CompiledChannel;
   /**
-   * New-style route handler from CompiledChannel. When present, the
-   * dispatch layer uses this instead of `fetch`.
+   * HTTP route handler from the selected `CompiledChannel` route.
    */
   readonly handler?: RouteHandler;
   /**
-   * New-style websocket route handler from CompiledChannel. Present only for
-   * routes declared via `WS()`.
+   * WebSocket route handler from the selected `CompiledChannel` route.
    */
   readonly websocket?: WebSocketRouteHandler;
 }
 
 /**
- * Runtime-owned local subagent node resolved from one compiled local
- * subagent package.
+ * Runtime provenance for the selected structural subagent source owned by its
+ * parent node. This is distinct from any module that resolves the child config.
+ */
+export type ResolvedRuntimeSubagentSource = Readonly<
+  SourceRef & {
+    readonly sourceKind: "subagent";
+  }
+>;
+
+/**
+ * Runtime-owned local subagent node resolved from one selected structural
+ * subagent source.
  */
 export type ResolvedRuntimeSubagentNode = Readonly<
-  ModuleSourceRef &
+  ResolvedRuntimeSubagentSource &
     Node & {
       kind: "subagent";
       name: string;
@@ -289,13 +289,14 @@ export type ResolvedRuntimeSubagentNode = Readonly<
 >;
 
 /**
- * Runtime-owned remote subagent entry resolved from one module-backed remote
- * definition in the parent node's compiled manifest.
+ * Runtime-owned remote subagent entry retaining both the selected structural
+ * source and the independent module that resolved its configuration.
  */
 export type ResolvedRuntimeRemoteAgentNode = Readonly<
-  ModuleSourceRef &
+  ResolvedRuntimeSubagentSource &
     Node & {
       auth?: OutboundAuthFn;
+      configResolver: Readonly<ModuleSourceRef>;
       description: string;
       forwardPrincipal?: boolean;
       headers?: HeadersValue;
@@ -325,7 +326,7 @@ export interface ResolvedDynamicSubagentDefinition extends Readonly<ModuleSource
  * Runtime-owned additive agent configuration resolved from `agent.ts`.
  */
 type ResolvedAgentDefinitionBase = Omit<InternalAgentDefinition, "build" | "model" | "source"> & {
-  source?: Readonly<NonNullable<InternalAgentDefinition["source"]>>;
+  source: Readonly<NonNullable<InternalAgentDefinition["source"]>>;
 };
 
 export type ResolvedAgentDefinition = Readonly<
@@ -348,7 +349,7 @@ export type ResolvedAgentDefinition = Readonly<
 interface ResolvedAgentMetadata {
   readonly agentRoot: string;
   readonly appRoot: string;
-  readonly diagnosticsSummary: DiscoverDiagnosticsSummary;
+  readonly diagnosticsSummary: CompilerDiagnosticsSummary;
 }
 
 /**
@@ -406,20 +407,8 @@ export interface ResolvedAgent {
   readonly channels: readonly ResolvedChannelDefinition[];
   readonly config?: ResolvedAgentDefinition;
   readonly connections: readonly ResolvedConnectionDefinition[];
-  /**
-   * Logical names of framework-provided channels the author opted out of by
-   * exporting `disableRoute()` from a file in `agent/channels/`. Each
-   * entry is the slash-joined slug path of one such file. The graph
-   * resolver uses this list to filter the framework default channel set.
-   */
-  readonly disabledFrameworkChannels: readonly string[];
-  /**
-   * Names of framework-provided tools the author opted out of by exporting
-   * `disableTool()` from a file in `agent/tools/`. Each entry is the
-   * filename slug of one such file. The graph resolver uses this list to
-   * filter the framework default tool set.
-   */
-  readonly disabledFrameworkTools: readonly string[];
+  /** Native execution work prepared by the compiler for this graph node. */
+  readonly kernelPlan: KernelCapabilityPlan;
   /**
    * Configuration for the experimental framework `Workflow` orchestration
    * tool. Present when an authored tool module exports
@@ -440,11 +429,8 @@ export interface ResolvedAgent {
    * declare one.
    */
   readonly instructions: readonly ResolvedInstructionsDefinition[];
-  /**
-   * Authored sandbox override for this agent, when one exists. `null`
-   * means the agent uses the framework default sandbox unchanged.
-   */
-  readonly sandbox: ResolvedSandboxDefinition | null;
+  /** Sandbox selected by the compiled source graph for this agent. */
+  readonly sandbox: ResolvedSandboxDefinition;
   /**
    * Byte-free descriptor for the compiled workspace resource tree owned
    * by this agent's graph node. The prewarm orchestrator resolves the

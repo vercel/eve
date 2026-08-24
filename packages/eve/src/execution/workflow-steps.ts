@@ -91,20 +91,22 @@ import {
   readRetainedBackgroundToolResult,
   runBackgroundStep,
 } from "#execution/tasks/parent/tool-execution.js";
-import {
-  isTaskOwnedSerializedContext,
-  TASK_UPDATE_SESSION_INSTRUCTION,
-} from "#execution/tasks/child/instructions.js";
+import { isTaskOwnedSerializedContext } from "#execution/tasks/child/instructions.js";
 import { prepareWorkflowPreambleTrace } from "#execution/workflow-trace-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
-import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
+import {
+  createKernelSessionPromptAdditions,
+  hydrateDurableSession,
+  refreshSessionFromTurnAgent,
+} from "#execution/session.js";
 import { createExecutionHistoryView } from "#execution/history-view.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
+import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
-import { isTaskToolAvailable, TASK_UPDATE_TOOL_NAME } from "#runtime/framework-tools/tasks.js";
 import { stageAttachmentsToSandbox } from "#harness/attachment-staging.js";
+import { resolveSessionKernelPlan } from "#kernel/capabilities.js";
 
 const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
   "Task mode cannot complete while input requests remain pending.";
@@ -130,16 +132,12 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const tasksEnabled = bundle.resolvedAgent.config?.experimental?.tasks === true;
   ctx.set(TasksEnabledKey, tasksEnabled);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const taskUpdatesEnabled =
-    isTaskOwnedSerializedContext(input.serializedContext) &&
-    isTaskToolAvailable({
-      disabledFrameworkTools: bundle.resolvedAgent.disabledFrameworkTools ?? [],
-      hasAuthoredTool: effectiveAgent.turnAgent.tools.some(
-        (tool) => tool.name === TASK_UPDATE_TOOL_NAME,
-      ),
-      tasksEnabled,
-      toolName: TASK_UPDATE_TOOL_NAME,
-    });
+  const sessionKernel = resolveSessionKernelPlan({
+    nodePlan: bundle.resolvedAgent.kernelPlan,
+    rootPlan: bundle.graph.root.agent.kernelPlan,
+    taskOwned: isTaskOwnedSerializedContext(input.serializedContext),
+  });
+  const kernelPlan = sessionKernel.plan;
 
   // Populate the callback base URL so getHookUrl() works during tool
   // execution, preferring eve's active local origin over metadata fallback.
@@ -325,7 +323,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     tasksEnabled || bundle.resolvedAgent.config?.experimental?.subagentPersistentSessions === true;
   const dynamicToolResolvers = bundle.resolvedAgent.dynamicToolResolvers ?? [];
   const effectiveNode = {
-    ...bundle.graph.root,
+    ...getResolvedRuntimeAgentNode(bundle.graph, bundle.nodeId),
     turnAgent: effectiveAgent.turnAgent,
   };
   const runtimeIdentity = buildRuntimeIdentity(effectiveNode);
@@ -498,7 +496,17 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
             thresholdPercent: effectiveAgent.thresholdPercent,
           },
           session: lifecycleSession,
-          systemPromptAdditions: taskUpdatesEnabled ? [TASK_UPDATE_SESSION_INSTRUCTION] : undefined,
+          systemPromptAdditions: createKernelSessionPromptAdditions({
+            capabilities,
+            kernelPlan,
+            persistentSubagentSessions:
+              tasksEnabled ||
+              bundle.resolvedAgent.config?.experimental?.subagentPersistentSessions === true,
+            session: lifecycleSession,
+            taskControl: sessionKernel.taskControl,
+            tasksEnabled,
+            turnAgent: effectiveAgent.turnAgent,
+          }),
           turnAgent: effectiveAgent.turnAgent,
         });
         const modelSession = tasksEnabled
@@ -520,6 +528,8 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
             nodeId: bundle.nodeId,
           },
           node: effectiveNode,
+          kernelPlan,
+          taskControl: sessionKernel.taskControl,
           workflowMaxSubagents: refreshedSession.workflowMaxSubagents,
         });
         return step(modelSession, stepInput);

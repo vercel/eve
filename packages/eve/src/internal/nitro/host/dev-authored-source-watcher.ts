@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { dirname, join, normalize, resolve, sep } from "node:path";
+import { dirname, join, normalize, relative, resolve, sep } from "node:path";
 import { watch } from "#compiled/chokidar/index.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { resolveTsConfigDependencyPaths } from "#internal/application/tsconfig-dependencies.js";
@@ -15,6 +15,7 @@ import {
   formatChangeDetectedLogLine,
   type WatcherChangeEvent,
 } from "#internal/nitro/host/dev-watcher-log.js";
+import { compiledWorkflowWorldPackageRoots } from "#compiler/workflow-world-plan.js";
 
 const DEBOUNCE_MS = 120;
 const WATCHED_LOCKFILE_NAMES = [
@@ -78,7 +79,12 @@ export async function startAuthoredSourceWatcher(input: {
     followSymlinks: false,
     ignoreInitial: true,
     ignored: (path) =>
-      shouldIgnoreWatcherPath(path, currentHost.appRoot, currentHost.workspaceExtensions),
+      shouldIgnoreWatcherPath(
+        path,
+        currentHost.appRoot,
+        currentHost.workspaceExtensions,
+        collectAuthenticatedPackageWatchRoots(currentHost),
+      ),
   });
   const watcherReady = waitForWatcherReady(watcher);
 
@@ -239,6 +245,10 @@ async function resolveAuthoredWatchPaths(
     watchPaths.add(path);
   }
 
+  for (const path of collectAuthenticatedPackageWatchRoots(host)) {
+    watchPaths.add(path);
+  }
+
   for (const path of tsconfigPaths) {
     watchPaths.add(path);
   }
@@ -334,15 +344,37 @@ function shouldIgnoreWatcherPath(
   path: string,
   appRoot: string,
   workspaceExtensions: readonly DevelopmentWorkspaceExtension[],
+  authenticatedPackageRoots: readonly string[],
 ): boolean {
   const normalizedPath = normalize(path);
-  const pathParts = normalizedPath.split(sep).filter(Boolean);
   const isProviderSettings = normalizedPath === normalize(providerSettingsPath(appRoot));
+  const authenticatedPackageRoot = authenticatedPackageRoots
+    .filter((root) => isPathInsideOrEqual(path, root))
+    .sort((left, right) => resolve(right).length - resolve(left).length)[0];
+  const ignoredDirectoryCandidate =
+    authenticatedPackageRoot === undefined
+      ? normalizedPath
+      : relative(authenticatedPackageRoot, path);
+  const hasIgnoredDirectory = normalize(ignoredDirectoryCandidate)
+    .split(sep)
+    .filter(Boolean)
+    .some((part) => WATCHER_IGNORED_DIRECTORY_NAMES.has(part));
 
   return (
-    (!isProviderSettings && pathParts.some((part) => WATCHER_IGNORED_DIRECTORY_NAMES.has(part))) ||
+    (!isProviderSettings && hasIgnoredDirectory) ||
     workspaceExtensions.some((extension) => isPathInsideOrEqual(path, extension.config.outDir))
   );
+}
+
+function collectAuthenticatedPackageWatchRoots(host: PreparedDevelopmentApplicationHost): string[] {
+  return [
+    ...new Set([
+      ...host.compileResult.manifest.externalDependencyPlan.entries.flatMap((entry) =>
+        entry.packages.map((pkg) => pkg.resolvedPackageRoot),
+      ),
+      ...compiledWorkflowWorldPackageRoots(host.compileResult.manifest.workflowWorld),
+    ]),
+  ].sort((left, right) => left.localeCompare(right));
 }
 
 function isPathInsideOrEqual(path: string, directory: string): boolean {

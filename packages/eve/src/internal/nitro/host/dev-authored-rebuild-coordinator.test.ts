@@ -65,20 +65,40 @@ function createHost(
   runtimeFingerprint: string,
   configuredWorld?: string,
 ): PreparedDevelopmentApplicationHost {
+  const workflowWorld =
+    configuredWorld === undefined || configuredWorld === "local"
+      ? ({ kind: "native", selection: "host-default", target: "local" } as const)
+      : configuredWorld === "vercel"
+        ? ({ kind: "native", selection: "configured", target: "vercel" } as const)
+        : ({
+            backing: {
+              entryPackageId: "root",
+              entryPath: `/tmp/eve-test/.eve/dev-hosts/${id}/compiler/workflow-world/${configuredWorld}/index.js`,
+              identitySha256: "0".repeat(64),
+              mode: "materialized",
+              packages: [],
+            },
+            kind: "host-module",
+            packageName: configuredWorld,
+            protocol: {
+              declaredPackageName: "@workflow/core",
+              declaredRange: "^5.0.0-beta.43",
+              expectedVersion: "5.0.0-beta.43",
+            },
+            selection: "configured",
+          } as const);
   return {
     appRoot: "/tmp/eve-test",
     compileResult: {
       manifest: {
-        config: {
-          experimental: {
-            workflow: configuredWorld === undefined ? undefined : { world: configuredWorld },
-          },
-        },
+        config: {},
+        workflowWorld,
       },
       project: { agentRoot: "/tmp/eve-test/agent" },
     } as CompileAgentResult,
     compiledArtifacts: {
       bootstrapPath: `/tmp/eve-test/.eve/dev-hosts/${id}/bootstrap.mjs`,
+      instrumentationPluginPath: `/tmp/eve-test/.eve/dev-hosts/${id}/instrumentation.mjs`,
       workflowWorldPluginPath: `/tmp/eve-test/.eve/dev-hosts/${id}/workflow-world.mjs`,
     },
     generation: {
@@ -204,6 +224,28 @@ describe("transactional authored rebuild coordinator", () => {
       appRoot: retryHost.appRoot,
       generation: retryHost.generation,
     });
+    await devServer.close();
+  });
+
+  it("retains the active custom World backing for a runtime-only rebuild", async () => {
+    const devServer = new DrainedNitroDevServer({ error: () => undefined }, createRunner);
+    const initialHost = createHost("initial", "run-1", "@example/custom-world");
+    mocks.computeDevelopmentHostFingerprint.mockResolvedValueOnce("host-1");
+    const coordinator = await createDevelopmentAuthoredRebuildCoordinator({
+      devServer,
+      initialHost,
+    });
+    const candidate = createHost("candidate", "run-2", "@example/custom-world");
+    mocks.prepareDevelopmentApplicationHost.mockResolvedValueOnce(candidate);
+    mocks.computeDevelopmentHostFingerprint.mockResolvedValueOnce("host-1");
+
+    const result = await coordinator.rebuild({ changedPaths: [] });
+
+    expect(result.kind).toBe("runtime");
+    expect(result.host.compileResult.manifest.workflowWorld).toEqual(
+      initialHost.compileResult.manifest.workflowWorld,
+    );
+    expect(mocks.removeDevelopmentHostWorkspace).toHaveBeenCalledWith(candidate.workspace);
     await devServer.close();
   });
 

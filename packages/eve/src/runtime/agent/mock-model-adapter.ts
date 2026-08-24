@@ -3,7 +3,6 @@ import { MockLanguageModelV3 } from "ai/test";
 import { z } from "#compiled/zod/index.js";
 
 import {
-  BOOTSTRAP_RUNTIME_MODEL_ID,
   BOOTSTRAP_RUNTIME_SYSTEM_PROMPT,
   type RuntimeModelReference,
 } from "#runtime/agent/bootstrap.js";
@@ -31,7 +30,7 @@ import {
   getAvailableSkills,
 } from "#runtime/agent/mock-model-skill-selection.js";
 import { createJsonSchemaSample } from "#runtime/agent/mock-structured-output.js";
-import { FINAL_OUTPUT_TOOL_NAME } from "#runtime/framework-tools/final-output.js";
+import { FINAL_OUTPUT_TOOL_NAME } from "#kernel/final-output.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 
 const MOCK_RUNTIME_MODEL_PROVIDER = "eve-runtime-mock";
@@ -171,7 +170,7 @@ function createFinalOutputResult(
 export function resolveMockAuthoredRuntimeModel(
   reference: RuntimeModelReference,
 ): LanguageModel | null {
-  if (!shouldMockAuthoredRuntimeModels() || reference.id === BOOTSTRAP_RUNTIME_MODEL_ID) {
+  if (!shouldMockAuthoredRuntimeModels()) {
     return null;
   }
 

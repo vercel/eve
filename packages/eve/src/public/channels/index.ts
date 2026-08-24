@@ -1,6 +1,9 @@
 export {
+  disableRoute,
   defineChannel,
   GET,
+  HEAD,
+  OPTIONS,
   POST,
   PUT,
   PATCH,
@@ -25,6 +28,7 @@ export {
   type ChannelDefinition,
   type ChannelContinuationOps,
   type ChannelEvents,
+  type DisabledRouteSentinel,
   type InferChannelMetadata,
   type Session,
   type SessionCallback,

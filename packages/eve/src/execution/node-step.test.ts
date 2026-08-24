@@ -12,8 +12,12 @@ import { ROOT_RUNTIME_AGENT_NODE_ID, type ResolvedRuntimeAgentNode } from "#runt
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import type { RuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
-import { createExecutionNodeStep, createNodeHarnessTools } from "#execution/node-step.js";
-import { countLocalSubagentCalls } from "#runtime/framework-tools/subagent/local.js";
+import {
+  createExecutionNodeStep,
+  createNodeHarnessTools as createNodeHarnessToolsWithPlan,
+} from "#execution/node-step.js";
+import type { KernelCapabilityPlan } from "#kernel/capabilities.js";
+import { countLocalSubagentCalls } from "#kernel/subagent/local.js";
 import { createSession } from "#execution/session.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
 import { toInputSchema } from "#shared/tool-schema.js";
@@ -29,10 +33,26 @@ vi.mock("../runtime/agent/resolve-model.js", () => ({
   resolveRuntimeModelReference: vi.fn().mockResolvedValue({}),
 }));
 
+const TEST_CONFIG_SOURCE = {
+  logicalPath: "agent.ts",
+  sourceId: "test:agent-config",
+  sourceKind: "module" as const,
+};
+
 afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
 });
+
+function createNodeHarnessTools(input: {
+  readonly kernelPlan?: KernelCapabilityPlan;
+  readonly node: ResolvedRuntimeAgentNode;
+}) {
+  return createNodeHarnessToolsWithPlan({
+    kernelPlan: input.kernelPlan ?? input.node.agent.kernelPlan,
+    node: input.node,
+  });
+}
 
 function setupMockAgentForToolExecution(toolName: string, args: unknown): void {
   vi.mocked(ToolLoopAgent).mockImplementation(function (
@@ -200,7 +220,7 @@ function createTestNode(
   return {
     agent: {
       ...agent,
-      disabledFrameworkTools: [],
+      kernelPlan: { prepared: ["agent", "ask_question"] },
     },
     channels: [],
     hookRegistry: createEmptyHookRegistry(),
@@ -237,6 +257,73 @@ function createNoopRuntime(): Runtime {
 }
 
 describe("createNodeHarnessTools", () => {
+  it("classifies source-composed load_skill from binding ownership", async () => {
+    const definition = {
+      description: "Load a skill.",
+      execute: async () => "loaded",
+      inputSchema: toInputSchema({ type: "object" }),
+      logicalPath: "tools/load_skill.ts",
+      name: "load_skill",
+      sourceId: "eve.framework-defaults:tools/load_skill.ts",
+      sourceKind: "module" as const,
+      sourceOwner: { feature: "eve.framework-defaults", kind: "framework" as const },
+    };
+    const toolRegistry = await createRuntimeToolRegistry({ tools: [definition] });
+    const tools = createNodeHarnessTools({
+      node: createTestNode(createTestTurnAgent({ tools: toolRegistry.preparedTools }), {
+        agent: {
+          ...({} as ResolvedRuntimeAgentNode["agent"]),
+          kernelPlan: { prepared: ["agent", "ask_question", "load_skill"] },
+        },
+        toolRegistry,
+      }),
+    });
+
+    expect(tools.get("load_skill")?.kernelCapability).toBe("load_skill");
+  });
+
+  it("keeps an application load_skill override as an ordinary tool", async () => {
+    const definition = {
+      description: "Application skill loader.",
+      execute: async () => "custom",
+      inputSchema: toInputSchema({ type: "object" }),
+      logicalPath: "tools/load_skill.ts",
+      name: "load_skill",
+      sourceId: "tools/load_skill.ts",
+      sourceKind: "module" as const,
+      sourceOwner: { kind: "application" as const },
+    };
+    const toolRegistry = await createRuntimeToolRegistry({ tools: [definition] });
+    const tools = createNodeHarnessTools({
+      node: createTestNode(createTestTurnAgent({ tools: toolRegistry.preparedTools }), {
+        toolRegistry,
+      }),
+    });
+
+    expect(tools.get("load_skill")?.kernelCapability).toBeUndefined();
+  });
+
+  it("rejects a prepared authored tool missing from its node registry", () => {
+    const node = createTestNode(
+      createTestTurnAgent({
+        tools: [
+          {
+            description: "Orphaned tool.",
+            inputSchema: { additionalProperties: false, properties: {}, type: "object" },
+            kind: "authored-tool",
+            logicalPath: "tools/orphaned.ts",
+            name: "orphaned",
+            sourceId: "tools/orphaned.ts",
+          },
+        ],
+      }),
+    );
+
+    expect(() => createNodeHarnessTools({ node })).toThrow(
+      'Prepared authored tool "orphaned" from "tools/orphaned.ts" is missing from runtime registry for node "__root__".',
+    );
+  });
+
   it("guides the model to split large tasks across parallel agent calls", () => {
     const agentTool = createNodeHarnessTools({ node: createTestNode() }).get("agent");
 
@@ -255,20 +342,26 @@ describe("createNodeHarnessTools", () => {
 
   it("does not give declared subagent nodes the built-in agent tool", () => {
     const tools = createNodeHarnessTools({
-      node: createTestNode(undefined, { nodeId: "subagents/researcher" }),
+      node: createTestNode(undefined, {
+        agent: {
+          ...({} as ResolvedRuntimeAgentNode["agent"]),
+          kernelPlan: { prepared: ["ask_question"] },
+        },
+        nodeId: "subagents/researcher",
+      }),
     });
 
     expect(tools.has("agent")).toBe(false);
   });
 
-  it("does not give the root node the built-in agent tool when it is disabled", () => {
+  it("does not give the root node the built-in agent tool when the plan omits it", () => {
     const node = createTestNode();
     const tools = createNodeHarnessTools({
       node: {
         ...node,
         agent: {
           ...node.agent,
-          disabledFrameworkTools: ["agent"],
+          kernelPlan: { prepared: ["ask_question"] },
         },
       },
     });
@@ -291,7 +384,15 @@ describe("createNodeHarnessTools", () => {
         ...node,
         agent: {
           ...node.agent,
-          config: { experimental: { tasks: true }, model: { id: "test-model" }, name: "test" },
+          config: {
+            experimental: { tasks: true },
+            model: { id: "test-model" },
+            name: "test",
+            source: TEST_CONFIG_SOURCE,
+          },
+          kernelPlan: {
+            prepared: ["agent", "task_cancel", "task_update", "ask_question"],
+          },
         },
       },
     });
@@ -334,6 +435,12 @@ describe("createNodeHarnessTools", () => {
             experimental: { tasks },
             model: { id: "test-model" },
             name: "test",
+            source: TEST_CONFIG_SOURCE,
+          },
+          kernelPlan: {
+            prepared: tasks
+              ? (["agent", "task_cancel", "task_update", "ask_question"] as const)
+              : (["agent", "ask_question"] as const),
           },
         },
       };
@@ -362,21 +469,87 @@ describe("createNodeHarnessTools", () => {
     ).toBe(2);
   });
 
-  it("respects disableTool for individual task tools", () => {
+  it("materializes only task tools present in the compiled plan", () => {
     const node = createTestNode();
     const tools = createNodeHarnessTools({
       node: {
         ...node,
         agent: {
           ...node.agent,
-          config: { experimental: { tasks: true }, model: { id: "test-model" }, name: "test" },
-          disabledFrameworkTools: ["task_cancel"],
+          config: {
+            experimental: { tasks: true },
+            model: { id: "test-model" },
+            name: "test",
+            source: TEST_CONFIG_SOURCE,
+          },
+          kernelPlan: { prepared: ["agent", "task_update", "ask_question"] },
         },
       },
     });
 
     expect(tools.has("task_update")).toBe(true);
     expect(tools.has("task_cancel")).toBe(false);
+  });
+
+  it("materializes root-authorized task_update for a named task child", () => {
+    const node = createTestNode(undefined, {
+      agent: {
+        ...({} as ResolvedRuntimeAgentNode["agent"]),
+        config: {
+          experimental: { tasks: true },
+          model: { id: "test-model" },
+          name: "child",
+          source: TEST_CONFIG_SOURCE,
+        },
+        kernelPlan: { prepared: ["ask_question", "final_output"] },
+      },
+      nodeId: "subagents/researcher",
+    });
+    const tools = createNodeHarnessTools({
+      kernelPlan: { prepared: ["task_update", "ask_question", "final_output"] },
+      node,
+    });
+
+    expect(node.agent.kernelPlan.prepared).not.toContain("task_update");
+    expect(tools.get("task_update")?.kernelCapability).toBe("task_update");
+  });
+
+  it("rejects a late session capability that collides with a child tool", () => {
+    const node = createTestNode(
+      createTestTurnAgent({
+        tools: [
+          {
+            description: "Conflicting child tool.",
+            inputSchema: { type: "object" },
+            kind: "subagent",
+            logicalPath: "subagents/task_update",
+            name: "task_update",
+            nodeId: "subagents/task_update",
+            sourceId: "subagents/task_update",
+          },
+        ],
+      }),
+      {
+        agent: {
+          ...({} as ResolvedRuntimeAgentNode["agent"]),
+          config: {
+            experimental: { tasks: true },
+            model: { id: "test-model" },
+            name: "child",
+            source: TEST_CONFIG_SOURCE,
+          },
+          kernelPlan: { prepared: ["ask_question", "final_output"] },
+        },
+        nodeId: "subagents/researcher",
+      },
+    );
+
+    expect(() =>
+      createNodeHarnessTools({
+        kernelPlan: { prepared: ["task_update", "ask_question", "final_output"] },
+        node,
+      }),
+    ).toThrow('Tool "task_update" collides with a prepared native kernel capability.');
   });
 });
 
@@ -394,6 +567,7 @@ describe("createExecutionNodeStep", () => {
           name: "regular-tool",
           sourceId: "tools/regular-tool.ts",
           sourceKind: "module",
+          sourceOwner: { kind: "application" },
         },
       ],
     });
@@ -525,6 +699,7 @@ describe("createExecutionNodeStep", () => {
         stepIndex: 0,
         turnId: "",
       },
+      kernelCapabilities: {},
       responseMessages: [
         {
           content: [

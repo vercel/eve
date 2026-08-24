@@ -97,7 +97,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
     this.#currentRuntimeFingerprint = input.currentRuntimeFingerprint;
     this.#devServer = input.devServer;
     this.#usesParentWorkflowWorld = usesParentDevelopmentWorkflowWorld(
-      input.initialHost.compileResult.manifest.config.experimental?.workflow?.world,
+      input.initialHost.compileResult.manifest.workflowWorld,
     );
   }
 
@@ -118,9 +118,8 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
         previousExtensions: previousHost.workspaceExtensions,
       });
       if (
-        usesParentDevelopmentWorkflowWorld(
-          nextHost.compileResult.manifest.config.experimental?.workflow?.world,
-        ) !== this.#usesParentWorkflowWorld
+        usesParentDevelopmentWorkflowWorld(nextHost.compileResult.manifest.workflowWorld) !==
+        this.#usesParentWorkflowWorld
       ) {
         throw new DevelopmentWorkflowWorldChangeRequiresRestartError();
       }
@@ -260,6 +259,13 @@ function retainActiveHostWorkspace(
 ): PreparedDevelopmentApplicationHost {
   return {
     ...nextHost,
+    compileResult: {
+      ...nextHost.compileResult,
+      manifest: {
+        ...nextHost.compileResult.manifest,
+        workflowWorld: activeHost.compileResult.manifest.workflowWorld,
+      },
+    },
     compiledArtifacts: activeHost.compiledArtifacts,
     workflowBuildDir: activeHost.workflowBuildDir,
     workspace: activeHost.workspace,
@@ -275,7 +281,7 @@ function startSandboxPrewarmAfterCommit(
   }
   const artifactsConfig = createDevelopmentNitroArtifactsConfig({
     appRoot: host.appRoot,
-    configuredWorld: host.compileResult.manifest.config.experimental?.workflow?.world,
+    worldPlan: host.compileResult.manifest.workflowWorld,
   });
   startDevelopmentSandboxPrewarmInBackground({
     appRoot: host.appRoot,

@@ -7,6 +7,7 @@ import {
   type AgentInfoResult,
 } from "#client/index.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info.js";
 import {
   createDevelopmentCredentialGate,
   type DevelopmentCredentialGate,
@@ -43,48 +44,28 @@ const NEWER_VERIFIED_TARGET = await resolveTestVercelTarget({
   projectName: "inbound-next",
 });
 
-const INFO: AgentInfoResult = {
+const INFO: AgentInfoResult = createTestAgentInfoResult({
   agent: {
     agentRoot: "/tmp/weather-agent/agent",
     appRoot: "/tmp/weather-agent",
     model: { id: "gpt-5", routing: { kind: "gateway", target: "openai" } },
     name: "Weather Agent",
   },
-  capabilities: { devRoutes: true },
-  channels: { authored: [], available: [], disabledFramework: [], framework: [] },
-  connections: [],
-  diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
-  hooks: [],
   instructions: {
     dynamic: [],
     static: [
       {
         content: "You are a weather assistant.",
-        logicalPath: "agent/instructions.md",
+        logicalPath: "instructions.md",
         name: "instructions",
+        owner: { kind: "application" },
         role: "system",
+        sourceId: "test:instructions",
         sourceKind: "markdown",
       },
     ],
   },
-  kind: "eve-agent-info",
-  mode: "development",
-  sandbox: null,
-  schedules: [],
-  skills: { dynamic: [], static: [] },
-  subagents: { local: [], total: 0 },
-  tools: {
-    authored: [],
-    available: [],
-    disabledFramework: [],
-    dynamic: [],
-    framework: [],
-    reserved: [],
-  },
-  version: 2,
-  workflow: { enabled: false, toolName: "Workflow" },
-  workspace: { resourceRoot: null, rootEntries: [] },
-};
+});
 
 const VERCEL_SSO_CHALLENGE = `
 <title>Authentication Required</title>

@@ -8,7 +8,7 @@ import { executeReadFileOnSandbox } from "../src/execution/sandbox/read-file-too
 import type { SandboxAccess } from "../src/sandbox/state.js";
 import type { SandboxSession } from "../src/shared/sandbox-session.js";
 import { executeWriteFileOnSandbox } from "../src/execution/sandbox/write-file-tool.js";
-import { ReadFileStateKey } from "../src/runtime/framework-tools/file-state.js";
+import { ReadFileStateKey } from "../src/execution/tools/file-state.js";
 import { preserveFrameworkStateOnCompaction } from "../src/execution/compaction.js";
 
 // ---------------------------------------------------------------------------

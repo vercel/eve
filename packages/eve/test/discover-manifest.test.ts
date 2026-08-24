@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  createDiscoverErrorDiagnostic,
-  createDiscoverWarningDiagnostic,
-} from "../src/discover/diagnostics.js";
+  createCompilerErrorDiagnostic,
+  createCompilerWarningDiagnostic,
+} from "../src/shared/compiler-diagnostics.js";
 import {
   AGENT_SOURCE_MANIFEST_KIND,
   AGENT_SOURCE_MANIFEST_VERSION,
@@ -11,6 +11,7 @@ import {
   createPathDerivedSourceId,
   deriveAgentIdFromRoots,
 } from "../src/discover/manifest.js";
+import { ROOT_COMPILED_AGENT_NODE_ID } from "../src/compiler/manifest.js";
 
 describe("agent source manifest", () => {
   it("creates an empty manifest with stable defaults for nested agent roots", () => {
@@ -36,6 +37,7 @@ describe("agent source manifest", () => {
       resolvedExtensions: [],
       hooks: [],
       instructions: [],
+      instrumentation: { providers: [] },
       lib: [],
       kind: AGENT_SOURCE_MANIFEST_KIND,
       sandbox: null,
@@ -56,14 +58,16 @@ describe("agent source manifest", () => {
       agentRoot,
       appRoot,
       diagnostics: [
-        createDiscoverErrorDiagnostic({
+        createCompilerErrorDiagnostic({
           code: "discover/missing-instructions",
           message: "Expected instructions.md or instructions.ts in the agent root.",
+          nodeId: ROOT_COMPILED_AGENT_NODE_ID,
           sourcePath: agentRoot,
         }),
-        createDiscoverWarningDiagnostic({
+        createCompilerWarningDiagnostic({
           code: "discover/unsupported-entry",
           message: "Ignoring unsupported context/ directory.",
+          nodeId: ROOT_COMPILED_AGENT_NODE_ID,
           sourcePath: `${agentRoot}/context`,
         }),
       ],

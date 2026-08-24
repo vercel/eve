@@ -73,33 +73,33 @@ describe("assertWorkflowWorldCompatibility", () => {
     ).toThrow(/@workflow\/core 4\.x/);
   });
 
-  it("no-ops when the world declares no @workflow/* dependency", () => {
+  it("rejects a world that declares no @workflow/* dependency", () => {
     expect(() =>
       assertWorkflowWorldCompatibility({
         worldPackageName: "@workflow/world-postgres",
         worldManifest: { dependencies: { "some-other-dep": "1.0.0" } },
         expectedWorkflowVersion: EXPECTED,
       }),
-    ).not.toThrow();
+    ).toThrow("must declare a dependency or peerDependency");
   });
 
-  it("no-ops when the declared range is unparseable", () => {
+  it("rejects an unparseable declared range", () => {
     expect(() =>
       assertWorkflowWorldCompatibility({
         worldPackageName: "@workflow/world-postgres",
         worldManifest: { dependencies: { "@workflow/core": "workspace:*" } },
         expectedWorkflowVersion: EXPECTED,
       }),
-    ).not.toThrow();
+    ).toThrow("unsupported range");
   });
 
-  it("no-ops when the expected version cannot be parsed", () => {
+  it("rejects an invalid bundled version", () => {
     expect(() =>
       assertWorkflowWorldCompatibility({
         worldPackageName: "@workflow/world-postgres",
         worldManifest: { dependencies: { "@workflow/core": "^4.0.0" } },
         expectedWorkflowVersion: "not-a-version",
       }),
-    ).not.toThrow();
+    ).toThrow("bundled Workflow version");
   });
 });

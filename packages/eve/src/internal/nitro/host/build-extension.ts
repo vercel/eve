@@ -6,6 +6,7 @@ import {
   EXTENSION_COMPATIBILITY_MANIFEST_KIND,
   writeExtensionCompatibilityManifest,
 } from "#compiler/extension-compatibility.js";
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/compiled-agent-node-id.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import { discoverFlatModuleSource, readSortedDirectoryEntries } from "#discover/grammar.js";
 import { createDiskProjectSource } from "#discover/project-source.js";
@@ -16,6 +17,7 @@ import {
   type ExtensionBuildConfig,
 } from "#internal/nitro/host/extension-build-config.js";
 import { deriveExtensionCapabilityRequirements } from "#internal/nitro/host/extension-capability-requirements.js";
+import { createExtensionDeclarationBinding } from "#internal/nitro/host/extension-declaration-binding.js";
 import {
   emitExtensionDistribution,
   ExtensionOutputRestoreError,
@@ -52,6 +54,7 @@ export async function buildExtensionPackage(
   }
 
   const declarationModule = discoverFlatModuleSource({
+    nodeId: ROOT_COMPILED_AGENT_NODE_ID,
     rootEntries: await readSortedDirectoryEntries(source, config.sourceRoot),
     rootPath: config.sourceRoot,
     slotName: "extension",
@@ -61,6 +64,13 @@ export async function buildExtensionPackage(
       `Cannot build extension "${config.packageName}": its source root "${config.sourceRoot}" is missing an "extension.<ext>" declaration. Add \`export default defineExtension(...)\` there (with or without config).`,
     );
   }
+  const declarationBinding = createExtensionDeclarationBinding({
+    declarationModule,
+    namespace: config.shortName,
+    packageName: config.packageName,
+    runtimeDependencies: config.runtimeDependencies,
+    sourceRoot: config.sourceRoot,
+  });
 
   const transactionRoot = await mkdtemp(join(appRoot, ".eve-extension-build-"));
   const stagedOutDir = join(transactionRoot, "output");
@@ -70,12 +80,9 @@ export async function buildExtensionPackage(
     await mkdir(stagedDistRoot, { recursive: true });
     await emitExtensionDistribution({
       appRoot,
-      declarationModule,
+      declarationBinding,
       declarationsRoot: join(transactionRoot, "declarations"),
       manifest,
-      runtimeDependencies: config.runtimeDependencies,
-      shortName: config.shortName,
-      sourceRoot: config.sourceRoot,
       stagedDistRoot,
       stagedOutDir,
       transactionRoot,
@@ -84,14 +91,11 @@ export async function buildExtensionPackage(
       kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
       formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
       builtWithEve: resolveInstalledPackageInfo().version,
-      ...(config.externalDependencies.length === 0
-        ? {}
-        : { build: { externalDependencies: config.externalDependencies } }),
+      build: { externalDependencies: config.externalDependencies },
       requires: await deriveExtensionCapabilityRequirements({
-        declarationModule,
+        declarationBinding,
+        declarationExportName: declarationModule.exportName,
         manifest,
-        runtimeDependencies: config.runtimeDependencies,
-        sourceRoot: config.sourceRoot,
       }),
     });
     await ensureExtensionExports(appRoot, config.outDir);

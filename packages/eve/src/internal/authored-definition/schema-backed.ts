@@ -18,6 +18,7 @@ import {
 } from "#shared/tool-schema.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
 import {
+  ALLOWED_DYNAMIC_TOOL_EVENTS,
   assertResolverOnlyDynamicSentinel,
   isDynamicSentinel,
   type DynamicToolEventName,
@@ -29,7 +30,13 @@ import {
  * Identity is path-derived — the compiler stamps the filename slug onto
  * the compiled entry. This shape never carries an authored `name`.
  */
-type NormalizedAuthoredTool = Readonly<Omit<InternalToolDefinitionWithExecuteFn, "name">>;
+type NormalizedAuthoredTool = Readonly<
+  Omit<InternalToolDefinitionWithExecuteFn, "name"> & {
+    readonly hasAuth: boolean;
+    readonly hasModelOutputProjection: boolean;
+    readonly requiresApproval: boolean;
+  }
+>;
 type MutableNormalizedAuthoredTool = {
   -readonly [K in keyof NormalizedAuthoredTool]: NormalizedAuthoredTool[K];
 };
@@ -61,9 +68,16 @@ type NormalizedToolEntry =
 export function normalizeToolDefinition(value: unknown, message: string): NormalizedToolEntry {
   if (isDynamicSentinel(value)) {
     assertResolverOnlyDynamicSentinel(value, message);
+    const eventNames = Object.keys(value.events);
+    const unsupportedEvent = eventNames.find(
+      (eventName) => !ALLOWED_DYNAMIC_TOOL_EVENTS.has(eventName),
+    );
+    if (unsupportedEvent !== undefined) {
+      throw new Error(`${message} Unsupported dynamic tool event: "${unsupportedEvent}".`);
+    }
     return {
       kind: "dynamic-tool",
-      eventNames: Object.keys(value.events) as DynamicToolEventName[],
+      eventNames: eventNames as DynamicToolEventName[],
     };
   }
   if (isDisabledToolSentinel(value)) {
@@ -113,7 +127,10 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   const definition: MutableNormalizedAuthoredTool = {
     description: expectString(record.description, message),
     execute: expectFunction(record.execute, message),
+    hasAuth: record.auth !== undefined,
+    hasModelOutputProjection: record.toModelOutput !== undefined,
     inputSchema,
+    requiresApproval: record.approval !== undefined,
   };
   if (record.execution !== undefined) {
     const execution = expectString(record.execution, message);

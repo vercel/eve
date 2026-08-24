@@ -6,40 +6,18 @@ import {
   type AgentInfoResult,
   type Client,
 } from "#client/index.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info.js";
 
 import { probeAgentInfo } from "./agent-info-probe.js";
 
-const AGENT_INFO = {
+const AGENT_INFO = createTestAgentInfoResult({
   agent: {
     agentRoot: "/tmp/weather-agent/agent",
     appRoot: "/tmp/weather-agent",
     model: { id: "gpt-5", routing: { kind: "gateway", target: "openai" } },
     name: "Weather Agent",
   },
-  capabilities: { devRoutes: true },
-  channels: { authored: [], available: [], disabledFramework: [], framework: [] },
-  connections: [],
-  diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
-  hooks: [],
-  instructions: { dynamic: [], static: [] },
-  kind: "eve-agent-info",
-  mode: "development",
-  sandbox: null,
-  schedules: [],
-  skills: { dynamic: [], static: [] },
-  subagents: { local: [], total: 0 },
-  tools: {
-    authored: [],
-    available: [],
-    disabledFramework: [],
-    dynamic: [],
-    framework: [],
-    reserved: [],
-  },
-  version: 2,
-  workflow: { enabled: false, toolName: "Workflow" },
-  workspace: { resourceRoot: null, rootEntries: [] },
-} satisfies AgentInfoResult;
+}) satisfies AgentInfoResult;
 
 async function advanceRetry(): Promise<void> {
   await Promise.resolve();

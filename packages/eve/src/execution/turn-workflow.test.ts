@@ -7,6 +7,7 @@ import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-
 import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
+import { dispatchTaskStep } from "#execution/tasks/parent/dispatch-task-step.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import { turnWorkflow } from "#execution/turn-workflow.js";
 import {
@@ -45,6 +46,10 @@ vi.mock("./workflow-steps.js", () => ({
 
 vi.mock("./dispatch-runtime-actions-step.js", () => ({
   dispatchRuntimeActionsStep: vi.fn(),
+}));
+
+vi.mock("./tasks/parent/dispatch-task-step.js", () => ({
+  dispatchTaskStep: vi.fn(),
 }));
 
 vi.mock("./dispatch-workflow-runtime-actions-step.js", () => ({
@@ -270,6 +275,55 @@ describe("turnWorkflow", () => {
       },
       kind: "turn-result",
     });
+  });
+
+  it("dispatches a task-owned child's runtime actions through task control", async () => {
+    const sessionState = createSessionState();
+    installInbox([]);
+    vi.mocked(turnStep)
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingRuntimeActionKeys: ["tool-call:task_update:call-1"],
+        serializedContext: { state: "pending-task-update" },
+        sessionState,
+        taskControlsEnabled: true,
+        tasksEnabled: false,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "updated",
+        serializedContext: { state: "done" },
+        sessionState,
+      });
+    vi.mocked(dispatchTaskStep).mockResolvedValueOnce({
+      pendingTasks: [],
+      results: [
+        {
+          callId: "call-1",
+          kind: "tool-result",
+          output: { status: "sent", taskId: "task_named" },
+          toolName: "task_update",
+        },
+      ],
+      sessionState,
+    });
+
+    const { input } = createInput({
+      driverCapabilities: { turnInbox: true },
+      mode: "conversation",
+      sessionState,
+    });
+    await turnWorkflow(input);
+
+    expect(dispatchTaskStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serializedContext: { state: "pending-task-update" },
+        sessionState,
+      }),
+    );
+    expect(dispatchRuntimeActionsStep).not.toHaveBeenCalled();
   });
 
   it("parks for pending input when the channel supports input requests", async () => {

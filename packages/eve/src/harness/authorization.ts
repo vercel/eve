@@ -36,7 +36,7 @@ import { ContextKey } from "#context/key.js";
 import { SessionIdKey } from "#context/keys.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
-import type { AuthorizationCallback, ConnectionPrincipal } from "#runtime/connections/types.js";
+import type { AuthorizationCallback, ConnectionPrincipal } from "#shared/connections.js";
 import type { JsonValue } from "#public/types/json.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import { createUlid } from "#shared/ulid.js";

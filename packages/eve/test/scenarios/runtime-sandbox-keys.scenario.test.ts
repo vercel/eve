@@ -1,13 +1,15 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it as vitestIt, vi } from "vitest";
 
+import { compileAgent } from "../../src/compiler/compile-agent.js";
 import {
   createBundledRuntimeCompiledArtifactsSource,
   createDiskRuntimeCompiledArtifactsSource,
 } from "../../src/runtime/compiled-artifacts-source.js";
 import { createRuntimeSandboxTemplateKey } from "../../src/runtime/sandbox/keys.js";
+import { createTestRuntime } from "../../src/internal/testing/app-harness.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 /**
@@ -21,36 +23,38 @@ import { useTemporaryDirectories } from "../../src/internal/testing/use-temporar
  */
 const createScratchDirectory = useTemporaryDirectories();
 const BOOTSTRAP_SOURCE_HASH = "bootstrap-source-hash";
+const SANDBOX_SOURCE_HASH = "sandbox-source-hash";
+let runtime: Awaited<ReturnType<typeof createTestRuntime>>;
+
+beforeAll(async () => {
+  runtime = await createTestRuntime();
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-async function createTemporaryAppRoot(options?: { sourceGraphHash?: string }): Promise<string> {
+async function createTemporaryAppRoot(): Promise<string> {
   const appRoot = await createScratchDirectory("eve-sbx-keys-");
-  await mkdir(join(appRoot, ".eve", "compile"), { recursive: true });
+  await mkdir(join(appRoot, "agent"), { recursive: true });
   await writeFile(
-    join(appRoot, ".eve", "compile", "compile-metadata.json"),
-    `${JSON.stringify({
-      compile: {
-        moduleMap: { path: ".eve/compile/module-map.mjs", sha256: "deadbeef" },
-      },
-      discovery: {
-        diagnostics: { path: ".eve/discovery/diagnostics.json", sha256: "deadbeef" },
-        manifest: { path: ".eve/discovery/agent-discovery-manifest.json", sha256: "deadbeef" },
-        sourceGraphHash: options?.sourceGraphHash ?? "test-source-graph-hash",
-        summary: { errors: 0, warnings: 0 },
-      },
-      generator: { name: "eve", version: "0.0.0-test" },
-      kind: "eve-compile-metadata",
-      status: "ready",
-      version: 5,
-    })}\n`,
+    join(appRoot, "package.json"),
+    `${JSON.stringify({ name: "runtime-sandbox-keys-scenario", type: "module" })}\n`,
   );
+  await writeFile(
+    join(appRoot, "agent", "agent.ts"),
+    'export default { model: "openai/gpt-5-mini" };\n',
+  );
+  await writeFile(join(appRoot, "agent", "instructions.md"), "Test instructions.\n");
+  await compileAgent({ startPath: appRoot });
   return appRoot;
 }
 
-const WORKSPACE_PLAN = { contentHash: "workspace-hash", kind: "workspace-content" } as const;
+const WORKSPACE_PLAN = {
+  contentHash: "workspace-hash",
+  kind: "workspace-content",
+  sourceHash: SANDBOX_SOURCE_HASH,
+} as const;
 
 function stubEmptyVercelProjectSources(): void {
   vi.stubEnv("VERCEL_PROJECT_ID", "");
@@ -58,6 +62,10 @@ function stubEmptyVercelProjectSources(): void {
   // A deployment id must never participate in template scopes; set one to
   // prove the fallback ignores it.
   vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_123");
+}
+
+function it(name: string, fn: () => Promise<void>): void {
+  vitestIt(name, async () => await runtime.run(fn));
 }
 
 describe("createRuntimeSandboxTemplateKey", () => {
@@ -134,7 +142,11 @@ describe("createRuntimeSandboxTemplateKey", () => {
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "eve:default-sandbox",
-      templatePlan: { contentHash: "workspace-hash", kind: "workspace-content" },
+      templatePlan: {
+        contentHash: "workspace-hash",
+        kind: "workspace-content",
+        sourceHash: SANDBOX_SOURCE_HASH,
+      },
     });
 
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_two");
@@ -144,7 +156,11 @@ describe("createRuntimeSandboxTemplateKey", () => {
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "eve:default-sandbox",
-      templatePlan: { contentHash: "workspace-hash", kind: "workspace-content" },
+      templatePlan: {
+        contentHash: "workspace-hash",
+        kind: "workspace-content",
+        sourceHash: SANDBOX_SOURCE_HASH,
+      },
     });
 
     expect(secondKey).toBe(firstKey);
@@ -195,7 +211,11 @@ describe("createRuntimeSandboxTemplateKey", () => {
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "eve:default-sandbox",
-      templatePlan: { contentHash: "workspace-hash", kind: "workspace-content" },
+      templatePlan: {
+        contentHash: "workspace-hash",
+        kind: "workspace-content",
+        sourceHash: SANDBOX_SOURCE_HASH,
+      },
     } as const;
 
     vi.stubEnv("VERCEL_TEAM_ID", "team_build");
@@ -337,14 +357,22 @@ describe("createRuntimeSandboxTemplateKey", () => {
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "eve:default-sandbox",
-      templatePlan: { contentHash: "workspace-hash-one", kind: "workspace-content" },
+      templatePlan: {
+        contentHash: "workspace-hash-one",
+        kind: "workspace-content",
+        sourceHash: SANDBOX_SOURCE_HASH,
+      },
     });
     const secondKey = await createRuntimeSandboxTemplateKey({
       backendName: "vercel",
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "eve:default-sandbox",
-      templatePlan: { contentHash: "workspace-hash-two", kind: "workspace-content" },
+      templatePlan: {
+        contentHash: "workspace-hash-two",
+        kind: "workspace-content",
+        sourceHash: SANDBOX_SOURCE_HASH,
+      },
     });
 
     expect(secondKey).not.toBe(firstKey);
@@ -356,7 +384,7 @@ describe("createRuntimeSandboxTemplateKey", () => {
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "eve:default-sandbox",
-      templatePlan: { kind: "none" },
+      templatePlan: { kind: "none", sourceHash: SANDBOX_SOURCE_HASH },
     });
 
     expect(key).toBeNull();

@@ -9,7 +9,6 @@ import type {
   RuntimeDynamicModelReference,
   RuntimeModelReference,
 } from "#runtime/agent/bootstrap.js";
-import { resolveBootstrapRuntimeModel } from "#runtime/agent/bootstrap-model.js";
 import {
   resolveMockAuthoredRuntimeModel,
   shouldMockAuthoredRuntimeModels,
@@ -51,12 +50,6 @@ export async function resolveRuntimeModelReference(
   reference: RuntimeModelReference,
   scope?: RuntimeModelResolutionScope,
 ): Promise<LanguageModel> {
-  const bootstrapModel = resolveBootstrapRuntimeModel(reference);
-
-  if (bootstrapModel !== null) {
-    return bootstrapModel;
-  }
-
   const mockModel = resolveMockAuthoredRuntimeModel(reference);
 
   if (mockModel !== null) {

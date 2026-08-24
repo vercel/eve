@@ -21,14 +21,11 @@ import {
   type ResolvedRuntimeModelSelection,
   type RuntimeModelResolutionScope,
 } from "#runtime/agent/resolve-model.js";
-import type { DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
+import {
+  ALLOWED_DYNAMIC_MODEL_EVENTS,
+  type DynamicToolEventName,
+} from "#shared/dynamic-tool-definition.js";
 import { toErrorMessage } from "#shared/errors.js";
-
-const ALLOWED_DYNAMIC_MODEL_EVENTS = new Set<DynamicToolEventName>([
-  "session.started",
-  "turn.started",
-  "step.started",
-]);
 
 export type ActiveDynamicModelSelection = LiveDynamicModelSelection;
 

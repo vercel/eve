@@ -56,17 +56,11 @@ export {
   type MatchedToolResult,
   type ToolResultFromFn,
 } from "#public/tool-result-narrowing.js";
-export { type DefineBashToolInput, defineBashTool } from "#public/tools/define-bash-tool.js";
-export { type DefineGlobToolInput, defineGlobTool } from "#public/tools/define-glob-tool.js";
-export { type DefineGrepToolInput, defineGrepTool } from "#public/tools/define-grep-tool.js";
-export {
-  type DefineReadFileToolInput,
-  defineReadFileTool,
-} from "#public/tools/define-read-file-tool.js";
-export {
-  type DefineWriteFileToolInput,
-  defineWriteFileTool,
-} from "#public/tools/define-write-file-tool.js";
+export { type DefineBashToolInput, defineBashTool } from "#public/tools/bash.js";
+export { type DefineGlobToolInput, defineGlobTool } from "#public/tools/glob.js";
+export { type DefineGrepToolInput, defineGrepTool } from "#public/tools/grep.js";
+export { type DefineReadFileToolInput, defineReadFileTool } from "#public/tools/read-file.js";
+export { type DefineWriteFileToolInput, defineWriteFileTool } from "#public/tools/write-file.js";
 export {
   type WebSearchProvider,
   type WebSearchToolDefinition,

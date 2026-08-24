@@ -1,7 +1,8 @@
 import type { Nitro } from "nitro/types";
 import { describe, expect, it } from "vitest";
 
-import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { EVE_PRODUCTION_CRON_ROUTE_PATTERN, EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { eveRoutePatternMatchesPath } from "#protocol/route-pattern.js";
 import {
   applyEveCronHandlerRoute,
   createEveCronHandlerRoute,
@@ -18,6 +19,7 @@ describe("createEveCronHandlerRoute", () => {
 
     const suffix = route.slice(`${EVE_ROUTE_PREFIX}/cron/`.length);
     expect(suffix).toMatch(BASE64URL_PATTERN);
+    expect(eveRoutePatternMatchesPath(EVE_PRODUCTION_CRON_ROUTE_PATTERN, route)).toBe(true);
   });
 
   it("emits a unique route on every call", () => {

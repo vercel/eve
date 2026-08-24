@@ -42,7 +42,12 @@ async function createPostBuildFixture(
   await writeFile(join(repoRoot, "docs", "guide.md"), "doc\n", "utf8");
   await writeFile(
     join(packageRoot, "package.json"),
-    '{"version":"1.2.3","engines":{"node":">=24"}}\n',
+    '{"version":"1.2.3","engines":{"node":">=24"},"imports":{"#framework-sources/revision.js":"./runtime-source-revision.mjs"}}\n',
+    "utf8",
+  );
+  await writeFile(
+    join(packageRoot, "runtime-source-revision.mjs"),
+    'export const resolveEveRuntimeSourceRevision = () => "runtime-source-revision";\n',
     "utf8",
   );
   await writeFile(
@@ -106,6 +111,11 @@ describe("post-build scripts", () => {
       "utf8",
     );
     await writeFile(
+      join(packageRoot, "dist", "src", "framework-source-revision.js"),
+      'export const revision = "__EVE_RUNTIME_SOURCE_REVISION__";\n',
+      "utf8",
+    );
+    await writeFile(
       join(packageRoot, "dist", "src", "cli", "commands", "channels.js"),
       'export const connect = "__VERCEL_CONNECT_VERSION__";\n',
       "utf8",
@@ -136,6 +146,9 @@ describe("post-build scripts", () => {
     await expect(
       readFile(join(packageRoot, "dist", "src", "internal", "application", "package.js"), "utf8"),
     ).resolves.toBe('export const version = "1.2.3";\n');
+    await expect(
+      readFile(join(packageRoot, "dist", "src", "framework-source-revision.js"), "utf8"),
+    ).resolves.toBe('export const revision = "runtime-source-revision";\n');
     await expect(
       readFile(join(packageRoot, "dist", "src", "cli", "commands", "channels.js"), "utf8"),
     ).resolves.toBe('export const connect = "3.0.0";\n');

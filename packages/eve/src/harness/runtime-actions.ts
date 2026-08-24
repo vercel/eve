@@ -3,7 +3,7 @@ import type { ModelMessage, ToolSet, TypedToolCall } from "ai";
 import { createActionResultEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
 import { resolveRuntimeActionResultsForKeys } from "#runtime/actions/results.js";
-import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
+import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/runtime-actions.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import { findRunningAgentHandle, isResultBoundToRunningHandle } from "#harness/handles/query.js";
@@ -21,6 +21,8 @@ import type {
   SessionStateMap,
   StepInput,
 } from "#harness/types.js";
+import { isKernelCapabilityName, type KernelCapabilityName } from "#kernel/capabilities.js";
+import { classifyKernelRuntimeCall } from "#kernel/executable-capabilities.js";
 
 const PENDING_RUNTIME_ACTION_BATCH_KEY = "eve.runtime.pendingActionBatch";
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
@@ -59,6 +61,7 @@ interface PendingRuntimeActionEventMetadata {
 export interface PendingRuntimeActionBatch {
   readonly actions: readonly RuntimeActionRequest[];
   readonly event: PendingRuntimeActionEventMetadata;
+  readonly kernelCapabilities: Readonly<Record<string, KernelCapabilityName>>;
   readonly responseMessages: readonly ModelMessage[];
 }
 
@@ -87,7 +90,13 @@ export function getPendingRuntimeActionBatch(
     !Array.isArray(batch.actions) ||
     !Array.isArray(batch.responseMessages) ||
     typeof batch.event !== "object" ||
-    batch.event === null
+    batch.event === null ||
+    typeof batch.kernelCapabilities !== "object" ||
+    batch.kernelCapabilities === null ||
+    Array.isArray(batch.kernelCapabilities) ||
+    !Object.values(batch.kernelCapabilities).every(
+      (capability) => typeof capability === "string" && isKernelCapabilityName(capability),
+    )
   ) {
     return undefined;
   }
@@ -117,6 +126,7 @@ export function clearPendingRuntimeActionBatch(session: HarnessSession): Harness
 export function setPendingRuntimeActionBatch(input: {
   readonly actions: readonly RuntimeActionRequest[];
   readonly event: PendingRuntimeActionEventMetadata;
+  readonly kernelCapabilities: Readonly<Record<string, KernelCapabilityName>>;
   readonly responseMessages: readonly ModelMessage[];
   readonly session: HarnessSession;
 }): HarnessSession {
@@ -125,6 +135,7 @@ export function setPendingRuntimeActionBatch(input: {
   state[PENDING_RUNTIME_ACTION_BATCH_KEY] = {
     actions: [...input.actions],
     event: input.event,
+    kernelCapabilities: { ...input.kernelCapabilities },
     responseMessages: [...input.responseMessages],
   } satisfies PendingRuntimeActionBatch;
 
@@ -364,18 +375,19 @@ export function createRuntimeActionRequestFromToolCall(input: {
 }): RuntimeActionRequest {
   const definition = input.tools.get(input.toolCall.toolName);
 
-  if (definition?.frameworkAction === "load-skill") {
-    return {
-      callId: input.toolCall.toolCallId,
-      input: resolveToolCallInputObject(input.toolCall.input, {
-        callId: input.toolCall.toolCallId,
-        toolName: input.toolCall.toolName,
-      }),
-      kind: "load-skill",
-    };
+  if (definition?.kernelCapability !== undefined) {
+    const request = classifyKernelRuntimeCall(definition.kernelCapability, {
+      definition,
+      resolveInput: resolveToolCallInputObject,
+      toolCall: input.toolCall,
+    });
+    if (request !== undefined) return request;
   }
 
-  if (definition?.runtimeAction?.kind === "subagent-call") {
+  if (
+    definition?.runtimeAction?.kind === "subagent-call" &&
+    definition.kernelCapability === undefined
+  ) {
     return {
       callId: input.toolCall.toolCallId,
       description: definition.description,

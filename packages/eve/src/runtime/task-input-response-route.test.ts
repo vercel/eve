@@ -1,12 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
-import { EVE_TASK_INPUT_ROUTE_PATTERN } from "#protocol/routes.js";
-import type { RouteContext } from "#public/definitions/channel.js";
-import {
-  getTaskInputResponseChannelDefinitions,
-  handleTaskInputResponseRequest,
-} from "#runtime/task-input-response-route.js";
+import type { RouteHandlerArgs } from "#channel/routes.js";
+import { handleTaskInputResponseRequest } from "#runtime/task-input-response-route.js";
 
 const resumeHookMock = vi.fn();
 const getHookByTokenMock = vi.fn();
@@ -29,12 +25,6 @@ describe("task input response capability", () => {
     getHookByTokenMock.mockReset();
     getHookByTokenMock.mockResolvedValue(TARGET_HOOK);
     resumeHookMock.mockReset();
-  });
-
-  it("registers one capability-scoped POST route", () => {
-    expect(getTaskInputResponseChannelDefinitions()).toEqual([
-      expect.objectContaining({ method: "POST", urlPath: EVE_TASK_INPUT_ROUTE_PATTERN }),
-    ]);
   });
 
   it("resumes only the addressed child input batch", async () => {
@@ -88,10 +78,6 @@ function request(body: unknown): Request {
   });
 }
 
-function context(token: string): RouteContext {
-  return {
-    params: { token },
-    requestIp: null,
-    waitUntil() {},
-  };
+function context(token: string): Pick<RouteHandlerArgs, "params"> {
+  return { params: { token } };
 }

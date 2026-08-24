@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { AgentInfoResult } from "#client/index.js";
 import type { LogRecord } from "#internal/logging.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info.js";
 import type { DevDiagnostics } from "../diagnostics.js";
 import { searchActionValue } from "#setup/cli/select-state.js";
 import {
@@ -85,7 +86,7 @@ function agentInfoWithModel(
   endpoint?: StaticAgentInfoModel["endpoint"],
   extras?: Partial<StaticAgentInfoModel>,
 ): AgentInfoResult {
-  return {
+  return createTestAgentInfoResult({
     agent: {
       agentRoot: "/tmp/weather-agent/agent",
       appRoot: "/tmp/weather-agent",
@@ -97,54 +98,61 @@ function agentInfoWithModel(
       },
       name: "Weather Agent",
     },
-    capabilities: {
-      devRoutes: true,
+  });
+}
+
+function localAgentInfoEntry(input: {
+  readonly name: string;
+  readonly nodeId: string;
+  readonly parentNodeId: string;
+}): AgentInfoResult["subagents"]["local"][number] {
+  return {
+    description: `${input.name} specialist`,
+    entryPath: `/tmp/weather-agent/agent/subagents/${input.name}`,
+    logicalPath: `subagents/${input.name}`,
+    name: input.name,
+    nodeId: input.nodeId,
+    owner: { kind: "application" },
+    parentNodeId: input.parentNodeId,
+    rootPath: `/tmp/weather-agent/agent/subagents/${input.name}`,
+    sourceId: `test:${input.nodeId}`,
+    sourceKind: "subagent",
+    summary: {
+      channels: 0,
+      connections: 0,
+      hooks: 0,
+      instructions: false,
+      schedules: 0,
+      skills: 0,
+      tools: 0,
     },
-    channels: {
-      authored: [],
-      available: [],
-      disabledFramework: [],
-      framework: [],
+  };
+}
+
+function remoteAgentInfoEntry(input: {
+  readonly name: string;
+  readonly nodeId: string;
+  readonly parentNodeId: string;
+}): AgentInfoResult["remoteAgents"]["entries"][number] {
+  return {
+    configResolver: {
+      logicalPath: `subagents/${input.name}/agent.ts`,
+      owner: { kind: "application" },
+      sourceId: `test:${input.nodeId}:config`,
+      sourceKind: "module",
     },
-    connections: [],
-    diagnostics: {
-      discoveryErrors: 0,
-      discoveryWarnings: 0,
-    },
-    hooks: [],
-    instructions: {
-      dynamic: [],
-      static: [],
-    },
-    kind: "eve-agent-info",
-    mode: "development",
-    sandbox: null,
-    schedules: [],
-    skills: {
-      dynamic: [],
-      static: [],
-    },
-    subagents: {
-      local: [],
-      total: 0,
-    },
-    tools: {
-      authored: [],
-      available: [],
-      disabledFramework: [],
-      dynamic: [],
-      framework: [],
-      reserved: [],
-    },
-    version: 2,
-    workflow: {
-      enabled: false,
-      toolName: "Workflow",
-    },
-    workspace: {
-      resourceRoot: null,
-      rootEntries: [],
-    },
+    description: `${input.name} remote specialist`,
+    entryPath: `/tmp/weather-agent/agent/subagents/${input.name}`,
+    logicalPath: `subagents/${input.name}`,
+    name: input.name,
+    nodeId: input.nodeId,
+    owner: { kind: "application" },
+    parentNodeId: input.parentNodeId,
+    path: "/eve/v1/session",
+    rootPath: `/tmp/weather-agent/agent/subagents/${input.name}`,
+    sourceId: `test:${input.nodeId}`,
+    sourceKind: "subagent",
+    url: "https://remote.example",
   };
 }
 
@@ -345,6 +353,70 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("Fetched https://github.com/vercel/eve/issues/648");
     expect(snapshot).not.toContain("format=markdown");
     expect(snapshot).not.toContain("large fetched page");
+    renderer.shutdown();
+  });
+
+  it("recognizes only root-owned local and remote agents as parent tool names", async () => {
+    const { screen, renderer } = makeRenderer();
+    const baseInfo = agentInfoWithModel("gpt-5");
+    const manager = localAgentInfoEntry({
+      name: "manager",
+      nodeId: "opaque:manager",
+      parentNodeId: baseInfo.agent.nodeId,
+    });
+    const researcher = localAgentInfoEntry({
+      name: "researcher",
+      nodeId: "opaque:researcher",
+      parentNodeId: manager.nodeId,
+    });
+    const reviewer = remoteAgentInfoEntry({
+      name: "reviewer",
+      nodeId: "opaque:reviewer",
+      parentNodeId: baseInfo.agent.nodeId,
+    });
+    renderer.renderAgentHeader({
+      info: {
+        ...baseInfo,
+        remoteAgents: { entries: [reviewer], total: 1 },
+        subagents: { local: [manager, researcher], total: 2 },
+      },
+      name: "Weather Agent",
+      serverUrl: "http://localhost:3000",
+    });
+
+    await renderer.renderStream(
+      streamOf([
+        {
+          type: "tool-call",
+          toolCallId: "nested-name",
+          toolName: "researcher",
+          input: { message: "nested only" },
+        },
+        { type: "tool-result", toolCallId: "nested-name", output: "done" },
+        {
+          type: "tool-call",
+          toolCallId: "direct-name",
+          toolName: "manager",
+          input: { message: "delegate directly" },
+        },
+        { type: "tool-result", toolCallId: "direct-name", output: "done" },
+        {
+          type: "tool-call",
+          toolCallId: "remote-name",
+          toolName: "reviewer",
+          input: { message: "delegate remotely" },
+        },
+        { type: "tool-result", toolCallId: "remote-name", output: "done" },
+        { type: "finish" },
+      ]),
+      { submittedPrompt: "delegate", continueSession: false },
+    );
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("researcher");
+    expect(snapshot).not.toContain("Delegate researcher");
+    expect(snapshot).toContain("Delegated manager");
+    expect(snapshot).toContain("Delegated reviewer");
     renderer.shutdown();
   });
 

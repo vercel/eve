@@ -183,6 +183,7 @@ function createConfig(
     ],
   ]);
   return {
+    kernelPlan: { prepared: ["final_output"] },
     mode: "conversation",
     resolveModel: async (): Promise<LanguageModel> => model,
     tools,

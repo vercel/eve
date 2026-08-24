@@ -29,14 +29,13 @@ import { readConnectionProtocol } from "#public/definitions/connections/protocol
  * runtime resolution) stays protocol-agnostic.
  */
 export async function compileConnectionDefinition(
-  agentRoot: string,
   source: ConnectionSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
+  options: ModuleBackedDefinitionLoadOptions,
 ): Promise<CompiledConnectionDefinition> {
   const loaded = await loadModuleBackedDefinition({
-    agentRoot,
-    externalDependencies: options.externalDependencies,
+    binding: options.binding,
     kind: "connection",
+    moduleLoader: options.moduleLoader,
     source,
   });
   const protocol = readConnectionProtocol(loaded);
@@ -58,6 +57,9 @@ export async function compileConnectionDefinition(
     compiled = {
       ...shared,
       description: normalized.description,
+      hasApproval: normalized.approval !== undefined,
+      hasAuthorization: normalized.auth !== undefined,
+      hasHeaders: normalized.headers !== undefined,
       protocol: "openapi",
       url: normalized.baseUrl ?? "",
     };
@@ -67,6 +69,9 @@ export async function compileConnectionDefinition(
     compiled = {
       ...shared,
       description: normalized.description,
+      hasApproval: normalized.approval !== undefined,
+      hasAuthorization: normalized.auth !== undefined,
+      hasHeaders: normalized.headers !== undefined,
       protocol: "mcp",
       url: normalized.url,
     };

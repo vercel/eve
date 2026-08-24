@@ -34,6 +34,57 @@ The application exposes a health route plus eve channel routes that inspect the 
 
 The session routes use only durable session IDs. Create a session explicitly, then put its returned ID in every follow-up, control, and stream path.
 
+### Replace home or health
+
+The default home and health handlers are ordinary compiled channel sources.
+Author `agent/channels/home.ts` to replace `GET /`, or
+`agent/channels/eve/v1/health.ts` to replace the health source. A replacement
+health channel should retain both `GET` and `HEAD` and return this successful
+payload:
+
+```json
+{ "ok": true, "status": "ready", "workflowId": "<compiled workflow id>" }
+```
+
+You can remove either source by exporting `disableRoute()` from its canonical
+file instead. Removing health leaves `/eve/v1/health` unregistered, so
+`Client.health()` throws `ClientError` for the resulting non-2xx response. A
+selected health route that returns a 2xx body outside the contract causes
+`HealthResponseError`. Home and health replacement does not control internal
+process readiness. During `eve dev`, the host uses its internal development
+control and readiness transport. During `eve start`, the parent process waits
+for a child-process listening handshake rather than probing an HTTP route.
+
+### Inspect the compiled agent
+
+`GET /eve/v1/info` returns the version 3 inspection snapshot used by the CLI,
+development UI, and typed client. The response projects one effective compiled
+root plus its complete local and remote agent graph rather than rebuilding
+framework state at request time:
+
+- static definitions include their logical path, source ID, and owner;
+- dynamic tool, skill, and instruction resolvers are listed separately from
+  their session-specific outputs;
+- `kernel.availability` is `"prepared-potential"`: `kernel.frameworkSources`
+  lists selected framework source definitions that the kernel materializes,
+  while `kernel.native` lists the closed native capabilities the compiled node
+  can prepare;
+- `channels` is the effective ordered route list used for dispatch;
+- `subagents.local` and `remoteAgents.entries` are separate flat graph rosters;
+  each entry carries `parentNodeId`, and `agent.nodeId` identifies the root;
+- `composition.selected`, `composition.disabled`, and `composition.shadowed`
+  exhaustively record the root agent's effective source slots and every losing
+  candidate. Precedence runs from framework default to extension package to
+  extension override to application, so extensions can shadow framework
+  defaults, and application sources can shadow framework or extension
+  candidates; and
+- `composition.routes.shadowed` separately retains selected channel routes that
+  lost a method-and-path collision.
+
+The snapshot does not claim which conditional capabilities a particular model
+call received. Use `Client.info()` from `eve/client` when you want the response
+validated against the current schema.
+
 ### Start and continue a session
 
 Start a session with an initial message, then use the returned `sessionId` for every follow-up and control operation:

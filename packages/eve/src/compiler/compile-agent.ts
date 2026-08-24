@@ -1,7 +1,11 @@
 import { join } from "node:path";
 
-import type { DiscoverDiagnostic } from "#discover/diagnostics.js";
-import { hasDiscoverErrors, summarizeDiscoverDiagnostics } from "#discover/diagnostics.js";
+import type { CompilerDiagnostic } from "#shared/compiler-diagnostics.js";
+import {
+  formatCompilerDiagnostic,
+  hasCompilerErrors,
+  summarizeCompilerDiagnostics,
+} from "#shared/compiler-diagnostics.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import type { ResolvedDiscoveryProject } from "#discover/project.js";
 import { resolveDiscoveryProject } from "#discover/project.js";
@@ -14,12 +18,17 @@ import {
   writeCompilerArtifacts,
 } from "#compiler/artifacts.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import { ChannelRoutePlanningError } from "#compiler/channel-route-plan.js";
+import { SourceNormalizationError } from "#compiler/normalize-helpers.js";
+import type { BuiltInWorkflowWorldTarget } from "#internal/workflow/world-target.js";
 
 /**
  * Input for compiling the current authored agent into framework-owned
  * discovery artifacts.
  */
 export interface CompileAgentInput {
+  /** Effective native World when the root config does not select one. */
+  defaultWorkflowWorld?: BuiltInWorkflowWorldTarget;
   /**
    * Optional {@link ProjectSource} used for discovery reads. Defaults to a
    * disk-backed source so production callers keep their current behaviour.
@@ -33,7 +42,7 @@ export interface CompileAgentInput {
  * artifacts.
  */
 export interface CompileAgentResult {
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
   manifest: CompiledAgentManifest;
   metadata: CompileMetadata;
   paths: CompilerArtifactPaths;
@@ -41,8 +50,8 @@ export interface CompileAgentResult {
 }
 
 /**
- * Error raised when discovery artifacts were written but discovery still
- * contained errors.
+ * Error raised when compiler artifacts were written but diagnostics contain
+ * errors.
  */
 export class CompileAgentError extends Error {
   readonly result: CompileAgentResult;
@@ -69,17 +78,38 @@ export class CompileAgentError extends Error {
   }
 }
 
+/** Error raised when compilation aborts before a successful artifact can be written. */
+export class CompileAgentDiagnosticError extends Error {
+  readonly diagnostic: CompilerDiagnostic;
+  readonly diagnostics: readonly CompilerDiagnostic[];
+
+  constructor(
+    diagnostic: CompilerDiagnostic,
+    previousDiagnostics: readonly CompilerDiagnostic[] = [],
+  ) {
+    const diagnostics = [...previousDiagnostics, diagnostic];
+    super(formatCompileAgentErrorLines(diagnostics).join("\n"));
+    this.name = "CompileAgentDiagnosticError";
+    this.diagnostic = diagnostic;
+    this.diagnostics = diagnostics;
+  }
+}
+
 /**
- * Runs discovery, writes compiler-owned artifacts, and throws when discovery
- * produced errors.
+ * Runs discovery and compilation, writes compiler-owned artifacts, and throws
+ * when diagnostics contain errors.
  */
 export async function compileAgent(input: CompileAgentInput = {}): Promise<CompileAgentResult> {
   const discovered = await discoverAgentForCompilation(input);
   const artifactsRoot = join(discovered.project.appRoot, ".eve");
-  const result = await writeAgentCompilation(discovered, {
-    publishedRoot: artifactsRoot,
-    writeRoot: artifactsRoot,
-  });
+  const result = await writeAgentCompilation(
+    discovered,
+    {
+      publishedRoot: artifactsRoot,
+      writeRoot: artifactsRoot,
+    },
+    input.defaultWorkflowWorld ?? resolveDefaultWorkflowWorld(),
+  );
 
   return finishAgentCompilation(result, CompileAgentError.fromDurableArtifacts);
 }
@@ -91,16 +121,21 @@ export async function compileAgent(input: CompileAgentInput = {}): Promise<Compi
  */
 export async function compileAgentInWorkspace(input: {
   readonly artifactLocations: CompilerArtifactLocations;
+  readonly defaultWorkflowWorld: BuiltInWorkflowWorldTarget;
   readonly startPath: string;
 }): Promise<CompileAgentResult> {
   const discovered = await discoverAgentForCompilation({ startPath: input.startPath });
-  const result = await writeAgentCompilation(discovered, input.artifactLocations);
+  const result = await writeAgentCompilation(
+    discovered,
+    input.artifactLocations,
+    input.defaultWorkflowWorld,
+  );
 
   return finishAgentCompilation(result, CompileAgentError.fromTransientArtifacts);
 }
 
 interface DiscoveredAgentCompilation {
-  readonly diagnostics: DiscoverDiagnostic[];
+  readonly diagnostics: CompilerDiagnostic[];
   readonly manifest: AgentSourceManifest;
   readonly project: ResolvedDiscoveryProject;
 }
@@ -122,16 +157,26 @@ async function discoverAgentForCompilation(
 async function writeAgentCompilation(
   discovered: DiscoveredAgentCompilation,
   artifactLocations: CompilerArtifactLocations,
+  defaultWorkflowWorld: BuiltInWorkflowWorldTarget,
 ): Promise<CompileAgentResult> {
-  const writtenArtifacts = await writeCompilerArtifacts({
-    appRoot: discovered.project.appRoot,
-    artifactLocations,
-    diagnostics: discovered.diagnostics,
-    manifest: discovered.manifest,
-  });
+  let writtenArtifacts: Awaited<ReturnType<typeof writeCompilerArtifacts>>;
+  try {
+    writtenArtifacts = await writeCompilerArtifacts({
+      appRoot: discovered.project.appRoot,
+      artifactLocations,
+      defaultWorkflowWorld,
+      diagnostics: discovered.diagnostics,
+      manifest: discovered.manifest,
+    });
+  } catch (error) {
+    if (error instanceof ChannelRoutePlanningError || error instanceof SourceNormalizationError) {
+      throw new CompileAgentDiagnosticError(error.diagnostic, discovered.diagnostics);
+    }
+    throw error;
+  }
 
   return {
-    diagnostics: discovered.diagnostics,
+    diagnostics: writtenArtifacts.diagnosticsArtifact.diagnostics,
     manifest: writtenArtifacts.compiledManifest,
     metadata: writtenArtifacts.metadata,
     paths: writtenArtifacts.paths,
@@ -139,20 +184,24 @@ async function writeAgentCompilation(
   };
 }
 
+function resolveDefaultWorkflowWorld(): BuiltInWorkflowWorldTarget {
+  return process.env.VERCEL ? "vercel" : "local";
+}
+
 function finishAgentCompilation(
   result: CompileAgentResult,
   createError: (result: CompileAgentResult) => CompileAgentError,
 ): CompileAgentResult {
-  if (hasDiscoverErrors(result.diagnostics)) {
+  if (hasCompilerErrors(result.diagnostics)) {
     throw createError(result);
   }
 
-  reportDiscoverWarnings(result.diagnostics);
+  reportCompilerWarnings(result.diagnostics);
 
   return result;
 }
 
-function reportDiscoverWarnings(diagnostics: readonly DiscoverDiagnostic[]): void {
+function reportCompilerWarnings(diagnostics: readonly CompilerDiagnostic[]): void {
   const warnings = diagnostics.filter((diagnostic) => diagnostic.severity === "warning");
 
   if (warnings.length === 0) {
@@ -160,30 +209,25 @@ function reportDiscoverWarnings(diagnostics: readonly DiscoverDiagnostic[]): voi
   }
 
   for (const warning of warnings) {
-    console.warn(`Warning [${warning.code}]: ${warning.message}\n  source: ${warning.sourcePath}`);
+    console.warn(formatCompilerDiagnostic(warning));
   }
 }
 
-function formatCompileAgentErrorLines(diagnostics: readonly DiscoverDiagnostic[]): string[] {
-  const summary = summarizeDiscoverDiagnostics(diagnostics);
+function formatCompileAgentErrorLines(diagnostics: readonly CompilerDiagnostic[]): string[] {
+  const summary = summarizeCompilerDiagnostics(diagnostics);
   const lines: string[] = [
-    `Discovery failed with ${summary.errors} error(s) and ${summary.warnings} warning(s).`,
+    `Compilation failed with ${summary.errors} error(s) and ${summary.warnings} warning(s).`,
   ];
 
   if (diagnostics.length === 0) {
     return lines;
   }
 
-  lines.push("Discovery diagnostics:");
+  lines.push("Compiler diagnostics:");
 
   for (const diagnostic of diagnostics) {
-    lines.push(`- ${formatDiagnosticSeverity(diagnostic.severity)}: ${diagnostic.message}`);
-    lines.push(`  source: ${diagnostic.sourcePath}`);
+    lines.push(formatCompilerDiagnostic(diagnostic, { bullet: true }));
   }
 
   return lines;
-}
-
-function formatDiagnosticSeverity(severity: DiscoverDiagnostic["severity"]): string {
-  return severity === "error" ? "Error" : "Warning";
 }

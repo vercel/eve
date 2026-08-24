@@ -9,8 +9,8 @@ import type {
   ConnectionAuthDefinition,
   HeadersDefinition,
   ToolFilterDefinition,
-} from "#runtime/connections/types.js";
-import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
+} from "#shared/connections.js";
+import { normalizeAuthorizationSpec } from "#shared/validate-connection-authorization.js";
 import { expectObjectRecord, expectOnlyKnownKeys } from "#internal/authored-module.js";
 import { parseJsonValue } from "#shared/json.js";
 
@@ -45,7 +45,7 @@ const KNOWN_AUTHORIZATION_KEYS = [
   // closure state of `getToken`. The runtime never reads it; it
   // survives `normalizeAuthorizationSpec` so consumers can pick it
   // off the normalized auth definition. See
-  // `runtime/connections/types.ts#AuthorizationDefinitionBase` for
+  // `shared/connections.ts#AuthorizationDefinitionBase` for
   // the type and `@vercel/connect/eve`'s `connect()` for the
   // canonical producer.
   "vercelConnect",

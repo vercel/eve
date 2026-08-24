@@ -90,6 +90,7 @@ export async function taskModelRetryStep(input: {
     provider: "eve-integration-mock",
   });
   const runStep = createToolLoopHarness({
+    kernelPlan: { prepared: ["final_output"] },
     mode: "task",
     resolveModel: async (): Promise<LanguageModel> => model,
     tools: new Map(),

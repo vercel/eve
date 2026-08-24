@@ -15,11 +15,7 @@ import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type {
-  InputResponse,
-  StrictInputResponses,
-  ValidatedInputResponse,
-} from "#runtime/input/types.js";
+import type { InputResponse, StrictInputResponses, ValidatedInputResponse } from "#shared/input.js";
 import {
   buildSlackBinding,
   buildSlackWorkspaceHandle,

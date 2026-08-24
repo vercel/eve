@@ -1,17 +1,30 @@
+import { readFile } from "node:fs/promises";
+
 import { describe, expect, it } from "vitest";
 
+import {
+  createCompileMetadata,
+  publishCompilerArtifactFiles,
+} from "../../src/compiler/artifacts.js";
 import { compileAgent } from "../../src/compiler/compile-agent.js";
-import { createDiskRuntimeCompiledArtifactsSource } from "../../src/runtime/compiled-artifacts-source.js";
+import {
+  createCompiledModuleMapDescriptorModuleSource,
+  createCompiledModuleMapIdentity,
+} from "../../src/compiler/module-map.js";
+import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "../../src/internal/application/runtime-compiled-artifacts-source.js";
+import { serializeArtifactJson } from "../../src/protocol/artifact-json.js";
 import { loadCompiledManifest } from "../../src/runtime/loaders/manifest.js";
-import { loadCompiledModuleMapFromAuthoredSource } from "../../src/internal/authored-module-map-loader.js";
+import { loadCompiledArtifactSet } from "../../src/runtime/loaders/compiled-artifact-set.js";
 import { resolveRuntimeAgentGraph } from "../../src/runtime/resolve-agent-graph.js";
+import { summarizeCompilerDiagnostics } from "../../src/shared/compiler-diagnostics.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 
 const scenarioApp = useScenarioApp();
 const compatibilityManifest = JSON.stringify({
   kind: "eve-extension",
-  formatVersion: 1,
+  formatVersion: 2,
   builtWithEve: "0.0.0-test",
+  build: { externalDependencies: [] },
   requires: { extension: 1, tool: 1, config: 1 },
 });
 
@@ -62,13 +75,70 @@ describe("mounted extension via authored-source loader", () => {
       },
     });
 
-    await compileAgent({ startPath: app.appRoot });
+    const compileResult = await compileAgent({ startPath: app.appRoot });
 
-    const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(app.appRoot);
-    const [manifest, moduleMap] = await Promise.all([
-      loadCompiledManifest({ compiledArtifactsSource }),
-      loadCompiledModuleMapFromAuthoredSource({ compiledArtifactsSource }),
+    const compiledArtifactsSource = createAuthoredSourceRuntimeCompiledArtifactsSource(app.appRoot);
+    const compiledManifest = await loadCompiledManifest({ compiledArtifactsSource });
+    const extensionTool = compiledManifest.tools.find((tool) => tool.name === "crm__crm_echo");
+    if (extensionTool === undefined) {
+      throw new Error("Expected the compiled extension tool.");
+    }
+    const extensionBinding = compiledManifest.bindings[extensionTool.sourceId];
+    if (extensionBinding === undefined) {
+      throw new Error("Expected the compiled extension binding.");
+    }
+    const opaqueSourceId = "opaque-extension-tool-source";
+    const bindings = { ...compiledManifest.bindings };
+    delete bindings[extensionTool.sourceId];
+    bindings[opaqueSourceId] = extensionBinding;
+    const opaqueManifest = {
+      ...compiledManifest,
+      bindings,
+      sourceComposition: {
+        ...compiledManifest.sourceComposition,
+        selected: compiledManifest.sourceComposition.selected.map((source) =>
+          source.sourceKind === "module" && source.sourceId === extensionTool.sourceId
+            ? { ...source, sourceId: opaqueSourceId }
+            : source,
+        ),
+      },
+      tools: compiledManifest.tools.map((tool) =>
+        tool.sourceId === extensionTool.sourceId ? { ...tool, sourceId: opaqueSourceId } : tool,
+      ),
+    };
+    const compiledManifestJson = serializeArtifactJson(opaqueManifest);
+    const [diagnosticsArtifactJson, discoveryManifestJson] = await Promise.all([
+      readFile(compileResult.paths.diagnosticsPath, "utf8"),
+      readFile(compileResult.paths.discoveryManifestPath, "utf8"),
     ]);
+    const moduleMapIdentity = await createCompiledModuleMapIdentity(opaqueManifest);
+    const moduleMapSource = createCompiledModuleMapDescriptorModuleSource({
+      identity: moduleMapIdentity,
+      manifest: opaqueManifest,
+      moduleMapPath: compileResult.paths.moduleMapPath,
+    });
+    const metadata = createCompileMetadata({
+      appRoot: app.appRoot,
+      compiledManifestJson,
+      diagnosticsArtifactJson,
+      diagnosticsSummary: summarizeCompilerDiagnostics(compileResult.diagnostics),
+      discoveryManifestJson,
+      moduleMapIdentity,
+      moduleMapSource,
+      paths: compileResult.paths,
+    });
+    await publishCompilerArtifactFiles({
+      metadataJson: serializeArtifactJson(metadata),
+      paths: compileResult.paths,
+      payloads: {
+        compiledManifestJson,
+        diagnosticsArtifactJson,
+        discoveryManifestJson,
+        moduleMapSource,
+      },
+    });
+
+    const { manifest, moduleMap } = await loadCompiledArtifactSet({ compiledArtifactsSource });
     const graph = await resolveRuntimeAgentGraph({ manifest, moduleMap });
 
     const tool = graph.root.agent.tools.find((entry) => entry.name === "crm__crm_echo");

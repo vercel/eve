@@ -1,617 +1,464 @@
-import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import {
-  getAllFrameworkToolDefinitions,
-  getAllFrameworkToolNames,
-  getFrameworkDynamicToolResolvers,
-  getOptInFrameworkToolNames,
-} from "#runtime/framework-tools/index.js";
-import {
-  getAllFrameworkChannelNames,
-  getFrameworkChannelDefinitions,
-} from "#runtime/framework-channels/index.js";
 import type {
-  AgentInfoData,
-  CompiledAgentManifest,
-  CompiledSubagentNode,
-  ResolvedSandboxDefinition,
-  ResolvedScheduleDefinition,
-  ResolvedSkillDefinition,
-} from "#internal/nitro/routes/agent-info/load-agent-info-data.js";
-import type {
-  ResolvedAgent,
-  ResolvedChannelDefinition,
-  ResolvedToolDefinition,
-} from "#runtime/types.js";
-import { serializeInputSchema, serializeOutputSchema } from "#shared/tool-schema.js";
-import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
-import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
-import type { AgentReasoningDefinition, ModelRouting } from "#shared/agent-definition.js";
-import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
+  AgentInfoChannelEntry,
+  AgentInfoDynamicResolverEntry,
+  AgentInfoNamedDynamicResolverEntry,
+  AgentInfoOwner,
+  AgentInfoRemoteAgentEntry,
+  AgentInfoResult,
+  AgentInfoSource,
+  AgentInfoSubagentEntry,
+  AgentInfoToolEntry,
+} from "#client/agent-info-schema.js";
+import {
+  ROOT_COMPILED_AGENT_NODE_ID,
+  type CompiledAgentManifest,
+  type CompiledAgentNodeManifest,
+  type CompiledAgentResources,
+  type CompiledChannelDefinition,
+  type CompiledRemoteAgentNode,
+  type CompiledSubagentNode,
+} from "#compiler/manifest.js";
+import type { AgentSourceDescriptor } from "#compiler/source-composition.js";
+import { requireAgreedCompiledModuleRef } from "#compiler/module-binding.js";
+import type { AgentInfoManifestData } from "#internal/nitro/routes/agent-info/load-agent-info-data.js";
+import {
+  type GatewayCredentialPresence,
+  resolveModelEndpointStatus,
+} from "#internal/resolve-model-endpoint-status.js";
+import { projectPreparedKernelCapabilitiesForInspection } from "#kernel/capabilities.js";
+import type { ChatGptAuthState } from "#public/models/openai/chatgpt/token-broker.js";
 
-export interface AgentInfoSource {
+export type AgentInfoResponse = AgentInfoResult;
+
+type ManifestResources = CompiledAgentManifest | CompiledAgentNodeManifest | CompiledAgentResources;
+type BindingResources = Pick<ManifestResources, "bindings">;
+
+interface SourceReference {
   readonly exportName?: string;
   readonly logicalPath: string;
-  readonly sourceId?: string;
-  readonly sourceKind: string;
+  readonly sourceId: string;
+  readonly sourceKind: AgentInfoSource["sourceKind"];
 }
 
-export interface AgentInfoToolEntry extends AgentInfoSource {
-  readonly description: string;
-  readonly hasAuth: boolean;
-  readonly hasExecute: boolean;
-  readonly hasModelOutputProjection: boolean;
-  readonly hasOutputSchema: boolean;
-  readonly inputSchema: unknown;
-  readonly name: string;
-  readonly origin: "authored" | "framework";
-  readonly outputSchema: unknown;
-  readonly replacesFrameworkTool: boolean;
-  readonly requiresApproval: boolean;
-}
-
-export interface AgentInfoFrameworkToolEntry extends AgentInfoToolEntry {
-  readonly disabledByAuthor: boolean;
-  readonly replacedByAuthoredTool: boolean;
-  readonly status: "active" | "disabled" | "opt-in" | "replaced";
-}
-
-export interface AgentInfoDynamicResolverEntry extends AgentInfoSource {
-  readonly eventNames: readonly string[];
-  readonly origin: "authored" | "framework";
-  readonly slug: string;
-}
-
-export interface AgentInfoTools {
-  readonly available: readonly AgentInfoToolEntry[];
-  readonly authored: readonly AgentInfoToolEntry[];
-  readonly disabledFramework: readonly string[];
-  readonly dynamic: readonly AgentInfoDynamicResolverEntry[];
-  readonly framework: readonly AgentInfoFrameworkToolEntry[];
-  readonly reserved: readonly string[];
-}
-
-export interface AgentInfoSkillEntry extends AgentInfoSource {
-  readonly description: string;
-  readonly license?: string;
-  readonly markdown: string;
-  readonly metadata?: Readonly<Record<string, string>>;
-  readonly name: string;
-}
-
-export interface AgentInfoInstructionsEntry extends AgentInfoSource {
-  readonly content: string;
-  readonly name: string;
-  readonly role: "system" | "user";
-}
-
-export interface AgentInfoInstructions {
-  readonly dynamic: readonly AgentInfoDynamicResolverEntry[];
-  readonly static: readonly AgentInfoInstructionsEntry[];
-}
-
-export interface AgentInfoScheduleEntry extends AgentInfoSource {
-  readonly cron: string;
-  readonly hasRun: boolean;
-  readonly markdown?: string;
-  readonly name: string;
-}
-
-export interface AgentInfoSubagentEntry extends AgentInfoSource {
-  readonly description?: string;
-  readonly entryPath: string;
-  readonly name: string;
-  readonly nodeId: string;
-  readonly rootPath: string;
-  readonly summary: {
-    readonly channels: number;
-    readonly connections: number;
-    readonly hooks: number;
-    readonly instructions: boolean;
-    readonly schedules: number;
-    readonly skills: number;
-    readonly tools: number;
+function toChatGptEndpoint(state: ChatGptAuthState | undefined) {
+  if (state === undefined) return undefined;
+  return {
+    state: state.kind,
+    ...(state.kind === "ready" &&
+      state.accountLabel !== undefined && { accountLabel: state.accountLabel }),
   };
 }
 
-export interface AgentInfoChannelEntry extends AgentInfoSource {
-  readonly adapterKind?: string;
-  readonly method: string;
-  readonly name: string;
-  readonly origin: "authored" | "framework";
-  readonly urlPath: string;
-}
-
-export interface AgentInfoFrameworkChannelEntry extends AgentInfoChannelEntry {
-  readonly disabledByAuthor: boolean;
-  readonly replacedByAuthoredChannel: boolean;
-  readonly status: "active" | "disabled" | "replaced";
-}
-
-export interface AgentInfoChannels {
-  readonly authored: readonly AgentInfoChannelEntry[];
-  readonly available: readonly AgentInfoChannelEntry[];
-  readonly disabledFramework: readonly string[];
-  readonly framework: readonly AgentInfoFrameworkChannelEntry[];
-}
-
-export interface AgentInfoConnectionEntry extends AgentInfoSource {
-  readonly connectionName: string;
-  readonly description: string;
-  readonly hasApproval: boolean;
-  readonly hasAuthorization: boolean;
-  readonly hasHeaders: boolean;
-  readonly protocol: string;
-  readonly toolFilter?: unknown;
-  readonly url: string;
-}
-
-export interface AgentInfoHookEntry extends AgentInfoSource {
-  readonly eventNames: readonly string[];
-  readonly slug: string;
-}
-
-export interface AgentInfoSandboxEntry extends AgentInfoSource {
-  readonly backendKind?: string;
-  readonly description?: string;
-  readonly hasBootstrap: boolean;
-  readonly hasOnSession: boolean;
-  readonly revalidationKey?: string;
-  readonly sourceHash?: string;
-}
-
-export interface AgentInfoDiagnostics {
-  readonly discoveryErrors: number;
-  readonly discoveryWarnings: number;
-}
-
-interface AgentInfoModelBase {
-  readonly contextWindowTokens?: number;
-  readonly providerOptions?: unknown;
-  /** The agent's authored reasoning effort, forwarded to the model call. */
-  readonly reasoning?: AgentReasoningDefinition;
-  readonly source?: AgentInfoSource;
-}
-
-export type AgentInfoModel = AgentInfoModelBase &
-  (
-    | {
-        readonly id: string;
-        readonly routing: ModelRouting;
-        readonly endpoint?: ModelEndpointStatus;
-      }
-    | {
-        readonly id?: never;
-        readonly routing: { readonly kind: "dynamic" };
-        readonly endpoint?: never;
-      }
-  );
-
-export interface AgentInfoResponse {
-  readonly agent: {
-    readonly agentRoot: string;
-    readonly appRoot: string;
-    readonly configSource?: AgentInfoSource;
-    readonly description?: string;
-    readonly model: AgentInfoModel;
-    readonly name: string;
-    readonly outputSchema?: unknown;
-  };
-  readonly capabilities: {
-    readonly devRoutes: boolean;
-  };
-  readonly channels: AgentInfoChannels;
-  readonly connections: readonly AgentInfoConnectionEntry[];
-  readonly diagnostics: AgentInfoDiagnostics;
-  readonly hooks: readonly AgentInfoHookEntry[];
-  readonly instructions: AgentInfoInstructions;
-  readonly kind: "eve-agent-info";
-  readonly mode: "development" | "production";
-  readonly sandbox: AgentInfoSandboxEntry | null;
-  readonly schedules: readonly AgentInfoScheduleEntry[];
-  readonly skills: {
-    readonly static: readonly AgentInfoSkillEntry[];
-    readonly dynamic: readonly AgentInfoDynamicResolverEntry[];
-  };
-  readonly subagents: {
-    readonly local: readonly AgentInfoSubagentEntry[];
-    readonly total: number;
-  };
-  readonly tools: AgentInfoTools;
-  readonly version: 2;
-  readonly workflow: {
-    readonly enabled: boolean;
-    readonly toolName: string;
-  };
-  readonly workspace: {
-    readonly resourceRoot: unknown;
-    readonly rootEntries: readonly string[];
-  };
-}
-
+/** Projects `/eve/v1/info` solely from serialized compiler and kernel authority. */
 export function buildAgentInfoResponse(
-  data: AgentInfoData,
+  data: AgentInfoManifestData,
   input: {
-    readonly mode: AgentInfoResponse["mode"];
+    readonly mode: AgentInfoResult["mode"];
+    readonly gatewayCredentials: GatewayCredentialPresence;
+    readonly chatgptAuth?: ChatGptAuthState;
   },
-): AgentInfoResponse {
-  const agent = data.agent;
-  const config = agent.config;
-  if (config === undefined) {
-    throw new Error("Cannot inspect unresolved dynamic subagent resources as a root agent.");
-  }
-  const tools = buildToolInfo(agent, getRootDelegationToolNames(data.manifest));
+): AgentInfoResult {
+  const manifest = data.manifest;
+  const kernelProjection = projectPreparedKernelCapabilitiesForInspection(manifest.kernelPlan);
+  const frameworkSources = [...kernelProjection.frameworkSourcePaths].map((logicalPath) => {
+    const matches = manifest.tools.filter((tool) => tool.logicalPath === logicalPath);
+    if (matches.length !== 1) {
+      throw new Error(
+        `Compiled kernel source "${logicalPath}" must resolve to exactly one compiled tool.`,
+      );
+    }
+    const tool = matches[0]!;
+    const binding = requireModuleBinding(manifest, tool);
+    if (binding.owner.kind !== "framework") {
+      throw new Error(`Compiled kernel source "${logicalPath}" is not framework-owned.`);
+    }
+    return renderTool(manifest, tool);
+  });
+  const kernelSourceIds = new Set(frameworkSources.map((source) => source.sourceId));
+  const localParentNodeIds = new Map(
+    manifest.subagentEdges.map((edge) => [edge.childNodeId, edge.parentNodeId] as const),
+  );
+  const localSubagents = manifest.subagents.map((subagent) =>
+    renderSubagent(subagent, requireLocalParentNodeId(localParentNodeIds, subagent.nodeId)),
+  );
+  const remoteAgents = [
+    ...manifest.remoteAgents.map((remoteAgent) =>
+      renderRemoteAgent(remoteAgent, ROOT_COMPILED_AGENT_NODE_ID),
+    ),
+    ...manifest.subagents.flatMap((parent) =>
+      parent.agent.remoteAgents.map((remoteAgent) => renderRemoteAgent(remoteAgent, parent.nodeId)),
+    ),
+  ];
 
   return {
     agent: {
-      agentRoot: agent.metadata.agentRoot,
-      appRoot: agent.metadata.appRoot,
-      configSource: config.source ? toSource(config.source) : undefined,
-      description: config.description,
+      agentRoot: manifest.agentRoot,
+      appRoot: manifest.appRoot,
+      configSource: toModuleSource(manifest, manifest.config.source),
+      description: manifest.config.description,
       model:
-        config.dynamicModel === undefined
+        manifest.config.dynamicModel === undefined
           ? {
-              contextWindowTokens: config.model.contextWindowTokens,
-              id: config.model.id,
-              providerOptions: config.model.providerOptions,
-              reasoning: config.reasoning,
-              source: config.model.source ? toSource(config.model.source) : undefined,
-              routing: resolveStaticAgentModelRouting(data.manifest),
+              contextWindowTokens: manifest.config.model.contextWindowTokens,
+              endpoint: resolveModelEndpointStatus(
+                manifest.config.model.routing,
+                input.gatewayCredentials,
+                toChatGptEndpoint(input.chatgptAuth),
+              ),
+              id: manifest.config.model.id,
+              maxOutputTokens: manifest.config.model.maxOutputTokens,
+              providerOptions: manifest.config.model.providerOptions,
+              reasoning: manifest.config.reasoning,
+              routing: manifest.config.model.routing,
+              source:
+                manifest.config.model.source === undefined
+                  ? undefined
+                  : toModuleSource(manifest, manifest.config.model.source),
             }
           : {
-              reasoning: config.reasoning,
-              routing: { kind: "dynamic" },
+              reasoning: manifest.config.reasoning,
+              routing: {
+                kind: "dynamic",
+                resolver: renderDynamicResolver(manifest, manifest.config.dynamicModel),
+              },
             },
-      name: config.name,
-      outputSchema: config.outputSchema,
+      name: manifest.config.name,
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
+      outputSchema: manifest.config.outputSchema,
     },
-    capabilities: {
-      devRoutes: input.mode === "development",
+    capabilities: { devRoutes: input.mode === "development" },
+    channels: manifest.channelRoutes.effective.map((channel) => renderChannel(manifest, channel)),
+    composition: {
+      disabled: manifest.sourceComposition.disabled.map((entry) => ({
+        slot: entry.slot,
+        source: renderCompositionSource(entry.source),
+      })),
+      routes: {
+        shadowed: manifest.channelRoutes.shadowed.map((entry) => ({
+          loser: renderChannelWithOwner(entry.loser.route, entry.loser.binding.owner),
+          method: entry.method,
+          pathPattern: entry.pathPattern,
+          winningSourceId: entry.winningSourceId,
+        })),
+      },
+      selected: manifest.sourceComposition.selected.map((entry) =>
+        entry.sourceKind === "module"
+          ? {
+              slot: entry.slot,
+              source: toModuleSource(
+                manifest,
+                requireAgreedCompiledModuleRef(manifest, entry.sourceId),
+              ),
+              sourceKind: "module" as const,
+            }
+          : {
+              slot: entry.slot,
+              source: renderCompositionSource(entry.source),
+              sourceKind: "non-module" as const,
+            },
+      ),
+      shadowed: manifest.sourceComposition.shadowed.map((entry) => ({
+        slot: entry.slot,
+        source: renderCompositionSource(entry.source),
+        winningSourceId: entry.winningSourceId,
+      })),
     },
-    channels: buildChannelInfo(agent),
-    connections: agent.connections.map((connection) => ({
-      ...toSource(connection),
+    connections: manifest.connections.map((connection) => ({
+      ...toModuleSource(manifest, connection),
       connectionName: connection.connectionName,
       description: connection.description,
-      hasApproval: connection.approval !== undefined,
-      hasAuthorization: connection.authorization !== undefined,
-      hasHeaders: connection.headers !== undefined,
+      hasApproval: connection.hasApproval,
+      hasAuthorization: connection.hasAuthorization,
+      hasHeaders: connection.hasHeaders,
       protocol: connection.protocol,
-      toolFilter: connection.tools,
       url: connection.url,
     })),
     diagnostics: {
-      discoveryErrors: agent.metadata.diagnosticsSummary.errors,
-      discoveryWarnings: agent.metadata.diagnosticsSummary.warnings,
+      errors: manifest.diagnosticsSummary.errors,
+      warnings: manifest.diagnosticsSummary.warnings,
     },
-    hooks: agent.hooks.map((hook) => ({
-      ...toSource(hook),
-      eventNames: Object.keys(hook.events).sort(),
+    hooks: manifest.hooks.map((hook) => ({
+      ...toModuleSource(manifest, hook),
+      eventNames: [...hook.eventNames],
       slug: hook.slug,
     })),
     instructions: {
-      dynamic: agent.dynamicInstructionsResolvers.map((resolver) =>
-        renderDynamicResolver(resolver, { origin: "authored" }),
+      dynamic: manifest.dynamicInstructions.map((resolver) =>
+        renderNamedDynamicResolver(manifest, resolver),
       ),
-      static: agent.instructions.map((instructions) => ({
-        ...toSource(instructions),
+      static: manifest.instructions.map((instructions) => ({
+        ...toSource(manifest, instructions),
         content: instructions.content,
         name: instructions.name,
         role: instructions.role,
       })),
     },
+    kernel: {
+      availability: "prepared-potential",
+      frameworkSources,
+      native: kernelProjection.native.map((capability) => ({ ...capability })),
+    },
     kind: "eve-agent-info",
     mode: input.mode,
-    sandbox: renderSandbox(agent.sandbox),
-    schedules: data.schedules.map(renderSchedule),
+    remoteAgents: {
+      entries: remoteAgents,
+      total: remoteAgents.length,
+    },
+    sandbox: {
+      ...toModuleSource(manifest, manifest.sandbox),
+      backendKind: manifest.sandbox.backendName,
+      description: manifest.sandbox.description,
+      hasBootstrap: manifest.sandbox.hasBootstrap,
+      hasOnSession: manifest.sandbox.hasOnSession,
+      revalidationKey: manifest.sandbox.revalidationKey,
+      sourceHash: manifest.sandbox.sourceHash,
+    },
+    schedules: manifest.schedules.map((schedule) => ({
+      ...toSource(manifest, schedule),
+      cron: schedule.cron,
+      hasRun: schedule.hasRun,
+      markdown: schedule.markdown,
+      name: schedule.name,
+    })),
     skills: {
-      static: agent.skills.map(renderSkill),
-      dynamic: agent.dynamicSkillResolvers.map((resolver) =>
-        renderDynamicResolver(resolver, { origin: "authored" }),
+      dynamic: manifest.dynamicSkills.map((resolver) =>
+        renderNamedDynamicResolver(manifest, resolver),
       ),
+      static: manifest.skills.map((skill) => ({
+        ...toSource(manifest, skill),
+        description: skill.description,
+        license: skill.license,
+        markdown: skill.markdown,
+        metadata: skill.metadata,
+        name: skill.name,
+      })),
     },
     subagents: {
-      local: data.manifest.subagents.map(renderSubagent),
-      total: data.manifest.subagents.length,
+      local: localSubagents,
+      total: localSubagents.length,
     },
-    tools,
-    version: 2,
-    workflow: {
-      enabled: agent.workflowTool !== undefined,
-      toolName: WORKFLOW_TOOL_NAME,
+    tools: {
+      dynamic: manifest.dynamicTools.map((resolver) =>
+        renderNamedDynamicResolver(manifest, resolver),
+      ),
+      static: manifest.tools
+        .filter((tool) => !kernelSourceIds.has(tool.sourceId))
+        .map((tool) => renderTool(manifest, tool)),
     },
+    version: 3,
     workspace: {
-      resourceRoot: agent.workspaceResourceRoot,
-      rootEntries: [...agent.workspaceSpec.rootEntries],
+      resourceRoot: manifest.workspaceResourceRoot,
+      rootEntries: [...manifest.workspaceResourceRoot.rootEntries],
     },
   };
 }
 
-function resolveStaticAgentModelRouting(manifest: CompiledAgentManifest): ModelRouting {
-  if (manifest.config.model === undefined) {
-    throw new Error("Resolved static agent config does not match its compiled manifest.");
+function requireLocalParentNodeId(
+  parentNodeIds: ReadonlyMap<string, string>,
+  nodeId: string,
+): string {
+  const parentNodeId = parentNodeIds.get(nodeId);
+  if (parentNodeId === undefined) {
+    throw new Error(`Compiled local agent "${nodeId}" is missing its parent edge.`);
   }
-  return manifest.config.model.routing;
+  return parentNodeId;
 }
 
-function buildChannelInfo(agent: ResolvedAgent): AgentInfoChannels {
-  const authoredChannelNames = new Set(agent.channels.map((channel) => channel.name));
-  const disabledFrameworkChannels = new Set(agent.disabledFrameworkChannels);
-  const allFrameworkChannelNames = getAllFrameworkChannelNames();
-  const frameworkChannelDefinitions = getFrameworkChannelDefinitions();
-  const activeFrameworkChannels = frameworkChannelDefinitions.filter(
-    (channel) =>
-      !authoredChannelNames.has(channel.name) && !disabledFrameworkChannels.has(channel.name),
-  );
-  const authored = agent.channels.map((channel) =>
-    renderChannel(channel, {
-      origin: "authored",
-    }),
-  );
-  const framework = frameworkChannelDefinitions.map((channel) => {
-    const replacedByAuthoredChannel = authoredChannelNames.has(channel.name);
-    const disabledByAuthor = disabledFrameworkChannels.has(channel.name);
-    const status: AgentInfoFrameworkChannelEntry["status"] = disabledByAuthor
-      ? "disabled"
-      : replacedByAuthoredChannel
-        ? "replaced"
-        : "active";
-
-    return {
-      ...renderChannel(channel, {
-        origin: "framework",
-      }),
-      disabledByAuthor,
-      replacedByAuthoredChannel,
-      status,
-    };
-  });
-
-  return {
-    authored,
-    available: [
-      ...activeFrameworkChannels.map((channel) =>
-        renderChannel(channel, {
-          origin: "framework",
-        }),
-      ),
-      ...authored,
-    ],
-    disabledFramework: [...agent.disabledFrameworkChannels],
-    framework: framework.filter((channel) => allFrameworkChannelNames.has(channel.name)),
-  };
-}
-
-function buildToolInfo(
-  agent: ResolvedAgent,
-  delegationToolNames: ReadonlySet<string>,
-): AgentInfoTools {
-  const authoredToolNames = new Set(agent.tools.map((tool) => tool.name));
-  const disabledFrameworkTools = new Set(agent.disabledFrameworkTools);
-  const allFrameworkToolNames = getAllFrameworkToolNames();
-  const dynamicFrameworkResolvers = getFrameworkDynamicToolResolvers();
-  const authored = agent.tools.map((tool) =>
-    renderTool(tool, {
-      origin: "authored",
-      replacesFrameworkTool: allFrameworkToolNames.has(tool.name),
-    }),
-  );
-  const frameworkInfo = buildFrameworkToolInfo({
-    authoredToolNames,
-    delegationToolNames,
-    disabledFrameworkToolNames: disabledFrameworkTools,
-  });
-
-  return {
-    available: [...frameworkInfo.available, ...authored],
-    authored,
-    disabledFramework: [...agent.disabledFrameworkTools],
-    dynamic: [
-      ...dynamicFrameworkResolvers.map((resolver) =>
-        renderDynamicResolver(resolver, { origin: "framework" }),
-      ),
-      ...agent.dynamicToolResolvers.map((resolver) =>
-        renderDynamicResolver(resolver, { origin: "authored" }),
-      ),
-    ],
-    framework: frameworkInfo.framework,
-    reserved: [WORKFLOW_TOOL_NAME, LOAD_SKILL_TOOL_NAME],
-  };
-}
-
-export function buildFrameworkToolInfo(input: {
-  readonly authoredToolNames: ReadonlySet<string>;
-  readonly delegationToolNames: ReadonlySet<string>;
-  readonly disabledFrameworkToolNames: ReadonlySet<string>;
-}): Pick<AgentInfoTools, "available" | "framework"> {
-  const occupiedToolNames = new Set([...input.authoredToolNames, ...input.delegationToolNames]);
-  const available: AgentInfoToolEntry[] = [];
-  const framework: AgentInfoFrameworkToolEntry[] = [];
-  const optInFrameworkToolNames = getOptInFrameworkToolNames();
-
-  for (const definition of getAllFrameworkToolDefinitions()) {
-    const disabledByAuthor = input.disabledFrameworkToolNames.has(definition.name);
-    const replacedByAuthoredTool = input.authoredToolNames.has(definition.name);
-    const status: AgentInfoFrameworkToolEntry["status"] = disabledByAuthor
-      ? "disabled"
-      : occupiedToolNames.has(definition.name)
-        ? "replaced"
-        : optInFrameworkToolNames.has(definition.name)
-          ? "opt-in"
-          : "active";
-    const rendered = renderTool(definition, {
-      origin: "framework",
-      replacesFrameworkTool: false,
-    });
-
-    if (status === "active") {
-      available.push(rendered);
-    }
-
-    framework.push({
-      ...rendered,
-      disabledByAuthor,
-      replacedByAuthoredTool,
-      status,
-    });
-  }
-
-  return { available, framework };
-}
-
-export function getRootDelegationToolNames(manifest: CompiledAgentManifest): ReadonlySet<string> {
-  const rootChildNodeIds = new Set(
-    manifest.subagentEdges
-      .filter((edge) => edge.parentNodeId === ROOT_COMPILED_AGENT_NODE_ID)
-      .map((edge) => edge.childNodeId),
-  );
-
-  return new Set([
-    ...manifest.subagents
-      .filter((subagent) => rootChildNodeIds.has(subagent.nodeId))
-      .map((subagent) => subagent.name),
-    ...manifest.remoteAgents.map((remoteAgent) => remoteAgent.name),
-  ]);
-}
-
-export function renderChannel(
-  channel: ResolvedChannelDefinition,
-  input: {
-    readonly origin: "authored" | "framework";
-  },
-): AgentInfoChannelEntry {
-  return {
-    ...toSource(channel),
-    adapterKind: channel.adapter?.kind,
-    method: channel.method,
-    name: channel.name,
-    origin: input.origin,
-    urlPath: channel.urlPath,
-  };
-}
-
-export function renderTool(
-  tool: ResolvedToolDefinition,
-  input: {
-    readonly origin: "authored" | "framework";
-    readonly replacesFrameworkTool: boolean;
-  },
+function renderTool(
+  resources: ManifestResources,
+  tool: ManifestResources["tools"][number],
 ): AgentInfoToolEntry {
-  const inputSchema = serializeInputSchema(tool.inputSchema);
-  const outputSchema = serializeOutputSchema(tool.outputSchema);
-
   return {
-    ...toSource(tool),
+    ...toModuleSource(resources, tool),
     description: tool.description,
-    hasAuth: false,
-    hasExecute: tool.execute !== undefined,
-    hasModelOutputProjection: tool.toModelOutput !== undefined,
-    hasOutputSchema: outputSchema !== undefined,
-    inputSchema,
+    hasAuth: tool.hasAuth,
+    hasExecute: tool.hasExecute,
+    hasModelOutputProjection: tool.hasModelOutputProjection,
+    hasOutputSchema: tool.outputSchema !== undefined,
+    inputSchema: tool.inputSchema,
     name: tool.name,
-    origin: input.origin,
-    outputSchema,
-    replacesFrameworkTool: input.replacesFrameworkTool,
-    requiresApproval: tool.approval !== undefined,
+    outputSchema: tool.outputSchema,
+    requiresApproval: tool.requiresApproval,
   };
 }
 
-function renderSkill(skill: ResolvedSkillDefinition): AgentInfoSkillEntry {
+function renderDynamicResolver(
+  resources: ManifestResources,
+  resolver: {
+    readonly eventNames: readonly string[];
+    readonly exportName?: string;
+    readonly logicalPath: string;
+    readonly sourceId: string;
+    readonly sourceKind: "module";
+  },
+): AgentInfoDynamicResolverEntry {
   return {
-    ...toSource(skill),
-    description: skill.description,
-    license: skill.license,
-    markdown: skill.markdown,
-    metadata: skill.metadata,
-    name: skill.name,
+    ...toModuleSource(resources, resolver),
+    eventNames: [...resolver.eventNames],
   };
 }
 
-export function renderSchedule(schedule: ResolvedScheduleDefinition): AgentInfoScheduleEntry {
-  return {
-    ...toSource(schedule),
-    cron: schedule.cron,
-    hasRun: schedule.hasRun,
-    markdown: schedule.markdown,
-    name: schedule.name,
-  };
-}
-
-function renderSandbox(sandbox: ResolvedSandboxDefinition | null): AgentInfoSandboxEntry | null {
-  if (sandbox === null) {
-    return null;
-  }
-
-  return {
-    ...toSource(sandbox),
-    backendKind: resolveBackendKind(sandbox.backend),
-    description: sandbox.description,
-    hasBootstrap: sandbox.bootstrap !== undefined,
-    hasOnSession: sandbox.onSession !== undefined,
-    revalidationKey: sandbox.revalidationKey,
-    sourceHash: sandbox.sourceHash,
-  };
-}
-
-export function renderSubagent(subagent: CompiledSubagentNode): AgentInfoSubagentEntry {
-  return {
-    ...toSource(subagent),
-    description: subagent.description,
-    entryPath: subagent.entryPath,
-    name: subagent.name,
-    nodeId: subagent.nodeId,
-    rootPath: subagent.rootPath,
-    summary: {
-      channels: subagent.agent.channels.length,
-      connections: subagent.agent.connections.length,
-      hooks: subagent.agent.hooks.length,
-      instructions: subagent.agent.instructions.length > 0,
-      schedules: subagent.agent.schedules.length,
-      skills: subagent.agent.skills.length,
-      tools: subagent.agent.tools.length,
-    },
-  };
-}
-
-export function renderDynamicResolver(
+function renderNamedDynamicResolver(
+  resources: ManifestResources,
   resolver: {
     readonly eventNames: readonly string[];
     readonly exportName?: string;
     readonly logicalPath: string;
     readonly slug: string;
     readonly sourceId: string;
-    readonly sourceKind: string;
+    readonly sourceKind: "module";
   },
-  input: {
-    readonly origin: "authored" | "framework";
-  },
-): AgentInfoDynamicResolverEntry {
+): AgentInfoNamedDynamicResolverEntry {
+  return { ...renderDynamicResolver(resources, resolver), slug: resolver.slug };
+}
+
+function renderSubagent(
+  subagent: CompiledSubagentNode,
+  parentNodeId: string,
+): AgentInfoSubagentEntry {
+  const common = {
+    ...toSubagentSource(subagent),
+    entryPath: subagent.entryPath,
+    name: subagent.name,
+    nodeId: subagent.nodeId,
+    parentNodeId,
+    rootPath: subagent.rootPath,
+    summary: {
+      channels: subagent.agent.channelRoutes.effective.length,
+      connections: subagent.agent.connections.length,
+      hooks: subagent.agent.hooks.length,
+      instructions:
+        subagent.agent.instructions.length + subagent.agent.dynamicInstructions.length > 0,
+      schedules: subagent.agent.schedules.length,
+      skills: subagent.agent.skills.length + subagent.agent.dynamicSkills.length,
+      tools: subagent.agent.tools.length + subagent.agent.dynamicTools.length,
+    },
+  };
+  return subagent.configResolver === undefined
+    ? { ...common, description: subagent.description }
+    : {
+        ...common,
+        configResolver: renderDynamicResolver(subagent.agent, subagent.configResolver),
+      };
+}
+
+function renderRemoteAgent(
+  remoteAgent: CompiledRemoteAgentNode,
+  parentNodeId: string,
+): AgentInfoRemoteAgentEntry {
   return {
-    ...toSource(resolver),
-    eventNames: [...resolver.eventNames],
-    origin: input.origin,
-    slug: resolver.slug,
+    ...toSubagentSource(remoteAgent),
+    configResolver: toModuleSource(remoteAgent, remoteAgent.configResolver),
+    description: remoteAgent.description,
+    entryPath: remoteAgent.entryPath,
+    name: remoteAgent.name,
+    nodeId: remoteAgent.nodeId,
+    outputSchema: remoteAgent.outputSchema,
+    parentNodeId,
+    path: remoteAgent.path,
+    rootPath: remoteAgent.rootPath,
+    url: remoteAgent.url,
   };
 }
 
-export function toSource(source: {
+function renderChannel(
+  resources: ManifestResources,
+  channel: CompiledChannelDefinition,
+): AgentInfoChannelEntry {
+  return renderChannelWithOwner(channel, requireModuleBinding(resources, channel).owner);
+}
+
+function renderChannelWithOwner(
+  channel: CompiledChannelDefinition,
+  owner: AgentInfoOwner,
+): AgentInfoChannelEntry {
+  return {
+    ...toSourceWithOwner(channel, owner),
+    adapterKind: channel.adapterKind,
+    method: channel.method,
+    name: channel.name,
+    urlPath: channel.urlPath,
+  };
+}
+
+function renderCompositionSource(source: AgentSourceDescriptor) {
+  return {
+    ...toSourceWithOwner(source, source.owner),
+    layer: source.layer,
+  };
+}
+
+function toSubagentSource(source: {
   readonly exportName?: string;
   readonly logicalPath: string;
-  readonly sourceId?: string;
-  readonly sourceKind: string;
-}): AgentInfoSource {
+  readonly owner: AgentInfoOwner;
+  readonly sourceId: string;
+}): AgentInfoSource & { readonly sourceKind: "subagent" } {
+  return toSourceWithOwner({ ...source, sourceKind: "subagent" }, source.owner);
+}
+
+function toModuleSource(
+  resources: BindingResources,
+  source: Omit<SourceReference, "sourceKind"> & { readonly sourceKind: "module" },
+): AgentInfoSource & { readonly sourceKind: "module" } {
+  return toSourceWithOwner(source, requireModuleBinding(resources, source).owner);
+}
+
+function toSource<Kind extends AgentInfoSource["sourceKind"]>(
+  resources: ManifestResources,
+  source: Omit<SourceReference, "sourceKind"> & { readonly sourceKind: Kind },
+): AgentInfoSource & { readonly sourceKind: Kind } {
+  if (source.sourceKind === "module") {
+    return toModuleSource(
+      resources,
+      source as Omit<SourceReference, "sourceKind"> & { readonly sourceKind: "module" },
+    ) as AgentInfoSource & { readonly sourceKind: Kind };
+  }
+  const selected = resources.sourceComposition.selected.find(
+    (entry) => entry.sourceKind === "non-module" && entry.source.sourceId === source.sourceId,
+  );
+  if (selected === undefined || selected.sourceKind !== "non-module") {
+    throw new Error(`Compiled source "${source.sourceId}" is missing selected ownership.`);
+  }
+  if (
+    selected.source.logicalPath !== source.logicalPath ||
+    selected.source.sourceKind !== source.sourceKind
+  ) {
+    throw new Error(`Compiled source "${source.sourceId}" does not match its selected descriptor.`);
+  }
+  return toSourceWithOwner(source, selected.source.owner);
+}
+
+function toSourceWithOwner<Kind extends AgentInfoSource["sourceKind"]>(
+  source: Omit<SourceReference, "sourceKind"> & { readonly sourceKind: Kind },
+  owner: AgentInfoOwner,
+): AgentInfoSource & { readonly sourceKind: Kind } {
   return {
     exportName: source.exportName,
     logicalPath: source.logicalPath,
+    owner,
     sourceId: source.sourceId,
     sourceKind: source.sourceKind,
   };
 }
 
-function resolveBackendKind(backend: unknown): string | undefined {
-  if (backend === null || typeof backend !== "object") {
-    return undefined;
+function requireModuleBinding(
+  resources: BindingResources,
+  source: { readonly logicalPath: string; readonly sourceId: string },
+) {
+  const binding = requireModuleBindingById(resources, source.sourceId);
+  if (binding.logicalPath !== source.logicalPath) {
+    throw new Error(
+      `Compiled source "${source.sourceId}" has logical path "${source.logicalPath}", but its binding owns "${binding.logicalPath}".`,
+    );
   }
+  return binding;
+}
 
-  const kind = (backend as { readonly kind?: unknown }).kind;
-  return typeof kind === "string" ? kind : undefined;
+function requireModuleBindingById(resources: BindingResources, sourceId: string) {
+  const binding = resources.bindings[sourceId];
+  if (binding === undefined) {
+    throw new Error(`Compiled module source "${sourceId}" is missing its binding.`);
+  }
+  return binding;
 }

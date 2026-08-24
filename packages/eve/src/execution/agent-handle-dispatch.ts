@@ -28,7 +28,7 @@ import type {
   RuntimeRemoteAgentCallActionRequest,
   RuntimeSubagentCallActionRequest,
   RuntimeSubagentDispatchFailure,
-} from "#runtime/actions/types.js";
+} from "#shared/runtime-actions.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import {
   continueRemoteAgentSession,

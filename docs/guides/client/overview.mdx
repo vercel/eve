@@ -30,16 +30,66 @@ const health = await client.health();
 console.log(health.status, health.workflowId);
 ```
 
-Non-2xx responses throw `ClientError`, which carries the HTTP `status` and response `body`.
+A successful health response has the strict shape
+`{ ok: true, status: "ready", workflowId: string }`. Non-2xx responses throw
+`ClientError`, which carries the HTTP `status`, response `body`, and headers. A
+2xx response that is not JSON or does not match that shape throws
+`HealthResponseError`; its `issues` list identifies invalid fields when JSON
+parsing succeeded.
 
 ## Inspect an agent
 
-Use `info()` to inspect a development agent. The client parses and validates the complete response before returning it:
+Use `info()` to inspect the agent's compiled v3 snapshot. The client parses the complete strict response before returning it:
 
 ```ts
 const info = await client.info();
-console.log(info.agent.name, info.agent.model.id);
+console.log(info.agent.name, info.agent.configSource.owner);
+
+if (info.agent.model.routing.kind === "dynamic") {
+  console.log(info.agent.model.routing.resolver.eventNames);
+}
 ```
+
+Every graph-backed source entry carries a `sourceId` and `owner`. `info.channels` contains only effective compiled routes. `info.subagents.local` and `info.remoteAgents.entries` are separate flat collections that include every compiled local and remote node, including agents nested below local subagents. Each entry identifies its scope with `parentNodeId`; compare it with `info.agent.nodeId` to find agents owned directly by the root:
+
+```ts
+const directLocalAgents = info.subagents.local.filter(
+  (entry) => entry.parentNodeId === info.agent.nodeId,
+);
+```
+
+Follow `parentNodeId` values to traverse the graph. Node IDs are opaque, and
+names are unique only among agents with the same parent. The root agent's
+exhaustive source-selection history is available under `info.composition`:
+`selected` and `disabled` account for every effective source slot, while
+`shadowed` identifies every losing candidate and its winner. Precedence runs
+from framework default to extension package to extension override to
+application, so extensions can shadow framework defaults, and application
+sources can shadow framework or extension candidates.
+
+`info.composition.routes.shadowed` is separate from source-slot composition. It
+retains selected channel routes that lost a method-and-path collision, while
+`info.channels` contains only the effective routes used for dispatch.
+
+`info.kernel.availability` is `"prepared-potential"`: kernel entries describe capabilities prepared before a session starts, not the model-visible tools for a particular call. Runtime authorization, session context, and model support can narrow availability later.
+
+For a raw response outside `Client`, parse it with the exported schema:
+
+```ts
+import { AgentInfoResultSchema } from "eve/client";
+
+const response = await fetch("http://127.0.0.1:2000/eve/v1/info");
+const info = AgentInfoResultSchema.parse(await response.json());
+```
+
+The version 3 result distinguishes compiled resources from native runtime
+capabilities. Read `tools.static` and the other static lists for effective
+definitions and their source owners, `tools.dynamic` for resolver definitions,
+`kernel.frameworkSources` for selected framework sources materialized by the
+kernel, `kernel.native` for prepared native potential, `channels` for the
+ordered dispatch routes, and `composition` for the complete source and route
+selection history. Dynamic resolver output is session-specific and is not part
+of this snapshot.
 
 ## Authentication
 

@@ -166,6 +166,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       | undefined;
 
     const { state: sessionState } = await createSessionStep({
+      capabilities,
       compiledArtifactsSource: serializedBundle.source,
       continuationToken,
       dynamicSubagentAgentConfig,

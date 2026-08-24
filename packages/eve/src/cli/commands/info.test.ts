@@ -3,15 +3,19 @@ import { describe, expect, test, vi } from "vitest";
 import { COMPILE_METADATA_KIND, COMPILE_METADATA_VERSION } from "#compiler/artifacts.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import {
-  createCompiledAgentManifest,
-  createCompiledAgentNodeManifest,
-  type CompiledChannelEntry,
+  type CompiledChannelDefinition,
   type CompiledInstructionsDefinition,
   type CompiledScheduleDefinition,
   type CompiledSubagentNode,
   ROOT_COMPILED_AGENT_NODE_ID,
 } from "#compiler/manifest.js";
 import { getApplicationInfo } from "#internal/application/paths.js";
+import {
+  createStubCompiledAgentManifest as createCompiledAgentManifest,
+  createStubCompiledAgentNodeManifest as createCompiledAgentNodeManifest,
+  TEST_COMPILED_AGENT_CONFIG_BINDING,
+  TEST_COMPILED_AGENT_CONFIG_SOURCE,
+} from "#internal/testing/compiled-manifest.js";
 import { inspectApplication } from "#services/inspect-application.js";
 
 import { buildApplicationInfoJson, printApplicationInfo } from "./info.js";
@@ -40,26 +44,36 @@ function makeSchedule(name: string): CompiledScheduleDefinition {
 }
 
 function makeSubagent(name: string): CompiledSubagentNode {
+  const entryPath = `subagents/${name}/agent.ts`;
+  const nodeId = `subagents/${name}/agent.ts`;
   return {
-    agent: createCompiledAgentNodeManifest({
-      agentRoot: `${AGENT_ROOT}/subagents/${name}`,
-      appRoot: APP_ROOT,
-      config: {
-        model: {
-          id: "anthropic/claude-sonnet-5",
-          routing: { kind: "gateway", target: "anthropic" },
+    agent: createCompiledAgentNodeManifest(
+      {
+        kernelPlan: { prepared: [] },
+        agentRoot: `${AGENT_ROOT}/subagents/${name}`,
+        appRoot: APP_ROOT,
+        bindings: [TEST_COMPILED_AGENT_CONFIG_BINDING],
+        config: {
+          model: {
+            id: "anthropic/claude-sonnet-5",
+            routing: { kind: "gateway", target: "anthropic" },
+          },
+          name,
+          source: TEST_COMPILED_AGENT_CONFIG_SOURCE,
         },
-        name,
       },
-    }),
+      { isRoot: false, nodeId },
+    ),
+    backing: { externalDependencies: [], kind: "filesystem", sourcePath: entryPath },
     description: `${name} subagent description`,
-    entryPath: `subagents/${name}/agent.ts`,
+    entryPath,
     logicalPath: `subagents/${name}`,
     name,
-    nodeId: name,
+    nodeId,
+    owner: { kind: "application" },
     rootPath: `subagents/${name}`,
     sourceId: `subagents/${name}/agent.ts`,
-    sourceKind: "module",
+    sourceKind: "subagent",
   };
 }
 
@@ -70,11 +84,14 @@ function makeCompiledState(
     schedules?: CompiledScheduleDefinition[];
   } = {},
 ): CompileAgentResult {
-  const channels: CompiledChannelEntry[] = [
+  const instructionBindings = (options.instructions ?? [])
+    .filter((source) => source.sourceKind === "module")
+    .map((source) => ({ logicalPath: source.logicalPath, sourceId: source.sourceId }));
+  const channels: CompiledChannelDefinition[] = [
     {
       kind: "channel",
       name: "slack",
-      logicalPath: "agent/channels/slack.ts",
+      logicalPath: "channels/slack.ts",
       method: "POST",
       urlPath: "/eve/v1/slack",
       sourceId: "memory::slack",
@@ -84,7 +101,7 @@ function makeCompiledState(
     {
       kind: "channel",
       name: "eve",
-      logicalPath: "agent/channels/eve.ts",
+      logicalPath: "channels/eve.ts",
       method: "POST",
       urlPath: "/eve/v1/session",
       sourceId: "memory::eve",
@@ -93,16 +110,25 @@ function makeCompiledState(
     },
   ];
   const manifest = createCompiledAgentManifest({
+    kernelPlan: { prepared: [] },
     agentRoot: AGENT_ROOT,
     appRoot: APP_ROOT,
+    bindings: [
+      TEST_COMPILED_AGENT_CONFIG_BINDING,
+      { logicalPath: "channels/slack.ts", sourceId: "memory::slack" },
+      { logicalPath: "channels/eve.ts", sourceId: "memory::eve" },
+      { logicalPath: "tools/create_ticket.ts", sourceId: "memory::create_ticket" },
+      ...instructionBindings,
+    ],
     config: {
       model: {
         id: "anthropic/claude-sonnet-5",
         routing: { kind: "gateway", target: "anthropic" },
       },
       name: "triage-bot",
+      source: TEST_COMPILED_AGENT_CONFIG_SOURCE,
     },
-    channels,
+    channelRoutes: { effective: channels, preflight: [], shadowed: [] },
     instructions: options.instructions ?? [],
     tools: [
       {
@@ -121,16 +147,17 @@ function makeCompiledState(
     })),
     subagents: options.subagents ?? [],
   });
-  const digest = { path: "x", sha256: "y" };
+  const digest = { path: "x", sha256: "a".repeat(64) };
+  const moduleMapDigest = { ...digest, identitySha256: "c".repeat(64) };
   return {
     diagnostics: [],
     manifest,
     metadata: {
-      compile: { moduleMap: digest },
+      compile: { manifest: digest, moduleMap: moduleMapDigest },
       discovery: {
         diagnostics: digest,
         manifest: digest,
-        sourceGraphHash: "hash",
+        sourceGraphHash: "b".repeat(64),
         summary: { errors: 0, warnings: 0 },
       },
       generator: { name: "eve", version: "0.0.0-test" },

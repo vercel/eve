@@ -47,6 +47,11 @@ export interface BootstrapSemverModule {
 }
 
 export interface BootstrapDependencies extends BootstrapBuildDependencies {
+  /**
+   * Bun version string used by tests to exercise the runtime guard.
+   */
+  bunVersion?: string;
+
   importBootstrapModule?: (specifier: string) => Promise<BootstrapSemverModule>;
 
   importModule?: (specifier: string) => Promise<BootstrapCliModule>;

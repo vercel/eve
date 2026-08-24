@@ -28,7 +28,7 @@ import {
   principalKey,
   resolveConnectionPrincipal,
   resolveConnectionPrincipalFromAuth,
-} from "#runtime/connections/principal.js";
+} from "#execution/connections/principal.js";
 import type { SessionAuthContext } from "#context/keys.js";
 import {
   type AuthorizationDefinition,
@@ -36,7 +36,7 @@ import {
   type InteractiveAuthorizationDefinition,
   supportsInteractiveAuthorization,
   type TokenResult,
-} from "#runtime/connections/types.js";
+} from "#shared/connections.js";
 
 const LOCAL_HTTP_VERCEL_CONNECT_HOSTNAMES: ReadonlySet<string> = new Set(["127.0.0.1", "[::1]"]);
 

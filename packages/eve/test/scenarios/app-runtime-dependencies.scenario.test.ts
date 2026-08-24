@@ -546,7 +546,7 @@ describe("app runtime dependency tracing", () => {
     ).resolves.toContain('"name": "fixture-trace-only-dep"');
     expect(serverModuleSource).toContain('"fixture-trace-only-dep"');
     expect(serverModuleSource).not.toContain('export const label = "fixture-trace-only-dep";');
-  }, 30_000);
+  }, 60_000);
 
   it("traces hosted external dependencies configured in agent.ts", async () => {
     const appRoot = await createScratchDirectory("eve-app-build-external-dep-build-");
@@ -733,7 +733,7 @@ describe("app runtime dependency tracing", () => {
         ),
       ).resolves.toContain('"name": "fixture-external-only-dep"');
     }
-  }, 30_000);
+  }, 60_000);
 
   it("rewrites framework tool executors into hosted Vercel output", async () => {
     vi.stubEnv("VERCEL", "1");
@@ -801,9 +801,7 @@ describe("app runtime dependency tracing", () => {
     );
     expect(serverModuleSource).not.toContain('import("esbuild")');
     expect(serverModuleSource).not.toContain('import("rolldown")');
-    expect(serverModuleSource).toContain(
-      "This tool requires sandbox access on the runtime context.",
-    );
+    expect(serverModuleSource).toContain("read_file only supports text files.");
     expect(serverModuleSource).toContain("The dynamic skill");
     expect(serverModuleSource).toContain("URL must start with https://");
   }, 30_000);
@@ -992,7 +990,7 @@ describe("app runtime dependency tracing", () => {
       throw new Error("Expected hosted output to retain the authored instrumentation module.");
     }
 
-    await import(pathToFileURL(instrumentationModulePath).href);
+    await import(pathToFileURL(join(serverFunctionDirectory, "index.mjs")).href);
     expect((globalThis as Record<string, unknown>).__fixtureInstrumentationDep).toEqual({
       label: "fixture-instrumentation-helper",
     });

@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 
-import type { RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { RuntimeToolCallActionRequest } from "#shared/runtime-actions.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import { resolveTextToResponses } from "#channel/resolve-text.js";
 import {
   getApprovedTools,

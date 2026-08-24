@@ -39,7 +39,11 @@ describe("durable compiled artifact sources", () => {
     // its payloads must pin their exact snapshot instead of a selector.
     const source = createDiskRuntimeCompiledArtifactsSource(
       "/app/.eve/dev-runtime/snapshots/generation-a/source/app",
-      { moduleMapLoaderPath: "/pkg/loader.ts", sandboxAppRoot: "/app" },
+      {
+        moduleMapLoaderKind: "materialized-generation",
+        moduleMapLoaderPath: "/pkg/loader.ts",
+        sandboxAppRoot: "/app",
+      },
     );
 
     const durable = serializeDurableCompiledArtifactsSource(source);

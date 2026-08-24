@@ -1,6 +1,5 @@
 import type { H3Event } from "nitro";
 import type { Span } from "#compiled/@opentelemetry/api/index.js";
-import type { RouteContext } from "#public/definitions/channel.js";
 import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
 import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-channel-receive.js";
 import type { RouteHandlerArgs, WebSocketRouteHooks } from "#channel/routes.js";
@@ -12,15 +11,16 @@ import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
 import {
   attachAgentInfoRouteResponse,
+  attachRouteAgentName,
   attachRouteChannelName,
   attachRemoteAgentStreamHeadersResolver,
   attachRouteSessionCreator,
-} from "#internal/nitro/routes/channel-route-context.js";
+} from "#channel/route-context.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { traceChannelRequest } from "#internal/nitro/routes/channel-request-instrumentation.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
-import { withVercelOidcProjectResolver } from "#runtime/governance/auth/vercel-oidc-project.js";
+import { withVercelOidcProjectResolver } from "#execution/governance/auth/vercel-oidc-project.js";
 
 const log = createLogger("channel.dispatch");
 
@@ -40,8 +40,8 @@ interface BuiltRouteArgs {
  * Nitro forwards that work to `event.waitUntil()` so webhook
  * acknowledgements can return immediately.
  *
- * Authored channels receive `RouteHandlerArgs`; framework-internal channels
- * receive the smaller `RouteContext` used by callback routes.
+ * Every handler is resolved from the compiler-selected `CompiledChannel`
+ * route and receives the complete `RouteHandlerArgs` contract.
  */
 export async function dispatchChannelRequest(
   event: H3Event,
@@ -88,20 +88,12 @@ export async function dispatchChannelRequest(
 
     try {
       response = await withDevelopmentVercelOidcContext(config, event.req, async () => {
-        if (matchedChannel.handler) {
-          // Authored CompiledChannel route — build RouteHandlerArgs.
-          return await matchedChannel.handler(event.req, routeArgs.args);
+        if (matchedChannel.handler === undefined) {
+          throw new Error(
+            `Resolved channel "${matchedChannel.name}" has no HTTP handler for ${routeKey}.`,
+          );
         }
-
-        // Framework-internal fetch-only channel (e.g. the connection
-        // callback route). Build a RouteContext with the agent handle.
-        const ctx: RouteContext = {
-          waitUntil: routeArgs.args.waitUntil,
-          params: routeArgs.args.params,
-          requestIp: routeArgs.args.requestIp,
-        };
-
-        return await matchedChannel.fetch(event.req, ctx);
+        return await matchedChannel.handler(event.req, routeArgs.args);
       });
     } catch (error) {
       // Without this a handler throw is only Nitro's default 5xx, with no eve
@@ -280,6 +272,9 @@ function buildRouteArgs(
         requestId,
       }),
   );
+  if (bundle.agentName !== undefined) {
+    attachRouteAgentName(args, bundle.agentName);
+  }
   if (bundle.resolveRemoteAgentStreamHeaders !== undefined) {
     attachRemoteAgentStreamHeadersResolver(args, bundle.resolveRemoteAgentStreamHeaders);
   }

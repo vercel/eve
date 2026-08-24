@@ -8,6 +8,7 @@ import {
   type RouteDefinition,
 } from "#channel/routes.js";
 import { normalizeChannelDefinition } from "#internal/authored-definition/channel.js";
+import { parseEveRoutePattern } from "#protocol/route-pattern.js";
 import { toErrorMessage } from "#shared/errors.js";
 import {
   createResolvedModuleSourceRef,
@@ -22,12 +23,9 @@ import type { ResolvedChannelDefinition } from "#runtime/types.js";
  * `GET` / etc. inside `defineChannel`) and the channel's `receive` hook
  * if the author declared one.
  *
- * Every authored channel is a `CompiledChannel` from `defineChannel` —
- * the bare `{ fetch, receive? }` Route shape is rejected by
- * {@link normalizeChannelDefinition}. Framework-internal channels
- * (the connection callback route, the `eve` session channel) build
- * `ResolvedChannelDefinition` values directly and do not flow through
- * this resolver.
+ * Every channel is a `CompiledChannel` from `defineChannel` — including
+ * framework-owned sources. The bare `{ fetch, receive? }` Route shape is
+ * rejected by {@link normalizeChannelDefinition}.
  */
 export async function resolveChannelDefinition(
   definition: CompiledChannelDefinition,
@@ -55,7 +53,7 @@ export async function resolveChannelDefinition(
     const matchedRoute = channelDefinition.routes.find(
       (route) =>
         route.method.toUpperCase() === definition.method.toUpperCase() &&
-        route.path === definition.urlPath,
+        parseEveRoutePattern(route.path).canonicalPath === definition.urlPath,
     );
 
     const channelKind = `channel:${definition.name}`;
@@ -67,20 +65,16 @@ export async function resolveChannelDefinition(
       (adapter as { kind: string }).kind = channelKind;
     }
 
-    const httpRoute = resolveHttpRoute(definition, matchedRoute);
-    const websocketRoute = resolveWebSocketRoute(definition, matchedRoute);
+    const handler = resolveHttpRoute(definition, matchedRoute);
+    const websocket = resolveWebSocketRoute(definition, matchedRoute);
 
     return {
       name: definition.name,
       method: definition.method,
       urlPath: definition.urlPath,
       cors: definition.cors,
-      fetch: async (req: Request, ctx: any) => {
-        if (httpRoute) return httpRoute.handler(req, ctx);
-        return Response.json({ error: "No matching route handler.", ok: false }, { status: 404 });
-      },
-      handler: httpRoute?.handler,
-      websocket: websocketRoute?.handler,
+      handler,
+      websocket,
       receive: channelDefinition.receive,
       definition: channelDefinition,
       adapter,
@@ -104,23 +98,29 @@ export async function resolveChannelDefinition(
 function resolveHttpRoute(
   definition: CompiledChannelDefinition,
   route: RouteDefinition | undefined,
-) {
-  if (route === undefined || definition.method === "WEBSOCKET" || !isHttpRouteDefinition(route)) {
+): ResolvedChannelDefinition["handler"] {
+  if (definition.method === "WEBSOCKET") {
     return undefined;
   }
-  return route;
+  if (route === undefined || !isHttpRouteDefinition(route)) {
+    throw new Error(
+      `Compiled channel route ${definition.method} ${definition.urlPath} is missing from "${definition.logicalPath}".`,
+    );
+  }
+  return route.handler;
 }
 
 function resolveWebSocketRoute(
   definition: CompiledChannelDefinition,
   route: RouteDefinition | undefined,
-) {
-  if (
-    route === undefined ||
-    definition.method !== "WEBSOCKET" ||
-    !isWebSocketRouteDefinition(route)
-  ) {
+): ResolvedChannelDefinition["websocket"] {
+  if (definition.method !== "WEBSOCKET") {
     return undefined;
   }
-  return route;
+  if (route === undefined || !isWebSocketRouteDefinition(route)) {
+    throw new Error(
+      `Compiled WebSocket route ${definition.urlPath} is missing from "${definition.logicalPath}".`,
+    );
+  }
+  return route.handler;
 }

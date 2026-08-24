@@ -8,6 +8,10 @@ import { buildToolSet } from "#harness/tools.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 
+const TEST_KERNEL_PLAN = {
+  prepared: ["agent", "task_cancel", "task_update", "ask_question", "Workflow", "final_output"],
+} as const;
+
 describe("getAdvertisedTools", () => {
   it("keeps the built-in agent tool in the root session", () => {
     const tools = new Map([
@@ -15,7 +19,11 @@ describe("getAdvertisedTools", () => {
       ["agent", createBuiltInAgentTool()],
     ]) satisfies HarnessToolMap;
 
-    const advertisedTools = getAdvertisedTools({ session: {}, tools });
+    const advertisedTools = getAdvertisedTools({
+      kernelPlan: TEST_KERNEL_PLAN,
+      session: {},
+      tools,
+    });
 
     expect([...advertisedTools.keys()]).toEqual(["add", "agent"]);
   });
@@ -27,6 +35,7 @@ describe("getAdvertisedTools", () => {
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
+      kernelPlan: TEST_KERNEL_PLAN,
       session: { subagentDepth: 99 },
       tools,
     });
@@ -41,6 +50,7 @@ describe("getAdvertisedTools", () => {
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
+      kernelPlan: TEST_KERNEL_PLAN,
       session: { rootSessionId: "root-session", subagentDepth: 1 },
       tools,
     });
@@ -55,6 +65,7 @@ describe("getAdvertisedTools", () => {
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
+      kernelPlan: TEST_KERNEL_PLAN,
       session: { rootSessionId: "root-session", subagentDepth: 1 },
       tools,
     });
@@ -69,6 +80,7 @@ describe("getAdvertisedTools", () => {
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
+      kernelPlan: TEST_KERNEL_PLAN,
       session: { subagentDepth: 1 },
       tools,
     });
@@ -83,6 +95,7 @@ describe("getAdvertisedTools", () => {
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
+      kernelPlan: TEST_KERNEL_PLAN,
       session: {
         rootSessionId: "root-session",
         subagentDepth: 99,
@@ -97,6 +110,7 @@ describe("getAdvertisedTools", () => {
     const tools = new Map([["delegate", createSubagentTool("delegate")]]) satisfies HarnessToolMap;
 
     const advertisedTools = await getAdvertisedTools({
+      kernelPlan: TEST_KERNEL_PLAN,
       modelTools: buildToolSet({ tools }),
       session: createSession({ rootSessionId: "root-session", subagentDepth: 1 }),
       tools,
@@ -114,6 +128,7 @@ describe("getAdvertisedTools", () => {
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = await getAdvertisedTools({
+      kernelPlan: TEST_KERNEL_PLAN,
       modelTools: buildToolSet({ tools }),
       session: createSession(),
       tools,
@@ -128,6 +143,7 @@ describe("getAdvertisedTools", () => {
 describe("getAdvertisedTools for definition arrays", () => {
   it("removes built-in agent tool definitions from delegated sessions", () => {
     const advertisedTools = getAdvertisedTools({
+      kernelPlan: TEST_KERNEL_PLAN,
       session: { rootSessionId: "root-session", subagentDepth: 1 },
       tools: [createTool("add"), createSubagentTool("delegate"), createBuiltInAgentTool()],
     });
@@ -142,7 +158,11 @@ describe("getAdvertisedTools for definition arrays", () => {
       ["task_update", createTaskControlTool("task_update")],
     ]) satisfies HarnessToolMap;
 
-    const advertisedTools = getAdvertisedTools({ session: {}, tools });
+    const advertisedTools = getAdvertisedTools({
+      kernelPlan: TEST_KERNEL_PLAN,
+      session: {},
+      tools,
+    });
 
     expect([...advertisedTools.keys()]).toEqual(["add", "task_cancel"]);
   });
@@ -156,6 +176,7 @@ describe("getAdvertisedTools for definition arrays", () => {
 
     const advertisedTools = getAdvertisedTools({
       delegatedCaller: true,
+      kernelPlan: TEST_KERNEL_PLAN,
       session: { rootSessionId: "root-session", subagentDepth: 1 },
       tools,
     });
@@ -169,7 +190,11 @@ describe("getAdvertisedTools for definition arrays", () => {
       ["task_update", createTaskControlTool("task_update")],
     ]) satisfies HarnessToolMap;
 
-    const advertisedTools = getAdvertisedTools({ session: {}, tools });
+    const advertisedTools = getAdvertisedTools({
+      kernelPlan: TEST_KERNEL_PLAN,
+      session: {},
+      tools,
+    });
 
     expect([...advertisedTools.keys()]).toEqual(["add"]);
   });
@@ -198,6 +223,7 @@ function createSubagentTool(name: string): HarnessToolDefinition {
 function createBuiltInAgentTool(): HarnessToolDefinition {
   return {
     ...createSubagentTool("agent"),
+    kernelCapability: "agent",
     runtimeAction: {
       kind: "subagent-call",
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
@@ -206,9 +232,10 @@ function createBuiltInAgentTool(): HarnessToolDefinition {
   };
 }
 
-function createTaskControlTool(name: string): HarnessToolDefinition {
+function createTaskControlTool(name: "task_cancel" | "task_update"): HarnessToolDefinition {
   return {
     ...createTool(name),
+    kernelCapability: name,
     runtimeAction: { kind: "task-control" },
   };
 }

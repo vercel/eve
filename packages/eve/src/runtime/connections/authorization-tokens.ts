@@ -15,7 +15,7 @@
 
 import type { AlsContext, ContextContainer } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import type { TokenResult } from "#runtime/connections/types.js";
+import type { TokenResult } from "#shared/connections.js";
 
 /**
  * Inner map of `principalKey` → {@link TokenResult} for one connection.
