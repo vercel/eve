@@ -446,6 +446,36 @@ compilation use the same composer and normalizers as production.
 
 ## Framework migration
 
+### Default source inventory
+
+After migration, the framework provides exactly these default identities
+through source composition:
+
+| Identity                     | Definition                             | Registered for   | Notes                                                         |
+| ---------------------------- | -------------------------------------- | ---------------- | ------------------------------------------------------------- |
+| `agent.ts`                   | `defineAgent`                          | every local node | default model config; phase-one composition                   |
+| `sandbox.ts`                 | `defineSandbox({})`                    | every local node | selects `defaultSandbox()`; stable semantic revision          |
+| `tools/bash.ts`              | `defineTool`                           | every local node | ordinary executor                                             |
+| `tools/read_file.ts`         | `defineTool`                           | every local node | ordinary executor                                             |
+| `tools/write_file.ts`        | `defineTool`                           | every local node | ordinary executor                                             |
+| `tools/todo.ts`              | `defineTool`                           | every local node | ordinary executor                                             |
+| `tools/web_fetch.ts`         | `defineTool`                           | every local node | ordinary executor                                             |
+| `tools/load_skill.ts`        | `defineTool`                           | every local node | visibility: `requires-loadable-skill`                         |
+| `tools/connection_search.ts` | `defineDynamic`                        | every local node | discovers and qualifies connection tools                      |
+| `tools/ask_question.ts`      | `defineTool` + `request-input`         | every local node | visibility: `requires-request-input`                          |
+| `tools/agent.ts`             | `defineTool` + `agent-dispatch`        | root node        | visibility: `root-session`                                    |
+| `tools/task_update.ts`       | `defineTool` + `task-control`          | root node        | prepared in tasks mode; visibility: `delegated-task-child`    |
+| `tools/task_cancel.ts`       | `defineTool` + `task-control`          | root node        | prepared in tasks mode; visibility: `root-session`            |
+| `tools/web_search.ts`        | `webSearch` sentinel + `provider-tool` | every local node | materialized at eligible model calls                          |
+| `channels/eve.ts`            | `eveChannel` factory                   | root node        | complete `/eve/v1` surface: protocol, callbacks, health, info |
+| `channels/home.ts`           | `defineChannel`                        | root node        | `GET` and `HEAD` at `/`                                       |
+
+Every identity above is replaceable and disableable through ordinary slot
+composition. `glob` and `grep` are exported from `eve/tools/defaults` but
+never registered. Workflow is enabled by the config sentinel rather than a
+default registration. Native behavior outside these identities is limited to
+`final_output` and the closed host inventory.
+
 ### Primitive ownership boundaries
 
 Ordinary public definitions and schemas live under `public/tools` or another
