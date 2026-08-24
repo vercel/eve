@@ -37,6 +37,12 @@
       "import": "./scaffold/agent.js",
       "default": "./scaffold/agent.js"
     },
+    "./config": {
+      "eve-source": "./src/config.ts",
+      "types": "./scaffold/config.d.ts",
+      "import": "./scaffold/config.js",
+      "default": "./scaffold/config.js"
+    },
     "./sandbox": {
       "eve-source": "./src/sandbox.ts",
       "types": "./scaffold/sandbox.d.ts",
@@ -65,7 +71,8 @@
   },
   "dependencies": {
     "eve": "workspace:^",
-    "just-bash": "3.1.0"
+    "just-bash": "3.1.0",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
