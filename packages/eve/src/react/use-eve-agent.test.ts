@@ -675,7 +675,8 @@ describe("useEveAgent", () => {
     ];
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(createBoundedStreamResponse(events));
+      .mockResolvedValueOnce(createBoundedStreamResponse(events))
+      .mockResolvedValueOnce(createEagerStreamResponse([]));
     let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
     const statuses: string[] = [];
 
@@ -693,7 +694,7 @@ describe("useEveAgent", () => {
       await vi.waitFor(() => expect(helpers?.events).toHaveLength(events.length));
     });
 
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(statuses[0]).toBe("submitted");
     expect(helpers?.status).toBe("ready");
     expect(helpers?.data).toEqual(

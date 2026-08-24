@@ -197,6 +197,13 @@ describe("eve init smoke", () => {
     const projectDir = join(scratch, "smoke-agent");
     const canonicalProjectDir = await realpath(projectDir);
     const agentSource = await readFile(join(projectDir, "agent/agent.ts"), "utf8");
+    const readme = await readFile(join(projectDir, "README.md"), "utf8");
+    expect(readme).toContain("# smoke-agent");
+    expect(readme).toContain("## Getting started");
+    expect(readme).toContain("eve dev");
+    expect(readme).toContain("## Learn more");
+    expect(readme).toContain("## Deploy on Vercel");
+    expect(readme).toContain("eve deploy");
     const packageJson = JSON.parse(await readFile(join(projectDir, "package.json"), "utf8")) as {
       engines?: { node?: string };
     };
