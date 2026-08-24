@@ -1717,13 +1717,7 @@
       ],
       "envVars": {
         "X_CONSUMER_SECRET": "",
-        "X_USER_ACCESS_TOKEN": "",
-        "X_CLIENT_ID": "",
-        "X_REFRESH_TOKEN": "",
-        "X_CLIENT_SECRET": "",
-        "X_ENCRYPTION_KEY": "",
-        "X_USER_ID": "",
-        "X_USERNAME": ""
+        "X_USER_ACCESS_TOKEN": ""
       },
       "meta": {
         "eve": {
