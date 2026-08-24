@@ -193,7 +193,9 @@ function packageJsonTemplate(includeRootOnlyFields: boolean): string {
   },
   "scripts": {
     "build": "eve build",
+    "deploy": "eve deploy",
     "dev": "eve dev",
+    "eval": "eve eval",
     "start": "eve start",
     "typecheck": "tsc"
   },

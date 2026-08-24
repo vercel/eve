@@ -1032,6 +1032,14 @@ describe("scaffoldBaseProject", () => {
     // The default path used by `eve init` must carry the stable toolchain
     // version captured from the workspace catalog into generated projects.
     expect(JSON.parse(packageJson)).toMatchObject({
+      scripts: {
+        build: "eve build",
+        deploy: "eve deploy",
+        dev: "eve dev",
+        eval: "eve eval",
+        start: "eve start",
+        typecheck: "tsc",
+      },
       devDependencies: { typescript: "7.0.2" },
       engines: { node: "24.x" },
     });
