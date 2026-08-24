@@ -101,6 +101,78 @@ export default mcpChannel({
 
 You can wrap any strategy in `oauthResource()`, including `vercelOidc()`, but the advertised authorization server must issue tokens that strategy accepts. `vercelOidc()` by itself is preconfigured Vercel workload identity and does not advertise an interactive login.
 
+### Sign in with Vercel
+
+Use [Sign in with Vercel](https://vercel.com/docs/sign-in-with-vercel) when MCP users should authenticate with their Vercel account. Vercel publishes OAuth and OpenID Connect discovery at `https://vercel.com/.well-known/openid-configuration`, including client registration, authorization, token, and introspection endpoints.
+
+Sign in with Vercel access tokens are opaque rather than JWTs. Validate them with Vercel's token introspection endpoint instead of `verifyOidc()`:
+
+```ts title="agent/channels/mcp.ts"
+import {
+  extractBearerToken,
+  oauthResource,
+  type AuthFn,
+  withAuthChallenges,
+} from "eve/channels/auth";
+import { mcpChannel } from "eve/channels/mcp";
+
+const issuer = "https://vercel.com";
+const introspectionEndpoint = "https://api.vercel.com/login/oauth/token/introspect";
+
+interface VercelTokenIntrospection {
+  active?: unknown;
+  iss?: unknown;
+  sub?: unknown;
+  token_type?: unknown;
+}
+
+const verifySignInWithVercel: AuthFn<Request> = async (request) => {
+  const token = extractBearerToken(request.headers.get("authorization"));
+  if (token === null) return null;
+
+  const response = await fetch(introspectionEndpoint, {
+    method: "POST",
+    body: new URLSearchParams({ token }),
+    signal: AbortSignal.timeout(5_000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Vercel token introspection failed with status ${response.status}.`);
+  }
+
+  const result = (await response.json()) as VercelTokenIntrospection;
+  if (
+    result.active !== true ||
+    result.iss !== issuer ||
+    result.token_type !== "bearer" ||
+    typeof result.sub !== "string" ||
+    result.sub.length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    attributes: {},
+    authenticator: "sign-in-with-vercel",
+    principalId: result.sub,
+    principalType: "user",
+  };
+};
+
+const signInWithVercel = withAuthChallenges(verifySignInWithVercel, [{ scheme: "Bearer" }]);
+
+export default mcpChannel({
+  auth: oauthResource(signInWithVercel, {
+    issuer,
+    scopes: ["openid"],
+  }),
+});
+```
+
+The MCP client discovers Vercel from eve's protected-resource metadata, registers or uses an OAuth client, and opens Vercel's authorization flow. The introspection response's `sub` becomes the eve principal, so each Vercel user owns only their invocations.
+
+This example authenticates any active Sign in with Vercel user. Add application authorization inside `verifySignInWithVercel` when access should be limited to particular users, teams, or OAuth client IDs. `vercelOidc()` serves a different purpose: it verifies Vercel workload identity for deployments and does not produce this user sign-in experience.
+
 ### Protected-resource metadata
 
 By default, eve derives the metadata path from the complete MCP resource identifier according to RFC 9728:
