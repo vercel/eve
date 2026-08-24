@@ -7714,9 +7714,14 @@ describe("createToolLoopHarness", () => {
 
       expect(followup.next).toBeNull();
       expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(callIndex + 1);
-      expect(vi.mocked(ToolLoopAgent).mock.calls[callIndex]?.[0]).toMatchObject({
+      const followupAgentSettings = vi.mocked(ToolLoopAgent).mock.calls[callIndex]?.[0];
+      expect(followupAgentSettings).toMatchObject({
+        activeTools: [],
         toolChoice: "none",
       });
+      expect(JSON.stringify(followupAgentSettings?.instructions)).toContain(
+        "Tool use is unavailable while a previous tool call is awaiting approval.",
+      );
       expect(messages.at(-1)).toEqual({ content: question, role: "user" });
       expect(messages.every((message) => message.role !== "tool")).toBe(true);
       expect(messages.filter(isPendingApprovalProjection)).toHaveLength(1);
@@ -7736,7 +7741,12 @@ describe("createToolLoopHarness", () => {
     const denialIndex = followupQuestions.length + 1;
     const denialMessages = readGenerateMessages(denialIndex);
     expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(denialIndex + 1);
-    expect(vi.mocked(ToolLoopAgent).mock.calls[denialIndex]?.[0].toolChoice).not.toBe("none");
+    const denialAgentSettings = vi.mocked(ToolLoopAgent).mock.calls[denialIndex]?.[0];
+    expect(denialAgentSettings?.activeTools).toBeUndefined();
+    expect(denialAgentSettings?.toolChoice).not.toBe("none");
+    expect(JSON.stringify(denialAgentSettings?.instructions)).not.toContain(
+      "Tool use is unavailable while a previous tool call is awaiting approval.",
+    );
     expect(denialMessages.slice(-2)).toEqual([
       {
         content: [

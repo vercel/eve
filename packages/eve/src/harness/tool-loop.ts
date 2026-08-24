@@ -288,6 +288,9 @@ import {
 const environment = process.env.NODE_ENV ?? "unknown";
 const eveVersion = resolveInstalledPackageInfo().version;
 
+const PENDING_TOOL_APPROVAL_INSTRUCTION =
+  "Tool use is unavailable while a previous tool call is awaiting approval. Do not simulate tool calls or tool results. If the user's request requires a tool, explain that it must wait for the pending approval to resolve.";
+
 const log = createLogger("harness.tool-loop");
 
 /**
@@ -1375,9 +1378,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       const baseSystemEntry: SystemModelMessage[] = session.agent.system
         ? [{ role: "system" as const, content: session.agent.system }]
         : [];
+      const pendingApprovalEntry: SystemModelMessage[] = hasPendingApprovalBatch(session)
+        ? [{ role: "system" as const, content: PENDING_TOOL_APPROVAL_INSTRUCTION }]
+        : [];
       const rawInstructions =
-        systemMessages.length > 0 || extraSystemEntry.length > 0
-          ? [...extraSystemEntry, ...baseSystemEntry, ...systemMessages]
+        systemMessages.length > 0 || extraSystemEntry.length > 0 || pendingApprovalEntry.length > 0
+          ? [...extraSystemEntry, ...baseSystemEntry, ...systemMessages, ...pendingApprovalEntry]
           : undefined;
       const markedInstructions =
         rawInstructions !== undefined && marker
@@ -1511,6 +1517,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       session = advertisedModelTools.session;
       const modelTools = advertisedModelTools.modelTools;
 
+      const pendingApproval = hasPendingApprovalBatch(session);
       const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;
 
       const instrumentationTurnId = activeTurnId(emissionState);
@@ -1548,6 +1555,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       });
 
       const agentSettings = {
+        activeTools: pendingApproval ? ([] as const) : undefined,
         headers: attributionHeaders,
         instructions,
         model,
@@ -1592,7 +1600,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           bridgeIntegration,
         ),
         toolApproval: buildToolApproval(modelTools),
-        toolChoice: hasPendingApprovalBatch(session) ? ("none" as const) : undefined,
+        toolChoice: pendingApproval ? ("none" as const) : undefined,
         tools: effectiveTools,
       };
       const agent = new ToolLoopAgent(agentSettings);
