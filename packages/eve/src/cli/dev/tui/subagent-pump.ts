@@ -122,12 +122,19 @@ export type SubagentToolUpdate = {
 export interface SubagentPumpOptions {
   client?: Client;
   view?: SubagentView;
+  onProgressEvent?: (input: {
+    readonly callId: string;
+    readonly event: MessageStreamEvent;
+  }) => void;
   formatActionResultError: (event: ActionResultStreamEvent) => string;
 }
 
 export class SubagentPump {
   readonly #client: Client | undefined;
   readonly #view: SubagentView | undefined;
+  readonly #onProgressEvent:
+    | ((input: { readonly callId: string; readonly event: MessageStreamEvent }) => void)
+    | undefined;
   readonly #formatActionResultError: (event: ActionResultStreamEvent) => string;
   readonly #runs = new Map<string, SubagentRun>();
   readonly #pumps = new Map<string, AbortController>();
@@ -135,6 +142,7 @@ export class SubagentPump {
   constructor(options: SubagentPumpOptions) {
     this.#client = options.client;
     this.#view = options.view;
+    this.#onProgressEvent = options.onProgressEvent;
     this.#formatActionResultError = options.formatActionResultError;
   }
 
@@ -380,6 +388,7 @@ export class SubagentPump {
     const run = this.#runs.get(callId);
     if (!run) return;
     if (!run.seenChildEvents.admit(event)) return;
+    this.#onProgressEvent?.({ callId, event });
     // Parent completion is provisional. Any delayed child event reopens the
     // mutable cohort until the child stream supplies its own boundary.
     if (run.status === "provisional") {

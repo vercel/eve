@@ -1,4 +1,5 @@
 import type { LogDisplayMode } from "./log-display-mode.js";
+import type { TuiProgressRenderer } from "./progress.js";
 
 export type { LogDisplayMode };
 
@@ -74,4 +75,7 @@ export type TuiDisplayOptions = {
    * `eve dev` CLI defaults to `stderr`.
    */
   logs?: LogDisplayMode;
+
+  /** Optional progress projections rendered independently of the normal transcript. */
+  progressRenderers?: readonly TuiProgressRenderer[];
 };

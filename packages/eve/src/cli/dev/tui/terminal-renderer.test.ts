@@ -102,6 +102,27 @@ function agentInfoWithModel(
 }
 
 describe("TerminalRenderer (inline scrollback)", () => {
+  it("updates a renderer-owned progress activity tree in place", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.renderProgressActivity({
+      live: true,
+      rootTurnId: "turn-1",
+      text: "• Working\n  • researcher",
+    });
+    renderer.renderProgressActivity({
+      live: false,
+      rootTurnId: "turn-1",
+      text: "✓ Working\n  ✓ researcher",
+    });
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("✓ Working");
+    expect(snapshot).toContain("✓ researcher");
+    expect(snapshot).not.toContain("• Working");
+    renderer.shutdown();
+  });
+
   it("prints the dim wordmark tag as the parting line after a Ctrl-C exit", async () => {
     const { screen, input, renderer } = makeRenderer();
     const prompt = renderer.readPrompt();

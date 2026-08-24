@@ -17,6 +17,7 @@ import type {
   SubagentView,
   SubagentToolUpdate,
 } from "./runner.js";
+import type { TuiProgressActivityUpdate } from "./progress.js";
 import { interruptedError } from "./errors.js";
 import {
   dismissTypeahead,
@@ -635,6 +636,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * reload re-sends it, and an identical banner repeated per reload is noise.
    * Committed scrollback is never cleared or replayed.
    */
+  renderProgressActivity(update: TuiProgressActivityUpdate): void {
+    this.#upsertBlock({
+      body: stripTerminalControls(update.text),
+      id: `progress-activity:${update.rootTurnId}`,
+      kind: "notice",
+      live: update.live,
+      title: "Activity",
+    });
+    this.#paint();
+  }
+
   renderAgentHeader(options: AgentHeaderOptions): void {
     this.#title = options.name;
     this.#agentHeader = options;
