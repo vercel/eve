@@ -2,12 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import { RuntimeRegistryError } from "../src/internal/runtime-registry.js";
 import { createRuntimeSubagentRegistry } from "../src/runtime/subagents/registry.js";
-import { PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA } from "../src/tools/framework/agent-contract.js";
+import { SUBAGENT_TOOL_INPUT_SCHEMA as subagentToolInputSchema } from "../src/tools/framework/agent-contract.js";
 import type { ResolvedRuntimeSubagentNode } from "../src/runtime/types.js";
 
 const SUBAGENT_TOOL_INPUT_SCHEMA = {
   type: "object",
   properties: {
+    agentId: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+      description:
+        "Only pass this to continue a previous delegation: the id of an agent from the <agents> list. To start a new agent — the common case — omit this field entirely (or pass null or an empty string).",
+    },
     message: {
       type: "string",
       description:
@@ -19,9 +24,9 @@ const SUBAGENT_TOOL_INPUT_SCHEMA = {
 } as const;
 
 describe("createRuntimeSubagentRegistry", () => {
-  it("accepts null as an omitted persistent agentId", () => {
+  it("accepts null as an omitted agentId", () => {
     expect(
-      PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA.parse({
+      subagentToolInputSchema.parse({
         agentId: null,
         message: "Investigate this",
       }),

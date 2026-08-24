@@ -31,7 +31,6 @@ export async function startRemoteSubagent(input: {
   readonly initiatorAuth: Parameters<typeof startRemoteAgentSession>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof startRemoteAgentSession>[0]["parentTraceContext"];
-  readonly persistentSessions: boolean;
   readonly session: RuntimeSession;
   readonly taskOwned: boolean;
 }): Promise<DispatchOutcome> {
@@ -87,7 +86,6 @@ export async function startRemoteSubagent(input: {
       initiatorAuth: input.initiatorAuth,
       operationId: operation.id,
       parentTraceContext: input.parentTraceContext,
-      persistentSessions: input.persistentSessions,
       remote: resolvedRemote,
       session: input.session,
     });

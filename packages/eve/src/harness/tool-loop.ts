@@ -1202,16 +1202,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // results, keeping the request user-final for providers that reject
     // assistant-final histories. See resolveAgentsAnnouncement for the role
     // rationale (assistant-final rejection, prompt-cache preservation).
-    if (config.persistentSubagentSessions === true) {
-      const store = getAgentHandleStore(session.state);
-      if (store?.handles.some((handle) => handle.phase === "addressed") !== true) {
-        const announcement = resolveAgentsAnnouncement({
-          messages: projectHistory(messages, session.state),
-          store,
-        });
-        if (announcement !== undefined) {
-          messages.push({ content: announcement, role: "user" });
-        }
+    const agentStore = getAgentHandleStore(session.state);
+    if (
+      agentStore !== undefined &&
+      agentStore.handles.some((handle) => handle.phase === "addressed") !== true
+    ) {
+      const announcement = resolveAgentsAnnouncement({
+        messages: projectHistory(messages, session.state),
+        store: agentStore,
+      });
+      if (announcement !== undefined) {
+        messages.push({ content: announcement, role: "user" });
       }
     }
 

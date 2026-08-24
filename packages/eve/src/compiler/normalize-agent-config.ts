@@ -176,10 +176,6 @@ function normalizeExperimentalDefinition(
     compiledExperimental.instrumentationProviders = experimental.instrumentationProviders;
   }
 
-  if (experimental.subagentPersistentSessions !== undefined) {
-    compiledExperimental.subagentPersistentSessions = experimental.subagentPersistentSessions;
-  }
-
   if (experimental.tasks !== undefined) {
     compiledExperimental.tasks = experimental.tasks;
   }

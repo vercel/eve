@@ -11,7 +11,7 @@ import {
   validateCompiledModuleMap,
 } from "#compiler/validate-artifact.js";
 
-describe("compiled agent manifest v42", () => {
+describe("compiled agent manifest v43", () => {
   it("round-trips a real compiled graph through the serialized schema", async () => {
     const { manifest } = await compileFromMemory({
       model: "openai/gpt-5.4",
@@ -119,5 +119,19 @@ describe("compiled agent manifest v42", () => {
     expect(() => validateCompiledAgentManifest(corrupted)).toThrow(
       "subagent graph contains a cycle",
     );
+  });
+
+  it("rejects the removed persistent-session field in compiled manifests", async () => {
+    const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+
+    expect(() =>
+      compiledAgentManifestSchema.parse({
+        ...manifest,
+        config: {
+          ...manifest.config,
+          experimental: { subagentPersistentSessions: true },
+        },
+      }),
+    ).toThrow();
   });
 });

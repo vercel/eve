@@ -326,12 +326,6 @@ export interface ToolLoopHarnessConfig {
    * compacted history.
    */
   readonly onCompaction?: () => readonly ModelMessage[];
-  /**
-   * Whether the resolved agent uses persistent subagent sessions.
-   * Gates delegated-agent handle tracking and the model-visible `<agents>`
-   * listing appended after runtime-action batches resolve.
-   */
-  readonly persistentSubagentSessions?: boolean;
   /** Resolves step-scoped dynamic tools once for approval policy and model work. */
   readonly resolveStepDynamicTools?: (input: {
     readonly ctx: AlsContext;

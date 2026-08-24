@@ -60,12 +60,6 @@ export async function startRemoteAgentSession(input: {
    * created instead of starting a second one.
    */
   readonly operationId?: string;
-  /**
-   * Whether the dispatching agent uses persistent subagent sessions.
-   * Persistent remote children run in conversation mode so their sessions
-   * accept follow-up messages.
-   */
-  readonly persistentSessions?: boolean;
   readonly parentTraceContext?: SessionTraceContext;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly session: HarnessSession;
@@ -107,10 +101,9 @@ export async function startRemoteAgentSession(input: {
     },
     message: formatRemoteAgentCallInputMessage({
       action: input.action,
-      persistentSession: input.persistentSessions,
       remote: input.remote,
     }),
-    mode: input.persistentSessions === true ? "conversation" : "task",
+    mode: "conversation",
     outputSchema:
       normalizeRequestedOutputSchema(input.action.input.outputSchema) ?? input.remote.outputSchema,
   };
@@ -547,7 +540,6 @@ async function resolveRemoteAgentRequestHeaders(
 
 function formatRemoteAgentCallInputMessage(input: {
   readonly action: RuntimeRemoteAgentCallActionRequest;
-  readonly persistentSession?: boolean;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
 }): string {
   const message = typeof input.action.input.message === "string" ? input.action.input.message : "";
@@ -555,7 +547,6 @@ function formatRemoteAgentCallInputMessage(input: {
     description: input.remote.description,
     message,
     name: input.action.remoteAgentName,
-    persistentSession: input.persistentSession,
     type: "remote",
   }).message;
 }

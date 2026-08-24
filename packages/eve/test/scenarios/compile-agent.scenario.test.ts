@@ -1049,6 +1049,29 @@ describe("compileAgent", () => {
     await expect(compileAgent({ startPath: appRoot })).rejects.toThrow("codeMode");
   });
 
+  it("rejects the removed experimental.subagentPersistentSessions field", async () => {
+    const { agentRoot, appRoot } = await createAppRoot(
+      "eve-compile-experimental-subagent-persistence-",
+      APP_ROOT_OPTIONS,
+    );
+
+    await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.");
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      [
+        "export default {",
+        '  model: "openai/gpt-5.4",',
+        "  experimental: { subagentPersistentSessions: true },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+
+    await expect(compileAgent({ startPath: appRoot })).rejects.toThrow(
+      "subagentPersistentSessions",
+    );
+  });
+
   it("uses the authored local subagent id as the canonical compiled runtime id", async () => {
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-compile-subagent-id-",

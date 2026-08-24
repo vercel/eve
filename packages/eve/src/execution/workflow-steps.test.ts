@@ -1678,7 +1678,7 @@ describe("turnStep", () => {
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
       resolvedAgent: {
-        config: { experimental: { subagentPersistentSessions: true, tasks: true } },
+        config: { experimental: { tasks: true } },
       },
       subagentRegistry: {},
       toolRegistry: {},
@@ -1933,7 +1933,7 @@ describe("turnStep", () => {
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
       resolvedAgent: {
-        config: { experimental: { subagentPersistentSessions: true, tasks: true } },
+        config: { experimental: { tasks: true } },
       },
       subagentRegistry: {},
       toolRegistry: {},
@@ -1997,7 +1997,7 @@ describe("turnStep", () => {
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
       resolvedAgent: {
-        config: { experimental: { subagentPersistentSessions: true, tasks: true } },
+        config: { experimental: { tasks: true } },
       },
       subagentRegistry: {},
       toolRegistry: {},
@@ -2396,7 +2396,7 @@ describe("turnStep", () => {
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
       resolvedAgent: {
-        config: { experimental: { subagentPersistentSessions: true, tasks: true } },
+        config: { experimental: { tasks: true } },
       },
       subagentRegistry: {},
       toolRegistry: {},

@@ -6,10 +6,7 @@ import type {
 } from "#runtime/types.js";
 import type { JsonObject } from "#shared/json.js";
 import { serializeInputSchema } from "#tools/schema.js";
-import {
-  PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA,
-  SUBAGENT_TOOL_INPUT_SCHEMA,
-} from "#tools/framework/agent-contract.js";
+import { SUBAGENT_TOOL_INPUT_SCHEMA } from "#tools/framework/agent-contract.js";
 
 /**
  * One runtime-owned subagent tracked by the prepared registry.
@@ -42,32 +39,14 @@ export interface RuntimeSubagentRegistry {
  */
 const SUBAGENT_TOOL_INPUT_JSON_SCHEMA = serializeInputSchema(SUBAGENT_TOOL_INPUT_SCHEMA);
 
-const PERSISTENT_SUBAGENT_TOOL_INPUT_JSON_SCHEMA = serializeInputSchema(
-  PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA,
-);
-
-/** Selects the serialized subagent tool input schema for one agent's runtime mode. */
-export function getSubagentToolInputJsonSchema(persistentSessions: boolean): JsonObject {
-  return persistentSessions
-    ? PERSISTENT_SUBAGENT_TOOL_INPUT_JSON_SCHEMA
-    : SUBAGENT_TOOL_INPUT_JSON_SCHEMA;
-}
-
 /**
  * Builds the runtime-owned registry for the resolved subagents visible from one
  * runtime agent node.
  */
 export function createRuntimeSubagentRegistry(input: {
-  /**
-   * Whether the owning agent uses persistent subagent sessions. Adds the
-   * model-visible `agentId` continuation field to every lowered subagent tool
-   * schema.
-   */
-  readonly persistentSessions?: boolean;
   readonly reservedToolNames?: readonly string[];
   readonly subagents: readonly ResolvedRuntimeDelegationNode[];
 }): RuntimeSubagentRegistry {
-  const inputSchema = getSubagentToolInputJsonSchema(input.persistentSessions === true);
   const preparedTools: PreparedRuntimeDelegationTool[] = [];
   const dynamicNodeIds = new Set<string>();
   const dynamicResolvers: ResolvedDynamicSubagentResolver[] = [];
@@ -94,7 +73,7 @@ export function createRuntimeSubagentRegistry(input: {
     let registeredSubagent: RuntimeRegisteredSubagent;
     const dynamic = subagentDefinition.kind === "subagent" ? subagentDefinition.dynamic : undefined;
     if (dynamic === undefined) {
-      const prepared = createPreparedRuntimeSubagentTool(subagentDefinition, inputSchema);
+      const prepared = createPreparedRuntimeSubagentTool(subagentDefinition);
       registeredSubagent = {
         definition: subagentDefinition,
         prepared,

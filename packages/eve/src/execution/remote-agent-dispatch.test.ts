@@ -263,13 +263,13 @@ describe("startRemoteAgentSession", () => {
         'You are the subagent "research".',
         "Description: Performs research.",
         "",
-        "The caller delegated the following task to you. Complete it and return the final result directly.",
+        "The caller delegated the following task to you. Complete it and return the result directly. The caller may send follow-up messages after you answer.",
         "",
         "Caller message:",
         "find the marker",
       ].join("\n"),
       capabilities: {},
-      mode: "task",
+      mode: "conversation",
     });
   });
 
@@ -398,7 +398,7 @@ describe("startRemoteAgentSession", () => {
 
     const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
     expect(body.outputSchema).toEqual(outputSchema);
-    expect(body.mode).toBe("task");
+    expect(body.mode).toBe("conversation");
     expect(body.capabilities).toEqual({});
   });
 

@@ -192,7 +192,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     ctx.set(BundleKey, {
       compiledArtifactsSource: {},
       resolvedAgent: {
-        config: { experimental: { subagentPersistentSessions: true, tasks: true } },
+        config: { experimental: { tasks: true } },
       },
       subagentRegistry: {
         subagentsByNodeId: new Map([
@@ -1281,7 +1281,7 @@ function installContext(
   const bundle = {
     compiledArtifactsSource: {},
     resolvedAgent: {
-      config: tasks ? { experimental: { subagentPersistentSessions: true, tasks: true } } : {},
+      config: tasks ? { experimental: { tasks: true } } : {},
     },
     subagentRegistry: { subagentsByNodeId },
     turnAgent: {

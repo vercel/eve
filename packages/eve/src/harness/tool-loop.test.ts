@@ -1009,7 +1009,6 @@ describe("createToolLoopHarness", () => {
 
     const runStep = createToolLoopHarness(
       createTestConfig("conversation", undefined, {
-        persistentSubagentSessions: true,
         resolveModel: vi.fn().mockResolvedValue(
           new MockLanguageModelV3({
             modelId: "claude-sonnet-4-5",
@@ -1079,9 +1078,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const runStep = createToolLoopHarness(
-      createTestConfig("conversation", undefined, { persistentSubagentSessions: true }),
-    );
+    const runStep = createToolLoopHarness(createTestConfig("conversation"));
     const session = createTestSession({
       state: {
         [AGENT_HANDLES_STATE_KEY]: {
@@ -1132,9 +1129,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const runStep = createToolLoopHarness(
-      createTestConfig("conversation", undefined, { persistentSubagentSessions: true }),
-    );
+    const runStep = createToolLoopHarness(createTestConfig("conversation"));
     const session = createTestSession({
       history: [
         { content: "Delegate this.", role: "user" },
@@ -4389,9 +4384,8 @@ describe("createToolLoopHarness", () => {
 
   it("surfaces a terminal model-call error to the parent as a failed task result", async () => {
     // Regression test for https://github.com/vercel/eve/issues/412 — a
-    // delegated subagent runs in task mode; when its model id does not
-    // resolve (terminal 404), the failure must reach the parent as an
-    // error result, not a successful empty output.
+    // delegated task-mode child whose model id does not resolve (terminal 404)
+    // must report an error to its parent, not a successful empty output.
     const error = Object.assign(new Error("No endpoints found for anthropic/claude-3.5-haiku"), {
       name: "AI_APICallError",
       statusCode: 404,

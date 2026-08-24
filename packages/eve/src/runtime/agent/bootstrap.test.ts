@@ -76,14 +76,9 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
     );
   });
 
-  it("includes the messaging instruction for an opted-in root agent (framework agent tool)", () => {
+  it("includes the messaging instruction for the root framework agent tool", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
-      agent: createResolvedAgentForTest({
-        config: {
-          experimental: { subagentPersistentSessions: true },
-          name: "test-agent",
-        } as ResolvedAgent["config"],
-      }),
+      agent: createResolvedAgentForTest(),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
       tools: [createFrameworkAgentTool()],
     });
@@ -92,21 +87,11 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
     expect(turnAgent.instructions).toContainEqual(expect.stringContaining("Tool execution"));
   });
 
-  it("omits the messaging instruction for a root agent without the experimental opt-in", () => {
-    const turnAgent = createResolvedRuntimeTurnAgent({
-      agent: createResolvedAgentForTest(),
-      nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
-      tools: [],
-    });
-
-    expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("Pass `agentId`"));
-  });
-
-  it("explains task-derived busy agents when tasks imply persistent sessions", () => {
+  it("explains task-derived busy agents in task mode", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest({
         config: {
-          experimental: { subagentPersistentSessions: true, tasks: true },
+          experimental: { tasks: true },
           name: "test-agent",
         } as ResolvedAgent["config"],
       }),
@@ -121,10 +106,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
   it("omits the messaging instruction when an authored tool named agent shadows the framework tool", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest({
-        config: {
-          experimental: { subagentPersistentSessions: true },
-          name: "test-agent",
-        } as ResolvedAgent["config"],
+        config: { name: "test-agent" } as ResolvedAgent["config"],
       }),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
       tools: [
@@ -146,10 +128,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
   it("omits the messaging instruction when no agent tool was compiled", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest({
-        config: {
-          experimental: { subagentPersistentSessions: true },
-          name: "test-agent",
-        } as ResolvedAgent["config"],
+        config: { name: "test-agent" } as ResolvedAgent["config"],
       }),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
       tools: [],
@@ -161,10 +140,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
   it("omits the messaging instruction for a non-root node without declared subagents", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest({
-        config: {
-          experimental: { subagentPersistentSessions: true },
-          name: "test-agent",
-        } as ResolvedAgent["config"],
+        config: { name: "test-agent" } as ResolvedAgent["config"],
       }),
       nodeId: "subagents/researcher",
       tools: [],

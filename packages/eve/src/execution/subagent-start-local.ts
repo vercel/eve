@@ -35,7 +35,6 @@ export async function startLocalSubagent(input: {
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
-  readonly persistentSessions: boolean;
   readonly sandboxSessionId: string;
   readonly session: RuntimeSession;
   readonly source: SubagentInputSource;
@@ -58,7 +57,6 @@ export async function startLocalSubagent(input: {
     graph: input.bundle.graph,
     parentContinuationToken: input.parentContinuationToken,
     parentTraceContext: input.parentTraceContext,
-    persistentSessions: input.persistentSessions,
     sandboxSessionId: input.sandboxSessionId,
     session: input.session,
     source,

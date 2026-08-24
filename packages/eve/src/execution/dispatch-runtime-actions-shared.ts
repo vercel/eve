@@ -503,7 +503,15 @@ function classifyFreshStart(input: {
           ? registered.definition.description
           : undefined);
       const source: SubagentInputSource =
-        description !== undefined ? { description, type: "local" } : { type: "runtime" };
+        description !== undefined
+          ? {
+              description,
+              outputSchema:
+                dynamicAgentConfig?.outputSchema ??
+                input.bundle.graph?.nodesByNodeId.get(action.nodeId)?.turnAgent?.outputSchema,
+              type: "local",
+            }
+          : { outputSchema: input.bundle.turnAgent.outputSchema, type: "runtime" };
       return {
         kind: "start",
         target: {
@@ -544,7 +552,6 @@ export async function startSubagent(input: {
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
-  readonly persistentSessions: boolean;
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly session: RuntimeSession;
@@ -574,7 +581,6 @@ export async function startSubagent(input: {
         initiatorAuth: input.initiatorAuth,
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext,
-        persistentSessions: input.persistentSessions,
         sandboxSessionId: input.sandboxSessionId,
         session: input.session,
         source: input.target.source,
@@ -592,7 +598,6 @@ export async function startSubagent(input: {
         initiatorAuth: input.initiatorAuth,
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext,
-        persistentSessions: input.persistentSessions,
         session: input.session,
         taskOwned: input.taskOwned,
       });

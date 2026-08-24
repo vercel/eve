@@ -24,7 +24,6 @@ import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts
 import {
   AGENT_TOOL_DESCRIPTION,
   AGENT_TOOL_NAME,
-  PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA,
   SUBAGENT_TOOL_INPUT_SCHEMA,
 } from "#tools/framework/agent-contract.js";
 import { createTaskToolHarnessDefinitions } from "#execution/tools/tasks.js";
@@ -114,8 +113,6 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     instrumentation,
     mode: input.mode,
     onCompaction: preserveFrameworkStateOnCompaction,
-    persistentSubagentSessions:
-      input.node.agent.config?.experimental?.subagentPersistentSessions === true,
     dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),
@@ -237,10 +234,7 @@ function resolveHarnessToolDefinition(input: {
   if (def.owner.kind === "framework" && def.name === AGENT_TOOL_NAME) {
     const delegation = {
       description: AGENT_TOOL_DESCRIPTION,
-      inputSchema:
-        input.node.agent.config?.experimental?.subagentPersistentSessions === true
-          ? PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA
-          : SUBAGENT_TOOL_INPUT_SCHEMA,
+      inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
       kind: "subagent" as const,
       name: AGENT_TOOL_NAME,
       nodeId: input.node.nodeId,
