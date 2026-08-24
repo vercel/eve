@@ -291,6 +291,7 @@ export interface InstrumentationSessionStartedEvent {
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId: string;
   readonly sessionId: string;
+  readonly traceSeed?: InstrumentationTraceContext;
 }
 
 export type InstrumentationTraceContext = RuntimeTraceContext;

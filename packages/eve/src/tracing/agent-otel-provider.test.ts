@@ -383,6 +383,124 @@ describe("createAgentOtelInstrumentation", () => {
     expect(turn.parentSpanContext?.spanId).toBe(turnTrace.spanId);
   });
 
+  it("uses the pre-allocated trace seed's trace id for agent.session", async () => {
+    const runtime = createRuntime();
+    const seed: InstrumentationTraceContext = {
+      spanId: "a".repeat(16),
+      traceFlags: 1,
+      traceId: "b".repeat(32),
+    };
+    const sessionEvent = {
+      agentName: "weather",
+      idempotencyKey: sessionIdempotencyKey("session-seed"),
+      rootSessionId: "session-seed",
+      sessionId: "session-seed",
+      traceSeed: seed,
+      type: "session.started" as const,
+    };
+
+    await runtime.prepareSessionTrace(sessionEvent);
+    await runtime.hooks.publish(sessionEvent);
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    const session = byName(spans, "agent.session")[0]!;
+    expect(session.spanContext().traceId).toBe(seed.traceId);
+    expect(session.spanContext().spanId).toBe(seed.spanId);
+  });
+
+  it("falls back to fresh ids when no trace seed is present", async () => {
+    const runtime = createRuntime();
+    const sessionEvent = {
+      agentName: "weather",
+      idempotencyKey: sessionIdempotencyKey("session-noseed"),
+      rootSessionId: "session-noseed",
+      sessionId: "session-noseed",
+      type: "session.started" as const,
+    };
+
+    const trace = await runtime.prepareSessionTrace(sessionEvent);
+    await runtime.hooks.publish(sessionEvent);
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    const session = byName(spans, "agent.session")[0]!;
+    expect(session.spanContext().traceId).toBe(trace.traceId);
+    // Fresh span id is random, not derived — just verify it matches the returned context.
+    expect(session.spanContext().spanId).toBe(trace.spanId);
+  });
+
+  it("inherits parent trace context for delegated agents", async () => {
+    const runtime = createRuntime();
+    const parentTrace: InstrumentationTraceContext = {
+      spanId: "c".repeat(16),
+      traceFlags: 1,
+      traceId: "d".repeat(32),
+    };
+    const sessionEvent = {
+      agentName: "researcher",
+      idempotencyKey: sessionIdempotencyKey("session-child"),
+      parentTraceContext: parentTrace,
+      rootSessionId: "root-session",
+      sessionId: "session-child",
+      type: "session.started" as const,
+    };
+
+    const trace = await runtime.prepareSessionTrace(sessionEvent);
+    expect(trace.traceId).toBe(parentTrace.traceId);
+    expect(trace.spanId).toBe(parentTrace.spanId);
+  });
+
+  it("treats the seed as authoritative when late policy would reject", async () => {
+    const runtime = createRuntime(undefined, () => false);
+    const seed: InstrumentationTraceContext = {
+      spanId: "a".repeat(16),
+      traceFlags: 1,
+      traceId: "b".repeat(32),
+    };
+    const sessionEvent = {
+      agentName: "weather",
+      idempotencyKey: sessionIdempotencyKey("session-seed-authoritative"),
+      rootSessionId: "session-seed-authoritative",
+      sessionId: "session-seed-authoritative",
+      traceSeed: seed,
+      type: "session.started" as const,
+    };
+
+    await runtime.prepareSessionTrace(sessionEvent);
+    await runtime.hooks.publish(sessionEvent);
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    const session = byName(spans, "agent.session")[0]!;
+    expect(session.spanContext().traceId).toBe(seed.traceId);
+    expect(session.spanContext().traceFlags).toBe(1);
+  });
+
+  it("treats an unsampled seed as authoritative when late policy would accept", async () => {
+    const runtime = createRuntime();
+    const seed: InstrumentationTraceContext = {
+      spanId: "e".repeat(16),
+      traceFlags: 0,
+      traceId: "f".repeat(32),
+    };
+    const sessionEvent = {
+      agentName: "weather",
+      idempotencyKey: sessionIdempotencyKey("session-seed-unsampled"),
+      rootSessionId: "session-seed-unsampled",
+      sessionId: "session-seed-unsampled",
+      traceSeed: seed,
+      type: "session.started" as const,
+    };
+
+    await runtime.prepareSessionTrace(sessionEvent);
+    await runtime.hooks.publish(sessionEvent);
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    expect(byName(spans, "agent.session")).toHaveLength(0);
+  });
+
   it.each([
     ["cancelled", SpanStatusCode.UNSET],
     ["failed", SpanStatusCode.ERROR],
@@ -680,7 +798,7 @@ describe("createAgentOtelInstrumentation", () => {
     },
   );
 
-  it("applies the private audience gate to an adopted sampled trace", async () => {
+  it("preserves the parent's sampling decision for adopted traces", async () => {
     const runtime = createRuntime(new InMemoryAgentTraceStateStore(), null);
 
     await emitAttempt({
@@ -698,7 +816,12 @@ describe("createAgentOtelInstrumentation", () => {
     });
     await runtime.provider.forceFlush();
 
-    expect(runtime.exporter.getFinishedSpans()).toEqual([]);
+    // The parent's traceFlags are authoritative — the child does not re-evaluate.
+    const spans = runtime.exporter.getFinishedSpans();
+    expect(spans.length).toBeGreaterThan(0);
+    for (const span of spans) {
+      expect(span.spanContext().traceId).toBe("b".repeat(32));
+    }
   });
 
   it("allows private tracing when the trace policy opts in", async () => {
@@ -1710,5 +1833,33 @@ describe("createAgentOtelInstrumentation", () => {
       "error.type": "TOOL_CALL_FAILED",
     });
     expect(byName(spans, "agent.turn")[0]!.status.code).toBe(SpanStatusCode.UNSET);
+  });
+});
+
+describe("AgentSpanIdGenerator.withTraceId", () => {
+  it("primes the next generateTraceId call", () => {
+    const gen = new AgentSpanIdGenerator();
+    const primed = "e".repeat(32);
+    const result = gen.withTraceId(primed, () => gen.generateTraceId());
+    expect(result).toBe(primed);
+    // After the callback, a fresh call should produce a different id.
+    const next = gen.generateTraceId();
+    expect(next).not.toBe(primed);
+  });
+
+  it("nests inside withSpanId to prime both ids", () => {
+    const gen = new AgentSpanIdGenerator();
+    const primedTraceId = "f".repeat(32);
+    const primedSpanId = "a".repeat(16);
+    let capturedTraceId: string | undefined;
+    let capturedSpanId: string | undefined;
+    gen.withSpanId(primedSpanId, () =>
+      gen.withTraceId(primedTraceId, () => {
+        capturedTraceId = gen.generateTraceId();
+        capturedSpanId = gen.generateSpanId();
+      }),
+    );
+    expect(capturedTraceId).toBe(primedTraceId);
+    expect(capturedSpanId).toBe(primedSpanId);
   });
 });

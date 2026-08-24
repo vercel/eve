@@ -10,6 +10,7 @@ import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
+import { evaluateTracePolicy, isSampledTrace } from "#tracing/sampled-trace.js";
 import type { AgentSessionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 
 interface AgentOtelSessionContextInput {
@@ -40,8 +41,43 @@ export function createAgentOtelSessionContext(
     readonly channelAudience: ChannelAudience;
     readonly rootSessionId: string;
     readonly sessionId: string;
+    readonly traceSeed?: InstrumentationTraceContext;
   }): SpanContext => {
-    if (!shouldTrace(input.tracePolicy, session)) {
+    if (session.traceSeed !== undefined) {
+      if (!isSampledTrace(session.traceSeed)) {
+        return {
+          isRemote: false,
+          spanId: session.traceSeed.spanId,
+          traceFlags: 0,
+          traceId: session.traceSeed.traceId,
+        };
+      }
+      const startSpan = () =>
+        input.tracer.startSpan("agent.session", {
+          attributes: {
+            "agent.framework.name": "eve",
+            "agent.framework.version": input.frameworkVersion,
+            "agent.channel.audience": session.channelAudience,
+            "agent.name": session.agentName,
+            "agent.session.id": session.sessionId,
+            "agent.trace.schema.version": 2,
+          },
+          root: true,
+        });
+      const span = input.idGenerator.withSpanId(session.traceSeed.spanId, () =>
+        input.idGenerator.withTraceId(session.traceSeed!.traceId, startSpan),
+      );
+      span.addEvent("session.started");
+      span.end();
+      return span.spanContext();
+    }
+    // Fallback for already-running workflows that predate the seed.
+    if (
+      !evaluateTracePolicy(input.tracePolicy, {
+        agentName: session.agentName,
+        audience: session.channelAudience,
+      })
+    ) {
       return {
         isRemote: false,
         spanId: input.idGenerator.deriveSpanId(`session:${session.sessionId}`),
@@ -61,9 +97,6 @@ export function createAgentOtelSessionContext(
       root: true,
     });
     span.addEvent("session.started");
-    // The session outlives this worker and has no guaranteed close — an idle
-    // session never ends — so the root is recorded as a zero-duration marker
-    // and later spans parent through its persisted context.
     span.end();
     return span.spanContext();
   };
@@ -84,16 +117,9 @@ export function createAgentOtelSessionContext(
                 channelAudience: normalizeChannelAudience(event.channelAudience),
                 rootSessionId: event.rootSessionId,
                 sessionId: event.sessionId,
+                traceSeed: event.traceSeed,
               })
-            : adoptedSpanContext(
-                event.parentTraceContext,
-                shouldTrace(input.tracePolicy, {
-                  agentName: event.agentName,
-                  channelAudience: normalizeChannelAudience(event.channelAudience),
-                  rootSessionId: event.rootSessionId,
-                  sessionId: event.sessionId,
-                }),
-              ),
+            : adoptedSpanContext(event.parentTraceContext),
         rootSessionId: event.rootSessionId,
       };
       await input.stateStore.setSession(event.sessionId, state);
@@ -153,29 +179,6 @@ export function createAgentOtelSessionContext(
   return { ensureSessionContext, prepareSessionTrace, prepareTurnTrace };
 }
 
-function shouldTrace(
-  policy: TraceCapturePolicy | undefined,
-  trace: {
-    readonly agentName?: string;
-    readonly channelAudience: ChannelAudience;
-    readonly rootSessionId: string;
-    readonly sessionId: string;
-  },
-): boolean {
-  try {
-    return (
-      policy?.({
-        agentName: trace.agentName,
-        audience: trace.channelAudience,
-        rootSessionId: trace.rootSessionId,
-        sessionId: trace.sessionId,
-      }) ?? trace.channelAudience === "public"
-    );
-  } catch {
-    return false;
-  }
-}
-
 function portableSpanContext(spanContext: SpanContext): InstrumentationTraceContext {
   return {
     spanId: spanContext.spanId,
@@ -184,11 +187,11 @@ function portableSpanContext(spanContext: SpanContext): InstrumentationTraceCont
   };
 }
 
-function adoptedSpanContext(handed: InstrumentationTraceContext, sampled = true): SpanContext {
+function adoptedSpanContext(handed: InstrumentationTraceContext): SpanContext {
   return {
     isRemote: "isRemote" in handed && handed.isRemote === true,
     spanId: handed.spanId,
-    traceFlags: sampled ? handed.traceFlags : 0,
+    traceFlags: handed.traceFlags,
     traceId: handed.traceId,
   };
 }

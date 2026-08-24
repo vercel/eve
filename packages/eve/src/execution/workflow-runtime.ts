@@ -19,6 +19,11 @@ import type {
 } from "#channel/types.js";
 import { serializeContext } from "#context/serialize.js";
 import {
+  ChannelInstrumentationKey,
+  SessionTraceSeedKey,
+  type SessionTraceSeed,
+} from "#context/keys.js";
+import {
   buildSessionAttributes,
   buildSubagentRootAttributes,
   readParentLineage,
@@ -50,6 +55,9 @@ import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
+import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
+import { evaluateTracePolicy } from "#tracing/sampled-trace.js";
+import { normalizeChannelAudience } from "#shared/channel-audience.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
@@ -138,6 +146,14 @@ export function createWorkflowRuntime(config: {
         run: input,
       });
       const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
+      const traceSeed = allocateSessionTraceSeed({
+        agentName: effectiveAgent.turnAgent.id,
+        audience: normalizeChannelAudience(ctx.get(ChannelInstrumentationKey)?.metadata.audience),
+        parentTraceContext: input.parentTraceContext,
+      });
+      if (traceSeed !== undefined) {
+        ctx.set(SessionTraceSeedKey, traceSeed);
+      }
       const serializedContext = serializeContext(ctx);
       const parentLineage = readParentLineage(serializedContext);
       const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
@@ -431,5 +447,35 @@ function normalizeWorkflowHook(value: unknown): WorkflowHookRecord {
 
   return {
     runId,
+  };
+}
+
+function allocateSessionTraceSeed(input: {
+  readonly agentName?: string;
+  readonly audience: ReturnType<typeof normalizeChannelAudience>;
+  readonly parentTraceContext?: {
+    readonly traceId: string;
+    readonly spanId: string;
+    readonly traceFlags: number;
+  };
+}): SessionTraceSeed | undefined {
+  if (input.parentTraceContext !== undefined) {
+    return {
+      spanId: input.parentTraceContext.spanId,
+      traceFlags: input.parentTraceContext.traceFlags,
+      traceId: input.parentTraceContext.traceId,
+    };
+  }
+  const instrumentation = getInstrumentationRuntime();
+  if (instrumentation?.prepareSessionTrace === undefined) return undefined;
+  if (instrumentation.idGenerator === undefined) return undefined;
+  const sampled = evaluateTracePolicy(instrumentation.otelSettings?.tracePolicy, {
+    agentName: input.agentName,
+    audience: input.audience,
+  });
+  return {
+    spanId: instrumentation.idGenerator.allocateSpanId(),
+    traceFlags: sampled ? 1 : 0,
+    traceId: instrumentation.idGenerator.generateTraceId(),
   };
 }

@@ -37,6 +37,7 @@ import {
   ParentSessionKey,
   ParentTraceContextKey,
   SessionCallbackKey,
+  SessionTraceSeedKey,
   TurnTaskDeliveryKey,
   TurnTaskStateKey,
 } from "#context/keys.js";
@@ -674,6 +675,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const taskUpdatesEnabled = taskOwned && config.tools.has(TASK_UPDATE_TOOL_NAME);
     const parentLineage = resolveParentLineage(parent, channel);
     const parentTraceContext = store?.get(ParentTraceContextKey);
+    const traceSeed = store?.get(SessionTraceSeedKey);
     let activeAttemptScope: InstrumentationAttemptScope | undefined;
     const emit = createInstrumentationHandleEvent({
       agentName: config.runtimeIdentity?.agentName,
@@ -744,6 +746,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         sessionId: session.sessionId,
         sessionStarted: emissionState.sessionStarted,
         traceContext: authoredTraceContext,
+        traceSeed,
         turnId: `turn_${emissionState.sequence}`,
       });
     };
