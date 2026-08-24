@@ -313,12 +313,18 @@ export function selectIntegrationPage(input: {
     return row;
   });
   const nextOffset = offset + items.length;
-  return {
+  const result: {
+    hasMore: boolean;
+    items: readonly FoundIntegration[];
+    nextOffset?: number;
+    total: number;
+  } = {
     hasMore: nextOffset < matches.length,
     items,
-    ...(nextOffset < matches.length ? { nextOffset } : {}),
     total: matches.length,
   };
+  if (nextOffset < matches.length) result.nextOffset = nextOffset;
+  return result;
 }
 
 function matchesCategory(entry: CatalogEntry, category: Category): boolean {
@@ -484,13 +490,20 @@ export default defineTool({
     if (typeof input.query === "string") selection.query = input.query;
     const page = selectIntegrationPage(selection);
 
-    return {
+    const result: {
+      errors: { message: string; registry: string }[];
+      hasMore: boolean;
+      items: readonly FoundIntegration[];
+      nextOffset?: number;
+      total: number;
+    } = {
       errors,
       hasMore: page.hasMore,
       items: await annotateInstalled({ ctx, entries, rows: page.items }),
-      ...(page.nextOffset === undefined ? {} : { nextOffset: page.nextOffset }),
       total: page.total,
     };
+    if (page.nextOffset !== undefined) result.nextOffset = page.nextOffset;
+    return result;
   },
 });
 
