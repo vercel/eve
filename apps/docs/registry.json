@@ -1671,7 +1671,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "https://chat-sdk.dev/adapters/official/gchat",
+          "docs": "/integrations/chat-sdk-gchat#setup",
           "implementation": "chat-sdk"
         }
       }
@@ -1697,7 +1697,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "https://chat-sdk.dev/adapters/official/whatsapp",
+          "docs": "/integrations/chat-sdk-whatsapp#setup",
           "implementation": "chat-sdk"
         }
       }
@@ -1721,7 +1721,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "https://chat-sdk.dev/adapters/official/x",
+          "docs": "/integrations/chat-sdk-x#setup",
           "implementation": "chat-sdk"
         }
       }
@@ -1746,7 +1746,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "https://chat-sdk.dev/adapters/official/messenger",
+          "docs": "/integrations/chat-sdk-messenger#setup",
           "implementation": "chat-sdk"
         }
       }
@@ -1770,7 +1770,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "https://chat-sdk.dev/adapters/vendor-official/zernio",
+          "docs": "/integrations/chat-sdk-zernio#setup",
           "implementation": "chat-sdk"
         }
       }
@@ -1794,7 +1794,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "https://chat-sdk.dev/adapters/vendor-official/velt",
+          "docs": "/integrations/chat-sdk-velt#setup",
           "implementation": "chat-sdk"
         }
       }
@@ -1819,7 +1819,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "https://chat-sdk.dev/adapters/vendor-official/sendblue",
+          "docs": "/integrations/chat-sdk-sendblue#setup",
           "implementation": "chat-sdk"
         }
       }
@@ -1843,7 +1843,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "https://chat-sdk.dev/adapters/vendor-official/novu",
+          "docs": "/integrations/chat-sdk-novu#setup",
           "implementation": "chat-sdk"
         }
       }
@@ -1867,7 +1867,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "https://chat-sdk.dev/adapters/vendor-official/liveblocks",
+          "docs": "/integrations/chat-sdk-liveblocks#setup",
           "implementation": "chat-sdk"
         }
       }
@@ -1912,7 +1912,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "https://chat-sdk.dev/adapters/vendor-official/kapso",
+          "docs": "/integrations/chat-sdk-kapso#setup",
           "implementation": "chat-sdk"
         }
       }
@@ -1957,7 +1957,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "https://chat-sdk.dev/adapters/vendor-official/dial",
+          "docs": "/integrations/chat-sdk-dial#setup",
           "implementation": "chat-sdk"
         }
       }
@@ -1982,7 +1982,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "https://chat-sdk.dev/adapters/vendor-official/agentphone",
+          "docs": "/integrations/chat-sdk-agentphone#setup",
           "implementation": "chat-sdk"
         }
       }
@@ -2006,7 +2006,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "https://chat-sdk.dev/adapters/vendor-official/lark",
+          "docs": "/integrations/chat-sdk-lark#setup",
           "implementation": "chat-sdk"
         }
       }
@@ -2030,7 +2030,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "https://chat-sdk.dev/adapters/vendor-official/matrix",
+          "docs": "/integrations/chat-sdk-beeper#setup",
           "implementation": "chat-sdk"
         }
       }
@@ -2055,7 +2055,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "https://chat-sdk.dev/adapters/vendor-official/resend",
+          "docs": "/integrations/chat-sdk-resend#setup",
           "implementation": "chat-sdk"
         }
       }

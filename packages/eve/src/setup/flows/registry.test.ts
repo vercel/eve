@@ -146,7 +146,7 @@ describe("runRegistryFlow", () => {
         {
           output: [
             "Environment: BROWSER_TOKEN, BROWSER_URL",
-            "Documentation: https://eve.dev/integrations/browser",
+            "Setup: https://eve.dev/integrations/browser",
           ],
         },
       ],
