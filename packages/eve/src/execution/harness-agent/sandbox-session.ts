@@ -3,10 +3,13 @@ import { randomUUID } from "node:crypto";
 import type { HarnessBridgeSettings } from "#execution/harness-agent/adapter.js";
 import { harnessUsesBridge } from "#execution/harness-agent/adapter.js";
 import type { HarnessAgentHarness } from "#execution/harness-agent/types.js";
+import { adaptMultiplexedCommandToSandboxProcess } from "#execution/sandbox/multiplexed-command.js";
+import { streamToBuffer } from "#execution/sandbox/stream-utils.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
 const HARNESS_ROOT = "/workspace/.eve-harness";
 const HARNESS_TEMP = `${HARNESS_ROOT}/tmp`;
+const VERCEL_SANDBOX_USER = "vercel-sandbox";
 
 type VercelSandbox = Awaited<
   ReturnType<(typeof import("#compiled/@vercel/sandbox/index.js"))["Sandbox"]["get"]>
@@ -29,7 +32,7 @@ export async function createHarnessSandboxHandle(input: {
 }): Promise<HarnessSandboxHandle> {
   let bridge: HarnessBridgeSettings | undefined;
   let dispose = async () => {};
-  const session = adaptSandboxSession(input.sandbox);
+  let session = adaptSandboxSession(input.sandbox);
   if (harnessUsesBridge(input.harness)) {
     const vercelSandbox = await resolveVercelSandbox({
       harness: input.harness,
@@ -37,6 +40,10 @@ export async function createHarnessSandboxHandle(input: {
     });
     const ports = resolveHarnessPorts({
       harness: input.harness,
+      vercelSandbox,
+    });
+    session = adaptVercelSandboxSession({
+      sandbox: input.sandbox,
       vercelSandbox,
     });
     await prepareHarnessWorkspace(session);
@@ -84,6 +91,74 @@ function adaptSandboxSession(sandbox: SandboxSession): HarnessSandboxSession {
     removePath: sandbox.removePath,
     resolvePath: sandbox.resolvePath,
     setNetworkPolicy: sandbox.setNetworkPolicy,
+  };
+}
+
+function adaptVercelSandboxSession(input: {
+  readonly sandbox: SandboxSession;
+  readonly vercelSandbox: VercelSandbox;
+}): HarnessSandboxSession {
+  const user = input.vercelSandbox.asUser(VERCEL_SANDBOX_USER);
+  return {
+    ...adaptSandboxSession(input.sandbox),
+    async run(options) {
+      const command = await user.runCommand({
+        args: ["-lc", options.command],
+        cmd: "bash",
+        cwd: options.workingDirectory ?? HARNESS_ROOT,
+        env: { ...options.env, TMPDIR: HARNESS_TEMP },
+        signal: options.abortSignal,
+      });
+      const [stdout, stderr] = await Promise.all([command.stdout(), command.stderr()]);
+      return { exitCode: command.exitCode, stderr, stdout };
+    },
+    async spawn(options) {
+      const command = await user.runCommand({
+        args: ["-lc", options.command],
+        cmd: "bash",
+        cwd: options.workingDirectory ?? HARNESS_ROOT,
+        detached: true,
+        env: { ...options.env, TMPDIR: HARNESS_TEMP },
+        signal: options.abortSignal,
+      });
+      return adaptMultiplexedCommandToSandboxProcess({
+        command,
+        getOutput: (log) => log.stream,
+      });
+    },
+    async writeBinaryFile(options) {
+      await user.writeFiles(
+        [
+          {
+            content: options.content,
+            path: input.sandbox.resolvePath(options.path),
+          },
+        ],
+        { signal: options.abortSignal },
+      );
+    },
+    async writeFile(options) {
+      await user.writeFiles(
+        [
+          {
+            content: await streamToBuffer(options.content),
+            path: input.sandbox.resolvePath(options.path),
+          },
+        ],
+        { signal: options.abortSignal },
+      );
+    },
+    async writeTextFile(options) {
+      await user.writeFiles(
+        [
+          {
+            content: Buffer.from(options.content, options.encoding as BufferEncoding | undefined),
+            path: input.sandbox.resolvePath(options.path),
+          },
+        ],
+        { signal: options.abortSignal },
+      );
+    },
   };
 }
 

@@ -13,24 +13,51 @@ vi.mock("#compiled/@vercel/sandbox/index.js", () => ({
 
 function createVercelSandbox(
   input: {
+    readonly leasedPort?: number;
     readonly routes?: readonly number[];
   } = {},
 ) {
+  const finishedCommand = (
+    command: { readonly exitCode?: number; readonly stdout?: string } = {},
+  ) => ({
+    exitCode: command.exitCode ?? 0,
+    stderr: vi.fn().mockResolvedValue(""),
+    stdout: vi.fn().mockResolvedValue(command.stdout ?? ""),
+  });
+  const detachedCommand = {
+    kill: vi.fn().mockResolvedValue(undefined),
+    async *logs() {},
+    wait: vi.fn().mockResolvedValue({ exitCode: 0 }),
+  };
+  const user = {
+    runCommand: vi
+      .fn()
+      .mockImplementation(
+        async (options: { readonly args?: readonly string[]; readonly detached?: boolean }) => {
+          if (options.detached) {
+            return detachedCommand;
+          }
+          if (options.args?.[1]?.includes("EVE_HARNESS_PORTS")) {
+            return input.leasedPort === undefined
+              ? finishedCommand({ exitCode: 75 })
+              : finishedCommand({ stdout: String(input.leasedPort) });
+          }
+          return finishedCommand();
+        },
+      ),
+    writeFiles: vi.fn().mockResolvedValue(undefined),
+  };
   return {
+    asUser: vi.fn().mockReturnValue(user),
+    detachedCommand,
     domain: (port: number) => `https://port-${port}.example.test`,
     routes: (input.routes ?? [4319]).map((port) => ({ port })),
+    user,
   };
 }
 
-function createEveSandbox(input: { readonly leasedPort?: number } = {}): SandboxSession {
-  const run = vi.fn().mockImplementation(async (options: { readonly command: string }) => {
-    if (options.command.includes("EVE_HARNESS_PORTS")) {
-      return input.leasedPort === undefined
-        ? { exitCode: 75, stderr: "", stdout: "" }
-        : { exitCode: 0, stderr: "", stdout: String(input.leasedPort) };
-    }
-    return { exitCode: 0, stderr: "", stdout: "" };
-  });
+function createEveSandbox(): SandboxSession {
+  const run = vi.fn().mockResolvedValue({ exitCode: 0, stderr: "", stdout: "" });
   return {
     id: "eve-session",
     readBinaryFile: vi.fn().mockResolvedValue(null),
@@ -74,8 +101,8 @@ describe("createHarnessSandboxHandle", () => {
   });
 
   it("passes an exposed port and its WebSocket endpoint to a bridge harness", async () => {
-    const session = createEveSandbox({ leasedPort: 4319 });
-    const vercelSandbox = createVercelSandbox();
+    const session = createEveSandbox();
+    const vercelSandbox = createVercelSandbox({ leasedPort: 4319 });
     mocks.getVercelSandbox.mockResolvedValue(vercelSandbox);
 
     const handle = await createHarnessSandboxHandle({
@@ -88,18 +115,23 @@ describe("createHarnessSandboxHandle", () => {
       port: 4319,
       portEndpoint: { url: "wss://port-4319.example.test/" },
     });
-    expect(session.run).toHaveBeenCalledTimes(2);
-    expect(session.run).toHaveBeenNthCalledWith(
+    expect(vercelSandbox.asUser).toHaveBeenCalledWith("vercel-sandbox");
+    expect(vercelSandbox.user.runCommand).toHaveBeenCalledTimes(2);
+    expect(vercelSandbox.user.runCommand).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ workingDirectory: "/workspace" }),
+      expect.objectContaining({ cwd: "/workspace" }),
     );
+    expect(session.run).not.toHaveBeenCalled();
     await handle.dispose();
-    expect(session.run).toHaveBeenCalledTimes(3);
+    expect(vercelSandbox.user.runCommand).toHaveBeenCalledTimes(3);
   });
 
   it("selects an available exposed port instead of an occupied one", async () => {
-    const session = createEveSandbox({ leasedPort: 4320 });
-    const vercelSandbox = createVercelSandbox({ routes: [4319, 4320] });
+    const session = createEveSandbox();
+    const vercelSandbox = createVercelSandbox({
+      leasedPort: 4320,
+      routes: [4319, 4320],
+    });
     mocks.getVercelSandbox.mockResolvedValue(vercelSandbox);
 
     const handle = await createHarnessSandboxHandle({
@@ -111,15 +143,15 @@ describe("createHarnessSandboxHandle", () => {
       port: 4320,
       portEndpoint: { url: "wss://port-4320.example.test/" },
     });
-    const reservation = vi.mocked(session.run).mock.calls[1]?.[0];
-    expect(reservation?.command).toContain("server.listen");
+    const reservation = vercelSandbox.user.runCommand.mock.calls[1]?.[0];
+    expect(reservation?.args?.[1]).toContain("server.listen");
     expect(reservation?.env).toMatchObject({ EVE_HARNESS_PORTS: "4319 4320" });
     await handle.dispose();
   });
 
-  it("uses the existing eve sandbox session for bridge commands and bootstrap files", async () => {
-    const session = createEveSandbox({ leasedPort: 4319 });
-    const vercelSandbox = createVercelSandbox();
+  it("uses the existing Vercel Sandbox user for bridge commands and bootstrap files", async () => {
+    const session = createEveSandbox();
+    const vercelSandbox = createVercelSandbox({ leasedPort: 4319 });
     mocks.getVercelSandbox.mockResolvedValue(vercelSandbox);
 
     const handle = await createHarnessSandboxHandle({
@@ -132,30 +164,47 @@ describe("createHarnessSandboxHandle", () => {
       env: { TOKEN: "secret" },
       workingDirectory: "/workspace/ms",
     });
-    expect(session.run).toHaveBeenLastCalledWith({
-      command: "whoami",
+    expect(vercelSandbox.user.runCommand).toHaveBeenLastCalledWith({
+      args: ["-lc", "whoami"],
+      cmd: "bash",
+      cwd: "/workspace/ms",
       env: {
         TMPDIR: "/workspace/.eve-harness/tmp",
         TOKEN: "secret",
       },
-      workingDirectory: "/workspace/ms",
+      signal: undefined,
     });
 
     await handle.session.writeTextFile({
       content: "bridge config",
       path: "/workspace/.eve-harness/config.json",
     });
-    expect(session.writeTextFile).toHaveBeenCalledWith({
-      content: "bridge config",
-      path: "/workspace/.eve-harness/config.json",
-    });
+    expect(vercelSandbox.user.writeFiles).toHaveBeenCalledWith(
+      [
+        {
+          content: Buffer.from("bridge config"),
+          path: "/workspace/.eve-harness/config.json",
+        },
+      ],
+      { signal: undefined },
+    );
 
     const process = await handle.session.spawn({ command: "node bridge.mjs" });
     await process.wait();
-    expect(session.spawn).toHaveBeenLastCalledWith({
-      command: "node bridge.mjs",
+    expect(vercelSandbox.user.runCommand).toHaveBeenLastCalledWith({
+      args: ["-lc", "node bridge.mjs"],
+      cmd: "bash",
+      cwd: "/workspace/.eve-harness",
+      detached: true,
       env: { TMPDIR: "/workspace/.eve-harness/tmp" },
+      signal: undefined,
     });
+    expect(vercelSandbox.detachedCommand.wait).toHaveBeenCalledOnce();
+
+    const commands = vercelSandbox.user.runCommand.mock.calls
+      .flatMap(([options]) => options.args ?? [])
+      .join(" ");
+    expect(commands).not.toMatch(/useradd|chgrp|chmod|chown/);
     await handle.dispose();
   });
 
