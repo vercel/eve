@@ -472,9 +472,11 @@ through source composition:
 
 Every identity above is replaceable and disableable through ordinary slot
 composition. `glob` and `grep` are published at `eve/tools/glob` and
-`eve/tools/grep` but never registered. Workflow is enabled by the config
-sentinel rather than a default registration. Native behavior outside these
-identities is limited to `final_output` and the closed host inventory.
+`eve/tools/grep` but never registered. Workflow shares the slot pattern
+without a framework default: an authored `experimental_workflow()` sentinel
+at `tools/workflow.ts` opts in at that canonical identity. Native behavior
+outside these identities is limited to `final_output` and the closed host
+inventory.
 
 ### Primitive ownership boundaries
 
@@ -574,6 +576,15 @@ An application `defineTool(...)` or `disableTool()` at any of those identities
 composes normally. Replacing `tools/web_search.ts` with an application
 `webSearch(...)` or ordinary tool follows the same rule; model/provider
 materialization remains the `provider-tool` effect described below.
+
+Workflow follows the same pattern with no framework default: the authored
+`experimental_workflow()` sentinel at `tools/workflow.ts` composes at that
+canonical slot and declares the `workflow-host` effect. The kernel owns its
+advertisement (root sessions below the depth limit), sandbox materialization
+over `agent-dispatch`-eligible tools, and interrupt dispatch. The Workflow
+world configuration stays in `defineAgent({ experimental: { workflow } })`,
+and its transport stays in the closed host inventory; neither is a tool
+identity.
 
 ### `connection_search`
 
@@ -776,7 +787,7 @@ The kernel is keyed by a closed set of effect kinds, never by tool name:
 | `agent-dispatch` | `tools/agent.ts`; graph-derived subagent and remote-agent tools | park into the runtime-action batch; dispatch child sessions; fold results back |
 | `task-control`   | `tools/task_update.ts`, `tools/task_cancel.ts`                  | execute through the durable task dispatch step                                 |
 | `provider-tool`  | the `tools/web_search.ts` provider sentinel                     | materialize the provider-managed tool at eligible model calls                  |
-| `workflow-host`  | the compiled Workflow sentinel                                  | expose eligible tools inside the Workflow sandbox                              |
+| `workflow-host`  | the selected `tools/workflow.ts` sentinel                       | expose eligible tools inside the Workflow sandbox                              |
 
 Each effect kind owns its park semantics, dispatch, resume, prompt flags,
 advertisement predicate evaluation, and inspection projection through one
