@@ -1,6 +1,7 @@
 import type { LanguageModel } from "ai";
 
 import type { Runtime, SessionCapabilities } from "#channel/types.js";
+import { buildCurrentTimeContext } from "#context/date-time-instruction-lifecycle.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import {
   createBackgroundSubagentHarnessDefinition,
@@ -9,7 +10,7 @@ import {
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
+import type { HandleEventFn, HarnessToolMap, StepFn, StepInput } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
@@ -128,13 +129,26 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     runtimeIdentity: buildRuntimeIdentity(input.node),
     tools,
   });
-  if (instrumentation === undefined) return step;
+  const runStep: StepFn = (session, stepInput) =>
+    step(session, appendCurrentTimeContext(stepInput, new Date()));
+  if (instrumentation === undefined) return runStep;
   return async (session, stepInput) => {
     try {
-      return await step(session, stepInput);
+      return await runStep(session, stepInput);
     } finally {
       await instrumentation.forceFlush();
     }
+  };
+}
+
+export function appendCurrentTimeContext(
+  input: StepInput | undefined,
+  now: Date,
+): StepInput | undefined {
+  if (input === undefined) return undefined;
+  return {
+    ...input,
+    context: [...(input.context ?? []), buildCurrentTimeContext(now)],
   };
 }
 
