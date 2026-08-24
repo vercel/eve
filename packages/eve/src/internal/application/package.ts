@@ -133,6 +133,24 @@ function isSourceCheckout(packageRoot: string): boolean {
   return existsSync(join(packageRoot, "src", "internal", "application", "package.ts"));
 }
 
+function findNearestSourceCheckoutRoot(startDirectory: string): string | undefined {
+  let currentDirectory = startDirectory;
+
+  while (true) {
+    if (isSourceCheckout(currentDirectory)) {
+      return currentDirectory;
+    }
+
+    const parentDirectory = dirname(currentDirectory);
+
+    if (parentDirectory === currentDirectory) {
+      return undefined;
+    }
+
+    currentDirectory = parentDirectory;
+  }
+}
+
 function tryCreatePackageLocation(packageRoot: string): PackageLocation | undefined {
   if (isSourceCheckout(packageRoot)) {
     return {
@@ -238,10 +256,15 @@ function tryResolveLocalPackageRoot(currentModulePath: string): string | undefin
     const canonicalModulePath = realpathSync.native(currentModulePath);
     const directBuildLocation = tryResolveDirectBuildLocation(canonicalModulePath);
 
-    return (
-      directBuildLocation?.packageRoot ??
-      findNearestVerifiedPackageRoot(dirname(canonicalModulePath))
-    );
+    if (directBuildLocation !== undefined) {
+      return directBuildLocation.packageRoot;
+    }
+
+    const sourceCheckoutRoot = findNearestSourceCheckoutRoot(dirname(canonicalModulePath));
+
+    return sourceCheckoutRoot === undefined
+      ? undefined
+      : tryResolveVerifiedPackageRoot(join(sourceCheckoutRoot, "package.json"));
   } catch {
     return undefined;
   }
