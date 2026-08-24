@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 
 import type { DiscoverDiagnostic, DiscoverDiagnosticsSummary } from "#discover/diagnostics.js";
@@ -11,6 +11,7 @@ import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { materializeWorkspaceResources } from "#compiler/workspace-resources.js";
+import { createVercelConnectManifest } from "#compiler/vercel-connect-manifest.js";
 
 /**
  * Stable diagnostics artifact kind emitted by the compiler.
@@ -44,6 +45,7 @@ export interface CompilerArtifactPaths {
   discoveryManifestPath: string;
   discoveryDirectoryPath: string;
   moduleMapPath: string;
+  vercelConnectManifestPath: string;
 }
 
 /**
@@ -135,6 +137,7 @@ function resolveCompilerArtifactPathsAt(
     discoveryManifestPath: join(discoveryDirectoryPath, "agent-discovery-manifest.json"),
     discoveryDirectoryPath,
     moduleMapPath: join(compileDirectoryPath, "module-map.mjs"),
+    vercelConnectManifestPath: join(compileDirectoryPath, "vercel-connect-manifest.json"),
   };
 }
 
@@ -213,6 +216,10 @@ export async function writeCompilerArtifacts(
     manifest: await compileAgentManifest(input.manifest),
   });
   const compiledManifestJson = serializeArtifactJson(compiledManifest);
+  const vercelConnectManifest = createVercelConnectManifest({
+    manifest: compiledManifest,
+    version: resolveInstalledPackageInfo().version,
+  });
   const discoveryManifestJson = serializeArtifactJson(input.manifest);
   const diagnosticsArtifactJson = serializeArtifactJson(diagnosticsArtifact);
   const moduleMapSource = createCompiledModuleMapSource({
@@ -237,6 +244,9 @@ export async function writeCompilerArtifacts(
   });
   await Promise.all([
     writeFile(paths.compiledManifestPath, compiledManifestJson),
+    vercelConnectManifest === undefined
+      ? rm(paths.vercelConnectManifestPath, { force: true })
+      : writeFile(paths.vercelConnectManifestPath, serializeArtifactJson(vercelConnectManifest)),
     writeFile(paths.diagnosticsPath, diagnosticsArtifactJson),
     writeFile(paths.discoveryManifestPath, discoveryManifestJson),
     writeFile(paths.moduleMapPath, moduleMapSource),
