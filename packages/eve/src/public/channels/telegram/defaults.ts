@@ -1,6 +1,12 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { extractErrorId, formatErrorHint } from "#internal/logging.js";
+import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
+import {
+  formatTelegramAuthorizationDisplayName,
+  renderTelegramAuthorizationCompleted,
+  renderTelegramAuthorizationPrompt,
+  renderTelegramAuthorizationStatus,
+} from "#public/channels/telegram/authorization.js";
 import {
   registerTelegramFreeformPrompt,
   renderTelegramInputRequest,
@@ -11,6 +17,8 @@ import type {
   TelegramContext,
   TelegramInboundResult,
 } from "#public/channels/telegram/telegramChannel.js";
+
+const log = createLogger("telegram.defaults");
 
 /** Default auth projection for Telegram webhook actors. */
 export function defaultTelegramAuth(message: TelegramMessage): SessionAuthContext | null {
@@ -59,10 +67,74 @@ export const defaultEvents: TelegramChannelEvents = {
     await channel.telegram.startTyping();
   },
 
+  async "authorization.required"(event, channel, _ctx) {
+    if (event.candidateId !== undefined) return;
+
+    const displayName = formatTelegramAuthorizationDisplayName(
+      event.name,
+      event.authorization?.displayName,
+    );
+    const isPrivate = channel.telegram.chatType === "private";
+    const pending = channel.state.pendingAuthMessageIds ?? {};
+
+    if (isPrivate) {
+      try {
+        const posted = await channel.telegram.post(renderTelegramAuthorizationPrompt(event));
+        if (posted.id) {
+          channel.state.pendingAuthMessageIds = { ...pending, [event.name]: posted.id };
+        }
+      } catch (error) {
+        log.error("Telegram authorization prompt delivery failed", { error, name: event.name });
+      }
+      return;
+    }
+
+    if (pending[event.name] === undefined) {
+      try {
+        const posted = await channel.telegram.post(
+          renderTelegramAuthorizationStatus({
+            displayName,
+            requesterUserId: channel.state.triggeringUserId,
+          }),
+        );
+        if (posted.id) {
+          channel.state.pendingAuthMessageIds = { ...pending, [event.name]: posted.id };
+        }
+      } catch (error) {
+        log.error("Telegram authorization status delivery failed", { error, name: event.name });
+      }
+    }
+  },
+
   async "authorization.completed"(event, channel, _ctx) {
-    if (event.outcome === "authorized") {
+    if (event.outcome === "authorized" && event.candidateId === undefined) {
       await channel.telegram.startTyping();
     }
+    if (event.candidateId !== undefined) return;
+
+    const pending = channel.state.pendingAuthMessageIds ?? {};
+    const messageId = pending[event.name];
+    if (messageId === undefined) return;
+    const displayName = formatTelegramAuthorizationDisplayName(
+      event.name,
+      event.authorization?.displayName,
+    );
+    try {
+      await channel.telegram.editMessageText({
+        messageId,
+        replyMarkup: { inline_keyboard: [] },
+        text: renderTelegramAuthorizationCompleted({
+          displayName,
+          outcome: event.outcome,
+          reason: event.reason,
+        }),
+      });
+    } catch (error) {
+      log.error("Telegram authorization status edit failed", { error, name: event.name });
+    }
+    const next = { ...pending };
+    delete next[event.name];
+    channel.state.pendingAuthMessageIds = next;
   },
 
   async "actions.requested"(_event, channel, _ctx) {
