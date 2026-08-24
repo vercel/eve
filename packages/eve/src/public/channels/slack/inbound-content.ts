@@ -13,11 +13,18 @@ export function resolveSlackInboundMrkdwn(text: string, raw: Record<string, unkn
     return text;
   }
 
-  if (extracted.length > trimmedText.length && extracted.includes(trimmedText)) {
+  const normalizedExtracted = normalizeComparableText(extracted);
+  const normalizedTrimmed = normalizeComparableText(trimmedText);
+
+  if (extracted.length > trimmedText.length && normalizedExtracted.includes(normalizedTrimmed)) {
     return extracted;
   }
 
   if (extracted.length >= trimmedText.length * 2) {
+    const hasLegacyAttachments = Array.isArray(raw.attachments) && raw.attachments.length > 0;
+    if (hasLegacyAttachments && !normalizedExtracted.includes(normalizedTrimmed)) {
+      return `${text}\n${extracted}`;
+    }
     return extracted;
   }
 
@@ -43,6 +50,7 @@ function extractBlockKitLines(blocks: unknown): string[] {
       case "section":
         appendTextObjectLine(lines, block.text);
         appendFieldLines(lines, block.fields);
+        appendSectionAccessoryLine(lines, block.accessory);
         break;
       case "header":
         appendTextObjectLine(lines, block.text);
@@ -154,7 +162,21 @@ function appendFieldLines(lines: string[], fields: unknown): void {
 function appendElementLines(lines: string[], elements: unknown): void {
   if (!Array.isArray(elements)) return;
   for (const element of elements) {
+    if (!isObject(element)) continue;
+    if (element.type === "image") {
+      if (typeof element.alt_text === "string" && element.alt_text.length > 0) {
+        lines.push(element.alt_text);
+      }
+      continue;
+    }
     appendTextObjectLine(lines, element);
+  }
+}
+
+function appendSectionAccessoryLine(lines: string[], accessory: unknown): void {
+  if (!isObject(accessory)) return;
+  if (accessory.type === "button") {
+    appendActionsLine(lines, [accessory]);
   }
 }
 
@@ -254,7 +276,7 @@ function richTextInlineToPlain(elements: unknown): string {
         break;
       case "link":
         if (typeof element.url === "string" && typeof element.text === "string") {
-          parts.push(formatSlackLink(element.url, element.text));
+          parts.push(formatInboundRichTextLink(element.url, element.text));
         } else if (typeof element.text === "string") {
           parts.push(element.text);
         } else if (typeof element.url === "string") {
@@ -307,4 +329,15 @@ export function readSlackTextObject(textObject: unknown): string {
 
 function normalizeComparableText(input: string): string {
   return input.replace(/\s+/gu, " ").trim();
+}
+
+function formatInboundRichTextLink(url: string, label: string): string {
+  try {
+    return formatSlackLink(url, label);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      return `${label} (${url})`;
+    }
+    throw error;
+  }
 }

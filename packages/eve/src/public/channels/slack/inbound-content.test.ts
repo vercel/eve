@@ -421,6 +421,113 @@ describe("resolveSlackInboundMrkdwn", () => {
   it("ignores malformed blocks and attachments containers", () => {
     expect(resolveSlackInboundMrkdwn("", { blocks: "nope", attachments: 42 })).toBe("");
   });
+
+  it("does not throw when a rich_text link URL contains Slack control characters", () => {
+    expect(() =>
+      resolveSlackInboundMrkdwn("", {
+        blocks: [
+          {
+            type: "rich_text",
+            elements: [
+              {
+                type: "rich_text_section",
+                elements: [
+                  { type: "link", url: "https://example.com/?q=a|b", text: "incident link" },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    ).not.toThrow();
+
+    const result = resolveSlackInboundMrkdwn("", {
+      blocks: [
+        {
+          type: "rich_text",
+          elements: [
+            {
+              type: "rich_text_section",
+              elements: [
+                { type: "link", url: "https://example.com/?q=a|b", text: "incident link" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toContain("incident link");
+    expect(result).toContain("https://example.com/?q=a|b");
+  });
+
+  it("keeps a human comment when legacy attachment content is much longer", () => {
+    const result = resolveSlackInboundMrkdwn("this is the bug we saw yesterday", {
+      attachments: [
+        {
+          is_share: true,
+          text: "Deploy 142 failed in us-east-1 because the health check never recovered. See the incident doc for rollback steps.",
+        },
+      ],
+    });
+
+    expect(result).toContain("this is the bug we saw yesterday");
+    expect(result).toContain("Deploy 142 failed");
+  });
+
+  it("prefers extracted block content when whitespace differs from top-level text", () => {
+    const result = resolveSlackInboundMrkdwn("Alert: latency high\nin checkout region now", {
+      blocks: [
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: "Alert: latency high in checkout region now" },
+        },
+        {
+          type: "actions",
+          elements: [
+            { type: "button", text: { type: "plain_text", text: "Acknowledge" }, action_id: "ack" },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toContain("Alert: latency high in checkout region now");
+    expect(result).toContain("[Acknowledge]");
+  });
+
+  it("extracts section accessory button labels as bracketed controls", () => {
+    const result = resolveSlackInboundMrkdwn("", {
+      blocks: [
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: "Approve this deploy?" },
+          accessory: {
+            type: "button",
+            text: { type: "plain_text", text: "Approve" },
+            action_id: "approve",
+          },
+        },
+      ],
+    });
+
+    expect(result).toBe("Approve this deploy?\n[Approve]");
+  });
+
+  it("extracts image alt_text from context block elements", () => {
+    const result = resolveSlackInboundMrkdwn("", {
+      blocks: [
+        {
+          type: "context",
+          elements: [
+            { type: "image", image_url: "https://example.com/graph.png", alt_text: "error graph" },
+            { type: "mrkdwn", text: "opened 5m ago" },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toBe("error graph\nopened 5m ago");
+  });
 });
 
 describe("readSlackTextObject", () => {

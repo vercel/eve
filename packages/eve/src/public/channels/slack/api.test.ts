@@ -482,6 +482,52 @@ describe("SlackThread.refresh", () => {
     expect(message.markdown).toContain("Restart the pods.");
   });
 
+  it("survives rich_text links whose URLs contain Slack control characters", async () => {
+    vi.unstubAllGlobals();
+    mock = buildFetchMock([
+      {
+        text: "plain reply",
+        ts: "1700000000.123456",
+        thread_ts: "1700000000.000001",
+        user: "U01",
+      },
+      {
+        text: "",
+        ts: "1700000000.123457",
+        thread_ts: "1700000000.000001",
+        bot_id: "B01",
+        blocks: [
+          {
+            type: "rich_text",
+            elements: [
+              {
+                type: "rich_text_section",
+                elements: [
+                  { type: "link", url: "https://example.com/?q=a|b", text: "incident link" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    vi.stubGlobal("fetch", mock.fetch);
+
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1700000000.000001",
+      teamId: undefined,
+    });
+
+    await thread.refresh();
+
+    expect(thread.recentMessages).toHaveLength(2);
+    expect(thread.recentMessages[0]?.markdown).toBe("plain reply");
+    expect(thread.recentMessages[1]?.markdown).toContain("incident link");
+    expect(thread.recentMessages[1]?.markdown).toContain("https://example.com/?q=a|b");
+  });
+
   it("shares one conversations.replies request across overlapping refreshes", async () => {
     let resolveReplies!: (response: Response) => void;
     const replies = new Promise<Response>((resolve) => {
