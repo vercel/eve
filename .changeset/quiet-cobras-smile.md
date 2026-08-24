@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Show registry item documentation links after adding an integration from the dev TUI, including the focused X Chat SDK setup guide.
+Show declared environment variables and an eve setup link after adding a registry integration from the dev TUI. Chat SDK adapter links open the integration page's Configure section.
