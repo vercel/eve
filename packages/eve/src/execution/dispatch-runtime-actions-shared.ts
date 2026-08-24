@@ -39,7 +39,9 @@ import { readActionTraceContext } from "#tracing/agent-trace-context-store.js";
 import {
   assertUniqueRuntimeActionCallIds,
   getPendingRuntimeActionBatch,
+  setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
+import { activeTurnId } from "#harness/active-turn-id.js";
 import {
   createSubagentCalledEvent,
   encodeMessageStreamEvent,
@@ -157,6 +159,7 @@ export interface PreparedRuntimeActionDispatch {
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
+  readonly sessionStateRepaired: boolean;
   readonly plan: readonly DispatchPlanEntry[];
   readonly session: RuntimeSession;
 }
@@ -182,14 +185,29 @@ export async function prepareRuntimeActionDispatch(input: {
   const batch = getPendingRuntimeActionBatch(durableSession.state);
 
   if (batch === undefined || batch.actions.length === 0) return undefined;
+  const parentTurnId = batch.event.turnId || activeTurnId(input.sessionState.emissionState);
+  const sessionStateRepaired = batch.event.turnId !== parentTurnId;
+  const repairedBatch = sessionStateRepaired
+    ? { ...batch, event: { ...batch.event, turnId: parentTurnId } }
+    : batch;
   const ctx = await deserializeContext(input.serializedContext);
-  return await prepareActionDispatch({
-    batch,
+  const prepared = await prepareActionDispatch({
+    batch: repairedBatch,
     ctx,
     durableSession,
     serializedContext: input.serializedContext,
     taskControls: input.taskControls,
   });
+  if (!sessionStateRepaired) return prepared;
+
+  return {
+    ...prepared,
+    session: setPendingRuntimeActionBatch({
+      ...repairedBatch,
+      session: prepared.session,
+    }),
+    sessionStateRepaired: true,
+  };
 }
 
 export async function prepareAgentActionDispatch(input: {
@@ -284,6 +302,7 @@ async function prepareActionDispatch(input: {
     plan,
     sandboxSessionId,
     serializedContext: input.serializedContext,
+    sessionStateRepaired: false,
     session,
   };
 }
