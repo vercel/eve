@@ -73,3 +73,17 @@ export {
   type WebSearchToolInput,
   webSearch,
 } from "#public/tools/web-search.js";
+export {
+  type DefineDynamicHarnessAgentToolSettings,
+  defineDynamicHarnessAgentTool,
+  defineFixedHarnessAgentTool,
+} from "#public/tools/harness-agent.js";
+export type {
+  DefineFixedHarnessAgentToolSettings,
+  DynamicHarnessAgentToolInput,
+  FixedHarnessAgentToolInput,
+  HarnessAgentHarness,
+  HarnessAgentSettings,
+  HarnessAgentSkill,
+  HarnessAgentSkillFile,
+} from "#execution/harness-agent/types.js";

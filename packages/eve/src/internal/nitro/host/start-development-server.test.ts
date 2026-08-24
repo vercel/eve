@@ -25,6 +25,13 @@ const mocks = vi.hoisted(() => {
     handleRequest: vi.fn(async () => undefined),
     start: vi.fn(async () => undefined),
   };
+  const workflowWorldTimeoutsAtCreation: {
+    body: string | undefined;
+    headers: string | undefined;
+  } = {
+    body: undefined,
+    headers: undefined,
+  };
   const listenerServer = {
     close: vi.fn(async () => undefined),
     ready: vi.fn(async () => undefined),
@@ -102,8 +109,13 @@ const mocks = vi.hoisted(() => {
       },
     })),
     activateDevelopmentGeneration: vi.fn(async () => undefined),
-    createParentDevelopmentWorkflowWorld: vi.fn(() => mocksWorldInstance),
+    createParentDevelopmentWorkflowWorld: vi.fn(() => {
+      workflowWorldTimeoutsAtCreation.body = process.env.WORKFLOW_LOCAL_BODY_TIMEOUT_MS;
+      workflowWorldTimeoutsAtCreation.headers = process.env.WORKFLOW_LOCAL_HEADERS_TIMEOUT_MS;
+      return mocksWorldInstance;
+    }),
     worldInstance: mocksWorldInstance,
+    workflowWorldTimeoutsAtCreation,
     discardDevelopmentGeneration: vi.fn(async () => undefined),
     removeDevelopmentHostWorkspace: vi.fn(async () => undefined),
     readFile: vi.fn(async (path: string) => {
@@ -351,8 +363,12 @@ describe("createDevelopmentServer", () => {
     mocks.stopDevelopmentSandboxResources.mockResolvedValue(undefined);
     vi.stubGlobal("fetch", mocks.fetch);
     delete process.env.WORKFLOW_LOCAL_BASE_URL;
+    delete process.env.WORKFLOW_LOCAL_BODY_TIMEOUT_MS;
+    delete process.env.WORKFLOW_LOCAL_HEADERS_TIMEOUT_MS;
     delete process.env.PORT;
     delete process.env.EVE_DEVELOPMENT_SANDBOX_RUN_ID;
+    mocks.workflowWorldTimeoutsAtCreation.body = undefined;
+    mocks.workflowWorldTimeoutsAtCreation.headers = undefined;
     mocks.files.clear();
     mocks.devServer.upgrade = vi.fn(
       async (_req: unknown, _socket: unknown, _head: unknown) => undefined,
@@ -373,6 +389,8 @@ describe("createDevelopmentServer", () => {
 
   afterEach(() => {
     delete process.env.WORKFLOW_LOCAL_BASE_URL;
+    delete process.env.WORKFLOW_LOCAL_BODY_TIMEOUT_MS;
+    delete process.env.WORKFLOW_LOCAL_HEADERS_TIMEOUT_MS;
     delete process.env.PORT;
     delete process.env.EVE_DEVELOPMENT_SANDBOX_RUN_ID;
     mocks.files.clear();
@@ -400,6 +418,9 @@ describe("createDevelopmentServer", () => {
     expect(mocks.createParentDevelopmentWorkflowWorld).toHaveBeenCalledWith(
       expect.objectContaining({ agentName: "test-agent", appRoot: "/tmp/eve-test" }),
     );
+    expect(mocks.workflowWorldTimeoutsAtCreation).toEqual({ body: "0", headers: "0" });
+    expect(process.env.WORKFLOW_LOCAL_BODY_TIMEOUT_MS).toBeUndefined();
+    expect(process.env.WORKFLOW_LOCAL_HEADERS_TIMEOUT_MS).toBeUndefined();
     expect(mocks.worldInstance.start).toHaveBeenCalledOnce();
     expect(process.env.EVE_DEV_WORKFLOW_TRANSPORT_SECRET).toEqual(expect.any(String));
     expect(process.env.EVE_DEV_WORKER_APP_ROOT).toBe("/tmp/eve-test");
@@ -419,6 +440,23 @@ describe("createDevelopmentServer", () => {
     expect(process.env.EVE_DEV_WORKER_APP_ROOT).toBeUndefined();
     expect(process.env.EVE_DEVELOPMENT_SANDBOX_RUN_ID).toBeUndefined();
     expect(mocks.worldInstance.close).toHaveBeenCalledOnce();
+  });
+
+  it("preserves explicit local workflow queue transport timeouts", async () => {
+    process.env.WORKFLOW_LOCAL_BODY_TIMEOUT_MS = "45000";
+    process.env.WORKFLOW_LOCAL_HEADERS_TIMEOUT_MS = "60000";
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+
+    const server = await startDevelopmentServer("/tmp/eve-test");
+
+    expect(mocks.workflowWorldTimeoutsAtCreation).toEqual({ body: "45000", headers: "60000" });
+    expect(process.env.WORKFLOW_LOCAL_BODY_TIMEOUT_MS).toBe("45000");
+    expect(process.env.WORKFLOW_LOCAL_HEADERS_TIMEOUT_MS).toBe("60000");
+
+    await server.close();
+
+    expect(process.env.WORKFLOW_LOCAL_BODY_TIMEOUT_MS).toBe("45000");
+    expect(process.env.WORKFLOW_LOCAL_HEADERS_TIMEOUT_MS).toBe("60000");
   });
 
   it("serves the parent World for an explicitly local Workflow World", async () => {

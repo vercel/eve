@@ -1,0 +1,19 @@
+import { z as z3 } from "zod/v3";
+
+import { defineTool } from "#public/tools/index.js";
+
+export default defineTool({
+  description: "Start a report.",
+  execution: "background",
+  inputSchema: z3.object({ reportId: z3.string() }),
+  execute(input, _ctx, task) {
+    void Promise.resolve().then(async () => {
+      await task.send({ kind: "update", message: "Report started." });
+      await task.send({ data: { reportId: input.reportId }, kind: "complete" });
+    });
+    return task.delegated({
+      executor: { data: { reportId: input.reportId }, kind: "report" },
+      receipt: { reportId: input.reportId },
+    });
+  },
+});

@@ -1,6 +1,6 @@
 ---
 title: "Built-in Tools"
-description: "The default and opt-in tools eve provides, including Workflow, glob, grep, and sleep."
+description: "The default and opt-in tools eve provides, including HarnessAgent, Workflow, glob, grep, and sleep."
 ---
 
 eve provides a default tool set for every agent and additional framework tools you can add with one file. Use this page to review what the model can call, opt into more capabilities, or override and disable defaults. For custom tools, see [Tools](../tools).
@@ -40,12 +40,13 @@ Review these default tools before production use. Disable, wrap, restrict, or re
 
 Some framework-provided tools stay out of the default set. Add the corresponding file when your agent needs one:
 
-| Tool       | Definition to export                       | Purpose                                            |
-| ---------- | ------------------------------------------ | -------------------------------------------------- |
-| `glob`     | `defineGlobTool()` from `eve/tools`        | Find sandbox files by glob pattern.                |
-| `grep`     | `defineGrepTool()` from `eve/tools`        | Search sandbox file contents by regex.             |
-| `Workflow` | `experimental_workflow()` from `eve/tools` | Orchestrate root-agent copies from generated code. |
-| `sleep`    | `sleep()` from `eve/tools/sleep`           | Pause and durably resume the current turn.         |
+| Tool            | Definition to export                               | Purpose                                            |
+| --------------- | -------------------------------------------------- | -------------------------------------------------- |
+| `glob`          | `defineGlobTool()` from `eve/tools`                | Find sandbox files by glob pattern.                |
+| `grep`          | `defineGrepTool()` from `eve/tools`                | Search sandbox file contents by regex.             |
+| `harness_agent` | `defineDynamicHarnessAgentTool()` from `eve/tools` | Run a coding harness in the current sandbox.       |
+| `Workflow`      | `experimental_workflow()` from `eve/tools`         | Orchestrate root-agent copies from generated code. |
+| `sleep`         | `sleep()` from `eve/tools/sleep`                   | Pause and durably resume the current turn.         |
 
 For example, add file discovery and content search with two files:
 
@@ -63,7 +64,7 @@ export default defineGrepTool();
 
 The filename supplies the model-facing tool name. You can pass a custom `description` to either helper. The tools run against the agent's sandbox and use the same schemas, results, and error behavior as eve's framework implementations.
 
-The sections below cover `Workflow` and `sleep` in more detail.
+The sections below cover `harness_agent`, `Workflow`, and `sleep` in more detail.
 
 ## Override a default
 
@@ -115,6 +116,99 @@ Three moves shape the harness. The right one depends on whether the model should
 - **Override** when you want the same capability with different behavior. Spread the default from `eve/tools/defaults` and wrap it (logging, an extra guard, a different backend), and the model still sees a tool by that name. Spreading keeps the default's description, schema, and any framework state, such as the `todo` tool's durable state key. Drop the spread and your replacement owns its own context, losing that wiring.
 - **Disable** when the model should not have the capability at all. A `disableTool()` sentinel removes the built-in, and the model never sees it. Reach for this to lock down `bash` or `web_fetch` in an agent that should not run shell commands or fetch arbitrary URLs.
 - **Author a new tool** when you want a capability the harness does not ship. Give it a fresh slug under `agent/tools/` and it joins the built-ins instead of replacing one. See [Tools](../tools) for the authoring model.
+
+## HarnessAgent tool
+
+The opt-in `harness_agent` tool runs Claude Code, Codex, or another supported coding harness against the agent's current sandbox. Each call starts a fresh HarnessAgent session, but it uses the same live `/workspace` and sandbox processes as the calling eve agent. Files written by the coding harness are immediately visible to the caller.
+
+Export the flexible definition from a file named `harness_agent.ts`:
+
+```ts title="agent/tools/harness_agent.ts"
+import { defineDynamicHarnessAgentTool } from "eve/tools";
+
+export default defineDynamicHarnessAgentTool();
+```
+
+Pass `description` to replace the default model-facing tool description.
+
+The model supplies `task` and `harness`. It can also supply `model`, `id`, `instructions`, `skills`, and a workspace-relative `workingDirectory`. Supported harness names are `claude-code`, `cline`, `codex`, `deepagents`, `grok-build`, `opencode`, and `pi`. Omitting `model` uses the selected harness's default model.
+
+Every `harness_agent` call requires eve tool approval before it starts. Once approved, the selected coding harness runs its built-in tools without additional approval prompts. The HarnessAgent tool does not expose inner tool approval, permission mode, tool filtering, timeout, or debug settings.
+
+### Preconfigure a HarnessAgent tool
+
+Use `defineFixedHarnessAgentTool` when instructions and other settings belong in code rather than model input. The resulting tool exposes only `task` and `harness` to the model:
+
+```ts title="agent/tools/implement_change.ts"
+import { defineFixedHarnessAgentTool } from "eve/tools";
+
+export default defineFixedHarnessAgentTool({
+  description: "Implement a requested change in the repository.",
+  instructions: "Implement the requested change and run the relevant checks.",
+  harnesses: ["claude-code", "codex"],
+  models: {
+    "claude-code": "your-claude-model",
+  },
+  workingDirectory: "my-repo-checkout",
+});
+```
+
+`description` is required because each preconfigured tool has a specific purpose. Set `harnesses` to an allowlist or to `"all"`; omitting it enables all supported harnesses. `models` is the only per-harness configuration. Each omitted model continues to use that harness's default.
+
+The general settings are `id`, `instructions`, `skills`, and `workingDirectory`. A skill has `name`, `description`, and `content`, plus optional `files` entries with `path` and `content`.
+
+### Return structured output
+
+Only a preconfigured HarnessAgent tool can declare structured output because an eve tool has one output schema for every invocation. Pass a Zod schema as `outputSchema`; eve exposes it as the tool's output schema and requires the coding harness to produce the same shape:
+
+```ts title="agent/tools/review_change.ts"
+import { defineFixedHarnessAgentTool } from "eve/tools";
+import { z } from "zod";
+
+const reviewSchema = z.object({
+  verdict: z.enum(["approved", "neutral", "changes-required"]),
+  summary: z.string(),
+  findings: z.array(
+    z.object({
+      file: z.string(),
+      line: z.string().optional(),
+      message: z.string(),
+      severity: z.enum(["low", "medium", "high"]),
+    }),
+  ),
+});
+
+export default defineFixedHarnessAgentTool({
+  description:
+    "Request a code review of the current diff in the repository, including structured findings.",
+  harnesses: ["claude-code", "codex", "grok-build"],
+  instructions:
+    "Review the current code changes diff. Provide a final verdict and any findings that require iteration or should be reconsidered.",
+  outputSchema: reviewSchema,
+  workingDirectory: "my-repo-checkout",
+});
+```
+
+The tool returns the validated object directly. Without `outputSchema`, both HarnessAgent tool shapes return the harness's final text.
+
+### Sandbox requirements
+
+Claude Code, Codex, DeepAgents, Grok Build, and OpenCode use an in-sandbox bridge. Configure the `vercel()` sandbox backend with at least one exposed port for the bridge:
+
+```ts title="agent/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+import { vercel } from "eve/sandbox/vercel";
+
+export default defineSandbox({
+  backend: vercel({ ports: [4319] }),
+});
+```
+
+The HarnessAgent tool reserves an available port from the configured `ports` array and passes that port and its `wss://` Vercel Sandbox URL to the selected harness adapter. The tool does not add or remove Vercel Sandbox routes. Configure more than one port if the agent can run bridge-backed harness calls concurrently.
+
+Cline and Pi do not use a bridge and can run with another eve sandbox backend. All harnesses still work in the caller's current sandbox; the tool never creates a second sandbox. The first call for a bridge-backed harness may need outbound network access while its adapter bootstraps the bridge inside the sandbox.
+
+Authentication is not a HarnessAgent tool setting. Each adapter resolves its usual credentials from the eve runtime environment, such as `AI_GATEWAY_API_KEY`, `VERCEL_OIDC_TOKEN`, or its provider-specific API key, and makes the required credentials available to the harness process.
 
 ## Workflow tool
 

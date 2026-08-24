@@ -14,6 +14,8 @@ import {
 } from "#internal/workflow/development-world-protocol.js";
 
 const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
+const WORKFLOW_LOCAL_BODY_TIMEOUT_ENV = "WORKFLOW_LOCAL_BODY_TIMEOUT_MS";
+const WORKFLOW_LOCAL_HEADERS_TIMEOUT_ENV = "WORKFLOW_LOCAL_HEADERS_TIMEOUT_MS";
 const PORT_ENV = "PORT";
 
 export function createDevelopmentWorkflowWorld(input: {
@@ -32,7 +34,7 @@ export function createDevelopmentWorkflowWorld(input: {
   ) {
     return undefined;
   }
-  return createParentDevelopmentWorkflowWorld({
+  return createParentDevelopmentWorkflowWorldWithUnboundedTransport({
     agentName: input.preparedHost.compileResult.manifest.config.name,
     appRoot: input.appRoot,
     resolveActiveGenerationId: () => {
@@ -44,6 +46,35 @@ export function createDevelopmentWorkflowWorld(input: {
     },
     transportSecret: input.transportSecret,
   });
+}
+
+function createParentDevelopmentWorkflowWorldWithUnboundedTransport(input: {
+  readonly agentName: string;
+  readonly appRoot: string;
+  readonly resolveActiveGenerationId: () => string;
+  readonly transportSecret: string;
+}): ParentDevelopmentWorkflowWorld {
+  const previousBodyTimeout = process.env[WORKFLOW_LOCAL_BODY_TIMEOUT_ENV];
+  const previousHeadersTimeout = process.env[WORKFLOW_LOCAL_HEADERS_TIMEOUT_ENV];
+
+  process.env[WORKFLOW_LOCAL_BODY_TIMEOUT_ENV] ??= "0";
+  process.env[WORKFLOW_LOCAL_HEADERS_TIMEOUT_ENV] ??= "0";
+
+  try {
+    return createParentDevelopmentWorkflowWorld(input);
+  } finally {
+    if (previousBodyTimeout === undefined) {
+      delete process.env[WORKFLOW_LOCAL_BODY_TIMEOUT_ENV];
+    } else {
+      process.env[WORKFLOW_LOCAL_BODY_TIMEOUT_ENV] = previousBodyTimeout;
+    }
+
+    if (previousHeadersTimeout === undefined) {
+      delete process.env[WORKFLOW_LOCAL_HEADERS_TIMEOUT_ENV];
+    } else {
+      process.env[WORKFLOW_LOCAL_HEADERS_TIMEOUT_ENV] = previousHeadersTimeout;
+    }
+  }
 }
 
 export function installWorkflowTransportEnvironment(appRoot: string, secret: string): () => void {

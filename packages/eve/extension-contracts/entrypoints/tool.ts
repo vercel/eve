@@ -1,5 +1,7 @@
 export {
   defineBashTool,
+  defineDynamicHarnessAgentTool,
+  defineFixedHarnessAgentTool,
   defineGlobTool,
   defineGrepTool,
   defineReadFileTool,
