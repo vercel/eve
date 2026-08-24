@@ -1023,6 +1023,12 @@ describe("scaffoldBaseProject", () => {
     const agentSource = await readFile(join(projectRoot, "agent/agent.ts"), "utf8");
     expect(agentSource).toContain('model: "openai/gpt-5-mini"');
     expect(agentSource).not.toContain("modelOptions");
+    const readme = await readFile(join(projectRoot, "README.md"), "utf8");
+    expect(readme).toContain("# demo-agent");
+    expect(readme).toContain("## Getting started");
+    expect(readme).toContain("## Learn more");
+    expect(readme).toContain("## Deploy on Vercel");
+    expect(readme).not.toContain("__EVE_INIT_");
     const packageJson = await readFile(join(projectRoot, "package.json"), "utf8");
     expect(packageJson).toContain('"eve": "^0.25.0"');
     // Channels added later (`eve add channel/slack`, possibly next to a
@@ -1107,6 +1113,7 @@ describe("scaffoldBaseProject", () => {
       await expect(readFile(join(projectRoot, "package.json"), "utf8")).resolves.toContain(
         '"eve": "^0.25.0"',
       );
+      await expect(readFile(join(projectRoot, "README.md"), "utf8")).resolves.toContain("eve dev");
       await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(
         packageManager === "pnpm",
       );
