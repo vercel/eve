@@ -126,8 +126,8 @@ This work will:
 - limit non-source host behavior to an explicit closed host inventory and move
   process readiness away from the replaceable public health route;
 - replace agent-info v2 with a truthful v3 projection;
-- remove the old framework, extension-composition, fallback, and inspection
-  paths in the same implementation.
+- remove each superseded framework, extension-composition, fallback, and
+  inspection path in the delivery PR that supersedes it.
 
 The implementation does not expose a public registration API or public effect
 constructors, serialize functions, mutate a compiled graph, create
@@ -888,35 +888,68 @@ memory-only registry or runtime contributor seam.
 
 ## Delivery
 
-The implementation lands as one PR that replaces every superseded path in the
-same change; no compatibility adapter lands. Transitional helpers may exist
-while the implementation branch is under construction. PR #2407 was an earlier
-attempt at this boundary; it remains open only as salvage reference and does
-not gate or define the implementation.
+The implementation lands as two stacked PRs split at the boundary between
+source identity and dispatch behavior. Each PR deletes every path it
+supersedes; no compatibility adapter lands in either. The split isolates the
+two failure domains: PR 1's risk is compilation, serialization, and loading,
+guarded by artifact validators and module-map parity; PR 2's risk is
+park/resume semantics inside the harness, reviewed in a small focused diff.
+PR #2407 was an earlier atomic attempt at this boundary; it remains open only
+as salvage reference and does not gate or define the implementation.
 
-Within that single PR, construction follows one internal order so each layer
-is correct before the next begins:
+### PR 1 — canonical source graph
+
+Everything becomes a source, and dispatch behavior does not change:
 
 1. source-neutral candidates, required bindings, and the one composition pass;
-2. framework tool, config, and sandbox migration to programmatic sources;
-3. the kernel effect inventory and deletion of name-based dispatch;
+2. ordinary framework tool, config, sandbox, and `connection_search`
+   migration to programmatic sources;
+3. effectful tool definitions registered at their canonical `tools/*.ts`
+   slots — presence, replacement, disablement, and ownership become source
+   composition, while the harness continues to supply their behavior through
+   the existing dispatch mechanics;
 4. framework channels, the compiled route plan, and the closed host inventory;
 5. inspection v3 and in-memory compiler parity.
 
-`COMPILED_AGENT_MANIFEST_VERSION` moves from 41 to 42 with the complete
-serialized shape: required total bindings, persisted composition, the channel
-route plan, the kernel effect plan, config provenance, and v3 inspection
-metadata. The compiler diagnostic artifact moves from version 1 to version 2
-in the same change. Disk and bundled loaders reject earlier serialized shapes
-rather than repairing them.
+`COMPILED_AGENT_MANIFEST_VERSION` moves from 41 to 42 with required total
+bindings, persisted composition, the channel route plan, config provenance,
+and v3 inspection metadata. The compiler diagnostic artifact moves from
+version 1 to version 2 in the same PR. Disk and bundled loaders reject
+earlier serialized shapes rather than repairing them. Kernel preparation
+switches from catalog membership to slot survival: a capability prepares only
+when its canonical source survived composition, and agent-info v3 derives its
+prepared kernel entries from that survival plus the static kind mapping.
 
-The PR includes one release-note-oriented changeset — `minor`, because it
-breaks the agent-info schema and the replaceable health contract — and updates
-tool, dynamic capability, config, channel, health, sandbox, and agent-info
-documentation. When it lands, #2347 is closed with a pointer to this doc.
+PR 1 carries one explicitly inventoried transitional seam: the harness still
+recognizes `ask_question`, `agent`, `task_update`, `task_cancel`,
+`web_search`, and `final_output` through today's name checks, `runtimeAction`
+markers, and the `frameworkAction: "load-skill"` marker. Nothing else on the
+magic-string list survives PR 1 — the `sourceId.startsWith("eve:")` calling
+convention dies with the catalog — and no new name-based dispatch may be
+added.
 
+PR 1 includes the `minor` changeset — it breaks the agent-info schema and the
+replaceable health contract — and updates tool, config, channel, health,
+sandbox, and agent-info documentation.
+
+### PR 2 — kernel effects
+
+Dispatch becomes declared effects, and the seam is deleted:
+
+1. effect declarations and visibility conditions consumed by the kernel;
+2. the exhaustive effect-kind lifecycle, with approvals riding
+   `request-input`;
+3. deletion of the complete magic-string dispatch layer listed in the
+   deletion ledger's kernel row.
+
+`COMPILED_AGENT_MANIFEST_VERSION` moves from 42 to 43 with the serialized
+kernel effect plan. PR 2 is `patch` when externally observable behavior is
+preserved, and updates the dynamic capability documentation.
+
+PR 2 depends entirely on PR 1 and starts only after it lands; nothing in PR 1
+depends on PR 2. When PR 2 lands, #2347 is closed with a pointer to this doc.
 The research status remains `in-progress` until every deletion, validation
-item, and required CI suite is complete.
+item, and required CI suite across both PRs is complete.
 
 ## Distributed deletion ledger
 
