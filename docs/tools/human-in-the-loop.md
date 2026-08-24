@@ -70,7 +70,7 @@ export default defineTool({
   inputSchema: z.object({ chargeId: z.string() }),
   approval: {
     request: always(),
-    response: ({ responder }) => {
+    response: ({ responder, request, response, session, auth }) => {
       // The Slack channel authenticates the responder and includes the workspace and user IDs.
       // Larger apps can look up approver membership here instead.
       const approvers = ["slack:T012AB3CD:U045EF6GH", "slack:T012AB3CD:U078JK9LM"];
