@@ -276,6 +276,33 @@ describe("runRegistrySetupCommand", () => {
     expect(child.kill).not.toHaveBeenCalled();
   });
 
+  it("rejects an incompatible child protocol version", async () => {
+    const child = Object.assign(new EventEmitter(), {
+      connected: true,
+      send: vi.fn(),
+      kill: vi.fn(),
+      pid: undefined,
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+    });
+    setTimeout(() => {
+      child.emit("message", { type: "ready", version: REGISTRY_SETUP_PROTOCOL_VERSION + 1 });
+      child.emit("close", 1, null);
+    }, 0);
+    spawn.mockReturnValue(child);
+
+    await expect(
+      runRegistrySetupCommand(
+        "/project",
+        { package: "@acme/slack", bin: "acme-slack", args: [] },
+        "experimental/selfmod",
+        options(),
+      ),
+    ).rejects.toThrow(
+      `Setup command does not support registry setup protocol v${REGISTRY_SETUP_PROTOCOL_VERSION}.`,
+    );
+  });
+
   it("rejects a setup command that does not speak the protocol", async () => {
     const child = Object.assign(new EventEmitter(), {
       connected: true,

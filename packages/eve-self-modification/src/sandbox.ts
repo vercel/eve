@@ -42,10 +42,11 @@ export function defineSelfModificationSandbox(
       const source = assertSelfModificationPullRequestsAvailable({
         pullRequests: config.pullRequests,
       });
+      const token = resolvePersonalAccessToken();
       const sandbox = await use();
       await prepareSelfModificationWorkspace({
         deployedSha: source.revision,
-        token: resolvePersonalAccessToken(),
+        token,
         repository: config.pullRequests.repository,
         rootDirectory: source.rootDirectory,
         sandbox,

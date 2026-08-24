@@ -10,6 +10,7 @@ import {
 import { resolveSelfModificationMode } from "../../src/mode.js";
 import {
   assertSelfModificationPullRequestsAvailable,
+  canUseSelfModificationPullRequests,
   resolvePersonalAccessToken,
 } from "../../src/pull-requests.js";
 import selfModification from "../extension.js";
@@ -68,7 +69,8 @@ export function defineSelfModificationPublishTool(
     const config = resolveSelfModificationConfig(selfModification.config);
     const pullRequests = pullRequestsOverride ?? config.pullRequests;
     return pullRequests !== undefined &&
-      resolveSelfModificationMode({ ...config, pullRequests }) === "pull-requests"
+      resolveSelfModificationMode({ ...config, pullRequests }) === "pull-requests" &&
+      canUseSelfModificationPullRequests({ pullRequests })
       ? createSelfModificationPublishTool(pullRequests)
       : null;
   };

@@ -1,6 +1,6 @@
 import type { DeploymentSource } from "eve";
 import type { ToolContext } from "eve/tools";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getDeploymentSource = vi.hoisted(() =>
   vi.fn<() => DeploymentSource | null>(() => ({
@@ -25,6 +25,7 @@ const pullRequests = {
   repository: { owner: "acme", targetBranch: "main", repo: "agent" },
 };
 
+beforeEach(() => vi.stubEnv("EVE_SELF_MODIFICATION_GITHUB_TOKEN", "github-token"));
 afterEach(() => vi.unstubAllEnvs());
 
 async function resolvePublishTool(publish: ReturnType<typeof defineSelfModificationPublishTool>) {
@@ -47,6 +48,19 @@ describe("self-modification publish tool", () => {
     ).resolves.toBeNull();
   });
 
+  it("stays absent without deployment source or a GitHub credential", async () => {
+    vi.stubEnv("EVE_SELF_MODIFICATION_GITHUB_TOKEN", "");
+    await expect(
+      resolvePublishTool(defineSelfModificationPublishTool(pullRequests)),
+    ).resolves.toBeNull();
+
+    vi.stubEnv("EVE_SELF_MODIFICATION_GITHUB_TOKEN", "github-token");
+    getDeploymentSource.mockReturnValueOnce(null);
+    await expect(
+      resolvePublishTool(defineSelfModificationPublishTool(pullRequests)),
+    ).resolves.toBeNull();
+  });
+
   it("publishes without an in-session approval gate", async () => {
     const tool = await resolvePublishTool(defineSelfModificationPublishTool(pullRequests));
     if (tool === null || tool === undefined || !("execute" in tool)) {
@@ -56,11 +70,11 @@ describe("self-modification publish tool", () => {
   });
 
   it("rechecks deployment source before opening the sandbox", async () => {
-    getDeploymentSource.mockReturnValueOnce(null);
     const tool = await resolvePublishTool(defineSelfModificationPublishTool(pullRequests));
     if (tool === null || tool === undefined || !("execute" in tool)) {
       throw new Error("Expected configured publish tool.");
     }
+    getDeploymentSource.mockReturnValueOnce(null);
     const getSandbox = vi.fn(async () => {
       throw new Error("Sandbox should not be opened.");
     });

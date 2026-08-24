@@ -51,4 +51,16 @@ describe("defineSelfModificationAgent", () => {
     const agent = defineSelfModificationAgent({ config: { development: { enabled: false } } });
     expect(agent.events["session.started"]?.({}, {} as never)).toBeNull();
   });
+
+  it("hides deployed self-modification without captured source metadata", async () => {
+    delete process.env.EVE_DEV;
+    const agent = defineSelfModificationAgent({
+      config: {
+        change: { behavior: "review", branch: "main" },
+        source: { git: { repository: "github.com/acme/agent" } },
+      },
+    });
+
+    expect(await agent.events["session.started"]?.({}, {} as never)).toBeNull();
+  });
 });

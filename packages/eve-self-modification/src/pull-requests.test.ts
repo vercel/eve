@@ -53,7 +53,17 @@ describe("deployed self-modification availability", () => {
     );
   });
 
-  it("does not expose pull requests without trusted source metadata", () => {
-    expect(canUseSelfModificationPullRequests({ pullRequests: pullRequests() })).toBe(false);
+  it("exposes pull requests only with source metadata and a credential", () => {
+    expect(
+      canUseSelfModificationPullRequests({ pullRequests: pullRequests(), source: SOURCE }),
+    ).toBe(false);
+
+    vi.stubEnv("EVE_SELF_MODIFICATION_GITHUB_TOKEN", "github-token");
+    expect(
+      canUseSelfModificationPullRequests({ pullRequests: pullRequests(), source: SOURCE }),
+    ).toBe(true);
+    expect(canUseSelfModificationPullRequests({ pullRequests: pullRequests(), source: null })).toBe(
+      false,
+    );
   });
 });

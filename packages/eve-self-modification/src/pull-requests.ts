@@ -25,9 +25,11 @@ export function assertSelfModificationPullRequestsAvailable(input: {
 
 export function canUseSelfModificationPullRequests(input: {
   readonly pullRequests: ResolvedSelfModificationPullRequests;
+  readonly source?: DeploymentSource | null;
 }): boolean {
   try {
     assertSelfModificationPullRequestsAvailable(input);
+    resolvePersonalAccessToken();
     return true;
   } catch {
     return false;

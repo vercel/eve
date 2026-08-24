@@ -46,6 +46,12 @@ export {
   HeadlessPromptError,
 } from "./headless.js";
 export { createPromptCommandOutput, type PromptCommandLog } from "./cli/index.js";
+export { createRegistrySetupClient, type RegistrySetupClient } from "./registry-setup-client.js";
+export {
+  REGISTRY_SETUP_PROTOCOL_VERSION,
+  type RegistrySetupFact,
+  type RegistrySetupOutcome,
+} from "./registry-setup-protocol.js";
 export {
   getPackageManagerStrategy,
   runPackageManagerInstall,
