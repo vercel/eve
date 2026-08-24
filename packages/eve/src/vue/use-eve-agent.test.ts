@@ -352,7 +352,9 @@ describe("useEveAgent (Vue composable wiring)", () => {
       }),
       createSessionWaitingEvent(),
     ];
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createBoundedStreamResponse(events));
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(createBoundedStreamResponse(events))
+      .mockResolvedValueOnce(createEagerStreamResponse([]));
     const scope = effectScope();
     const agent = scope.run(() =>
       useEveAgent({
