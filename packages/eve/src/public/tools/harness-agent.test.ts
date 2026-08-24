@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runHarnessAgent } from "#execution/harness-agent/run.js";
 import type { ToolContext } from "#public/definitions/tool.js";
-import { createHarnessAgentTool, defineHarnessAgentTool } from "#public/tools/harness-agent.js";
+import {
+  defineDynamicHarnessAgentTool,
+  defineFixedHarnessAgentTool,
+} from "#public/tools/harness-agent.js";
 import type { HarnessAgentHarness } from "#execution/harness-agent/types.js";
 import type { RuntimeSandboxSession } from "#shared/sandbox-session.js";
 import { serializeInputSchema } from "#shared/tool-schema.js";
@@ -41,9 +44,9 @@ beforeEach(() => {
   vi.mocked(runHarnessAgent).mockReset();
 });
 
-describe("defineHarnessAgentTool", () => {
+describe("defineDynamicHarnessAgentTool", () => {
   it("exposes serializable settings without low-level harness controls", () => {
-    const tool = defineHarnessAgentTool();
+    const tool = defineDynamicHarnessAgentTool();
     expect(
       (tool.inputSchema as { readonly "~standard": { readonly vendor: string } })["~standard"]
         .vendor,
@@ -70,19 +73,20 @@ describe("defineHarnessAgentTool", () => {
   });
 
   it("allows overriding the model-facing description", () => {
-    expect(defineHarnessAgentTool().description).toBe(
+    expect(defineDynamicHarnessAgentTool().description).toBe(
       "Run a coding harness such as Claude Code or Codex in the current eve sandbox to complete a task.",
     );
     expect(
-      defineHarnessAgentTool({ description: "Delegate repository work to a coding harness." })
-        .description,
+      defineDynamicHarnessAgentTool({
+        description: "Delegate repository work to a coding harness.",
+      }).description,
     ).toBe("Delegate repository work to a coding harness.");
   });
 
   it("runs the selected harness in the current sandbox", async () => {
     vi.mocked(runHarnessAgent).mockResolvedValue("done");
     const context = createContext();
-    const tool = defineHarnessAgentTool();
+    const tool = defineDynamicHarnessAgentTool();
 
     await expect(
       tool.execute(
@@ -111,9 +115,9 @@ describe("defineHarnessAgentTool", () => {
   });
 });
 
-describe("createHarnessAgentTool", () => {
+describe("defineFixedHarnessAgentTool", () => {
   it("exposes only task and an allowlisted harness", () => {
-    const tool = createHarnessAgentTool({
+    const tool = defineFixedHarnessAgentTool({
       description: "Implement a focused change in the repository.",
       harnesses: ["claude-code", "codex"],
       models: { codex: "gpt-5.4-codex" },
@@ -143,7 +147,7 @@ describe("createHarnessAgentTool", () => {
     const outputSchema = z.object({ summary: z.string() });
     const output = { summary: "Reviewed." };
     vi.mocked(runHarnessAgent).mockResolvedValue(output);
-    const tool = createHarnessAgentTool({
+    const tool = defineFixedHarnessAgentTool({
       description: "Review a change and return structured findings.",
       harnesses: ["claude-code"],
       instructions: "Review the change.",
@@ -164,17 +168,17 @@ describe("createHarnessAgentTool", () => {
   });
 
   it("rejects empty allowlists and model settings for disabled harnesses", () => {
-    expect(() => createHarnessAgentTool({ description: "Run a harness.", harnesses: [] })).toThrow(
-      "at least one enabled harness",
-    );
     expect(() =>
-      createHarnessAgentTool({
+      defineFixedHarnessAgentTool({ description: "Run a harness.", harnesses: [] }),
+    ).toThrow("at least one enabled harness");
+    expect(() =>
+      defineFixedHarnessAgentTool({
         description: "Run a harness.",
         harnesses: ["unknown" as HarnessAgentHarness],
       }),
     ).toThrow('Unknown HarnessAgent harness "unknown"');
     expect(() =>
-      createHarnessAgentTool({
+      defineFixedHarnessAgentTool({
         description: "Run a harness.",
         harnesses: ["codex"],
         models: { "claude-code": "claude-opus-4-1" },

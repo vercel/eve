@@ -4,15 +4,15 @@ import { z } from "#compiled/zod/index.js";
 import { HARNESS_AGENT_HARNESSES } from "#execution/harness-agent/adapter.js";
 import { runHarnessAgent } from "#execution/harness-agent/run.js";
 import {
-  type CreateHarnessAgentToolSettings,
+  type DefineFixedHarnessAgentToolSettings,
+  type DynamicHarnessAgentToolInput,
   type FixedHarnessAgentToolInput,
   type HarnessAgentHarness,
-  type HarnessAgentToolInput,
 } from "#execution/harness-agent/types.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
-type HarnessAgentToolRuntimeSettings = Omit<
-  CreateHarnessAgentToolSettings<StandardJSONSchemaV1<unknown, unknown> | undefined>,
+type FixedHarnessAgentToolRuntimeSettings = Omit<
+  DefineFixedHarnessAgentToolSettings<StandardJSONSchemaV1<unknown, unknown> | undefined>,
   "description"
 >;
 
@@ -41,7 +41,7 @@ const configurableSettingsShape = {
     .optional(),
 };
 
-export const HARNESS_AGENT_TOOL_INPUT_SCHEMA = z.strictObject({
+export const DYNAMIC_HARNESS_AGENT_TOOL_INPUT_SCHEMA = z.strictObject({
   harness: z.enum(HARNESS_AGENT_HARNESSES).describe("Coding harness to run."),
   model: z
     .string()
@@ -51,10 +51,10 @@ export const HARNESS_AGENT_TOOL_INPUT_SCHEMA = z.strictObject({
   ...configurableSettingsShape,
 });
 
-export async function executeHarnessAgentTool(input: {
+export async function executeDynamicHarnessAgentTool(input: {
   readonly abortSignal?: AbortSignal;
   readonly sandbox: SandboxSession;
-  readonly toolInput: HarnessAgentToolInput;
+  readonly toolInput: DynamicHarnessAgentToolInput;
 }): Promise<string> {
   return await runHarnessAgent<string>({
     abortSignal: input.abortSignal,
@@ -66,7 +66,7 @@ export async function executeHarnessAgentTool(input: {
   });
 }
 
-export function createHarnessAgentToolRuntime(settings: HarnessAgentToolRuntimeSettings) {
+export function createFixedHarnessAgentToolRuntime(settings: FixedHarnessAgentToolRuntimeSettings) {
   const enabledHarnesses = resolveEnabledHarnesses(settings.harnesses);
   validateModels({ enabledHarnesses, models: settings.models });
 
@@ -92,17 +92,17 @@ export function createHarnessAgentToolRuntime(settings: HarnessAgentToolRuntimeS
 }
 
 function resolveEnabledHarnesses(
-  harnesses: CreateHarnessAgentToolSettings["harnesses"],
+  harnesses: DefineFixedHarnessAgentToolSettings["harnesses"],
 ): readonly HarnessAgentHarness[] {
   if (harnesses === undefined || harnesses === "all") {
     return HARNESS_AGENT_HARNESSES;
   }
   if (!Array.isArray(harnesses)) {
-    throw new Error('createHarnessAgentTool harnesses must be "all" or an allowlist.');
+    throw new Error('defineFixedHarnessAgentTool harnesses must be "all" or an allowlist.');
   }
   const enabled = [...new Set(harnesses)];
   if (enabled.length === 0) {
-    throw new Error("createHarnessAgentTool requires at least one enabled harness.");
+    throw new Error("defineFixedHarnessAgentTool requires at least one enabled harness.");
   }
   for (const harness of enabled) {
     if (!HARNESS_AGENT_HARNESSES.includes(harness)) {
@@ -121,7 +121,7 @@ function createFixedInputSchema(enabledHarnesses: readonly HarnessAgentHarness[]
 
 function validateModels(input: {
   readonly enabledHarnesses: readonly HarnessAgentHarness[];
-  readonly models: CreateHarnessAgentToolSettings["models"];
+  readonly models: DefineFixedHarnessAgentToolSettings["models"];
 }): void {
   if (input.models === undefined) {
     return;

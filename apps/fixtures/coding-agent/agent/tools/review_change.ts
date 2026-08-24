@@ -1,4 +1,4 @@
-import { createHarnessAgentTool } from "eve/tools";
+import { defineFixedHarnessAgentTool } from "eve/tools";
 import { z } from "zod";
 
 const reviewSchema = z.object({
@@ -14,7 +14,7 @@ const reviewSchema = z.object({
   ),
 });
 
-export default createHarnessAgentTool({
+export default defineFixedHarnessAgentTool({
   description:
     "Request a code review of the current diff in the ms project repository, including structured findings.",
   harnesses: ["claude-code", "codex", "grok-build"],

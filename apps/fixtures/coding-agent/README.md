@@ -11,7 +11,7 @@ pull overwriting them.
 
 ## How delegation works
 
-The fixture exports `defineHarnessAgentTool()` from `agent/tools/harness_agent.ts`, so the outer
+The fixture exports `defineDynamicHarnessAgentTool()` from `agent/tools/harness_agent.ts`, so the outer
 agent chooses the harness and may optionally choose its model. The instructions require every call
 to pass `workingDirectory: "ms"`. That workspace-relative value resolves to `/workspace/ms`, where
 the selected harness inspects, edits, and tests the repository.

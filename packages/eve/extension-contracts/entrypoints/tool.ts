@@ -1,9 +1,9 @@
 export {
-  createHarnessAgentTool,
   defineBashTool,
+  defineDynamicHarnessAgentTool,
+  defineFixedHarnessAgentTool,
   defineGlobTool,
   defineGrepTool,
-  defineHarnessAgentTool,
   defineReadFileTool,
   defineTool,
   defineWriteFileTool,

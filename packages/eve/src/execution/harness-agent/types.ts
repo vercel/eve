@@ -28,7 +28,7 @@ export interface HarnessAgentSettings {
   readonly workingDirectory?: string;
 }
 
-export interface HarnessAgentToolInput extends HarnessAgentSettings {
+export interface DynamicHarnessAgentToolInput extends HarnessAgentSettings {
   readonly task: string;
   readonly harness: HarnessAgentHarness;
   readonly model?: string;
@@ -39,7 +39,7 @@ export interface FixedHarnessAgentToolInput {
   readonly harness: HarnessAgentHarness;
 }
 
-export interface CreateHarnessAgentToolSettings<
+export interface DefineFixedHarnessAgentToolSettings<
   TOutputSchema extends StandardJSONSchemaV1<unknown, unknown> | undefined = undefined,
 > extends HarnessAgentSettings {
   /** Model-facing description for this preconfigured HarnessAgent tool. */

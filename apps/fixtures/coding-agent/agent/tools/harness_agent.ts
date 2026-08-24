@@ -1,3 +1,3 @@
-import { defineHarnessAgentTool } from "eve/tools";
+import { defineDynamicHarnessAgentTool } from "eve/tools";
 
-export default defineHarnessAgentTool();
+export default defineDynamicHarnessAgentTool();

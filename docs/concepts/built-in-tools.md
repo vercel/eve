@@ -39,13 +39,13 @@ Review these default tools before production use. Disable, wrap, restrict, or re
 
 Some framework-provided tools stay out of the default set. Add the corresponding file when your agent needs one:
 
-| Tool            | Definition to export                        | Purpose                                            |
-| --------------- | ------------------------------------------- | -------------------------------------------------- |
-| `glob`          | `defineGlobTool()` from `eve/tools`         | Find sandbox files by glob pattern.                |
-| `grep`          | `defineGrepTool()` from `eve/tools`         | Search sandbox file contents by regex.             |
-| `harness_agent` | `defineHarnessAgentTool()` from `eve/tools` | Run a coding harness in the current sandbox.       |
-| `Workflow`      | `experimental_workflow()` from `eve/tools`  | Orchestrate root-agent copies from generated code. |
-| `sleep`         | `sleep()` from `eve/tools/sleep`            | Pause and durably resume the current turn.         |
+| Tool            | Definition to export                               | Purpose                                            |
+| --------------- | -------------------------------------------------- | -------------------------------------------------- |
+| `glob`          | `defineGlobTool()` from `eve/tools`                | Find sandbox files by glob pattern.                |
+| `grep`          | `defineGrepTool()` from `eve/tools`                | Search sandbox file contents by regex.             |
+| `harness_agent` | `defineDynamicHarnessAgentTool()` from `eve/tools` | Run a coding harness in the current sandbox.       |
+| `Workflow`      | `experimental_workflow()` from `eve/tools`         | Orchestrate root-agent copies from generated code. |
+| `sleep`         | `sleep()` from `eve/tools/sleep`                   | Pause and durably resume the current turn.         |
 
 For example, add file discovery and content search with two files:
 
@@ -123,9 +123,9 @@ The opt-in `harness_agent` tool runs Claude Code, Codex, or another supported co
 Export the flexible definition from a file named `harness_agent.ts`:
 
 ```ts title="agent/tools/harness_agent.ts"
-import { defineHarnessAgentTool } from "eve/tools";
+import { defineDynamicHarnessAgentTool } from "eve/tools";
 
-export default defineHarnessAgentTool();
+export default defineDynamicHarnessAgentTool();
 ```
 
 Pass `description` to replace the default model-facing tool description.
@@ -136,12 +136,12 @@ Every `harness_agent` call requires eve tool approval before it starts. Once app
 
 ### Preconfigure a HarnessAgent tool
 
-Use `createHarnessAgentTool` when instructions and other settings belong in code rather than model input. The resulting tool exposes only `task` and `harness` to the model:
+Use `defineFixedHarnessAgentTool` when instructions and other settings belong in code rather than model input. The resulting tool exposes only `task` and `harness` to the model:
 
 ```ts title="agent/tools/implement_change.ts"
-import { createHarnessAgentTool } from "eve/tools";
+import { defineFixedHarnessAgentTool } from "eve/tools";
 
-export default createHarnessAgentTool({
+export default defineFixedHarnessAgentTool({
   description: "Implement a requested change in the repository.",
   instructions: "Implement the requested change and run the relevant checks.",
   harnesses: ["claude-code", "codex"],
@@ -161,7 +161,7 @@ The general settings are `id`, `instructions`, `skills`, and `workingDirectory`.
 Only a preconfigured HarnessAgent tool can declare structured output because an eve tool has one output schema for every invocation. Pass a Zod schema as `outputSchema`; eve exposes it as the tool's output schema and requires the coding harness to produce the same shape:
 
 ```ts title="agent/tools/review_change.ts"
-import { createHarnessAgentTool } from "eve/tools";
+import { defineFixedHarnessAgentTool } from "eve/tools";
 import { z } from "zod";
 
 const reviewSchema = z.object({
@@ -178,7 +178,7 @@ const reviewSchema = z.object({
   workingDirectory: "my-repo-checkout",
 });
 
-export default createHarnessAgentTool({
+export default defineFixedHarnessAgentTool({
   description:
     "Request a code review of the current diff in the repository, including structured findings.",
   harnesses: ["claude-code", "codex", "grok-build"],
