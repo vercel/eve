@@ -5,31 +5,34 @@ import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js
 import {
   createSendblueAdapter,
   type SendblueAdapter,
-  type SendblueCredentials,
-  type SendblueWebhookVerifier,
+  type SendblueAdapterConfig,
 } from "#compiled/chat-adapter-sendblue/index.js";
 import type { Message, Thread } from "#compiled/chat/index.js";
 import { sendblueInboundContent } from "#public/channels/sendblue/inboundContent.js";
 
-/** Credentials and webhook settings for a Sendblue channel. */
-export type SendblueChannelCredentials = SendblueCredentials & {
-  /** Sendblue line used for outbound messages and accepted inbound webhooks. */
-  readonly fromNumber: string;
-  /** Sendblue webhook signing secret for direct provider delivery. */
-  readonly webhookSecret?: string;
-  /** Trusted verifier for webhook delivery, such as Vercel Connect's OIDC verifier. */
-  readonly webhookVerifier?: SendblueWebhookVerifier;
-};
-
-/** Resolves Sendblue credentials for integrations that rotate them. */
-export type SendblueChannelCredentialsProvider = () =>
-  | SendblueChannelCredentials
-  | Promise<SendblueChannelCredentials>;
+/**
+ * Sendblue adapter credentials and line configuration.
+ *
+ * Pass direct API credentials, or `connectSendblueCredentials(...)` from
+ * `@vercel/connect/eve` for a rotating bearer token and managed line.
+ */
+export type SendblueChannelCredentials = Partial<
+  Pick<
+    SendblueAdapterConfig,
+    | "accessToken"
+    | "allowedFromNumbers"
+    | "apiKey"
+    | "apiSecret"
+    | "defaultFromNumber"
+    | "webhookSecret"
+    | "webhookVerifier"
+  >
+>;
 
 /** Configuration for {@link sendblueChannel}. */
 export interface SendblueChannelConfig {
-  /** Direct Sendblue credentials or a lazy provider such as `connectSendblueCredentials(...)`. */
-  readonly credentials: SendblueChannelCredentials | SendblueChannelCredentialsProvider;
+  /** Direct Sendblue credentials or `connectSendblueCredentials(...)`. */
+  readonly credentials: SendblueChannelCredentials;
   /** Override the default webhook route (`/eve/v1/sendblue`). */
   readonly route?: string;
   /** Display name used by the Chat SDK runtime. Defaults to `"eve"`. */
@@ -53,19 +56,11 @@ export interface SendblueChannel extends Channel<any, any, any> {}
  * ```
  */
 export function sendblueChannel(config: SendblueChannelConfig): SendblueChannel {
-  const credentials = toCredentialsProvider(config.credentials);
-  const webhookSecret =
-    (typeof config.credentials === "function" ? undefined : config.credentials.webhookSecret) ??
-    process.env.SENDBLUE_WEBHOOK_SECRET;
-  const fallbackWebhookVerifier = webhookSecret === undefined ? vercelOidc() : undefined;
   const sendblue = createSendblueAdapter({
-    credentials: () => resolveAdapterCredentials(credentials),
-    defaultFromNumber: () => resolveFromNumber(credentials),
-    ...(webhookSecret
-      ? { webhookSecret }
-      : {
-          webhookVerifier: createCredentialWebhookVerifier(credentials, fallbackWebhookVerifier!),
-        }),
+    ...config.credentials,
+    ...(config.credentials.webhookSecret || config.credentials.webhookVerifier
+      ? {}
+      : { webhookVerifier: vercelOidc() }),
   });
   const bridge = chatSdkChannel({
     adapters: { sendblue },
@@ -82,38 +77,6 @@ export function sendblueChannel(config: SendblueChannelConfig): SendblueChannel 
   });
 
   return bridge.channel;
-}
-
-function toCredentialsProvider(
-  credentials: SendblueChannelConfig["credentials"],
-): SendblueChannelCredentialsProvider {
-  return typeof credentials === "function" ? credentials : () => credentials;
-}
-
-async function resolveAdapterCredentials(
-  credentials: SendblueChannelCredentialsProvider,
-): Promise<SendblueCredentials> {
-  const {
-    fromNumber: _fromNumber,
-    webhookSecret: _webhookSecret,
-    webhookVerifier: _webhookVerifier,
-    ...adapterCredentials
-  } = await credentials();
-  return adapterCredentials;
-}
-
-async function resolveFromNumber(credentials: SendblueChannelCredentialsProvider): Promise<string> {
-  return (await credentials()).fromNumber;
-}
-
-function createCredentialWebhookVerifier(
-  credentials: SendblueChannelCredentialsProvider,
-  fallbackVerifier: SendblueWebhookVerifier,
-): SendblueWebhookVerifier {
-  return async (request: Request, rawBody: string) => {
-    const verifier = (await credentials()).webhookVerifier ?? fallbackVerifier;
-    return verifier(request, rawBody);
-  };
 }
 
 async function dispatchMessage(

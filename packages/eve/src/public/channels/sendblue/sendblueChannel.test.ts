@@ -30,7 +30,7 @@ describe("sendblueChannel", () => {
 
   it("dispatches Sendblue mentions without subscribing the thread", async () => {
     sendblueChannel({
-      credentials: { accessToken: "token", fromNumber: "+15551234567" },
+      credentials: { accessToken: "token", defaultFromNumber: "+15551234567" },
     });
     const handler = mention.mock.calls[0]?.[0];
     if (handler === undefined) throw new Error("Expected an inbound mention handler.");
@@ -57,36 +57,32 @@ describe("sendblueChannel", () => {
       credentials: {
         apiKey: "api-key",
         apiSecret: "api-secret",
-        fromNumber: "+15551234567",
+        defaultFromNumber: "+15551234567",
         webhookSecret: "webhook-secret",
       },
     });
 
     const adapterConfig = createAdapter.mock.calls[0]?.[0];
-    await expect(adapterConfig.defaultFromNumber()).resolves.toBe("+15551234567");
-    await expect(adapterConfig.credentials()).resolves.toEqual({
-      apiKey: "api-key",
-      apiSecret: "api-secret",
-    });
+    expect(adapterConfig.defaultFromNumber).toBe("+15551234567");
+    expect(adapterConfig.apiKey).toBe("api-key");
+    expect(adapterConfig.apiSecret).toBe("api-secret");
     expect(adapterConfig.webhookSecret).toBe("webhook-secret");
   });
 
   it("uses managed credentials for its line and webhook verification", async () => {
     const webhookVerifier = vi.fn();
-    const credentials = vi.fn(async () => ({
-      accessToken: "token",
-      fromNumber: "+15551234567",
-      webhookVerifier,
-    }));
+    const accessToken = vi.fn(async () => "token");
+    const defaultFromNumber = vi.fn(async () => "+15551234567");
+    const allowedFromNumbers = vi.fn(async () => ["+15551234567"]);
 
-    sendblueChannel({ credentials });
+    sendblueChannel({
+      credentials: { accessToken, defaultFromNumber, allowedFromNumbers, webhookVerifier },
+    });
 
     const adapterConfig = createAdapter.mock.calls[0]?.[0];
-    expect(adapterConfig.defaultFromNumber).toEqual(expect.any(Function));
-    await expect(adapterConfig.defaultFromNumber()).resolves.toBe("+15551234567");
-    await expect(adapterConfig.credentials()).resolves.toEqual({ accessToken: "token" });
-    expect(adapterConfig.webhookVerifier).toEqual(expect.any(Function));
-    await adapterConfig.webhookVerifier(new Request("https://example.com"), "body");
-    expect(webhookVerifier).toHaveBeenCalledWith(expect.any(Request), "body");
+    expect(adapterConfig.accessToken).toBe(accessToken);
+    expect(adapterConfig.defaultFromNumber).toBe(defaultFromNumber);
+    expect(adapterConfig.allowedFromNumbers).toBe(allowedFromNumbers);
+    expect(adapterConfig.webhookVerifier).toBe(webhookVerifier);
   });
 });
