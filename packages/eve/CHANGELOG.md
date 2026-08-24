@@ -1,5 +1,20 @@
 # eve
 
+## 0.44.4
+
+### Patch Changes
+
+- dbfa01c: New standalone projects created by `eve init` now include a `README.md` with templated project and development instructions.
+- 5a029d9: Allow `justbash({ customCommands })` to register trusted host application commands in live just-bash sandbox sessions.
+- 2bbb775: Pass the app installation workspace id to function-form Slack bot token providers across events, interactions, proactive sends, and private file downloads.
+- 2a34f75: Chat SDK direct-message channels now support HITL authorization challenges.
+- 1b1f2dd: Resume an existing Web Chat session's active response even when its durable history still ends at the previous turn boundary.
+- 8f2bf7a: Add `eval` and `deploy` scripts to newly scaffolded eve projects.
+- bca1304: Linq and Photon inbound messages now derive user auth from their message authors, allowing user-scoped connections to request authorization by default.
+- 50488a1: `/add` in the dev terminal UI now accepts a registry item address. `/add channel/slack` skips the category and search screens and opens that item's details and confirmation directly, then runs the same installation, setup, add-more, and deployment flow as bare `/add`, which still opens the registry browser.
+- 94a0952: Follow up to ten `web_fetch` redirects while rechecking each destination for SSRF safety. Non-success HTTP responses now return a plain-text failure result with the response body when available instead of failing the tool call.
+- 4464e4d: Slack inbound messages now derive their text from Block Kit blocks and legacy attachments when the top-level `text` field is empty or a short fallback. Alert-style bot posts (sections, fields, headers, markdown blocks, tables, cards, carousels, containers, rich text, legacy attachments) previously reached the model as an empty message body; they now carry the visible message content, and fetched thread replies get the same treatment.
+
 ## 0.44.3
 
 ### Patch Changes
