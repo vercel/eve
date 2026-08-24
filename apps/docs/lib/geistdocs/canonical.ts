@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const canonicalRoutes = {
   home: "/",
-  evals: "/evals",
+  benchmarks: "/benchmarks",
   integrations: "/integrations",
   templates: "/templates",
 } as const;

@@ -45,7 +45,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     origin: getSiteOrigin(),
     sources: [
       { pathname: canonicalRoutes.home },
-      { pathname: canonicalRoutes.evals },
+      { pathname: canonicalRoutes.benchmarks },
       ...docs,
       { pathname: canonicalRoutes.integrations },
       ...integrations.map(({ slug }) => ({ pathname: integrationPath(slug) })),

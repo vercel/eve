@@ -36,25 +36,27 @@ programmatic module exists on disk.
 
 The framework API is internal. Programmatic modules export ordinary public eve
 definitions: `defineTool`, `defineDynamic`, `defineChannel`, `defineSandbox`,
-`defineAgent`, and the existing connection, hook, schedule, instruction, and
-skill factories. They never construct `Compiled*` or `Resolved*` records.
+`defineAgent`, `defineInstrumentation`, and the existing connection, hook,
+schedule, instruction, and skill factories. They never construct `Compiled*` or `Resolved*` records.
 Production runtime behavior continues to live in the `eve` package; generated
 module maps only bind statically reachable module namespaces.
 
 The compiled manifest, required bindings, persisted composition report,
-compiler-owned channel route plan, and closed kernel and host capability plans
-are the only downstream authority. An active module-backed source is owned by
-its binding. An active non-module source is owned by its explicit compiled
-source record. A losing or disabled source is owned by its self-contained
-composition entry. No second winner-owner index or out-of-band origin table may
-exist.
+compiler-owned channel route plan, and closed kernel effect and host
+capability plans are the only downstream authority. An active module-backed
+source is owned by its binding. An active non-module source is owned by its
+explicit compiled source record. A losing or disabled source is owned by its
+self-contained composition entry. No second winner-owner index or out-of-band
+origin table may exist.
 
 Every ordinary framework default is a first-class eve primitive at a canonical
-logical path, including the default `agent.ts`, sandbox, home page, and public
-health endpoint. Native execution may implement a selected primitive, but it
-may not create that primitive's presence independently of the source graph.
-Model-visible kernel capabilities and host registrations that cannot be
-ordinary sources live in separate, typed, exhaustive inventories.
+logical path, including the default `agent.ts`, sandbox, home page, and the
+eve channel carrying the public health and info endpoints. Native execution
+may implement a selected primitive, but it may not create that primitive's
+presence independently of the source graph.
+Model-visible kernel behavior is keyed by a closed set of typed effect kinds —
+never by tool name — and host registrations that cannot be ordinary sources
+live in a separate, typed, exhaustive inventory.
 
 This supersedes the runtime-tool contribution seam in #2347. Runtime
 contribution is too late for channels, schedules, sandboxes, host routes,
@@ -78,13 +80,24 @@ extension features work around that assumption at different layers:
   effective `sandbox.ts` source;
 - the default agent config is synthesized inside normalization rather than
   selected as an `agent.ts` source;
-- the home page and public health endpoint are native host routes that bypass
-  channel source composition and use a second route-precedence system;
-- subagent ownership survives in a module-global `WeakMap` while its
-  composition report is discarded;
+- the home page, public health endpoint, and `/eve/v1/info` inspection
+  endpoint are native host routes that bypass channel source composition and
+  use a second route-precedence system;
+- subagent composition results from `composeAgentSubagentSources` and
+  `composeExtensionSubagentSources` are consumed inline and discarded, while
+  module-global `WeakSet`/`WeakMap` state stands in for compiled subagent
+  identity at runtime;
 - two agent-info builders re-create framework status from different inputs;
 - native harness tools are represented by metadata stubs that are not the
   definitions the harness advertises or executes.
+
+Native dispatch itself is a layer of magic strings. Execution branches on
+`sourceId.startsWith("eve:")` to decide how a tool executor is called; the
+harness recognizes `ask_question` and `final_output` by tool-name comparison;
+task control is classified through the `TASK_CONTROL_TOOL_NAMES` name set;
+`load_skill` carries a `frameworkAction` marker even though it runs an
+ordinary inline executor; and advertisement rules such as root-only and
+delegated-caller-only visibility are name checks inside the harness.
 
 The result is duplicate machinery with inconsistent identity. Replacement,
 disablement, route order, source provenance, cold-start loading, and inspection
@@ -103,26 +116,29 @@ This work will:
   once, including local subagent source nodes;
 - compile one effective manifest consumed by runtime, Nitro, bundling, and
   inspection;
-- migrate ordinary framework tools, `connection_search`, framework channels,
-  home, health, the default sandbox, and the default `agent.ts` to
-  programmatic eve modules;
+- migrate ordinary and effectful framework tools, `connection_search`, the
+  eve channel (carrying the callbacks, health, and info), the home channel,
+  the default sandbox, and the default `agent.ts` to programmatic eve
+  modules;
 - separate public primitive definitions, execution implementations, and native
   kernel code so each ordinary default has one definition value;
-- replace scattered native-tool knowledge with one executable, exhaustive
-  kernel capability inventory covering preparation, advertisement,
-  materialization, dispatch, prompt flags, and inspection;
+- replace scattered native-tool knowledge — name checks, source-ID prefixes,
+  and marker fields — with a closed inventory of typed kernel effect kinds
+  covering preparation, advertisement, materialization, dispatch, prompt
+  flags, and inspection;
 - limit non-source host behavior to an explicit closed host inventory and move
   process readiness away from the replaceable public health route;
 - replace agent-info v2 with a truthful v3 projection;
-- remove the old framework, extension-composition, fallback, and inspection
-  paths in the same implementation.
+- remove each superseded framework, extension-composition, fallback, and
+  inspection path in the delivery PR that supersedes it.
 
-The implementation does not expose a public registration API, serialize
-functions, mutate a compiled graph, create programmatic subagent nodes, or
-virtualize markdown and skill asset files. Programmatic modules may be applied
-to already-discovered local nodes. The framework registry receives a narrow
-exception to provide the default config slot, but no registration may
-recursively introduce nodes, extensions, or raw workspace content.
+The implementation does not expose a public registration API or public effect
+constructors, serialize functions, mutate a compiled graph, create
+programmatic subagent nodes, or virtualize markdown and skill asset files.
+Programmatic modules may be applied to already-discovered local nodes. The
+framework registry receives a narrow exception to provide the default config
+slot, but no registration may recursively introduce nodes, extensions, or raw
+workspace content.
 
 ## Source model
 
@@ -292,7 +308,9 @@ fails unless every module-backed manifest reference has exactly one binding,
 logical paths agree, extension-owned filesystem bindings carry
 `extensionScope`, and every binding is referenced. The same semantic validator
 runs after schema parsing in every disk and bundled artifact loader, before
-module-map hydration.
+module-map hydration. That validator is one module: new artifact checks
+extend it, and sibling per-artifact validator files are a design failure, not
+a pattern.
 
 The binding table participates in artifact versioning and hashing. Development
 hydration, generated module maps, bundled artifacts, materialized artifacts,
@@ -307,26 +325,28 @@ statically reachable registry lookups for programmatic modules. The resulting
 `sourceId` is opaque outside equality, diagnostics, serialization, and module
 map lookup.
 
-### Binding-safe compilation phases
+### Binding-safe compilation
 
-Every application, extension, and framework candidate receives its backing,
-owner, and physical scope when the candidate is created. Application sources
-are not reconstructed after normalization. Compilation proceeds in two
-binding-safe phases because the selected config supplies build settings:
+Two invariants order compilation, because build settings derive from the
+selected config:
 
-1. Collect and compose structural and config candidates, create the selected
-   config binding, and then load and normalize that config.
-2. Derive build, task, and external-dependency settings from the selected
-   config.
-3. Construct and compose the remaining candidates with those settings and
-   create the complete selected binding table.
-4. Load and normalize only selected, bound non-config definitions.
+- The config slot composes and binds first, and the winning `agent.ts` loads
+  before any non-config definition. Build, task, and external-dependency
+  settings derive from that selected config.
+- Losing candidates never receive bindings and never execute — not during
+  compilation, and not during cold-start hydration.
 
 The config normalizer receives only its selected candidate and required
-phase-one binding. Module-backed primitive normalizers require a binding.
-Direct injected definitions are not a production escape hatch; the only
-already-evaluated value passed between phases is the compiler-owned selected
-config. Losing candidates receive no compiled binding and never execute.
+binding. Module-backed primitive normalizers require a binding. Direct
+injected definitions are not a production escape hatch: no candidate
+constructor accepts an evaluated definition value, and the only
+already-evaluated value passed between compilation phases is the
+compiler-owned selected config.
+
+The two phases append candidates to one composition state. There is no
+partial-graph merge step, no post-hoc disjointness or integrity assertion,
+and no string phase discriminator — phase safety is a type, such as a
+phase-one state that cannot yet yield a manifest.
 
 `createProgrammaticCompiledModuleMap` is asynchronous and resolves only the
 programmatic bindings present in the compiled manifest. Generated,
@@ -363,8 +383,8 @@ module-backed winner points to its required binding; an active non-module
 winner carries owner on its compiled source record. A shadowed entry stores the
 loser's complete source descriptor and only the winning `sourceId`. A disabled
 entry stores the selected disable source descriptor because no active binding
-exists. `sourceComposition.sourceOwners`, full duplicate winner descriptors,
-and other parallel owner indexes are forbidden.
+exists. Parallel owner indexes such as a `sourceComposition.sourceOwners` map
+or full duplicate winner descriptors are forbidden.
 
 Identity uses the existing canonical equivalence rules: `.js` and `.ts`
 variants select the same slot, connection file/folder forms collide, and tool
@@ -381,11 +401,12 @@ logical path, source ID, and child manifest into recursive compilation. The
 parent binding table does not pretend to own a child node reference.
 
 Nested extension subagent records are fresh and immutable for each mount, so
-mounting one extension twice cannot share provenance. The separate
-`composeSubagentSources` report, module-global origin `WeakMap`, and any
-out-of-band subagent origin table are removed. Shadowed and supported disabled
-subagent candidates remain self-contained composition entries for diagnostics
-and inspection.
+mounting one extension twice cannot share provenance. The inline
+`composeAgentSubagentSources` and `composeExtensionSubagentSources` composers
+whose results are discarded, the module-global subagent executor-identity
+state, and any out-of-band subagent origin table are removed. Shadowed and
+supported disabled subagent candidates remain self-contained composition
+entries for diagnostics and inspection.
 
 ### Extensions are source projection, not a second compiler
 
@@ -411,7 +432,11 @@ happens once in path space; normalization happens once after selection.
 
 The result is one effective compiled graph containing node manifests, required
 bindings, the composition report, a compiler-owned channel route plan, and the
-prepared kernel capability plan. Every downstream consumer reads it:
+prepared kernel effect plan. Those are the only named plan artifacts.
+Instrumentation, the Workflow world, sandbox workspace assets, and external
+dependencies are per-binding data, ordinary slot content, or existing config —
+introducing any new named plan artifact requires amending this document
+first. Every downstream consumer reads the effective graph:
 
 - graph resolution registers only compiled resources;
 - Nitro registers only the compiled ordered channel routes;
@@ -433,21 +458,55 @@ compilation use the same composer and normalizers as production.
 
 ## Framework migration
 
+### Default source inventory
+
+After migration, the framework provides exactly these default identities
+through source composition:
+
+| Identity                     | Definition                             | Registered for   | Notes                                                                 |
+| ---------------------------- | -------------------------------------- | ---------------- | --------------------------------------------------------------------- |
+| `agent.ts`                   | `defineAgent`                          | every local node | default model config; phase-one composition                           |
+| `sandbox.ts`                 | `defineSandbox({})`                    | every local node | selects `defaultSandbox()`; stable semantic revision                  |
+| `tools/bash.ts`              | `defineTool`                           | every local node | ordinary executor                                                     |
+| `tools/read_file.ts`         | `defineTool`                           | every local node | ordinary executor                                                     |
+| `tools/write_file.ts`        | `defineTool`                           | every local node | ordinary executor                                                     |
+| `tools/todo.ts`              | `defineTool`                           | every local node | ordinary executor                                                     |
+| `tools/web_fetch.ts`         | `defineTool`                           | every local node | ordinary executor                                                     |
+| `tools/load_skill.ts`        | `defineTool`                           | every local node | visibility: `requires-loadable-skill`                                 |
+| `tools/connection_search.ts` | `defineDynamic`                        | every local node | discovers and qualifies connection tools                              |
+| `tools/ask_question.ts`      | `defineTool` + `request-input`         | every local node | visibility: `requires-request-input`                                  |
+| `tools/agent.ts`             | `defineTool` + `dispatch`              | root node        | action: `subagent-call`; visibility: `root-session`                   |
+| `tools/task_update.ts`       | `defineTool` + `dispatch`              | root node        | action: `task-update`; tasks mode; visibility: `delegated-task-child` |
+| `tools/task_cancel.ts`       | `defineTool` + `dispatch`              | root node        | action: `task-cancel`; tasks mode; visibility: `root-session`         |
+| `tools/web_search.ts`        | `webSearch` sentinel + `provider-tool` | every local node | materialized at eligible model calls                                  |
+| `channels/eve.ts`            | `eveChannel` factory                   | root node        | complete `/eve/v1` surface: protocol, callbacks, health, info         |
+| `channels/home.ts`           | `defineChannel`                        | root node        | `GET` and `HEAD` at `/`                                               |
+
+Every identity above is replaceable and disableable through ordinary slot
+composition. `glob` and `grep` are published at `eve/tools/glob` and
+`eve/tools/grep` but never registered. Workflow shares the slot pattern
+without a framework default: an authored `experimental_workflow()` sentinel
+at `tools/workflow.ts` opts in at that canonical identity. Authored
+`instrumentation.ts` likewise composes as an ordinary module slot with no
+framework default and no dedicated plan artifact. Native behavior outside
+these identities is limited to `final_output` and the closed host inventory.
+
 ### Primitive ownership boundaries
 
 Ordinary public definitions and schemas live under `public/tools` or another
 primitive-owned shared module. Execution-only implementations and durable
 state live under `execution/tools` or an equivalent execution-owned boundary.
-Native capability implementations live under `kernel/<capability>` or their
-capability-specific execution modules.
+Kernel effect handlers live under `kernel/<effect>` or their effect-specific
+execution modules.
 
 Each ordinary default has exactly one definition value. Its framework source
-module and `eve/tools/defaults` import that same value. Moving modules must
+module and its public `eve/tools/<name>` subpath export import that same
+value; there is no barrel export. Moving modules must
 preserve durable state key identity for todo, read-before-write, skill,
-connection-search, compaction, and task behavior. Import guards enforce that
-public modules do not import `runtime/`, ordinary framework sources construct
-only public definitions, and native tools are reachable only through the
-kernel inventory.
+connection-search, compaction, and task behavior. These boundaries hold
+structurally: public modules do not import `runtime/`, ordinary framework
+sources construct only public definitions, and kernel effects are dispatched
+only through the closed effect inventory.
 
 The mixed `runtime/framework-tools` subsystem and transitional re-export
 wrappers are deleted after legitimate modules move. “Framework tool catalog”
@@ -464,35 +523,98 @@ invoking the framework namespace loader.
 The selected config binding and owner are persisted with its composition
 history, so filesystem and in-memory agents report the same provenance. The
 framework's narrow config registration cannot introduce subagents, extensions,
-or other recursive graph content. Remove the synthesized
-`{ model: DEFAULT_AGENT_MODEL_ID }` normalizer branch, undefined-config-source
-inspection conventions, and config loading that bypasses the total binding
-table.
+or other recursive graph content. That exception is safe because config
+composes in the first phase against already-discovered nodes: the registration
+can never introduce a node, so it cannot expand the graph it composes into.
+Remove the synthesized `{ model: DEFAULT_AGENT_MODEL_ID }` normalizer branch,
+undefined-config-source inspection conventions, and config loading that
+bypasses the total binding table.
 
 ### Ordinary tools
 
-Author `bash`, `read_file`, `write_file`, `todo`, and `web_fetch` once as public
-`defineTool` values. Register those exact values at canonical paths and export
-them from `eve/tools/defaults`. `glob` and `grep` remain opt-in exports rather
-than dormant framework defaults.
+Author `bash`, `read_file`, `write_file`, `todo`, `web_fetch`, and
+`load_skill` once as public `defineTool` values with plain executors. Register
+those exact values at canonical paths and publish each at its own
+`eve/tools/<name>` subpath. The `eve/tools/defaults` barrel export is
+deleted. `glob` and `grep` are published the same way at `eve/tools/glob` and
+`eve/tools/grep` but are never registered as defaults.
 
 Their executors receive ordinary `ToolContext`. Remove the public/internal
 converter, duplicate resolved-definition constants and wrappers, and the
 `sourceId.startsWith("eve:")` calling convention. Framework ownership comes
 from the binding, not a string prefix.
 
-Register the public web-search sentinel at `tools/web_search.ts`. An
-application `webSearch(...)`, `defineTool(...)`, or `disableTool()` at that
-identity composes normally; model/provider materialization remains an explicit
-kernel capability described below.
+`load_skill` already has a real executor today; its
+`frameworkAction: "load-skill"` classification marker is deleted. Its executor
+reads an eve-owned skill-catalog context provider instead of closing over
+resolved skills, and its advertisement gate — whether the node can load a
+static or dynamic skill — becomes declared visibility data rather than a
+fabricated second definition. Dynamic-skill and cold-start behavior use the
+same compiled source and selected binding; no special source type or native
+fallback remains.
 
-`load_skill` becomes an ordinary public definition at
-`tools/load_skill.ts`. Its executor reads an eve-owned skill-catalog context
-provider instead of closing over resolved skills. The kernel inventory may
-still gate advertisement on whether the node can load a static or dynamic
-skill, but it does not fabricate a second definition. Dynamic-skill and
-cold-start behavior use the same compiled source and selected binding; no
-special source type or native fallback remains.
+### Effectful tools
+
+`ask_question`, `agent`, `task_update`, and `task_cancel` are ordinary public
+`defineTool` values, and `web_search` is the public `webSearch()` sentinel,
+all registered at canonical `tools/*.ts` slots. They compose, replace, and
+disable through the same source graph as any authored tool. Instead of an
+executor that performs work in-process, each declares a typed kernel effect
+(described below). The definitions know nothing about Workflow, parking,
+pending batches, or the model SDK; the kernel translates a declared effect
+into durable park/resume mechanics.
+
+The declaration and its visibility conditions are closed, JSON-serializable
+data carried on the definition value:
+
+```ts
+interface KernelEffectDeclaration {
+  readonly kind: "request-input" | "dispatch" | "provider-tool";
+  // per-kind payload stays minimal and JSON-serializable;
+  // "dispatch" carries one typed action
+}
+
+type DispatchAction =
+  | { readonly kind: "subagent-call"; readonly nodeId: string; readonly subagentName?: string }
+  | { readonly kind: "remote-agent-call"; readonly nodeId: string }
+  | { readonly kind: "task-update" }
+  | { readonly kind: "task-cancel" };
+
+type ToolVisibilityCondition =
+  | "root-session"
+  | "delegated-task-child"
+  | "requires-request-input"
+  | "requires-loadable-skill"
+  | "below-subagent-depth";
+```
+
+A definition declares zero or more visibility conditions; all declared
+conditions must hold for a session or model call to advertise the tool, and
+the kernel evaluates them without reading the tool's name. Visibility follows
+the same public-shaped, internally constructed rule as effect declarations:
+the types live on public definitions, the constructors stay unexported.
+
+An application `defineTool(...)` or `disableTool()` at any of those identities
+composes normally. Replacing `tools/web_search.ts` with an application
+`webSearch(...)` or ordinary tool follows the same rule; model/provider
+materialization remains the `provider-tool` effect described below.
+
+Workflow follows the same pattern with no framework default: the authored
+`experimental_workflow()` sentinel at `tools/workflow.ts` composes at that
+canonical slot and carries the tool's complete configuration in its
+arguments. It mints no new effect kind — the sentinel declares `dispatch` in
+program mode, which is code mode over the same effect. The kernel
+materializes the model-visible tool as an isolated program sandbox whose
+only host functions are the other `dispatch`-declaring tools in the
+effective graph. Each host call performs the same `dispatch` effect the
+`agent` tool performs, restricted to the agent-call actions — a program
+performing a task action is rejected — with results resuming the durable
+program instead of the model step. Advertisement (root sessions below the
+depth limit) is declared visibility data like any other effectful tool.
+Despite the shared name, `defineAgent({ experimental: { workflow } })` is
+unrelated to the tool: it selects the durable-runtime world backing the
+agent's own execution. That world selection and the workflow transport in
+the closed host inventory are not tool identities.
 
 ### `connection_search`
 
@@ -529,40 +651,41 @@ remain filesystem resources and are not virtualized.
 Register a root-only zero-argument factory returning
 `eveChannel({ auth: [vercelOidc(), localDev(), placeholderAuth()] })` at
 `channels/eve.ts`. A factory preserves the current per-resolution lifecycle.
-An authored channel or disable sentinel at that identity replaces or removes
-the complete default channel.
+The channel value owns the complete `/eve/v1` surface as ordinary channel
+routes: the session protocol, the connection callbacks (GET and POST plus
+their legacy forms), the workflow callback, task input, the public health
+protocol at `/eve/v1/health`, and the agent-info route at `/eve/v1/info`.
+There is exactly one framework identity for that surface; no framework
+channel registers at a deeper logical path.
 
-Register the six callback handlers as root-only, one-route `defineChannel`
-factories at exact paths:
+URLs, legacy support, authorization, status codes, and response bodies do not
+change. Route definitions carry per-route authorization so current behavior
+survives inside one channel: health stays publicly reachable while info, the
+callbacks, and the protocol routes keep the resolved channel auth policy. The
+definitions carry truthful HTTP adapter metadata and use the ordinary channel
+handler path, eliminating framework-only route construction and fetch
+dispatch. Data needed by the info handler comes from an eve-owned context
+provider — the effective compiled graph, binding owners, composition
+diagnostics, and kernel plan — not a special source kind or build-time native
+route.
 
-- `channels/eve/v1/connections/callback/get.ts`;
-- `channels/eve/v1/connections/callback/post.ts`;
-- `channels/eve/v1/connections/callback/legacy/get.ts`;
-- `channels/eve/v1/connections/callback/legacy/post.ts`;
-- `channels/eve/v1/callback/post.ts`;
-- `channels/eve/v1/task-input/post.ts`.
+Add a root framework channel module at `channels/home.ts` using ordinary
+`defineChannel`, `GET`, and `HEAD` values for the home page at `/`. Its
+metadata also comes from an eve-owned context provider, and the default
+preserves the current response body, status codes, and authentication
+behavior.
 
-The six identities remain independently replaceable and disableable. URLs,
-legacy support, authorization, status codes, and response bodies do not change.
-The definitions carry truthful HTTP adapter metadata and use the ordinary
-channel handler path, eliminating framework-only route construction and fetch
-dispatch.
-
-Add root framework channel modules at `channels/home.ts` and
-`channels/eve/v1/health.ts`. They use ordinary `defineChannel`, `GET`, and
-`HEAD` values for the home page and public health protocol. Metadata needed by
-the home handler comes from an eve-owned context provider, not a special source
-kind or build-time native route. The default modules preserve the current
-response bodies, status codes, and authentication behavior.
-
-Home and health are replaceable and disableable through ordinary source
-composition at those exact paths. This is an intentional pre-1.0 breaking
-change. A replacement for health owns its implementation but must return the
-public `HealthResult` payload on a successful response. `Client.health()`
-validates successful JSON with `HealthResultSchema`; a non-success response
-throws `ClientError`, and a successful response with an invalid payload throws
-`HealthResponseError`. No client or host code reaches a hidden native health
-fallback.
+The eve channel and home compose as two slots. An authored `channels/eve.ts`
+— typically another `eveChannel(...)` call with different auth — replaces the
+complete default surface, and a disable sentinel removes it; health, info,
+and the callbacks are not independently replaceable. This is an intentional
+pre-1.0 breaking change. A replacement owns its implementation, but the
+public payload contracts remain client-enforced: `Client.health()` validates
+successful JSON with `HealthResultSchema` — a non-success response throws
+`ClientError` and an invalid successful payload throws `HealthResponseError`
+— and `Client.info()` validates with `AgentInfoResultSchema` and throws
+`AgentInfoResponseError` for an unusable authorized payload. No client or
+host code reaches a hidden native fallback.
 
 #### One compiled route plan
 
@@ -604,10 +727,9 @@ path must have identical normalized options or fail with
 `compile/channel-cors-conflict`; identical options produce one derived
 `OPTIONS` record.
 
-Replacing or disabling `channels/home.ts` or
-`channels/eve/v1/health.ts` is source-slot composition. An unrelated channel
-that declares the same concrete route follows route ordering and does not gain
-source precedence.
+Replacing or disabling `channels/home.ts` or `channels/eve.ts` is source-slot
+composition. An unrelated channel that declares the same concrete route
+follows route ordering and does not gain source precedence.
 
 #### Closed native host inventory
 
@@ -661,63 +783,116 @@ complete. Route warnings therefore contribute to serialized diagnostics,
 shadow warning retains enough winner and loser identity to resolve its detailed
 `CompiledShadowedChannelRoute`; the route plan remains authoritative. Compile
 errors use the same stable codes and abort instead of being serialized into a
-successful artifact. The diagnostic artifact moved to version 2 with the
-framework-source graph and version 3 when node ownership became required. It
-does not read either prior shape.
+successful artifact. The discovery-diagnostics artifact (version 1 today)
+becomes this compiler diagnostic artifact at version 2; loaders reject the
+earlier serialized shape rather than repairing it.
 
-### Kernel capabilities
+### Kernel effects
 
-Native harness behavior cannot honestly be modeled as an ordinary executor
-yet. Replace descriptive metadata plus scattered conditionals with typed
-strategies or exhaustive switches. Fake resolved definitions and literal name
-lists may not spread through graph, harness, prompt, dispatch, and inspection
-code.
+Some framework tools cannot be modeled as plain executors: their behavior is
+to durably suspend the turn workflow and resume it with an externally produced
+result. Main already proves the mechanics — an authored tool with `approval`
+parks the entire durable turn through the pending-input path, and
+`requireAuth()` raises a typed signal the harness converts into an
+authorization park. What is missing is a typed boundary: today the harness
+recognizes these tools by name strings, source-ID prefixes, and marker fields.
 
-Each entry owns its canonical replacement path, reservation policy, node-level
-preparation, node/session/turn/model scope, advertisement predicate,
-materialization, runtime dispatch kind, prompt flags, and inspection
-projection. Adding a capability name must produce TypeScript failures until
-every lifecycle stage handles it. The closed inventory is:
+Both names are load-bearing. The kernel is eve's privileged core in the
+operating-system sense: definitions cannot suspend or resume the durable
+workflow themselves, only kernel handlers touch park/resume state, and the
+closed effect inventory plays the role of a syscall table. `request-input`
+suspends a turn the way a blocking `read()` suspends a process, and the
+kernel later resumes it with the result. Effects take their name from
+algebraic effects and handlers in programming-language theory: a definition
+performs an operation it cannot interpret, and a handler — here, the
+kernel — suspends the computation and resumes it with a value. The durable
+callback pattern, a stable identity plus a JSON closure rebound to live code
+on every run, is that suspended computation's serialized continuation.
 
-| Capability                | Prepared from                                                     | Advertised to                       |
-| ------------------------- | ----------------------------------------------------------------- | ----------------------------------- |
-| `agent`                   | root node when `tools/agent.ts` is not replaced or disabled       | top-level root sessions             |
-| `task_cancel`             | root tasks mode when `tools/task_cancel.ts` survives composition  | top-level root sessions             |
-| `task_update`             | root tasks mode when `tools/task_update.ts` survives composition  | delegated task children             |
-| `ask_question`            | `tools/ask_question.ts` is not replaced or disabled               | sessions supporting `requestInput`  |
-| `load_skill` gating       | an effective compiled `load_skill` definition and loadable skills | sessions on that prepared node      |
-| `web_search` materializer | the effective `tools/web_search.ts` provider sentinel             | model calls supporting its backend  |
-| `Workflow`                | the compiled Workflow sentinel and eligible agent actions         | root sessions below the depth limit |
-| `final_output`            | a turn requests structured final output                           | only the model call requiring it    |
+The kernel is keyed by a closed set of effect kinds, never by tool name:
 
-Local and remote subagent tools remain derived from the effective subagent
-graph. They are not kernel catalog entries, though the inventory may inspect
-their runtime actions when preparing Workflow. No native capability may exist
-outside this inventory, and no inventory entry may fabricate a `Resolved*`
-record merely for validation or inspection.
+| Effect kind     | Declared by                                                                                                                                                      | Kernel behavior                                                               |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `request-input` | `tools/ask_question.ts`; tool approvals internally                                                                                                               | park the turn on a pending input batch; resume synthesizes the tool result    |
+| `dispatch`      | `tools/agent.ts`; graph-derived subagent and remote-agent tools; `tools/task_update.ts`; `tools/task_cancel.ts`; the `tools/workflow.ts` sentinel (program mode) | park; execute typed actions in the durable dispatch step; resume with results |
+| `provider-tool` | the `tools/web_search.ts` provider sentinel                                                                                                                      | materialize the provider-managed tool at eligible model calls; no suspension  |
 
-Root tasks-mode preparation records whether the canonical `task_update` source
-survived composition and propagates that prepared capability to every
-task-owned session, including tasks targeting named or dynamic local
-subagents. `task_cancel` remains restricted to eligible parent/root sessions.
-The exhaustive lifecycle consumes this prepared source-backed state rather
-than rediscovering task capability availability.
+The two suspension kinds are genuinely distinct — `request-input` resolves
+inside the harness when the next channel delivery arrives, while `dispatch`
+resolves outside it in a durable step — and `provider-tool` never suspends at
+all. Everything narrower is payload, not a new kind. A `dispatch`
+declaration either names exactly one typed `DispatchAction` (call mode) or
+declares program mode, where the materialized durable program performs
+agent-call actions. The dispatch handler switches exhaustively over the
+action union: `subagent-call` and `remote-agent-call` start or resume child
+sessions; `task-update` and `task-cancel` execute task commands and may not
+be performed from a program. Results resume one of two continuations the
+pending batch already identifies: the model step, or the durable Workflow
+program whose host call performed the effect.
+
+Each effect kind owns its park semantics, dispatch, resume, prompt flags,
+advertisement predicate evaluation, and inspection projection through one
+exhaustive lifecycle. Adding an effect kind — or a dispatch action kind —
+must produce TypeScript failures until every lifecycle stage handles it.
+Effects prepare from the effective composed sources that declare them:
+replacing or disabling `tools/agent.ts` removes its `dispatch` preparation
+because no selected definition declares the effect. The compiled kernel
+effect plan serializes, per node, each prepared effect kind with its
+declaring source ID, action kind where applicable, and declared visibility
+conditions — nothing more. No kernel code fabricates a `Resolved*` record
+merely for validation or inspection.
+
+Effect declarations are public-shaped but internally constructed: the types
+live on the tool definition, not in harness code, and carry no reference to
+Workflow or execution internals. The constructors remain unexported; opening
+them to application tools is a separate future proposal. Effect resume state
+persists through the same durable callback pattern `defineDynamic` already
+uses; effects gain no parallel continuation store.
+
+`final_output` is the sole remaining non-tool native. It is injected per model
+call only when a turn requires structured output, its input schema is that
+turn's output schema, and calling it terminally intercepts the turn. It has no
+honest static source slot, so it stays outside the source graph as an
+explicitly typed terminal-output interception in the kernel.
 
 Preparation and advertisement are deliberately separate: a self-delegated or
 task child can share the root node while receiving a different model-visible
-tool set. Build inspection reports prepared potential, never claims to be the
-exact tools for every session and model call.
+tool set. Root tasks-mode preparation records whether the canonical
+`task_update` source survived composition and propagates that prepared
+capability to every task-owned session, including tasks targeting named or
+dynamic local subagents; `task_cancel` remains restricted to eligible
+parent/root sessions. Build inspection reports prepared potential, never
+claims to be the exact tools for every session and model call.
 
-Invariant guards reject native ordinary-resource fabrication and ad hoc kernel
-capability registries outside the exhaustive integration points.
+Local and remote subagent tools remain derived from the effective subagent
+graph; they declare the `dispatch` effect rather than appearing as kernel
+catalog entries. Workflow's sandbox materialization derives its host
+functions from exactly those `dispatch`-declaring tools.
+
+The layering is structural, not tooled: no harness or execution code may
+branch on a tool name or source ID; only kernel effect handlers touch
+park/resume session-state keys; `public/` modules never import `runtime/`,
+`harness/`, or `execution/`; and the kernel exposes no lookup by tool name or
+logical path — consumers receive prepared effect state instead of querying
+the inventory. Native ordinary-resource fabrication or effect dispatch
+outside the exhaustive integration points is a design error to correct in
+the implementation, not a condition to police with new guards.
+
+This deletes the magic-string dispatch layer: `sourceId.startsWith("eve:")`
+execution branching, `toolName === "ask_question"` and
+`toolName === "final_output"` harness checks, the `TASK_CONTROL_TOOL_NAMES`
+name set, the `frameworkAction: "load-skill"` marker, and name-based
+visibility rules in tool advertisement.
 
 ## Inspection v3
 
 Replace agent-info v2 instead of preserving fields whose meanings no longer
 fit. The `/eve/v1/info` payload becomes version 3 and has one projector from the
 effective compiled graph, binding owners, composition diagnostics, and kernel
-plan. All in-repository clients, TUI views, eval targeting, and tests migrate in
-the same change; there is no v2 fallback before 1.0.
+plan, served as an ordinary route of the framework eve channel at
+`channels/eve.ts` rather than a native Nitro route. All in-repository
+clients, TUI views, eval targeting, and tests migrate in the same change;
+there is no v2 fallback before 1.0.
 
 Version 3 reports:
 
@@ -726,7 +901,7 @@ Version 3 reports:
   path, source ID, and owner (`application`, `extension`, or `framework`);
 - active dynamic resolvers separately from their session-specific outputs,
   including exact subscribed events and explicit source provenance;
-- prepared kernel capabilities separately from compiled tool definitions,
+- prepared kernel effects separately from compiled tool definitions,
   including their audience/model conditions;
 - the exact effective ordered channel-route list used by Nitro, including home
   and health, plus retained route-composition diagnostics;
@@ -760,8 +935,8 @@ agent state.
 Every inspectable source must have explicit ownership. Missing ownership is a
 malformed artifact rejected at construction or load; agent-info never falls
 back to application ownership, parses a source ID, or reconstructs an origin.
-The kernel projection comes from the exhaustive inventory, and channel entries
-come directly from `manifest.channelRoutes.effective`.
+The kernel projection comes from the exhaustive effect inventory, and channel
+entries come directly from `manifest.channelRoutes.effective`.
 
 Normalizers continue recording safe facts that cannot be reconstructed from
 serialized JSON, such as execution presence, approval, schemas, model-output
@@ -790,111 +965,113 @@ neither logical paths nor source IDs recover missing backing or provenance.
 The app-harness execution helper accepts an installed tool identity or name and
 resolves it from the compiled runtime bundle. It never builds a new registry
 around a caller-owned `ResolvedToolDefinition`. Remove `createMemorySourceId`,
-mirrored hand-built `AgentSourceManifest` references,
-`applicationSourceOrigin`, and every test path that executes a caller-owned
-definition instead of the selected installed tool.
+mirrored hand-built `AgentSourceManifest` references, and every test path that
+executes a caller-owned definition instead of the selected installed tool.
 
-## Downstream first-class memory integration gate
+## Downstream memory integration
 
-This proposal does not prove the first-class memory integration. Before memory
-may depend on this mechanism, implementation must add a focused proof of this
-entire path:
-
-```text
-authored memory slot
-  -> compiled source binding
-  -> deterministic programmatic wrapper namespace
-  -> virtual tools/<slot>.ts exporting defineDynamic
-  -> ordinary compiled dynamic resolver
-  -> qualified provider tools
-  -> cold-start namespace reconstruction and durable callback replay
-```
-
-The proof must use the same source graph and binding table, not a memory-only
-registry or runtime contributor seam. It must show that a fresh process can
-reconstruct the wrapper and resume a parked provider-tool call. This remains an
-acceptance item for a future first-class memory implementation, not a
-completion criterion for the canonical-source implementation. The complete
-implementation still delivers the in-memory compiler parity described above.
+The wrapper-namespace path — an authored memory slot compiled to a
+programmatic binding whose virtual `tools/<slot>.ts` exports `defineDynamic`,
+producing an ordinary compiled resolver and qualified provider tools — is the
+intended mechanism for a future first-class memory integration. Proving that
+path, including cold-start namespace reconstruction and resuming a parked
+provider-tool call, is an acceptance item for the future memory research doc,
+which must use this same source graph and binding table rather than a
+memory-only registry or runtime contributor seam.
 
 ## Delivery
 
-The work lands through two PRs with one implementation boundary:
+The implementation lands as two stacked PRs split at the boundary between
+source identity and dispatch behavior. Each PR deletes every path it
+supersedes; no compatibility adapter lands in either. The split isolates the
+two failure domains: PR 1's risk is compilation, serialization, and loading,
+guarded by artifact validators and module-map parity; PR 2's risk is
+park/resume semantics inside the harness, reviewed in a small focused diff.
+PR #2407 was an earlier atomic attempt at this boundary; it remains open only
+as salvage reference and does not gate or define the implementation.
 
-```text
-#2404 research
-  ↓
-#2407 complete implementation and proof
-```
+Both PRs are judged by replacement ratio: production deletions from the
+ledger meet or exceed new machinery, and the touched subsystems end
+materially simpler than they started. A growing `guard-invariants` script,
+sibling validator modules, new plan artifacts, or hand-built test factories
+signal that the design is failing — the correction is always in the
+implementation, never in tooling around it. `guard-invariants` gains no new
+rules for this work; its changes are limited to baseline shrinks and
+deleted-path references.
 
-#2407 owns the source-neutral bindings, canonical composition, framework and
-extension migration, primitive ownership boundaries, default config source,
-exhaustive kernel lifecycle, agent-info v3, in-memory compiler parity, docs,
-e2e coverage, and rollout. It deletes every superseded path in the same PR;
-there are no descendant implementation PRs or parallel delivery tracks to
-restack.
+### PR 1 — canonical source graph
 
-Transitional helpers may exist while the implementation branch is under
-construction, but no compatibility adapter lands. The implementation PR
-includes one release-note-oriented changeset. Use `patch` for non-breaking
-features and fixes and `minor` only for a breaking public API change. The
-rollout updates tool, dynamic capability, config, channel, health, sandbox, and
-agent-info documentation.
+Everything becomes a source, and dispatch behavior does not change:
 
+1. source-neutral candidates, required bindings, and the one composition pass;
+2. ordinary framework tool, config, sandbox, and `connection_search`
+   migration to programmatic sources;
+3. effectful tool definitions registered at their canonical `tools/*.ts`
+   slots — presence, replacement, disablement, and ownership become source
+   composition, while the harness continues to supply their behavior through
+   the existing dispatch mechanics;
+4. framework channels, the compiled route plan, and the closed host inventory;
+5. inspection v3 and in-memory compiler parity.
+
+`COMPILED_AGENT_MANIFEST_VERSION` moves from 41 to 42 with required total
+bindings, persisted composition, the channel route plan, config provenance,
+and v3 inspection metadata. The compiler diagnostic artifact moves from
+version 1 to version 2 in the same PR. Disk and bundled loaders reject
+earlier serialized shapes rather than repairing them. The complete version 42
+schema, its single semantic validator, and serialization fixtures land first
+inside the PR, and the serialized shape does not change again within it; the
+same rule applies to version 43 in PR 2. Kernel preparation
+switches from catalog membership to slot survival: a capability prepares only
+when its canonical source survived composition, and agent-info v3 derives its
+prepared kernel entries from that survival plus the static kind mapping.
+
+PR 1 carries one explicitly inventoried transitional seam: the harness still
+recognizes `ask_question`, `agent`, `task_update`, `task_cancel`,
+`web_search`, and `final_output` through today's name checks, `runtimeAction`
+markers, and the `frameworkAction: "load-skill"` marker. Nothing else on the
+magic-string list survives PR 1 — the `sourceId.startsWith("eve:")` calling
+convention dies with the catalog — and no new name-based dispatch may be
+added.
+
+PR 1 includes the `minor` changeset — it breaks the agent-info schema, moves
+the health and info routes into the replaceable eve channel, and replaces the
+`eve/tools/defaults` barrel with per-tool `eve/tools/<name>` subpath exports —
+and updates tool, config, channel, health, sandbox, and agent-info
+documentation.
+
+### PR 2 — kernel effects
+
+Dispatch becomes declared effects, and the seam is deleted:
+
+1. effect declarations and visibility conditions consumed by the kernel;
+2. the exhaustive effect-kind lifecycle, with approvals riding
+   `request-input`;
+3. deletion of the complete magic-string dispatch layer listed in the
+   deletion ledger's kernel row.
+
+`COMPILED_AGENT_MANIFEST_VERSION` moves from 42 to 43 with the serialized
+kernel effect plan. PR 2 is `patch` when externally observable behavior is
+preserved, and updates the dynamic capability documentation.
+
+PR 2 depends entirely on PR 1 and starts only after it lands; nothing in PR 1
+depends on PR 2. When PR 2 lands, #2347 is closed with a pointer to this doc.
 The research status remains `in-progress` until every deletion, validation
-item, and required CI suite is complete.
-
-## Version ledger
-
-Compiled manifest versions record the implementation's serialized milestones
-and are never reused after a rewrite:
-
-| Serialized milestone            | Compiled manifest version | Serialized change                                                                                   |
-| ------------------------------- | ------------------------: | --------------------------------------------------------------------------------------------------- |
-| Source-neutral bindings         |                        45 | Required total bindings and semantic binding validation.                                            |
-| Canonical composition           |                        46 | Required persisted composition and effective source-graph relationships.                            |
-| Framework-source graph          |                        47 | Channel route plan, source records, programmatic revisions, and persisted diagnostic relationships. |
-| Primitive ownership boundaries  |                        47 | No schema bump; this milestone only changes module ownership and imports.                           |
-| Default config source           |                        48 | Required config binding, owner, and composition provenance.                                         |
-| Exhaustive kernel lifecycle     |                        49 | Exhaustive serialized kernel capability plan.                                                       |
-| Instrumentation source plan     |                        50 | Required source-backed instrumentation plan and immutable implementation identity.                  |
-| External dependency closure     |                        51 | Required filesystem module dependency closure and exact package-instance identity.                  |
-| Workflow world plan             |                        52 | Required world selection and exact materialized package backing.                                    |
-| Agent-info v3 authority         |                        53 | Required normalized inspection metadata for tools, connections, hooks, and sandboxes.               |
-| Remote config source graphs     |                        54 | Preserved each remote agent config's selected binding and composition in its own module scope.      |
-| Canonical derived bindings      |                        55 | Removed duplicated instrumentation and external-entry identities in favor of authoritative plans.   |
-| Compiler-scoped external plan   |                        55 | No schema bump; compilation finalizes its selected closures instead of resolving them again.        |
-| Binding-scoped sandbox identity |                        56 | Optional module semantic revisions and selected-backing sandbox source identity.                    |
-| Serialized workspace identity   |                        57 | Canonical workspace content hashes required for materialized managed resources.                     |
-| Node scope and provenance       |                        58 | Root-only child-state rejection and retained source owner/backing relationships.                    |
-| Workspace resource authority    |                        59 | Canonical per-node resource paths, derived root entries, and verified materialized byte identity.   |
-
-Versions 42 through 44 and 60 were consumed by earlier implementation
-iterations and are not reassigned. The exact projection and relational checks
-prototyped at version 60 are folded into the earliest owning milestones above.
-
-The compiler diagnostic artifact became version 2 with the framework-source
-graph and version 3 when node-scoped locators became required. Disk and bundled
-loaders reject earlier serialized shapes rather than repairing them. Any later
-change to compiled serialization or relational invariants takes the next
-unused manifest version; it may not reuse 45 through 60 even if an earlier
-commit is rewritten.
+item, and required CI suite across both PRs is complete.
 
 ## Distributed deletion ledger
 
 The work is incomplete while any listed path or equivalent parallel system
 remains:
 
-| Requirement group            | Required deletion                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Binding authority            | Optional bindings; binding reconstruction in compiled constructors; extension scope inferred from source-ID prefixes; fixtures that use physical extension paths as logical identity.                                                                                                                                                                                                                                                                                        |
-| Composition and loading      | `logicalPath`-based module loading or sandbox hashing; post-normalization binding reconstruction; module normalizers accepting missing bindings; non-config definition loading before the total remaining binding table exists; eager programmatic namespaces or definition imports; `sourceComposition.sourceOwners` and duplicate active-owner indexes; arbitrary unbound injected definitions in production normalizers.                                                  |
-| Framework-source graph       | Runtime no-source sandbox construction; `PACKAGE_ROUTES` and native home/health defaults; host lifecycle probes using the public health route; silent post-compile ordinary route drops; discovery-only diagnostics that lose compiler warnings; subagent origin `WeakMap` state and discarded subagent composition; prompt ownership parsed from source IDs; `public/tools/internal.ts` and `toPublicToolDefinition`; stale merge, disable, and fallback types or comments. |
-| Primitive ownership          | The mixed `runtime/framework-tools` directory, transitional re-export wrappers, public-to-runtime imports, duplicate default definition values, and ordinary “framework tool catalog” terminology.                                                                                                                                                                                                                                                                           |
-| Default config authority     | Synthesized default config in `normalize-agent-config.ts`, undefined-config-source inspection conventions, and config loading outside the total binding table.                                                                                                                                                                                                                                                                                                               |
-| Kernel lifecycle             | Kernel lifecycle conditionals, literal name lists, or registries outside exhaustive integration points, plus native fabrication of ordinary resources.                                                                                                                                                                                                                                                                                                                       |
-| Inspection and memory parity | Inspection owner fallback or framework-state reconstruction; omitted dynamic-resolver or remote-agent provenance; `createMemorySourceId`, mirrored memory manifest references, `applicationSourceOrigin`, and other in-memory descriptor shortcuts; harness execution of caller-owned tool objects; downstream source catalogs, composers, merges, or compatibility readers.                                                                                                 |
-| External plan authority      | Per-module configured-package plan construction, final manifest re-resolution, hidden `__compile_loader__` owner scopes, and unversioned immutable package caches.                                                                                                                                                                                                                                                                                                           |
+| Requirement group            | Required deletion                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Binding authority            | Optional bindings; binding reconstruction in compiled constructors; extension scope inferred from source-ID prefixes; fixtures that use physical extension paths as logical identity.                                                                                                                                                                                                                                                                      |
+| Composition and loading      | `logicalPath`-based module loading or sandbox hashing; post-normalization binding reconstruction; module normalizers accepting missing bindings; non-config definition loading before the total remaining binding table exists; eager programmatic namespaces or definition imports; parallel active-owner indexes; arbitrary unbound injected definitions in production normalizers.                                                                      |
+| Framework-source graph       | Runtime no-source sandbox construction; `PACKAGE_ROUTES` and the native home, health, and info route defaults; host lifecycle probes using the public health route; silent post-compile ordinary route drops; discovery-only diagnostics that lose compiler warnings; module-global subagent executor-identity state and discarded subagent composition; prompt ownership parsed from source IDs; `public/tools/internal.ts` and `toPublicToolDefinition`. |
+| Primitive ownership          | The mixed `runtime/framework-tools` directory, the `eve/tools/defaults` barrel export, transitional re-export wrappers, public-to-runtime imports, duplicate default definition values, and ordinary “framework tool catalog” terminology.                                                                                                                                                                                                                 |
+| Default config authority     | Synthesized default config in `normalize-agent-config.ts`, undefined-config-source inspection conventions, and config loading outside the total binding table.                                                                                                                                                                                                                                                                                             |
+| Kernel effects               | `sourceId.startsWith("eve:")` execution branching; `ask_question` and `final_output` tool-name checks in the harness; the `TASK_CONTROL_TOOL_NAMES` name set; the `frameworkAction: "load-skill"` marker; name-based advertisement visibility; kernel conditionals, literal name lists, or registries outside the exhaustive integration points; native fabrication of ordinary resources.                                                                 |
+| Inspection and memory parity | Inspection owner fallback or framework-state reconstruction; omitted dynamic-resolver or remote-agent provenance; `createMemorySourceId`, mirrored memory manifest references, and other in-memory descriptor shortcuts; harness execution of caller-owned tool objects; downstream source catalogs, composers, merges, or compatibility readers.                                                                                                          |
 
 This ledger also removes the old framework tool and channel catalogs, duplicate
 `Resolved*` constants and callback builders, `getAllFramework*Names`, compiled
@@ -903,25 +1080,21 @@ and synthetic registry, and the per-primitive extension prefix/rebase and
 disable machinery. Helpers may move behind the canonical boundary, but a
 renamed second source of truth does not satisfy deletion.
 
-## Validation matrix
+## Validation
 
-| Boundary                 | Required proof                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bindings and artifacts   | Missing, extra, path-mismatched, malformed extension, or missing-provenance bindings fail during construction and after disk or bundled schema parsing, before hydration. Opaque source IDs do not change loading or scope.                                                                                                                                                                                                                                                               |
-| Selection and loading    | Every winner is bound before evaluation. Losing filesystem exports and programmatic namespace loaders never execute during compilation or cold start. Config derives later binding settings without loading non-config winners early.                                                                                                                                                                                                                                                     |
-| Module-map parity        | Development, generated, materialized, bundled, hydrated, and in-memory maps expose the same `(nodeId, sourceId)` set and invoke only selected programmatic loaders. No virtual disk path is probed.                                                                                                                                                                                                                                                                                       |
-| Identity and precedence  | Framework, extension-package, extension-override, and application candidates follow one slot precedence. Same-layer duplicates and flattened public tool-name collisions fail during compilation. Losing definitions are never normalized.                                                                                                                                                                                                                                                |
-| Extensions and subagents | Projection qualifies each primitive once, preserves package backing and external dependencies, and retains ownership across nested and duplicate extension subagent mounts. No per-primitive merge or origin table remains.                                                                                                                                                                                                                                                               |
-| Sandbox and config       | Default and authored sandboxes and configs each have one truthful selected source. Authored config shadows the lazy default, and filesystem and memory compilation report identical provenance.                                                                                                                                                                                                                                                                                           |
-| External packages        | One compiler-scoped session selects configured package closures before definitions execute, records config-bootstrap witnesses, rejects owner conflicts or source mutation before later side effects, and finalizes those exact candidates into the manifest. Sandbox identity includes only its selected backing, relative closure, configured external closure, and programmatic revision. Immutable captures use the current versioned layout without trusting earlier cache topology. |
-| Public home and health   | Replacement and disablement, `Client.health()` payload validation, `ClientError`, `HealthResponseError`, internal process readiness, adapter reuse, runtime dispatch, Nitro registration, and inspection agree without native fallback.                                                                                                                                                                                                                                                   |
-| Route planning           | Cross-channel selection is deterministic and shared by dispatch, WebSocket handling, CORS, Nitro, and inspection. Same-source duplicates, reserved host overlaps, parameter-equivalent patterns, explicit `OPTIONS` conflicts, and inconsistent CORS use their stable compile errors.                                                                                                                                                                                                     |
-| Diagnostics              | Route warnings retain exact winner/loser provenance and survive disk and bundled loading, summaries, hashes, CLI rendering, and agent-info without requiring a physical path.                                                                                                                                                                                                                                                                                                             |
-| Framework behavior       | Connection search preserves filtering, auth, approval, failure, long-name, durable callback, and restart behavior without history scanning. Load skill, web search, ordinary defaults, callbacks, and extension overrides retain their public behavior.                                                                                                                                                                                                                                   |
-| Kernel lifecycle         | Every capability is covered through preparation, advertisement, materialization, dispatch, prompts, and inspection for root, self-delegated root, named and dynamic task children, non-task children, provider-dependent calls, Workflow depth, and structured output. Named task children receive `task_update`.                                                                                                                                                                         |
-| Inspection               | `AgentInfoResultSchema` validates exact unique sets and counts for config, primitives, effective and shadowed routes, dynamic resolver events, local subagents, remote agents, owners, composition, and kernel potential. Nitro's ordinary routes equal agent-info channels.                                                                                                                                                                                                              |
-| In-memory execution      | Each memory source is declared once. Filesystem and memory fixtures produce the same owner graph and kernel plan. The harness resolves and executes the installed compiled tool rather than an imported definition object.                                                                                                                                                                                                                                                                |
-| End to end               | A deterministic fixture covers defaults, extension and override layers, application replacement and disablement, nested subagents, `task_update`, home/health, dynamic tools and skills, dynamic model and subagent config, a remote agent, sandbox, and default/authored config across development, production, and agent-info artifacts. It invokes a replaced ordinary tool through the installed runtime rather than an imported definition object.                                   |
+Tests are replaced, not accumulated. Tests that assert superseded behavior —
+catalog merges, fallback construction, name-based dispatch, agent-info v2 —
+are deleted with the code they cover and replaced by tight unit and
+integration tests for the new boundaries. Test helpers obtain compiled
+artifacts only through the real compiler, from filesystem fixtures or
+in-memory source registration; no helper constructs `Compiled*` records
+field-by-field.
+
+The work adds no new e2e evals and no new scenario suites. Existing
+scenario, TUI, and fixture-owned e2e suites are the behavioral regression
+net: nearly all of them must continue passing unchanged, with modifications
+limited to the named breaking surfaces — agent-info v3 assertions, the
+health and info routes, and `eve/tools/<name>` import paths.
 
 Run inexpensive checks throughout implementation:
 
@@ -944,8 +1117,10 @@ pnpm test:tui
 pnpm docs:check
 ```
 
-Fixture-owned e2e suites run in CI. The final required CI includes deterministic
-world suites and the real-model `e2e-local` aggregate. Transport or provider
+Fixture-owned e2e suites run in CI. Composition, replacement, and disablement
+coverage lives in unit and integration tests against the real compiler, not
+in new fixtures. The final required CI includes the deterministic world
+suites and the real-model `e2e-local` aggregate; transport or provider
 variance may be rerun, but repeated failures are investigated rather than
 waived.
 
@@ -954,26 +1129,52 @@ waived.
 The implementation is complete only when:
 
 1. A compiled artifact with missing binding, owner, composition, or route
-   provenance cannot be constructed or loaded.
-2. Removing a selected framework source removes its runtime behavior; no
-   runtime layer recreates it.
-3. Every active ordinary capability appears once by public identity in the
-   compiled graph and once in inspection. Named primitives use their runtime
-   name; routes use method plus normalized path pattern.
-4. Nitro registers no ordinary route or generated preflight absent from the
-   compiled channel route plan.
-5. Every model-visible native kernel capability and every non-source host
-   registration is named in its exhaustive closed inventory.
-6. Agent-info explains the owner and replacement history of every config,
-   primitive, route, local subagent, remote agent, and dynamic resolver without
-   parsing identifiers.
-7. Searches for the distributed deletion ledger return no production match or
-   renamed equivalent.
-8. The complete implementation lands in #2407, and all required local and CI
-   validation passes.
-9. Changing a selected filesystem module or programmatic executable revision
-   changes module-map identity, while relocating identical filesystem content
-   without changing its logical extension namespace does not.
+   provenance cannot be constructed or loaded — enforced at construction and
+   after disk or bundled schema parsing, before module-map hydration.
+2. Every winner is bound before evaluation; losing filesystem exports and
+   programmatic namespace loaders never execute during compilation or cold
+   start.
+3. Development, generated, materialized, bundled, hydrated, and in-memory
+   module maps expose the same `(nodeId, sourceId)` set and invoke only
+   selected programmatic loaders; no virtual disk path is probed.
+4. Extension projection qualifies each primitive once, preserves package
+   backing and external dependencies, and retains ownership across nested and
+   duplicate extension subagent mounts; no per-primitive merge or origin
+   table remains.
+5. Removing a selected framework source removes its runtime behavior; no
+   runtime layer recreates it. Default and authored sandboxes and configs each
+   have one truthful selected source, and filesystem and memory compilation
+   report identical provenance.
+6. Every active ordinary capability appears once by public identity in the
+   compiled graph and once in inspection; named primitives use their runtime
+   name, routes use method plus normalized path pattern. Nitro registers no
+   ordinary route or generated preflight absent from the compiled channel
+   route plan, and route-planning failures use their stable compile error
+   codes.
+7. Every kernel effect kind, every dispatch action kind, and the
+   `final_output` interception are covered through preparation, advertisement,
+   materialization, dispatch, prompts, and inspection for root, self-delegated
+   root, named and dynamic task children, non-task children,
+   provider-dependent calls, Workflow depth, and structured output. Named task
+   children receive `task_update`. No harness or execution code branches on a
+   tool name or source ID.
+8. Connection search preserves filtering, auth, approval, failure, long-name,
+   durable callback, and restart behavior without history scanning; home and
+   eve-channel replacement, client payload validation for health and info,
+   and internal process readiness agree without a native fallback.
+9. Agent-info explains the owner and replacement history of every config,
+   primitive, route, local subagent, remote agent, and dynamic resolver
+   without parsing identifiers; `AgentInfoResultSchema` validates exact unique
+   sets and counts, and Nitro's ordinary routes equal agent-info channels.
+10. Searches for the distributed deletion ledger return no production match or
+    renamed equivalent.
+11. Changing a selected filesystem module or programmatic executable revision
+    changes module-map identity, while relocating identical filesystem content
+    without changing its logical extension namespace does not.
+12. The complete implementation lands with all required local and CI
+    validation passing, existing higher-level suites modified only at the
+    named breaking surfaces, no new e2e or scenario suites, and no new
+    `guard-invariants` rules.
 
 ## Invariants and rejected alternatives
 
@@ -992,12 +1193,19 @@ The implementation is complete only when:
   different implementation before load.
 - Active ownership has one location. Composition entries own only losing or
   disabled provenance; no winner-owner index or origin table is retained.
+- The design is self-enforcing. A boundary that needs a new mechanical guard
+  rule, an AST check over the implementation's own interfaces, or an
+  identifier-name pattern to survive is a design failure to correct, not a
+  guard to add.
 - `defineDynamic` remains the sole dynamic-definition lifecycle. Framework and
   future memory features do not gain parallel validation, durability,
   replacement, collision, or callback stores.
+- Kernel effects are declared on public definitions and implemented by the
+  kernel. Tool definitions never import Workflow, harness, or execution
+  internals, and no effect is keyed by tool name.
 - Ordinary route dispatch comes only from the compiled route plan. Native
-  behavior is limited to the separate exhaustive kernel and host inventories;
-  a universal native-tool, route, or adapter escape hatch is rejected.
+  behavior is limited to the closed kernel effect kinds and host inventory; a
+  universal native-tool, route, or adapter escape hatch is rejected.
 - Pre-1.0 cleanup is a breaking replacement: no legacy manifest reader,
   agent-info schema, health fallback, history reconstruction, duplicate status
   state, or compatibility path is retained.

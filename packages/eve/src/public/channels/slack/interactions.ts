@@ -29,6 +29,7 @@ import {
   isHitlAction,
   type HitlFreeformModalMetadata,
 } from "#public/channels/slack/hitl.js";
+import { readSlackTextObject } from "#public/channels/slack/inbound-content.js";
 import {
   SLACK_CARD_SUBTEXT_MAX_LENGTH,
   truncateCardSubtext,
@@ -196,9 +197,9 @@ function findPromptBlocks(blocks: readonly unknown[]): unknown[] {
 }
 
 function readPromptTextFromBlocks(blocks: readonly unknown[]): string | undefined {
-  const prompt = findPromptBlock(blocks) as { text?: { text?: unknown } } | undefined;
-  const text = prompt?.text?.text;
-  return typeof text === "string" && text.length > 0 ? text : undefined;
+  const prompt = findPromptBlock(blocks) as { text?: unknown } | undefined;
+  const text = readSlackTextObject(prompt?.text);
+  return text.length > 0 ? text : undefined;
 }
 
 function buildAnsweredHitlMessageBlocks(input: {

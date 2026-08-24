@@ -4,7 +4,7 @@ import { pageTitleMetadata } from "@/lib/geistdocs/metadata-title";
 import { benchmarkResults, benchmarkRows } from "@/lib/evals/results";
 import { ResultsTable } from "./results-table";
 
-const title = "Agent Evaluations - eve";
+const title = "Model Benchmarks - eve";
 const description =
   "See how coding agents perform on eve project authoring tasks with and without eve's generated guidance.";
 const titleMetadata = pageTitleMetadata(title);
@@ -12,15 +12,19 @@ const titleMetadata = pageTitleMetadata(title);
 export const metadata: Metadata = {
   ...titleMetadata,
   description,
-  alternates: canonicalAlternates(canonicalRoutes.evals),
-  openGraph: titleMetadata.openGraph,
+  alternates: canonicalAlternates(canonicalRoutes.benchmarks),
+  openGraph: {
+    ...titleMetadata.openGraph,
+    images: ["/benchmarks/opengraph-image"],
+  },
   twitter: {
     ...titleMetadata.twitter,
     card: "summary_large_image",
+    images: ["/benchmarks/twitter-image"],
   },
 };
 
-const EvalsPage = () => {
+const ModelBenchmarksPage = () => {
   const rows = benchmarkRows(benchmarkResults);
   const publishedAt = formatDate(benchmarkResults.generatedAt);
   const revision = benchmarkResults.suite.eveRevision;
@@ -28,7 +32,7 @@ const EvalsPage = () => {
   return (
     <main className="mx-auto w-full min-w-0 max-w-[1080px] px-4 pb-32 sm:px-6">
       <section className="flex min-w-0 flex-col items-center px-0 pt-16 pb-12 text-center sm:px-4">
-        <h1 className="text-gray-1000 text-heading-48 sm:text-heading-64">Agent Evaluations</h1>
+        <h1 className="text-gray-1000 text-heading-48 sm:text-heading-64">Model Benchmarks</h1>
         <p className="mt-5 max-w-3xl text-gray-900 text-lg">
           Performance of coding agents creating and changing eve projects, measured by deterministic
           checks against the files, commands, and simulated external interactions each run produces.
@@ -88,4 +92,4 @@ function formatDate(value: string | null): string {
   }).format(new Date(value));
 }
 
-export default EvalsPage;
+export default ModelBenchmarksPage;

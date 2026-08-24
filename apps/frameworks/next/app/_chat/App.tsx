@@ -2,15 +2,29 @@
 
 import { useEveAgent } from "eve/react";
 import { type FormEvent, type JSX, useEffect, useMemo, useRef, useState } from "react";
+import { type Components, Streamdown } from "streamdown";
 
 import { traceReducer } from "./trace-reducer";
-import { resolveTurnFailureMessage, shouldRenderAssistantTurn } from "./turn-content";
+import {
+  resolveTurnAssistantMessage,
+  resolveTurnFailureMessage,
+  shouldRenderAssistantTurn,
+} from "./turn-content";
 import type { TraceTurn } from "./types";
+
+const streamdownComponents = {
+  img: () => null,
+} satisfies Components;
 
 function ConversationSection(props: {
   readonly isSending: boolean;
   readonly turns: readonly TraceTurn[];
 }) {
+  const activeTurnId = props.isSending ? props.turns.at(-1)?.turnId : undefined;
+  const hasStreamingAssistantText = props.turns.some(
+    (turn) => turn.turnId === activeTurnId && resolveTurnAssistantMessage(turn) !== undefined,
+  );
+
   return (
     <ul className="chat-feed">
       {props.turns.flatMap((turn) => {
@@ -30,21 +44,37 @@ function ConversationSection(props: {
           return rendered;
         }
 
-        const assistantText = turn.assistantMessage ?? resolveTurnFailureMessage(turn) ?? "";
+        const assistantText =
+          resolveTurnAssistantMessage(turn) ?? resolveTurnFailureMessage(turn) ?? "";
+        const isStreaming = turn.turnId === activeTurnId;
         rendered.push(
           <li
             className={`chat-row role-assistant${turn.status === "failed" ? " variant-error" : ""}`}
             key={`${turn.turnId}:assistant`}
           >
             <div className="chat-bubble-stack">
-              <div className="chat-bubble">{assistantText}</div>
+              <div className="chat-bubble">
+                {turn.status === "failed" ? (
+                  assistantText
+                ) : (
+                  <Streamdown
+                    animated
+                    components={streamdownComponents}
+                    isAnimating={isStreaming}
+                    mode={isStreaming ? "streaming" : "static"}
+                    skipHtml
+                  >
+                    {assistantText}
+                  </Streamdown>
+                )}
+              </div>
             </div>
           </li>,
         );
 
         return rendered;
       })}
-      {props.isSending ? (
+      {props.isSending && !hasStreamingAssistantText ? (
         <li className="chat-row role-assistant pending">
           <div className="chat-bubble">Thinking…</div>
         </li>

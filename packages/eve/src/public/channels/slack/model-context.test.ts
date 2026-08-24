@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SlackThreadMessage } from "#public/channels/slack/api.js";
+import { parseMessageEvent } from "#public/channels/slack/inbound.js";
 import {
   formatSlackInboundMessage,
   formatSlackThreadContext,
@@ -74,5 +75,52 @@ describe("Slack model context", () => {
 
   it("omits empty thread context", () => {
     expect(formatSlackThreadContext([])).toBeUndefined();
+  });
+
+  it("renders Block Kit-only inbound messages with visible content", () => {
+    const parsed = parseMessageEvent({
+      type: "event_callback",
+      team_id: "T01",
+      event: {
+        type: "message",
+        user: "U01",
+        text: "",
+        channel: "C01",
+        ts: "1234567890.123456",
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: "*Alert:* Service latency is high",
+            },
+          },
+          {
+            type: "section",
+            fields: [
+              { type: "mrkdwn", text: "Status: Firing" },
+              { type: "mrkdwn", text: "Region: us-east-1" },
+            ],
+          },
+        ],
+      },
+    });
+    expect(parsed).not.toBeNull();
+
+    const block = formatSlackInboundMessage(
+      {
+        channelId: parsed!.channelId,
+        teamId: parsed!.teamId,
+        threadTs: parsed!.threadTs,
+        userId: parsed!.author?.userId ?? "",
+      },
+      {
+        markdown: parsed!.markdown,
+        ts: parsed!.ts,
+      },
+    );
+
+    expect(block).toContain("Service latency is high");
+    expect(block).not.toMatch(/<content>\s*<\/content>/u);
   });
 });
