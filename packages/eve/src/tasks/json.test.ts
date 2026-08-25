@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { taskCancel } from "#public/tools/task-cancel.js";
 import { TASK_VIEWS_OUTPUT_SCHEMA } from "#shared/task-tool.js";
 import { taskViewToJson } from "#tasks/json.js";
 import type { TaskView } from "#tasks/types.js";
@@ -43,10 +44,11 @@ describe("taskViewToJson", () => {
   });
 });
 
-describe("TASK_VIEWS_OUTPUT_SCHEMA", () => {
+describe("taskCancel.outputSchema", () => {
   it("preserves the broad task-control output contract", () => {
+    expect(taskCancel.outputSchema).toBe(TASK_VIEWS_OUTPUT_SCHEMA);
     expect(
-      TASK_VIEWS_OUTPUT_SCHEMA.parse({
+      taskCancel.outputSchema.parse({
         tasks: [
           {
             inputRequests: [{ prompt: "Choose" }],
