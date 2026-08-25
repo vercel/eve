@@ -13,6 +13,7 @@ import {
   telegramChannel,
   type TelegramChannelState,
 } from "#public/channels/telegram/index.js";
+import { isTelegramBotMentioned } from "#public/channels/telegram/defaults.js";
 
 const SECRET = "telegram-secret";
 
@@ -156,6 +157,7 @@ describe("telegramChannel() inbound route", () => {
   it("dispatches verified private messages with Telegram auth and chat-wide token", async () => {
     const channel = telegramChannel({
       api: { fetch: fakeTelegramFetch() },
+      botUsername: "testbot",
       credentials: { botToken: "bot-token", webhookSecretToken: SECRET },
       onMessage: (_ctx, message) => ({
         auth: defaultTelegramAuth(message),
@@ -177,6 +179,8 @@ describe("telegramChannel() inbound route", () => {
     expect(send).toHaveBeenCalledTimes(1);
     const [continuationToken, input] = send.mock.calls[0]!;
     expect((input as { context: string[] }).context[0]).toContain("<telegram_context>");
+    expect((input as { context: string[] }).context[0]).toContain("bot_username: testbot");
+    expect((input as { context: string[] }).context[0]).toContain("is_mentioned: false");
     expect(String((input as { message: string }).message)).toContain("hello");
     expect(continuationToken).toBe("42::");
     expect(input).toMatchObject({
@@ -191,6 +195,15 @@ describe("telegramChannel() inbound route", () => {
       },
       title: "Telegram run",
     });
+  });
+
+  it.each([
+    ["hello @testbot", true],
+    ["/ask@testbot hello", true],
+    ["hello @testbotany", false],
+    ["email x@testbot.org", false],
+  ])("reports exact bot mention state for %j", (text, expected) => {
+    expect(isTelegramBotMentioned({ caption: "", text }, "testbot")).toBe(expected);
   });
 
   it("gates group messages to commands, mentions, and replies to the bot", async () => {

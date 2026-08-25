@@ -41,6 +41,7 @@ import {
   type SlackEvent,
   slackEventBotUserId,
   slackEventInstallationTeamId,
+  slackEventReceivingBotUserId,
   type SlackEventEnvelope,
   type SlackInboundContext,
   type SlackMessage,
@@ -991,6 +992,7 @@ async function handleEventPost(input: {
   if (envelope === null) return new Response("ok");
   const appId = typeof envelope.api_app_id === "string" ? envelope.api_app_id : undefined;
   const botUserId = slackEventBotUserId(envelope);
+  const receivingBotUserId = slackEventReceivingBotUserId(envelope);
   const installationTeamId = slackEventInstallationTeamId(envelope);
 
   // Handler precedence, in fall-through order:
@@ -1009,6 +1011,7 @@ async function handleEventPost(input: {
           dispatchSlackMessage({
             appId,
             botUserId,
+            receivingBotUserId,
             from: input.from,
             resolveSession: input.resolveSession,
             credentials: config.credentials,
@@ -1026,6 +1029,7 @@ async function handleEventPost(input: {
           dispatchSlackMessage({
             appId,
             botUserId,
+            receivingBotUserId,
             from: input.from,
             resolveSession: input.resolveSession,
             credentials: config.credentials,
@@ -1054,6 +1058,7 @@ async function handleEventPost(input: {
           dispatchSlackMessage({
             appId,
             botUserId,
+            receivingBotUserId,
             from: input.from,
             resolveSession: input.resolveSession,
             credentials: config.credentials,
@@ -1120,6 +1125,7 @@ function isSelfAuthoredSlackMessage(
 async function dispatchSlackMessage(input: {
   readonly appId: string | undefined;
   readonly botUserId: string | undefined;
+  readonly receivingBotUserId: string | undefined;
   readonly from: ChannelFrom<SlackChannelState>;
   readonly resolveSession: ChannelResolveSession;
   readonly credentials: SlackChannelCredentials | undefined;
@@ -1201,7 +1207,7 @@ async function dispatchSlackMessage(input: {
   channelState.audience =
     input.kind === "direct_message" || isPrivateConversation ? "private" : "public";
   await deliverSlackMessage({
-    botUserId: input.botUserId,
+    botUserId: input.receivingBotUserId,
     credentials: input.credentials,
     kind: input.kind,
     isPrivateConversation,

@@ -59,7 +59,9 @@ export function isTelegramBotMentioned(
 ): boolean {
   if (botUsername === undefined) return false;
   const text = message.text || message.caption;
-  return text.toLowerCase().includes(`@${botUsername.toLowerCase()}`);
+  if (isTargetedBotCommand(text, botUsername)) return true;
+  const escapedUsername = botUsername.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  return new RegExp(`(?:^|[^A-Za-z0-9_])@${escapedUsername}(?=$|[^A-Za-z0-9_])`, "iu").test(text);
 }
 
 /** Built-in Telegram event handlers for typing, replies, HITL, and terminal errors. */
@@ -141,7 +143,7 @@ function shouldDispatchTelegramMessage(
   if (message.replyToMessage?.from?.isBot === true) return true;
 
   if (isBotCommand(text, botUsername)) return true;
-  if (isTelegramBotMentioned(message, botUsername)) return true;
+  if (botUsername !== undefined && mentionsBotUsername(text, botUsername)) return true;
 
   return false;
 }
@@ -152,4 +154,13 @@ function isBotCommand(text: string, botUsername: string | undefined): boolean {
   const target = match.groups?.target;
   if (target === undefined) return true;
   return botUsername !== undefined && target.toLowerCase() === botUsername.toLowerCase();
+}
+
+function isTargetedBotCommand(text: string, botUsername: string): boolean {
+  const match = /^\/[A-Za-z0-9_]+@(?<target>[A-Za-z0-9_]+)(?:\s|$)/u.exec(text);
+  return match?.groups?.target?.toLowerCase() === botUsername.toLowerCase();
+}
+
+function mentionsBotUsername(text: string, botUsername: string): boolean {
+  return text.toLowerCase().includes(`@${botUsername.toLowerCase()}`);
 }

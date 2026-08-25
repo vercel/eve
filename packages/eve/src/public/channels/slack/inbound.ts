@@ -205,6 +205,27 @@ export function slackEventBotUserId(envelope: SlackEventCallback): string | unde
   return authorization?.user_id;
 }
 
+/**
+ * Returns the receiving bot user id that is safe to expose in model context.
+ * Authorizations explicitly marked as non-bot identify an installer, not the
+ * receiving bot. When Slack omits `is_bot`, an `app_mention` can still prove
+ * the identity by mentioning the same authorization user id in its text.
+ */
+export function slackEventReceivingBotUserId(envelope: SlackEventCallback): string | undefined {
+  const botUserId = slackEventBotUserId(envelope);
+  if (botUserId !== undefined) return botUserId;
+
+  const event = envelope.event;
+  const text = typeof event?.text === "string" ? event.text : undefined;
+  if (event?.type !== "app_mention" || text === undefined) return undefined;
+  return envelope.authorizations?.find(
+    (entry) =>
+      entry.is_bot === undefined &&
+      typeof entry.user_id === "string" &&
+      text.includes(`<@${entry.user_id}>`),
+  )?.user_id;
+}
+
 /** Returns the workspace whose app installation authorized this event. */
 export function slackEventInstallationTeamId(envelope: SlackEventCallback): string | undefined {
   const authorizations = envelope.authorizations ?? [];

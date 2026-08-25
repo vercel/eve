@@ -261,6 +261,33 @@ describe("githubChannel", () => {
     });
   });
 
+  it("marks an accepted unmentioned issue comment as not mentioned", async () => {
+    const channel = githubChannel({
+      botName: "testbot",
+      credentials: { webhookSecret: SECRET },
+      onComment: () => ({ auth: null }),
+    });
+    const { send } = await firePost(
+      channel,
+      signedRequest(
+        "issue_comment",
+        basePayload({
+          action: "created",
+          comment: {
+            body: "Could you investigate?",
+            id: 10,
+            user: { id: 1, login: "octocat", type: "User" },
+          },
+          issue: { number: 5 },
+        }),
+      ),
+    );
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]![1].context[0]).toContain("bot_name: testbot");
+    expect(send.mock.calls[0]![1].context[0]).toContain("is_mentioned: false");
+  });
+
   it("resolves a lazy botName on first dispatch and caches it", async () => {
     const resolveBotName = vi.fn().mockResolvedValue("testbot");
     const channel = githubChannel({

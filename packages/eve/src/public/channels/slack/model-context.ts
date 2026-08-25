@@ -1,5 +1,6 @@
 import type { SlackThreadMessage } from "#public/channels/slack/api.js";
 import type { SlackInboundContext } from "#public/channels/slack/inbound.js";
+import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
 
 interface SlackModelMessageInput {
   readonly botUserId?: string;
@@ -39,12 +40,12 @@ export function formatSlackModelMessage(input: SlackModelMessageInput): string {
 /** Renders the triggering inbound Slack message as one attributed block. */
 export function formatSlackInboundMessage(
   context: SlackInboundContext,
-  message: { readonly markdown: string; readonly ts: string },
+  message: { readonly text: string; readonly ts: string },
 ): string {
   return formatSlackModelMessage({
     botUserId: context.botUserId,
     channelId: context.channelId,
-    content: message.markdown,
+    content: slackModelContent(message.text),
     isMentioned: context.isMentioned,
     senderId: context.userId || undefined,
     senderType: context.userId ? "user" : "unknown",
@@ -52,6 +53,23 @@ export function formatSlackInboundMessage(
     threadTs: context.threadTs,
     ts: message.ts,
   });
+}
+
+function slackModelContent(input: string): string {
+  const mentions: string[] = [];
+  let markerPrefix = "\uE000eve_slack_user_mention_";
+  while (input.includes(markerPrefix)) markerPrefix += "_";
+
+  const protectedInput = input.replace(/<@[A-Z0-9_]+(?:\|[^>\r\n]+)?>/giu, (mention) => {
+    const marker = `${markerPrefix}${mentions.length}\uE001`;
+    mentions.push(mention);
+    return marker;
+  });
+  let markdown = slackMrkdwnToGfm(protectedInput);
+  for (const [index, mention] of mentions.entries()) {
+    markdown = markdown.replaceAll(`${markerPrefix}${index}\uE001`, mention);
+  }
+  return markdown;
 }
 
 /**

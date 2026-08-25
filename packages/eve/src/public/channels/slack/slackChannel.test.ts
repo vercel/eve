@@ -1620,7 +1620,7 @@ describe("slackChannel() inbound mention pipeline", () => {
         type: "app_mention",
         user: "U_REQUESTER",
       },
-      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+      { authorizations: [{ user_id: "U_BOT" }] },
     );
 
     const { send } = await firePost(channel, buildSignedRequest({ body }));
@@ -1640,11 +1640,37 @@ describe("slackChannel() inbound mention pipeline", () => {
         "message_ts: 1700000000.000001",
         "team_id: T01",
         "<content>",
-        "@U_BOT Could you investigate?",
+        "<@U_BOT> Could you investigate?",
         "</content>",
         "</slack_message>",
       ].join("\n"),
     );
+  });
+
+  it("marks an accepted unmentioned direct message as not mentioned", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onDirectMessage: () => ({ auth: null }),
+    });
+    const body = buildEventBody(
+      {
+        channel: "D01",
+        channel_type: "im",
+        event_ts: "1700000000.000002",
+        text: "Could you investigate?",
+        ts: "1700000000.000002",
+        type: "message",
+        user: "U_REQUESTER",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [, { message }] = send.mock.calls[0]! as [string, { message: string }];
+    expect(message).toContain("bot_user_id: U_BOT");
+    expect(message).toContain("is_mentioned: false");
   });
 
   it("uses the run title returned by onAppMention for a public channel", async () => {

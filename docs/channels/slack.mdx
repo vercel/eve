@@ -156,7 +156,7 @@ Only the first available handler runs. A message hook returning `null` drops the
 
 `onInteraction(action, ctx)` separately handles user-owned `block_actions` callbacks. eve-owned HITL buttons and modal submissions go through `onInputResponse(ctx, submission)` instead. eve attaches the triggering Slack user id to the same model message as its text, preserving speaker attribution without profile lookups.
 
-The triggering model-visible `<slack_message>` includes the sender's `sender_id`, the receiving app's `bot_user_id` when Slack supplies it, and `is_mentioned` from the same exact check exposed by `ctx.isBotMentioned()`. This lets the model identify its own user ID and distinguish explicit mentions without changing Slack's existing mention parsing or routing.
+The triggering model-visible `<slack_message>` includes the sender's `sender_id`, the receiving app's `bot_user_id` when Slack supplies it, and `is_mentioned` from the same check exposed by `ctx.isBotMentioned()`. Its `<content>` preserves Slack user mentions as `<@USER_ID>` tokens while converting other Slack mrkdwn to Markdown. This lets the model identify its own user ID without changing mention routing.
 
 #### Restrict who can invoke the agent
 
