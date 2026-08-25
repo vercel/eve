@@ -38,9 +38,11 @@ const RUNNING_HANDLE: AgentHandle = {
     sessionId: "child-session-running",
   },
   identity: {
+    execution: "blocking",
     id: deriveAgentId("research", RUNNING_OPERATION_ID),
     name: "research",
     nodeId: "subagents/research",
+    targetKind: "local",
   },
   operation: {
     callId: "call-1",
@@ -64,9 +66,11 @@ const PARKED_HANDLE: AgentHandle = {
     sessionId: "child-session-parked",
   },
   identity: {
+    execution: "blocking",
     id: deriveAgentId("writer", PARKED_OPERATION_ID),
     name: "writer",
     nodeId: "subagents/writer",
+    targetKind: "local",
   },
   lastStatus: "draft ready",
   phase: "parked",
