@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { TASK_VIEWS_OUTPUT_SCHEMA } from "#runtime/framework-tools/tasks.js";
+import { TASK_VIEWS_OUTPUT_SCHEMA } from "#shared/task-tool.js";
 import { taskViewToJson } from "#tasks/json.js";
 import type { TaskView } from "#tasks/types.js";
 
