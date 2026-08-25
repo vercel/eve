@@ -1434,6 +1434,9 @@ importers:
 
   packages/eve-self-modification:
     dependencies:
+      eve:
+        specifier: workspace:^
+        version: link:../eve
       just-bash:
         specifier: 3.1.0
         version: 3.1.0(supports-color@10.2.2)
@@ -1441,9 +1444,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 25.9.1
-      eve:
-        specifier: workspace:*
-        version: link:../eve
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
