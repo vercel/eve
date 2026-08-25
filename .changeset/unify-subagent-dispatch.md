@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Select experimental task-backed subagent execution inside the shared runtime-action dispatch step instead of carrying task mode through the durable turn workflow.
+Select live task controls and persisted task-mode action batches inside the shared runtime-action dispatch step instead of carrying task mode through the durable turn workflow.

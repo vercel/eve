@@ -346,7 +346,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     );
   });
 
-  it("opens a shared parent sandbox for a background-task child", async () => {
+  it("replays a persisted task-mode start with shared parent sandbox access", async () => {
     const session = createStartSession({ kind: "local" });
     const { backend, create } = createSandboxBackend();
     installSandboxContext({

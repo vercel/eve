@@ -180,7 +180,6 @@ export async function prepareRuntimeActionDispatch(input: {
     ctx,
     durableSession,
     serializedContext: input.serializedContext,
-    taskControls: taskMode,
     taskMode,
   });
 }
@@ -204,7 +203,6 @@ export async function prepareAgentActionDispatch(input: {
     durableSession,
     fanoutSize: input.localFanoutSize,
     serializedContext: input.serializedContext,
-    taskControls: false,
     taskMode: false,
   });
 }
@@ -221,7 +219,6 @@ async function prepareActionDispatch(input: {
   readonly durableSession: Awaited<ReturnType<typeof readDurableSession>>;
   readonly fanoutSize?: number;
   readonly serializedContext: Record<string, unknown>;
-  readonly taskControls: boolean;
   readonly taskMode: boolean;
 }): Promise<PreparedRuntimeActionDispatch> {
   const { batch, durableSession } = input;
@@ -247,7 +244,7 @@ async function prepareActionDispatch(input: {
     bundle,
     ctx,
     session,
-    taskControls: input.taskControls,
+    taskControls: input.taskMode,
   });
 
   const sandboxSessionId = resolveActiveSandboxSessionId(adapter.state, session.sessionId);
