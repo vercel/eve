@@ -22,12 +22,9 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 19,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19],
-    dropped: {
-      15: "TaskExec replaces stageEffect with send",
-      18: "Public definitions now use their canonical internal contract identities.",
-    },
+    current: 18,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18],
+    dropped: { 15: "TaskExec replaces stageEffect with send" },
   },
   dynamicTool: {
     current: 19,
