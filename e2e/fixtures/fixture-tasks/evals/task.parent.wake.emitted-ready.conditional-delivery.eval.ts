@@ -1,8 +1,12 @@
-import type { EveEvalTurn } from "eve/evals";
+import type { EveEvalContext, EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
 import { defineTaskEval } from "./task-transition.js";
-import { requireSessionStreamIndex } from "./shared.js";
+import {
+  requireSessionStreamIndex,
+  type TaskEvalSessionDriver,
+  waitForTaskInput,
+} from "./shared.js";
 
 const REVIEW_FINDING = "blocker: task admission can discard deferred user input.";
 
@@ -14,6 +18,8 @@ export default defineTaskEval({
     primary: "task.parent.wake.emitted-ready",
     setup: [
       "task.dispatch.start.accepted-acknowledged",
+      "task.input.require.accepted-valid-batch",
+      "task.input.answer.accepted-complete",
       "task.lifecycle.complete.accepted-nonterminal",
     ],
     dimensions: { transport: "local", parentPhase: "parked" },
@@ -36,11 +42,14 @@ export default defineTaskEval({
       ),
     );
 
-    const sessionId = started.sessionId;
-    const firstLive = t.target.watchTurn(sessionId, {
-      startIndex: requireSessionStreamIndex(t, "First reviewer wake"),
-    });
-    const firstWake = await firstLive.result();
+    const blocked = await waitForTaskInput(t, t, "hold");
+    const firstObserved = await waitForTaskNotification(
+      t,
+      blocked.session,
+      blocked.observedTurns,
+      "First reviewer wake",
+    );
+    const firstWake = firstObserved.turn;
 
     firstWake.expectOk();
     const firstNotification = requireTaskNotification(firstWake);
@@ -65,10 +74,22 @@ export default defineTaskEval({
       satisfies((message) => message === undefined, "the pending cohort wake is silent"),
     );
 
-    const secondLive = t.target.watchTurn(sessionId, {
-      startIndex: requireSessionStreamIndex(firstLive.session, "Late reviewer wake"),
-    });
-    const wake = await secondLive.result();
+    const released = await firstObserved.session.respond([
+      {
+        optionId: "approve",
+        requestId: blocked.request.requestId,
+      },
+    ]);
+    released.expectOk();
+    released.noFailedActions();
+
+    const lateObserved = await waitForTaskNotification(
+      t,
+      firstObserved.session,
+      [released],
+      "Late reviewer wake",
+    );
+    const wake = lateObserved.turn;
 
     wake.expectOk();
     const lateNotification = requireTaskNotification(wake);
@@ -98,11 +119,43 @@ interface TaskNotification {
   readonly taskId: string;
 }
 
+interface ObservedTaskNotification {
+  readonly session: TaskEvalSessionDriver;
+  readonly turn: EveEvalTurn;
+}
+
+async function waitForTaskNotification(
+  t: EveEvalContext,
+  initialSession: TaskEvalSessionDriver,
+  observedTurns: readonly EveEvalTurn[],
+  operation: string,
+): Promise<ObservedTaskNotification> {
+  const observed = observedTurns.find((turn) => taskNotification(turn) !== undefined);
+  if (observed !== undefined) return { session: initialSession, turn: observed };
+
+  const sessionId = initialSession.sessionId;
+  if (sessionId === undefined) throw new Error(`${operation} has no parent session id.`);
+  const live = t.target.watchTurn(sessionId, {
+    startIndex: requireSessionStreamIndex(initialSession, operation),
+  });
+  const turn = await live.result();
+  if (taskNotification(turn) === undefined) {
+    throw new Error(`${operation} has no completed-task notification.`);
+  }
+  return { session: live.session, turn };
+}
+
 function requireTaskNotification(turn: EveEvalTurn): TaskNotification {
+  const notification = taskNotification(turn);
+  if (notification !== undefined) return notification;
+  throw new Error("Reviewer wake has no completed-task notification.");
+}
+
+function taskNotification(turn: EveEvalTurn): TaskNotification | undefined {
   for (const event of turn.events) {
     if (event.type !== "message.received" || typeof event.data.message !== "string") continue;
     const taskId = /Background task (task_[a-z0-9]+)/iu.exec(event.data.message)?.[1];
     if (taskId !== undefined) return { message: event.data.message, taskId };
   }
-  throw new Error("Reviewer wake has no completed-task notification.");
+  return undefined;
 }
