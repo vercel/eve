@@ -1,26 +1,31 @@
 import { deserializeContext } from "#context/serialize.js";
+import type { ContextContainer } from "#context/container.js";
+import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { hydrateDurableSession } from "#execution/session.js";
+import {
+  resetRemoteAgentSession,
+  resolveRemoteAgentForAction,
+} from "#execution/remote-agent-dispatch.js";
 import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";
-import { getAgentHandleStore, type AgentHandle } from "#harness/handles/store.js";
+import { getAgentHandleStore } from "#harness/handles/store.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import { getSessionTaskIndex } from "#tasks/session-index.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 
 const log = createLogger("execution.terminate-child-sessions");
 
 /**
- * Terminates same-deployment children the parent holds handles to when the
- * parent session ends.
+ * Terminates children the parent holds handles to when the parent session
+ * ends.
  *
  * Every nonterminal `agent/local`/`agent/self` handle is covered: `running`
  * and `parked` handles carry a confirmed address; a `starting` handle has
  * no session id yet (the child may not exist), so it is skipped with a
- * debug log rather than guessed at. Remote handles are out of scope —
- * documented gap: remote children survive parent termination until a
- * remote-termination protocol exists.
+ * debug log rather than guessed at. Remote handles are retired through the
+ * authenticated session-reset route.
  */
 export async function terminateChildSessionsStep(input: {
   readonly serializedContext?: Record<string, unknown>;
@@ -44,12 +49,25 @@ export async function terminateChildSessionsStep(input: {
   // into an ended parent. Already-terminal tasks report `unreachable`,
   // which is the expected no-op.
   const taskEntries = readSessionTaskIndex(session.state, session.sessionId);
-  if (taskEntries.length > 0) {
+  const handles = getAgentHandleStore(session.state)?.handles ?? [];
+  const hasRemoteHandle = handles.some(
+    (handle) => handle.phase !== "starting" && handle.address.kind === "agent/remote",
+  );
+  let runtimeContext:
+    | {
+        readonly bundle: CompiledBundle;
+        readonly ctx: ContextContainer;
+      }
+    | undefined;
+  if (taskEntries.length > 0 || hasRemoteHandle) {
     if (input.serializedContext === undefined) {
-      throw new Error("Task finalization requires serialized runtime context.");
+      throw new Error("Child finalization requires serialized runtime context.");
     }
     const ctx = await deserializeContext(input.serializedContext);
-    const bundle = ctx.require(BundleKey);
+    runtimeContext = { bundle: ctx.require(BundleKey), ctx };
+  }
+  if (taskEntries.length > 0) {
+    const { bundle, ctx } = runtimeContext!;
     const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
     const runtimeSession = hydrateDurableSession({
       durable: session,
@@ -67,7 +85,6 @@ export async function terminateChildSessionsStep(input: {
     }
   }
 
-  const handles = (getAgentHandleStore(session.state)?.handles ?? []).filter(isLocalChildHandle);
   if (handles.length === 0) {
     return;
   }
@@ -82,9 +99,23 @@ export async function terminateChildSessionsStep(input: {
       continue;
     }
     try {
-      await cancelRun(await getWorld(), handle.address.sessionId, {
-        cancelReason: "Parent session ended",
-      });
+      if (handle.address.kind === "agent/remote") {
+        const selection = getDynamicSubagentSelection(runtimeContext!.ctx, handle.identity.nodeId);
+        const remote = resolveRemoteAgentForAction({
+          dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
+          nodeId: handle.identity.nodeId,
+          registry: runtimeContext!.bundle.subagentRegistry.subagentsByNodeId,
+          remoteAgentName: handle.identity.name,
+        });
+        await resetRemoteAgentSession({
+          remote: { ...remote, url: handle.address.url },
+          sessionId: handle.address.sessionId,
+        });
+      } else {
+        await cancelRun(await getWorld(), handle.address.sessionId, {
+          cancelReason: "Parent session ended",
+        });
+      }
     } catch (error) {
       logError(log, "failed to terminate child session", error, {
         agentId: handle.identity.id,
@@ -94,11 +125,6 @@ export async function terminateChildSessionsStep(input: {
       });
     }
   }
-}
-
-function isLocalChildHandle(handle: AgentHandle): boolean {
-  const kind = handle.phase === "starting" ? handle.target.kind : handle.address.kind;
-  return kind === "agent/local" || kind === "agent/self";
 }
 
 function readSessionTaskIndex(

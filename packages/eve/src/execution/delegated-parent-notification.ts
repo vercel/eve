@@ -288,7 +288,7 @@ export async function resolveInitialTurnCallerStep(input: {
   };
 }
 
-/** Rebinds child event forwarding to the task that owns the next accepted turn. */
+/** Rebinds child event forwarding to the caller that owns the next accepted turn. */
 export async function bindTurnCallerContextStep(input: {
   readonly caller: TurnCaller | undefined;
   readonly serializedContext: Record<string, unknown>;
@@ -296,17 +296,18 @@ export async function bindTurnCallerContextStep(input: {
   "use step";
 
   const caller = input.caller;
-  if (caller?.taskId === undefined) return input.serializedContext;
+  if (caller === undefined) return input.serializedContext;
   if (caller.replyTo.kind === "callback") {
+    const callback = {
+      callId: caller.callId,
+      subagentName: caller.subagentName,
+      token: caller.replyTo.token,
+      url: caller.replyTo.url,
+    };
     return {
       ...input.serializedContext,
-      [SessionCallbackKey.name]: {
-        callId: caller.callId,
-        subagentName: caller.subagentName,
-        taskId: caller.taskId,
-        token: caller.replyTo.token,
-        url: caller.replyTo.url,
-      },
+      [SessionCallbackKey.name]:
+        caller.taskId === undefined ? callback : { ...callback, taskId: caller.taskId },
     };
   }
 
@@ -317,7 +318,7 @@ export async function bindTurnCallerContextStep(input: {
     Reflect.get(adapter, "kind") !== SUBAGENT_ADAPTER_KIND ||
     !isSubagentAdapterState(Reflect.get(adapter, "state"))
   ) {
-    throw new Error("Task-owned local turn is missing its subagent adapter binding.");
+    throw new Error("Delegated local turn is missing its subagent adapter binding.");
   }
   const state = Reflect.get(adapter, "state") as SubagentAdapterState;
   return {

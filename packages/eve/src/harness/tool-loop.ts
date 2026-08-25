@@ -2980,6 +2980,8 @@ async function finishTaskTurn(input: {
 
   const structured = extractFinalOutput(result);
   if (structured === undefined) {
+    // The schema belongs to the settled invocation.
+    session = { ...session, outputSchema: undefined };
     if (emit) {
       await emitFailedStep(emit, emissionState, {
         ...OUTPUT_SCHEMA_NOT_FULFILLED,
@@ -3028,6 +3030,9 @@ async function finishConversationTurn(input: {
 
   const structured = extractFinalOutput(result);
   if (structured === undefined) {
+    // The schema belongs to the settled turn. A later conversation turn that
+    // omits outputSchema must not inherit a failed turn's contract.
+    session = { ...session, outputSchema: undefined };
     if (emit) {
       emissionState = await emitRecoverableFailedTurn(emit, emissionState, {
         ...OUTPUT_SCHEMA_NOT_FULFILLED,

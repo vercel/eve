@@ -2525,6 +2525,7 @@ describe("createToolLoopHarness", () => {
         type: "step.failed",
       }),
     );
+    expect(result.session.outputSchema).toBeUndefined();
   });
 
   it("returns only the final assistant reply when a completed task step includes tool work", async () => {

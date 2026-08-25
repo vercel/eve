@@ -179,7 +179,7 @@ A child parks after answering instead of terminating, keeping its session and co
 
 Whenever the set of parked (resumable) children changes, eve appends a framework-injected note to the conversation — labeled `[Agents]` and carrying an `<agents>` block — listing each child's `agentId`, name, and latest status. The static system prompt tells the model the note is injected by eve, not written by the user. The note is appended only when the listing changes (an append-only design that preserves the provider prompt cache), the most recent note is authoritative, and children that are starting or running do not appear until they park again.
 
-The parent holds agent handles only for its session lifetime. When the parent session ends, eve terminates its local children. Remote children are not terminated on parent shutdown — that is a known gap: a parked remote child stays alive on its own deployment until that deployment's own lifecycle ends it. For [remote agents](./guides/remote-agents), upgrade both deployments before relying on continuation behavior introduced by a newer eve version.
+The parent holds agent handles only for its session lifetime. When the parent session ends, eve terminates local children and sends authenticated reset requests for remote children. Remote reset is best-effort: an unreachable deployment may retain the parked child until its own session deadline. For [remote agents](./guides/remote-agents), upgrade both deployments before relying on continuation or reset behavior introduced by a newer eve version.
 
 ## When to split
 

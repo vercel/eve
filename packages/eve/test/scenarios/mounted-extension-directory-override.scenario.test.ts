@@ -192,7 +192,7 @@ describe("mounted extension via directory form with override", () => {
           kind: "eve-extension",
           formatVersion: 1,
           builtWithEve: "0.0.0-test",
-          requires: { extension: 1, subagent: 2 },
+          requires: { extension: 1, subagent: 3 },
         }),
         "node_modules/@acme/crm/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',

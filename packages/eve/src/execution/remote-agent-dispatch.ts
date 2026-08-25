@@ -1,9 +1,11 @@
 import { z } from "#compiled/zod/index.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
+import { ResetResponseSchema, type ResetResponse } from "#protocol/reset-session.js";
 import { AgentHandleError } from "#protocol/agent-handle-error.js";
 import {
   createEveCallbackRoutePath,
   createEveSessionCancelRoutePath,
+  createEveSessionResetRoutePath,
   createEveSessionRoutePath,
 } from "#protocol/routes.js";
 import type { CancelTurnResult, SessionAuthContext, SessionTraceContext } from "#channel/types.js";
@@ -341,6 +343,35 @@ export async function cancelRemoteAgentTurn(input: {
   return result.data.status === "accepted"
     ? { sessionId: result.data.sessionId, status: "accepted" }
     : { status: "no_active_turn" };
+}
+
+/** Retires one exact remote child session through eve's authenticated reset route. */
+export async function resetRemoteAgentSession(input: {
+  readonly remote: ResolvedRuntimeRemoteAgentNode;
+  readonly sessionId: string;
+}): Promise<ResetResponse> {
+  const headers = await resolveRemoteAgentRequestHeaders(input.remote);
+  const response = await fetch(
+    createRemoteAgentRouteUrl(input.remote.url, createEveSessionResetRoutePath(input.sessionId)),
+    {
+      body: JSON.stringify({ reason: "Parent session ended" }),
+      headers: { "content-type": "application/json", ...headers },
+      method: "POST",
+    },
+  );
+  if (!response.ok) {
+    throw new Error(
+      `Remote agent "${input.remote.name}" reset-session request failed with HTTP ${response.status}.`,
+    );
+  }
+  const result = ResetResponseSchema.safeParse(await response.json());
+  if (
+    !result.success ||
+    (result.data.status === "reset" && result.data.previousSessionId !== input.sessionId)
+  ) {
+    throw new Error(`Remote agent "${input.remote.name}" reset-session response was invalid.`);
+  }
+  return result.data;
 }
 
 export function isRetryableRemoteAgentCancelError(error: unknown): boolean {

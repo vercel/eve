@@ -5,30 +5,47 @@ import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import { SESSION_TASKS_STATE_KEY, type SessionTaskIndexEntry } from "#tasks/session-index.js";
 
+const COMPILED_BUNDLE = {
+  subagentRegistry: { subagentsByNodeId: new Map() },
+};
+
 const {
   cancelOwnedTaskMock,
   cancelRunMock,
   deserializeContextMock,
   getWorldMock,
+  getDynamicSubagentSelectionMock,
   hydrateDurableSessionMock,
+  resetRemoteAgentSessionMock,
+  resolveRemoteAgentForActionMock,
   resolveEffectiveAgentRuntimeMock,
 } = vi.hoisted(() => ({
   cancelOwnedTaskMock: vi.fn(),
   cancelRunMock: vi.fn(),
   deserializeContextMock: vi.fn(),
   getWorldMock: vi.fn(),
+  getDynamicSubagentSelectionMock: vi.fn(),
   hydrateDurableSessionMock: vi.fn(),
+  resetRemoteAgentSessionMock: vi.fn(),
+  resolveRemoteAgentForActionMock: vi.fn(),
   resolveEffectiveAgentRuntimeMock: vi.fn(),
 }));
 
 vi.mock("#context/serialize.js", () => ({
   deserializeContext: deserializeContextMock,
 }));
+vi.mock("#context/dynamic-subagent-lifecycle.js", () => ({
+  getDynamicSubagentSelection: getDynamicSubagentSelectionMock,
+}));
 vi.mock("#execution/effective-agent-config.js", () => ({
   resolveEffectiveAgentRuntime: resolveEffectiveAgentRuntimeMock,
 }));
 vi.mock("#execution/session.js", () => ({
   hydrateDurableSession: hydrateDurableSessionMock,
+}));
+vi.mock("#execution/remote-agent-dispatch.js", () => ({
+  resetRemoteAgentSession: resetRemoteAgentSessionMock,
+  resolveRemoteAgentForAction: resolveRemoteAgentForActionMock,
 }));
 vi.mock("#execution/tasks/parent/dispatch.js", () => ({
   cancelOwnedTask: cancelOwnedTaskMock,
@@ -45,11 +62,24 @@ describe("terminateChildSessionsStep", () => {
     cancelRunMock.mockReset();
     cancelRunMock.mockResolvedValue(undefined);
     deserializeContextMock.mockReset();
-    deserializeContextMock.mockResolvedValue({ require: vi.fn().mockReturnValue("bundle") });
+    deserializeContextMock.mockResolvedValue({ require: vi.fn().mockReturnValue(COMPILED_BUNDLE) });
     getWorldMock.mockReset();
     getWorldMock.mockResolvedValue("world");
+    getDynamicSubagentSelectionMock.mockReset();
+    getDynamicSubagentSelectionMock.mockReturnValue(undefined);
     hydrateDurableSessionMock.mockReset();
     hydrateDurableSessionMock.mockReturnValue("runtime-session");
+    resetRemoteAgentSessionMock.mockReset();
+    resetRemoteAgentSessionMock.mockResolvedValue({ ok: true, status: "no_active_session" });
+    resolveRemoteAgentForActionMock.mockReset();
+    resolveRemoteAgentForActionMock.mockReturnValue({
+      description: "Research remotely",
+      kind: "remote",
+      name: "research",
+      nodeId: "subagents/research",
+      path: "/eve/v1/session",
+      url: "https://compiled.example.com",
+    });
     resolveEffectiveAgentRuntimeMock.mockReset();
     resolveEffectiveAgentRuntimeMock.mockReturnValue({ turnAgent: "turn-agent" });
   });
@@ -73,8 +103,9 @@ describe("terminateChildSessionsStep", () => {
     });
   });
 
-  it("skips remote handles: remote children survive parent termination (documented gap)", async () => {
+  it("resets remote children and terminates local children", async () => {
     await terminateChildSessionsStep({
+      serializedContext: { context: "serialized" },
       sessionState: makeSessionState([
         parkedHandle({ id: "ag_remote:1", kind: "agent/remote", sessionId: "session-remote" }),
         runningHandle({ id: "ag_local:1", kind: "agent/local", sessionId: "session-local" }),
@@ -83,6 +114,16 @@ describe("terminateChildSessionsStep", () => {
 
     expect(cancelRunMock).toHaveBeenCalledExactlyOnceWith("world", "session-local", {
       cancelReason: "Parent session ended",
+    });
+    expect(resolveRemoteAgentForActionMock).toHaveBeenCalledWith({
+      dynamicRemoteAgent: undefined,
+      nodeId: "subagents/research",
+      registry: COMPILED_BUNDLE.subagentRegistry.subagentsByNodeId,
+      remoteAgentName: "research",
+    });
+    expect(resetRemoteAgentSessionMock).toHaveBeenCalledWith({
+      remote: expect.objectContaining({ url: "https://remote.example.com" }),
+      sessionId: "session-remote",
     });
   });
 

@@ -5,8 +5,10 @@ import { buildSessionHandle } from "#channel/session.js";
 import { type SubagentAdapterState } from "#execution/subagent-adapter-state.js";
 import { ContextContainer } from "#context/container.js";
 import { ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
+import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { InputRequest } from "#shared/input.js";
 import { SUBAGENT_ADAPTER } from "#execution/subagent-adapter.js";
+import { bindTurnCallerContextStep } from "#execution/delegated-parent-notification.js";
 
 const SUBAGENT_INPUT_REQUESTED = SUBAGENT_ADAPTER["input.requested"];
 const SUBAGENT_AUTHORIZATION_REQUIRED = SUBAGENT_ADAPTER["authorization.required"];
@@ -139,6 +141,40 @@ describe("SUBAGENT_ADAPTER authorization handlers", () => {
 });
 
 describe("SUBAGENT_ADAPTER input.requested handler", () => {
+  it("forwards continuation HITL to the newly bound parent turn", async () => {
+    resumeHookMock.mockClear();
+    const rebound = await bindTurnCallerContextStep({
+      caller: {
+        callId: "call-continued",
+        replyTo: { kind: "hook", token: "parent-token-current" },
+        subagentName: "linear",
+      },
+      serializedContext: {
+        [ChannelKey.name]: {
+          kind: "subagent",
+          state: makeContext().state,
+        },
+      },
+    });
+    const base = makeContext();
+    const channel = rebound[ChannelKey.name] as { readonly state: Record<string, unknown> };
+
+    await SUBAGENT_INPUT_REQUESTED(
+      {
+        requests: [sampleRequest()],
+        sequence: 0,
+        stepIndex: 1,
+        turnId: "turn-continued",
+      },
+      { ...base, state: channel.state },
+    );
+
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "parent-token-current",
+      expect.objectContaining({ callId: "call-continued", kind: "subagent-input-request" }),
+    );
+  });
+
   it("forwards the child's HITL batch via resumeHook", async () => {
     resumeHookMock.mockClear();
     const ctx = makeContext();
