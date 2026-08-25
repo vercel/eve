@@ -6,9 +6,10 @@
  * The batch is classified into a dispatch plan first (reject / resume /
  * start), then each entry dispatches and emits one
  * parent `subagent.called` control-plane event through a single tail.
- * Every start commits an agent handle (`starting`) before its side effect
- * and confirms it (`running`) once the child reports coordinates, so the
- * returned snapshot-bearing state owns every child it may have created.
+ * Every start commits an agent handle (`starting`) before its side effect.
+ * Blocking dispatch confirms it as `running`; task-backed compatibility
+ * dispatch records an `addressed` handle owned through the task index. The
+ * returned snapshot-bearing state therefore owns every child it may create.
  *
  */
 
