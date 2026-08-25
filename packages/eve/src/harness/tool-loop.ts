@@ -20,6 +20,7 @@ import {
   type TypedToolResult,
 } from "ai";
 import { isScheduleAppAuth } from "#channel/schedule-auth.js";
+import { getAdapterKind } from "#channel/adapter.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { resolveProviderHeaders } from "#internal/gateway.js";
 import {
@@ -738,6 +739,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       return await prepareTurnTraceContext({
         agentName: config.runtimeIdentity?.agentName,
         channelAudience,
+        channelType: channel === undefined ? undefined : getAdapterKind(channel),
         instrumentation: config.instrumentation,
         parentLineage,
         parentTraceContext,

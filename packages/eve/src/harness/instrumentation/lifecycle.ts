@@ -287,6 +287,7 @@ export interface InstrumentationSessionStartedEvent {
   readonly type: "session.started";
   readonly agentName?: string;
   readonly channelKind?: string;
+  readonly channelType?: string;
   readonly channelAudience?: ChannelAudience;
   readonly idempotencyKey: string;
   readonly parentTraceContext?: InstrumentationTraceContext;

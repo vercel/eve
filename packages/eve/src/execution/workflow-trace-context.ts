@@ -12,6 +12,7 @@ import { prepareTurnTraceContext } from "#harness/prepare-trace-context.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeIdentity, RuntimeTraceContext } from "#protocol/message.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { getAdapterKind } from "#channel/adapter.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 
 /** Prepares native tracing for workflow-owned preambles emitted outside the tool loop. */
@@ -23,9 +24,11 @@ export async function prepareWorkflowPreambleTrace(input: {
 }): Promise<RuntimeTraceContext | undefined> {
   const parent = input.ctx.get(ParentSessionKey);
   const channel = input.ctx.get(ChannelInstrumentationKey);
+  const adapter = input.ctx.get(ChannelKey);
   return await prepareTurnTraceContext({
     agentName: input.runtimeIdentity.agentName,
     channelAudience: normalizeChannelAudience(channel?.metadata.audience),
+    channelType: adapter === undefined ? undefined : getAdapterKind(adapter),
     instrumentation: getInstrumentationRuntime(),
     parentLineage: resolveParentLineage(parent, input.ctx.get(ChannelKey)),
     parentTraceContext: input.ctx.get(ParentTraceContextKey),

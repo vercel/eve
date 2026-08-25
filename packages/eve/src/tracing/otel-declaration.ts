@@ -107,6 +107,12 @@ export interface ContentOptions {
 export interface TraceCaptureContext {
   readonly agentName?: string;
   readonly audience: ChannelAudience;
+  /**
+   * The channel's adapter kind — the bare type (`"slack"`, `"http"`,
+   * `"schedule"`, `"discord"`, …), never the route-scoped `channel:<name>`
+   * projection. Undefined when the session has no channel.
+   */
+  readonly channelType?: string;
 }
 
 export type TraceCapturePolicy = (trace: TraceCaptureContext) => boolean;

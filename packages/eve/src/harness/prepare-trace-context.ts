@@ -15,6 +15,7 @@ const log = createLogger("harness.prepare-trace-context");
 export async function prepareTurnTraceContext(input: {
   readonly agentName?: string;
   readonly channelAudience?: ChannelAudience;
+  readonly channelType?: string;
   readonly instrumentation?: HarnessInstrumentation;
   readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
@@ -33,6 +34,7 @@ export async function prepareTurnTraceContext(input: {
       prepared = await input.instrumentation.prepareSessionTrace({
         agentName: input.agentName,
         channelAudience: input.channelAudience,
+        channelType: input.channelType,
         idempotencyKey: sessionIdempotencyKey(input.sessionId),
         parentTraceContext: input.parentTraceContext,
         rootSessionId: input.rootSessionId,

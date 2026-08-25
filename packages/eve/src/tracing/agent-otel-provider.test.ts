@@ -430,6 +430,26 @@ describe("createAgentOtelInstrumentation", () => {
     expect(session.spanContext().spanId).toBe(trace.spanId);
   });
 
+  it("passes channelType to the policy on the seedless fallback path", async () => {
+    let captured: { channelType?: string } | undefined;
+    const runtime = createRuntime(undefined, (trace) => {
+      captured = trace;
+      return true;
+    });
+    const sessionEvent = {
+      agentName: "weather",
+      channelType: "slack",
+      idempotencyKey: sessionIdempotencyKey("session-noseed-kind"),
+      rootSessionId: "session-noseed-kind",
+      sessionId: "session-noseed-kind",
+      type: "session.started" as const,
+    };
+
+    await runtime.prepareSessionTrace(sessionEvent);
+
+    expect(captured?.channelType).toBe("slack");
+  });
+
   it("inherits parent trace context for delegated agents", async () => {
     const runtime = createRuntime();
     const parentTrace: InstrumentationTraceContext = {
