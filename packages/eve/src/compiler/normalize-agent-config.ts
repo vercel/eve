@@ -22,6 +22,7 @@ import {
   type ManifestCompileContext,
 } from "#compiler/normalize-helpers.js";
 import type { CompiledModuleBinding } from "#compiler/source-graph.js";
+import { createCompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -47,7 +48,10 @@ export async function compileAgentConfig(
           binding: options.binding,
           displayPath: configModulePath,
           kind: "agent config",
-          registries: context.registries,
+          loadNamespace: createCompiledBindingNamespaceLoader({
+            bindings: { [configModule.sourceId]: options.binding },
+            registries: context.registries,
+          }),
           source: configModule,
         }),
     `Expected the agent config export "${configModule.exportName ?? "default"}" from "${configModulePath}" to match the public eve shape.`,

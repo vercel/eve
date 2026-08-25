@@ -365,8 +365,10 @@ const filesystemModuleBackingSchema = z
 
 const programmaticModuleBackingSchema = z
   .object({
+    dependencies: z.record(z.string(), z.string()).readonly().optional(),
     kind: z.literal("programmatic"),
     moduleId: z.string(),
+    parameters: jsonObjectSchema.optional(),
     registryId: z.string(),
     revision: z.string(),
     semanticRevision: z.string().optional(),
@@ -397,6 +399,7 @@ const agentSourceDescriptorSchema: z.ZodType<AgentSourceDescriptor> = z
       programmaticModuleBackingSchema,
       resourceSourceBackingSchema,
     ]),
+    form: z.enum(["derived", "direct"]),
     layer: z.enum(["framework-default", "extension-package", "extension-override", "application"]),
     logicalPath: z.string(),
     owner: agentSourceOwnerSchema,

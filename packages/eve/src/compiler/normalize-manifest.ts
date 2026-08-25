@@ -27,6 +27,7 @@ import {
   ROOT_COMPILED_AGENT_NODE_ID,
 } from "#compiler/manifest.js";
 import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
+import { createCompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
 import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
 import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
@@ -408,13 +409,17 @@ class AgentGraphCompiler {
       throw new Error(`Selected agent config source "${candidate.sourceId}" was not projected.`);
     }
     const source = projected.source;
+    const loadNamespace = createCompiledBindingNamespaceLoader({
+      bindings: { [candidate.sourceId]: binding },
+      registries: this.registries,
+    });
     return {
       binding,
       candidate,
       definition: await loadModuleBackedDefinition({
         binding,
         kind: "agent config",
-        registries: this.registries,
+        loadNamespace,
         source,
       }),
       source,
@@ -440,6 +445,10 @@ class AgentGraphCompiler {
     let workflowTool: CompiledWorkflowToolDefinition | undefined;
     let webSearchProvider: WebSearchProvider | undefined;
     const selectedSourceIds = collectSelectedSourceIds(state.composed);
+    const loadNamespace = createCompiledBindingNamespaceLoader({
+      bindings: state.bindings,
+      registries: this.registries,
+    });
 
     for (const candidate of state.orderedCandidates) {
       if (!selectedSourceIds.has(candidate.sourceId)) continue;
@@ -448,8 +457,8 @@ class AgentGraphCompiler {
       const binding = state.bindings[candidate.sourceId];
       const options = {
         binding,
+        loadNamespace,
         owner: candidate.owner,
-        registries: this.registries,
       };
       switch (entry.kind) {
         case "config":
@@ -458,7 +467,7 @@ class AgentGraphCompiler {
         case "channel": {
           const result = await compileChannelDefinition(input.manifest.agentRoot, entry.source, {
             binding: binding!,
-            registries: this.registries,
+            loadNamespace,
           });
           if (result.kind === "disabled") {
             state.composed = disableComposedCandidate({ candidate, composed: state.composed });
@@ -471,7 +480,7 @@ class AgentGraphCompiler {
           connections.push(
             await compileConnectionDefinition(input.manifest.agentRoot, entry.source, {
               binding: binding!,
-              registries: this.registries,
+              loadNamespace,
             }),
           );
           break;
@@ -479,7 +488,7 @@ class AgentGraphCompiler {
           hooks.push(
             await compileHookEntry(entry.source, {
               binding: binding!,
-              registries: this.registries,
+              loadNamespace,
             }),
           );
           break;
@@ -499,7 +508,7 @@ class AgentGraphCompiler {
         case "sandbox":
           sandbox = await compileSandboxDefinition(input.manifest.agentRoot, entry.source, {
             binding: binding!,
-            registries: this.registries,
+            loadNamespace,
           });
           break;
         case "schedule":
@@ -516,7 +525,7 @@ class AgentGraphCompiler {
         case "tool": {
           const result = await compileToolEntry(input.manifest.agentRoot, entry.source, {
             binding: binding!,
-            registries: this.registries,
+            loadNamespace,
           });
           if (result.kind === "disabled") {
             state.composed = disableComposedCandidate({ candidate, composed: state.composed });

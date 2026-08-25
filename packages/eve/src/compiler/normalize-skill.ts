@@ -74,7 +74,7 @@ export async function compileSkillSource(
   const exportValue = await loadModuleBackedDefinition({
     binding: loadOptions.binding,
     kind: "skill",
-    registries: loadOptions.registries,
+    loadNamespace: loadOptions.loadNamespace,
     source,
   });
 

@@ -5,15 +5,15 @@ import type {
   CompiledAgentResources,
 } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import { packageStateNamespace } from "#discover/extensions.js";
 import {
-  loadProgrammaticModuleNamespace,
   type AgentSourceRegistry,
   type CompiledModuleBinding,
   type ProgrammaticModuleNamespace,
 } from "#compiler/source-graph.js";
+import { createCompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
-import { loadAuthoredModuleNamespace } from "#internal/authored-module-loader.js";
+
+export { resolveCompiledModuleExtensionScopeNamespace } from "#compiler/load-binding-namespace.js";
 
 export type CompiledModuleNodeScope = z.infer<typeof compiledModuleNodeScopeSchema>;
 export type CompiledModuleMap = z.infer<typeof compiledModuleMapSchema>;
@@ -61,29 +61,34 @@ export function createCompiledModuleMapSource(input: CreateCompiledModuleMapSour
   const importSpecifierStyle = input.importSpecifierStyle ?? "relative";
   let index = 0;
   let usesProgrammaticLoader = false;
-  const scopes: RenderedNodeScope[] = collectBoundNodeScopes(input.manifest).map((scope) => ({
-    modules: scope.modules.map(({ binding, sourceId }) => {
-      const bindingName = `module_${index++}`;
-      if (binding.backing.kind === "filesystem") {
+  const scopes: RenderedNodeScope[] = collectBoundNodeScopes(input.manifest).map((scope) => {
+    const bindingNames = new Map(
+      scope.modules.map((module) => [module.sourceId, `module_${index++}`] as const),
+    );
+    return {
+      modules: scope.modules.map(({ binding, sourceId }) => {
+        const bindingName = bindingNames.get(sourceId)!;
+        if (binding.backing.kind === "filesystem") {
+          return {
+            bindingName,
+            importSpecifier: createImportSpecifier({
+              fromDirectory: moduleMapDirectory,
+              importSpecifierStyle,
+              targetPath: binding.backing.sourcePath,
+            }),
+            sourceId,
+          };
+        }
+        usesProgrammaticLoader = true;
         return {
           bindingName,
-          importSpecifier: createImportSpecifier({
-            fromDirectory: moduleMapDirectory,
-            importSpecifierStyle,
-            targetPath: binding.backing.sourcePath,
-          }),
+          initializer: `await loadProgrammaticModule(${JSON.stringify(binding.backing)}, ${renderProgrammaticDependencies(binding.backing.dependencies, bindingNames)})`,
           sourceId,
         };
-      }
-      usesProgrammaticLoader = true;
-      return {
-        bindingName,
-        initializer: `await loadProgrammaticModule(${JSON.stringify(binding.backing)})`,
-        sourceId,
-      };
-    }),
-    nodeId: scope.nodeId,
-  }));
+      }),
+      nodeId: scope.nodeId,
+    };
+  });
   const modules = scopes.flatMap((scope) => scope.modules);
   const imports = modules.flatMap((module) =>
     module.importSpecifier === undefined
@@ -122,27 +127,16 @@ export async function createProgrammaticCompiledModuleMap(
   const nodes: CompiledModuleMap["nodes"] = {};
   for (const scope of collectBoundNodeScopes(manifest)) {
     const modules: Record<string, ProgrammaticModuleNamespace> = {};
-    for (const { binding, sourceId } of scope.modules) {
-      modules[sourceId] =
-        binding.backing.kind === "filesystem"
-          ? await loadAuthoredModuleNamespace(binding.backing.sourcePath, {
-              externalDependencies: binding.backing.externalDependencies,
-              extensionScopeNamespace: resolveCompiledModuleExtensionScopeNamespace(binding),
-            })
-          : await loadProgrammaticModuleNamespace({ backing: binding.backing, registries });
+    const bindings = Object.fromEntries(
+      scope.modules.map(({ binding, sourceId }) => [sourceId, binding]),
+    );
+    const loadNamespace = createCompiledBindingNamespaceLoader({ bindings, registries });
+    for (const { sourceId } of scope.modules) {
+      modules[sourceId] = await loadNamespace(sourceId);
     }
     nodes[scope.nodeId] = { modules };
   }
   return { nodes };
-}
-
-/** Derives the stable package-owned scope used while loading an extension module. */
-export function resolveCompiledModuleExtensionScopeNamespace(
-  binding: CompiledModuleBinding,
-): string | undefined {
-  return binding.owner.kind === "extension"
-    ? packageStateNamespace(binding.owner.packageName)
-    : undefined;
 }
 
 /** Returns every binding owned by one compiled node, including remote config modules. */
@@ -156,9 +150,52 @@ export function collectModuleBindingsForManifest(
     }
     modules.set(remote.sourceId, remote.binding);
   }
-  return [...modules]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([sourceId, binding]) => ({ binding, sourceId }));
+  return orderBoundModules(
+    [...modules]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([sourceId, binding]) => ({ binding, sourceId })),
+  );
+}
+
+function orderBoundModules(modules: readonly BoundModule[]): readonly BoundModule[] {
+  const bySourceId = new Map(modules.map((module) => [module.sourceId, module]));
+  const ordered: BoundModule[] = [];
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (module: BoundModule): void => {
+    if (visited.has(module.sourceId)) return;
+    if (visiting.has(module.sourceId)) {
+      throw new Error(`Compiled module dependency cycle includes "${module.sourceId}".`);
+    }
+    visiting.add(module.sourceId);
+    if (module.binding.backing.kind === "programmatic") {
+      for (const dependencySourceId of Object.values(module.binding.backing.dependencies ?? {})) {
+        const dependency = bySourceId.get(dependencySourceId);
+        if (dependency === undefined) {
+          throw new Error(
+            `Programmatic binding "${module.sourceId}" depends on missing binding "${dependencySourceId}".`,
+          );
+        }
+        visit(dependency);
+      }
+    }
+    visiting.delete(module.sourceId);
+    visited.add(module.sourceId);
+    ordered.push(module);
+  };
+  for (const module of modules) visit(module);
+  return ordered;
+}
+
+function renderProgrammaticDependencies(
+  dependencies: Readonly<Record<string, string>> | undefined,
+  bindingNames: ReadonlyMap<string, string>,
+): string {
+  const entries = Object.entries(dependencies ?? {});
+  if (entries.length === 0) return "Object.freeze({})";
+  return `Object.freeze({ ${entries
+    .map(([alias, sourceId]) => `${JSON.stringify(alias)}: ${bindingNames.get(sourceId)!}`)
+    .join(", ")} })`;
 }
 
 function collectBoundNodeScopes(manifest: CompiledAgentManifest): readonly BoundNodeScope[] {

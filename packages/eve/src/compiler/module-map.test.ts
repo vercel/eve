@@ -6,6 +6,7 @@ import {
   createCompiledModuleMapSource,
   createProgrammaticCompiledModuleMap,
 } from "#compiler/module-map.js";
+import { validateCompiledAgentManifest } from "#compiler/validate-artifact.js";
 
 const mocks = vi.hoisted(() => ({
   loadAuthoredModuleNamespace: vi.fn(
@@ -109,5 +110,61 @@ describe("compiled module maps", () => {
         .filter(([sourcePath]) => sourcePath.startsWith("/application/"))
         .every(([, options]) => options.extensionScopeNamespace === undefined),
     ).toBe(true);
+  });
+
+  it("orders and renders programmatic dependencies in generated maps", async () => {
+    const { manifest } = await compileFromMemory({
+      model: "openai/gpt-5.4",
+      tools: [{ name: "weather" }],
+    });
+    const tool = manifest.tools.find((candidate) => candidate.name === "weather")!;
+    const configSourceId = manifest.config.source.sourceId;
+    const binding = manifest.bindings[tool.sourceId]!;
+    if (binding.backing.kind !== "programmatic") {
+      throw new Error("Expected a programmatic tool binding.");
+    }
+    manifest.bindings[tool.sourceId] = {
+      ...binding,
+      backing: {
+        ...binding.backing,
+        dependencies: { config: configSourceId },
+        parameters: { role: "derived" },
+      },
+    };
+
+    const ordered = collectModuleBindingsForManifest(manifest).map((entry) => entry.sourceId);
+    const source = createCompiledModuleMapSource({
+      manifest,
+      moduleMapPath: "/app/.eve/compile/module-map.mjs",
+    });
+
+    expect(ordered.indexOf(configSourceId)).toBeLessThan(ordered.indexOf(tool.sourceId));
+    expect(source).toContain('"parameters":{"role":"derived"}');
+    expect(source).toMatch(/Object\.freeze\(\{ "config": module_\d+ \}\)/);
+  });
+
+  it("rejects missing and cyclic programmatic binding dependencies", async () => {
+    const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+    const sourceId = manifest.config.source.sourceId;
+    const binding = manifest.bindings[sourceId]!;
+    if (binding.backing.kind !== "programmatic") {
+      throw new Error("Expected a programmatic config binding.");
+    }
+
+    manifest.bindings[sourceId] = {
+      ...binding,
+      backing: { ...binding.backing, dependencies: { missing: "missing-source" } },
+    };
+    expect(() => validateCompiledAgentManifest(manifest)).toThrow(
+      `programmatic binding "${sourceId}" depends on missing binding "missing-source"`,
+    );
+
+    manifest.bindings[sourceId] = {
+      ...binding,
+      backing: { ...binding.backing, dependencies: { self: sourceId } },
+    };
+    expect(() => validateCompiledAgentManifest(manifest)).toThrow(
+      `programmatic binding dependency cycle includes "${sourceId}"`,
+    );
   });
 });

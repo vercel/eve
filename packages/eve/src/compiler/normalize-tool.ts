@@ -46,7 +46,7 @@ export async function compileToolEntry(
     await loadModuleBackedDefinition({
       binding: options.binding,
       kind: "tool",
-      registries: options.registries,
+      loadNamespace: options.loadNamespace,
       source,
     }),
     `Expected the tool export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,

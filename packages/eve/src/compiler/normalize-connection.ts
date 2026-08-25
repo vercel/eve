@@ -36,7 +36,7 @@ export async function compileConnectionDefinition(
   const loaded = await loadModuleBackedDefinition({
     binding: options.binding,
     kind: "connection",
-    registries: options.registries,
+    loadNamespace: options.loadNamespace,
     source,
   });
   const protocol = readConnectionProtocol(loaded);

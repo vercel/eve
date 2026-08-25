@@ -2,16 +2,15 @@ import {
   getAuthoredModuleExport,
   materializeAuthoredModuleExport,
 } from "#internal/authored-module.js";
-import { loadAuthoredModuleNamespace } from "#internal/authored-module-loader.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { CompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
 import {
-  loadProgrammaticModuleNamespace,
   type AgentSourceRegistry,
   type CompiledModuleBinding,
   type AgentSourceOwner,
 } from "#compiler/source-graph.js";
+import type { CompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
 
 const SANDBOX_PARENT_DEFINITION_MARKER = Symbol.for("eve.sandbox-parent-definition");
 
@@ -30,23 +29,23 @@ export interface ManifestCompileContext {
 
 export interface ModuleBackedDefinitionLoadOptions {
   readonly binding: CompiledModuleBinding;
-  readonly registries: readonly AgentSourceRegistry[];
+  readonly loadNamespace: CompiledBindingNamespaceLoader;
 }
 
 export interface SourceDefinitionCompileOptions {
   readonly binding?: CompiledModuleBinding;
+  readonly loadNamespace?: CompiledBindingNamespaceLoader;
   readonly owner: AgentSourceOwner;
-  readonly registries?: readonly AgentSourceRegistry[];
 }
 
 export function requireModuleBackedDefinitionLoadOptions(
   options: SourceDefinitionCompileOptions,
   logicalPath: string,
 ): ModuleBackedDefinitionLoadOptions {
-  if (options.binding === undefined || options.registries === undefined) {
+  if (options.binding === undefined || options.loadNamespace === undefined) {
     throw new Error(`Module-backed source "${logicalPath}" requires a compiled binding.`);
   }
-  return { binding: options.binding, registries: options.registries };
+  return { binding: options.binding, loadNamespace: options.loadNamespace };
 }
 
 /**
@@ -62,7 +61,7 @@ export async function loadModuleBackedDefinition(input: {
   readonly binding: CompiledModuleBinding;
   readonly displayPath?: string;
   readonly kind: string;
-  readonly registries: readonly AgentSourceRegistry[];
+  readonly loadNamespace: CompiledBindingNamespaceLoader;
   readonly source: ModuleSourceRef;
 }): Promise<unknown> {
   if (input.binding.logicalPath !== input.source.logicalPath) {
@@ -70,15 +69,7 @@ export async function loadModuleBackedDefinition(input: {
       `Compiled binding "${input.source.sourceId}" targets "${input.binding.logicalPath}", not "${input.source.logicalPath}".`,
     );
   }
-  const moduleNamespace =
-    input.binding.backing.kind === "filesystem"
-      ? await loadAuthoredModuleNamespace(input.binding.backing.sourcePath, {
-          externalDependencies: input.binding.backing.externalDependencies,
-        })
-      : await loadProgrammaticModuleNamespace({
-          backing: input.binding.backing,
-          registries: input.registries,
-        });
+  const moduleNamespace = await input.loadNamespace(input.source.sourceId);
   const exportValue = getAuthoredModuleExport(moduleNamespace, input.source);
 
   // defineSandbox marks parent selectors so they remain distinguishable from
