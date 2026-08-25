@@ -8,9 +8,14 @@ import type { SessionCommandInbox, SessionInboxPayload } from "#execution/sessio
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 
 const createHookMock = vi.fn();
+const getRunMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
+}));
+
+vi.mock("#compiled/@workflow/core/runtime.js", () => ({
+  getRun: (...args: unknown[]) => getRunMock(...args),
 }));
 
 vi.mock("./dispatch-turn-step.js", () => ({
@@ -25,6 +30,103 @@ describe("dispatchAndAwaitTurn", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     createHookMock.mockReset();
+    getRunMock.mockReturnValue({ returnValue: Promise.resolve() });
+  });
+
+  it("fails and disposes the control hook when its child run terminates", async () => {
+    const childError = Object.assign(new Error("queue exhausted"), { delivery: 49 });
+    getRunMock.mockReturnValue({ returnValue: Promise.reject(childError) });
+    installControlHook([]);
+
+    const failure = await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox: createCommandInbox(),
+      controlToken: "turn-control",
+      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: createState("http:test"),
+    }).catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      name: "TurnWorkflowTerminalError",
+      message: "Turn workflow turn-run terminated before reporting a result.",
+      runId: "turn-run",
+    });
+    expect((failure as Error).cause).toMatchObject({ message: "queue exhausted", delivery: 49 });
+    const hook = createHookMock.mock.results[0]?.value as { dispose: ReturnType<typeof vi.fn> };
+    expect(hook.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("keeps waiting for terminal control when the child completes first", async () => {
+    const state = createState("http:test");
+    let releaseControl: (() => void) | undefined;
+    let signalControlStarted: (() => void) | undefined;
+    const controlReady = new Promise<void>((resolve) => {
+      releaseControl = resolve;
+    });
+    const controlStarted = new Promise<void>((resolve) => {
+      signalControlStarted = resolve;
+    });
+    createHookMock.mockReturnValue(
+      createMockHook(async () => {
+        signalControlStarted?.();
+        await controlReady;
+        return {
+          done: false,
+          value: {
+            action: { kind: "park", serializedContext: {}, sessionState: state },
+            kind: "turn-result",
+          },
+        };
+      }),
+    );
+
+    const turn = dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox: createCommandInbox(),
+      controlToken: "turn-control",
+      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: state,
+    });
+    await controlStarted;
+    releaseControl?.();
+
+    expect((await turn).action.kind).toBe("park");
+  });
+
+  it("keeps an accepted control action when the child rejects later", async () => {
+    const state = createState("http:test");
+    let rejectChild: ((error: Error) => void) | undefined;
+    const returnValue = new Promise<void>((_resolve, reject) => {
+      rejectChild = reject;
+    });
+    getRunMock.mockReturnValue({ returnValue });
+    installControlHook([
+      { action: { kind: "park", serializedContext: {}, sessionState: state }, kind: "turn-result" },
+    ]);
+
+    const turn = await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox: createCommandInbox(),
+      controlToken: "turn-control",
+      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: state,
+    });
+    rejectChild?.(new Error("late child failure"));
+    await Promise.resolve();
+
+    expect(turn.action.kind).toBe("park");
   });
 
   it("rekeys the public hook when the active turn changes its continuation token", async () => {
