@@ -1,4 +1,5 @@
 export {
+  defaultSendblueAuth,
   sendblueChannel,
   type SendblueChannel,
   type SendblueChannelConfig,

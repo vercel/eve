@@ -1,4 +1,5 @@
 import { vercelOidc } from "#public/channels/auth.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import type { Channel } from "#public/definitions/channel.js";
 import { chatSdkChannel, type ChatSdkChannelBridge } from "#public/channels/chat-sdk/index.js";
 import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js";
@@ -89,8 +90,22 @@ async function dispatchMessage(
   if (content === undefined) return;
   await bridge.send(
     { context: [], message: content },
-    { auth: null, thread, turnPolicy: "experimental-steer" },
+    { auth: defaultSendblueAuth(message), thread, turnPolicy: "steer" },
   );
+}
+
+/** Default Sendblue auth projection for inbound Chat SDK message authors. */
+export function defaultSendblueAuth(message: Message): SessionAuthContext {
+  const attributes: Record<string, string> = {};
+  if (message.author.userName !== undefined) attributes.user_name = message.author.userName;
+  return {
+    attributes,
+    authenticator: "sendblue-message",
+    issuer: "sendblue",
+    principalId: `sendblue:${message.author.userId}`,
+    principalType: message.author.isBot ? "service" : "user",
+    subject: message.author.userId,
+  };
 }
 
 async function markReadBestEffort(adapter: SendblueAdapter, thread: Thread): Promise<void> {

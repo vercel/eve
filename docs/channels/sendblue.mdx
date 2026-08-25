@@ -24,8 +24,9 @@ export default sendblueChannel({
 The channel resolves a fresh Connect bearer token and its sole provisioned
 Sendblue line. That line limits inbound events, so unrelated account lines do
 not reach the agent. For a connector with multiple lines, pass `fromNumber` to
-`connectSendblueCredentials(...)` to select one. When no direct webhook secret
-is configured, the channel verifies Connect-forwarded webhooks with Vercel OIDC.
+`connectSendblueCredentials(...)` to select one. The channel derives user auth
+from each message author. When no direct webhook secret is configured, the
+channel verifies Connect-forwarded webhooks with Vercel OIDC.
 
 ## Other hosts
 

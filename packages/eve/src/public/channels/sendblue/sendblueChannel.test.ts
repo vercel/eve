@@ -48,7 +48,18 @@ describe("sendblueChannel", () => {
     expect(markRead).toHaveBeenCalledWith(thread.id);
     expect(send).toHaveBeenCalledWith(
       { context: [], message: "Hello Sendblue" },
-      { auth: null, thread, turnPolicy: "experimental-steer" },
+      {
+        auth: {
+          attributes: { user_name: "user" },
+          authenticator: "sendblue-message",
+          issuer: "sendblue",
+          principalId: "sendblue:user",
+          principalType: "user",
+          subject: "user",
+        },
+        thread,
+        turnPolicy: "steer",
+      },
     );
   });
 
