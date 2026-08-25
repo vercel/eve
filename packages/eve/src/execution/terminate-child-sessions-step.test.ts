@@ -152,6 +152,34 @@ describe("terminateChildSessionsStep", () => {
     });
   });
 
+  it("uses fresh current credentials when a legacy child's URL still matches", async () => {
+    const auth = vi.fn();
+    const headers = vi.fn();
+    resolveRemoteAgentForActionMock.mockReturnValue({
+      auth,
+      headers,
+      name: "research",
+      url: "https://remote.example.com",
+    });
+
+    await terminateChildSessionsStep({
+      serializedContext: { context: "serialized" },
+      sessionState: makeSessionState([
+        parkedHandle({ id: "ag_remote:1", kind: "agent/remote", sessionId: "session-remote" }),
+      ]),
+    });
+
+    expect(resetRemoteAgentSessionMock).toHaveBeenCalledWith({
+      remote: expect.objectContaining({
+        auth,
+        headers,
+        name: "research",
+        url: "https://remote.example.com",
+      }),
+      sessionId: "session-remote",
+    });
+  });
+
   it("resets a remote child with its creation-time credential resolver", async () => {
     await terminateChildSessionsStep({
       serializedContext: { context: "serialized" },

@@ -308,6 +308,36 @@ describe("task cancellation identity", () => {
     expect(resolveRemoteAgentStreamHeaders).not.toHaveBeenCalled();
   });
 
+  it("uses fresh current credentials when a legacy child's URL still matches", async () => {
+    const auth = vi.fn();
+    const headers = vi.fn();
+    vi.mocked(resolveRemoteAgentForAction).mockReturnValue({
+      auth,
+      headers,
+      name: "research",
+      url: "https://child.example",
+    } as never);
+
+    await executeTaskControlAction({
+      action,
+      bundle: { subagentRegistry: { subagentsByNodeId: new Map() } } as never,
+      parentTurnId: "turn-parent",
+      session: createSession("remote"),
+    });
+
+    expect(cancelRemoteAgentTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        remote: expect.objectContaining({
+          auth,
+          headers,
+          name: "research",
+          url: "https://child.example",
+        }),
+      }),
+    );
+    expect(vi.mocked(cancelRemoteAgentTurn).mock.calls[0]?.[0]).not.toHaveProperty("headers");
+  });
+
   it("preserves resolved headers when retrying an unguarded remote cancel", async () => {
     vi.mocked(cancelRemoteAgentTurn)
       .mockResolvedValueOnce({ status: "no_active_turn" })
