@@ -1,127 +1,84 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install.js";
-import type { SandboxCommandResult, SandboxSession } from "#shared/sandbox-session.js";
+import type { SandboxSession } from "#shared/sandbox-session.js";
+import {
+  startBackgroundBashProcess,
+  waitForBackgroundBashProcess,
+} from "#execution/sandbox/bash-background.js";
 
-import { DEFAULT_BASH_TIMEOUT_SECONDS, executeBashOnSandbox } from "./bash.js";
+import { DEFAULT_BASH_YIELD_AFTER_SECONDS, executeBashOnSandbox } from "./bash.js";
+
+vi.mock("#execution/sandbox/bash-background.js", () => ({
+  startBackgroundBashProcess: vi.fn(),
+  waitForBackgroundBashProcess: vi.fn(),
+}));
+
+const sandbox = {} as SandboxSession;
+
+function process() {
+  return {
+    kill: vi.fn(async () => {}),
+    processId: "process-123",
+    read: vi.fn(async () => ({ stderr: "partial err", stdout: "partial out" })),
+  };
+}
 
 describe("executeBashOnSandbox", () => {
-  const previousDevFlag = process.env[EVE_DEV_ENV_FLAG];
+  afterEach(() => vi.resetAllMocks());
 
-  afterEach(() => {
-    if (previousDevFlag === undefined) {
-      delete process.env[EVE_DEV_ENV_FLAG];
-    } else {
-      process.env[EVE_DEV_ENV_FLAG] = previousDevFlag;
-    }
-    vi.restoreAllMocks();
-  });
-
-  it("logs sandbox command progress in dev without adding to stderr", async () => {
-    process.env[EVE_DEV_ENV_FLAG] = "1";
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    const sandbox = createTestSandboxSession({
+  it("returns completed output when the command finishes during the foreground wait", async () => {
+    const running = process();
+    vi.mocked(startBackgroundBashProcess).mockResolvedValue(running);
+    vi.mocked(waitForBackgroundBashProcess).mockResolvedValue({
       exitCode: 0,
       stderr: "",
-      stdout: "weather-codes.md\n",
+      stdout: "done\n",
     });
 
-    const result = await executeBashOnSandbox(sandbox, { command: "ls -la /workspace" });
-
-    expect(result).toEqual({
+    await expect(executeBashOnSandbox(sandbox, { command: "build" })).resolves.toEqual({
       exitCode: 0,
+      status: "completed",
       stderr: "",
-      stdout: "weather-codes.md\n",
+      stdout: "done\n",
       truncated: false,
     });
-    expect(log).toHaveBeenCalledWith("eve: starting sandbox command: ls -la /workspace");
-    expect(log).toHaveBeenCalledWith("eve: sandbox command finished (exit 0): ls -la /workspace");
+    expect(waitForBackgroundBashProcess).toHaveBeenCalledWith({
+      abortSignal: undefined,
+      process: running,
+      yieldAfterMs: DEFAULT_BASH_YIELD_AFTER_SECONDS * 1_000,
+    });
   });
 
-  it.each([
-    {
-      expectedTimeoutMs: DEFAULT_BASH_TIMEOUT_SECONDS * 1_000,
-      input: { command: "sleep forever" },
-      scenario: "uses the default timeout",
-    },
-    {
-      expectedTimeoutMs: 10_000,
-      input: { command: "sleep forever", timeout: 10 },
-      scenario: "honors a shorter requested timeout",
-    },
-    {
-      expectedTimeoutMs: 1_200_000,
-      input: { command: "sleep forever", timeout: 1_200 },
-      scenario: "honors a requested timeout above ten minutes",
-    },
-  ])("$scenario", async ({ expectedTimeoutMs, input }) => {
-    const { abort, timeout } = mockTimeoutSignal();
-    const execution = executeBashOnSandbox(createAbortingTestSandboxSession(), input);
-    const rejection = expect(execution).rejects.toMatchObject({ name: "TimeoutError" });
+  it("returns a process receipt instead of killing a command after yieldAfter", async () => {
+    const running = process();
+    vi.mocked(startBackgroundBashProcess).mockResolvedValue(running);
+    vi.mocked(waitForBackgroundBashProcess).mockResolvedValue(null);
 
-    expect(timeout).toHaveBeenCalledWith(expectedTimeoutMs);
-    abort();
-
-    await rejection;
+    await expect(
+      executeBashOnSandbox(sandbox, { command: "build", yieldAfter: 10 }),
+    ).resolves.toEqual({
+      processId: "process-123",
+      status: "running",
+      stderr: "partial err",
+      stdout: "partial out",
+      truncated: false,
+    });
+    expect(running.kill).not.toHaveBeenCalled();
   });
 
-  it("composes the command timeout with turn cancellation", async () => {
-    const controller = new AbortController();
-    const sandbox = createAbortingTestSandboxSession();
-    const execution = executeBashOnSandbox(
-      sandbox,
-      { command: "sleep forever" },
-      { abortSignal: controller.signal },
-    );
-    const rejection = expect(execution).rejects.toMatchObject({ name: "AbortError" });
+  it("kills a background command when the turn is cancelled", async () => {
+    const running = process();
+    const cancelled = new DOMException("cancelled", "AbortError");
+    vi.mocked(startBackgroundBashProcess).mockResolvedValue(running);
+    vi.mocked(waitForBackgroundBashProcess).mockRejectedValue(cancelled);
 
-    controller.abort(new DOMException("The turn was cancelled.", "AbortError"));
-
-    await rejection;
+    await expect(
+      executeBashOnSandbox(
+        sandbox,
+        { command: "build" },
+        { abortSignal: AbortSignal.abort(cancelled) },
+      ),
+    ).rejects.toBe(cancelled);
+    expect(running.kill).toHaveBeenCalledOnce();
   });
 });
-
-function mockTimeoutSignal() {
-  const controller = new AbortController();
-  const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(controller.signal);
-  return {
-    abort: () => controller.abort(new DOMException("The command timed out.", "TimeoutError")),
-    timeout,
-  };
-}
-
-function createAbortingTestSandboxSession(): SandboxSession {
-  const sandbox = createTestSandboxSession({ exitCode: 0, stderr: "", stdout: "" });
-  return {
-    ...sandbox,
-    run: vi.fn(
-      async ({ abortSignal }) =>
-        await new Promise<SandboxCommandResult>((_resolve, reject) => {
-          if (abortSignal?.aborted === true) {
-            reject(abortSignal.reason);
-            return;
-          }
-          abortSignal?.addEventListener("abort", () => reject(abortSignal.reason), { once: true });
-        }),
-    ),
-  };
-}
-
-function createTestSandboxSession(result: SandboxCommandResult): SandboxSession {
-  return {
-    id: "test-sandbox",
-    readBinaryFile: async () => null,
-    readFile: async () => null,
-    readTextFile: async () => null,
-    removePath: async () => {},
-    resolvePath: (path) => path,
-    run: vi.fn().mockResolvedValue(result),
-    setNetworkPolicy: async () => {},
-    spawn: async () => {
-      throw new Error("spawn is not implemented in this test sandbox");
-    },
-    writeBinaryFile: async () => {},
-    writeFile: async () => {},
-    writeTextFile: async () => {},
-  };
-}

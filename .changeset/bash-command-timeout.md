@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Bound built-in `bash` commands to five minutes by default and allow the model to request a different positive duration with the optional `timeout` input. Bash deadlines now compose with turn cancellation so stalled commands are terminated before they can hold a run indefinitely.
+Run built-in `bash` commands in the foreground for five minutes by default, with an optional `yieldAfter` override. Commands still running then continue in the background and return a process id that the model can pass back to `bash` to poll, await, or kill.
