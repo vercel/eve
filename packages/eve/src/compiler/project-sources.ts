@@ -35,6 +35,7 @@ export type ProjectedModuleSource =
         | "hook"
         | "instructions"
         | "instrumentation"
+        | "memory"
         | "sandbox"
         | "schedule"
         | "skill"
@@ -70,6 +71,7 @@ const MODULE_KIND_BY_SLOT_ROOT: Partial<
   hooks: "hook",
   instructions: "instructions",
   instrumentation: "instrumentation",
+  memory: "memory",
   sandbox: "sandbox",
   schedules: "schedule",
   skills: "skill",
@@ -304,6 +306,7 @@ function projectManifest(input: {
   for (const source of input.manifest.channels) pushModule(source);
   for (const source of input.manifest.connections) pushModule(source);
   for (const source of input.manifest.hooks) pushModule(source);
+  for (const source of input.manifest.memories) pushModule(source);
   if (input.manifest.sandbox !== null) pushModule(input.manifest.sandbox);
   for (const source of input.manifest.tools) pushModule(source);
   for (const source of input.manifest.instructions) {

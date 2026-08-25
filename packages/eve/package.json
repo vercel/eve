@@ -101,6 +101,16 @@
       "import": "./dist/src/public/tools/approval/index.js",
       "default": "./dist/src/public/tools/approval/index.js"
     },
+    "./memory": {
+      "types": "./dist/src/public/memory/index.d.ts",
+      "import": "./dist/src/public/memory/index.js",
+      "default": "./dist/src/public/memory/index.js"
+    },
+    "./memory/scope": {
+      "types": "./dist/src/public/memory/scope.d.ts",
+      "import": "./dist/src/public/memory/scope.js",
+      "default": "./dist/src/public/memory/scope.js"
+    },
     "./tools/sleep": {
       "types": "./dist/src/public/tools/sleep.d.ts",
       "import": "./dist/src/public/tools/sleep.js",

@@ -86,9 +86,28 @@ const rootDefaults = defineProgrammaticAgentSource({
   ],
 });
 
+export const memoryWrapperSourceRegistration = {
+  applyTo: "loader-only" as const,
+  source: defineProgrammaticAgentSource({
+    id: "eve:memory-wrapper",
+    revision,
+    modules: [
+      {
+        logicalPath: "tools/memory-wrapper.ts",
+        loadNamespace: async (context) => {
+          const { loadMemoryWrapperNamespace } =
+            await import("#framework/sources/modules/memory-wrapper.js");
+          return await loadMemoryWrapperNamespace(context);
+        },
+      },
+    ],
+  }),
+};
+
 export const frameworkAgentSourceRegistry: AgentSourceRegistry = createAgentSourceRegistry([
   { applyTo: "all-local-nodes", source: localDefaults },
   { applyTo: "root", source: rootDefaults },
+  memoryWrapperSourceRegistration,
 ]);
 
 export async function loadFrameworkProgrammaticModule(

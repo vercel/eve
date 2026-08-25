@@ -20,6 +20,7 @@ export type {
   AgentInfoHookEntry,
   AgentInfoInstructions,
   AgentInfoInstructionsEntry,
+  AgentInfoMemoryEntry,
   AgentInfoResult,
   AgentInfoRemoteAgentEntry,
   AgentInfoSandboxEntry,

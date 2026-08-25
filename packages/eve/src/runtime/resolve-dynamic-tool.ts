@@ -15,6 +15,7 @@ type DynamicToolResolverSource = Readonly<
   ModuleSourceRef & {
     readonly extensionNamespace?: string;
     readonly slug: string;
+    readonly rebindMissingCallbacks?: boolean;
   }
 >;
 
@@ -105,6 +106,7 @@ function createResolvedDynamicToolResolver(
     exportName: source.exportName,
     extensionNamespace: source.extensionNamespace,
     logicalPath: source.logicalPath,
+    rebindMissingCallbacks: source.rebindMissingCallbacks,
     slug: source.slug,
     sourceId: source.sourceId,
     sourceKind: "module",

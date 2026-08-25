@@ -48,6 +48,11 @@ import {
   prepareDynamicInstructionPreamble,
 } from "#context/dynamic-instruction-lifecycle.js";
 import {
+  drainMemoryCommit,
+  prepareMemoryCompaction,
+  prepareMemoryPreamble,
+} from "#context/memory-lifecycle.js";
+import {
   getActiveDynamicModelSelection,
   isDynamicModelSelectionError,
 } from "#context/dynamic-model-lifecycle.js";
@@ -259,7 +264,12 @@ import {
 import { buildFinalOutputTool, FINAL_OUTPUT_TOOL_NAME } from "#harness/final-output.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { RunMode } from "#shared/run-mode.js";
-import { createHistoryViewPreparer } from "#shared/history-view.js";
+import { createHistoryViewPreparer, type HistoryViewProjector } from "#shared/history-view.js";
+import {
+  canonicalizeMemoryRecords,
+  clearMemorySessionState,
+  shouldCanonicalizeMemory,
+} from "#shared/memory-state.js";
 import {
   type CompactionConfig,
   type HarnessSession,
@@ -760,6 +770,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           thresholdPercent: session.compaction.thresholdPercent,
         },
         history: [],
+        state: clearMemorySessionState(session.state),
       };
       await emit?.(
         createContextClearedEvent({
@@ -788,7 +799,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
               turnId: activeTurnId(emissionState),
             },
             force: true,
-            messages: [...projectHistory(session.history, session.state)],
+            historyProjector: config.historyProjector,
+            messages: [...session.history],
             model: resolvedModel.model,
             onCompaction: config.onCompaction,
             resolveModel: config.resolveModel,
@@ -1134,13 +1146,34 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // --- Turn preamble ------------------------------------------------------
 
+    const preparedTurnInput: ModelMessage[] = [];
+    if (effectiveStepInput?.context !== undefined && pending.deferredContext !== true) {
+      for (const entry of effectiveStepInput.context) {
+        preparedTurnInput.push({ content: entry, role: "user" });
+      }
+    }
+    const normalizedTurnContent = normalizeUserContent(effectiveStepInput?.message);
+    const stagedTurnContent =
+      normalizedTurnContent !== undefined && !pending.deferredMessage && !pending.consumedMessage
+        ? await stageAttachmentsToSandbox(normalizedTurnContent)
+        : undefined;
+    if (stagedTurnContent !== undefined) {
+      preparedTurnInput.push({ content: stagedTurnContent, role: "user" });
+    }
+
     let instructionMessages: ModelMessage[] = [];
+    let memoryCommit: ReturnType<typeof drainMemoryCommit> = undefined;
     if (emit && hasStepInput(input)) {
       if (store !== undefined) {
         prepareDynamicInstructionPreamble(
           store,
           projectHistory(pending.session.history, pending.session.state),
         );
+        prepareMemoryPreamble(store, {
+          history: pending.messages,
+          input: preparedTurnInput,
+          state: pending.session.state,
+        });
       }
       try {
         const traceContext = await preparePreambleTrace();
@@ -1153,9 +1186,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         );
       } catch (error) {
         instructionMessages = store === undefined ? [] : drainDynamicInstructionUserMessages(store);
+        memoryCommit = store === undefined ? undefined : drainMemoryCommit(store);
         session = {
           ...pending.session,
-          history: [...pending.session.history, ...instructionMessages],
+          history: [...(memoryCommit?.history ?? pending.session.history), ...instructionMessages],
+          state: memoryCommit?.state ?? pending.session.state,
         };
         if (!isDynamicModelSelectionError(error)) throw error;
         return failModelSelection(error, {
@@ -1166,24 +1201,27 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         });
       }
       instructionMessages = store === undefined ? [] : drainDynamicInstructionUserMessages(store);
+      memoryCommit = store === undefined ? undefined : drainMemoryCommit(store);
 
       if (turnSpan) {
         turnSpan.setAttribute("eve.turn.id", emissionState.turnId);
       }
     }
 
+    const committedHistory = memoryCommit?.history ?? pending.session.history;
     const historyLength = pending.session.history.length;
     session = setHarnessEmissionState(
       {
         ...pending.session,
-        history: [...pending.session.history, ...instructionMessages],
+        history: [...committedHistory, ...instructionMessages],
+        state: memoryCommit?.state ?? pending.session.state,
       },
       emissionState,
     );
     let messages: ModelMessage[] = [
-      ...pending.messages.slice(0, historyLength),
+      ...(memoryCommit?.history ?? pending.messages.slice(0, historyLength)),
       ...instructionMessages,
-      ...pending.messages.slice(historyLength),
+      ...(memoryCommit === undefined ? pending.messages.slice(historyLength) : []),
     ];
 
     // A resolved session-limit continuation prompt grants a fresh token
@@ -1221,22 +1259,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }
     }
 
-    if (effectiveStepInput?.context !== undefined && pending.deferredContext !== true) {
-      for (const entry of effectiveStepInput.context) {
-        messages.push({ content: entry, role: "user" });
-      }
-    }
-
-    const userContent = normalizeUserContent(effectiveStepInput?.message);
-    if (userContent !== undefined && !pending.deferredMessage && !pending.consumedMessage) {
-      // Staging writes FilePart bytes into the sandbox and replaces
-      // each part's `data` with a compact `eve-sandbox:` URL. The
-      // `messages` array — and everything that flows into
-      // `session.history` from it — therefore never carries raw
-      // attachment bytes across step boundaries.
-      const content = await stageAttachmentsToSandbox(userContent);
-      messages.push({ content, role: "user" });
-    }
+    messages = [...messages, ...preparedTurnInput];
 
     let projectedMessages = projectHistory(messages, session.state);
 
@@ -1285,7 +1308,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       auth: ctx?.get(AuthKey) ?? null,
       emit,
       emissionState,
-      messages: [...projectedMessages],
+      historyProjector: config.historyProjector,
+      messages: [...messages],
       model,
       onCompaction: config.onCompaction,
       resolveModel: config.resolveModel,
@@ -2948,6 +2972,7 @@ async function emitStructuredResult(
   emissionState: ReturnType<typeof getHarnessEmissionState>,
   structured: JsonValue,
   mode: RunMode,
+  messages: readonly ModelMessage[],
 ): Promise<ReturnType<typeof getHarnessEmissionState>> {
   await emit(
     createResultCompletedEvent({
@@ -2957,7 +2982,7 @@ async function emitStructuredResult(
       turnId: emissionState.turnId,
     }),
   );
-  return emitTurnEpilogue(emit, emissionState, mode);
+  return emitTurnEpilogue(emit, emissionState, mode, messages);
 }
 
 /**
@@ -2979,7 +3004,7 @@ async function finishTaskTurn(input: {
 
   if (schema === undefined) {
     if (emit) {
-      emissionState = await emitTurnEpilogue(emit, emissionState, "task");
+      emissionState = await emitTurnEpilogue(emit, emissionState, "task", session.history);
       session = setHarnessEmissionState(session, emissionState);
     }
     return { next: { done: true, output: stepOutput ?? "" }, session };
@@ -3003,7 +3028,13 @@ async function finishTaskTurn(input: {
 
   session = persistStructuredAssistantTurn(session, history, structured);
   if (emit) {
-    emissionState = await emitStructuredResult(emit, emissionState, structured, "task");
+    emissionState = await emitStructuredResult(
+      emit,
+      emissionState,
+      structured,
+      "task",
+      session.history,
+    );
     session = setHarnessEmissionState(session, emissionState);
   }
   return { next: { done: true, output: structured }, session };
@@ -3028,7 +3059,7 @@ async function finishConversationTurn(input: {
 
   if (schema === undefined) {
     if (emit) {
-      emissionState = await emitTurnEpilogue(emit, emissionState, "conversation");
+      emissionState = await emitTurnEpilogue(emit, emissionState, "conversation", session.history);
       session = setHarnessEmissionState(session, emissionState);
     }
     const settledTurn = { output: stepOutput ?? "" } satisfies SettledTurn;
@@ -3056,7 +3087,13 @@ async function finishConversationTurn(input: {
 
   session = persistStructuredAssistantTurn(session, history, structured);
   if (emit) {
-    emissionState = await emitStructuredResult(emit, emissionState, structured, "conversation");
+    emissionState = await emitStructuredResult(
+      emit,
+      emissionState,
+      structured,
+      "conversation",
+      session.history,
+    );
     session = setHarnessEmissionState(session, emissionState);
   }
   const settledTurn = { output: structured } satisfies SettledTurn;
@@ -3260,6 +3297,7 @@ async function maybeCompact(input: {
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly force?: boolean;
+  readonly historyProjector?: HistoryViewProjector;
   readonly messages: ModelMessage[];
   readonly model: LanguageModel;
   readonly onCompaction?: ToolLoopHarnessConfig["onCompaction"];
@@ -3274,9 +3312,13 @@ async function maybeCompact(input: {
 }> {
   const { emit, emissionState } = input;
   let messages = input.messages;
-  const session = input.session;
+  let session = input.session;
+  const projectedMessages =
+    input.historyProjector?.({ messages, state: session.state }) ?? messages;
+  const needsSummary = input.force === true || shouldCompact(projectedMessages, session.compaction);
+  const needsMemoryCanonicalization = shouldCanonicalizeMemory(messages);
 
-  if (input.force !== true && !shouldCompact(messages, session.compaction)) {
+  if (!needsSummary && !needsMemoryCanonicalization) {
     return { compacted: false, messages, session };
   }
 
@@ -3295,27 +3337,39 @@ async function maybeCompact(input: {
   ) as Parameters<typeof compactMessages>[3];
 
   if (emit) {
+    const ctx = contextStorage.getStore();
+    if (ctx !== undefined) {
+      prepareMemoryCompaction(ctx, { history: messages, state: session.state });
+    }
     await emit(
       createCompactionRequestedEvent({
         modelId: formatLanguageModelGatewayId(compaction.model),
         sequence: emissionState.sequence,
         sessionId: session.sessionId,
         turnId: emissionState.turnId,
-        usageInputTokens: getInputTokenCount(messages, session.compaction),
+        usageInputTokens: getInputTokenCount(projectedMessages, session.compaction),
       }),
+      projectedMessages,
     );
   }
 
-  messages = await compactMessages(
-    messages,
-    compaction.model,
-    session.compaction,
-    providerOptions,
-    input.telemetry,
-    buildGatewayAttributionHeaders(compaction.model, input.runtimeIdentity),
-    input.abortSignal,
-    input.force === true,
-  );
+  const canonical = canonicalizeMemoryRecords(messages);
+  const ordinary =
+    input.historyProjector?.({ messages: canonical.ordinary, state: session.state }) ??
+    canonical.ordinary;
+  const compactedOrdinary = needsSummary
+    ? await compactMessages(
+        [...ordinary],
+        compaction.model,
+        session.compaction,
+        providerOptions,
+        input.telemetry,
+        buildGatewayAttributionHeaders(compaction.model, input.runtimeIdentity),
+        input.abortSignal,
+        input.force === true,
+      )
+    : [...ordinary];
+  messages = [...canonical.memory, ...compactedOrdinary];
 
   if (input.onCompaction) {
     for (const msg of input.onCompaction()) {
@@ -3324,6 +3378,10 @@ async function maybeCompact(input: {
   }
 
   if (emit) {
+    const ctx = contextStorage.getStore();
+    if (ctx !== undefined) {
+      prepareMemoryCompaction(ctx, { history: messages, state: session.state });
+    }
     await emit(
       createCompactionCompletedEvent({
         modelId: formatLanguageModelGatewayId(compaction.model),
@@ -3331,7 +3389,15 @@ async function maybeCompact(input: {
         sessionId: session.sessionId,
         turnId: emissionState.turnId,
       }),
+      input.historyProjector?.({ messages, state: session.state }) ?? messages,
     );
+    if (ctx !== undefined) {
+      const commit = drainMemoryCommit(ctx);
+      if (commit !== undefined) {
+        messages = [...commit.history];
+        session = { ...session, state: commit.state };
+      }
+    }
   }
 
   return { compacted: true, messages, session };

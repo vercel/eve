@@ -16,6 +16,7 @@ Control context by putting information in the narrowest surface that needs it. K
 | Files or command execution                           | The [sandbox workspace](../sandbox)                    | A workspace hint, then files and command output the model requests through tools |
 | A specialist with a separate prompt and capabilities | A [subagent](../subagents)                             | Only the subagent's final result in the parent context                           |
 | Instructions or capabilities that vary by caller     | A [dynamic capability](../guides/dynamic-capabilities) | The values resolved for the active session                                       |
+| Scoped context retrieved from cross-session storage  | [Memory](../memory)                                    | Attributed user-role messages recalled before the current delivery               |
 
 ## Base identity with `instructions.md`
 
@@ -59,6 +60,11 @@ See [Dynamic capabilities](../guides/dynamic-capabilities) for the resolver API,
 
 User-role instructions follow the normal history lifecycle. Compaction can summarize them, and clear removes them without rerunning their static definitions or dynamic resolvers. System-role instructions remain outside history and continue to apply after either operation.
 
+Recalled memory also uses user-role messages, but eve keeps their attribution
+separate. Compaction excludes them from the summary, preserves their canonical
+records, and recalls again after the checkpoint. Clear removes those session
+records without deleting the provider's external data.
+
 ## What to read next
 
 - [Instructions](../instructions): author the always-on system prompt.
@@ -66,3 +72,4 @@ User-role instructions follow the normal history lifecycle. Compaction can summa
 - [Sandbox](../sandbox): give the model files and command execution.
 - [Subagents](../subagents): isolate specialist work.
 - [Dynamic capabilities](../guides/dynamic-capabilities): vary context and capabilities by session.
+- [Memory](../memory): retrieve scoped context from storage that outlives a session.

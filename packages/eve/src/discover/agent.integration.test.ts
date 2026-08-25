@@ -13,6 +13,7 @@ import { discoverAgent } from "#discover/discover-agent.js";
 import {
   DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
   DISCOVER_EXTENSION_COMPATIBILITY_INVALID,
+  DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
   DISCOVER_EXTENSION_MOUNT_AMBIGUOUS,
   DISCOVER_EXTENSION_MOUNT_MISSING_DECLARATION,
   DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
@@ -29,6 +30,7 @@ import {
   DISCOVER_UNSUPPORTED_DIRECTORY,
 } from "#discover/grammar.js";
 import { DISCOVER_LIB_DIRECTORY_INVALID, DISCOVER_LIB_ENTRY_UNSUPPORTED } from "#discover/lib.js";
+import { DISCOVER_MEMORY_NAME_INVALID, DISCOVER_MEMORY_SLOT_AMBIGUOUS } from "#discover/memory.js";
 import {
   DISCOVER_SCHEDULE_FILE_UNSUPPORTED,
   DISCOVER_SCHEDULES_DIRECTORY_INVALID,
@@ -52,6 +54,76 @@ const EXTENSION_COMPATIBILITY_MANIFEST = JSON.stringify({
  * here against an in-memory {@link buildMemoryAgentProject} tree.
  */
 describe("discoverAgent (memory)", () => {
+  it("discovers flat and named memory slots with path-derived identities", async () => {
+    const flat = buildMemoryAgentProject({
+      agentFiles: { "instructions.md": "Remember.", "memory.ts": "export default {};" },
+    });
+    const named = buildMemoryAgentProject({
+      agentFiles: {
+        "instructions.md": "Remember.",
+        "memory/profile.ts": "export default {};",
+        "memory/workspace.mjs": "export default {};",
+      },
+    });
+
+    const flatResult = await discoverAgent({
+      agentRoot: flat.agentRoot,
+      appRoot: flat.appRoot,
+      source: flat.source,
+    });
+    const namedResult = await discoverAgent({
+      agentRoot: named.agentRoot,
+      appRoot: named.appRoot,
+      source: named.source,
+    });
+
+    expect(flatResult.diagnostics).toEqual([]);
+    expect(flatResult.manifest.memories).toEqual([
+      {
+        logicalPath: "memory.ts",
+        slot: "memory",
+        sourceId: "memory.ts",
+        sourceKind: "module",
+      },
+    ]);
+    expect(namedResult.diagnostics).toEqual([]);
+    expect(namedResult.manifest.memories).toEqual([
+      {
+        logicalPath: "memory/profile.ts",
+        slot: "profile",
+        sourceId: "memory/profile.ts",
+        sourceKind: "module",
+      },
+      {
+        logicalPath: "memory/workspace.mjs",
+        slot: "workspace",
+        sourceId: "memory/workspace.mjs",
+        sourceKind: "module",
+      },
+    ]);
+  });
+
+  it("rejects mixed flat/directory memory and invalid slot names", async () => {
+    const project = buildMemoryAgentProject({
+      agentFiles: {
+        "instructions.md": "Remember.",
+        "memory.ts": "export default {};",
+        "memory/not.valid.ts": "export default {};",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(
+      expect.arrayContaining([DISCOVER_MEMORY_NAME_INVALID, DISCOVER_MEMORY_SLOT_AMBIGUOUS]),
+    );
+    expect(result.manifest.memories).toEqual([]);
+  });
+
   it("discovers single-file schedules in both module and markdown forms with recursive nesting", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {
@@ -838,6 +910,34 @@ describe("discoverAgent (memory)", () => {
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
       "discover/extension-agent-config-unsupported",
     );
+  });
+
+  it("rejects memory declared by a mounted extension", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: { source: "source", dist: "extension" } },
+        }),
+        "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
+        "node_modules/@acme/crm/extension/memory.ts": "export default {};",
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
+    );
+    expect(result.manifest.resolvedExtensions[0]?.manifest.memories).toEqual([]);
   });
 
   it("reports an unresolved mount when the extension package is missing", async () => {

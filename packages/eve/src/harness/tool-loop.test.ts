@@ -1010,6 +1010,7 @@ describe("createToolLoopHarness", () => {
 
     const runStep = createToolLoopHarness(
       createTestConfig("conversation", undefined, {
+        historyProjector: ({ messages }) => [...messages],
         resolveModel: vi.fn().mockResolvedValue(
           new MockLanguageModelV3({
             modelId: "claude-sonnet-4-5",

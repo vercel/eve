@@ -68,6 +68,7 @@ export const DISCOVER_EXTENSION_AGENT_CONFIG_UNSUPPORTED =
  * consuming agent's to own.
  */
 export const DISCOVER_EXTENSION_SANDBOX_UNSUPPORTED = "discover/extension-sandbox-unsupported";
+export const DISCOVER_EXTENSION_MEMORY_UNSUPPORTED = "discover/extension-memory-unsupported";
 
 /**
  * Resolved on-disk location of one mounted extension package.

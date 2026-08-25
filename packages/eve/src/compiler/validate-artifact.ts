@@ -169,6 +169,10 @@ export function validateCompiledAgentResources(
     "hook slug",
   );
   validateUniqueIdentities(
+    node.memories.map((entry) => ({ identity: entry.slot, kind: "memory" })),
+    "memory slot",
+  );
+  validateUniqueIdentities(
     node.schedules.map((entry) => ({ identity: entry.name, kind: "schedule" })),
     "schedule name",
   );
@@ -318,6 +322,7 @@ function collectReferencedModuleSources(
   for (const value of node.dynamicSkills) add(value);
   for (const value of node.dynamicTools) add(value);
   for (const value of node.hooks) add(value);
+  for (const value of node.memories) add(value);
   for (const value of node.instructions) if (value.sourceKind === "module") add(value);
   if (node.instrumentation !== undefined) add(node.instrumentation);
   if (node.workflowTool !== undefined) add(node.workflowTool);
