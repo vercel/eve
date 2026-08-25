@@ -382,10 +382,12 @@ function parsePayloadAttachments(files: readonly SlackFile[] | undefined): Slack
  * `SlackMessage` and is therefore trivially testable in isolation.
  */
 export interface SlackInboundContext {
+  readonly botUserId?: string;
   readonly userId: string;
   readonly userName?: string;
   readonly fullName?: string;
   readonly channelId: string;
+  readonly isMentioned?: boolean;
   readonly threadTs: string;
   readonly teamId?: string;
 }

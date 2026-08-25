@@ -53,6 +53,15 @@ export async function defaultOnMessage(
   return { auth: defaultTelegramAuth(message) };
 }
 
+export function isTelegramBotMentioned(
+  message: Pick<TelegramMessage, "caption" | "text">,
+  botUsername: string | undefined,
+): boolean {
+  if (botUsername === undefined) return false;
+  const text = message.text || message.caption;
+  return text.toLowerCase().includes(`@${botUsername.toLowerCase()}`);
+}
+
 /** Built-in Telegram event handlers for typing, replies, HITL, and terminal errors. */
 export const defaultEvents: TelegramChannelEvents = {
   async "turn.started"(_event, channel, _ctx) {
@@ -132,7 +141,7 @@ function shouldDispatchTelegramMessage(
   if (message.replyToMessage?.from?.isBot === true) return true;
 
   if (isBotCommand(text, botUsername)) return true;
-  if (botUsername !== undefined && mentionsBot(text, botUsername)) return true;
+  if (isTelegramBotMentioned(message, botUsername)) return true;
 
   return false;
 }
@@ -143,8 +152,4 @@ function isBotCommand(text: string, botUsername: string | undefined): boolean {
   const target = match.groups?.target;
   if (target === undefined) return true;
   return botUsername !== undefined && target.toLowerCase() === botUsername.toLowerCase();
-}
-
-function mentionsBot(text: string, botUsername: string): boolean {
-  return text.toLowerCase().includes(`@${botUsername.toLowerCase()}`);
 }

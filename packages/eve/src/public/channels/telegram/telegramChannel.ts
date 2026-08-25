@@ -27,7 +27,11 @@ import {
   collectTelegramFileParts,
   createTelegramFetchFile,
 } from "#public/channels/telegram/attachments.js";
-import { defaultEvents, defaultOnMessage } from "#public/channels/telegram/defaults.js";
+import {
+  defaultEvents,
+  defaultOnMessage,
+  isTelegramBotMentioned,
+} from "#public/channels/telegram/defaults.js";
 import {
   TELEGRAM_HITL_CALLBACK_PREFIX,
   isTelegramSyntheticResponse,
@@ -503,6 +507,7 @@ async function dispatchMessage(input: {
     chatId: input.message.chat.id,
     chatTitle: input.message.chat.title,
     chatType: input.message.chat.type,
+    isMentioned: isTelegramBotMentioned(input.message, input.config.botUsername),
     messageId: input.message.messageId,
     messageThreadId: input.message.messageThreadId,
     userId: input.message.from?.id,

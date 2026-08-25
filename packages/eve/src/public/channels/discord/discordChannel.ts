@@ -4,7 +4,6 @@ import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
-
 import { createLogger, logError } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
@@ -594,6 +593,7 @@ async function dispatchCommand(input: {
 }): Promise<void> {
   const turnMessage = commandInteractionMessage(input.interaction);
   const contextBlock = formatDiscordContextBlock({
+    applicationId: input.interaction.applicationId,
     channelId: input.interaction.channelId,
     commandName: input.interaction.commandName,
     guildId: input.interaction.guildId,

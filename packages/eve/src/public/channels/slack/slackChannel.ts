@@ -1174,11 +1174,12 @@ async function dispatchSlackMessage(input: {
       raw: input.message.raw,
       request: slack.request,
     }));
+  const isBotMentioned =
+    input.kind === "app_mention" ||
+    (input.botUserId !== undefined && input.message.text.includes(`<@${input.botUserId}`));
   const ctx: SlackInboundMessageContext = {
     ...sessionOperations,
-    isBotMentioned: () =>
-      input.kind === "app_mention" ||
-      (input.botUserId !== undefined && input.message.text.includes(`<@${input.botUserId}`)),
+    isBotMentioned: () => isBotMentioned,
     isDMOrPrivateChannel,
     isSubscribed: async () => (await sessionOperations.resolveSession()) !== undefined,
     slack,
@@ -1200,9 +1201,11 @@ async function dispatchSlackMessage(input: {
   channelState.audience =
     input.kind === "direct_message" || isPrivateConversation ? "private" : "public";
   await deliverSlackMessage({
+    botUserId: input.botUserId,
     credentials: input.credentials,
     kind: input.kind,
     isPrivateConversation,
+    isMentioned: isBotMentioned,
     message: input.message,
     result,
     sessionOperations,
@@ -1299,9 +1302,11 @@ async function verifyInbound(
 }
 
 async function deliverSlackMessage(input: {
+  readonly botUserId: string | undefined;
   readonly sessionOperations: SlackSessionOperations;
   readonly credentials: SlackChannelCredentials | undefined;
   readonly isPrivateConversation: boolean;
+  readonly isMentioned: boolean;
   readonly kind: string;
   readonly message: SlackMessage;
   readonly result: Exclude<SlackInboundResult, null>;
@@ -1324,8 +1329,10 @@ async function deliverSlackMessage(input: {
       policy: input.uploadPolicy,
     });
     const inboundContext: SlackInboundContext = {
+      botUserId: input.botUserId,
       channelId: message.channelId,
       fullName: message.author?.fullName,
+      isMentioned: input.isMentioned,
       teamId: message.teamId,
       threadTs: message.threadTs,
       userId: message.author?.userId ?? "",

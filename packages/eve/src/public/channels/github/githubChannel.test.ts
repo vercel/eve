@@ -234,6 +234,8 @@ describe("githubChannel", () => {
     const [continuationToken, input] = send.mock.calls[0]!;
     expect(input.message).toBe("help me");
     expect(input.context).toEqual([expect.stringContaining("<github_context>")]);
+    expect(input.context[0]).toContain("bot_name: testbot");
+    expect(input.context[0]).toContain("is_mentioned: true");
     expect(input.inputResponses).toBeUndefined();
     expect(continuationToken).toBe("repo:123:issue:5");
     expect(input).toMatchObject({

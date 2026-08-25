@@ -220,6 +220,9 @@ describe("telegramChannel() inbound route", () => {
     });
     expect(mentioned.send).toHaveBeenCalledTimes(1);
     expect(mentioned.send.mock.calls[0]![0]).toBe("-1001::11");
+    expect((mentioned.send.mock.calls[0]![1] as { context: string[] }).context[0]).toContain(
+      "is_mentioned: true",
+    );
   });
 
   it("delivers Telegram callback queries as compact HITL input responses", async () => {

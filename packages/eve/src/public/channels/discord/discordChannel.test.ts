@@ -218,6 +218,7 @@ describe("discordChannel() inbound route", () => {
     expect(send).toHaveBeenCalledTimes(1);
     const [continuationToken, input] = send.mock.calls[0]!;
     expect((input as { context: string[] }).context[0]).toContain("<discord_context>");
+    expect((input as { context: string[] }).context[0]).toContain("application_id: APP1");
     expect(String((input as { message: string }).message)).toContain("hello discord");
     expect(continuationToken).toBe("C01:I01");
     expect(input).toMatchObject({

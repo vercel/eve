@@ -169,6 +169,8 @@ describe("teamsChannel", () => {
       title: "Teams run",
     });
     expect(send.mock.calls[0]![1].context[0]).toContain("<teams_context>");
+    expect(send.mock.calls[0]![1].context[0]).toContain("bot_id: BOT");
+    expect(send.mock.calls[0]![1].context[0]).toContain("is_mentioned: true");
   });
 
   it("default dispatch ignores unmentioned group messages", async () => {

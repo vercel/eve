@@ -2,8 +2,10 @@ import type { SlackThreadMessage } from "#public/channels/slack/api.js";
 import type { SlackInboundContext } from "#public/channels/slack/inbound.js";
 
 interface SlackModelMessageInput {
+  readonly botUserId?: string;
   readonly channelId?: string;
   readonly content: string;
+  readonly isMentioned?: boolean;
   readonly senderId?: string;
   readonly senderType: "agent" | "bot" | "unknown" | "user";
   readonly teamId?: string;
@@ -21,6 +23,8 @@ export function formatSlackModelMessage(input: SlackModelMessageInput): string {
     "<slack_message>",
     `sender_type: ${input.senderType}`,
     ...(input.senderId ? [`sender_id: ${input.senderId}`] : []),
+    ...(input.botUserId ? [`bot_user_id: ${input.botUserId}`] : []),
+    ...(input.isMentioned !== undefined ? [`is_mentioned: ${input.isMentioned}`] : []),
     ...(input.channelId ? [`channel_id: ${input.channelId}`] : []),
     `thread_ts: ${input.threadTs}`,
     `message_ts: ${input.ts}`,
@@ -38,8 +42,10 @@ export function formatSlackInboundMessage(
   message: { readonly markdown: string; readonly ts: string },
 ): string {
   return formatSlackModelMessage({
+    botUserId: context.botUserId,
     channelId: context.channelId,
     content: message.markdown,
+    isMentioned: context.isMentioned,
     senderId: context.userId || undefined,
     senderType: context.userId ? "user" : "unknown",
     teamId: context.teamId,
