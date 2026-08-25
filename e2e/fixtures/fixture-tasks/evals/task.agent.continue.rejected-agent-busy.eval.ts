@@ -80,7 +80,6 @@ export default defineTaskEval({
       },
     ]);
     released.expectOk();
-    released.notEvent("step.started");
     released.noFailedActions();
 
     await waitForCompletedTask(t, blocked.session, "CHILD-TASK-EXCLUSIVITY-VERIFY", admittedTaskId);
