@@ -175,7 +175,8 @@ export async function* followStreamIterable(
         }
       }
     } catch (error) {
-      if (!isStreamDisconnectError(error)) throw error;
+      // Browser stream reads use vendor-specific TypeError messages for transport failures.
+      if (!(error instanceof TypeError) && !isStreamDisconnectError(error)) throw error;
     } finally {
       connection.close();
     }
