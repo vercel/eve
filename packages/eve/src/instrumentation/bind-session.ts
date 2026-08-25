@@ -1,3 +1,6 @@
+import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
+import { contextStorage } from "#context/container.js";
+import { ContextKey } from "#context/key.js";
 import { withoutInstrumentationContent } from "#instrumentation/content.js";
 import {
   sessionIdempotencyKey,
@@ -12,6 +15,18 @@ import {
   type SerializedSessionInstrumentation,
   type SessionInstrumentation,
 } from "#instrumentation/session-plan.js";
+import { recordErrorOnSpan } from "#internal/logging.js";
+import { normalizeInstrumentationChannelKind } from "#internal/instrumentation.js";
+
+interface InstrumentationTurnTraceState {
+  readonly spanId: string;
+  readonly traceFlags: number;
+  readonly traceId: string;
+}
+
+const InstrumentationTurnTraceKey = new ContextKey<InstrumentationTurnTraceState>(
+  "eve.instrumentation.turnTrace",
+);
 
 const inertHooks: InstrumentationHooks = {
   capturesContent: false,
@@ -33,14 +48,22 @@ export function bindSessionInstrumentation(input: {
   }
 
   const plan = input.plan === undefined ? undefined : parseSessionInstrumentationPlan(input.plan);
-  const hooks = frozenHooks(input.runtime?.hooks, plan?.captureLevel === "content");
+  const providerHooks = frozenHooks(input.runtime?.hooks, plan?.captureLevel === "content");
+  const hooks: InstrumentationHooks = {
+    capturesContent: providerHooks.capturesContent,
+    publish: (event) => providerHooks.publish(enrichEvent(event, plan)),
+  };
   const runInContext = input.runtime?.runInContext ?? ((_operation, execute) => execute());
+  const usesOtel = input.runtime?.otelSettings !== undefined;
 
   return {
+    capturesContent: hooks.capturesContent,
     forceFlush: input.runtime?.forceFlush ?? (async () => undefined),
     hooks,
     preparePreamble: async (preamble) => {
-      let prepared = preamble.traceContext;
+      const traceContext =
+        preamble.traceContext ?? contextStorage.getStore()?.get(InstrumentationTurnTraceKey);
+      let prepared = traceContext;
       if (!preamble.sessionStarted && input.runtime?.prepareSessionTrace !== undefined) {
         prepared = await input.runtime.prepareSessionTrace({
           agentName: plan?.agentName,
@@ -67,7 +90,7 @@ export function bindSessionInstrumentation(input: {
           type: "turn.started",
         });
       }
-      return preamble.traceContext ?? prepared;
+      return traceContext ?? prepared;
     },
     prepareSessionTrace: input.runtime?.prepareSessionTrace,
     prepareTurnTrace: input.runtime?.prepareTurnTrace,
@@ -79,10 +102,72 @@ export function bindSessionInstrumentation(input: {
         traceContext,
       };
     },
-    publish: async (event) => hooks.publish(enrichEvent(event, plan)),
+    publish: async (event) => hooks.publish(event),
     runInContext,
-    runStep: async (_step, execute) => execute(),
-    telemetryForAttempt: () => undefined,
+    runStep: async (step, execute) => {
+      if (!usesOtel) return execute();
+      const tracer = trace.getTracer("eve");
+      const turnSpan = step.hasInput
+        ? tracer.startSpan("ai.eve.turn", {
+            attributes: {
+              "ai.telemetry.functionId":
+                input.runtime?.otelSettings?.functionId ?? step.agentName ?? "",
+              "eve.environment": step.environment,
+              "eve.session.id": step.sessionId,
+              "eve.turn.id": step.turnId,
+              "eve.version": step.eveVersion,
+            },
+          })
+        : undefined;
+      const store = contextStorage.getStore();
+      if (turnSpan !== undefined) {
+        store?.set(InstrumentationTurnTraceKey, turnSpan.spanContext());
+      }
+      const stored = store?.get(InstrumentationTurnTraceKey);
+      const parentContext =
+        turnSpan !== undefined
+          ? trace.setSpan(otelContext.active(), turnSpan)
+          : stored === undefined
+            ? undefined
+            : trace.setSpan(
+                otelContext.active(),
+                trace.wrapSpanContext({ ...stored, isRemote: true }),
+              );
+      try {
+        return parentContext === undefined
+          ? await execute()
+          : await otelContext.with(parentContext, execute);
+      } catch (error) {
+        if (turnSpan !== undefined) recordErrorOnSpan(turnSpan, error);
+        throw error;
+      } finally {
+        turnSpan?.end();
+      }
+    },
+    runtimeContextResolvers: input.runtime?.runtimeContextResolvers,
+    runtimeContextChannel: {
+      kind: normalizeInstrumentationChannelKind(plan?.channelKind),
+      metadata: plan?.channelMetadata ?? {},
+    },
+    telemetryForAttempt: (attempt) => {
+      if (!usesOtel && attempt.bridgeIntegration === undefined) return undefined;
+      const includeRuntimeContext: Record<string, true> = {};
+      for (const key of Object.keys(attempt.runtimeContext ?? {})) {
+        includeRuntimeContext[key] = true;
+      }
+      return {
+        functionId: input.runtime?.otelSettings?.functionId ?? attempt.agentName,
+        includeRuntimeContext,
+        integrations:
+          attempt.bridgeIntegration === undefined
+            ? undefined
+            : [attempt.bridgeIntegration, ...(attempt.registeredIntegrations ?? [])],
+        isEnabled: true,
+        recordInputs: plan?.sampled === true || plan?.recordInputs === true,
+        recordOutputs: plan?.sampled === true || plan?.recordOutputs === true,
+      };
+    },
+    usesOtel,
   };
 }
 
@@ -116,6 +201,25 @@ function enrichEvent(
         spanId: plan.spanId,
         traceFlags: plan.traceFlags,
         traceId: plan.traceId,
+      },
+    };
+  }
+  if (event.type === "turn.started") {
+    return {
+      ...event,
+      parentLineage: plan.parentLineage,
+      parentTraceContext: plan.parentTraceContext,
+      rootSessionId: plan.rootSessionId || event.rootSessionId,
+    };
+  }
+  if ("scope" in event) {
+    return {
+      ...event,
+      scope: {
+        ...event.scope,
+        channelAudience: plan.audience,
+        functionId: plan.functionId ?? event.scope.functionId,
+        rootSessionId: plan.rootSessionId || event.scope.rootSessionId,
       },
     };
   }

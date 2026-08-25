@@ -29,6 +29,7 @@ type ToolLoopInstrumentation = Pick<SessionInstrumentation, "hooks" | "runInCont
   Partial<
     Pick<
       SessionInstrumentation,
+      | "capturesContent"
       | "forceFlush"
       | "preparePreamble"
       | "prepareSessionTrace"
@@ -36,7 +37,10 @@ type ToolLoopInstrumentation = Pick<SessionInstrumentation, "hooks" | "runInCont
       | "propagationFor"
       | "publish"
       | "runStep"
+      | "runtimeContextResolvers"
+      | "runtimeContextChannel"
       | "telemetryForAttempt"
+      | "usesOtel"
     >
   >;
 

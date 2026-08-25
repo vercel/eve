@@ -2,13 +2,13 @@ import type { ModelMessage } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { AuthKey, ChannelInstrumentationKey } from "#context/keys.js";
+import { AuthKey } from "#context/keys.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
 import {
   buildTelemetryRuntimeContext,
   type BuildTelemetryRuntimeContextInput,
 } from "#harness/instrumentation/runtime-context.js";
-import type { RuntimeContextResolver } from "#tracing/otel-declaration.js";
+import type { SessionRuntimeContextResolver } from "#instrumentation/session-plan.js";
 import type { HarnessSession } from "#harness/types.js";
 import type {
   InstrumentationStepStartedEventInput,
@@ -52,6 +52,8 @@ function build(
   return buildTelemetryRuntimeContext({
     eveVersion: "0.0.0-test",
     authored: { events: {} },
+    capturesContent: false,
+    channel: { kind: "unknown", metadata: {} },
     emissionState,
     environment: "test",
     modelInput: { instructions: undefined, messages },
@@ -161,13 +163,13 @@ describe("buildTelemetryRuntimeContext", () => {
 
   it("reflects the active channel kind and exposes channel metadata to the resolver", () => {
     const ctx = new ContextContainer();
-    ctx.set(ChannelInstrumentationKey, {
-      kind: "channel:support",
-      metadata: { triggeringUserId: "U999" },
-    });
 
     const runtimeContext = contextStorage.run(ctx, () =>
       build({
+        channel: {
+          kind: "channel:support",
+          metadata: { triggeringUserId: "U999" },
+        },
         authored: {
           events: {
             "step.started": (
@@ -194,7 +196,7 @@ describe("buildTelemetryRuntimeContext", () => {
     });
   });
 
-  it("withholds model content from hosted unknown-audience resolvers", () => {
+  it("withholds model content when the frozen producer capture is metadata", () => {
     let captured: InstrumentationStepStartedEventInput | undefined;
 
     build({
@@ -211,16 +213,14 @@ describe("buildTelemetryRuntimeContext", () => {
     expect(captured?.modelInput).toEqual({ instructions: undefined, messages: [] });
   });
 
-  it("exposes model content to public-audience resolvers", () => {
+  it("exposes model content when the frozen producer capture is content", () => {
     const ctx = new ContextContainer();
-    ctx.set(ChannelInstrumentationKey, {
-      kind: "channel:public",
-      metadata: { audience: "public" },
-    });
     let captured: InstrumentationStepStartedEventInput | undefined;
 
     contextStorage.run(ctx, () =>
       build({
+        capturesContent: true,
+        channel: { kind: "channel:public", metadata: { audience: "public" } },
         authored: {
           events: {
             "step.started": (input: InstrumentationStepStartedEventInput) => {
@@ -239,10 +239,6 @@ describe("buildTelemetryRuntimeContext", () => {
     const roles = ["admin"];
     const channelMetadata = { nested: { value: "original" }, triggeringUserId: "U999" };
     const ctx = new ContextContainer();
-    ctx.set(ChannelInstrumentationKey, {
-      kind: "channel:support",
-      metadata: channelMetadata,
-    });
     ctx.set(AuthKey, {
       attributes: { roles },
       authenticator: "jwt",
@@ -253,6 +249,7 @@ describe("buildTelemetryRuntimeContext", () => {
     let captured: InstrumentationStepStartedEventInput | undefined;
     contextStorage.run(ctx, () =>
       build({
+        channel: { kind: "channel:support", metadata: channelMetadata },
         authored: {
           events: {
             "step.started": (input: InstrumentationStepStartedEventInput) => {
@@ -276,29 +273,29 @@ describe("buildTelemetryRuntimeContext", () => {
 
   describe("provider runtimeContext resolvers", () => {
     it("emits framework keys when a provider resolver returns undefined", () => {
-      const resolver: RuntimeContextResolver = () => undefined;
+      const resolver: SessionRuntimeContextResolver = () => undefined;
       const runtimeContext = build({ authored: undefined, providerResolvers: [resolver] });
 
       expect(runtimeContext).toEqual(FRAMEWORK_KEYS);
     });
 
     it("merges a single provider resolver beneath framework keys", () => {
-      const resolver: RuntimeContextResolver = () => ({ team: "platform" });
+      const resolver: SessionRuntimeContextResolver = () => ({ team: "platform" });
       const runtimeContext = build({ authored: undefined, providerResolvers: [resolver] });
 
       expect(runtimeContext).toEqual({ ...FRAMEWORK_KEYS, team: "platform" });
     });
 
     it("merges multiple provider resolvers, later ones overriding earlier", () => {
-      const first: RuntimeContextResolver = () => ({ env: "prod", team: "a" });
-      const second: RuntimeContextResolver = () => ({ team: "b" });
+      const first: SessionRuntimeContextResolver = () => ({ env: "prod", team: "a" });
+      const second: SessionRuntimeContextResolver = () => ({ team: "b" });
       const runtimeContext = build({ authored: undefined, providerResolvers: [first, second] });
 
       expect(runtimeContext).toEqual({ ...FRAMEWORK_KEYS, env: "prod", team: "b" });
     });
 
     it("drops reserved eve.* keys from provider resolver results", () => {
-      const resolver: RuntimeContextResolver = () =>
+      const resolver: SessionRuntimeContextResolver = () =>
         ({ "eve.session.id": "override", team: "platform" }) as never;
       const runtimeContext = build({ authored: undefined, providerResolvers: [resolver] });
 
@@ -306,10 +303,10 @@ describe("buildTelemetryRuntimeContext", () => {
     });
 
     it("continues when a provider resolver throws", () => {
-      const failing: RuntimeContextResolver = () => {
+      const failing: SessionRuntimeContextResolver = () => {
         throw new Error("boom");
       };
-      const healthy: RuntimeContextResolver = () => ({ team: "platform" });
+      const healthy: SessionRuntimeContextResolver = () => ({ team: "platform" });
       const runtimeContext = build({ authored: undefined, providerResolvers: [failing, healthy] });
 
       expect(runtimeContext).toEqual({ ...FRAMEWORK_KEYS, team: "platform" });
@@ -321,7 +318,7 @@ describe("buildTelemetryRuntimeContext", () => {
     });
 
     it("merges provider resolver results alongside the legacy step.started hook", () => {
-      const resolver: RuntimeContextResolver = () => ({ source: "provider" });
+      const resolver: SessionRuntimeContextResolver = () => ({ source: "provider" });
       const runtimeContext = build({
         authored: { events: { "step.started": () => ({ runtimeContext: { source: "legacy" } }) } },
         providerResolvers: [resolver],

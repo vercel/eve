@@ -90,7 +90,6 @@ describe("createInstrumentationHandleEvent", () => {
       },
     };
     const handleEvent = createInstrumentationHandleEvent({
-      agentName: "weather",
       handleEvent: async (event) => {
         order.push(`durable:${event.type}`);
       },
@@ -171,14 +170,8 @@ describe("createInstrumentationHandleEvent", () => {
     ]);
   });
 
-  it("carries the dispatch lineage onto every turn a child session starts", async () => {
+  it("publishes structural turn facts for controls to enrich", async () => {
     const events: { readonly type: string }[] = [];
-    const parentLineage = {
-      callId: "call-7",
-      sessionId: "session-1",
-      subagentName: "researcher",
-      turnId: "turn-1",
-    };
     const handleEvent = createInstrumentationHandleEvent({
       handleEvent: async () => {},
       hooks: {
@@ -187,8 +180,6 @@ describe("createInstrumentationHandleEvent", () => {
           events.push(event);
         },
       },
-      parentLineage,
-      rootSessionId: "session-1",
       sessionId: "child-1",
     })!;
 
@@ -198,9 +189,7 @@ describe("createInstrumentationHandleEvent", () => {
     expect(events.filter((event) => event.type === "turn.started")).toEqual([
       {
         idempotencyKey: turnIdempotencyKey("child-1", "child-turn-1"),
-        parentLineage,
-        parentTraceContext: undefined,
-        rootSessionId: "session-1",
+        rootSessionId: "child-1",
         sequence: 0,
         sessionId: "child-1",
         turnId: "child-turn-1",
@@ -208,9 +197,7 @@ describe("createInstrumentationHandleEvent", () => {
       },
       {
         idempotencyKey: turnIdempotencyKey("child-1", "child-turn-2"),
-        parentLineage,
-        parentTraceContext: undefined,
-        rootSessionId: "session-1",
+        rootSessionId: "child-1",
         sequence: 1,
         sessionId: "child-1",
         turnId: "child-turn-2",

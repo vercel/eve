@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { vi } from "vitest";
 
+import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { bindSessionInstrumentation } from "#instrumentation/bind-session.js";
 import {
   createInstrumentationHooks,
@@ -153,5 +157,85 @@ describe("bindSessionInstrumentation", () => {
     expect(received[0]).toMatchObject({
       input: { instructions: "secret", messages: [{ role: "user", content: "hello" }] },
     });
+  });
+
+  it("persists and restores turn trace state through instrumentation context", async () => {
+    const hooks = createInstrumentationHooks([]);
+    const currentRuntime = runtime({ hooks, sampled: true });
+    const frozenPlan = plan({ hooks, sampled: true });
+    const spanContext = {
+      spanId: "0123456789abcdef",
+      traceFlags: 1,
+      traceId: "0123456789abcdef0123456789abcdef",
+    };
+    const span = {
+      addEvent: vi.fn(),
+      addLink: vi.fn(),
+      addLinks: vi.fn(),
+      end: vi.fn(),
+      isRecording: () => true,
+      recordException: vi.fn(),
+      setAttribute: vi.fn(),
+      setAttributes: vi.fn(),
+      setStatus: vi.fn(),
+      spanContext: () => spanContext,
+      updateName: vi.fn(),
+    } as ReturnType<ReturnType<typeof trace.getTracer>["startSpan"]>;
+    const getTracer = vi.spyOn(trace, "getTracer").mockReturnValue({
+      startSpan: () => span,
+    } as ReturnType<typeof trace.getTracer>);
+
+    try {
+      const firstContext = new ContextContainer();
+      const firstControls = bindSessionInstrumentation({
+        plan: frozenPlan,
+        rootSessionId: "session-1",
+        runtime: currentRuntime,
+        sessionId: "session-1",
+      });
+      await contextStorage.run(firstContext, () =>
+        firstControls.runStep(
+          {
+            environment: "test",
+            eveVersion: "0.0.0",
+            hasInput: true,
+            sequence: 0,
+            sessionId: "session-1",
+            turnId: "turn_0",
+          },
+          async () => undefined,
+        ),
+      );
+      const serialized = serializeContext(firstContext);
+      expect(serialized["eve.instrumentation.turnTrace"]).toEqual(spanContext);
+
+      const secondContext = await deserializeContext(serialized);
+      const wrapSpanContext = vi.spyOn(trace, "wrapSpanContext");
+      const withContext = vi.spyOn(otelContext, "with");
+      const secondControls = bindSessionInstrumentation({
+        plan: frozenPlan,
+        rootSessionId: "session-1",
+        runtime: currentRuntime,
+        sessionId: "session-1",
+      });
+      await contextStorage.run(secondContext, () =>
+        secondControls.runStep(
+          {
+            environment: "test",
+            eveVersion: "0.0.0",
+            hasInput: false,
+            sequence: 0,
+            sessionId: "session-1",
+            turnId: "turn_0",
+          },
+          async () => undefined,
+        ),
+      );
+
+      expect(wrapSpanContext).toHaveBeenCalledWith({ ...spanContext, isRemote: true });
+      expect(withContext).toHaveBeenCalled();
+    } finally {
+      getTracer.mockRestore();
+    }
   });
 });

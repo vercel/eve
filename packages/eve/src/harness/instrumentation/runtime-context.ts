@@ -3,16 +3,10 @@ import type { ModelMessage, SystemModelMessage } from "ai";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { AlsContext } from "#context/container.js";
 import { contextStorage } from "#context/container.js";
-import {
-  AuthKey,
-  ChannelInstrumentationKey,
-  InitiatorAuthKey,
-  ParentSessionKey,
-} from "#context/keys.js";
+import { AuthKey, InitiatorAuthKey, ParentSessionKey } from "#context/keys.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { RuntimeContextResolver } from "#tracing/otel-declaration.js";
-import { shouldCaptureInstrumentationContent } from "#harness/instrumentation/content-policy.js";
+import type { SessionRuntimeContextResolver } from "#instrumentation/session-plan.js";
 import {
   normalizeInstrumentationChannelKind,
   resolveInstrumentationProjection,
@@ -24,7 +18,6 @@ import type {
   InstrumentationRuntimeContext,
   InstrumentationStepStartedEventInput,
 } from "#public/instrumentation/index.js";
-import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { parseJsonObject, parseJsonValue, type JsonObject, type JsonValue } from "#shared/json.js";
 
 const log = createLogger("harness.instrumentation-runtime-context");
@@ -32,13 +25,15 @@ const log = createLogger("harness.instrumentation-runtime-context");
 export interface BuildTelemetryRuntimeContextInput {
   readonly eveVersion: string;
   readonly authored: InstrumentationDefinition | undefined;
+  readonly capturesContent: boolean;
+  readonly channel: InstrumentationChannel;
   readonly emissionState: HarnessEmissionState;
   readonly environment: string;
   readonly modelInput: {
     readonly instructions: string | SystemModelMessage | undefined;
     readonly messages: readonly ModelMessage[];
   };
-  readonly providerResolvers?: readonly RuntimeContextResolver[];
+  readonly providerResolvers?: readonly SessionRuntimeContextResolver[];
   readonly session: HarnessSession;
 }
 
@@ -61,13 +56,10 @@ export function buildTelemetryRuntimeContext(
 
   const authoredRuntimeContext = resolveStepStartedRuntimeContext(input);
   const providerRuntimeContext = resolveProviderRuntimeContext(input);
-  const context = contextStorage.getStore();
-  const projection = context?.get(ChannelInstrumentationKey);
-
   return {
     ...authoredRuntimeContext,
     ...providerRuntimeContext,
-    "eve.channel.kind": normalizeInstrumentationChannelKind(projection?.kind),
+    "eve.channel.kind": normalizeInstrumentationChannelKind(input.channel.kind),
     "eve.environment": input.environment,
     "eve.session.id": input.session.sessionId,
     "eve.step.index": String(input.emissionState.stepIndex),
@@ -81,17 +73,13 @@ function buildInstrumentationStepStartedInput(
   input: Omit<BuildTelemetryRuntimeContextInput, "authored" | "eveVersion" | "environment">,
 ): InstrumentationStepStartedEventInput {
   const context = contextStorage.getStore();
-  const projection = context?.get(ChannelInstrumentationKey);
-  const capturesContent = shouldCaptureInstrumentationContent(
-    normalizeChannelAudience(projection?.metadata.audience),
-  );
 
   return {
     channel: {
-      kind: normalizeInstrumentationChannelKind(projection?.kind),
-      metadata: snapshotForInstrumentation(projection?.metadata, "channel.metadata") ?? {},
+      kind: normalizeInstrumentationChannelKind(input.channel.kind),
+      metadata: snapshotForInstrumentation(input.channel.metadata, "channel.metadata") ?? {},
     } as InstrumentationChannel,
-    modelInput: capturesContent
+    modelInput: input.capturesContent
       ? (snapshotForInstrumentation(input.modelInput, "modelInput") ?? {
           instructions: undefined,
           messages: [],

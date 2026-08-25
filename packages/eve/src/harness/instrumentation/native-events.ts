@@ -8,9 +8,7 @@ import type {
   InstrumentationHooks,
   InstrumentationInputRequestedEvent,
   InstrumentationInputResolvedEvent,
-  InstrumentationParentLineage,
   InstrumentationPointEvent,
-  InstrumentationTraceContext,
   InstrumentationUsage,
 } from "#instrumentation/lifecycle.js";
 import {
@@ -29,18 +27,11 @@ import type { ResolvedInputBatch } from "#harness/input-requests.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
-import type { ChannelAudience } from "#shared/channel-audience.js";
 
 export interface CreateInstrumentationHandleEventInput {
-  readonly agentName?: string;
-  readonly channelKind?: string;
-  readonly channelAudience?: ChannelAudience;
   readonly getAttemptScope?: () => InstrumentationAttemptScope | undefined;
   readonly handleEvent?: HandleEventFn;
   readonly hooks?: InstrumentationHooks;
-  readonly parentLineage?: InstrumentationParentLineage;
-  readonly parentTraceContext?: InstrumentationTraceContext;
-  readonly rootSessionId?: string;
   readonly sessionId: string;
   readonly turnId?: string;
 }
@@ -293,12 +284,8 @@ function toLifecycleEvent(
   switch (event.type) {
     case "session.started":
       return {
-        agentName: input.agentName,
-        channelAudience: input.channelAudience,
-        channelKind: input.channelKind,
         idempotencyKey: sessionIdempotencyKey(input.sessionId),
-        parentTraceContext: input.parentTraceContext,
-        rootSessionId: input.rootSessionId ?? input.sessionId,
+        rootSessionId: input.sessionId,
         sessionId: input.sessionId,
         type: "session.started",
       };
@@ -321,9 +308,7 @@ function toLifecycleEvent(
     case "turn.started":
       return {
         idempotencyKey: turnIdempotencyKey(input.sessionId, event.data.turnId),
-        parentLineage: input.parentLineage,
-        parentTraceContext: input.parentTraceContext,
-        rootSessionId: input.rootSessionId ?? input.sessionId,
+        rootSessionId: input.sessionId,
         sequence: event.data.sequence,
         sessionId: input.sessionId,
         turnId: event.data.turnId,

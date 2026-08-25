@@ -15,7 +15,9 @@ import type {
   InstrumentationTurnStartedEvent,
 } from "#instrumentation/lifecycle.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
-import type { JsonObject, JsonValue } from "#shared/json.js";
+import { parseJsonObject, type JsonObject, type JsonValue } from "#shared/json.js";
+import type { InstrumentationRuntimeContextInput } from "#public/instrumentation/index.js";
+import type { InstrumentationChannel } from "#public/instrumentation/index.js";
 
 /**
  * Opaque serialized session instrumentation plan.
@@ -47,11 +49,13 @@ export interface SessionInstrumentationPlanData {
   readonly audience: ChannelAudience;
   readonly channelType?: string;
   readonly channelKind?: string;
+  readonly channelMetadata: JsonObject;
   readonly traceId: string;
   readonly spanId: string;
   readonly traceFlags: number;
   readonly sampled: boolean;
   readonly captureLevel: InstrumentationCapture;
+  readonly functionId?: string;
   readonly isTraceContentVisible: boolean;
   readonly recordInputs?: boolean;
   readonly recordOutputs?: boolean;
@@ -127,11 +131,16 @@ export function parseSessionInstrumentationPlan(
     audience,
     channelType: typeof record["channelType"] === "string" ? record["channelType"] : undefined,
     channelKind: typeof record["channelKind"] === "string" ? record["channelKind"] : undefined,
+    channelMetadata:
+      typeof record["channelMetadata"] === "object" && record["channelMetadata"] !== null
+        ? parseJsonObject(record["channelMetadata"])
+        : {},
     traceId,
     spanId,
     traceFlags,
     sampled: (traceFlags & 0x01) === 0x01,
     captureLevel,
+    functionId: typeof record["functionId"] === "string" ? record["functionId"] : undefined,
     isTraceContentVisible: record["isTraceContentVisible"] === true,
     recordInputs: typeof record["recordInputs"] === "boolean" ? record["recordInputs"] : undefined,
     recordOutputs:
@@ -145,6 +154,21 @@ export function parseSessionInstrumentationPlan(
 function shouldCaptureContent(audience: ChannelAudience): boolean {
   if (audience === "public") return true;
   return audience === "unknown" && isEveDevEnvironment();
+}
+
+/** @internal Migration-only workflow visibility for contexts without a plan. */
+export function legacyTraceContentVisible(audience: unknown): boolean {
+  return shouldCaptureContent(normalizeChannelAudience(audience));
+}
+
+/** @internal Migration-only trace id reader for contexts without a plan. */
+export function readLegacyTraceId(seed: unknown): string | undefined {
+  if (typeof seed !== "object" || seed === null) return undefined;
+  const record = seed as Record<string, unknown>;
+  const traceId = record["traceId"];
+  const traceFlags = record["traceFlags"];
+  if (typeof traceId !== "string" || typeof traceFlags !== "number") return undefined;
+  return (traceFlags & 0x01) === 0x01 && traceId.length > 0 ? traceId : undefined;
 }
 
 /**
@@ -166,6 +190,7 @@ export function planSessionInstrumentation(input: {
   const audience = normalizeChannelAudience(channel?.metadata.audience);
   const channelType = channel?.channelType;
   const channelKind = channel?.kind;
+  const channelMetadata = snapshotChannelMetadata(channel?.metadata);
   const agentName = input.session.agentName;
 
   const runtime = input.runtime;
@@ -176,6 +201,7 @@ export function planSessionInstrumentation(input: {
       audience,
       channelType,
       channelKind,
+      channelMetadata,
       traceId: parentTraceContext.traceId,
       spanId: parentTraceContext.spanId,
       traceFlags: parentTraceContext.traceFlags,
@@ -184,6 +210,7 @@ export function planSessionInstrumentation(input: {
         runtime,
         parentTraceContext.traceFlags & 0x01 ? true : false,
       ),
+      functionId: runtime?.otelSettings?.functionId,
       isTraceContentVisible: shouldCaptureContent(audience),
       recordInputs: runtime?.otelSettings?.recordInputs,
       recordOutputs: runtime?.otelSettings?.recordOutputs,
@@ -204,12 +231,16 @@ export function planSessionInstrumentation(input: {
       audience,
       channelType,
       channelKind,
+      channelMetadata,
       traceId: "",
       spanId: "",
       traceFlags: 0,
       sampled: false,
-      captureLevel: "metadata",
+      captureLevel: resolveCaptureLevel(runtime, false),
+      functionId: runtime?.otelSettings?.functionId,
       isTraceContentVisible: shouldCaptureContent(audience),
+      recordInputs: runtime?.otelSettings?.recordInputs,
+      recordOutputs: runtime?.otelSettings?.recordOutputs,
       rootSessionId,
     };
     return { schemaVersion: SCHEMA_VERSION, data: toJsonObject(data) };
@@ -226,17 +257,27 @@ export function planSessionInstrumentation(input: {
     audience,
     channelType,
     channelKind,
+    channelMetadata,
     traceId: runtime.idGenerator.generateTraceId(),
     spanId: runtime.idGenerator.allocateSpanId(),
     traceFlags: sampled ? 1 : 0,
     sampled,
     captureLevel: resolveCaptureLevel(runtime, sampled),
+    functionId: runtime.otelSettings.functionId,
     isTraceContentVisible: shouldCaptureContent(audience),
     recordInputs: runtime.otelSettings.recordInputs,
     recordOutputs: runtime.otelSettings.recordOutputs,
     rootSessionId,
   };
   return { schemaVersion: SCHEMA_VERSION, data: toJsonObject(data) };
+}
+
+function snapshotChannelMetadata(value: unknown): JsonObject {
+  try {
+    return parseJsonObject(value ?? {});
+  } catch {
+    return {};
+  }
 }
 
 function resolveCaptureLevel(
@@ -279,6 +320,7 @@ function evaluateTracePolicySafe(
 export interface InstrumentationPlanningRuntime {
   readonly idGenerator?: { allocateSpanId(): string; generateTraceId(): string };
   readonly otelSettings?: {
+    readonly functionId?: string;
     readonly tracePolicy?: (trace: {
       readonly agentName?: string;
       readonly audience: ChannelAudience;
@@ -367,15 +409,25 @@ export interface PreambleInput {
 /** Input to {@link SessionInstrumentation.telemetryForAttempt}. */
 export interface AttemptInstrumentationInput {
   readonly agentName?: string;
+  readonly bridgeIntegration?: unknown;
+  readonly registeredIntegrations?: readonly unknown[];
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
 }
 
 /** Input to {@link SessionInstrumentation.runStep}. */
 export interface StepInstrumentationInput {
+  readonly agentName?: string;
+  readonly environment: string;
+  readonly eveVersion: string;
+  readonly hasInput: boolean;
   readonly sessionId: string;
   readonly turnId: string;
   readonly sequence: number;
 }
+
+export type SessionRuntimeContextResolver = (
+  input: InstrumentationRuntimeContextInput,
+) => JsonObject | undefined;
 
 /** Input to {@link SessionInstrumentation.propagationFor}. */
 export interface ChildPropagationInput {
@@ -401,6 +453,7 @@ export interface InstrumentationPropagation {
 export interface SessionInstrumentation {
   /** @internal Transitional AI SDK bridge surface. */
   readonly hooks: InstrumentationHooks;
+  readonly capturesContent: boolean;
   /** @internal Transitional AI SDK bridge surface. */
   readonly prepareSessionTrace?: (
     event: InstrumentationSessionStartedEvent,
@@ -411,6 +464,11 @@ export interface SessionInstrumentation {
   ) => Promise<InstrumentationTraceContext>;
   /** @internal Transitional AI SDK bridge surface. */
   readonly runInContext: InstrumentationContextRunner;
+  /** @internal Transitional runtime-context bridge surface. */
+  readonly runtimeContextResolvers?: readonly SessionRuntimeContextResolver[];
+  readonly runtimeContextChannel: InstrumentationChannel;
+  /** Whether AI SDK OTel integration must be installed for this session. */
+  readonly usesOtel: boolean;
   publish(event: InstrumentationEventInput): Promise<void>;
   preparePreamble(input: PreambleInput): Promise<RuntimeTraceContext | undefined>;
   telemetryForAttempt(input: AttemptInstrumentationInput): SessionTelemetryOptions | undefined;

@@ -32,13 +32,12 @@
  */
 
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
-import { ChannelRequestIdKey, type SessionTraceSeed } from "#context/keys.js";
-import { shouldCaptureInstrumentationContent } from "#harness/instrumentation/content-policy.js";
-import { isSampledTrace } from "#tracing/sampled-trace.js";
+import { ChannelRequestIdKey } from "#context/keys.js";
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
-import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { isNonEmptyString } from "#shared/guards.js";
 import {
+  legacyTraceContentVisible,
+  readLegacyTraceId,
   readPlanTraceId,
   readPlanIsTraceContentVisible,
   readPlanChannelKind,
@@ -115,15 +114,13 @@ export function isWorkflowTraceContentVisible(serializedContext: Record<string, 
   const channel = serializedContext[CHANNEL_CONTEXT_KEY_NAME] as
     | SerializedChannelAdapter
     | undefined;
-  return shouldCaptureInstrumentationContent(normalizeChannelAudience(channel?.audience));
+  return legacyTraceContentVisible(channel?.audience);
 }
 
 export function readSessionTraceId(serializedContext: Record<string, unknown>): string | undefined {
   const plan = readPlanFromContext(serializedContext);
   if (plan !== undefined) return readPlanTraceId(plan);
-  const seed = serializedContext["eve.sessionTraceSeed"] as SessionTraceSeed | undefined;
-  if (seed === undefined || !isSampledTrace(seed)) return undefined;
-  return isNonEmptyString(seed.traceId) ? seed.traceId : undefined;
+  return readLegacyTraceId(serializedContext["eve.sessionTraceSeed"]);
 }
 
 /**
