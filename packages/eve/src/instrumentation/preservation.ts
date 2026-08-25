@@ -6,8 +6,10 @@ export function preserveSerializedSessionInstrumentation(
   original: Record<string, unknown>,
   interrupted: Record<string, unknown>,
 ): Record<string, unknown> {
-  return preserveSerializedInstrumentationState(
+  const preserved = preserveSerializedInstrumentationState(
     preserveSerializedAgentTraceState(original, interrupted),
     interrupted,
   );
+  const plan = interrupted["eve.sessionInstrumentationPlan"];
+  return plan === undefined ? preserved : { ...preserved, "eve.sessionInstrumentationPlan": plan };
 }

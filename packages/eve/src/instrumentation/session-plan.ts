@@ -285,6 +285,34 @@ export function planSessionInstrumentation(input: {
   return { schemaVersion: SCHEMA_VERSION, data: toJsonObject(data) };
 }
 
+/** Builds a one-time migration plan while preserving an existing seed exactly. */
+export function migrateSessionInstrumentation(input: {
+  readonly runtime?: InstrumentationPlanningRuntime;
+  readonly seed: InstrumentationTraceContext;
+  readonly session: SessionInstrumentationPlanningInput;
+}): SerializedSessionInstrumentation {
+  const audience = normalizeChannelAudience(input.session.channel?.metadata.audience);
+  const sampled = (input.seed.traceFlags & 0x01) === 0x01;
+  const data: SessionInstrumentationPlanData = {
+    agentName: input.session.agentName,
+    audience,
+    captureLevel: resolveCaptureLevel(input.runtime, sampled),
+    channelKind: input.session.channel?.kind,
+    channelMetadata: snapshotChannelMetadata(input.session.channel?.metadata),
+    channelType: input.session.channel?.channelType,
+    functionId: input.runtime?.otelSettings?.functionId,
+    isTraceContentVisible: shouldCaptureContent(audience),
+    recordInputs: input.runtime?.otelSettings?.recordInputs,
+    recordOutputs: input.runtime?.otelSettings?.recordOutputs,
+    rootSessionId: input.session.rootSessionId,
+    sampled,
+    spanId: input.seed.spanId,
+    traceFlags: input.seed.traceFlags,
+    traceId: input.seed.traceId,
+  };
+  return { schemaVersion: SCHEMA_VERSION, data: toJsonObject(data) };
+}
+
 function snapshotChannelMetadata(value: unknown): JsonObject {
   try {
     return parseJsonObject(value ?? {});

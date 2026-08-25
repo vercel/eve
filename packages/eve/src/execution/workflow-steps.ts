@@ -44,7 +44,7 @@ import {
 } from "#harness/channel-delivery-instrumentation.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { bindSessionInstrumentation } from "#instrumentation/bind-session.js";
-import { SessionInstrumentationPlanKey } from "#instrumentation/session-plan.js";
+import { ensureSessionInstrumentationPlan } from "#instrumentation/migration.js";
 import { preserveSerializedSessionInstrumentation } from "#instrumentation/preservation.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
@@ -194,10 +194,17 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     turnAgent: effectiveAgent.turnAgent,
   });
   const history = createExecutionHistoryView(initialSession);
-  const instrumentation = bindSessionInstrumentation({
-    plan: ctx.get(SessionInstrumentationPlanKey),
+  const instrumentationRuntime = getInstrumentationRuntime();
+  const instrumentationPlan = ensureSessionInstrumentationPlan({
+    agentName: effectiveAgent.turnAgent.id,
+    ctx,
     rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
-    runtime: getInstrumentationRuntime(),
+    runtime: instrumentationRuntime,
+  });
+  const instrumentation = bindSessionInstrumentation({
+    plan: instrumentationPlan,
+    rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
+    runtime: instrumentationRuntime,
     sessionId: initialSession.sessionId,
   });
   const initialEmissionState = getHarnessEmissionState(initialSession.state);

@@ -9,8 +9,7 @@ import {
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
-import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
-import { evaluateTracePolicy, isSampledTrace } from "#tracing/sampled-trace.js";
+import { isSampledTrace } from "#tracing/sampled-trace.js";
 import type { AgentSessionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 import { withNativeSamplingDecision } from "#tracing/native-sampling.js";
 
@@ -19,7 +18,6 @@ interface AgentOtelSessionContextInput {
   readonly idGenerator: AgentSpanIdGenerator;
   readonly stateStore: AgentTraceStateStore;
   readonly tracer: Tracer;
-  readonly tracePolicy?: TraceCapturePolicy;
 }
 
 interface AgentOtelSessionContext {
@@ -77,35 +75,14 @@ export function createAgentOtelSessionContext(
       span.end();
       return span.spanContext();
     }
-    // Fallback for already-running workflows that predate the seed.
-    if (
-      !evaluateTracePolicy(input.tracePolicy, {
-        agentName: session.agentName,
-        audience: session.channelAudience,
-        channelType: session.channelType,
-      })
-    ) {
-      return {
-        isRemote: false,
-        spanId: input.idGenerator.deriveSpanId(`session:${session.sessionId}`),
-        traceFlags: 0,
-        traceId: input.idGenerator.generateTraceId(),
-      };
-    }
-    const span = input.tracer.startSpan("agent.session", {
-      attributes: {
-        "agent.framework.name": "eve",
-        "agent.framework.version": input.frameworkVersion,
-        "agent.channel.audience": session.channelAudience,
-        "agent.name": session.agentName,
-        "agent.session.id": session.sessionId,
-        "agent.trace.schema.version": 2,
-      },
-      root: true,
-    });
-    span.addEvent("session.started");
-    span.end();
-    return span.spanContext();
+    // Missing seeds are invalid after workflow-context migration. Fail closed
+    // without re-evaluating policy or creating an exported native root.
+    return {
+      isRemote: false,
+      spanId: input.idGenerator.deriveSpanId(`session:${session.sessionId}`),
+      traceFlags: 0,
+      traceId: input.idGenerator.generateTraceId(),
+    };
   };
 
   const ensureSessionContext = async (

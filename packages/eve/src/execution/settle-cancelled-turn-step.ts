@@ -29,7 +29,7 @@ import { clearPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { createInstrumentationHandleEvent } from "#harness/instrumentation/native-events.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { bindSessionInstrumentation } from "#instrumentation/bind-session.js";
-import { SessionInstrumentationPlanKey } from "#instrumentation/session-plan.js";
+import { ensureSessionInstrumentationPlan } from "#instrumentation/migration.js";
 import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
 import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import {
@@ -73,10 +73,17 @@ export async function settleCancelledTurnStep(input: {
     durable: durableSession,
     turnAgent: effectiveAgent.turnAgent,
   });
-  const instrumentation = bindSessionInstrumentation({
-    plan: ctx.get(SessionInstrumentationPlanKey),
+  const instrumentationRuntime = getInstrumentationRuntime();
+  const instrumentationPlan = ensureSessionInstrumentationPlan({
+    agentName: effectiveAgent.turnAgent.id,
+    ctx,
     rootSessionId: session.rootSessionId ?? session.sessionId,
-    runtime: getInstrumentationRuntime(),
+    runtime: instrumentationRuntime,
+  });
+  const instrumentation = bindSessionInstrumentation({
+    plan: instrumentationPlan,
+    rootSessionId: session.rootSessionId ?? session.sessionId,
+    runtime: instrumentationRuntime,
     sessionId: session.sessionId,
   });
 

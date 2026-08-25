@@ -112,6 +112,7 @@ async function emitAttempt(input: {
   readonly turnAlreadyStarted?: boolean;
   readonly turnId: string;
   readonly turnSequence: number;
+  readonly traceSeed?: InstrumentationTraceContext;
 }): Promise<void> {
   const scope: InstrumentationAttemptScope = {
     attemptId: `${input.sessionId}:${input.turnId}:0:${input.attemptIndex ?? 0}`,
@@ -292,6 +293,7 @@ async function publishTurnStarted(input: {
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId?: string;
   readonly sessionId: string;
+  readonly traceSeed?: InstrumentationTraceContext;
   readonly turnId: string;
   readonly turnSequence: number;
 }): Promise<void> {
@@ -304,6 +306,15 @@ async function publishTurnStarted(input: {
     parentTraceContext: input.parentTraceContext,
     rootSessionId,
     sessionId: input.sessionId,
+    traceSeed:
+      input.traceSeed ??
+      (input.parentTraceContext === undefined
+        ? {
+            spanId: "1111111111111111",
+            traceFlags: 1,
+            traceId: "22222222222222222222222222222222",
+          }
+        : undefined),
     type: "session.started",
   });
   await input.hooks.publish({
@@ -354,6 +365,11 @@ describe("createAgentOtelInstrumentation", () => {
       idempotencyKey: sessionIdempotencyKey("session-1"),
       rootSessionId: "session-1",
       sessionId: "session-1",
+      traceSeed: {
+        spanId: "1111111111111111",
+        traceFlags: 1,
+        traceId: "22222222222222222222222222222222",
+      },
       type: "session.started" as const,
     };
     const turnEvent = {
@@ -409,7 +425,7 @@ describe("createAgentOtelInstrumentation", () => {
     expect(session.spanContext().spanId).toBe(seed.spanId);
   });
 
-  it("falls back to fresh ids when no trace seed is present", async () => {
+  it("fails closed when migration did not provide a trace seed", async () => {
     const runtime = createRuntime();
     const sessionEvent = {
       agentName: "weather",
@@ -423,14 +439,11 @@ describe("createAgentOtelInstrumentation", () => {
     await runtime.hooks.publish(sessionEvent);
     await runtime.provider.forceFlush();
 
-    const spans = runtime.exporter.getFinishedSpans();
-    const session = byName(spans, "agent.session")[0]!;
-    expect(session.spanContext().traceId).toBe(trace.traceId);
-    // Fresh span id is random, not derived — just verify it matches the returned context.
-    expect(session.spanContext().spanId).toBe(trace.spanId);
+    expect(trace.traceFlags).toBe(0);
+    expect(byName(runtime.exporter.getFinishedSpans(), "agent.session")).toHaveLength(0);
   });
 
-  it("passes channelType to the policy on the seedless fallback path", async () => {
+  it("does not evaluate policy on a seedless provider fallback", async () => {
     let captured: { channelType?: string } | undefined;
     const runtime = createRuntime(undefined, (trace) => {
       captured = trace;
@@ -447,7 +460,7 @@ describe("createAgentOtelInstrumentation", () => {
 
     await runtime.prepareSessionTrace(sessionEvent);
 
-    expect(captured?.channelType).toBe("slack");
+    expect(captured).toBeUndefined();
   });
 
   it("inherits parent trace context for delegated agents", async () => {
@@ -540,6 +553,11 @@ describe("createAgentOtelInstrumentation", () => {
         idempotencyKey,
         rootSessionId: "session-1",
         sessionId: "session-1",
+        traceSeed: {
+          spanId: "1111111111111111",
+          traceFlags: 1,
+          traceId: "22222222222222222222222222222222",
+        },
         type: "channel.delivery.started",
       });
       await runtime.hooks.publish({
@@ -605,6 +623,11 @@ describe("createAgentOtelInstrumentation", () => {
         idempotencyKey: sessionIdempotencyKey("session-1"),
         rootSessionId: "session-1",
         sessionId: "session-1",
+        traceSeed: {
+          spanId: "1111111111111111",
+          traceFlags: 1,
+          traceId: "22222222222222222222222222222222",
+        },
         type: "session.started",
       });
       await runtime.hooks.publish(started);
@@ -800,7 +823,7 @@ describe("createAgentOtelInstrumentation", () => {
   });
 
   it.each(["private", "unknown"] as const)(
-    "does not record %s conversation traces by default",
+    "does not record %s conversation traces when the frozen plan is unsampled",
     async (audience) => {
       const runtime = createRuntime(new InMemoryAgentTraceStateStore(), null);
 
@@ -809,6 +832,11 @@ describe("createAgentOtelInstrumentation", () => {
         hooks: runtime.hooks,
         runInContext: runtime.runInContext,
         sessionId: `session-${audience}`,
+        traceSeed: {
+          spanId: "1111111111111111",
+          traceFlags: 0,
+          traceId: "22222222222222222222222222222222",
+        },
         turnId: `turn-${audience}`,
         turnSequence: 0,
       });
@@ -1395,6 +1423,11 @@ describe("createAgentOtelInstrumentation", () => {
       idempotencyKey: sessionIdempotencyKey("session-1"),
       rootSessionId: "session-1",
       sessionId: "session-1",
+      traceSeed: {
+        spanId: "1111111111111111",
+        traceFlags: 1,
+        traceId: "22222222222222222222222222222222",
+      },
       type: "session.started",
     });
     await runtime.hooks.publish({
@@ -1682,9 +1715,8 @@ describe("createAgentOtelInstrumentation", () => {
     const firstTurn = byName(firstRuntime.exporter.getFinishedSpans(), "agent.turn")[0]!;
     const replayTurn = byName(replayRuntime.exporter.getFinishedSpans(), "agent.turn")[0]!;
     // The abandoned attempt keeps its own trace rather than interleaving with
-    // the retry. Both carry `agent.session.id`, so the session view still
-    // resolves to every trace the session produced.
-    expect(replayTurn.spanContext().traceId).not.toBe(firstTurn.spanContext().traceId);
+    // Migration preserves one frozen trace identity across replay.
+    expect(replayTurn.spanContext().traceId).toBe(firstTurn.spanContext().traceId);
     expect(replayTurn.attributes["agent.session.id"]).toBe(
       firstTurn.attributes["agent.session.id"],
     );
