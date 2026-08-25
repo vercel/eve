@@ -60,10 +60,14 @@ const startOperation: StartOperation = {
 };
 
 const identity: AgentIdentity = {
+  execution: "blocking",
   id: deriveAgentId("research", startOperation.id),
   name: "research",
   nodeId: "node_research",
+  targetKind: "local",
 };
+
+const backgroundIdentity: AgentIdentity = { ...identity, execution: "background" };
 
 const address: AgentAddress = {
   continuationToken: "continuation_child",
@@ -149,13 +153,15 @@ describe("confirmAgentStarted", () => {
 });
 
 describe("task agent addresses", () => {
-  it("confirms a persistent address without an execution phase", () => {
+  it("confirms a persistent background address", () => {
     const addressed = confirmTaskAgentAddress(preparedSession(), {
       address,
       operationId: startOperation.id,
     });
 
-    expect(handlesOf(addressed)).toEqual([{ address, identity, phase: "addressed" }]);
+    expect(handlesOf(addressed)).toEqual([
+      { address, identity: backgroundIdentity, phase: "addressed" },
+    ]);
   });
 
   it("removes only the addressed task agent", () => {
@@ -171,7 +177,9 @@ describe("task agent addresses", () => {
 describe("recordTaskAgentAddress", () => {
   it("appends an addressed handle from a delegated task's executor binding", () => {
     const recorded = recordTaskAgentAddress(createSession(), { address, identity });
-    expect(handlesOf(recorded)).toEqual([{ address, identity, phase: "addressed" }]);
+    expect(handlesOf(recorded)).toEqual([
+      { address, identity: backgroundIdentity, phase: "addressed" },
+    ]);
   });
 
   it("is a replay no-op when the identical handle is already stored", () => {
@@ -342,7 +350,13 @@ describe("rebaseAgentHandles", () => {
       kind: "agent/local",
       sessionId: "session_other",
     },
-    identity: { id: "ag_writer:aaaaaaaaaaaa", name: "writer", nodeId: "node_writer" },
+    identity: {
+      execution: "blocking",
+      id: "ag_writer:aaaaaaaaaaaa",
+      name: "writer",
+      nodeId: "node_writer",
+      targetKind: "local",
+    },
     lastStatus: "",
     phase: "parked",
   };

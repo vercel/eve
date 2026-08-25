@@ -90,6 +90,8 @@ export function createSubagentExecutorBinding(executor: SubagentExecutorData): T
   return {
     data: {
       address: { ...address },
+      // Keep the established byte shape so replaying a bind against a task
+      // created before handle metadata was added remains idempotent.
       identity: { id: identity.id, name: identity.name, nodeId: identity.nodeId },
     },
     kind: "subagent",
@@ -103,14 +105,28 @@ export function readSubagentExecutor(
   if (binding?.kind !== "subagent") return undefined;
   const identity = readAgentIdentity(binding.data.identity);
   const address = readAgentAddress(binding.data.address);
-  return identity === undefined || address === undefined ? undefined : { address, identity };
+  if (identity === undefined || address === undefined) return undefined;
+  return {
+    address,
+    identity: {
+      ...identity,
+      execution: identity.execution ?? "background",
+      targetKind: identity.targetKind ?? (address.kind === "agent/remote" ? "remote" : "local"),
+    } satisfies AgentIdentity,
+  };
 }
 
 function readAgentIdentity(value: JsonValue | undefined): AgentIdentity | undefined {
   if (value === undefined || !isJsonObjectValue(value)) return undefined;
-  const { id, name, nodeId } = value;
+  const { execution, id, name, nodeId, targetKind } = value;
   return typeof id === "string" && typeof name === "string" && typeof nodeId === "string"
-    ? { id, name, nodeId }
+    ? {
+        execution: execution === "blocking" || execution === "background" ? execution : undefined,
+        id,
+        name,
+        nodeId,
+        targetKind: targetKind === "local" || targetKind === "remote" ? targetKind : undefined,
+      }
     : undefined;
 }
 

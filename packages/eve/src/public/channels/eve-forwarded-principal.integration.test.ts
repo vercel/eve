@@ -57,6 +57,7 @@ function createEmptySkillBundle(): CompiledBundle {
     moduleMap: undefined as never,
     nodeId: undefined,
     resolvedAgent: { skills: [] } as never,
+    rootCapabilities: { tasks: false },
     subagentRegistry: undefined as never,
     toolRegistry: undefined as never,
     turnAgent: undefined as never,

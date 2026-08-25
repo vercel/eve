@@ -64,6 +64,7 @@ export function createRuntimeSubagentRegistry(input: {
    * `agentId` continuation field to every lowered subagent tool schema.
    */
   readonly persistentSessions?: boolean;
+  readonly tasksEnabled?: boolean;
   readonly reservedToolNames?: readonly string[];
   readonly subagents: readonly ResolvedRuntimeDelegationNode[];
 }): RuntimeSubagentRegistry {
@@ -94,7 +95,9 @@ export function createRuntimeSubagentRegistry(input: {
     let registeredSubagent: RuntimeRegisteredSubagent;
     const dynamic = subagentDefinition.kind === "subagent" ? subagentDefinition.dynamic : undefined;
     if (dynamic === undefined) {
-      const prepared = createPreparedRuntimeSubagentTool(subagentDefinition, inputSchema);
+      const prepared = createPreparedRuntimeSubagentTool(subagentDefinition, inputSchema, {
+        execution: input.tasksEnabled === true ? "background" : "blocking",
+      });
       registeredSubagent = {
         definition: subagentDefinition,
         prepared,
@@ -135,12 +138,14 @@ export function createRuntimeSubagentRegistry(input: {
 export function createPreparedRuntimeSubagentTool(
   definition: ResolvedRuntimeDelegationNode,
   inputSchema: JsonObject = SUBAGENT_TOOL_INPUT_JSON_SCHEMA,
+  options: { readonly execution?: "background" | "blocking" } = { execution: "blocking" },
 ): PreparedRuntimeDelegationTool {
   if (definition.description === undefined) {
     throw new Error(`Static subagent "${definition.name}" is missing a description.`);
   }
   return {
     description: definition.description,
+    execution: options.execution,
     inputSchema,
     kind: definition.kind,
     logicalPath: definition.logicalPath,
@@ -148,5 +153,6 @@ export function createPreparedRuntimeSubagentTool(
     nodeId: definition.nodeId,
     outputSchema: definition.kind === "remote" ? definition.outputSchema : undefined,
     sourceId: definition.sourceId,
+    targetKind: definition.kind === "remote" ? "remote" : "local",
   };
 }

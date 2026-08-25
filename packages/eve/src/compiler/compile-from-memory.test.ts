@@ -18,6 +18,7 @@ describe("compileFromMemory", () => {
 
     expect(manifest).toMatchObject({
       kind: COMPILED_AGENT_MANIFEST_KIND,
+      rootCapabilities: { tasks: false },
       version: COMPILED_AGENT_MANIFEST_VERSION,
       config: {
         model: { id: "openai/gpt-5.4" },
@@ -81,7 +82,7 @@ describe("compileFromMemory", () => {
     expect(manifest.bindings[skill!.sourceId]?.owner).toEqual({ kind: "application" });
   });
 
-  it("preserves roots and passes the serialized v42 schema", async () => {
+  it("preserves roots and passes the serialized v43 schema", async () => {
     const { manifest } = await compileFromMemory({
       agentRoot: "/app/agent",
       appRoot: "/app",

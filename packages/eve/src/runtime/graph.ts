@@ -4,6 +4,7 @@ import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import type { RuntimeToolRegistry } from "#runtime/tools/registry.js";
 import type { ResolvedAgent, ResolvedChannelDefinition } from "#runtime/types.js";
+import type { CompiledRootAgentCapabilities } from "#compiler/manifest.js";
 
 /**
  * Stable node id used by the runtime-owned graph bundle for the root agent.
@@ -28,6 +29,7 @@ export interface ResolvedRuntimeAgentNode {
    */
   readonly hookRegistry: RuntimeHookRegistry;
   readonly nodeId: string;
+  readonly rootCapabilities: CompiledRootAgentCapabilities;
   readonly sandboxRegistry: RuntimeSandboxRegistry;
   readonly sourceId?: string;
   readonly subagentRegistry: RuntimeSubagentRegistry;
@@ -42,6 +44,7 @@ export interface ResolvedRuntimeAgentNode {
 export interface ResolvedAgentGraphBundle {
   readonly nodesByNodeId: ReadonlyMap<string, ResolvedRuntimeAgentNode>;
   readonly root: ResolvedRuntimeAgentNode;
+  readonly rootCapabilities: CompiledRootAgentCapabilities;
 }
 
 /**

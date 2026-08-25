@@ -112,7 +112,56 @@ describe("getAgentHandleStore", () => {
 describe("assertPersistableAgentHandleStore", () => {
   it("returns a valid store unchanged in shape", () => {
     expect(assertPersistableAgentHandleStore({ handles: [addressedHandle] })).toEqual({
-      handles: [addressedHandle],
+      handles: [
+        {
+          ...addressedHandle,
+          identity: { ...identity, execution: "background", targetKind: "local" },
+        },
+      ],
+    });
+  });
+
+  it("infers legacy execution and target metadata from phase and routing", () => {
+    const starting: AgentHandle = {
+      identity,
+      operation: startOperation,
+      phase: "starting",
+      target: { continuationToken: "continuation_child", kind: "agent/local" },
+    };
+    const running: AgentHandle = {
+      address: {
+        callbackBaseUrl: "https://parent.test",
+        kind: "agent/remote",
+        sessionId: address.sessionId,
+        url: "https://child.test",
+      },
+      identity,
+      operation: startOperation,
+      phase: "running",
+    };
+    const parked: AgentHandle = {
+      address,
+      identity,
+      lastStatus: "done",
+      phase: "parked",
+    };
+
+    expect(assertPersistableAgentHandleStore({ handles: [starting] }).handles[0]?.identity).toEqual(
+      {
+        ...identity,
+        execution: "blocking",
+        targetKind: "local",
+      },
+    );
+    expect(assertPersistableAgentHandleStore({ handles: [running] }).handles[0]?.identity).toEqual({
+      ...identity,
+      execution: "blocking",
+      targetKind: "remote",
+    });
+    expect(assertPersistableAgentHandleStore({ handles: [parked] }).handles[0]?.identity).toEqual({
+      ...identity,
+      execution: "blocking",
+      targetKind: "local",
     });
   });
 

@@ -52,9 +52,11 @@ const usage = {
 };
 
 const childIdentity: AgentIdentity = {
+  execution: "background",
   id: "ag_research:operation1",
   name: "research",
   nodeId: "node_research",
+  targetKind: "local",
 };
 const childAddress: AgentAddress = {
   continuationToken: "continuation_child",

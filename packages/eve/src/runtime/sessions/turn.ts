@@ -16,10 +16,12 @@ export type PreparedRuntimeAuthoredTool = Readonly<
 >;
 
 type PreparedRuntimeDelegationToolBase<TKind extends "remote" | "subagent"> = Readonly<
-  InternalToolDefinition &
+  Omit<InternalToolDefinition, "execution"> &
     SourceRef &
     Node & {
+      execution?: "blocking" | "background";
       kind: TKind;
+      targetKind?: "local" | "remote";
     }
 >;
 

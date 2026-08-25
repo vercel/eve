@@ -11,7 +11,7 @@ import {
   validateCompiledModuleMap,
 } from "#compiler/validate-artifact.js";
 
-describe("compiled agent manifest v42", () => {
+describe("compiled agent manifest v43", () => {
   it("round-trips a real compiled graph through the serialized schema", async () => {
     const { manifest } = await compileFromMemory({
       model: "openai/gpt-5.4",
@@ -20,7 +20,32 @@ describe("compiled agent manifest v42", () => {
 
     const parsed = compiledAgentManifestSchema.parse(JSON.parse(JSON.stringify(manifest)));
     expect(parsed.version).toBe(COMPILED_AGENT_MANIFEST_VERSION);
+    expect(parsed.rootCapabilities).toEqual({ tasks: false });
     expect(() => validateCompiledAgentManifest(parsed)).not.toThrow();
+  });
+
+  it("projects the root task capability separately from authored config", async () => {
+    const { manifest } = await compileFromMemory({
+      agent: {
+        experimental: { tasks: true },
+        model: "openai/gpt-5.4",
+      },
+      model: "openai/gpt-5.4",
+    });
+
+    expect(manifest.rootCapabilities).toEqual({ tasks: true });
+    expect(manifest.config.experimental?.tasks).toBe(true);
+  });
+
+  it("rejects a root task capability that contradicts authored config", async () => {
+    const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+
+    expect(() =>
+      validateCompiledAgentManifest({
+        ...manifest,
+        rootCapabilities: { tasks: true },
+      }),
+    ).toThrow("root task capability (true) does not match root agent config (false)");
   });
 
   it("rejects a missing required binding", async () => {

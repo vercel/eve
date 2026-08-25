@@ -127,9 +127,11 @@ const LOCAL_PARKED_HANDLE: AgentHandle = {
     sessionId: CHILD_SESSION_ID,
   },
   identity: {
+    execution: "blocking",
     id: deriveAgentId("research", PARKED_START_OPERATION_ID),
     name: "research",
     nodeId: "subagents/research",
+    targetKind: "local",
   },
   lastStatus: "initial result",
   phase: "parked",
@@ -143,9 +145,11 @@ const REMOTE_PARKED_HANDLE: AgentHandle = {
     url: "https://remote.example.com",
   },
   identity: {
+    execution: "blocking",
     id: deriveAgentId("research", PARKED_START_OPERATION_ID),
     name: "research",
     nodeId: "remote/research",
+    targetKind: "remote",
   },
   lastStatus: "initial result",
   phase: "parked",
@@ -287,9 +291,11 @@ describe("dispatchRuntimeActionsStep child starts", () => {
             sessionId: CHILD_SESSION_ID,
           },
           identity: {
+            execution: "blocking",
             id: deriveAgentId("research", startOperationId),
             name: "research",
             nodeId: "subagents/research",
+            targetKind: "local",
           },
           operation: {
             callId: "call-1",
@@ -458,9 +464,11 @@ describe("dispatchRuntimeActionsStep child starts", () => {
             sessionId: CHILD_SESSION_ID,
           },
           identity: {
+            execution: "background",
             id: agentId,
             name: "research",
             nodeId: "subagents/research",
+            targetKind: "local",
           },
           phase: "addressed",
         },

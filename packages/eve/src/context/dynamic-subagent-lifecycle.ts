@@ -69,6 +69,7 @@ async function resolveSelections(input: {
             url: remoteAgent.url,
           },
           inputSchema,
+          { execution: input.ctx.get(TasksEnabledKey) === true ? "background" : "blocking" },
         );
 
         return [resolver.nodeId, { kind: "remote", prepared, remoteAgent }] as const;
@@ -91,6 +92,7 @@ async function resolveSelections(input: {
           sourceKind: resolver.sourceKind,
         },
         inputSchema,
+        { execution: input.ctx.get(TasksEnabledKey) === true ? "background" : "blocking" },
       );
 
       return [

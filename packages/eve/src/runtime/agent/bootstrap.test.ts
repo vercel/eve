@@ -67,6 +67,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
         ],
       }),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
+      rootCapabilities: { tasks: false },
       tools: [createFrameworkAgentTool()],
     });
 
@@ -85,6 +86,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
         } as ResolvedAgent["config"],
       }),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
+      rootCapabilities: { tasks: false },
       tools: [createFrameworkAgentTool()],
     });
 
@@ -96,6 +98,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest(),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
+      rootCapabilities: { tasks: false },
       tools: [],
     });
 
@@ -106,11 +109,11 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest({
         config: {
-          experimental: { tasks: true },
           name: "test-agent",
         } as ResolvedAgent["config"],
       }),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
+      rootCapabilities: { tasks: true },
       tools: [createFrameworkAgentTool()],
     });
 
@@ -127,6 +130,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
         } as ResolvedAgent["config"],
       }),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
+      rootCapabilities: { tasks: false },
       tools: [
         {
           description: "Authored replacement for the framework agent tool.",
@@ -152,6 +156,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
         } as ResolvedAgent["config"],
       }),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
+      rootCapabilities: { tasks: false },
       tools: [],
     });
 
@@ -167,6 +172,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
         } as ResolvedAgent["config"],
       }),
       nodeId: "subagents/researcher",
+      rootCapabilities: { tasks: false },
       tools: [],
     });
 

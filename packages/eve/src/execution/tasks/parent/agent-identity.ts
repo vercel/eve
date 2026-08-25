@@ -19,10 +19,12 @@ export function describeTaskAgent(input: {
     input.agentId ??
     mintStartOperation({
       callId: action.callId,
+      execution: "background",
       name,
       nodeId: action.nodeId,
       parentSessionId: input.parentSessionId,
       parentTurnId: input.parentTurnId,
+      targetKind: action.kind === "remote-agent-call" ? "remote" : "local",
     }).identity.id;
   return {
     agentId,

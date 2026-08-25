@@ -7,7 +7,11 @@ import {
   getDynamicSubagentSelection,
   refreshDynamicSessionSubagentsForRuntimeRevision,
 } from "#context/dynamic-subagent-lifecycle.js";
-import { SessionDynamicSubagentRuntimeRevisionKey, SessionIdKey } from "#context/keys.js";
+import {
+  SessionDynamicSubagentRuntimeRevisionKey,
+  SessionIdKey,
+  TasksEnabledKey,
+} from "#context/keys.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
 import { createSessionStartedEvent, createTurnStartedEvent } from "#protocol/message.js";
@@ -58,6 +62,29 @@ describe("dynamic subagent lifecycle", () => {
       },
     ]);
     expect(getDynamicSubagentSelection(ctx, resolver.nodeId)).toBeDefined();
+  });
+
+  it("stamps the legacy root-wide execution mode on durable selections", async () => {
+    const ctx = createContext();
+    ctx.set(TasksEnabledKey, true);
+    const created = createResolver();
+    const resolver: ResolvedDynamicSubagentResolver = {
+      ...created.resolver,
+      events: { "session.started": () => created.agentConfig },
+    };
+
+    await dispatchDynamicSubagentEvent({
+      ctx,
+      event: createSessionStartedEvent(),
+      messages: [],
+      persistentSessions: true,
+      resolvers: [resolver],
+    });
+
+    expect(getDynamicSubagentSelection(ctx, created.resolver.nodeId)?.prepared).toMatchObject({
+      execution: "background",
+      targetKind: "local",
+    });
   });
 
   it("lets a turn-scoped null hide a session-scoped selection", async () => {

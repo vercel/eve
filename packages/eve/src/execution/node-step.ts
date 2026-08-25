@@ -115,7 +115,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     mode: input.mode,
     onCompaction: preserveFrameworkStateOnCompaction,
     persistentSubagentSessions:
-      input.node.agent.config?.experimental?.tasks === true ||
+      input.node.rootCapabilities.tasks ||
       input.node.agent.config?.experimental?.subagentPersistentSessions === true,
     dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
@@ -188,14 +188,14 @@ function createRuntimeDynamicModelEventDispatcher(
  *
  * For authored tools: copies all lifecycle fields from the resolved definition.
  * For subagent tools: selects the existing runtime-action definition or the
- * background `defineTool` definition from the node's `experimental.tasks` setting.
+ * background `defineTool` definition from the root agent's task capability.
  * Tools without `execute` (provider-managed) get entries with schema but no execute.
  */
 export function createNodeHarnessTools(input: {
   readonly node: ResolvedRuntimeAgentNode;
 }): HarnessToolMap {
   const tools = new Map<string, HarnessToolDefinition>();
-  const tasksEnabled = input.node.agent.config?.experimental?.tasks === true;
+  const tasksEnabled = input.node.rootCapabilities.tasks;
 
   for (const tool of input.node.turnAgent.tools) {
     const definition = resolveHarnessToolDefinition({

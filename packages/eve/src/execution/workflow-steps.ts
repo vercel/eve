@@ -127,7 +127,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   }
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
-  const tasksEnabled = bundle.resolvedAgent.config?.experimental?.tasks === true;
+  const tasksEnabled = bundle.rootCapabilities.tasks;
   ctx.set(TasksEnabledKey, tasksEnabled);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
   const taskUpdatesEnabled =

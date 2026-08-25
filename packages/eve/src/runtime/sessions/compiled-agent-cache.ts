@@ -19,6 +19,7 @@ import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import type { RuntimeToolRegistry } from "#runtime/tools/registry.js";
 import type { ResolvedAgent } from "#runtime/types.js";
+import type { CompiledRootAgentCapabilities } from "#compiler/manifest.js";
 import { getActiveRuntimeSession } from "#runtime/sessions/runtime-session.js";
 
 export interface CompiledRuntimeAgentBundle {
@@ -34,6 +35,7 @@ export interface CompiledRuntimeAgentBundle {
    */
   readonly nodeId?: string;
   readonly resolvedAgent: ResolvedAgent;
+  readonly rootCapabilities: CompiledRootAgentCapabilities;
   readonly subagentRegistry: RuntimeSubagentRegistry;
   readonly toolRegistry: RuntimeToolRegistry;
   readonly turnAgent: RuntimeTurnAgent;
@@ -83,6 +85,7 @@ async function loadFullBundle(
     hookRegistry: rootNode.hookRegistry,
     moduleMap,
     resolvedAgent: rootNode.agent,
+    rootCapabilities: graph.rootCapabilities,
     subagentRegistry: rootNode.subagentRegistry,
     toolRegistry: rootNode.toolRegistry,
     turnAgent: rootNode.turnAgent,
@@ -188,11 +191,13 @@ export async function getCompiledRuntimeAgentBundle(input: {
     graph: {
       nodesByNodeId: fullBundle.graph.nodesByNodeId,
       root: node,
+      rootCapabilities: fullBundle.rootCapabilities,
     },
     hookRegistry: node.hookRegistry,
     moduleMap: fullBundle.moduleMap,
     nodeId: input.nodeId,
     resolvedAgent: node.agent,
+    rootCapabilities: fullBundle.rootCapabilities,
     subagentRegistry: node.subagentRegistry,
     toolRegistry: node.toolRegistry,
     turnAgent: node.turnAgent,

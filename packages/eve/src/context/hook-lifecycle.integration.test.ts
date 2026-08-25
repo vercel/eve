@@ -22,6 +22,7 @@ function createMockBundle(): CompiledBundle {
     moduleMap: undefined as never,
     nodeId: undefined,
     resolvedAgent: { config: { name: "test-agent" }, skills: [] } as never,
+    rootCapabilities: { tasks: false },
     subagentRegistry: undefined as never,
     toolRegistry: undefined as never,
     turnAgent: {

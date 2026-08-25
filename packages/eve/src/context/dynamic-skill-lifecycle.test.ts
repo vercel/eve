@@ -27,6 +27,7 @@ function createMockBundle(authoredSkillNames: readonly string[] = []): CompiledB
       config: { name: "test-agent" },
       skills: authoredSkillNames.map((name) => ({ name })),
     } as never,
+    rootCapabilities: { tasks: false },
     subagentRegistry: undefined as never,
     toolRegistry: undefined as never,
     turnAgent: undefined as never,

@@ -22,8 +22,9 @@ describe("createSessionStep", () => {
   it("adds task_update guidance to a task-owned session system prompt", async () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       resolvedAgent: {
-        config: { experimental: { tasks: true } },
+        config: {},
       },
+      rootCapabilities: { tasks: true },
       turnAgent: {
         ...TestTurnAgent,
         tools: [
@@ -57,6 +58,7 @@ describe("createSessionStep", () => {
       resolvedAgent: {
         config: {},
       },
+      rootCapabilities: { tasks: true },
       turnAgent: TestTurnAgent,
     } as never);
 

@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { applyTaskTransition } from "#tasks/transitions.js";
-import type { TaskCommand, TaskStatus, TaskView } from "#tasks/types.js";
+import {
+  createSubagentExecutorBinding,
+  type TaskCommand,
+  type TaskStatus,
+  type TaskView,
+} from "#tasks/types.js";
 
 function createView(status: TaskStatus, overrides: Partial<TaskView> = {}): TaskView {
   // Cast on purpose: tests probe the transition function's runtime guards
@@ -61,6 +66,38 @@ describe("applyTaskTransition", () => {
         kind: "bind",
       }),
     ).toMatchObject({ action: "rejected", view: bound.view });
+  });
+
+  it("treats a current subagent bind as replay of its legacy byte shape", () => {
+    const legacy = {
+      data: {
+        address: {
+          continuationToken: "continuation_child",
+          kind: "agent/local" as const,
+          sessionId: "session_child",
+        },
+        identity: {
+          id: "ag_research:abcdef123456",
+          name: "research",
+          nodeId: "subagents/research",
+        },
+      },
+      kind: "subagent" as const,
+    };
+    const current = createSubagentExecutorBinding({
+      address: legacy.data.address,
+      identity: {
+        ...legacy.data.identity,
+        execution: "background",
+        targetKind: "local",
+      },
+    });
+    const view = createView("working", { executor: { binding: legacy } });
+
+    expect(applyTaskTransition(view, { executor: current, kind: "bind" })).toEqual({
+      action: "noop",
+      view,
+    });
   });
 
   it("retains a late executor binding after fast task completion", () => {

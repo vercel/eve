@@ -67,10 +67,12 @@ export async function startLocalSubagent(input: {
   const targetKind = source.type === "runtime" ? ("agent/self" as const) : ("agent/local" as const);
   const { identity, operation } = mintStartOperation({
     callId: action.callId,
+    execution: input.taskOwned ? "background" : "blocking",
     name: action.subagentName,
     nodeId: action.nodeId,
     parentSessionId: input.session.sessionId,
     parentTurnId: input.batchEvent.turnId,
+    targetKind: "local",
   });
   // Ownership is recorded before the start side effect, and the prepared
   // (or rejected) store rides every outcome into the step result. The

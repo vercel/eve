@@ -67,10 +67,12 @@ export async function startRemoteSubagent(input: {
 
   const { identity, operation } = mintStartOperation({
     callId: action.callId,
+    execution: input.taskOwned ? "background" : "blocking",
     name: action.remoteAgentName,
     nodeId: action.nodeId,
     parentSessionId: input.session.sessionId,
     parentTurnId: input.batchEvent.turnId,
+    targetKind: "remote",
   });
   const preparedSession = prepareAgentStart(input.currentSession, {
     identity,

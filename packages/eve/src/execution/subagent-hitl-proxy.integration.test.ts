@@ -56,6 +56,7 @@ function buildMockBundle(adapters: readonly ChannelAdapter[]): CompiledBundle {
     hookRegistry: createEmptyHookRegistry(),
     moduleMap: {} as CompiledBundle["moduleMap"],
     resolvedAgent: {} as CompiledBundle["resolvedAgent"],
+    rootCapabilities: { tasks: false },
     subagentRegistry: {} as CompiledBundle["subagentRegistry"],
     toolRegistry: {} as CompiledBundle["toolRegistry"],
     turnAgent: {} as CompiledBundle["turnAgent"],

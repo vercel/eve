@@ -98,10 +98,9 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
 
   // Interrupt-sourced batches obey the same mode split as model-authored
   // ones: task agents wrap every delegation in the task lifecycle.
-  const dispatchStep =
-    bundle.resolvedAgent.config?.experimental?.tasks === true
-      ? dispatchTaskStep
-      : dispatchRuntimeActionsStep;
+  const dispatchStep = bundle.rootCapabilities.tasks
+    ? dispatchTaskStep
+    : dispatchRuntimeActionsStep;
   const dispatched = await dispatchStep({
     callbackBaseUrl: input.callbackBaseUrl,
     parentContinuationToken: input.parentContinuationToken,

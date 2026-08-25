@@ -83,6 +83,7 @@ export function createResolvedRuntimeTurnAgent(input: {
   readonly agent: ResolvedAgent;
   readonly id?: string;
   readonly nodeId?: string;
+  readonly rootCapabilities: { readonly tasks: boolean };
   readonly tools: readonly PreparedRuntimeTool[];
 }): RuntimeTurnAgent {
   const agent = input.agent;
@@ -113,10 +114,9 @@ export function createResolvedRuntimeTurnAgent(input: {
       connections: agent.connections,
       instructions: agent.instructions,
       persistentSubagentSessions:
-        config?.experimental?.tasks === true ||
-        config?.experimental?.subagentPersistentSessions === true,
+        input.rootCapabilities.tasks || config?.experimental?.subagentPersistentSessions === true,
       subagentsAvailable: subagentDeclaredTool || subagentFrameworkRootTool,
-      tasksEnabled: config?.experimental?.tasks === true,
+      tasksEnabled: input.rootCapabilities.tasks,
       toolsAvailable: input.tools.length > 0,
       workspaceSpec: agent.workspaceSpec,
     }),

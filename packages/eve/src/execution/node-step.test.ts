@@ -202,6 +202,7 @@ function createTestNode(
     channels: [],
     hookRegistry: createEmptyHookRegistry(),
     nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
+    rootCapabilities: { tasks: false },
     sandboxRegistry: createStubSandboxRegistry(),
     subagentRegistry: {
       dynamicNodeIds: new Set(),
@@ -241,10 +242,10 @@ async function createNodeWithSourceOwnedTools(input: {
   );
   return {
     ...node,
+    rootCapabilities: { tasks: input.tasks === true },
     agent: {
       ...node.agent,
       config: {
-        experimental: { tasks: input.tasks === true },
         model: { id: "test-model" },
         name: "test",
       },
@@ -317,6 +318,17 @@ describe("createNodeHarnessTools", () => {
       expect(tools.get(name)?.execute).toBeUndefined();
     }
     expect(tools.has("task_sleep")).toBe(false);
+  });
+
+  it("uses projected root tasks on a child whose config has no task setting", async () => {
+    const node = await createNodeWithSourceOwnedTools({
+      names: ["task_cancel"],
+      tasks: true,
+    });
+    expect(node.agent.config?.experimental?.tasks).toBeUndefined();
+    expect(createNodeHarnessTools({ node }).get("task_cancel")?.runtimeAction).toEqual({
+      kind: "task-control",
+    });
   });
 
   it("executes compiled local and remote delegation tools in the selected task mode", async () => {

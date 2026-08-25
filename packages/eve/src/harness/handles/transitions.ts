@@ -193,7 +193,12 @@ export function confirmTaskAgentAddress(
       handle === existing
         ? {
             address: input.address,
-            identity: existing.identity,
+            identity: {
+              ...existing.identity,
+              execution: "background" as const,
+              targetKind:
+                input.address.kind === "agent/remote" ? ("remote" as const) : ("local" as const),
+            },
             phase: "addressed" as const,
           }
         : handle,
@@ -220,7 +225,11 @@ export function recordTaskAgentAddress(
   const handles = getAgentHandleStore(session.state)?.handles ?? [];
   const record: AgentHandle = {
     address: input.address,
-    identity: input.identity,
+    identity: {
+      ...input.identity,
+      execution: "background",
+      targetKind: input.address.kind === "agent/remote" ? "remote" : "local",
+    },
     phase: "addressed",
   };
   const existing = handles.find((handle) => handle.identity.id === input.identity.id);

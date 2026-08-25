@@ -186,5 +186,6 @@ function createGraph(
   return {
     nodesByNodeId: new Map([[ROOT_RUNTIME_AGENT_NODE_ID, root as never]]),
     root: root as never,
+    rootCapabilities: { tasks: false },
   };
 }

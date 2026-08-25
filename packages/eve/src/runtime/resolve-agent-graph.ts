@@ -91,6 +91,7 @@ export async function resolveRuntimeAgentGraph(
     moduleMap: input.moduleMap,
     nodeId: ROOT_COMPILED_AGENT_NODE_ID,
     nodesByNodeId,
+    rootCapabilities: input.manifest.rootCapabilities,
     subagentNodesById,
   });
   attachInheritedSandboxWorkspaceResources({
@@ -101,6 +102,7 @@ export async function resolveRuntimeAgentGraph(
   return {
     nodesByNodeId,
     root,
+    rootCapabilities: input.manifest.rootCapabilities,
   };
 }
 
@@ -111,6 +113,7 @@ interface ResolveRuntimeAgentNodeInput {
   readonly moduleMap: CompiledModuleMap;
   readonly nodeId: string;
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
+  readonly rootCapabilities: CompiledAgentManifest["rootCapabilities"];
   readonly sourceId?: string;
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
 }
@@ -148,8 +151,9 @@ async function resolveRuntimeAgentNode(
   });
   const subagentRegistry = createRuntimeSubagentRegistry({
     persistentSessions:
-      agent.config?.experimental?.tasks === true ||
+      input.rootCapabilities.tasks ||
       agent.config?.experimental?.subagentPersistentSessions === true,
+    tasksEnabled: input.rootCapabilities.tasks,
     reservedToolNames: [
       LOAD_SKILL_TOOL_NAME,
       ...toolRegistry.preparedTools.map((tool) => tool.name),
@@ -160,6 +164,7 @@ async function resolveRuntimeAgentNode(
       moduleMap: input.moduleMap,
       nodesByNodeId: input.nodesByNodeId,
       parentNodeId: input.nodeId,
+      rootCapabilities: input.rootCapabilities,
       subagentNodesById: input.subagentNodesById,
     }),
   });
@@ -168,6 +173,7 @@ async function resolveRuntimeAgentNode(
     channels: agent.channels,
     hookRegistry: createRuntimeHookRegistry(agent.hooks),
     nodeId,
+    rootCapabilities: input.rootCapabilities,
     sandboxRegistry,
     sourceId: input.sourceId,
     subagentRegistry,
@@ -176,6 +182,7 @@ async function resolveRuntimeAgentNode(
       agent,
       id: input.agentId,
       nodeId,
+      rootCapabilities: input.rootCapabilities,
       tools: [...toolRegistry.preparedTools, ...subagentRegistry.preparedTools],
     }),
   };
@@ -191,6 +198,7 @@ async function resolveRuntimeSubagents(input: {
   readonly moduleMap: CompiledModuleMap;
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
   readonly parentNodeId: string;
+  readonly rootCapabilities: CompiledAgentManifest["rootCapabilities"];
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
 }): Promise<readonly ResolvedRuntimeDelegationNode[]> {
   const resolvedSubagents: ResolvedRuntimeDelegationNode[] = [];
@@ -214,6 +222,7 @@ async function resolveRuntimeSubagents(input: {
         childNodeIdsByParentNodeId: input.childNodeIdsByParentNodeId,
         moduleMap: input.moduleMap,
         nodesByNodeId: input.nodesByNodeId,
+        rootCapabilities: input.rootCapabilities,
         sourceRef,
         subagentNodesById: input.subagentNodesById,
       }),
@@ -237,6 +246,7 @@ async function resolveRuntimeSubagent(input: {
   readonly childNodeIdsByParentNodeId: ReadonlyMap<string, readonly string[]>;
   readonly moduleMap: CompiledModuleMap;
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
+  readonly rootCapabilities: CompiledAgentManifest["rootCapabilities"];
   readonly sourceRef: CompiledSubagentNode;
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
 }): Promise<ResolvedRuntimeSubagentNode> {
@@ -268,6 +278,7 @@ async function resolveRuntimeSubagent(input: {
     moduleMap: input.moduleMap,
     nodeId: input.sourceRef.nodeId,
     nodesByNodeId: input.nodesByNodeId,
+    rootCapabilities: input.rootCapabilities,
     sourceId: input.sourceRef.sourceId,
     subagentNodesById: input.subagentNodesById,
   });
