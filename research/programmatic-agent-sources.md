@@ -94,7 +94,7 @@ extension features work around that assumption at different layers:
 Native dispatch itself is a layer of magic strings. Execution branches on
 `sourceId.startsWith("eve:")` to decide how a tool executor is called; the
 harness recognizes `ask_question` and `final_output` by tool-name comparison;
-task control is classified through the `TASK_CONTROL_TOOL_NAMES` name set;
+task control is classified through the `TASK_TOOL_NAMES` name set;
 `load_skill` carries a `frameworkAction` marker even though it runs an
 ordinary inline executor; and advertisement rules such as root-only and
 delegated-caller-only visibility are name checks inside the harness.
@@ -880,7 +880,7 @@ the implementation, not a condition to police with new guards.
 
 This deletes the magic-string dispatch layer: `sourceId.startsWith("eve:")`
 execution branching, `toolName === "ask_question"` and
-`toolName === "final_output"` harness checks, the `TASK_CONTROL_TOOL_NAMES`
+`toolName === "final_output"` harness checks, the `TASK_TOOL_NAMES`
 name set, the `frameworkAction: "load-skill"` marker, and name-based
 visibility rules in tool advertisement.
 
@@ -1072,7 +1072,7 @@ remains:
 | Framework-source graph       | Runtime no-source sandbox construction; `PACKAGE_ROUTES` and the native home, health, and info route defaults; host lifecycle probes using the public health route; silent post-compile ordinary route drops; discovery-only diagnostics that lose compiler warnings; module-global subagent executor-identity state and discarded subagent composition; prompt ownership parsed from source IDs; `public/tools/internal.ts` and `toPublicToolDefinition`. |
 | Primitive ownership          | The mixed `runtime/framework-tools` directory, the `eve/tools/defaults` barrel export, transitional re-export wrappers, public-to-runtime imports, duplicate default definition values, and ordinary “framework tool catalog” terminology.                                                                                                                                                                                                                 |
 | Default config authority     | Synthesized default config in `normalize-agent-config.ts`, undefined-config-source inspection conventions, and config loading outside the total binding table.                                                                                                                                                                                                                                                                                             |
-| Kernel effects               | `sourceId.startsWith("eve:")` execution branching; `ask_question` and `final_output` tool-name checks in the harness; the `TASK_CONTROL_TOOL_NAMES` name set; the `frameworkAction: "load-skill"` marker; name-based advertisement visibility; kernel conditionals, literal name lists, or registries outside the exhaustive integration points; native fabrication of ordinary resources.                                                                 |
+| Kernel effects               | `sourceId.startsWith("eve:")` execution branching; `ask_question` and `final_output` tool-name checks in the harness; the `TASK_TOOL_NAMES` name set; the `frameworkAction: "load-skill"` marker; name-based advertisement visibility; kernel conditionals, literal name lists, or registries outside the exhaustive integration points; native fabrication of ordinary resources.                                                                         |
 | Inspection and memory parity | Inspection owner fallback or framework-state reconstruction; omitted dynamic-resolver or remote-agent provenance; `createMemorySourceId`, mirrored memory manifest references, and other in-memory descriptor shortcuts; harness execution of caller-owned tool objects; downstream source catalogs, composers, merges, or compatibility readers.                                                                                                          |
 
 This ledger also removes the old framework tool and channel catalogs, duplicate
