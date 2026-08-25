@@ -249,6 +249,21 @@ export const hindsightLogo = (props: LogoProps) => (
 
 export const datadogLogo = (props: LogoProps) => <SiDatadog color="default" {...props} />;
 
+export const pusharyLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M12 2a6 6 0 0 0-6 6v3.6l-1.72 2.87A1 1 0 0 0 5.14 16h13.72a1 1 0 0 0 .86-1.53L18 11.6V8a6 6 0 0 0-6-6Z"
+      fill="#D0443F"
+    />
+    <path
+      d="M9.5 18a2.5 2.5 0 0 0 5 0"
+      stroke="#D0443F"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
 export const honeycombLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
@@ -709,6 +724,7 @@ export const logos = {
   jaeger: jaegerLogo,
   raindrop: raindropLogo,
   kernel: kernelLogo,
+  pushary: pusharyLogo,
   upstash: upstashLogo,
   arcana: arcanaLogo,
   hindsight: hindsightLogo,
