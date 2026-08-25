@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1510
 status: proposed
-last_updated: "2026-08-20"
+last_updated: "2026-08-25"
 ---
 
 # First-class memory
@@ -31,6 +31,14 @@ discriminated `phase`, current turn coordinates, a stable operation ID, and the
 locked memory scope resolved for the slot. Tools are resolved once after
 turn-start recall through the same durable dynamic-capability machinery as a
 `turn.started` `defineDynamic` tool resolver.
+
+Memory definitions and provider tools compile through eve's canonical source
+graph. Each selected memory slot retains its authored binding and projects one
+compiler-owned programmatic `tools/<slot>.ts` wrapper that exports an ordinary
+`defineDynamic` resolver. The wrapper qualifies provider tool keys and passes
+them through the existing source composition, binding, module-map, dynamic-tool,
+approval, authorization, and replay paths. Memory does not add a runtime tool
+contribution seam or a second executable registry.
 
 ```text
 turn.started          ---> recall(phase: "turn.started") ---> tools
@@ -126,6 +134,53 @@ export default defineMemory({
 `tools: false` is the only memory-specific tool control. Finer policy — per-tool
 approval, overrides, or denial — reuses the ordinary dynamic-tool approval
 surface, because provider tools are ordinary dynamic tools.
+
+## Compilation and provider tools
+
+Memory is a source-graph primitive, not a post-compile runtime attachment. For
+`agent/memory/user.ts`, the compiler selects and binds the memory definition,
+then projects its provider-tool adapter as a programmatic source at
+`tools/user.ts`:
+
+```text
+memory/user.ts
+  └─ selected memory definition
+       └─ programmatic tools/user.ts wrapper
+            └─ compiled defineDynamic resolver
+                 └─ user__<provider tool key>
+```
+
+The memory definition and wrapper each use the canonical candidate,
+composition, binding-validation, artifact, module-map, hydration, and runtime
+resolution pipeline used by other eve sources. The wrapper participates in
+source selection before normalization; it is never appended to a resolved
+agent, contributed after preamble resolution, or reconstructed from an
+optional manifest side table. Ordinary source composition owns replacement and
+disablement, and the ordinary dynamic-tool lifecycle owns public-name
+collisions and complete-result failure.
+
+The wrapper resolves on `turn.started` after recall commits. It reads the
+already locked slot, invokes `provider.tools(context)`, requires a map of
+branded `defineTool()` values, qualifies each key as
+`<slot>__<provider tool key>`, and prepends the slot description. A disabled
+slot, `tools: false`, `null`, or an empty result contributes no tools. Provider
+factories use eve's durable callback helpers when their callbacks cannot be
+stamped by authored-source transformation.
+
+This architecture is a completion gate for the core implementation:
+filesystem, in-memory, generated, bundled, and hydrated module maps must load
+the same selected wrapper binding, and a parked provider tool must resume after
+a fresh-process callback rebind. A memory-only registry, post-resolution tool
+merge, or logical-path loading fallback fails that gate.
+
+Current eve automatically rebinds missing callbacks by rerunning
+`session.started` resolvers; it does not rerun an arbitrary
+`turn.started` resolver. The memory core must therefore prove that loading the
+selected wrapper binding registers the callbacks needed by persisted provider
+tools, or extend cold rebinding at the generic compiled-resolver boundary. Any
+such extension belongs to the ordinary dynamic-tool lifecycle, contains no
+memory types, preserves the parked call's captured closure values, and never
+reruns provider mutation.
 
 ## Model-facing description
 
@@ -783,16 +838,14 @@ slot, and turn. Its messages include the projected turn-start recall results
 followed by the admitted turn input. Returning `null` or an empty record
 exposes no tools for the slot.
 
-The memory definition is implicit `defineDynamic` authoring: eve adapts each
-implemented `tools` function to a `turn.started` dynamic resolver. Provider
-tools are ordinary branded `defineTool()` entries and depend entirely on the
-generic dynamic-tool engine — durable callback descriptors that survive fresh
-processes ([#2345](https://github.com/vercel/eve/issues/2345)), per-call
-origins that resume against the originating definition
-([#2346](https://github.com/vercel/eve/issues/2346)), and the runtime-tool
-contribution seam ([#2347](https://github.com/vercel/eve/issues/2347)). Memory
-adds no tool machinery of its own: no memory-specific approval methods, no
-separate callback registry, and no `defineMemoryTool` wrapper.
+The compiler-owned wrapper makes the memory definition implicit
+`defineDynamic` authoring: it adapts each implemented `tools` method to a
+`turn.started` dynamic resolver before source selection and normalization.
+Provider tools are ordinary branded `defineTool()` entries and depend entirely
+on the generic dynamic-tool engine and canonical source graph. Memory adds no
+tool machinery of its own: no runtime contribution seam, memory-specific
+approval methods, separate callback registry, parked-call origin store, or
+`defineMemoryTool` wrapper.
 
 Tools never write recalled context. A tool executor mutates provider storage
 and returns ordinary tool output; recall is the single writer of recalled
@@ -810,13 +863,16 @@ qualified tool name also approves that name after a scope change. Providers
 should use `always()` or a custom policy when approval must be participant- or
 scope-specific.
 
-The resolved tool set remains stable across every model step in the turn. When
-a call parks on approval or authorization, the continuation reconstructs the
-exact originating definition — including its captured scope — through the
-generic durable-descriptor and call-origin machinery, even in a fresh process
-and even if another participant has since replaced the current turn's tools.
-Callback forms the descriptor mechanism cannot express fail with an explicit
-diagnostic at resolution time rather than silently degrading at replay.
+The resolved tool set remains stable across every model step in the turn.
+Dynamic callback identity is the final qualified tool name plus callback phase,
+and closure values — including the locked memory scope — are snapshotted when
+the tool set resolves. After callback-registry loss or a redeploy, the compiled
+wrapper binding re-registers a missing implementation through the generic
+dynamic-tool lifecycle. A resumed call runs the latest deployed callback
+implementation with the captured closure values; a renamed or removed tool
+fails closed. Callback forms the descriptor mechanism cannot express fail with
+an explicit diagnostic at resolution time rather than silently degrading at
+replay.
 
 A direct inline-authorization park follows the ordinary tool contract. The
 unfinished assistant/tool exchange does not enter durable history, and the
@@ -826,9 +882,10 @@ turn-scoped tool set.
 
 Workflow replay returns recorded results for committed resolutions. Resolver
 code may run again when an uncommitted delivery is re-executed after a crash,
-so resolver side effects must be idempotent; provider mutations belong in the
-returned tools' `execute` functions. eve never substitutes the current turn's
-definition or scope for a parked call's captured definition.
+or once to rebind a missing session-scoped callback, so resolver side effects
+must be idempotent; provider mutations belong in the returned tools' `execute`
+functions. Callback rebinding may select newer deployed code, but it never
+replaces the parked call's captured scope values with another turn's scope.
 
 ### Completed-turn capture
 
@@ -1050,8 +1107,9 @@ recall visibility. Mounted extensions cannot contribute memory slots.
   so providers can supersede keyed items with smaller content.
 - Provider tools are slot-qualified, scope-bound ordinary dynamic tools built
   entirely on the generic dynamic-tool engine. Each turn resolves one complete
-  tool set, every model step uses it, and a durable call keeps its originating
-  definition until settlement. Tools never write recalled context.
+  tool set, every model step uses it, and callback replay uses the captured
+  closure values with the implementation registered for the same qualified
+  name and phase. Tools never write recalled context.
 - An optional static slot description is prepended to every provider tool
   description before durable metadata capture. It never derives from or exposes
   the namespace or scope, and it guides model routing without granting access.
@@ -1083,8 +1141,44 @@ Still out of scope:
 - Standardizing provider credentials, migrations, inspection tools, or
   deployment operations.
 
+## Implementation boundary
+
+The generic prerequisites are on `main`: the projected-history seam
+([#2352](https://github.com/vercel/eve/pull/2352)), durable dynamic callbacks
+([#2354](https://github.com/vercel/eve/pull/2354)), name-and-phase callback
+identity ([#2384](https://github.com/vercel/eve/pull/2384)), and the canonical
+source graph and binding table
+([#2404](https://github.com/vercel/eve/pull/2404),
+[#2516](https://github.com/vercel/eve/pull/2516)). The runtime-tool contribution
+proposal in [#2347](https://github.com/vercel/eve/issues/2347) is superseded;
+memory uses the compile-time wrapper described above. The kernel-effects
+follow-up to #2516 is not a prerequisite because provider tools have ordinary
+executors rather than native kernel effects.
+
+Implementation proceeds in two pull requests:
+
+1. A new first-class memory core branch starts from current `main`. It adds the
+   authoring and compiler surface, source-graph wrapper, namespace and scope
+   locks, recall records and projection, lifecycle, compaction, published
+   documentation, and deterministic end-to-end coverage. It does not restack
+   or reuse the custom runtime lifecycle from
+   [#2142](https://github.com/vercel/eve/pull/2142).
+2. The bounded `fileMemory()` provider in
+   [#2144](https://github.com/vercel/eve/pull/2144) is rebased onto the merged
+   core. It retains only provider storage, document, backend, and concurrency
+   work, and absorbs final file-provider e2e coverage. The separate e2e tail in
+   [#2145](https://github.com/vercel/eve/pull/2145) is superseded.
+
+The core implementation is complete only when one selected source and binding
+authority explains every memory definition and provider-tool wrapper, every
+message-bearing consumer receives the same projected history, compaction
+cannot summarize or lose private memory records, and a parked provider tool
+survives a real fresh-process reconstruction without memory-specific callback
+or origin machinery.
+
 ## Primary references
 
+- [Programmatic agent sources](./programmatic-agent-sources.md)
 - [Supermemory: how it works](https://supermemory.ai/docs/concepts/how-it-works)
 - [Hermes Agent memory](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/memory.md)
 - [eve dynamic capabilities](../docs/guides/dynamic-capabilities.md)
@@ -1120,11 +1214,11 @@ Still out of scope:
       `defineMemory(...)` may supply an optional static `description`. eve
       validates it and prepends it to every provider tool description before
       storing durable dynamic metadata. Omitting it preserves provider
-      descriptions unchanged. The implementation neither derives nor exposes
-      namespace or scope values, and the docs distinguish model routing
-      guidance from authorization. Unit coverage verifies two slots sharing one
-      provider receive different descriptions without mutating provider tools;
-      file-memory integration and e2e coverage exercise described
+      descriptions unchanged. The proposed wrapper neither derives nor exposes
+      namespace or scope values, and the contract distinguishes model routing
+      guidance from authorization. Core coverage must verify that two slots
+      sharing one provider receive different descriptions without mutating
+      provider tools; file-memory integration and e2e must exercise described
       `fileMemory()` slots. This resolves the [model-facing attribution
       thread](https://github.com/vercel/eve/pull/1581#discussion_r3807269437).
 
