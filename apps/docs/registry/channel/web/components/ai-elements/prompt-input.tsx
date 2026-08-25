@@ -864,8 +864,8 @@ export const PromptInput = ({
       <form className="w-full" onSubmit={handleSubmit} ref={formRef} {...props}>
         <InputGroup
           className={cn(
-            "overflow-hidden rounded-2xl bg-card shadow-sm",
-            "focus-within:border-foreground has-[[data-slot=input-group-control]:focus-visible]:border-foreground",
+            "overflow-hidden rounded-2xl bg-card/80 shadow-sm backdrop-blur-md",
+            "focus-within:border-foreground! has-[[data-slot=input-group-control]:focus-visible]:border-foreground!",
             className,
           )}
         >
@@ -995,7 +995,7 @@ export const PromptInputTextarea = ({
 
   return (
     <InputGroupTextarea
-      className={cn("field-sizing-content max-h-48 min-h-18", className)}
+      className={cn("field-sizing-content max-h-48 min-h-18 text-sm!", className)}
       name="message"
       onCompositionEnd={handleCompositionEnd}
       onCompositionStart={handleCompositionStart}
@@ -1057,7 +1057,11 @@ export const PromptInputButton = ({
 
   const button = (
     <InputGroupButton
-      className={cn(className)}
+      className={cn(
+        "rounded-full",
+        variant === "outline" && "bg-card hover:bg-card dark:hover:bg-input/30",
+        className,
+      )}
       size={newSize}
       type="button"
       variant={variant}

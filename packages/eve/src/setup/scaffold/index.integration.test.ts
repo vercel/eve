@@ -245,7 +245,7 @@ describe("ensureChannel", () => {
       join(projectRoot, "app/_components/agent-chat.tsx"),
       "utf8",
     );
-    expect(agentChatSource).toContain("<PromptInputTextarea disabled={isResuming}");
+    expect(agentChatSource).toMatch(/<PromptInputTextarea\s+disabled=\{isResuming\}/);
     expect(agentChatSource).toContain('turnPolicy: "steer"');
     expect(agentChatSource).toContain('const isResuming = agent.status === "resuming"');
     expect(agentChatSource).toContain("canRespond={!isBusy && !isResuming}");

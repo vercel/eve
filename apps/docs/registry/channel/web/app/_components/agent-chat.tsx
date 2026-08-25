@@ -17,6 +17,7 @@ import {
   type PromptInputMessage,
   PromptInputSubmit,
   PromptInputTextarea,
+  usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,7 @@ export function AgentChat({
   readonly sessionless?: boolean;
 }) {
   const [cancellationError, setCancellationError] = useState<string>();
+  const [hasInputText, setHasInputText] = useState(false);
   const agent = useEveAgent({
     initialSession:
       sessionId === undefined
@@ -82,6 +84,7 @@ export function AgentChat({
     const text = message.text.trim();
     if ((text.length === 0 && message.files.length === 0) || isResuming) return;
 
+    setHasInputText(false);
     setCancellationError(undefined);
     const options = isBusy ? { turnPolicy: "steer" as const } : undefined;
 
@@ -108,20 +111,16 @@ export function AgentChat({
 
   const composer = (
     <PromptInput onSubmit={handleSubmit}>
-      <PromptInputTextarea disabled={isResuming} placeholder="Send a message…" />
-      {isBusy ? (
-        <PromptInputButton
-          aria-label="Stop"
-          className="absolute right-12 bottom-2.5 rounded-full"
-          onClick={requestCancellation}
-          variant="default"
-        >
-          <SquareIcon className="size-3 fill-current" />
-        </PromptInputButton>
-      ) : null}
-      <PromptInputSubmit
+      <PromptInputTextarea
         disabled={isResuming}
-        status={isBusy || isResuming ? undefined : agent.status}
+        onChange={(event) => setHasInputText(event.currentTarget.value.trim().length > 0)}
+        placeholder="Send a message…"
+      />
+      <ComposerAction
+        hasInputText={hasInputText}
+        isBusy={isBusy}
+        isResuming={isResuming}
+        onCancel={requestCancellation}
       />
     </PromptInput>
   );
@@ -189,6 +188,36 @@ export function AgentChat({
   );
 }
 
+function ComposerAction({
+  hasInputText,
+  isBusy,
+  isResuming,
+  onCancel,
+}: {
+  readonly hasInputText: boolean;
+  readonly isBusy: boolean;
+  readonly isResuming: boolean;
+  readonly onCancel: () => void;
+}) {
+  const attachments = usePromptInputAttachments();
+  const canSubmit = hasInputText || attachments.files.length > 0;
+
+  if (!isBusy || canSubmit) {
+    return <PromptInputSubmit disabled={isResuming} />;
+  }
+
+  return (
+    <PromptInputButton
+      aria-label="Stop"
+      className="absolute right-2.5 bottom-2.5"
+      onClick={onCancel}
+      variant="outline"
+    >
+      <SquareIcon className="size-3 fill-current" />
+    </PromptInputButton>
+  );
+}
+
 function ErrorMessage({ message }: { readonly message: string }) {
   return (
     <Message className="max-w-full" from="assistant">
@@ -216,14 +245,14 @@ function ChatHeader({ canStartNewChat }: { readonly canStartNewChat: boolean }) 
         {canStartNewChat ? (
           <Button
             aria-label="Start a new chat"
-            className="pointer-events-auto fixed top-2 right-6"
+            className="pointer-events-auto fixed top-3 right-6 pr-4"
             onClick={() => window.location.assign("/s")}
             size="sm"
             type="button"
             variant="ghost"
           >
             <PlusIcon className="size-4" />
-            <span className="hidden sm:inline">New chat</span>
+            <span className="hidden font-normal text-sm sm:inline">New chat</span>
           </Button>
         ) : null}
       </div>
