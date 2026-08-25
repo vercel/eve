@@ -859,5 +859,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     const [, workflowInput] = startMock.mock.calls[0]!;
     const serialized = workflowInput[0].serializedContext as Record<string, unknown>;
     expect(serialized["eve.sessionTraceSeed"]).toBeUndefined();
+    expect(serialized["eve.otelTraceEnabled"]).toBe(false);
+    expect(startMock.mock.calls[0]?.[2].attributes["$eve.is_otel_trace_enabled"]).toBe("false");
   });
 });
