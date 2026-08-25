@@ -14,6 +14,7 @@ import { type AlsContext, contextStorage } from "#context/container.js";
 import { AuthKey, type SessionAuthContext } from "#context/keys.js";
 import { ConnectionAuthorizationFailedError } from "#public/connections/errors.js";
 import type { AuthorizationDefinition, ConnectionPrincipal } from "#shared/connection-types.js";
+import { isVercelOidcIssuer } from "#shared/vercel-project.js";
 
 /**
  * Stable string key identifying one principal within a connection's
@@ -124,7 +125,7 @@ export function resolveConnectionPrincipalFromAuth(
 function isVercelDevelopmentUser(current: SessionAuthContext): boolean {
   return (
     current.authenticator === "oidc" &&
-    current.issuer?.startsWith("https://oidc.vercel.com/") === true &&
+    isVercelOidcIssuer(current.issuer) &&
     current.attributes.environment === "development" &&
     current.subject === current.attributes.user_id
   );

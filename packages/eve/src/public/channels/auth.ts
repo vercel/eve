@@ -22,6 +22,7 @@ import {
   type ResolvedOidcAuthStrategy,
   type RouteStrategyAuthenticationResult,
 } from "#channel/auth/types.js";
+import { isVercelOidcIssuer } from "#shared/vercel-project.js";
 
 const vercelOidcLog = createLogger("auth.vercel-oidc");
 import {
@@ -847,8 +848,6 @@ const LOCAL_DEV_SESSION_AUTH_CONTEXT: SessionAuthContext = {
   principalType: "local-dev",
 };
 
-const VERCEL_OIDC_ISSUER_PREFIX = "https://oidc.vercel.com/";
-
 /**
  * Expected prefix for the `aud` claim of a Vercel-minted OIDC token
  * (`https://vercel.com/<owner-slug>`). Requiring it gives a real audience
@@ -923,7 +922,7 @@ export async function verifyVercelOidc(
     return { ok: false };
   }
 
-  if (!claims.issuer.startsWith(VERCEL_OIDC_ISSUER_PREFIX)) {
+  if (!isVercelOidcIssuer(claims.issuer)) {
     vercelOidcLog.debug("Rejected token whose issuer is not a Vercel OIDC issuer.", {
       issuer: claims.issuer,
     });
