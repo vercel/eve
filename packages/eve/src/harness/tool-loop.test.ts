@@ -31,6 +31,7 @@ import {
   TurnTaskStateKey,
 } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
+import { invocationOwnerKey } from "#internal/invocation/metadata.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -9197,13 +9198,29 @@ describe("createToolLoopHarness", () => {
       }),
     );
     const session = createTestSession({
+      agent: {
+        modelReference: {
+          id: "openai/gpt-4",
+          providerOptions: { openai: { store: false } },
+        },
+        system: "You are a test assistant.",
+        tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
+      },
       history: [
         { content: "old message", role: "user" },
         { content: "old reply", role: "assistant" },
       ],
     });
+    const auth = {
+      attributes: {},
+      authenticator: "oidc",
+      principalId: "user_123",
+      principalType: "user",
+    };
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, auth);
 
-    await runStep(session, { message: "Hi" });
+    await contextStorage.run(ctx, () => runStep(session, { message: "Hi" }));
 
     expect(getCompatibilityEventTypes(events)).toEqual([
       "session.started",
@@ -9231,6 +9248,12 @@ describe("createToolLoopHarness", () => {
       sequence: 0,
       sessionId: "test-session",
       turnId: "turn_0",
+    });
+    expect(vi.mocked(compactMessages).mock.calls[0]?.[3]).toEqual({
+      openai: {
+        safetyIdentifier: invocationOwnerKey(auth),
+        store: false,
+      },
     });
   });
 
@@ -10049,6 +10072,65 @@ describe("createToolLoopHarness", () => {
           { content: "Can you confirm?", role: "user" },
         ],
       ]);
+    });
+
+    it("threads the active caller into OpenAI provider options across turns", async () => {
+      setupStopResult();
+      const auth = {
+        attributes: {},
+        authenticator: "oidc",
+        principalId: "user_123",
+        principalType: "user",
+      };
+      const session = createTestSession({
+        agent: {
+          modelReference: {
+            id: "openai/gpt-5.6-sol",
+            providerOptions: {
+              openai: { safetyIdentifier: "authored", store: false },
+            },
+          },
+          system: "",
+          tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
+        },
+      });
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          resolveModel: vi.fn().mockResolvedValue("openai/gpt-5.6-sol"),
+        }),
+      );
+      const ctx = new ContextContainer();
+      ctx.set(AuthKey, auth);
+
+      const first = await contextStorage.run(ctx, () => runStep(session, { message: "hi" }));
+      const nextAuth = { ...auth, principalId: "user_456" };
+      ctx.set(AuthKey, nextAuth);
+      await contextStorage.run(ctx, () => runStep(first.session, { message: "again" }));
+
+      const readProviderOptions = async (index: number) => {
+        const agentCall = vi.mocked(ToolLoopAgent).mock.calls[index]?.[0];
+        const prepareStep = getPrepareStep<unknown[], { providerOptions?: unknown }>(
+          agentCall?.prepareStep,
+        );
+        return (
+          await prepareStep({
+            context: undefined,
+            messages: [],
+            model: null,
+            stepNumber: 0,
+            steps: [],
+          })
+        ).providerOptions;
+      };
+
+      await expect(readProviderOptions(0)).resolves.toEqual({
+        gateway: { caching: "auto" },
+        openai: { safetyIdentifier: invocationOwnerKey(auth), store: false },
+      });
+      await expect(readProviderOptions(1)).resolves.toEqual({
+        gateway: { caching: "auto" },
+        openai: { safetyIdentifier: invocationOwnerKey(nextAuth), store: false },
+      });
     });
 
     it("gateway-auto path: merges gateway.caching='auto' into providerOptions for string model ids", async () => {

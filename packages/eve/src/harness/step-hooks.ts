@@ -10,6 +10,7 @@ import type {
   TypedToolCall,
   TypedToolResult,
 } from "ai";
+import type { SessionAuthContext } from "#channel/types.js";
 import {
   createActionResultEvent,
   createActionsRequestedEvent,
@@ -30,6 +31,7 @@ import {
   mergeGatewayAutoCaching,
   type PromptCachePath,
 } from "#harness/prompt-cache.js";
+import { mergeOpenAISafetyIdentifier } from "#harness/openai-safety.js";
 import { createRuntimeActionRequestFromToolCall } from "#harness/runtime-actions.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
@@ -75,6 +77,7 @@ export type HarnessStepResult = Pick<
  * Input for {@link buildStepHooks}.
  */
 interface StepHooksInput {
+  readonly auth: SessionAuthContext | null;
   readonly cachePath: PromptCachePath;
   readonly emit?: HarnessEmitFn;
   readonly emissionState: HarnessEmissionState;
@@ -179,7 +182,12 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
       messages: processed,
     };
 
-    const providerOptions = requireSessionModelReference(session).providerOptions;
+    const modelReference = requireSessionModelReference(session);
+    const providerOptions = mergeOpenAISafetyIdentifier(
+      modelReference,
+      modelReference.providerOptions,
+      input.auth,
+    );
     if (input.cachePath.kind === "gateway-auto") {
       stepResult.providerOptions = mergeGatewayAutoCaching(providerOptions) as NonNullable<
         typeof stepResult.providerOptions

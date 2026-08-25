@@ -20,6 +20,7 @@ import {
   type TypedToolResult,
 } from "ai";
 import { isScheduleAppAuth } from "#channel/schedule-auth.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { resolveProviderHeaders } from "#internal/gateway.js";
 import {
@@ -243,6 +244,7 @@ import {
   isInvalidToolCall,
 } from "#harness/tool-call-input-errors.js";
 import { buildStepHooks, emitStepActions, type HarnessStepResult } from "#harness/step-hooks.js";
+import { mergeOpenAISafetyIdentifier } from "#harness/openai-safety.js";
 import {
   buildToolApproval,
   buildToolSetFromDefinitions,
@@ -779,6 +781,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
           const compacted = await maybeCompact({
             abortSignal: config.abortSignal,
+            auth: ctx?.get(AuthKey) ?? null,
             emit,
             emissionState: {
               ...emissionState,
@@ -1279,6 +1282,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     const compaction = await maybeCompact({
       abortSignal: config.abortSignal,
+      auth: ctx?.get(AuthKey) ?? null,
       emit,
       emissionState,
       messages: [...projectedMessages],
@@ -1542,6 +1546,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             );
 
       const hooks = buildStepHooks({
+        auth: ctx?.get(AuthKey) ?? null,
         cachePath,
         emit,
         emissionState,
@@ -3251,6 +3256,7 @@ function createNextCompactionConfig(
  */
 async function maybeCompact(input: {
   readonly abortSignal?: AbortSignal;
+  readonly auth: SessionAuthContext | null;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly force?: boolean;
@@ -3280,6 +3286,13 @@ async function maybeCompact(input: {
     modelReference: requireSessionModelReference(session),
     resolveModel: input.resolveModel,
   });
+  const compactionModelReference =
+    session.agent.compactionModelReference ?? requireSessionModelReference(session);
+  const providerOptions = mergeOpenAISafetyIdentifier(
+    compactionModelReference,
+    compaction.providerOptions,
+    input.auth,
+  ) as Parameters<typeof compactMessages>[3];
 
   if (emit) {
     await emit(
@@ -3297,7 +3310,7 @@ async function maybeCompact(input: {
     messages,
     compaction.model,
     session.compaction,
-    compaction.providerOptions,
+    providerOptions,
     input.telemetry,
     buildGatewayAttributionHeaders(compaction.model, input.runtimeIdentity),
     input.abortSignal,
