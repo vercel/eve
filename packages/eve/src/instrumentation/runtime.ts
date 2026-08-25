@@ -7,6 +7,11 @@ import type {
 } from "#instrumentation/lifecycle.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { OtelHarnessSettings, RuntimeContextResolver } from "#tracing/otel-declaration.js";
+import type {
+  SerializedSessionInstrumentation,
+  SessionInstrumentation,
+  SessionInstrumentationPlanningInput,
+} from "#instrumentation/session-plan.js";
 
 const INSTRUMENTATION_RUNTIME_KEY = Symbol.for("eve.instrumentation-runtime");
 
@@ -25,6 +30,17 @@ export interface InstrumentationRuntime {
   readonly runtimeContextResolvers?: readonly RuntimeContextResolver[];
   readonly runInContext: InstrumentationContextRunner;
   readonly shutdown: () => Promise<void>;
+  readonly planSession?: (
+    input: SessionInstrumentationPlanningInput,
+  ) => SerializedSessionInstrumentation;
+  readonly bindSession?: (input: {
+    readonly plan: SerializedSessionInstrumentation;
+    readonly sessionId: string;
+    readonly rootSessionId: string;
+  }) => SessionInstrumentation;
+  readonly migrateSession?: (
+    input: Readonly<Record<string, unknown>>,
+  ) => SerializedSessionInstrumentation;
 }
 
 /** Instrumentation capabilities consumed inside one harness execution. */
