@@ -58,7 +58,7 @@ Then configure the public `https://…/eve/v1/discord` route as the application'
 
 `onCommand(ctx, interaction)` decides whether to dispatch and under what `auth`. Return `{ auth }` to proceed, `null` to drop the interaction, or `title` alongside `auth` to set the title when the dispatch starts a run. By default, auth comes from the invoking user.
 
-The model-visible `<discord_context>` identifies the invoking user as `user_id` and the receiving Discord application as `application_id`.
+The model-visible `<discord_context>` includes `user_id` and the receiving application's `application_id`.
 
 Event handlers receive `(eventData, channel, ctx)`, with Discord platform handles on `channel.discord`:
 

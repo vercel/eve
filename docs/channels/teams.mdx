@@ -26,7 +26,7 @@ By default the channel mounts at `POST /eve/v1/teams`. Point your Azure Bot or T
 
 ### Dispatch
 
-The default `onMessage` handles two cases: personal-chat messages, and channel or group-chat messages that mention the bot directly. Ambient resource-specific-consent messages are dropped unless you override it. Return `title` alongside `auth` to set the title when the dispatch starts a run. Before dispatch, eve strips the mention, adds a `<teams_context>` block with the sender's `user_id`, receiving bot's `bot_id`, and the parsed `is_mentioned` value, and scopes channel and group threads by root activity id (`replyToId ?? id`).
+The default `onMessage` handles two cases: personal-chat messages, and channel or group-chat messages that mention the bot directly. Ambient resource-specific-consent messages are dropped unless you override it. Return `title` alongside `auth` to set the title when the dispatch starts a run. Before dispatch, eve strips the mention, adds `<teams_context>` with `user_id`, `bot_id`, and `is_mentioned`, and scopes channel and group threads by root activity id (`replyToId ?? id`).
 
 For example, use the contextual `isSubscribed()` helper to continue active threads without requiring another mention:
 
