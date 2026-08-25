@@ -2439,14 +2439,14 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).not.toContain("Enter to select");
     expect(countOccurrences(snapshot, "Esc to")).toBe(1);
 
-    input.down();
+    input.send("j");
     const unselected = screen
       .snapshot()
       .split("\n")
       .find((line) => line.includes("AI Gateway"));
     expect(unselected).toContain("1. AI Gateway");
     expect(unselected).not.toContain("▶");
-    input.up();
+    input.send("k");
 
     input.enter();
     await expect(answer).resolves.toEqual({ optionId: "gateway" });

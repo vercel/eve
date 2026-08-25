@@ -1245,6 +1245,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
         }
 
         if (mode === "overlay") {
+          const textNavigation = setupSelectionIntent(key, {
+            textNavigation: !isOnFreeformRow(),
+          });
+          if (textNavigation?.kind === "move") {
+            moveCursor(textNavigation.direction === "up" ? -1 : 1);
+            return;
+          }
+
           switch (key.type) {
             case "up":
             case "ctrl-p":
@@ -1993,7 +2001,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     const question = this.#captureSetupQuestion<string | undefined>(
       (key, settle) => {
-        const intent = setupSelectionIntent(key);
+        const intent = setupSelectionIntent(key, { textNavigation: true });
         switch (intent?.kind) {
           case "cancel":
             settle(undefined);
@@ -2111,7 +2119,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           );
         };
 
-        const intent = setupSelectionIntent(key);
+        const intent = setupSelectionIntent(key, { textNavigation: !onEditableRow() });
         switch (intent?.kind) {
           case "cancel":
             settle(undefined);
@@ -2239,7 +2247,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
           }
         };
 
-        const intent = setupSelectionIntent(key);
+        const intent = setupSelectionIntent(key, {
+          textNavigation: interaction.phase.kind === "inactive",
+        });
         switch (intent?.kind) {
           case "cancel":
             dispatch({ type: "cancel" });

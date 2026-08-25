@@ -19,7 +19,15 @@ export type SetupSelectionIntent =
   | { kind: "submit" };
 
 /** Maps terminal keys to the intents every setup selection surface shares. */
-export function setupSelectionIntent(key: TerminalKey): SetupSelectionIntent | undefined {
+export function setupSelectionIntent(
+  key: TerminalKey,
+  options: { textNavigation?: boolean } = {},
+): SetupSelectionIntent | undefined {
+  if (options.textNavigation && key.type === "text" && key.framing === "unframed") {
+    if (key.value === "k") return { kind: "move", direction: "up" };
+    if (key.value === "j") return { kind: "move", direction: "down" };
+  }
+
   switch (key.type) {
     case "ctrl-c":
     case "escape":
@@ -142,7 +150,7 @@ function editSetupSelect(input: SetupSelectInputState): SetupSelectInputResult {
 
 /** Pure key transition for a setup select; rendering and lifecycle stay outside. */
 export function reduceSetupSelectInput(input: SetupSelectInputState): SetupSelectInputResult {
-  const intent = setupSelectionIntent(input.key);
+  const intent = setupSelectionIntent(input.key, { textNavigation: !isSearchableSelect(input) });
   switch (intent?.kind) {
     case "cancel":
       if (
