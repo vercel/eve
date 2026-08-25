@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 
 import { replayDynamicTools } from "#context/build-dynamic-tools.js";
-import type { ContextContainer } from "#context/container.js";
+import { contextStorage, type ContextContainer } from "#context/container.js";
 import type { ContextKey } from "#context/key.js";
 import {
   SessionDynamicToolMetadataKey,
@@ -394,7 +394,10 @@ export async function rebindMissingCompiledDynamicToolCallbacks(input: {
   );
   if (matching.length === 0) return;
 
-  await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages);
+  await contextStorage.run(
+    input.ctx,
+    async () => await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages),
+  );
   const unresolved = missing.filter((entry) => hasUnregisteredDurableDynamicCallbacks([entry]));
   if (unresolved.length > 0) {
     throw new Error(
