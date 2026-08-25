@@ -24,7 +24,7 @@ import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agen
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import type { JsonObject } from "#shared/json.js";
-import { readTaskIdFromInboxToken } from "#tasks/task-id.js";
+import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 
 const CreateSessionResponseSchema = z.object({
   ok: z.literal(true),

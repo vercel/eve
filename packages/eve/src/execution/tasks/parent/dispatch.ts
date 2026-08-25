@@ -25,7 +25,7 @@ import type {
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import {
   TASK_CANCEL_TOOL_NAME,
-  TASK_CONTROL_TOOL_NAMES,
+  TASK_TOOL_NAMES,
   TASK_UPDATE_TOOL_NAME,
 } from "#tools/framework/task-contract.js";
 import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
@@ -46,7 +46,7 @@ const CANCEL_COMMIT_POLL_DELAY_MS = 250;
 export function isTaskControlAction(
   action: RuntimeActionRequest,
 ): action is RuntimeToolCallActionRequest {
-  return action.kind === "tool-call" && TASK_CONTROL_TOOL_NAMES.has(action.toolName);
+  return action.kind === "tool-call" && TASK_TOOL_NAMES.has(action.toolName);
 }
 
 /**

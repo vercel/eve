@@ -6,6 +6,7 @@ import {
   buildTurnAttributes,
   deriveSessionTitle,
   EVE_SESSION_TITLE_MAX_CHARS,
+  isWorkflowTraceContentVisible,
   readChannelKind,
   readChannelRequestId,
   readParentLineage,
@@ -14,6 +15,7 @@ import {
   readSessionTraceId,
 } from "#execution/eve-workflow-attributes.js";
 import { ChannelRequestIdKey } from "#context/keys.js";
+import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
 
 const slackChannelCtx = {
   "eve.channel": { kind: "slack", state: { team: "T1" }, audience: "public" },
@@ -42,6 +44,16 @@ describe("readChannelKind", () => {
     expect(readChannelKind({})).toBeUndefined();
     expect(readChannelKind({ "eve.channel": { kind: "" } })).toBeUndefined();
     expect(readChannelKind({ "eve.channel": { kind: 42 } })).toBeUndefined();
+  });
+});
+
+describe("isWorkflowTraceContentVisible", () => {
+  it("reads audience from the shared serialized channel slot", () => {
+    expect(
+      isWorkflowTraceContentVisible({
+        [CHANNEL_CONTEXT_KEY_NAME]: { audience: "public", kind: "slack" },
+      }),
+    ).toBe(true);
   });
 });
 

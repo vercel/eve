@@ -31,6 +31,7 @@
  *   absence means no exported OTEL trace exists.
  */
 
+import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import { ChannelRequestIdKey, type SessionTraceSeed } from "#context/keys.js";
 import { shouldCaptureInstrumentationContent } from "#harness/instrumentation/content-policy.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
@@ -82,13 +83,17 @@ export interface SessionParentLineage {
  * tag emission silently drops undefined values.
  */
 export function readChannelKind(serializedContext: Record<string, unknown>): string | undefined {
-  const channel = serializedContext["eve.channel"] as SerializedChannelAdapter | undefined;
+  const channel = serializedContext[CHANNEL_CONTEXT_KEY_NAME] as
+    | SerializedChannelAdapter
+    | undefined;
   const kind = channel?.kind;
   return isNonEmptyString(kind) ? kind : undefined;
 }
 
 export function isWorkflowTraceContentVisible(serializedContext: Record<string, unknown>): boolean {
-  const channel = serializedContext["eve.channel"] as SerializedChannelAdapter | undefined;
+  const channel = serializedContext[CHANNEL_CONTEXT_KEY_NAME] as
+    | SerializedChannelAdapter
+    | undefined;
   return shouldCaptureInstrumentationContent(normalizeChannelAudience(channel?.audience));
 }
 

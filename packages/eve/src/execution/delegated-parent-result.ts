@@ -11,6 +11,7 @@ import type { JsonValue } from "#shared/json.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
+import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
 
 const ZERO_TOKEN_USAGE: TokenUsage = {
   cacheReadTokens: 0,
@@ -27,7 +28,7 @@ export function createDelegatedSubagentSuccessResult(
   serializedContext: Record<string, unknown>,
   output: unknown,
 ): RuntimeSubagentChildResult | undefined {
-  const channel = serializedContext["eve.channel"] as
+  const channel = serializedContext[CHANNEL_CONTEXT_KEY_NAME] as
     | { kind?: string; state?: Record<string, unknown> }
     | undefined;
 

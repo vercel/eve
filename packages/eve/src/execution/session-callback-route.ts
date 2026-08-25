@@ -15,7 +15,7 @@ import type {
   TaskInboundTurnStarted,
   TaskInboundUpdate,
 } from "#tasks/types.js";
-import { readTaskIdFromInboxToken } from "#tasks/task-id.js";
+import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 
 const ZERO_TOKEN_USAGE: TokenUsage = {
   cacheReadTokens: 0,

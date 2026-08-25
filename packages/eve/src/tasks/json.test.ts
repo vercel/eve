@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { taskCancel } from "#public/tools/task-cancel.js";
+import { TASK_VIEWS_OUTPUT_SCHEMA } from "#shared/task-tool.js";
 import { taskViewToJson } from "#tasks/json.js";
 import type { TaskView } from "#tasks/types.js";
 
@@ -39,5 +41,24 @@ describe("taskViewToJson", () => {
       status: "completed",
       taskId: "task-1",
     });
+  });
+});
+
+describe("taskCancel.outputSchema", () => {
+  it("preserves the broad task-control output contract", () => {
+    expect(taskCancel.outputSchema).toBe(TASK_VIEWS_OUTPUT_SCHEMA);
+    expect(
+      TASK_VIEWS_OUTPUT_SCHEMA.parse({
+        tasks: [
+          {
+            inputRequests: [{ prompt: "Choose" }],
+            lastOutput: { data: "partial", type: "result" },
+            metadata: { data: { source: "custom" }, kind: "tool", name: "report" },
+            status: "working",
+            taskId: "task-1",
+          },
+        ],
+      }),
+    ).toMatchObject({ tasks: [{ status: "working", taskId: "task-1" }] });
   });
 });
