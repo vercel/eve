@@ -81,7 +81,7 @@ describe("terminateChildSessionsStep", () => {
       name: "research",
       nodeId: "subagents/research",
       path: "/eve/v1/session",
-      url: "https://compiled.example.com",
+      url: "https://remote.example.com",
     });
     resolveRemoteAgentStreamHeadersMock.mockReset();
     resolveRemoteAgentStreamHeadersMock.mockResolvedValue({ authorization: "Bearer fresh" });
@@ -128,6 +128,26 @@ describe("terminateChildSessionsStep", () => {
     });
     expect(resetRemoteAgentSessionMock).toHaveBeenCalledWith({
       remote: expect.objectContaining({ url: "https://remote.example.com" }),
+      sessionId: "session-remote",
+    });
+  });
+
+  it("does not send current credentials to a legacy child's previous URL", async () => {
+    resolveRemoteAgentForActionMock.mockReturnValue({
+      name: "research",
+      url: "https://new-remote.example.com",
+    });
+
+    await terminateChildSessionsStep({
+      serializedContext: { context: "serialized" },
+      sessionState: makeSessionState([
+        parkedHandle({ id: "ag_remote:1", kind: "agent/remote", sessionId: "session-remote" }),
+      ]),
+    });
+
+    expect(resetRemoteAgentSessionMock).toHaveBeenCalledWith({
+      headers: {},
+      remote: { name: "research", url: "https://remote.example.com" },
       sessionId: "session-remote",
     });
   });

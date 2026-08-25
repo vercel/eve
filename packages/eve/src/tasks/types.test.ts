@@ -21,6 +21,7 @@ const localAddress: AgentAddress = {
 
 const remoteAddress: AgentAddress = {
   callbackBaseUrl: "https://parent.example",
+  credentialResolver: { resolverId: "dynamic-credentials-step" },
   kind: "agent/remote",
   sessionId: "session_child",
   url: "https://child.example",
@@ -36,6 +37,16 @@ describe("subagent executor binding", () => {
   it("round-trips a remote child through the durable binding", () => {
     const binding = createSubagentExecutorBinding({ address: remoteAddress, identity });
     expect(readSubagentExecutor(binding)).toEqual({ address: remoteAddress, identity });
+  });
+
+  it("round-trips an explicit no-credential remote resolver", () => {
+    const address: AgentAddress = {
+      ...remoteAddress,
+      credentialResolver: {},
+    };
+    const binding = createSubagentExecutorBinding({ address, identity });
+
+    expect(readSubagentExecutor(binding)).toEqual({ address, identity });
   });
 
   it("reads the binding recorded on task executor state", () => {

@@ -79,6 +79,7 @@ function createCancelledTurnSession(handles: readonly AgentHandle[]): HarnessSes
       compaction: { recentWindowSize: 10, threshold: 100_000 },
       continuationToken: CONTINUATION_TOKEN,
       history: [],
+      outputSchema: { type: "object" },
       sessionId: PARENT_SESSION_ID,
       state: { [AGENT_HANDLES_STATE_KEY]: { handles } },
     },
@@ -121,6 +122,7 @@ describe("settleCancelledTurnStep handle store", () => {
           PARKED_HANDLE,
         ],
       });
+      expect(result.sessionState.snapshot?.session.outputSchema).toBeUndefined();
     });
   });
 });

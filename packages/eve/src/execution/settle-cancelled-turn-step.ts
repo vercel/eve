@@ -143,7 +143,9 @@ export async function settleCancelledTurnStep(input: {
       clearPendingSessionLimitPrompt(
         clearAllProxyInputRequests(
           clearPendingWorkflowInterrupt(
-            clearPendingRuntimeActionBatch(abandonRunningAgentTurns(session)),
+            clearPendingRuntimeActionBatch(
+              abandonRunningAgentTurns({ ...session, outputSchema: undefined }),
+            ),
           ),
         ),
       ),

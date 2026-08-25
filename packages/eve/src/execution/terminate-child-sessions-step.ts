@@ -76,7 +76,12 @@ export async function terminateChildSessionsStep(input: {
     });
     for (const entry of taskEntries) {
       try {
-        await cancelOwnedTask({ bundle, entry, session: runtimeSession });
+        await cancelOwnedTask({
+          bundle,
+          entry,
+          serializedContext: input.serializedContext,
+          session: runtimeSession,
+        });
       } catch (error) {
         logError(log, "failed to cancel task during parent finalization", error, {
           parentSessionId: session.sessionId,
@@ -129,10 +134,15 @@ export async function terminateChildSessionsStep(input: {
             registry: runtimeContext!.bundle.subagentRegistry.subagentsByNodeId,
             remoteAgentName: handle.identity.name,
           });
-          await resetRemoteAgentSession({
-            remote: { ...remote, url: handle.address.url },
-            sessionId: handle.address.sessionId,
-          });
+          if (remote.url === handle.address.url) {
+            await resetRemoteAgentSession({ remote, sessionId: handle.address.sessionId });
+          } else {
+            await resetRemoteAgentSession({
+              headers: {},
+              remote: { name: handle.identity.name, url: handle.address.url },
+              sessionId: handle.address.sessionId,
+            });
+          }
         }
       } else {
         await cancelRun(await getWorld(), handle.address.sessionId, {

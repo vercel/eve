@@ -1,7 +1,10 @@
 import type { RuntimeSession } from "#execution/agent-handle-dispatch.js";
+import { deserializeContext } from "#context/serialize.js";
+import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import {
   cancelRemoteAgentTurn,
   resolveRemoteAgentForAction,
+  resolveRemoteAgentStreamHeaders,
 } from "#execution/remote-agent-dispatch.js";
 import {
   createTaskControlError,
@@ -107,7 +110,14 @@ export async function executeTaskControlAction(input: {
 
   const views: TaskView[] = [];
   for (const entry of entries) {
-    views.push(await cancelOwnedTask({ bundle: input.bundle, entry, session }));
+    views.push(
+      await cancelOwnedTask({
+        bundle: input.bundle,
+        entry,
+        serializedContext: input.serializedContext,
+        session,
+      }),
+    );
   }
   return { result: createTaskViewsResult(action, views), session };
 }
@@ -116,6 +126,7 @@ export async function executeTaskControlAction(input: {
 export async function cancelOwnedTask(input: {
   readonly bundle: CompiledBundle;
   readonly entry: SessionTaskIndexEntry;
+  readonly serializedContext?: Record<string, unknown>;
   readonly session: RuntimeSession;
 }): Promise<TaskView> {
   const { entry } = input;
@@ -141,7 +152,12 @@ export async function cancelOwnedTask(input: {
   const settledView = view;
 
   if (settledView.status === "cancelled" && delivery === "delivered") {
-    await propagateTaskCancel({ bundle: input.bundle, session: input.session, view: settledView });
+    await propagateTaskCancel({
+      bundle: input.bundle,
+      serializedContext: input.serializedContext,
+      session: input.session,
+      view: settledView,
+    });
   }
   return settledView;
 }
@@ -155,6 +171,7 @@ export async function cancelOwnedTask(input: {
  */
 async function propagateTaskCancel(input: {
   readonly bundle: CompiledBundle;
+  readonly serializedContext?: Record<string, unknown>;
   readonly session: RuntimeSession;
   readonly view: TaskView;
 }): Promise<void> {
@@ -174,6 +191,7 @@ async function propagateTaskCancel(input: {
     bundle: input.bundle,
     childTurnId: input.view.executor?.childTurnId,
     executor,
+    serializedContext: input.serializedContext,
     taskId: input.view.taskId,
   });
 }
@@ -188,6 +206,7 @@ export async function propagateSubagentExecutorCancel(input: {
   readonly bundle: CompiledBundle | undefined;
   readonly childTurnId?: string;
   readonly executor: SubagentExecutorData;
+  readonly serializedContext?: Record<string, unknown>;
   readonly taskId: string;
 }): Promise<void> {
   const { address, identity } = input.executor;
@@ -199,29 +218,65 @@ export async function propagateSubagentExecutorCancel(input: {
       if (input.bundle === undefined) {
         throw new Error("No compiled bundle is available to resolve the remote agent.");
       }
-      const resolved = resolveRemoteAgentForAction({
-        nodeId: identity.nodeId,
-        remoteAgentName: identity.name,
-        registry: input.bundle.subagentRegistry.subagentsByNodeId,
-      });
+      const credentialResolver = address.credentialResolver;
+      let dynamicRemoteAgent;
+      if (credentialResolver === undefined && input.serializedContext !== undefined) {
+        const ctx = await deserializeContext(input.serializedContext);
+        const selection = getDynamicSubagentSelection(ctx, identity.nodeId);
+        dynamicRemoteAgent = selection?.kind === "remote" ? selection.remoteAgent : undefined;
+      }
+      const resolved =
+        credentialResolver === undefined
+          ? resolveRemoteAgentForAction({
+              dynamicRemoteAgent,
+              nodeId: identity.nodeId,
+              remoteAgentName: identity.name,
+              registry: input.bundle.subagentRegistry.subagentsByNodeId,
+            })
+          : { name: identity.name, url: address.url };
+      const legacyUrlMismatch = credentialResolver === undefined && resolved.url !== address.url;
+      const headers = legacyUrlMismatch
+        ? {}
+        : credentialResolver?.resolverId === undefined
+          ? credentialResolver === undefined
+            ? undefined
+            : {}
+          : await resolveRemoteAgentStreamHeaders({
+              bundle: input.bundle,
+              name: identity.name,
+              resolverId: credentialResolver.resolverId,
+              url: address.url,
+            });
+      const remote = legacyUrlMismatch
+        ? { name: identity.name, url: address.url }
+        : { ...resolved, url: address.url };
       const cancelInput: {
+        headers?: Record<string, string>;
         readonly remote: typeof resolved & { readonly url: string };
         readonly sessionId: string;
         readonly taskId: string;
         turnId?: string;
       } = {
-        remote: { ...resolved, url: address.url },
+        remote,
         sessionId: childSessionId,
         taskId: input.taskId,
       };
+      if (headers !== undefined) cancelInput.headers = headers;
       if (childTurnId !== undefined) cancelInput.turnId = childTurnId;
       const result = await cancelRemoteAgentTurn(cancelInput);
       if (result.status === "no_active_turn") {
-        await cancelRemoteAgentTurn({
-          remote: { ...resolved, url: address.url },
+        const retryInput: {
+          headers?: Record<string, string>;
+          remote: typeof resolved & { readonly url: string };
+          sessionId: string;
+          taskId: string;
+        } = {
+          remote,
           sessionId: childSessionId,
           taskId: input.taskId,
-        });
+        };
+        if (headers !== undefined) retryInput.headers = headers;
+        await cancelRemoteAgentTurn(retryInput);
       }
       return;
     }

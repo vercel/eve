@@ -297,12 +297,13 @@ function buildForwardedPrincipalField(input: {
 }
 
 export async function cancelRemoteAgentTurn(input: {
-  readonly remote: ResolvedRuntimeRemoteAgentNode;
+  readonly headers?: Record<string, string>;
+  readonly remote: Pick<ResolvedRuntimeRemoteAgentNode, "auth" | "headers" | "name" | "url">;
   readonly sessionId: string;
   readonly taskId?: string;
   readonly turnId?: string;
 }): Promise<CancelTurnResult> {
-  const headers = await resolveRemoteAgentRequestHeaders(input.remote);
+  const headers = input.headers ?? (await resolveRemoteAgentRequestHeaders(input.remote));
   const response = await fetch(createRemoteAgentCancelTurnUrl(input.remote, input.sessionId), {
     body:
       input.turnId === undefined && input.taskId === undefined
@@ -537,7 +538,7 @@ function createRemoteAgentSessionUrl(remote: ResolvedRuntimeRemoteAgentNode): st
 }
 
 function createRemoteAgentCancelTurnUrl(
-  remote: ResolvedRuntimeRemoteAgentNode,
+  remote: Pick<ResolvedRuntimeRemoteAgentNode, "url">,
   sessionId: string,
 ): string {
   return createRemoteAgentRouteUrl(remote.url, createEveSessionCancelRoutePath(sessionId));
