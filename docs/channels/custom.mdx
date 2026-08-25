@@ -304,9 +304,11 @@ export default defineChannel({
 });
 ```
 
-The projection is re-evaluated whenever adapter state changes after channel event handlers run. Dynamic tool resolvers read it via `ctx.channel.metadata` and narrow it with `isChannel`. See [Dynamic capabilities](../guides/dynamic-capabilities) for the full consumption pattern.
+The projection is re-evaluated whenever adapter state changes after channel event handlers run. Dynamic tool resolvers read the live projection via `ctx.channel.metadata` and narrow it with `isChannel`. See [Dynamic capabilities](../guides/dynamic-capabilities) for the full consumption pattern.
 
 Metadata may include an `audience` classification: `public`, `private`, or `unknown`. Omit it when the channel cannot classify the conversation confidently; eve normalizes missing and invalid values to `unknown`. Consumers must treat `unknown` as non-public.
+
+Instrumentation snapshots the projection when `createSession` runs. A later `deliver` hook or channel event may change the live metadata seen by dynamic resolvers, but it cannot change trace admission, provider capture, `$eve.is_trace_content_visible`, or the metadata passed to instrumentation runtime-context resolvers for that session.
 
 When a parent agent dispatches a subagent, the framework forwards the parent's channel metadata projection to the child. The same `metadata(state)` projector also serves instrumentation metadata resolvers.
 

@@ -277,7 +277,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     expect(mocks.createSession).toHaveBeenCalledTimes(1);
     expect(mocks.createSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        parentTraceContext: { isRemote: false, spanId: actionSpanId, traceFlags: 1, traceId },
+        parentTraceContext: { spanId: actionSpanId, traceFlags: 1, traceId },
       }),
     );
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
@@ -639,7 +639,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     expect(result.results).toEqual([]);
     expect(mocks.startRemoteAgentSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        parentTraceContext: { isRemote: false, spanId: actionSpanId, traceFlags: 1, traceId },
+        parentTraceContext: { spanId: actionSpanId, traceFlags: 1, traceId },
       }),
     );
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({

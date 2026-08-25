@@ -93,6 +93,7 @@ Tool-wide authoring helpers such as `defineTool`, `defineDynamic`, and `disableT
 | `eve/context`                                                               | `defineState`, session and state types                                    |
 | `eve/sandbox`                                                               | `defineSandbox`, backends                                                 |
 | `eve/instrumentation`                                                       | `defineInstrumentation`, `isChannel`                                      |
+| `eve/instrumentation/otel`                                                  | `otel`, `otelIntegration`, `agentRuns`, `localTraces`, span export policies |
 | `eve/models/openai`                                                         | `chatgpt`, deprecated `experimental_chatgpt`                              |
 | `eve/evals`                                                                 | `defineEval`, `defineEvalConfig`, `mockModel`, eval types                 |
 | `eve/evals/expect`                                                          | `includes`, `equals`, `matches`, `similarity`                             |
@@ -103,6 +104,8 @@ Tool-wide authoring helpers such as `defineTool`, `defineDynamic`, and `disableT
 | [`eve/client`](../guides/client/overview)                                   | `Client`, `ClientSession`, health and agent-info schemas, response errors |
 
 Exported types ship from the same entrypoint as the helper they describe (for example `ToolDefinition` and `ToolContext` from `eve/tools`). The `exports` field in `packages/eve/package.json` lists every public entrypoint.
+
+For instrumentation provider projects, `otel({ tracePolicy })` freezes native session admission at session creation. `OtelOptions.sampler` controls unrelated OpenTelemetry roots but cannot override an admitted or rejected native `agent.*` trace. Destination `exportPolicy` values run independently at each destination processor boundary. See [Observability](../guides/instrumentation#four-instrumentation-decisions).
 
 ## ChatGPT subscription models
 

@@ -64,7 +64,6 @@ export function createAgentOtelSessionContext(
               "agent.session.id": session.sessionId,
               "agent.trace.schema.version": 2,
             },
-            root: true,
           },
           withNativeSamplingDecision(ROOT_CONTEXT, true),
         );

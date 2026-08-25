@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/2331
-status: proposed
-last_updated: "2026-08-20"
+status: implemented
+last_updated: "2026-08-25"
 ---
 
 # Audience-aware trace content policy
@@ -20,9 +20,11 @@ Channels may project one of three values from their existing synchronous `metada
 type ChannelAudience = "public" | "private" | "unknown";
 ```
 
-The field is optional for authored channels. Eve normalizes absent, malformed, and unsupported values to `unknown`. Built-in channel metadata interfaces require the field and classify only from platform evidence already captured during dispatch; ambiguous and proactive destinations remain `unknown` rather than performing observability-only network requests.
+The field is optional for authored channels. eve normalizes absent, malformed, and unsupported values to `unknown`. Built-in channel metadata interfaces require the field and classify only from platform evidence already captured during dispatch; ambiguous and proactive destinations remain `unknown` rather than performing observability-only network requests.
 
-The normalized audience is persisted with session trace state and exported as `agent.channel.audience` only on each `agent.session` window. Durable Eve state and an internal OpenTelemetry context key make the same value available to descendant export policies without duplicating a public attribute onto every span. Local subagents inherit the parent audience. Remote agents classify their receiving channel independently rather than trusting opaque metadata across deployment boundaries.
+The normalized audience is frozen in a serializable instrumentation plan when the session is created and exported as `agent.channel.audience` only on each `agent.session` window. Durable eve state and an internal OpenTelemetry context key make the same value available to descendant export policies without duplicating a public attribute onto every span. Adapter metadata changes during delivery do not reclassify instrumentation. Remote agents classify their receiving channel independently rather than trusting opaque metadata across deployment boundaries.
+
+The frozen plan also separates trace admission, producer capture, workflow content visibility, and destination export filtering. An admitted private or unknown trace captures complete source content; each destination redacts independently. Authored non-OTel providers remain independent from OTel admission.
 
 ## Public tracing API
 
@@ -148,7 +150,7 @@ This keeps unclassified local HTTP/TUI sessions observable while still rejecting
 The runtime order is:
 
 1. Derive and normalize the channel audience.
-2. Evaluate the process-wide `tracePolicy` before creating `agent.session`.
+2. Evaluate the process-wide `tracePolicy` once during session planning. Local children inherit; remote receivers may veto an incoming sampled decision.
 3. For accepted traces, capture complete Eve and AI SDK spans.
 4. Run each managed destination's composed export policies in declaration order. Custom integrations run their declared span processors.
 5. Hand the resulting facade to that destination's processors or exporter.

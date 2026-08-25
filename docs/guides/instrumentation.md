@@ -60,6 +60,19 @@ The third configurable surface, [runtime context events](#runtime-context), atta
 
 Built-in messaging channels classify their instrumentation metadata with an `audience`: `public`, `private`, or `unknown`. Slack public channels and Chat SDK workspace-visible threads are public; direct and private conversations are private; platform surfaces without enough visibility evidence remain unknown.
 
+## Four instrumentation decisions
+
+eve keeps four decisions separate so one observability destination cannot change another:
+
+1. **Session trace admission** decides whether eve creates a native `agent.*` trace. `tracePolicy` runs once when the session is created. Local subagents inherit the parent decision. A remote agent accepts a propagated sampled decision only when its own local policy also admits the session.
+2. **Provider producer capture** decides whether eve builds content-bearing lifecycle events and AI SDK telemetry. The session freezes the union of content requested by authored providers, an admitted native trace, and legacy `recordInputs` or `recordOutputs` settings. Rejecting an OTel trace does not disable an independent authored content provider.
+3. **Workflow content visibility** controls `$eve.is_trace_content_visible` and content-derived workflow attributes. It follows the existing audience rule and freezes when the session is created. This flag is separate from provider capture.
+4. **Per-destination span export policy** filters the admitted span immediately before one destination's processor chain. Each destination receives its own facade; filtering does not mutate the shared span or another destination's view.
+
+An admitted private or unknown trace captures complete source content before destination filtering. Add `redactSpanInputs()` and `redactSpanOutputs()` to every destination that must not receive that content.
+
+When you use the instrumentation provider layout, `otel({ tracePolicy, sampler })` applies these boundaries explicitly. `tracePolicy` is authoritative for native `agent.*` traces and their AI SDK descendants. `sampler` still controls unrelated authored, request, and auto-instrumented roots, but it cannot overturn a native session decision. The process sampler continues to preserve an incoming unsampled remote parent.
+
 ## Channel delivery traces
 
 Instrumentation providers receive `channel.delivery.started` followed by
@@ -110,7 +123,7 @@ export default defineInstrumentation({
 });
 ```
 
-The callback receives:
+The callback receives a session-frozen instrumentation channel snapshot:
 
 - `session`: the session id, current and initiator auth, and parent session lineage when this is a child run
 - `turn`: the stream turn id and sequence, for example `turn_0`
@@ -120,7 +133,7 @@ The callback receives:
 
 A channel exposes its identity through `kind`. For authored channels it is `channel:<name>`, where `<name>` is the channel's filename under `agent/channels/`, so `agent/channels/support.ts` is `channel:support`. Framework channels use `http`, `schedule`, or `subagent`, and an unrecognized or absent kind normalizes to `unknown`. The kind is also emitted as the `eve.channel.kind` span attribute. To access an authored channel's metadata with its precise type, import the channel definition and narrow with `isChannel(input.channel, supportChannel)`.
 
-Channel metadata is channel-owned. Built-in channels expose only the fields they choose to make observable; Slack, for example, projects `channelId`, `teamId`, `threadTs`, and `triggeringUserId` from its durable channel state. User-authored channels expose their own projection by returning `metadata(state)` from `defineChannel`. Runtime instrumentation never falls back to raw channel state.
+Channel metadata is channel-owned. Built-in channels expose only the fields they choose to make observable; Slack, for example, projects `channelId`, `teamId`, `threadTs`, and `triggeringUserId` from its durable channel state. User-authored channels expose their own projection by returning `metadata(state)` from `defineChannel`. eve snapshots this projection when the session is created, so later adapter state changes do not reclassify instrumentation. Runtime instrumentation never falls back to raw channel state.
 
 ## Authored trace hierarchy
 
@@ -165,6 +178,7 @@ Structural tags describe each run's place in the tree:
 - `$eve.trigger`: the channel kind that started the run
 - `$eve.title`: truncated title derived from the first user message
 - `$eve.trace_id`: trace id of the sampled agent trace containing the run, written on session, subagent, and turn rows so a dashboard run can be joined to its OpenTelemetry trace. Present only when the trace is sampled; absence means no exported OTEL trace exists.
+- `$eve.is_trace_content_visible`: audience-based workflow privacy decision frozen when the session is created. It does not indicate whether a provider captured content before destination filtering.
 
 Per-turn usage tags are written on each step of a turn, accumulating cumulative totals (last write wins):
 

@@ -74,7 +74,7 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `session.failed`          | The session failed.                                                                                              |
 | `session.completed`       | The session reached a terminal end.                                                                              |
 
-The optional `data.trace` on session and turn starts contains eve-owned W3C trace coordinates: `traceId`, `spanId`, and `traceFlags`. Use it to correlate stream consumers such as eval reporters with an observability backend. An uninstrumented target omits it.
+The optional `data.trace` on session and turn starts contains eve-owned W3C trace coordinates: `traceId`, `spanId`, and `traceFlags`. Use it to correlate stream consumers such as eval reporters with an observability backend. eve freezes this trace decision when the session is created. Local subagents inherit it; remote agents can veto an incoming sampled decision with their local trace policy, and an incoming unsampled decision remains unsampled. An uninstrumented target omits it.
 
 `reasoning.appended` and `message.appended` stream incremental output as it arrives. When the durable stream writer is busy, eve may coalesce adjacent deltas of the same type; the text remains in source order, and any other event forms an ordering barrier. Each append carries both the new delta and the cumulative text for the current block. The finalized block shows up on `message.completed` and `reasoning.completed`, which is the compatibility path for clients that don't render incremental streaming.
 
@@ -264,6 +264,8 @@ Every stream event runs four steps, in this order:
 4. **Dynamic resolvers**: [dynamic](../guides/dynamic-capabilities) tool, skill, and instruction resolvers fire, and `ctx.channel.metadata` already holds the freshly projected metadata from step 2.
 
 The order is structural, not incidental. By the time a resolver or hook reads channel metadata, the channel has already updated its state and the projection is current.
+
+Instrumentation is the exception to this live projection: trace admission, producer capture, workflow visibility, and instrumentation runtime-context channel metadata use the snapshot taken when the session was created.
 
 ## What to read next
 

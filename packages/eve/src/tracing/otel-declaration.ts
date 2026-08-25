@@ -70,10 +70,11 @@ export interface OtelOptions {
    */
   readonly resource?: Readonly<Record<string, unknown>>;
   /**
-   * Head sampling, and it is global: it decides whether a span is created at
-   * all, so it thins eve's own sinks and the `traceparent` eve propagates
-   * along with your exporters. To thin one backend only, drop spans in a
-   * processor.
+   * Process-wide head sampling for unrelated authored, request, and
+   * auto-instrumented spans. Native `agent.*` traces and AI SDK descendants
+   * preserve the decision frozen by `tracePolicy`; this sampler cannot
+   * override that decision. To thin one backend only, drop spans in a
+   * destination processor.
    */
   readonly sampler?: SamplerOrName;
   /** Composed into one propagator. All inject; the first to extract wins. Defaults to `auto`. */

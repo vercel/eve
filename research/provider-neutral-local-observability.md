@@ -1,7 +1,7 @@
 ---
 issue: TBD
-status: in-progress
-last_updated: "2026-07-30"
+status: implemented
+last_updated: "2026-08-25"
 ---
 
 # Provider-neutral local observability
@@ -94,16 +94,12 @@ attributes, or parent contexts.
 ### The session root is a real span
 
 `agent.session` is a real root span opened with OTel's `root` option, not a synthesized parent
-context. eve persists its span context — including the sampling decision it actually received — and
-later turns parent to that stored context.
+context. Session planning allocates its identity and freezes admission before workflow startup. eve
+persists that context, and later turns parent to the stored identity.
 
-This is what makes an authored sampler work. A synthesized parent asserting a sampled flag is a
-valid parent to `ParentBasedSampler`, which resolves through a parent branch and never consults the
-configured root rule. Asserting unsampled instead selects `localParentNotSampled`, which drops
-everything. A genuine root avoids both.
-
-Sampling is therefore per session trace. `agent.session.id` is a creation-time attribute, so an
-author can key a sampler on it.
+The native decision is authoritative for `agent.*` and AI SDK descendants. eve marks native OTel
+context so the process sampler preserves the frozen decision; unrelated authored, request, and
+auto-instrumented roots still delegate to the configured sampler unchanged.
 
 ### Marker spans
 
@@ -124,11 +120,11 @@ guaranteed close and could carry a real duration; that is tracked separately.
 
 ### Subagents
 
-A local subagent keeps its own session identity but adopts the parent action's `SpanContext`, so
-delegated work appears directly beneath the action that caused it. Remote dispatch sends the same
-context as `traceparent`; the receiver adopts it when available. A child with no propagated context
-opens its own root. `eve traces` resolves any session recorded in a trace, not only the one that
-opened it.
+A local subagent keeps its own session identity but inherits the parent action's instrumentation
+decision and context, so delegated work appears directly beneath the action that caused it. Remote
+dispatch sends `traceparent`; the receiver keeps an incoming unsampled decision and applies its local
+policy as a veto to an incoming sampled decision. A child with no propagated context opens its own
+root. `eve traces` resolves any session recorded in a trace, not only the one that opened it.
 
 ## Runtime integration
 
@@ -155,9 +151,8 @@ a supported customization surface. Braintrust's documented integration uses eve 
 
 ## Compatibility
 
-Production keeps its current `defineInstrumentation` and `@ai-sdk/otel` behavior until provider
-migration ships. Without lifecycle hooks no bridge is installed and production follows the existing
-authored path unchanged. Stream hooks and `step.started` semantics are unchanged.
+Legacy `defineInstrumentation()` and provider-directory layouts both adapt to the same serializable
+session plan and bound control surface. Stream hooks and `step.started` semantics are unchanged.
 
 ## Delivery phases
 
@@ -169,21 +164,20 @@ authored path unchanged. Stream hooks and `step.started` semantics are unchanged
 4. **Persistence.** — _landed._ OTLP/JSON segments, session context restored across dev worker
    restarts, retention bounds, capture policy.
 5. **Inspection.** — _landed._ `eve traces ls` and `eve traces [trace]`.
-6. **Session windows.** — _in review._ Real `agent.session` root with its recorded sampling
+6. **Session windows.** — _landed._ Real `agent.session` root with its recorded sampling
    decision, window rolling, subagent adoption, session-to-windows resolution in `eve traces`.
-7. **Public providers.** — _not started._ Promote the lifecycle contract into public hooks and
+7. **Public providers.** — _landed._ Promote the lifecycle contract into public hooks and
    migrate OTel, Vercel, Braintrust, and custom instrumentation onto it.
 
 ## Acceptance criteria
 
-- The lifecycle layer imports no OTel types. It does derive AI SDK callback payload shapes from
-  `Telemetry`, so `attempt`, `model.call`, and `tool.call` events currently expose AI SDK types to
-  providers — a known deviation from provider neutrality, to close in phase 7.
+- The lifecycle layer imports neither OTel nor AI SDK types. The harness-owned bridge maps AI SDK
+  callbacks into eve-owned event payloads before providers observe them.
 - Multiple providers observe one attempt while execution occurs exactly once.
 - No provider definition receives model or tool execution functions.
 - Documented authored instrumentation continues to observe eve calls.
 - Each provider builds its trace without inheriting Workflow or another provider's trace.
-- No eve span inherits a synthesized parent, so an authored sampler's root rule is consulted.
+- Native eve spans preserve the session decision; unrelated roots still use the authored sampler.
 - A session of ordinary length is exactly one trace; a session of any length has bounded traces.
 - `eve traces <session>` resolves every window of a session.
 - Parallel tool calls retain independent provider state.

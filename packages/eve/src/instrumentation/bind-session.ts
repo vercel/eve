@@ -108,10 +108,10 @@ export function bindSessionInstrumentation(input: {
     runStep: async (step, execute) => {
       if (!usesOtel) return execute();
       const tracer = trace.getTracer("eve");
-      const nativeContext = withNativeSamplingDecision(
-        otelContext.active(),
-        plan?.sampled === true,
-      );
+      const nativeContext =
+        plan !== undefined && plan.traceId.length > 0
+          ? withNativeSamplingDecision(otelContext.active(), plan.sampled)
+          : otelContext.active();
       const turnSpan = step.hasInput
         ? tracer.startSpan(
             "ai.eve.turn",
