@@ -18,7 +18,7 @@ import { frameworkAgentSourceRegistry } from "#framework/sources/registry.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineChannel, GET, POST } from "#public/definitions/channel.js";
 import { defineHook } from "#public/definitions/hook.js";
-import { defineTool, disableTool } from "#public/definitions/tool.js";
+import { defineTool, disableTool } from "#tools/definition.js";
 
 function manifest() {
   return createAgentSourceManifest({

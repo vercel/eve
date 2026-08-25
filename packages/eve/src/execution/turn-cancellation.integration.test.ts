@@ -22,9 +22,9 @@ import type { RouteHandlerArgs } from "#channel/routes.js";
 import { createSession } from "#channel/session.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
-import type { ToolContext } from "#public/definitions/tool.js";
+import type { ToolContext } from "#tools/definition.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
-import { toInputSchema } from "#shared/tool-schema.js";
+import { toInputSchema } from "#tools/schema.js";
 
 /**
  * Turn cancellation settles as `turn.cancelled` → `session.waiting` with

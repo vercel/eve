@@ -14,21 +14,21 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
-import { UNSPECIFIED_INPUT_SCHEMA } from "#shared/tool-schema.js";
+import { UNSPECIFIED_INPUT_SCHEMA } from "#tools/schema.js";
 import type { RunMode } from "#shared/run-mode.js";
 import {
   resolveRuntimeModelReference,
   type RuntimeModelResolutionScope,
 } from "#runtime/agent/resolve-model.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { AGENT_TOOL_DESCRIPTION, AGENT_TOOL_NAME } from "#shared/agent-tool.js";
+import { AGENT_TOOL_DESCRIPTION, AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 import { createTaskToolHarnessDefinitions } from "#execution/tools/tasks.js";
 import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
 import {
   PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA,
   SUBAGENT_TOOL_INPUT_SCHEMA,
-} from "#shared/agent-tool.js";
+} from "#tools/framework/agent-contract.js";
 
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";

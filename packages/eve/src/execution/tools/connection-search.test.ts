@@ -8,18 +8,15 @@ import {
   isAuthorizationSignal,
   PendingAuthorizationResultKey,
 } from "#harness/authorization.js";
-import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";
-import type { ToolContext } from "#public/definitions/tool.js";
+import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
+import type { ToolContext } from "#tools/definition.js";
 import type { ConnectionToolMetadata } from "#shared/connection-types.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
-import connectionSearch from "#public/tools/connection-search.js";
+import connectionSearch from "#tools/framework/connection-search.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
-import {
-  isBrandedToolEntry,
-  type DynamicResolveContext,
-  type DynamicToolSet,
-} from "#shared/dynamic-tool-definition.js";
-import { readDurableDynamicToolCallbacks } from "#shared/durable-dynamic-tool-callbacks.js";
+import { isBrandedToolEntry, type DynamicToolSet } from "#tools/dynamic.js";
+import type { DynamicResolveContext } from "#dynamic/definition.js";
+import { readDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
 
 function connection(name: string): ResolvedConnectionDefinition {
   return {

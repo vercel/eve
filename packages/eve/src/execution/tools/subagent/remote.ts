@@ -1,6 +1,6 @@
-import { defineTool } from "#public/definitions/tool.js";
-import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#shared/task-tool.js";
-import { PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA } from "#shared/agent-tool.js";
+import { defineTool } from "#tools/definition.js";
+import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#tools/framework/task-contract.js";
+import { PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA } from "#tools/framework/agent-contract.js";
 import { executeSubagentTool } from "#execution/tools/subagent/local.js";
 
 export function defineRemoteSubagent(input: {

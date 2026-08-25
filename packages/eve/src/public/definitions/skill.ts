@@ -4,7 +4,7 @@ import type {
   SkillPackageDefinition,
 } from "#shared/skill-definition.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
-import { SKILL_BRAND } from "#shared/dynamic-tool-definition.js";
+import { SKILL_BRAND } from "#shared/skill-definition.js";
 
 export type { NamedSkillDefinition, SkillFileContent, SkillPackageDefinition };
 

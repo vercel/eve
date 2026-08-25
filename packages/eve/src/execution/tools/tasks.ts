@@ -5,7 +5,7 @@ import {
   TASK_UPDATE_INPUT_SCHEMA,
   TASK_UPDATE_TOOL_NAME,
   TASK_VIEWS_OUTPUT_SCHEMA,
-} from "#shared/task-tool.js";
+} from "#tools/framework/task-contract.js";
 
 /**
  * Framework task tools for `experimental.tasks`.

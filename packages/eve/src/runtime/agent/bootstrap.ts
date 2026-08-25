@@ -1,6 +1,6 @@
 import type { ModelMessage } from "ai";
 
-import { AGENT_TOOL_NAME } from "#shared/agent-tool.js";
+import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 import { composeRuntimeBasePrompt } from "#runtime/prompt/compose.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import type { ResolvedAgent, ResolvedAgentDefinition } from "#runtime/types.js";

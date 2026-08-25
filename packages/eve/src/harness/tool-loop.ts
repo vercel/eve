@@ -158,7 +158,7 @@ import { attemptIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
 import { resolveParentLineage } from "#harness/parent-lineage.js";
 import { prepareTurnTraceContext } from "#harness/prepare-trace-context.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { TASK_UPDATE_TOOL_NAME } from "#shared/task-tool.js";
+import { TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 import {
   consumeDeferredStepInput,

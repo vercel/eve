@@ -16,7 +16,7 @@ import { createExecutionNodeStep, createNodeHarnessTools } from "#execution/node
 import { countLocalSubagentCalls } from "#execution/tools/subagent/local.js";
 import { createSession } from "#execution/session.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
-import { toInputSchema } from "#shared/tool-schema.js";
+import { toInputSchema } from "#tools/schema.js";
 
 vi.mock("ai", () => ({
   ToolLoopAgent: vi.fn(),

@@ -3,7 +3,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
-import { serializeOutputSchema } from "#shared/tool-schema.js";
+import { serializeOutputSchema } from "#tools/schema.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
@@ -14,7 +14,7 @@ import {
   isDynamicModelDefinition,
   type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
-import type { DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
+import type { DynamicToolEventName } from "#dynamic/definition.js";
 import type { CompiledAgentDefinition, CompiledRuntimeModelReference } from "#compiler/manifest.js";
 import type { CompiledRuntimeModelLimits } from "#compiler/model-catalog.js";
 import {

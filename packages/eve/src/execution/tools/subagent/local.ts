@@ -21,13 +21,13 @@ import { findTaskAgentAddress } from "#execution/tasks/parent/control-shared.js"
 import type { BackgroundTask } from "#execution/tasks/parent/delegate.js";
 import { CallbackBaseUrlKey } from "#harness/authorization.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
-import { defineTool, type TaskExec, type ToolContext } from "#public/definitions/tool.js";
+import { defineTool, type TaskExec, type ToolContext } from "#tools/definition.js";
 import type {
   RuntimeRemoteAgentCallActionRequest,
   RuntimeSubagentCallActionRequest,
 } from "#shared/action-types.js";
-import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#shared/task-tool.js";
-import { PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA } from "#shared/agent-tool.js";
+import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#tools/framework/task-contract.js";
+import { PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA } from "#tools/framework/agent-contract.js";
 import { parseJsonObject } from "#shared/json.js";
 import { createSubagentExecutorBinding } from "#tasks/types.js";
 import { activeTurnId } from "#harness/active-turn-id.js";

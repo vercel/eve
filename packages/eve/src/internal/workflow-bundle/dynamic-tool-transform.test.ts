@@ -5,7 +5,7 @@ import {
   collectDurableDynamicToolCallbacks,
   readDurableDynamicCallback,
   stampDurableDynamicToolCallbacks,
-} from "#shared/durable-dynamic-tool-callbacks.js";
+} from "#tools/durable-callbacks.js";
 
 // ---------------------------------------------------------------------------
 // Helpers for evaluating transformed code

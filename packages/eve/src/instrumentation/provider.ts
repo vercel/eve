@@ -13,9 +13,9 @@ import type {
   InstrumentationCapture,
   InstrumentationEvent,
 } from "#harness/instrumentation/lifecycle.js";
-import type { JsonValue } from "#public/types/json.js";
+import type { JsonValue } from "#shared/json.js";
 
-export type { JsonValue } from "#public/types/json.js";
+export type { JsonValue } from "#shared/json.js";
 
 export type {
   InstrumentationActionCompletedEvent,

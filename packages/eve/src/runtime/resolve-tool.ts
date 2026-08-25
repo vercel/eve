@@ -2,8 +2,11 @@ import type { CompiledToolDefinition } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
-import { registerDefinitionSource, stampDefinitionKey } from "#public/tool-result-narrowing.js";
-import { isToolSchema, toInputSchema, toOutputSchema } from "#shared/tool-schema.js";
+import {
+  registerDefinitionSource,
+  stampDefinitionKey,
+} from "#internal/authored-definition/source-identity.js";
+import { isToolSchema, toInputSchema, toOutputSchema } from "#tools/schema.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";

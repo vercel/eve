@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { contextStorage, ContextContainer } from "#context/container.js";
 import { AuthKey, SessionKey, type SessionAuthContext } from "#context/keys.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
+import type { SessionContext } from "#context/session-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { OpenApiConnectionClient } from "#runtime/connections/openapi-client.js";
 

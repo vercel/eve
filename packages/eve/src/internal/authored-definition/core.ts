@@ -19,7 +19,7 @@ import {
   isDynamicSentinel,
   type DynamicEvents,
   type DynamicToolEventName,
-} from "#shared/dynamic-tool-definition.js";
+} from "#dynamic/definition.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 type MutableDynamicEvents = {

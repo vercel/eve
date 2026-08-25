@@ -1,2 +1,5 @@
-export { default } from "#tools/load-skill.js";
-export * from "#tools/load-skill.js";
+import loadSkillDefinition from "#tools/provided/load-skill.js";
+
+export { loadSkill } from "#tools/provided/load-skill.js";
+
+export default loadSkillDefinition;

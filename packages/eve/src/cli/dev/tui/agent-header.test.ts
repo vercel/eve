@@ -19,7 +19,7 @@ const FRAMEWORK_TOOL: AgentInfoToolEntry = {
   owner: { feature: "test", kind: "framework" },
   outputSchema: { type: "object" },
   requiresApproval: false,
-  sourceId: "eve:bash-tool",
+  sourceId: "eve:defaults:tools/bash.ts",
   sourceKind: "module",
 };
 

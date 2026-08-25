@@ -16,7 +16,7 @@ import {
   assertResolverOnlyDynamicSentinel,
   isDynamicSentinel,
   type DynamicToolEventName,
-} from "#shared/dynamic-tool-definition.js";
+} from "#dynamic/definition.js";
 
 /**
  * Compiled skill entry produced from one authored `skills/*` file.

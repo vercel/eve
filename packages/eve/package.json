@@ -102,9 +102,9 @@
       "default": "./dist/src/public/tools/approval/index.js"
     },
     "./tools/sleep": {
-      "types": "./dist/src/public/tools/sleep/index.d.ts",
-      "import": "./dist/src/public/tools/sleep/index.js",
-      "default": "./dist/src/public/tools/sleep/index.js"
+      "types": "./dist/src/public/tools/sleep.d.ts",
+      "import": "./dist/src/public/tools/sleep.js",
+      "default": "./dist/src/public/tools/sleep.js"
     },
     "./tools": {
       "types": "./dist/src/public/tools/index.d.ts",
@@ -136,6 +136,11 @@
       "import": "./dist/src/public/tools/web-fetch.js",
       "default": "./dist/src/public/tools/web-fetch.js"
     },
+    "./tools/web_search": {
+      "types": "./dist/src/public/tools/web-search.d.ts",
+      "import": "./dist/src/public/tools/web-search.js",
+      "default": "./dist/src/public/tools/web-search.js"
+    },
     "./tools/load_skill": {
       "types": "./dist/src/public/tools/load-skill.d.ts",
       "import": "./dist/src/public/tools/load-skill.js",
@@ -150,6 +155,11 @@
       "types": "./dist/src/public/tools/grep.d.ts",
       "import": "./dist/src/public/tools/grep.js",
       "default": "./dist/src/public/tools/grep.js"
+    },
+    "./tools/workflow": {
+      "types": "./dist/src/public/tools/workflow.d.ts",
+      "import": "./dist/src/public/tools/workflow.js",
+      "default": "./dist/src/public/tools/workflow.js"
     },
     "./models/openai": {
       "types": "./dist/src/public/models/openai/index.d.ts",

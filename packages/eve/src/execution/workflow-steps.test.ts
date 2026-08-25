@@ -48,8 +48,8 @@ import { createTurnWorkflowInput } from "#execution/durable-session-migrations/t
 import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { projectToDurableSession } from "#execution/session.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
-import { defineTool } from "#public/definitions/tool.js";
-import { stampDurableDynamicCallback } from "#shared/durable-dynamic-tool-callbacks.js";
+import { defineTool } from "#tools/definition.js";
+import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import { readLatestTaskView, sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";

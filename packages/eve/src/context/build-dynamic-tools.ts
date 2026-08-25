@@ -14,13 +14,13 @@ import type {
   ApprovalResponseContext,
   ApprovalResponseDecision,
   ApprovalStatus,
-} from "#public/definitions/approval.js";
+} from "#approval/definition.js";
 import {
   callDurableDynamicCallback,
   lookupDurableDynamicCallback,
   type DurableDynamicCallbackPhase,
-} from "#shared/durable-dynamic-tool-callbacks.js";
-import { toInputSchema, toOutputSchema } from "#shared/tool-schema.js";
+} from "#tools/durable-callbacks.js";
+import { toInputSchema, toOutputSchema } from "#tools/schema.js";
 
 const log = createLogger("dynamic-tools");
 

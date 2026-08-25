@@ -2,7 +2,7 @@ import { z } from "#compiled/zod/index.js";
 
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { JsonValue } from "#shared/json.js";
-import type { TaskExecutorBinding } from "#shared/tool-task.js";
+import type { TaskExecutorBinding } from "#tools/task.js";
 import { sameTaskMetadata, type DurableTaskMetadata, type TaskView } from "#tasks/types.js";
 
 /**

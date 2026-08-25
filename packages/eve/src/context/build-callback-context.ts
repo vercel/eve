@@ -1,4 +1,4 @@
-import type { SessionContext } from "#public/definitions/callback-context.js";
+import type { SessionContext } from "#context/session-context.js";
 import type { SkillHandle } from "#shared/skill-types.js";
 import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-session.js";
 import { createSandboxSkillHandle } from "#runtime/skills/sandbox-access.js";

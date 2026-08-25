@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createResolvedRuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
-import { AGENT_TOOL_NAME } from "#shared/agent-tool.js";
+import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import type { ResolvedAgent } from "#runtime/types.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";

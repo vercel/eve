@@ -11,7 +11,7 @@ import {
   createEveSessionStreamRoutePath,
   createEveSubagentStreamRoutePath,
 } from "#protocol/routes.js";
-import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
+import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
 import type {
   RuntimeActionRequest,
   RuntimeActionResult,

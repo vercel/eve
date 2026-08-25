@@ -6,7 +6,7 @@ import {
   isDynamicSentinel,
   type DynamicResolveContext,
   type DynamicSentinel,
-} from "#shared/dynamic-tool-definition.js";
+} from "#dynamic/definition.js";
 
 /**
  * Optional overrides that eve forwards to the AI SDK model runtime call for

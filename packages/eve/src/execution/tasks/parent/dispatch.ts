@@ -27,7 +27,7 @@ import {
   TASK_CANCEL_TOOL_NAME,
   TASK_TOOL_NAMES,
   TASK_UPDATE_TOOL_NAME,
-} from "#shared/task-tool.js";
+} from "#tools/framework/task-contract.js";
 import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
 import {
   isTerminalTaskStatus,

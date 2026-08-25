@@ -1,6 +1,6 @@
 import type { Tool } from "ai";
 
-import { toInputSchema } from "#shared/tool-schema.js";
+import { toInputSchema } from "#tools/schema.js";
 import type { JsonObject } from "#shared/json.js";
 
 /**

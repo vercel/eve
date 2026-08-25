@@ -24,3 +24,13 @@ export interface SkillPackageDefinition {
 export interface NamedSkillDefinition extends SkillPackageDefinition {
   readonly name: string;
 }
+
+export const SKILL_BRAND = Symbol.for("eve:skill-brand");
+
+export function isBrandedSkillEntry(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as Record<symbol, unknown>)[SKILL_BRAND] === true
+  );
+}

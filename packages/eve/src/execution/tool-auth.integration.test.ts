@@ -9,9 +9,9 @@ import {
   PendingAuthorizationResultKey,
   isAuthorizationSignal,
 } from "#harness/authorization.js";
-import { isConnectionAuthorizationFailedError } from "#public/connections/errors.js";
+import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
-import type { ToolContext } from "#public/definitions/tool.js";
+import type { ToolContext } from "#tools/definition.js";
 import type {
   AuthorizationDefinition,
   ConnectionPrincipal,

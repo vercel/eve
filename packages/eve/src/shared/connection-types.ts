@@ -8,9 +8,9 @@
 
 import type { ToolSet } from "ai";
 
-import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { JsonValue } from "#public/types/json.js";
+import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
+import type { SessionContext } from "#context/session-context.js";
+import type { JsonValue } from "#shared/json.js";
 
 /**
  * Credential returned by a connection's `getToken` or

@@ -5,7 +5,7 @@ import { AuthKey, type SessionAuthContext } from "#context/keys.js";
 import {
   ConnectionAuthorizationFailedError,
   isConnectionAuthorizationFailedError,
-} from "#public/connections/errors.js";
+} from "#connections/errors.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
 

@@ -1,2 +1,11 @@
-export { default } from "#tools/glob.js";
-export * from "#tools/glob.js";
+import globDefinition from "#tools/provided/glob.js";
+
+export {
+  GLOB_INPUT_SCHEMA,
+  GLOB_OUTPUT_SCHEMA,
+  type GlobToolInput,
+  type GlobToolOutput,
+  glob,
+} from "#tools/provided/glob.js";
+
+export default globDefinition;

@@ -1,6 +1,6 @@
 import type { AgentAddress, AgentIdentity } from "#harness/handles/store.js";
 import { isJsonObjectValue, type JsonValue } from "#shared/json.js";
-import type { TaskExecutorBinding } from "#shared/tool-task.js";
+import type { TaskExecutorBinding } from "#tools/task.js";
 import type { SubagentAuthorizationEvent } from "#channel/types.js";
 
 /**

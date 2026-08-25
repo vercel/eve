@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION } from "#execution/session.js";
 import { createSessionStep } from "#execution/create-session-step.js";
-import { TASK_UPDATE_TOOL_NAME } from "#shared/task-tool.js";
+import { TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 
 vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({

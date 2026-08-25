@@ -13,17 +13,17 @@ import {
   ConnectionAuthorizationFailedError,
   isConnectionAuthorizationFailedError,
   isConnectionAuthorizationRequiredError,
-} from "#public/connections/errors.js";
-import { defineTool } from "#public/definitions/tool.js";
-import type { ToolContext } from "#public/definitions/tool.js";
+} from "#connections/errors.js";
+import { defineTool } from "#tools/definition.js";
+import type { ToolContext } from "#tools/definition.js";
 import {
   resolveApprovalPolicy,
   type ApprovalContext,
   type ApprovalResponseContext,
-} from "#public/definitions/approval.js";
-import type { JsonValue } from "#public/types/json.js";
+} from "#approval/definition.js";
+import type { JsonValue } from "#shared/json.js";
 import type { JsonObject } from "#shared/json.js";
-import { stampDurableDynamicToolCallbacks } from "#shared/durable-dynamic-tool-callbacks.js";
+import { stampDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
 import { writeCachedToken } from "#runtime/connections/authorization-tokens.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
