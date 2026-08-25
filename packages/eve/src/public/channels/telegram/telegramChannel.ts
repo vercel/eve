@@ -311,7 +311,7 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
         typeof receiveTarget.messageThreadId === "number"
           ? receiveTarget.messageThreadId
           : undefined;
-      const requestedConversationId = readOptionalString(receiveTarget.conversationId);
+      const requestedConversationId = readChatId(receiveTarget.conversationId);
       const initialMessage = receiveTarget.initialMessage;
       if (initialMessage !== undefined && requestedConversationId !== undefined) {
         throw new Error(
@@ -693,12 +693,6 @@ function attachTelegramDeliver(channel: TelegramChannel): void {
 }
 
 function readChatId(value: unknown): string | undefined {
-  if (typeof value === "string" && value.length > 0) return value;
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
-  return undefined;
-}
-
-function readOptionalString(value: unknown): string | undefined {
   if (typeof value === "string" && value.length > 0) return value;
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   return undefined;
