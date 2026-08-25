@@ -1401,7 +1401,9 @@ describe("createToolLoopHarness", () => {
     };
     const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
 
-    const result = await runStep(createTestSession(), { message: "Hi" });
+    const result = await runStep(createTestSession({ outputSchema: { type: "object" } }), {
+      message: "Hi",
+    });
 
     expect(result.next).toEqual({ done: true, output: "" });
     expect(events.map((event) => event.type)).toEqual([
@@ -4281,6 +4283,7 @@ describe("createToolLoopHarness", () => {
     // same thread rather than the whole run being torn down.
     expect(result.next).toBeNull();
     expect(result.settledTurn).toEqual({ isError: true, output: "Model blew up" });
+    expect(result.session.outputSchema).toBeUndefined();
 
     const types = events.map((e) => e.type);
     expect(types).toContain("session.started");

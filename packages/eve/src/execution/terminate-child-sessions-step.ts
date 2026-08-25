@@ -7,6 +7,7 @@ import { hydrateDurableSession } from "#execution/session.js";
 import {
   resetRemoteAgentSession,
   resolveRemoteAgentForAction,
+  resolveRemoteAgentStreamHeaders,
 } from "#execution/remote-agent-dispatch.js";
 import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";
 import { getAgentHandleStore } from "#harness/handles/store.js";
@@ -100,17 +101,39 @@ export async function terminateChildSessionsStep(input: {
     }
     try {
       if (handle.address.kind === "agent/remote") {
-        const selection = getDynamicSubagentSelection(runtimeContext!.ctx, handle.identity.nodeId);
-        const remote = resolveRemoteAgentForAction({
-          dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
-          nodeId: handle.identity.nodeId,
-          registry: runtimeContext!.bundle.subagentRegistry.subagentsByNodeId,
-          remoteAgentName: handle.identity.name,
-        });
-        await resetRemoteAgentSession({
-          remote: { ...remote, url: handle.address.url },
-          sessionId: handle.address.sessionId,
-        });
+        if (handle.address.credentialResolver !== undefined) {
+          const resolverId = handle.address.credentialResolver.resolverId;
+          const headers =
+            resolverId === undefined
+              ? {}
+              : await resolveRemoteAgentStreamHeaders({
+                  bundle: runtimeContext!.bundle,
+                  name: handle.identity.name,
+                  resolverId,
+                  url: handle.address.url,
+                });
+          await resetRemoteAgentSession({
+            headers,
+            remote: { name: handle.identity.name, url: handle.address.url },
+            sessionId: handle.address.sessionId,
+          });
+        } else {
+          // Compatibility for handles written before resolver identity was persisted.
+          const selection = getDynamicSubagentSelection(
+            runtimeContext!.ctx,
+            handle.identity.nodeId,
+          );
+          const remote = resolveRemoteAgentForAction({
+            dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
+            nodeId: handle.identity.nodeId,
+            registry: runtimeContext!.bundle.subagentRegistry.subagentsByNodeId,
+            remoteAgentName: handle.identity.name,
+          });
+          await resetRemoteAgentSession({
+            remote: { ...remote, url: handle.address.url },
+            sessionId: handle.address.sessionId,
+          });
+        }
       } else {
         await cancelRun(await getWorld(), handle.address.sessionId, {
           cancelReason: "Parent session ended",

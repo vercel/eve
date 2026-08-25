@@ -568,6 +568,10 @@ async function runDriverLoop(input: {
       }
 
       if (next.kind === "closed") {
+        await terminateChildSessionsStep({
+          serializedContext: stateCursor.serializedContext,
+          sessionState: stateCursor.sessionState,
+        });
         return { kind: "result", result: { output: "" } };
       }
 

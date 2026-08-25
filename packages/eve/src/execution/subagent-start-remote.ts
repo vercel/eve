@@ -71,10 +71,16 @@ export async function startRemoteSubagent(input: {
     parentSessionId: input.session.sessionId,
     parentTurnId: input.batchEvent.turnId,
   });
+  const credentialResolver = {
+    resolverId:
+      input.dynamicRemoteAgent === undefined
+        ? action.nodeId
+        : input.dynamicRemoteAgent.credentialsStepId,
+  };
   const preparedSession = prepareAgentStart(input.currentSession, {
     identity,
     operation,
-    target: { callbackBaseUrl, kind: "agent/remote", url: resolvedRemote.url },
+    target: { callbackBaseUrl, credentialResolver, kind: "agent/remote", url: resolvedRemote.url },
   });
 
   try {
@@ -91,6 +97,7 @@ export async function startRemoteSubagent(input: {
     });
     const address = {
       callbackBaseUrl,
+      credentialResolver,
       kind: "agent/remote",
       sessionId: child.sessionId,
       url: resolvedRemote.url,

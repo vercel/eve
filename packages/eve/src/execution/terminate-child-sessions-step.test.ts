@@ -18,6 +18,7 @@ const {
   hydrateDurableSessionMock,
   resetRemoteAgentSessionMock,
   resolveRemoteAgentForActionMock,
+  resolveRemoteAgentStreamHeadersMock,
   resolveEffectiveAgentRuntimeMock,
 } = vi.hoisted(() => ({
   cancelOwnedTaskMock: vi.fn(),
@@ -28,6 +29,7 @@ const {
   hydrateDurableSessionMock: vi.fn(),
   resetRemoteAgentSessionMock: vi.fn(),
   resolveRemoteAgentForActionMock: vi.fn(),
+  resolveRemoteAgentStreamHeadersMock: vi.fn(),
   resolveEffectiveAgentRuntimeMock: vi.fn(),
 }));
 
@@ -46,6 +48,7 @@ vi.mock("#execution/session.js", () => ({
 vi.mock("#execution/remote-agent-dispatch.js", () => ({
   resetRemoteAgentSession: resetRemoteAgentSessionMock,
   resolveRemoteAgentForAction: resolveRemoteAgentForActionMock,
+  resolveRemoteAgentStreamHeaders: resolveRemoteAgentStreamHeadersMock,
 }));
 vi.mock("#execution/tasks/parent/dispatch.js", () => ({
   cancelOwnedTask: cancelOwnedTaskMock,
@@ -80,6 +83,8 @@ describe("terminateChildSessionsStep", () => {
       path: "/eve/v1/session",
       url: "https://compiled.example.com",
     });
+    resolveRemoteAgentStreamHeadersMock.mockReset();
+    resolveRemoteAgentStreamHeadersMock.mockResolvedValue({ authorization: "Bearer fresh" });
     resolveEffectiveAgentRuntimeMock.mockReset();
     resolveEffectiveAgentRuntimeMock.mockReturnValue({ turnAgent: "turn-agent" });
   });
@@ -123,6 +128,56 @@ describe("terminateChildSessionsStep", () => {
     });
     expect(resetRemoteAgentSessionMock).toHaveBeenCalledWith({
       remote: expect.objectContaining({ url: "https://remote.example.com" }),
+      sessionId: "session-remote",
+    });
+  });
+
+  it("resets a remote child with its creation-time credential resolver", async () => {
+    await terminateChildSessionsStep({
+      serializedContext: { context: "serialized" },
+      sessionState: makeSessionState([
+        parkedHandle({
+          credentialResolver: { resolverId: "dynamic-credentials-step" },
+          id: "ag_remote:1",
+          kind: "agent/remote",
+          sessionId: "session-remote",
+        }),
+      ]),
+    });
+
+    expect(getDynamicSubagentSelectionMock).not.toHaveBeenCalled();
+    expect(resolveRemoteAgentForActionMock).not.toHaveBeenCalled();
+    expect(resolveRemoteAgentStreamHeadersMock).toHaveBeenCalledWith({
+      bundle: COMPILED_BUNDLE,
+      name: "research",
+      resolverId: "dynamic-credentials-step",
+      url: "https://remote.example.com",
+    });
+    expect(resetRemoteAgentSessionMock).toHaveBeenCalledWith({
+      headers: { authorization: "Bearer fresh" },
+      remote: { name: "research", url: "https://remote.example.com" },
+      sessionId: "session-remote",
+    });
+  });
+
+  it("does not invent credentials for a child created without a resolver", async () => {
+    await terminateChildSessionsStep({
+      serializedContext: { context: "serialized" },
+      sessionState: makeSessionState([
+        parkedHandle({
+          credentialResolver: {},
+          id: "ag_remote:1",
+          kind: "agent/remote",
+          sessionId: "session-remote",
+        }),
+      ]),
+    });
+
+    expect(getDynamicSubagentSelectionMock).not.toHaveBeenCalled();
+    expect(resolveRemoteAgentStreamHeadersMock).not.toHaveBeenCalled();
+    expect(resetRemoteAgentSessionMock).toHaveBeenCalledWith({
+      headers: {},
+      remote: { name: "research", url: "https://remote.example.com" },
       sessionId: "session-remote",
     });
   });
@@ -258,10 +313,15 @@ function makeIdentity(id: string): { id: string; name: string; nodeId: string } 
   return { id, name: "research", nodeId: "subagents/research" };
 }
 
-function makeAddress(kind: AddressKind, sessionId: string) {
+function makeAddress(
+  kind: AddressKind,
+  sessionId: string,
+  credentialResolver?: { readonly resolverId?: string },
+) {
   return kind === "agent/remote"
     ? {
         callbackBaseUrl: "https://parent.example.com",
+        credentialResolver,
         kind,
         sessionId,
         url: "https://remote.example.com",
@@ -270,12 +330,13 @@ function makeAddress(kind: AddressKind, sessionId: string) {
 }
 
 function runningHandle(input: {
+  readonly credentialResolver?: { readonly resolverId?: string };
   readonly id: string;
   readonly kind: AddressKind;
   readonly sessionId: string;
 }): AgentHandle {
   return {
-    address: makeAddress(input.kind, input.sessionId),
+    address: makeAddress(input.kind, input.sessionId, input.credentialResolver),
     identity: makeIdentity(input.id),
     operation: {
       callId: "call-1",
@@ -288,12 +349,13 @@ function runningHandle(input: {
 }
 
 function parkedHandle(input: {
+  readonly credentialResolver?: { readonly resolverId?: string };
   readonly id: string;
   readonly kind: AddressKind;
   readonly sessionId: string;
 }): AgentHandle {
   return {
-    address: makeAddress(input.kind, input.sessionId),
+    address: makeAddress(input.kind, input.sessionId, input.credentialResolver),
     identity: makeIdentity(input.id),
     lastStatus: "ready",
     phase: "parked",

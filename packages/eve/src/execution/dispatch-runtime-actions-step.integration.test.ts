@@ -647,6 +647,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
         expect.objectContaining({
           address: {
             callbackBaseUrl: "https://caller.example.com",
+            credentialResolver: { resolverId: "remote/research" },
             kind: "agent/remote",
             sessionId: "remote-session-123456789012",
             url: "https://registry.example.com",

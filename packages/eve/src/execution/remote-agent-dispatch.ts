@@ -347,10 +347,11 @@ export async function cancelRemoteAgentTurn(input: {
 
 /** Retires one exact remote child session through eve's authenticated reset route. */
 export async function resetRemoteAgentSession(input: {
-  readonly remote: ResolvedRuntimeRemoteAgentNode;
+  readonly headers?: Record<string, string>;
+  readonly remote: Pick<ResolvedRuntimeRemoteAgentNode, "auth" | "headers" | "name" | "url">;
   readonly sessionId: string;
 }): Promise<ResetResponse> {
-  const headers = await resolveRemoteAgentRequestHeaders(input.remote);
+  const headers = input.headers ?? (await resolveRemoteAgentRequestHeaders(input.remote));
   const response = await fetch(
     createRemoteAgentRouteUrl(input.remote.url, createEveSessionResetRoutePath(input.sessionId)),
     {

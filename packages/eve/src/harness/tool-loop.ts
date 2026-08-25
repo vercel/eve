@@ -1946,6 +1946,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           message: errorMessage,
         });
         const settledTurn = { isError: true, output: taskFailureOutput } satisfies SettledTurn;
+        session = { ...session, outputSchema: undefined };
         return {
           next: null,
           session: setHarnessEmissionState(session, emissionState),
