@@ -159,6 +159,11 @@ optional manifest side table. Ordinary source composition owns replacement and
 disablement, and the ordinary dynamic-tool lifecycle owns public-name
 collisions and complete-result failure.
 
+The inspection projection advances `/eve/v1/info` to version 4. It lists each
+selected memory slot with its source provenance and preserves the generated
+tool wrapper's required memory-source dependency in the public binding data.
+Subagent summaries include their memory-slot count.
+
 The wrapper resolves on `turn.started` after recall commits. It reads the
 already locked slot, invokes `provider.tools(context)`, requires a map of
 branded `defineTool()` values, qualifies each key as
@@ -800,12 +805,8 @@ accumulative across compaction.
 
 Because superseded versions and hidden scopes can grow while the visible
 prompt stays constant, eve triggers canonicalization on raw attributed-record
-growth independently of visible prompt size. If canonical memory state alone
-exceeds its configured bound, compaction fails with an actionable error — and
-the failure is recoverable by design: the next recall boundary still runs, so
-providers can supersede their keyed items with smaller content, and the bound
-is application-configurable. eve never silently summarizes, evicts, or
-truncates provider items.
+growth independently of visible prompt size. eve never silently summarizes,
+evicts, or truncates provider items.
 
 After a checkpoint is durably appended, eve calls `recall` with
 `phase: "compaction.completed"`. The provider receives the settled
@@ -954,7 +955,6 @@ implementation uses exactly the reviewed constants.
 | Provider item ID            | non-empty, 1,024 UTF-8 bytes         | keyed message `id`                                       |
 | Key prefixes                | `memns1_`, `memscope1_`, `memitem1_` | SHA-256 digests, base64url                               |
 | Raw-record canonicalization | 512 records or 262,144 bytes         | superseded/hidden attributed records between compactions |
-| Canonical private state     | 131,072 bytes, configurable          | folded memory state that must survive compaction         |
 | File entry                  | 2,048 UTF-8 bytes                    | normalized `save_memory` text                            |
 | File document               | 65,536 UTF-8 bytes                   | exact serialized stored document, including header       |
 | File entries                | `maxEntries`, default 100            | live entries per scope key                               |
@@ -1103,8 +1103,7 @@ recall visibility. Mounted extensions cannot contribute memory slots.
   boundary.
 - Compaction canonicalizes memory records without laundering any attributed
   record into a free-form summary and without dropping items hidden from the
-  active scope. Canonical-state overflow fails recoverably: recall still runs
-  so providers can supersede keyed items with smaller content.
+  active scope.
 - Provider tools are slot-qualified, scope-bound ordinary dynamic tools built
   entirely on the generic dynamic-tool engine. Each turn resolves one complete
   tool set, every model step uses it, and callback replay uses the captured
