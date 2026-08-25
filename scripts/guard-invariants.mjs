@@ -108,6 +108,10 @@
  *             as current. Version modules are append-only protocol history;
  *             the paired test pins that version's schema/encoder or
  *             migration/fixtures so a version cannot exist as untested code.
+ *   rule 41 — Harness and execution instrumentation boundaries stay policy-free.
+ *             Production harness/execution files cannot import `#tracing/*`;
+ *             harness files also cannot read channel audience, trace policy,
+ *             or the process instrumentation runtime directly.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -203,6 +207,7 @@ function isTsLike(relPath) {
  *   rule33: Violation[];
  *   rule35: Violation[];
  *   rule37: Violation[];
+ *   rule41: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -232,6 +237,7 @@ async function scanRepo(state) {
     checkRule33(posix, lines, state.rule33);
     checkRule35(posix, lines, state.rule35);
     checkRule37(posix, content, state.rule37);
+    checkRule41(posix, lines, state.rule41);
   }
 }
 
@@ -386,6 +392,60 @@ function checkRule37(posix, source, violations) {
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
+}
+
+// ---------- Rule 41: instrumentation ownership boundaries ----------
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule41(posix, lines, violations) {
+  if (!posix.startsWith("packages/eve/src/")) return;
+  if (/\.(?:integration|scenario)?\.test\.ts$/u.test(posix) || posix.endsWith(".test.ts")) return;
+  const harness = posix.startsWith("packages/eve/src/harness/");
+  const execution = posix.startsWith("packages/eve/src/execution/");
+  if (!harness && !execution) return;
+
+  for (const [index, line] of lines.entries()) {
+    if (line.includes('from "#tracing/') || line.includes("from '#tracing/")) {
+      violations.push({
+        rule: 41,
+        file: posix,
+        line: index + 1,
+        message:
+          "imports #tracing/* across the instrumentation ownership boundary. Use an instrumentation-owned control or propagation helper instead.",
+      });
+    }
+    if (!harness) continue;
+    if (
+      line.includes('from "#shared/channel-audience.js"') ||
+      line.includes("from '#shared/channel-audience.js'")
+    ) {
+      violations.push({
+        rule: 41,
+        file: posix,
+        line: index + 1,
+        message:
+          "imports channel audience policy into the harness. Audience is frozen by session instrumentation planning.",
+      });
+    }
+    if (
+      /\b(?:ChannelInstrumentationKey|normalizeChannelAudience|evaluateTracePolicy|getInstrumentationRuntime)\b/u.test(
+        line,
+      ) ||
+      line.includes(".metadata.audience")
+    ) {
+      violations.push({
+        rule: 41,
+        file: posix,
+        line: index + 1,
+        message:
+          "reads instrumentation policy or process runtime state inside the harness. Use the bound SessionInstrumentation controls instead.",
+      });
+    }
+  }
 }
 
 function importSpecifier(node) {
@@ -1256,6 +1316,7 @@ async function main() {
     rule33: /** @type {Violation[]} */ ([]),
     rule35: /** @type {Violation[]} */ ([]),
     rule37: /** @type {Violation[]} */ ([]),
+    rule41: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1360,6 +1421,9 @@ async function main() {
 
   // Rule 40
   violations.push(...(await checkRule40WireContracts()));
+
+  // Rule 41
+  violations.push(...state.rule41);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");
