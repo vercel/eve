@@ -155,6 +155,8 @@ export interface ResolvedExtensionMount {
   readonly sourceRoot: string;
   /** Discovered agent-shaped source manifest for the extension. */
   readonly manifest: AgentSourceManifest;
+  /** Runtime packages this extension requires the consuming application to externalize. */
+  readonly externalDependencies: readonly string[];
   /**
    * Consumer-authored overrides discovered in the mount directory form
    * (`extensions/<ns>/{tools,connections,…}/`). Composed under the same

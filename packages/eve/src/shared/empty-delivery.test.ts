@@ -7,6 +7,10 @@ describe("hasEmptyDeliverySentinel", () => {
     expect(hasEmptyDeliverySentinel(EMPTY_DELIVERY_SENTINEL)).toBe(true);
   });
 
+  it("recognizes an HTML-escaped sentinel", () => {
+    expect(hasEmptyDeliverySentinel("&lt;eve-empty-delivery/&gt;")).toBe(true);
+  });
+
   it("recognizes the sentinel anywhere in the response", () => {
     expect(hasEmptyDeliverySentinel(`before ${EMPTY_DELIVERY_SENTINEL} after`)).toBe(true);
   });

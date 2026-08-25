@@ -55,11 +55,25 @@ export async function checkTaskContinuationAvailability(input: {
   );
   return active === undefined
     ? undefined
-    : createAgentErrorResult({
+    : createTaskContinuationBusyResult({
         action: input.action,
-        code: AGENT_BUSY,
-        message: `Agent "${input.agentId}" is busy with task "${active.view.taskId}" (${active.view.status}).`,
+        agentId: input.agentId,
+        status: active.view.status,
+        taskId: active.view.taskId,
       });
+}
+
+export function createTaskContinuationBusyResult(input: {
+  readonly action: RuntimeAgentHandleAction;
+  readonly agentId: string;
+  readonly status: string;
+  readonly taskId: string;
+}): RuntimeSubagentDispatchFailure {
+  return createAgentErrorResult({
+    action: input.action,
+    code: AGENT_BUSY,
+    message: `Agent "${input.agentId}" is busy with task "${input.taskId}" (${input.status}).`,
+  });
 }
 
 /**

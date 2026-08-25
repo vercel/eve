@@ -194,6 +194,47 @@ describe("buildTelemetryRuntimeContext", () => {
     });
   });
 
+  it("withholds model content from hosted unknown-audience resolvers", () => {
+    let captured: InstrumentationStepStartedEventInput | undefined;
+
+    build({
+      authored: {
+        events: {
+          "step.started": (input: InstrumentationStepStartedEventInput) => {
+            captured = input;
+            return { runtimeContext: {} };
+          },
+        },
+      },
+    });
+
+    expect(captured?.modelInput).toEqual({ instructions: undefined, messages: [] });
+  });
+
+  it("exposes model content to public-audience resolvers", () => {
+    const ctx = new ContextContainer();
+    ctx.set(ChannelInstrumentationKey, {
+      kind: "channel:public",
+      metadata: { audience: "public" },
+    });
+    let captured: InstrumentationStepStartedEventInput | undefined;
+
+    contextStorage.run(ctx, () =>
+      build({
+        authored: {
+          events: {
+            "step.started": (input: InstrumentationStepStartedEventInput) => {
+              captured = input;
+              return { runtimeContext: {} };
+            },
+          },
+        },
+      }),
+    );
+
+    expect(captured?.modelInput.messages).toEqual(messages);
+  });
+
   it("snapshots resolver input so mutating live context cannot change it", () => {
     const roles = ["admin"];
     const channelMetadata = { nested: { value: "original" }, triggeringUserId: "U999" };

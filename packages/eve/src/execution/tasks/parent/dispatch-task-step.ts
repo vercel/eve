@@ -11,7 +11,7 @@
  * parent turn inbox, and every start dispatches a conversation-mode
  * (persistent) child so the background task stays resumable.
  *
- * Task-control calls (`task_peek` / `task_cancel` / `task_update`) execute
+ * Task-control calls (`task_cancel` / `task_update`) execute
  * inline in this step, which holds the session ownership index and world
  * access they need.
  */
@@ -134,6 +134,7 @@ export async function dispatchTaskStep(
           outcome = await dispatchToTaskAgentAddress({
             action: entry.action,
             agentId: entry.agentId,
+            auth: prepared.auth,
             bundle: createAgentContinuationBundle({
               action: entry.action,
               bundle,

@@ -29,6 +29,7 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { toInputSchema } from "#shared/tool-schema.js";
 
 function buildSerializedContext(overrides: {
+  audience?: "public" | "private" | "unknown";
   auth?: Record<string, unknown>;
   channelKind: string;
   channelState?: Record<string, unknown>;
@@ -44,10 +45,17 @@ function buildSerializedContext(overrides: {
     };
   };
 }): Record<string, unknown> {
+  const channel: { kind: unknown; state: unknown; audience?: unknown } = {
+    kind: overrides.channelKind,
+    state: overrides.channelState ?? {},
+  };
+  if (overrides.audience !== undefined) {
+    channel.audience = overrides.audience;
+  }
   const context: Record<string, unknown> = {
     "eve.auth": overrides.auth ?? null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
-    "eve.channel": { kind: overrides.channelKind, state: overrides.channelState ?? {} },
+    "eve.channel": channel,
     "eve.mode": overrides.mode,
   };
   if (overrides.continuationToken !== undefined) {
@@ -1140,6 +1148,7 @@ describe("workflowEntry integration", () => {
 
     await runtime.run(async () => {
       const serializedContext = buildSerializedContext({
+        audience: "public",
         channelKind: "http",
         continuationToken,
         mode: "conversation",
@@ -1172,6 +1181,7 @@ describe("workflowEntry integration", () => {
         const attrs = (persisted as { attributes?: Record<string, string> }).attributes ?? {};
 
         expect(attrs["$eve.type"]).toBe("session");
+        expect(attrs["$eve.is_trace_content_visible"]).toBe("true");
         expect(attrs["$eve.trigger"]).toBe("http");
         expect(attrs["$eve.title"]).toContain("session tag round-trip");
         // Top-level sessions have no parent or subagent name on the root run.
@@ -1189,6 +1199,7 @@ describe("workflowEntry integration", () => {
 
     await runtime.run(async () => {
       const serializedContext = buildSerializedContext({
+        audience: "public",
         channelKind: "subagent",
         continuationToken: "subagent:parent-session:call-subagent-1",
         mode: "task",
@@ -1232,6 +1243,7 @@ describe("workflowEntry integration", () => {
       const attrs = (persisted as { attributes?: Record<string, string> }).attributes ?? {};
 
       expect(attrs["$eve.type"]).toBe("subagent");
+      expect(attrs["$eve.is_trace_content_visible"]).toBe("true");
       expect(attrs["$eve.parent"]).toBe("parent-session");
       expect(attrs["$eve.parent_call"]).toBe("call-subagent-1");
       expect(attrs["$eve.parent_turn"]).toBe("turn-parent");

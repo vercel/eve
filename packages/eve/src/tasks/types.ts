@@ -1,4 +1,6 @@
-import type { JsonValue } from "#shared/json.js";
+import type { AgentAddress, AgentIdentity } from "#harness/handles/store.js";
+import { isJsonObjectValue, type JsonValue } from "#shared/json.js";
+import type { TaskExecutorBinding } from "#shared/tool-task.js";
 import type { SubagentAuthorizationEvent } from "#channel/types.js";
 
 /**
@@ -37,10 +39,120 @@ export interface TaskMetadata {
   readonly name: string;
 }
 
+export type SubagentTaskMetadata = TaskMetadata;
+
+/** Executor-neutral metadata retained by a non-subagent durable task. */
+export interface BackgroundTaskMetadata {
+  readonly kind: string;
+  readonly name: string;
+}
+
+export type DurableTaskMetadata = BackgroundTaskMetadata | TaskMetadata;
+
+export function createSubagentTaskMetadata(
+  metadata: Omit<SubagentTaskMetadata, "kind" | "name"> & { readonly name: string },
+): SubagentTaskMetadata {
+  return { ...metadata, kind: "subagent" };
+}
+
+export function readSubagentTaskMetadata(task: {
+  readonly executor?: TaskExecutorBinding | TaskExecutorState;
+  readonly metadata: DurableTaskMetadata;
+}): SubagentTaskMetadata | undefined {
+  if (task.metadata.kind === "subagent" && "agentId" in task.metadata) {
+    return task.metadata;
+  }
+  const executor = readSubagentExecutor(task.executor);
+  if (executor === undefined) return undefined;
+  return {
+    agentId: executor.identity.id,
+    kind: "subagent",
+    mode: executor.address.kind === "agent/remote" ? "remote" : "local",
+    name: executor.identity.name,
+  };
+}
+
+/**
+ * Durable subagent executor binding payload: the child's stable identity and
+ * private delivery address, copied from the parent's agent handle store at
+ * delegation time. Every field derives deterministically from the
+ * originating call (operation-hashed id, dispatch-chosen continuation
+ * token), so a replayed delegation produces a deep-equal binding — the
+ * equality the task run's `bind` replay check compares.
+ */
+export interface SubagentExecutorData {
+  readonly address: AgentAddress;
+  readonly identity: AgentIdentity;
+}
+
+export function createSubagentExecutorBinding(executor: SubagentExecutorData): TaskExecutorBinding {
+  const { address, identity } = executor;
+  return {
+    data: {
+      address: { ...address },
+      identity: { id: identity.id, name: identity.name, nodeId: identity.nodeId },
+    },
+    kind: "subagent",
+  };
+}
+
+export function readSubagentExecutor(
+  executor: TaskExecutorBinding | TaskExecutorState | undefined,
+): SubagentExecutorData | undefined {
+  const binding = executor !== undefined && "kind" in executor ? executor : executor?.binding;
+  if (binding?.kind !== "subagent") return undefined;
+  const identity = readAgentIdentity(binding.data.identity);
+  const address = readAgentAddress(binding.data.address);
+  return identity === undefined || address === undefined ? undefined : { address, identity };
+}
+
+function readAgentIdentity(value: JsonValue | undefined): AgentIdentity | undefined {
+  if (value === undefined || !isJsonObjectValue(value)) return undefined;
+  const { id, name, nodeId } = value;
+  return typeof id === "string" && typeof name === "string" && typeof nodeId === "string"
+    ? { id, name, nodeId }
+    : undefined;
+}
+
+function readAgentAddress(value: JsonValue | undefined): AgentAddress | undefined {
+  if (value === undefined || !isJsonObjectValue(value)) return undefined;
+  const { callbackBaseUrl, continuationToken, kind, sessionId, url } = value;
+  if (typeof sessionId !== "string") return undefined;
+  if (kind === "agent/local" || kind === "agent/self") {
+    return typeof continuationToken === "string"
+      ? { continuationToken, kind, sessionId }
+      : undefined;
+  }
+  if (kind === "agent/remote") {
+    return typeof url === "string" && typeof callbackBaseUrl === "string"
+      ? { callbackBaseUrl, kind, sessionId, url }
+      : undefined;
+  }
+  return undefined;
+}
+
+export function sameTaskMetadata(left: DurableTaskMetadata, right: DurableTaskMetadata): boolean {
+  if (left.kind !== right.kind || left.name !== right.name) return false;
+  const leftSubagent = "agentId" in left;
+  const rightSubagent = "agentId" in right;
+  return (
+    leftSubagent === rightSubagent &&
+    (!leftSubagent ||
+      !rightSubagent ||
+      (left.agentId === right.agentId && left.mode === right.mode))
+  );
+}
+
 /** Private executor state retained for cancellation and address reconciliation. */
 export interface TaskExecutorState {
+  /** Write-once executor address recorded by the `bind` command. */
+  readonly binding?: TaskExecutorBinding;
   readonly childSessionId?: string;
   readonly childTurnId?: string;
+  /**
+   * Child-session verdict from the last settled turn: `parked` survived
+   * and can take another delivery, `terminal` ended with the turn.
+   */
   readonly lifecycle?: "parked" | "terminal";
 }
 
@@ -137,7 +249,7 @@ export function readTaskInputRequestId(request: TaskInputRequest): string | unde
 /** Fields shared by every durable task view. */
 interface TaskViewBase {
   readonly taskId: string;
-  readonly metadata: TaskMetadata;
+  readonly metadata: DurableTaskMetadata;
   /** Private executor state; deliberately excluded from model-visible JSON. */
   readonly executor?: TaskExecutorState;
   /**
@@ -190,6 +302,10 @@ export type TaskView = TaskViewBase &
 
 /** Commands accepted by the durable task run's transition function. */
 export type TaskCommand =
+  | {
+      readonly executor: TaskExecutorBinding;
+      readonly kind: "bind";
+    }
   | {
       readonly kind: "complete";
       readonly data: JsonValue;
@@ -303,8 +419,10 @@ export interface TaskInboundTurnStarted {
 /** Intermediate progress sent by a running child to its parent agent. */
 export interface TaskInboundUpdate {
   readonly callId: string;
-  readonly childStepIndex: number;
-  readonly childTurnId: string;
+  /** Executor-neutral monotonic index within {@link updateEpoch}. */
+  readonly updateIndex: number;
+  /** Executor-neutral epoch id used with {@link updateIndex} for update dedupe. */
+  readonly updateEpoch: string;
   readonly kind: "task-update";
   readonly message: string;
 }

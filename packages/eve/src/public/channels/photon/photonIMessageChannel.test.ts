@@ -58,6 +58,40 @@ describe("photonIMessageChannel", () => {
     );
   });
 
+  it("derives user auth for default direct-message dispatch", async () => {
+    photonIMessageChannel({
+      credentials: async () => ({ projectId: "project-id", projectSecret: "project-secret" }),
+    });
+    const handler = directMessage.mock.calls[0]?.[0];
+    if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
+    const thread = { id: "thread-id" };
+    const message = new Message({
+      author: { isBot: false, isMe: false, userId: "user", userName: "user" },
+      id: "message-id",
+      raw: {},
+      text: "Hello Photon",
+      threadId: thread.id,
+    });
+
+    await handler(thread, message);
+
+    expect(send).toHaveBeenCalledWith(
+      { context: [], message: "Hello Photon" },
+      {
+        auth: {
+          attributes: { user_name: "user" },
+          authenticator: "photon-imessage",
+          issuer: "photon",
+          principalId: "photon:user",
+          principalType: "user",
+          subject: "user",
+        },
+        thread,
+        title: undefined,
+      },
+    );
+  });
+
   it("drops blank inbound messages without cancelling or sending", async () => {
     photonIMessageChannel({
       credentials: async () => ({ projectId: "project-id", projectSecret: "project-secret" }),
@@ -100,7 +134,18 @@ describe("photonIMessageChannel", () => {
 
     expect(send).toHaveBeenCalledWith(
       { context: [], message: "Hello group" },
-      { auth: null, thread, title: undefined },
+      {
+        auth: {
+          attributes: { user_name: "user" },
+          authenticator: "photon-imessage",
+          issuer: "photon",
+          principalId: "photon:user",
+          principalType: "user",
+          subject: "user",
+        },
+        thread,
+        title: undefined,
+      },
     );
   });
 });

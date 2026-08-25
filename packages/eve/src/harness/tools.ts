@@ -22,6 +22,12 @@ import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { normalizeToolJsonOutput, normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
+import {
+  createBackgroundToolCallBatch,
+  executeBackgroundToolCall,
+  type BackgroundExecutableTool,
+  type BackgroundToolCallBatch,
+} from "#harness/background-tools.js";
 
 type NativeApprovalStatus = Exclude<ApprovalStatus, boolean>;
 
@@ -48,11 +54,13 @@ const toolApprovals = new WeakMap<
  */
 export function buildToolSet(input: {
   readonly approvedTools?: ReadonlySet<string>;
+  readonly backgroundBatch?: BackgroundToolCallBatch;
   readonly capabilities?: SessionCapabilities;
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly tools: HarnessToolMap;
 }): ToolSet {
   const tools: Record<string, ToolSet[string]> = {};
+  const backgroundBatch = input.backgroundBatch ?? createBackgroundToolCallBatch();
   const canRequestInput = input.capabilities?.requestInput === true;
   const disabled = input.disabledProviderTools;
 
@@ -65,12 +73,38 @@ export function buildToolSet(input: {
       continue;
     }
 
+    backgroundBatch.setTool(
+      definition.name,
+      definition.execution === "background" && definition.execute !== undefined
+        ? (definition as BackgroundExecutableTool)
+        : undefined,
+    );
     const authorToModelOutput = definition.toModelOutput;
     const approval = buildApprovalFn(definition, input);
     const aiTool = tool({
       description: definition.description,
-      execute: wrapToolExecute(definition),
+      execute: wrapToolExecute(definition, backgroundBatch),
       inputSchema: definition.inputSchema,
+      ...(definition.execution === "background"
+        ? {
+            onInputAvailable: ({
+              input: toolInput,
+              toolCallId,
+            }: {
+              readonly input: unknown;
+              readonly toolCallId: string;
+            }) => {
+              if (definition.execute === undefined) {
+                throw new Error(`Background tool "${definition.name}" has no execute function.`);
+              }
+              backgroundBatch.register({
+                callId: toolCallId,
+                input: toolInput,
+                toolName: definition.name,
+              });
+            },
+          }
+        : {}),
       outputSchema: definition.outputSchema,
       ...(definition.execute !== undefined
         ? {
@@ -138,6 +172,7 @@ export function buildToolSet(input: {
  */
 export function buildToolSetFromDefinitions(input: {
   readonly approvedTools?: ReadonlySet<string>;
+  readonly backgroundBatch?: BackgroundToolCallBatch;
   readonly capabilities?: SessionCapabilities;
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly tools: readonly HarnessToolDefinition[];
@@ -150,6 +185,7 @@ export function buildToolSetFromDefinitions(input: {
   }
   return buildToolSet({
     approvedTools: input.approvedTools,
+    backgroundBatch: input.backgroundBatch,
     capabilities: input.capabilities,
     disabledProviderTools: input.disabledProviderTools,
     tools,
@@ -165,6 +201,7 @@ export function buildToolSetFromDefinitions(input: {
  */
 export function wrapToolExecute(
   definition: HarnessToolDefinition,
+  backgroundBatch: BackgroundToolCallBatch = createBackgroundToolCallBatch(),
 ): ((input: any, options: ToolExecuteOptions) => Promise<any> | AsyncIterable<any>) | undefined {
   const execute = definition.execute;
   if (execute === undefined) return undefined;
@@ -172,7 +209,15 @@ export function wrapToolExecute(
   return (input, options) => {
     let output: unknown;
     try {
-      output = execute(input, options);
+      output =
+        definition.execution === "background"
+          ? executeBackgroundToolCall({
+              batch: backgroundBatch,
+              definition: definition as BackgroundExecutableTool,
+              options,
+              toolInput: input,
+            })
+          : execute(input, options);
     } catch (error) {
       return Promise.reject(error);
     }
@@ -235,6 +280,7 @@ function normalizeToolExecuteOutput(
  */
 export async function buildToolSetWithProviderTools(input: {
   readonly approvedTools?: ReadonlySet<string>;
+  readonly backgroundBatch?: BackgroundToolCallBatch;
   readonly capabilities?: SessionCapabilities;
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly modelReference: RuntimeModelReference;
@@ -245,6 +291,7 @@ export async function buildToolSetWithProviderTools(input: {
   const tools: ToolSet = {
     ...buildToolSet({
       approvedTools: input.approvedTools,
+      backgroundBatch: input.backgroundBatch,
       capabilities: input.capabilities,
       disabledProviderTools: disabled,
       tools: input.tools,

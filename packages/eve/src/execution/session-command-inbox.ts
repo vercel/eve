@@ -7,15 +7,17 @@ import type {
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
+import {
+  SESSION_INBOX_WIRE_VERSION,
+  SESSION_INBOX_WIRE_VERSION_METADATA_KEY,
+} from "#execution/wire/session-inbox-contract.js";
 
 /**
  * Payloads accepted by a session driver's stable and channel aliases.
  *
- * `DeliverHookPayload` is the only delivery format producers persist. The
- * `send` member of `SessionCommand` stays accepted solely for payloads
- * persisted by eve 0.30.3–0.30.8, which wrote the command shape directly;
- * sessions are bounded by the 30-day default timeout, so the decode can be
- * dropped once runs created on those versions have aged out.
+ * This union is the hook's transport typing only; consumers interpret every
+ * payload through `sessionInboxWire.decode` in `execution/wire/session-inbox-wire.ts`,
+ * which owns the versioned wire schema and its legacy-shape fallbacks.
  */
 export type SessionInboxPayload =
   | DeliverHookPayload
@@ -131,7 +133,16 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
   };
 
   const createState = (token: string): SessionCommandHookState => {
-    const hook = createHook<SessionInboxPayload>({ token });
+    // Stamp the consumer's wire capability so producers can select an encoder
+    // pre-resume. Hooks created before this stamp carry no wire marker:
+    // markerless means the consumer predates the capability and accepts a
+    // legacy shape.
+    const hook = createHook<SessionInboxPayload>({
+      metadata: {
+        [SESSION_INBOX_WIRE_VERSION_METADATA_KEY]: SESSION_INBOX_WIRE_VERSION,
+      },
+      token,
+    });
     return {
       closed: false,
       enabled: false,

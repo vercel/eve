@@ -607,10 +607,10 @@ describe("EveTUIRunner idle session follow", () => {
         data: {
           actions: [
             {
-              callId: "peek-1",
+              callId: "cancel-1",
               input: { taskIds: ["task_123"] },
               kind: "tool-call",
-              toolName: "task_peek",
+              toolName: "task_cancel",
             },
           ],
           sequence: 1,
@@ -622,10 +622,10 @@ describe("EveTUIRunner idle session follow", () => {
         type: "action.result",
         data: {
           result: {
-            callId: "peek-1",
+            callId: "cancel-1",
             kind: "tool-result",
-            output: { tasks: [{ status: "completed", taskId: "task_123" }] },
-            toolName: "task_peek",
+            output: { tasks: [{ status: "cancelled", taskId: "task_123" }] },
+            toolName: "task_cancel",
           },
           sequence: 1,
           status: "completed",

@@ -51,6 +51,9 @@ import { verifyDiscordInbound } from "#public/channels/discord/verifyInbound.js"
 import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
+import type { ValidatedInputResponse } from "#runtime/input/types.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
+import { discordAudience, discordInstrumentationMetadata } from "./audience.js";
 
 const log = createLogger("discord.channel");
 
@@ -70,6 +73,7 @@ export interface DiscordEventContext extends DiscordChannelContext, ChannelConti
 
 /** JSON-serializable Discord channel state. */
 export interface DiscordChannelState {
+  audience?: ChannelAudience;
   /** Discord channel id. */
   channelId: string | null;
   /** Discord message id once anchored, or an interaction placeholder before the first reply. */
@@ -210,7 +214,6 @@ export interface DiscordChannel extends Channel<
   DiscordReceiveTarget,
   DiscordInstrumentationMetadata
 > {}
-
 /** Discord channel factory for HTTP Interactions and proactive channel messages. */
 export function discordChannel(config: DiscordChannelConfig = {}): DiscordChannel {
   const onCommand = config.onCommand ?? defaultOnCommand;
@@ -225,7 +228,7 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
     kindHint: "discord",
     turnPolicy: config.turnPolicy,
     state: initialDiscordState(),
-    metadata: (state) => ({ channelId: state.channelId, guildId: state.guildId }),
+    metadata: discordInstrumentationMetadata,
 
     context(state, session) {
       return rebuildDiscordContext(state, session, config);
@@ -298,6 +301,7 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
       return from(discordContinuationToken(channelId, conversationId)).send(input.message, {
         auth: input.auth,
         state: {
+          audience: "unknown",
           applicationId: null,
           channelId,
           conversationId: conversationId || null,
@@ -615,7 +619,7 @@ async function dispatchCommand(input: {
 
 async function dispatchInputResponses(input: {
   readonly conversationId: string;
-  readonly inputResponses: readonly { requestId: string; optionId?: string; text?: string }[];
+  readonly inputResponses: readonly ValidatedInputResponse[];
   readonly interaction: DiscordComponentInteraction | DiscordModalSubmitInteraction;
   readonly from: ChannelFrom<DiscordChannelState>;
 }): Promise<void> {
@@ -639,6 +643,7 @@ function stateFromInteraction(
   },
 ): DiscordChannelState {
   return {
+    audience: discordAudience(interaction.channelType),
     applicationId: interaction.applicationId,
     channelId: interaction.channelId,
     conversationId: options.conversationId,
@@ -651,6 +656,7 @@ function stateFromInteraction(
 
 function initialDiscordState(): DiscordChannelState {
   return {
+    audience: "unknown",
     applicationId: null,
     channelId: null,
     conversationId: null,

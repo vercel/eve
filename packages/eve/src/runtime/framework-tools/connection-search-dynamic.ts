@@ -15,8 +15,15 @@ import {
   isConnectionAuthorizationRequiredError,
 } from "#public/connections/errors.js";
 import { defineDynamic, defineTool } from "#public/definitions/tool.js";
+import type { ToolContext } from "#public/definitions/tool.js";
+import {
+  resolveApprovalPolicy,
+  type ApprovalContext,
+  type ApprovalResponseContext,
+} from "#public/definitions/approval.js";
 import type { JsonValue } from "#public/types/json.js";
 import type { JsonObject } from "#shared/json.js";
+import { stampDurableDynamicToolCallbacks } from "#shared/durable-dynamic-tool-callbacks.js";
 import { writeCachedToken } from "#runtime/connections/authorization-tokens.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
@@ -394,6 +401,116 @@ export function extractDiscoveredTools(
   return [...byQualifiedName.values()];
 }
 
+function readDiscoveredToolClosure(closure: JsonObject): {
+  readonly connectionName: string;
+  readonly toolName: string;
+} {
+  const connectionName = closure.connectionName;
+  const toolName = closure.toolName;
+  if (typeof connectionName !== "string" || typeof toolName !== "string") {
+    throw new Error("Discovered connection tool callback metadata is invalid.");
+  }
+  return { connectionName, toolName };
+}
+
+async function executeDiscoveredConnectionTool(
+  closure: JsonObject,
+  input: Record<string, unknown>,
+  executeCtx: ToolContext,
+): Promise<unknown> {
+  const { connectionName, toolName } = readDiscoveredToolClosure(closure);
+  const registry = loadContext().get(ConnectionRegistryKey);
+  if (registry === undefined) {
+    throw new Error("Connection registry is unavailable while replaying a discovered tool.");
+  }
+  const conn = registry
+    .getConnections()
+    .find((candidate) => candidate.connectionName === connectionName);
+  const interactiveAuth = (await resolveInteractiveAuth(registry, connectionName)) as
+    | InteractiveAuthorizationDefinition<JsonValue>
+    | undefined;
+
+  let justCompletedAuth = false;
+  if (interactiveAuth) {
+    const authResult = consumeAuthorizationResult(connectionName);
+    if (authResult) {
+      justCompletedAuth = true;
+      const ctx = loadContext();
+      const principal =
+        authResult.principal ?? resolveConnectionPrincipal(connectionName, interactiveAuth);
+      const token = await interactiveAuth.completeAuthorization({
+        callbackUrl: authResult.hookUrl,
+        connection: { url: conn?.url ?? "" },
+        principal,
+        resume: authResult.resume,
+        callback: authResult.callback,
+      });
+      writeCachedToken(ctx, connectionName, principalKey(principal), token);
+    }
+  }
+
+  try {
+    const client = registry.getClient(connectionName);
+    return await client.executeTool(toolName, input, {
+      abortSignal: executeCtx.abortSignal,
+    });
+  } catch (error) {
+    if (!isConnectionAuthorizationRequiredError(error) || !interactiveAuth) throw error;
+    if (justCompletedAuth) {
+      throw new ConnectionAuthorizationFailedError(connectionName, {
+        retryable: false,
+        reason: "token_rejected_after_authorization",
+        message: `Connection "${connectionName}" rejected the token immediately after authorization.`,
+      });
+    }
+
+    const attempt = createAuthorizationAttempt(connectionName);
+    if (!attempt) throw error;
+    const principal = resolveConnectionPrincipal(connectionName, interactiveAuth);
+    const callbackUrl = resolveAuthorizationCallbackUrl({
+      authorization: interactiveAuth,
+      callbackUrl: attempt.hookUrl,
+    });
+    const { challenge, resume } = await interactiveAuth.startAuthorization({
+      callbackUrl,
+      connection: { url: conn?.url ?? "" },
+      principal,
+    });
+    return requestAuthorization([
+      {
+        attemptId: attempt.attemptId,
+        name: connectionName,
+        challenge: stampChallengeDisplayName(challenge, interactiveAuth),
+        hookUrl: callbackUrl,
+        principal,
+        resume,
+      },
+    ]);
+  }
+}
+
+async function requestDiscoveredConnectionToolApproval(
+  closure: JsonObject,
+  context: ApprovalContext,
+) {
+  const { connectionName } = readDiscoveredToolClosure(closure);
+  const approval = loadContext().get(ConnectionRegistryKey)?.getConnectionApproval(connectionName);
+  return approval === undefined ? "not-applicable" : await resolveApprovalPolicy(approval)(context);
+}
+
+async function authorizeDiscoveredConnectionToolApproval(
+  closure: JsonObject,
+  context: ApprovalResponseContext,
+) {
+  const { connectionName } = readDiscoveredToolClosure(closure);
+  const approval = loadContext().get(ConnectionRegistryKey)?.getConnectionApproval(connectionName);
+  const response =
+    approval === undefined || typeof approval === "function" ? undefined : approval.response;
+  return response === undefined
+    ? { reason: "Approval response authorization is unavailable.", status: "rejected" as const }
+    : await response(context);
+}
+
 // The step-scoped definition re-derives its tools from conversation history.
 // After compaction removes old search results, those tools naturally disappear.
 const connectionSearchDynamicDefinition = defineDynamic({
@@ -417,7 +534,7 @@ const connectionSearchDynamicDefinition = defineDynamic({
 
       const tools: Record<string, object> = {};
 
-      tools["connection_search"] = defineTool({
+      const connectionSearchTool = defineTool({
         description:
           "Search for tools across your connections. " +
           "Discovered tools become directly callable by their qualified name " +
@@ -429,13 +546,21 @@ const connectionSearchDynamicDefinition = defineDynamic({
         },
         outputSchema: CONNECTION_SEARCH_OUTPUT_SCHEMA,
       });
+      stampDurableDynamicToolCallbacks(connectionSearchTool, {
+        execute: {
+          callback: (_closure, input) => executeConnectionSearch(input as ConnectionSearchInput),
+          closure: {},
+        },
+      });
+      tools["connection_search"] = connectionSearchTool;
 
       for (const result of discovered) {
         const connectionName = result.connection;
         const toolName = result.tool!;
         const approval = registry.getConnectionApproval(connectionName);
 
-        tools[qualifiedConnectionToolName(connectionName, toolName)] = defineTool({
+        const closure = { connectionName, toolName };
+        const discoveredTool = defineTool({
           description: result.description,
           inputSchema: (result.inputSchema ?? {
             type: "object",
@@ -443,80 +568,31 @@ const connectionSearchDynamicDefinition = defineDynamic({
           approval,
           outputSchema: result.outputSchema as JsonObject | undefined,
           async execute(input: Record<string, unknown>, executeCtx) {
-            const reg = loadContext().get(ConnectionRegistryKey)!;
-            const conn = reg.getConnections().find((c) => c.connectionName === connectionName);
-            const interactiveAuth = (await resolveInteractiveAuth(reg, connectionName)) as
-              | InteractiveAuthorizationDefinition<JsonValue>
-              | undefined;
-
-            let justCompletedAuth = false;
-            if (interactiveAuth) {
-              const authResult = consumeAuthorizationResult(connectionName);
-              if (authResult) {
-                justCompletedAuth = true;
-                const ctx = loadContext();
-                const principal =
-                  authResult.principal ??
-                  resolveConnectionPrincipal(connectionName, interactiveAuth);
-                const token = await interactiveAuth.completeAuthorization({
-                  callbackUrl: authResult.hookUrl,
-                  connection: { url: conn?.url ?? "" },
-                  principal,
-                  resume: authResult.resume,
-                  callback: authResult.callback,
-                });
-                writeCachedToken(ctx, connectionName, principalKey(principal), token);
-              }
-            }
-
-            try {
-              const client = reg.getClient(connectionName);
-              return await client.executeTool(toolName, input, {
-                abortSignal: executeCtx.abortSignal,
-              });
-            } catch (err) {
-              if (!isConnectionAuthorizationRequiredError(err) || !interactiveAuth) {
-                throw err;
-              }
-
-              // Loop guard: if we just completed authorization this turn and
-              // the token is still rejected, the grant is broken — fail
-              // terminally instead of re-prompting endlessly.
-              if (justCompletedAuth) {
-                throw new ConnectionAuthorizationFailedError(connectionName, {
-                  retryable: false,
-                  reason: "token_rejected_after_authorization",
-                  message: `Connection "${connectionName}" rejected the token immediately after authorization.`,
-                });
-              }
-
-              const attempt = createAuthorizationAttempt(connectionName);
-              if (!attempt) throw err;
-
-              const principal = resolveConnectionPrincipal(connectionName, interactiveAuth);
-              const callbackUrl = resolveAuthorizationCallbackUrl({
-                authorization: interactiveAuth,
-                callbackUrl: attempt.hookUrl,
-              });
-              const { challenge, resume } = await interactiveAuth.startAuthorization({
-                callbackUrl,
-                connection: { url: conn?.url ?? "" },
-                principal,
-              });
-
-              return requestAuthorization([
-                {
-                  attemptId: attempt.attemptId,
-                  name: connectionName,
-                  challenge: stampChallengeDisplayName(challenge, interactiveAuth),
-                  hookUrl: callbackUrl,
-                  principal,
-                  resume,
-                },
-              ]);
-            }
+            return await executeDiscoveredConnectionTool(closure, input, executeCtx);
           },
         });
+        stampDurableDynamicToolCallbacks(discoveredTool, {
+          execute: { callback: executeDiscoveredConnectionTool, closure },
+          ...(approval === undefined
+            ? {}
+            : {
+                approvalRequest: {
+                  callback: requestDiscoveredConnectionToolApproval,
+                  closure,
+                },
+              }),
+          ...(approval === undefined ||
+          typeof approval === "function" ||
+          approval.response === undefined
+            ? {}
+            : {
+                approvalResponse: {
+                  callback: authorizeDiscoveredConnectionToolApproval,
+                  closure,
+                },
+              }),
+        });
+        tools[qualifiedConnectionToolName(connectionName, toolName)] = discoveredTool;
       }
 
       return tools;

@@ -47,7 +47,7 @@ agent/
     intake.ts
 ```
 
-Install a channel from the registry with `eve add channel/photon-imessage`, `eve add channel/slack`, or `eve add channel/web`. You can also author the file by hand.
+Install a channel from the registry with `eve add channel/<name>`, such as `eve add channel/slack` or `eve add channel/web`. You can also author the file by hand.
 
 ## The eve HTTP channel (default)
 
@@ -55,7 +55,9 @@ The eve channel is the framework's default HTTP session API, the routes the term
 
 ## Custom channels
 
-When eve doesn't ship a channel for your surface, build one with `defineChannel` from `eve/channels`. A custom channel declares route handlers (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `WS`), an `events` map, and uses `send(address, input)` to start or resume a session. See [Custom channels](./custom) for the full walkthrough, including WebSocket routes, cross-channel hand-off, channel metadata, address tokens, and file uploads.
+When eve doesn't ship a channel for your surface, build one with `defineChannel` from `eve/channels`. A custom channel declares route handlers (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `WS`), an `events` map, and uses `send(address, input)` to start or resume a session. See [Custom channels](./custom) for the full walkthrough, including WebSocket routes, cross-channel agent hand-off, channel metadata, address tokens, and file uploads.
+
+A cross-channel `send(...)` supplies input to the agent and invokes the model on the destination channel. eve does not currently provide a direct cross-channel provider-message queue. To post without starting a turn, use the provider API. See [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications) when delivery also needs application-managed retries and deduplication.
 
 ## Relationship to the Chat SDK
 
@@ -71,6 +73,7 @@ eve's first-class channels use eve-owned runtimes for webhook handling, verifica
 | Local tooling, SDK clients, `curl`          | [eve HTTP channel](./eve) (default)                        |
 | MCP clients delegating durable work         | [MCP](./mcp)                                               |
 | Slack mentions, DMs, buttons                | [Slack](./slack)                                           |
+| iMessage and SMS                            | [Linq](./linq)                                             |
 | iMessage                                    | [Photon](./photon)                                         |
 | Discord slash commands, components          | [Discord](./discord)                                       |
 | Microsoft Teams messages + Adaptive Cards   | [Teams](./teams)                                           |
@@ -92,8 +95,9 @@ Where an eve agent communicates with people, you may be required to disclose tha
 - [eve HTTP channel](./eve): the default session API behind the TUI, SDK clients, and browser UIs
 - [Slack](./slack): the most common platform channel, end to end
 - [MCP](./mcp): expose the agent as a durable invocation service
-- [Photon](./photon), [Discord](./discord), [Teams](./teams), [Telegram](./telegram), [Twilio](./twilio), [GitHub](./github), and [Linear](./linear): the other first-class platform channels
+- [Linq](./linq), [Photon](./photon), [Discord](./discord), [Teams](./teams), [Telegram](./telegram), [Twilio](./twilio), [GitHub](./github), and [Linear](./linear): the other first-class platform channels
 - [Chat SDK adapters](./chat-sdk): reach services eve has no first-class channel for
 - [Custom channels](./custom): build a channel for any surface with `defineChannel`
+- [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications): post to another platform without starting an agent turn
 - [Frontend](../guides/frontend/overview): browser chat on the eve channel with `useEveAgent`
 - [Integrations](/integrations): browse every built-in channel in one gallery using the Channels filter

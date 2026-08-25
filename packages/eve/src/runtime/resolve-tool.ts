@@ -59,6 +59,7 @@ export async function resolveToolDefinition(
     return {
       description: definition.description,
       execute,
+      execution: definition.execution,
       exportName: definition.exportName,
       inputSchema,
       logicalPath: definition.logicalPath,

@@ -4,6 +4,7 @@ import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { forwardTurnCancellationStep } from "#execution/forward-turn-cancellation-step.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
+import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { TurnControlReceiver } from "#execution/turn-control-receiver.js";
@@ -20,6 +21,10 @@ vi.mock("./forward-turn-delivery-step.js", () => ({
 
 vi.mock("./forward-turn-cancellation-step.js", () => ({
   forwardTurnCancellationStep: vi.fn(),
+}));
+
+vi.mock("./report-dropped-wire-payload-step.js", () => ({
+  reportDroppedWirePayloadStep: vi.fn(),
 }));
 
 describe("TurnControlReceiver", () => {
@@ -131,12 +136,12 @@ describe("TurnControlReceiver", () => {
     });
 
     expect(action.kind).toBe("park");
+    // Decode normalizes: the wire-only mirror and `v` never reach buffers.
     expect(bufferedDeliveries).toEqual([
       {
         auth: undefined,
         caller: undefined,
         kind: "deliver",
-        payload: { message: "follow up" },
         payloads: [{ message: "follow up" }],
         requestId: undefined,
         turnPolicy: undefined,
@@ -218,6 +223,31 @@ describe("TurnControlReceiver", () => {
       payload: {},
       token: "turn-control:cancel",
     });
+  });
+
+  it("drops an unknown wire version loudly and keeps consuming the inbox", async () => {
+    installControlHook([parkResult()], true);
+    const bufferedDeliveries: DeliverHookPayload[] = [];
+
+    const action = await runReceiver(bufferedDeliveries, {
+      commandInbox: createCommandInbox([
+        { kind: "deliver", payloads: [{ message: "from the future" }], version: 99 } as never,
+        { kind: "send", payload: { message: "still delivered" } },
+      ]),
+    });
+
+    expect(action.kind).toBe("park");
+    expect(reportDroppedWirePayloadStep).toHaveBeenCalledOnce();
+    expect(bufferedDeliveries).toEqual([
+      {
+        auth: undefined,
+        caller: undefined,
+        kind: "deliver",
+        payloads: [{ message: "still delivered" }],
+        requestId: undefined,
+        turnPolicy: undefined,
+      },
+    ]);
   });
 
   it("forwards cancel and reset through the active turn's private hook", async () => {

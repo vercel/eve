@@ -371,6 +371,7 @@ export async function resolveExtensionMounts(input: {
       packageRoot: located.location.packageRoot,
       sourceRoot: located.location.sourceRoot,
       manifest: extensionResult.manifest,
+      externalDependencies: located.location.externalDependencies,
       overrides,
     });
   }

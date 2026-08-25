@@ -24,7 +24,6 @@ import {
   uploadSlackFiles,
   type SlackApiOptions,
   type SlackApiResponse as SlackPrimitiveApiResponse,
-  type SlackBotToken as SlackPrimitiveBotToken,
   type SlackFileUpload,
   type SlackMessageOptions,
 } from "#compiled/@chat-adapter/slack/api.js";
@@ -32,17 +31,22 @@ import { isCardElement, type CardElement, type FileUpload } from "#compiled/chat
 
 import { createLogger, logError } from "#internal/logging.js";
 import { cardToBlocks, cardToFallbackText } from "#public/channels/slack/blocks.js";
+import { resolveSlackInboundMrkdwn } from "#public/channels/slack/inbound-content.js";
 import { truncateTypingStatus } from "#public/channels/slack/limits.js";
 import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
 
 const log = createLogger("slack.api");
 
+/** Slack app installation workspace available when eve resolves a bot token. */
+export interface SlackBotTokenContext {
+  readonly teamId?: string;
+}
+
 /**
  * Slack bot token, materialized either as a literal `xoxb-...` string or
- * as a (possibly async) function that returns one. The function form
- * supports secret-manager lookups and credential rotation.
+ * as a (possibly async) function that receives the app installation workspace.
  */
-export type SlackBotToken = SlackPrimitiveBotToken;
+export type SlackBotToken = string | ((context: SlackBotTokenContext) => string | Promise<string>);
 
 /**
  * Builds the channel-local continuation token (`<channelId>:<threadTs>`).
@@ -59,9 +63,13 @@ export function slackContinuationToken(channelId: string, threadTs: string): str
  * Materializes a {@link SlackBotToken} to a string, falling back to
  * `process.env.SLACK_BOT_TOKEN`. Throws when neither is set.
  */
-export async function resolveSlackBotToken(token?: SlackBotToken): Promise<string> {
+export async function resolveSlackBotToken(
+  token?: SlackBotToken,
+  context: SlackBotTokenContext = {},
+): Promise<string> {
   const source = token ?? process.env.SLACK_BOT_TOKEN;
   if (!source) throw new Error("SLACK_BOT_TOKEN is required.");
+  if (typeof source === "function") return source(context);
   return resolveSlackBotTokenPrimitive(source);
 }
 
@@ -80,13 +88,14 @@ export type SlackApiResponse = SlackPrimitiveApiResponse;
  */
 export async function callSlackApi(input: {
   readonly botToken: SlackBotToken | undefined;
+  readonly context?: SlackBotTokenContext;
   readonly operation: string;
   readonly body: unknown;
 }): Promise<SlackApiResponse> {
   return callSlackApiPrimitive(
     input.operation,
     normalizeSlackApiBody(input.body),
-    createSlackApiOptions(input.botToken),
+    createSlackApiOptions(input.botToken, input.context),
   );
 }
 
@@ -97,8 +106,9 @@ export async function callSlackApi(input: {
  */
 function createSlackRequester(
   botToken: SlackBotToken | undefined,
+  context: SlackBotTokenContext,
 ): (operation: string, body: unknown) => Promise<SlackApiResponse> {
-  return (operation, body) => callSlackApi({ botToken, operation, body });
+  return (operation, body) => callSlackApi({ botToken, context, operation, body });
 }
 
 /**
@@ -348,11 +358,14 @@ export interface SlackWorkspaceHandle {
 /** Builds the workspace-scoped API handle used by generic event callbacks. */
 export function buildSlackWorkspaceHandle(input: {
   readonly botToken: SlackBotToken | undefined;
+  /** Workspace whose app installation supplies the bot token. */
+  readonly installationTeamId?: string;
+  /** Actor/content workspace exposed on the public handle. */
   readonly teamId: string | undefined;
 }): SlackWorkspaceHandle {
   return {
     teamId: input.teamId,
-    request: createSlackRequester(input.botToken),
+    request: createSlackRequester(input.botToken, { teamId: input.installationTeamId }),
   };
 }
 
@@ -383,10 +396,14 @@ export function buildSlackBinding(input: {
   readonly botUserId?: string;
   readonly channelId: string;
   readonly threadTs: string;
+  /** Workspace whose app installation supplies the bot token. */
+  readonly installationTeamId?: string;
+  /** Actor/content workspace exposed on the public handle. */
   readonly teamId: string | undefined;
   readonly onThreadTsChanged?: (ts: string) => void;
 }): SlackBinding {
-  const request = createSlackRequester(input.botToken);
+  const context = { teamId: input.installationTeamId };
+  const request = createSlackRequester(input.botToken, context);
   let messages: readonly SlackThreadMessage[] = [];
   let currentThreadTs = input.threadTs;
   let refreshInFlight: Promise<void> | undefined;
@@ -404,7 +421,7 @@ export function buildSlackBinding(input: {
     const channelId = options?.channelId ?? input.channelId;
     const threadTs = options?.threadTs ?? currentThreadTs;
     return uploadSlackFiles(files.map(toSlackFileUpload), {
-      ...createSlackApiOptions(input.botToken),
+      ...createSlackApiOptions(input.botToken, context),
       channelId: channelId || undefined,
       initialComment: options?.initialComment,
       threadTs: threadTs || undefined,
@@ -423,7 +440,7 @@ export function buildSlackBinding(input: {
       }
       try {
         const response = await fetchSlackThreadReplies({
-          ...createSlackApiOptions(input.botToken),
+          ...createSlackApiOptions(input.botToken, context),
           channel: input.channelId,
           limit: 50,
           ts: currentThreadTs,
@@ -481,7 +498,7 @@ export function buildSlackBinding(input: {
       }
 
       const response = await postSlackMessage(
-        buildPostMessageOptions(message, input.channelId, currentThreadTs, input.botToken),
+        buildPostMessageOptions(message, input.channelId, currentThreadTs, input.botToken, context),
       );
       const id = response.id;
       handleMessageTs(id);
@@ -500,7 +517,13 @@ export function buildSlackBinding(input: {
     async postEphemeral(userId, rawMessage) {
       const message = normalizePostInput(rawMessage);
       const response = await postSlackEphemeral({
-        ...buildPostMessageOptions(message, input.channelId, currentThreadTs, input.botToken),
+        ...buildPostMessageOptions(
+          message,
+          input.channelId,
+          currentThreadTs,
+          input.botToken,
+          context,
+        ),
         user: userId,
       });
       return { id: response.id, raw: response.raw };
@@ -514,7 +537,7 @@ export function buildSlackBinding(input: {
       }
       const message = normalizePostInput(rawMessage);
       const response = await postSlackMessage(
-        buildPostMessageOptions(message, imChannelId, "", input.botToken),
+        buildPostMessageOptions(message, imChannelId, "", input.botToken, context),
       );
       return { id: response.id, raw: response.raw };
     },
@@ -583,9 +606,10 @@ function buildPostMessageOptions(
   channelId: string,
   threadTs: string,
   botToken: SlackBotToken | undefined,
+  context: SlackBotTokenContext,
 ): SlackMessageOptions {
   const base: SlackMessageOptions = {
-    ...createSlackApiOptions(botToken),
+    ...createSlackApiOptions(botToken, context),
     channel: channelId,
     threadTs: threadTs || undefined,
     unfurlLinks: false,
@@ -610,8 +634,11 @@ function buildPostMessageOptions(
   return base;
 }
 
-function createSlackApiOptions(botToken: SlackBotToken | undefined): SlackApiOptions {
-  return { token: () => resolveSlackBotToken(botToken) };
+function createSlackApiOptions(
+  botToken: SlackBotToken | undefined,
+  context: SlackBotTokenContext = {},
+): SlackApiOptions {
+  return { token: () => resolveSlackBotToken(botToken, context) };
 }
 
 function normalizeSlackApiBody(body: unknown): Record<string, unknown> {
@@ -646,7 +673,8 @@ function parseThreadMessage(
     readonly botUserId: string | undefined;
   },
 ): SlackThreadMessage {
-  const text = typeof raw.text === "string" ? raw.text : "";
+  const topLevelText = typeof raw.text === "string" ? raw.text : "";
+  const text = resolveSlackInboundMrkdwn(topLevelText, raw);
   const ts = typeof raw.ts === "string" ? raw.ts : "";
   const threadTs = typeof raw.thread_ts === "string" ? raw.thread_ts : threadRootTs;
   const user = typeof raw.user === "string" ? raw.user : undefined;

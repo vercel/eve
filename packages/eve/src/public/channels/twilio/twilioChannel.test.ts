@@ -179,6 +179,14 @@ describe("twilioChannel() inbound text pipeline", () => {
     }
   });
 
+  it("classifies phone conversations as direct", () => {
+    const adapter = getAdapter(twilioChannel({ allowFrom: "*" }));
+
+    expect(adapter.instrumentation?.metadata?.(adapter.state)).toMatchObject({
+      audience: "private",
+    });
+  });
+
   it("mounts message, voice, and transcription routes below the base route", () => {
     const channel = twilioChannel({ allowFrom: "*", route: "/twilio" });
     expect(channel.routes.map((route) => ({ method: route.method, path: route.path }))).toEqual([

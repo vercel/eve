@@ -3,13 +3,20 @@ import { z } from "#compiled/zod/index.js";
 import { jsonValueSchema } from "#shared/json-schemas.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TaskView } from "#tasks/types.js";
+import { readSubagentTaskMetadata } from "#tasks/types.js";
 
-const taskMetadataJsonSchema = z.object({
-  agentId: z.string(),
-  kind: z.literal("subagent"),
-  mode: z.enum(["local", "remote"]),
-  name: z.string(),
-});
+const taskMetadataJsonSchema = z.union([
+  z.object({
+    agentId: z.string(),
+    kind: z.literal("subagent"),
+    mode: z.enum(["local", "remote"]),
+    name: z.string(),
+  }),
+  z.object({
+    kind: z.string(),
+    name: z.string(),
+  }),
+]);
 
 const taskOutputJsonSchema = z.object({
   data: jsonValueSchema,
@@ -54,9 +61,19 @@ type TaskViewJson = z.infer<typeof taskViewJsonSchema>;
 
 /** Projects a task view into the JSON value carried by tool results. */
 export function taskViewToJson(view: TaskView): TaskViewJson {
+  const subagent = readSubagentTaskMetadata(view);
+  const metadata =
+    subagent === undefined
+      ? view.metadata
+      : {
+          agentId: subagent.agentId,
+          kind: subagent.kind,
+          mode: subagent.mode,
+          name: subagent.name,
+        };
   // `satisfies` couples the schema to `TaskView` at compile time; the runtime
   // parse strips the private fields structural typing would let through.
-  return taskViewJsonSchema.parse(view satisfies TaskViewJson);
+  return taskViewJsonSchema.parse({ ...view, metadata });
 }
 
 /** Projects many views into one `{ tasks }` tool output. */

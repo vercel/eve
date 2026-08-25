@@ -10,6 +10,7 @@ import {
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
   createContextClearedEvent,
+  createInputResolvedEvent,
   createMessageReceivedEvent,
   createResultCompletedEvent,
   createSessionWaitingEvent,
@@ -24,7 +25,50 @@ import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 
 describe("message stream protocol", () => {
   it("pins the stream version for timed session events", () => {
-    expect(EVE_MESSAGE_STREAM_VERSION).toBe("22");
+    expect(EVE_MESSAGE_STREAM_VERSION).toBe("23");
+  });
+
+  it("creates authoritative input resolution batches", () => {
+    expect(
+      createInputResolvedEvent({
+        resolutions: [
+          {
+            kind: "question",
+            outcome: "answered",
+            requestId: "request-1",
+            response: { requestId: "request-1", text: "Ship it" },
+          },
+          {
+            kind: "tool-approval",
+            outcome: "ignored",
+            requestId: "request-2",
+          },
+        ],
+        sequence: 1,
+        stepIndex: 2,
+        turnId: "turn-1",
+      }),
+    ).toEqual({
+      data: {
+        resolutions: [
+          {
+            kind: "question",
+            outcome: "answered",
+            requestId: "request-1",
+            response: { requestId: "request-1", text: "Ship it" },
+          },
+          {
+            kind: "tool-approval",
+            outcome: "ignored",
+            requestId: "request-2",
+          },
+        ],
+        sequence: 1,
+        stepIndex: 2,
+        turnId: "turn-1",
+      },
+      type: "input.resolved",
+    });
   });
 
   it("creates preliminary tool-result snapshots", () => {

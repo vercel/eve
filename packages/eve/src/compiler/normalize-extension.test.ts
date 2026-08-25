@@ -146,6 +146,7 @@ describe("composeExtensionSubagentSources", () => {
         packageRoot: "/packages/crm",
         sourceRoot: extensionRoot,
         manifest: extensionManifest,
+        externalDependencies: [],
         overrides: overrideManifest,
       },
     });

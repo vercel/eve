@@ -56,6 +56,15 @@ export async function compileAgentManifest(
     subagents: composeAgentSubagentSources(manifest),
   });
 
+  const backgroundTool = [compiledNode, ...subagentGraph.nodes.map((node) => node.agent)]
+    .flatMap((node) => node.tools)
+    .find((tool) => tool.execution === "background");
+  if (backgroundTool !== undefined && compiledNode.config.experimental?.tasks !== true) {
+    throw new Error(
+      `Background tool "${backgroundTool.name}" requires experimental.tasks: true in the root agent config.`,
+    );
+  }
+
   return createCompiledAgentManifest({
     ...compiledNode,
     extensionMounts: compiledNode.extensionMounts,
@@ -92,6 +101,7 @@ async function compileAgentNodeManifest(
   const externalDependencies = mergeExternalDependencies(
     options.externalDependencies,
     rawConfig.build?.externalDependencies,
+    manifest.resolvedExtensions.flatMap((mount) => mount.externalDependencies),
   );
   const config =
     externalDependencies.length === 0
@@ -282,6 +292,7 @@ function compileExtensionMounts(manifest: AgentSourceManifest): CompiledExtensio
       (entry) => mountRefNamespace(entry.logicalPath) === mount.namespace,
     );
     return {
+      externalDependencies: [...mount.externalDependencies],
       namespace: mount.namespace,
       packageName: mount.packageName,
       packageNamespace: packageStateNamespace(mount.packageName),

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildSessionAttributes,
@@ -15,11 +15,11 @@ import {
 import { ChannelRequestIdKey } from "#context/keys.js";
 
 const slackChannelCtx = {
-  "eve.channel": { kind: "slack", state: { team: "T1" } },
+  "eve.channel": { kind: "slack", state: { team: "T1" }, audience: "public" },
 } satisfies Record<string, unknown>;
 
 const subagentChainCtx = {
-  "eve.channel": { kind: "slack", state: {} },
+  "eve.channel": { kind: "slack", state: {}, audience: "public" },
   "eve.parentSession": {
     callId: "call_subagent_0",
     sessionId: "wrun_parent_subagent",
@@ -27,6 +27,10 @@ const subagentChainCtx = {
     turn: { id: "turn_0", sequence: 0 },
   },
 } satisfies Record<string, unknown>;
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("readChannelKind", () => {
   it("returns the channel kind when the slot is well-formed", () => {
@@ -146,20 +150,34 @@ describe("buildSessionAttributes", () => {
 
     expect(attrs).toEqual({
       "$eve.channel_request_id": undefined,
+      "$eve.is_trace_content_visible": true,
       "$eve.type": "session",
       "$eve.trigger": "slack",
       "$eve.title": "ship the thing please",
     });
   });
 
-  it("omits the trigger when no channel is on the context", () => {
+  it("marks unknown sessions denied and omits their content-derived title", () => {
     const attrs = buildSessionAttributes({
       inputMessage: "hi",
       serializedContext: {},
     });
 
     expect(attrs["$eve.trigger"]).toBeUndefined();
-    expect(attrs["$eve.title"]).toBe("hi");
+    expect(attrs["$eve.is_trace_content_visible"]).toBe(false);
+    expect(attrs["$eve.title"]).toBeUndefined();
+  });
+
+  it("allows unknown session content during local eve dev", () => {
+    vi.stubEnv("EVE_DEV", "1");
+
+    const attrs = buildSessionAttributes({
+      inputMessage: "local prompt",
+      serializedContext: {},
+    });
+
+    expect(attrs["$eve.is_trace_content_visible"]).toBe(true);
+    expect(attrs["$eve.title"]).toBe("local prompt");
   });
 
   it("emits the channel request id when present", () => {
@@ -188,6 +206,7 @@ describe("buildSubagentRootAttributes", () => {
 
     expect(attrs).toEqual({
       "$eve.channel_request_id": undefined,
+      "$eve.is_trace_content_visible": true,
       "$eve.type": "subagent",
       "$eve.parent": "wrun_parent_subagent",
       "$eve.parent_call": "call_subagent_0",
@@ -218,10 +237,12 @@ describe("buildTurnAttributes", () => {
     const attrs = buildTurnAttributes({
       parentSessionId: "wrun_session_123",
       rootSessionId: "wrun_session_123",
+      serializedContext: slackChannelCtx,
     });
 
     expect(attrs).toEqual({
       "$eve.channel_request_id": undefined,
+      "$eve.is_trace_content_visible": true,
       "$eve.type": "turn",
       "$eve.parent": "wrun_session_123",
       "$eve.root": "wrun_session_123",
@@ -233,6 +254,7 @@ describe("buildTurnAttributes", () => {
       parentSessionId: "wrun_session_123",
       requestId: "req_turn",
       rootSessionId: "wrun_session_123",
+      serializedContext: slackChannelCtx,
     });
 
     expect(attrs["$eve.channel_request_id"]).toBe("req_turn");

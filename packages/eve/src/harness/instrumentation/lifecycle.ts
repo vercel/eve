@@ -1,6 +1,7 @@
 import { createInstrumentationDispatcher } from "#harness/instrumentation/dispatch.js";
 import type { InstrumentationStateSlot } from "#harness/instrumentation/state.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 
 /**
  * Stable eve identity for one actual model attempt.
@@ -12,6 +13,7 @@ import type { RuntimeTraceContext } from "#protocol/message.js";
  * fire once per attempt.
  */
 export interface InstrumentationAttemptScope {
+  readonly channelAudience?: ChannelAudience;
   readonly attemptId: string;
   readonly attemptIndex: number;
   readonly functionId?: string;
@@ -111,6 +113,8 @@ export type InstrumentationActionOutput =
  * some provider asked for it, and a provider that did not ask never receives
  * it — which is the same guarantee a destination that declines content gets,
  * one layer lower and without an OpenTelemetry pipeline to route it through.
+ * Runtime audience policy can still lower hosted private or unknown events to
+ * metadata before this provider-level projection.
  */
 export type InstrumentationCapture = "content" | "metadata";
 
@@ -160,6 +164,7 @@ export function channelDeliveryIdempotencyKey(sessionId: string, deliveryId: str
 }
 
 export interface InstrumentationChannelDeliveryRef {
+  readonly channelAudience?: ChannelAudience;
   readonly channelKind: string;
   readonly channelName: string;
   readonly deliveryId: string;
@@ -281,6 +286,7 @@ export interface InstrumentationSessionStartedEvent {
   readonly type: "session.started";
   readonly agentName?: string;
   readonly channelKind?: string;
+  readonly channelAudience?: ChannelAudience;
   readonly idempotencyKey: string;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId: string;

@@ -296,6 +296,7 @@ describe("startAuthoredSourceWatcher", () => {
             outDir,
             packageName: "@acme/crm",
             runtimeDependencies: ["eve"],
+            externalDependencies: [],
             shortName: "crm",
           },
         },

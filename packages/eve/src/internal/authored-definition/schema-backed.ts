@@ -93,7 +93,16 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
     record,
-    ["auth", "description", "execute", "inputSchema", "approval", "outputSchema", "toModelOutput"],
+    [
+      "auth",
+      "description",
+      "execute",
+      "execution",
+      "inputSchema",
+      "approval",
+      "outputSchema",
+      "toModelOutput",
+    ],
     message,
   );
   const inputSchema =
@@ -106,6 +115,13 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     execute: expectFunction(record.execute, message),
     inputSchema,
   };
+  if (record.execution !== undefined) {
+    const execution = expectString(record.execution, message);
+    if (execution !== "background") {
+      throw new Error(`${message} Expected "execution" to be "background".`);
+    }
+    definition.execution = execution;
+  }
   if (outputSchema !== undefined) {
     definition.outputSchema = outputSchema;
   }

@@ -220,6 +220,7 @@ describe("subagent authorization proxy", () => {
     expect(required.serializedContext[ChannelKey.name]).toEqual({
       kind: authorizationAdapter.kind,
       state: { pendingName: "linear" },
+      audience: "unknown",
     });
 
     const completedEvent: SubagentAuthorizationEvent = {
@@ -243,6 +244,7 @@ describe("subagent authorization proxy", () => {
     expect(completed.serializedContext[ChannelKey.name]).toEqual({
       kind: authorizationAdapter.kind,
       state: { outcome: "authorized" },
+      audience: "unknown",
     });
     expect(chunks).toHaveLength(2);
     expect(decodeEvent(chunks[0]!)).toMatchObject(requiredEvent);

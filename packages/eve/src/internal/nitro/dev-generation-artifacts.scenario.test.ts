@@ -437,6 +437,7 @@ describe("development generation artifacts", () => {
 
     expect(relative(canonicalSnapshotRoot, resolvedExternalPath)).toMatch(/^\.\.(?:[\\/]|$)/u);
     expect(existsSync(join(resolvedExternalPath, "binding.node"))).toBe(true);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "agent"))).toBe(false);
 
     await rm(join(app.appRoot, "node_modules", "fixture-bundled"), {
       force: true,

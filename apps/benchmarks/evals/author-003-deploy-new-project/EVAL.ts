@@ -5,8 +5,11 @@ import { authoringEval } from "./grader.js";
 const { commands, worldEvents } = authoringEval();
 const commandLog = commands.join("\n");
 
-test("uses eve deploy to create and link the named Vercel project without prompting", () => {
-  expect(commandLog).toMatch(/eve\s+deploy[^\n]*--project(?:=|\s+)field-notes/i);
+test("reaches the named Vercel project through eve without prompting", () => {
+  // The project name can be established by `eve link` or passed to `eve deploy`;
+  // both end at the same linked project, so the world events below are what
+  // decide whether the deployment actually happened.
+  expect(commandLog).toMatch(/eve\s+(?:link|deploy)[^\n]*--project(?:=|\s+)field-notes/i);
   expect(commandLog).toMatch(/eve\s+deploy[^\n]*--non-interactive/i);
   expect(commandLog).toMatch(/eve\s+deploy[^\n]*--yes/i);
   expect(commands).not.toContainEqual(

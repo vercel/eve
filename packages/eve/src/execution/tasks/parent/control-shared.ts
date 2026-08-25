@@ -9,11 +9,11 @@ import {
   getSessionTaskIndex,
   type SessionTaskIndexEntry,
 } from "#tasks/session-index.js";
-import type { TaskView } from "#tasks/types.js";
+import { readSubagentTaskMetadata, type TaskView } from "#tasks/types.js";
 
 /**
  * Result and lookup helpers shared by the task-control executors
- * (`task_peek`/`task_cancel` in the dispatch module,
+ * (`task_cancel` in the dispatch module,
  * task controls in their own).
  */
 
@@ -59,11 +59,17 @@ export async function readTaskView(entry: SessionTaskIndexEntry): Promise<TaskVi
 
 /** The placeholder view for a run that has not published anything yet. */
 function createPendingTaskView(entry: SessionTaskIndexEntry): TaskView {
-  return {
+  const view: TaskView = {
     metadata: entry.metadata,
     status: "working",
     taskId: entry.taskId,
   };
+
+  if (entry.executor === undefined) {
+    return view;
+  }
+
+  return { ...view, executor: { binding: entry.executor } };
 }
 
 /** Finds the persistent address record for one task-owned agent. */
@@ -86,7 +92,7 @@ export async function findActiveTaskForAgent(
   parentStepIndex?: number,
 ): Promise<{ readonly entry: SessionTaskIndexEntry; readonly view: TaskView } | undefined> {
   const entries = getSessionTaskIndex(session.state).filter(
-    (entry) => entry.metadata.agentId === agentId,
+    (entry) => readSubagentTaskMetadata(entry)?.agentId === agentId,
   );
   const views = await readTaskViews(entries);
   const active = entries.flatMap((entry, index) => {

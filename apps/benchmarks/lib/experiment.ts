@@ -6,6 +6,7 @@ import { createAuthoringAgent } from "./harness-agent.js";
 
 export function authoringExperiment(options: {
   readonly archive: Uint8Array;
+  readonly dependencyArchive: Uint8Array;
   readonly digest: string;
   readonly dependencyDigest: string;
   readonly runs?: number;
@@ -17,6 +18,7 @@ export function authoringExperiment(options: {
   const agent = createAuthoringAgent({
     model: options.benchmark.model,
     archive: options.archive,
+    dependencyArchive: options.dependencyArchive,
     digest: options.digest,
     dependencyDigest: options.dependencyDigest,
   });
@@ -28,7 +30,9 @@ export function authoringExperiment(options: {
     scripts: ["typecheck", "build"],
     runs: options.runs ?? 1,
     earlyExit: false,
-    timeout: 900,
+    // Lower this when iterating on a case that stalls, so a hung turn surfaces
+    // in minutes instead of consuming the full budget.
+    timeout: Number(process.env.EVE_BENCHMARK_TIMEOUT ?? 900),
     sandbox: "vercel",
     copyFiles: "changed",
     agentOptions: {

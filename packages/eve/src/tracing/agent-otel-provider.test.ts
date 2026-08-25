@@ -15,7 +15,10 @@ import {
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
-import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js";
+import {
+  createAgentOtelInstrumentation,
+  type AgentOtelInstrumentationInput,
+} from "#tracing/agent-otel-provider.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import {
@@ -33,6 +36,8 @@ import {
   type InstrumentationTraceContext,
   type InstrumentationUsage,
 } from "#harness/instrumentation/lifecycle.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
+import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import {
   actionIdempotencyKey,
   attemptIdempotencyKey,
@@ -56,6 +61,7 @@ interface TestRuntime {
 
 function createRuntime(
   stateStore: AgentTraceStateStore = new InMemoryAgentTraceStateStore(),
+  tracePolicy: TraceCapturePolicy | null = () => true,
 ): TestRuntime {
   const exporter = new InMemorySpanExporter();
   const idGenerator = new AgentSpanIdGenerator();
@@ -64,14 +70,18 @@ function createRuntime(
     spanProcessors: [new SimpleSpanProcessor(exporter)],
   });
   const tracer = provider.getTracer("eve.agent");
-  const agentOtel = createAgentOtelInstrumentation({
+  const agentOtelInput: Omit<AgentOtelInstrumentationInput, "tracePolicy"> & {
+    tracePolicy?: TraceCapturePolicy;
+  } = {
     frameworkVersion: "test",
     idGenerator,
     recordInputs: true,
     recordOutputs: true,
     stateStore,
     tracer,
-  });
+  };
+  if (tracePolicy !== null) agentOtelInput.tracePolicy = tracePolicy;
+  const agentOtel = createAgentOtelInstrumentation(agentOtelInput);
   const hooks = createInstrumentationHooks([agentOtel.hook]);
   return {
     exporter,
@@ -88,6 +98,7 @@ async function emitAttempt(input: {
   readonly actionUsage?: InstrumentationUsage;
   readonly attemptIndex?: number;
   readonly attemptError?: Error;
+  readonly channelAudience?: ChannelAudience;
   readonly hooks: InstrumentationHooks;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly runInContext: InstrumentationContextRunner;
@@ -105,6 +116,7 @@ async function emitAttempt(input: {
   const scope: InstrumentationAttemptScope = {
     attemptId: `${input.sessionId}:${input.turnId}:0:${input.attemptIndex ?? 0}`,
     attemptIndex: input.attemptIndex ?? 0,
+    channelAudience: input.channelAudience,
     functionId: "weather",
     sessionId: input.sessionId,
     stepIndex: 0,
@@ -274,6 +286,7 @@ async function emitAttempt(input: {
 }
 
 async function publishTurnStarted(input: {
+  readonly channelAudience?: ChannelAudience;
   readonly hooks: InstrumentationHooks;
   readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
@@ -285,6 +298,7 @@ async function publishTurnStarted(input: {
   const rootSessionId = input.rootSessionId ?? input.sessionId;
   await input.hooks.publish({
     agentName: "weather",
+    channelAudience: input.channelAudience,
     channelKind: "http",
     idempotencyKey: sessionIdempotencyKey(input.sessionId),
     parentTraceContext: input.parentTraceContext,
@@ -632,6 +646,7 @@ describe("createAgentOtelInstrumentation", () => {
     const contextWith = vi.spyOn(context, "with");
     await context.with(activeContext, () =>
       emitAttempt({
+        channelAudience: "public",
         hooks: runtime.hooks,
         runInContext: runtime.runInContext,
         sessionId: "session-1",
@@ -657,6 +672,7 @@ describe("createAgentOtelInstrumentation", () => {
     expect(session.parentSpanContext).toBeUndefined();
     expect(session.events.map((event) => event.name)).toEqual(["session.started"]);
     expect(session.attributes).toMatchObject({
+      "agent.channel.audience": "public",
       "agent.session.id": "session-1",
       "agent.session.window": 0,
       "agent.trace.schema.version": 1,
@@ -679,6 +695,9 @@ describe("createAgentOtelInstrumentation", () => {
     ).toBe(true);
     expect(action.parentSpanContext?.spanId).toBe(step.spanContext().spanId);
     expect(tool.parentSpanContext?.spanId).toBe(action.spanContext().spanId);
+    for (const span of [turn, step, operation, model, action, tool]) {
+      expect(span.attributes).not.toHaveProperty("agent.channel.audience");
+    }
     expect(
       new Set(
         spans
@@ -708,6 +727,62 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.framework.name": "eve",
       "agent.root.session.id": "session-1",
     });
+  });
+
+  it.each(["private", "unknown"] as const)(
+    "does not record %s conversation traces by default",
+    async (audience) => {
+      const runtime = createRuntime(new InMemoryAgentTraceStateStore(), null);
+
+      await emitAttempt({
+        channelAudience: audience,
+        hooks: runtime.hooks,
+        runInContext: runtime.runInContext,
+        sessionId: `session-${audience}`,
+        turnId: `turn-${audience}`,
+        turnSequence: 0,
+      });
+      await runtime.provider.forceFlush();
+
+      expect(runtime.exporter.getFinishedSpans()).toEqual([]);
+    },
+  );
+
+  it("applies the private audience gate to an adopted sampled trace", async () => {
+    const runtime = createRuntime(new InMemoryAgentTraceStateStore(), null);
+
+    await emitAttempt({
+      channelAudience: "private",
+      hooks: runtime.hooks,
+      parentTraceContext: {
+        spanId: "a".repeat(16),
+        traceFlags: 1,
+        traceId: "b".repeat(32),
+      },
+      runInContext: runtime.runInContext,
+      sessionId: "session-private",
+      turnId: "turn-private",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+
+    expect(runtime.exporter.getFinishedSpans()).toEqual([]);
+  });
+
+  it("allows private tracing when the trace policy opts in", async () => {
+    const runtime = createRuntime(new InMemoryAgentTraceStateStore(), () => true);
+
+    await emitAttempt({
+      channelAudience: "private",
+      hooks: runtime.hooks,
+      runInContext: runtime.runInContext,
+      sessionId: "session-private",
+      turnId: "turn-private",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+
+    expect(byName(runtime.exporter.getFinishedSpans(), "agent.session")).toHaveLength(1);
   });
 
   it("writes merged runtime context onto the step, operation, and chat spans", async () => {

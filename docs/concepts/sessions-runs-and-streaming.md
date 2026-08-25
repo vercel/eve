@@ -53,6 +53,7 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `action.partial`          | A locally executed tool generator yielded a preliminary output snapshot.                                         |
 | `action.result`           | A tool call returned.                                                                                            |
 | `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or `ask_question`); carries `requests`. |
+| `input.resolved`          | The server accepted terminal human-input outcomes; carries `resolutions` with responses when provided.           |
 | `subagent.called`         | A subagent was delegated; carries `childSessionId` to attach to.                                                 |
 | `subagent.completed`      | A delegated subagent finished.                                                                                   |
 | `reasoning.appended`      | A reasoning delta (incremental, with cumulative text so far).                                                    |
@@ -85,7 +86,7 @@ Note: consider the privacy, confidentiality, and user-experience implications fo
 
 A delegated subagent publishes progress on its own child-session stream. The parent only emits `subagent.called` with a `childSessionId`, which a client uses to attach.
 
-`step.failed` and `turn.failed` carry `{ code, message, details? }` for the failed fragment or turn, and `session.failed` is the terminal session-level variant. `turn.cancelled` is not a failure: the cancelled turn ends without any failure event, `session.waiting` follows, and the session accepts the next message normally — whatever the turn streamed before cancellation stays on the stream, while durable history keeps only what had already settled. When a turn requested an output schema, the finalized payload lands on `result.completed` as `data.result` before the turn boundary. `authorization.required` carries the sign-in challenge (`data.authorization` may include `url`, `userCode`, `expiresAt`, `instructions`), and `authorization.completed` carries `data.outcome` (`"authorized" | "declined" | "failed" | "timed-out"`).
+`step.failed` and `turn.failed` carry `{ code, message, details? }` for the failed fragment or turn, and `session.failed` is the terminal session-level variant. `turn.cancelled` is not a failure: the cancelled turn ends without any failure event, `session.waiting` follows, and the session accepts the next message normally. Whatever the turn streamed before cancellation stays on the stream. Durable history keeps the accepted user input and previously settled work, but discards incomplete assistant output and unfinished tool state. When a turn requested an output schema, the finalized payload lands on `result.completed` as `data.result` before the turn boundary. `authorization.required` carries the sign-in challenge (`data.authorization` may include `url`, `userCode`, `expiresAt`, `instructions`), and `authorization.completed` carries `data.outcome` (`"authorized" | "declined" | "failed" | "timed-out"`).
 
 ## The event envelope
 

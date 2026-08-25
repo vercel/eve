@@ -60,10 +60,10 @@ export default defineTaskEval({
     );
     still.expectOk();
     await t.require(
-      requireTaskView(still.requireToolCall("task_peek").output, taskId),
+      requireTaskView(still.requireToolCall("task_cancel").output, taskId),
       satisfies(
         (view: Record<string, unknown>) => hasSameCancelledFields(view, cancelledView),
-        "task_peek observes the same semantic fields after repeated cancellation",
+        "another no-op cancellation observes the same semantic fields",
       ),
     );
   },

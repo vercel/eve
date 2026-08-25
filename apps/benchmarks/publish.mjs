@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -13,6 +12,12 @@ import {
   publishedBenchmarkModels,
   publishedExperimentId,
 } from "./lib/benchmark-config.ts";
+import {
+  prepareFixtures,
+  resetExperiments,
+  writeExperiment,
+  writeSubjectArchives,
+} from "./lib/experiment-files.mjs";
 import { revisionSubject } from "./lib/source.mjs";
 
 const appRoot = dirname(fileURLToPath(import.meta.url));
@@ -53,7 +58,7 @@ const experimentNames = benchmarks.flatMap((benchmark) =>
   authoringTreatments.map((treatment) => publishedExperimentId(benchmark, treatment)),
 );
 
-prepareFixtures();
+prepareFixtures(evalsRoot);
 writeExperiments(subject, revision, benchmarks);
 
 console.log(`> eve revision: ${revision}`);
@@ -151,47 +156,26 @@ To inspect pending benchmark cells without publishing:
   return false;
 }
 
-function prepareFixtures() {
-  for (const name of fixtureNames()) {
-    const fixtureRoot = join(evalsRoot, name);
-    writeFileSync(join(fixtureRoot, "PROMPT.md"), "");
-    writeFileSync(
-      join(fixtureRoot, "package.json"),
-      `${JSON.stringify({ name: `eve-authoring-${name}`, private: true, type: "module" }, null, 2)}\n`,
-    );
-  }
-}
-
-function fixtureNames() {
-  return readdirSync(evalsRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && existsSync(join(evalsRoot, entry.name, "CASE.ts")))
-    .map((entry) => entry.name)
-    .sort();
-}
-
 function writeExperiments(subject, revision, benchmarks) {
-  rmSync(experimentsRoot, { recursive: true, force: true });
-  mkdirSync(experimentsRoot, { recursive: true });
-  const archiveName = `published-${revision.slice(0, 12)}.source.tar.gz`;
-  writeFileSync(join(experimentsRoot, archiveName), subject.archive);
+  resetExperiments(experimentsRoot);
+  const { archiveName, dependencyArchiveName } = writeSubjectArchives(
+    experimentsRoot,
+    subject,
+    `published-${revision.slice(0, 12)}`,
+  );
 
   for (const benchmark of benchmarks) {
     for (const treatment of authoringTreatments) {
-      const experimentName = publishedExperimentId(benchmark, treatment);
-      writeFileSync(
-        join(experimentsRoot, `${experimentName}.ts`),
-        `import { readFileSync } from "node:fs";\n` +
-          `import { authoringExperiment } from "../lib/experiment.js";\n\n` +
-          `export default authoringExperiment({\n` +
-          `  archive: readFileSync(new URL(${JSON.stringify(`./${archiveName}`)}, import.meta.url)),\n` +
-          `  digest: ${JSON.stringify(subject.digest)},\n` +
-          `  dependencyDigest: ${JSON.stringify(subject.dependencyDigest)},\n` +
-          `  runs: ${publishedBenchmark.runs},\n` +
-          `  evals: ${JSON.stringify(publishedBenchmark.caseIds)},\n` +
-          `  benchmark: ${JSON.stringify(benchmark)},\n` +
-          `  treatment: ${JSON.stringify(treatment)},\n` +
-          `});\n`,
-      );
+      writeExperiment(experimentsRoot, publishedExperimentId(benchmark, treatment), {
+        archiveName,
+        dependencyArchiveName,
+        digest: subject.digest,
+        dependencyDigest: subject.dependencyDigest,
+        runs: publishedBenchmark.runs,
+        evals: publishedBenchmark.caseIds,
+        benchmark,
+        treatment,
+      });
     }
   }
 }

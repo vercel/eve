@@ -4,6 +4,7 @@ import type {
   StandardSchemaV1,
 } from "#compiled/@standard-schema/spec/index.js";
 import type { JsonObject } from "#shared/json.js";
+import type { TaskExec } from "#shared/tool-task.js";
 
 /**
  * Options forwarded from the AI SDK to the tool's {@link ToolDefinition.execute}
@@ -14,10 +15,14 @@ export type ToolExecuteOptions = Omit<ToolExecutionOptions<unknown>, "context">;
 export type ToolExecuteFn<TInput = unknown, TOutput = unknown> = (
   input: TInput,
   options: ToolExecuteOptions,
+  task?: TaskExec,
 ) => Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
+
+export type ToolExecution = "background";
 
 interface ToolDefinitionBase {
   readonly description: string;
+  readonly execution?: ToolExecution;
 }
 
 /**

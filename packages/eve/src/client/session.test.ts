@@ -800,7 +800,7 @@ describe("ClientSession", () => {
     ]);
   });
 
-  it("keeps following an active turn while authorization is pending", async () => {
+  it("keeps following an active turn across an authorization parking boundary", async () => {
     let streamRequest = 0;
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
       if ((init?.method ?? "GET") === "POST") {
@@ -809,13 +809,22 @@ describe("ClientSession", () => {
 
       streamRequest += 1;
       if (streamRequest === 1) {
-        return createStreamResponse([{ type: "authorization.required", data: {} }]);
+        return createStreamResponse([
+          {
+            type: "authorization.required",
+            data: { name: "linear", webhookUrl: "https://agent.example.com/auth/linear" },
+          },
+          {
+            type: "session.waiting",
+            data: { continuationToken: "session-id", wait: "next-user-message" },
+          },
+        ]);
       }
       if (streamRequest <= 7) {
         return createStreamResponse([]);
       }
       return createStreamResponse([
-        { type: "authorization.completed", data: {} },
+        { type: "authorization.completed", data: { name: "linear", outcome: "authorized" } },
         {
           type: "session.waiting",
           data: { continuationToken: "session-id", wait: "next-user-message" },
@@ -829,6 +838,7 @@ describe("ClientSession", () => {
       const eventTypes = await collectEventTypes(await session.send("first"));
       expect(eventTypes).toEqual([
         "authorization.required",
+        "session.waiting",
         "authorization.completed",
         "session.waiting",
       ]);
@@ -837,7 +847,36 @@ describe("ClientSession", () => {
     }
 
     expect(fetchMock).toHaveBeenCalledTimes(9);
-    expect(session.state.streamIndex).toBe(3);
+    expect(session.state.streamIndex).toBe(4);
+  });
+
+  it("stops at a non-blocking authorization parking boundary", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return createAcceptedResponse();
+      }
+
+      return createStreamResponse([
+        { type: "authorization.required", data: { name: "linear" } },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
+      ]);
+    });
+    const session = createSession();
+
+    vi.useFakeTimers();
+    let eventTypes: string[];
+    try {
+      eventTypes = await collectEventTypes(await session.send("first"));
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(eventTypes).toEqual(["authorization.required", "session.waiting"]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(session.state.streamIndex).toBe(2);
   });
 
   it("honors an explicit idle reconnect limit for an active turn", async () => {

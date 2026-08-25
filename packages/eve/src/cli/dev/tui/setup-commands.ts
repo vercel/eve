@@ -47,6 +47,8 @@ export interface TuiSetupCommandInput {
   renderer: TuiSetupCommandRenderer;
   /** Initial model-flow step authorized by the runner's boot evidence. */
   initialModelStep?: "provider";
+  /** Registry address from `/add <item>`, opening that item instead of the browser. */
+  initialRegistryAddress?: string;
   /** Live ChatGPT identity shown only inside model configuration UI. */
   chatGptAccountLabel?: string;
   /** Suspends development runtime artifacts while registry installation and setup mutate them. */
@@ -258,7 +260,15 @@ async function executeSetupCommand(
         return outcome;
       }
       case "add": {
-        const result = await flows.runRegistryFlow({ appRoot, prompter, signal });
+        const registryInput: Parameters<TuiSetupFlows["runRegistryFlow"]>[0] = {
+          appRoot,
+          prompter,
+          signal,
+        };
+        if (input.initialRegistryAddress !== undefined) {
+          registryInput.initialAddress = input.initialRegistryAddress;
+        }
+        const result = await flows.runRegistryFlow(registryInput);
         if (result.kind === "cancelled") {
           return { message: "/add dismissed.", preserveFlowDiagnostics: true };
         }
@@ -300,6 +310,13 @@ async function executeSetupCommand(
       }
     }
   } catch (error) {
+    const actionableError = error instanceof RegistryFlowFailedError ? error.cause : error;
+    const upgrade = await vercelCliUpgradeOutcome(actionableError, command, flows, {
+      appRoot,
+      prompter,
+      signal,
+    });
+    if (upgrade !== undefined) return upgrade;
     if (error instanceof RegistryFlowFailedError) {
       const completed = error.completed;
       return {
@@ -314,12 +331,6 @@ async function executeSetupCommand(
         preserveFlowDiagnostics: command !== "model",
       };
     }
-    const upgrade = await vercelCliUpgradeOutcome(error, command, flows, {
-      appRoot,
-      prompter,
-      signal,
-    });
-    if (upgrade !== undefined) return upgrade;
     // Provisioning steps (link, deploy, Slack) throw a Vercel human action when
     // `whoami` fails or a scope is denied. Route it to the in-TUI fix instead of
     // dumping the raw "Human action required" message.
@@ -352,7 +363,7 @@ async function vercelCliUpgradeOutcome(
   let choice: "upgrade" | "later";
   try {
     choice = await input.prompter.select({
-      message: "Your Vercel CLI needs an update to list your teams. Upgrade now?",
+      message: "Your Vercel CLI needs an update to continue setup. Upgrade now?",
       options: [
         {
           value: "upgrade",

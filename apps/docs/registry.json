@@ -29,6 +29,30 @@
       }
     },
     {
+      "name": "experimental/self-modification",
+      "type": "registry:item",
+      "title": "Self-modification (Experimental)",
+      "description": "Add an experimental, development-only source editing subagent to an eve project.",
+      "dependencies": ["@eve/self-modification"],
+      "files": [
+        {
+          "path": "registry/experimental/self-modification/agent.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/self-modification/agent.ts"
+        },
+        {
+          "path": "registry/experimental/self-modification/sandbox.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/self-modification/sandbox.ts"
+        },
+        {
+          "path": "registry/experimental/self-modification/extension.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/self-modification/extensions/selfmod.ts"
+        }
+      ]
+    },
+    {
       "name": "extension/agent-browser",
       "type": "registry:item",
       "title": "agent-browser",
@@ -309,6 +333,31 @@
           "path": "registry/connections/honeycomb.ts",
           "type": "registry:file",
           "target": "agent/connections/honeycomb.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/agentcard",
+      "type": "registry:item",
+      "title": "Agentcard",
+      "description": "let agents buy online",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "agentcard", "agentcard", "agentcard"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/agentcard.ts",
+          "type": "registry:file",
+          "target": "agent/connections/agentcard.ts"
         }
       ]
     },
@@ -1380,15 +1429,14 @@
       },
       "dependencies": [
         "@radix-ui/react-use-controllable-state@1.2.2",
-        "@shikijs/core@4.1.0",
-        "@shikijs/engine-javascript@4.1.0",
-        "@shikijs/engine-oniguruma@4.1.0",
+        "@shikijs/core@3.23.0",
+        "@shikijs/engine-javascript@3.23.0",
+        "@shikijs/engine-oniguruma@3.23.0",
         "@streamdown/cjk@1.0.3",
         "@streamdown/code@1.1.1",
         "@streamdown/math@1.0.2",
         "@streamdown/mermaid@1.0.2",
         "@tailwindcss/postcss@4.3.0",
-        "ai@^7.0.38",
         "class-variance-authority@0.7.1",
         "clsx@2.1.1",
         "cmdk@1.1.1",
@@ -1399,7 +1447,7 @@
         "radix-ui@1.4.3",
         "react@19.2.6",
         "react-dom@19.2.6",
-        "shiki@4.1.0",
+        "shiki@3.23.0",
         "streamdown@2.5.0",
         "tailwind-merge@3.6.0",
         "tailwindcss@4.3.0",
@@ -1444,6 +1492,16 @@
           "target": "app/page.tsx"
         },
         {
+          "path": "registry/channel/web/app/s/[sessionId]/page.tsx",
+          "type": "registry:file",
+          "target": "app/s/[sessionId]/page.tsx"
+        },
+        {
+          "path": "registry/channel/web/app/s/page.tsx",
+          "type": "registry:file",
+          "target": "app/s/page.tsx"
+        },
+        {
           "path": "registry/channel/web/components.json",
           "type": "registry:file",
           "target": "components.json"
@@ -1472,6 +1530,11 @@
           "path": "registry/channel/web/components/ai-elements/prompt-input.tsx",
           "type": "registry:file",
           "target": "components/ai-elements/prompt-input.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/question.tsx",
+          "type": "registry:file",
+          "target": "components/ai-elements/question.tsx"
         },
         {
           "path": "registry/channel/web/components/ai-elements/reasoning.tsx",
@@ -1587,11 +1650,6 @@
           "path": "registry/channel/web/postcss.config.mjs",
           "type": "registry:file",
           "target": "postcss.config.mjs"
-        },
-        {
-          "path": "registry/channel/web/tsconfig.json",
-          "type": "registry:file",
-          "target": "tsconfig.json"
         }
       ]
     },
@@ -1613,7 +1671,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-gchat#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1639,7 +1697,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-whatsapp#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1663,7 +1721,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-x#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1688,7 +1746,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-messenger#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1712,7 +1770,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-zernio#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1736,7 +1794,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-velt#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1761,7 +1819,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-sendblue#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1785,7 +1843,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-novu#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1809,32 +1867,28 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-liveblocks#configure",
           "implementation": "chat-sdk"
         }
       }
     },
     {
-      "name": "channel/chat-sdk-linq",
+      "name": "channel/linq",
       "type": "registry:item",
       "title": "Linq",
-      "description": "iMessage and SMS conversations, media, and tapbacks through Linq.",
-      "dependencies": ["chat", "@linqapp/chat-sdk-adapter", "@chat-adapter/state-memory"],
-      "envVars": {
-        "LINQ_API_KEY": "",
-        "LINQ_WEBHOOK_SECRET": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/chat-sdk-linq.ts",
-          "type": "registry:file",
-          "target": "agent/channels/linq.ts"
-        }
-      ],
+      "description": "Connect an eve agent to iMessage and SMS through Linq with guided Connect or portable setup.",
+      "dependencies": ["@vercel/connect@>=0.9.0"],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
-          "implementation": "chat-sdk"
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "linq"]
+          },
+          "requires": ">=0.41.0",
+          "docs": "/docs/channels/linq",
+          "implementation": "native"
         }
       }
     },
@@ -1858,7 +1912,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-kapso#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1903,7 +1957,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-dial#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1928,7 +1982,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-agentphone#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1952,7 +2006,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-lark#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1976,7 +2030,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-beeper#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -2001,7 +2055,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-resend#configure",
           "implementation": "chat-sdk"
         }
       }

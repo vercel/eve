@@ -37,6 +37,7 @@ import {
   type ScopedAuthorization,
 } from "#runtime/connections/scoped-authorization.js";
 import type { ToolExecuteOptions } from "#shared/tool-definition.js";
+import type { TaskExec } from "#shared/tool-task.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 
 /**
@@ -54,17 +55,34 @@ import { isAsyncIterable } from "#shared/async-iterable.js";
  * strategies rethrow the original error because they have no consent flow to
  * park on.
  */
-export function createToolExecuteWithAuth(input: {
+type ToolExecuteWithAuthInput<TInput> = {
   readonly scope: string;
-  readonly execute: (toolInput: unknown, ctx: unknown) => unknown;
-}): (toolInput: unknown, options: ToolExecuteOptions) => Promise<unknown> | AsyncIterable<unknown> {
-  const { scope, execute } = input;
+} & (
+  | {
+      readonly execution: "background";
+      readonly execute: (toolInput: TInput, ctx: ToolContext, task: TaskExec) => unknown;
+    }
+  | {
+      readonly execution?: never;
+      readonly execute: (toolInput: TInput, ctx: ToolContext, task?: TaskExec) => unknown;
+    }
+);
+
+export function createToolExecuteWithAuth<TInput>(
+  input: ToolExecuteWithAuthInput<TInput>,
+): (
+  toolInput: TInput,
+  options: ToolExecuteOptions,
+  task?: TaskExec,
+) => Promise<unknown> | AsyncIterable<unknown> {
+  const { scope } = input;
 
   // An async wrapper would turn an async generator into Promise<AsyncIterable>,
   // which the AI SDK treats as one non-serializable terminal output.
   return (
-    toolInput: unknown,
+    toolInput: TInput,
     options: ToolExecuteOptions,
+    task?: TaskExec,
   ): Promise<unknown> | AsyncIterable<unknown> => {
     const justAuthorizedScopes = new Set<string>();
     const ctx = buildToolContext({
@@ -75,7 +93,15 @@ export function createToolExecuteWithAuth(input: {
     });
 
     try {
-      const output = execute(toolInput, ctx);
+      let output: unknown;
+      if (input.execution === "background") {
+        if (task === undefined) {
+          throw new Error("Background tool execution requires a task runtime.");
+        }
+        output = input.execute(toolInput, ctx, task);
+      } else {
+        output = input.execute(toolInput, ctx, task);
+      }
       if (isAsyncIterable(output)) {
         return handleToolIterableErrors(output);
       }

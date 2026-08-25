@@ -181,6 +181,17 @@ export const vercelLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const agentcardLogo = (props: LogoProps) => (
+  <svg viewBox="0 0 214 152" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      clipRule="evenodd"
+      d="M16 0H197.333C208 0 213.333 5.33333 213.333 16V136C213.333 146.667 208 152 197.333 152H16C5.33333 152 0 146.667 0 136V16C0 5.33333 5.33333 0 16 0ZM50.6667 33.3333H162.667V37.3333H50.6667V33.3333ZM50.6667 114.667H162.667V118.667H50.6667V114.667ZM50.6667 37.3333H54.6667V114.667H50.6667V37.3333ZM158.667 37.3333H162.667V114.667H158.667V37.3333ZM54.6667 78.6667H158.667V82.6667H54.6667V78.6667ZM104 37.3333H108V78.6667H104V37.3333Z"
+      fill="currentColor"
+      fillRule="evenodd"
+    />
+  </svg>
+);
+
 export const linearLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
@@ -686,6 +697,7 @@ export const logos = {
   teams: teamsLogo,
   telegram: telegramLogo,
   twilio: twilioLogo,
+  agentcard: agentcardLogo,
   vercel: vercelLogo,
   linear: linearLogo,
   context: contextLogo,

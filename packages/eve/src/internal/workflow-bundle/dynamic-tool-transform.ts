@@ -1,28 +1,8 @@
 /**
- * Compiler transform for dynamic tool files.
- *
- * Hoists inline `execute` functions from `defineDynamic`
- * event handler return values to module-scope named functions
- * registered in the global step registry. The workflow SDK then
- * handles serialization and replay.
- *
- * The walker enters nested functions (helpers, callbacks, IIFEs) so
- * patterns like `function buildTool(n) { return { execute() {} } }`
- * are supported. For each execute found, scope variables from every
- * enclosing function between the handler and the execute are
- * collected. Only variables the execute body actually references are
- * captured — this avoids TDZ errors from later declarations.
- *
- * At each call site the inline execute is replaced with:
- * - A wrapper that passes referenced scope values as `__vars`
- * - `__executeStepFn`: reference to the hoisted function
- * - `__closureVars`: snapshot for durable serialization
- *
- * Limitation: `execute` must be an inline function literal (function
- * expression, arrow, or method shorthand). Variable references
- * (`execute: myFn`) and call results (`execute: makeFn()`) are not
- * detected — the transform returns null and the tool works on the
- * first workflow step but is not replayable.
+ * Stamps callbacks passed to authored `defineTool()` calls with durable replay
+ * descriptors. Each callback body is hoisted into a module-suffix function and
+ * the live callback is stamped with that function plus the lexical values its
+ * body references; identity `(toolName, phase)` is assigned at resolve time.
  */
 
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
@@ -33,37 +13,21 @@ import {
   walkNode,
 } from "#internal/workflow-bundle/dynamic-tool-ast-references.js";
 
-interface HandlerInfo {
-  /** The handler function AST node */
-  handlerNode: AstNode;
-  /** Start of the handler function body (the `{`) */
-  bodyStart: number;
-  /** Collected variable names declared in the handler scope */
-  scopeVars: readonly string[];
-  /** Handler parameter names (event, ctx) */
-  paramNames: readonly string[];
-  /** Execute functions found inside the return value */
-  executes: readonly ExecuteInfo[];
-}
+type CallbackPhase = "approvalRequest" | "approvalResponse" | "execute" | "toModelOutput";
+type CallbackPropertyName = "approval" | "execute" | "request" | "response" | "toModelOutput";
 
-interface ExecuteInfo {
-  /** Full property range (execute: function(...) { ... }) */
-  propStart: number;
-  propEnd: number;
-  /** The function source (params + body) */
-  fnSource: string;
-  /** Whether the function is async */
-  isAsync: boolean;
-  /** Generated name for the hoisted function */
-  hoistedName: string;
-  /** Parameter source */
-  params: string;
-  /** Body source (block statement including braces) */
-  body: string;
-  /** Function body AST used to identify actual identifier references */
-  bodyNode: AstNode;
-  /** Scope entries from nested functions between handler and this execute */
-  nestedScopes: readonly ScopeEntry[];
+interface CallbackInfo {
+  readonly body: string;
+  readonly bodyNode: AstNode;
+  readonly isAsync: boolean;
+  readonly isGenerator: boolean;
+  readonly isReference: boolean;
+  readonly nestedScopes: readonly ScopeEntry[];
+  readonly params: string;
+  readonly phase: CallbackPhase;
+  readonly propertyName: CallbackPropertyName;
+  readonly propEnd: number;
+  readonly propStart: number;
 }
 
 interface ScopeEntry {
@@ -71,546 +35,390 @@ interface ScopeEntry {
   readonly vars: readonly string[];
 }
 
-let transformCounter = 0;
-
 /**
- * Transforms a dynamic tool file:
- * 1. Hoists execute functions to module scope with "use step"
- * 2. Captures handler-scope variables via __vars parameter
- * 3. Adds "use step" to event handlers so the workflow SDK caches
- *    the handler's return value (resolver runs once per scope)
- *
- * Returns null if the file doesn't contain a dynamic tool pattern.
+ * Transforms every `defineTool()` call imported from an eve authoring entry
+ * point. This includes tools created in authored helper modules, not only the
+ * file containing `defineDynamic()`.
  */
 export async function transformDynamicToolExecute(
   filename: string,
   source: string,
 ): Promise<{ code: string } | null> {
-  if (!source.includes("defineDynamic")) {
-    return null;
-  }
-  if (!source.includes("events")) {
-    return null;
-  }
-  if (!source.includes("execute")) {
-    return null;
-  }
+  if (!source.includes("defineTool")) return null;
 
-  const ast = await parseSource(filename, source);
-  const handlers = findDynamicToolHandlers(source, ast);
+  const ast = (await parseWithNitroRolldownAst(filename, source)) as AstNode;
+  const defineToolAliases = findDefineToolAliases(ast);
+  if (defineToolAliases.size === 0) return null;
 
-  if (handlers.every((h) => h.executes.length === 0)) {
-    return null;
-  }
-
-  return applyTransform(source, handlers);
+  const callbacks: CallbackInfo[] = [];
+  walkForCallbacks(source, ast, callbacks, [], defineToolAliases);
+  return callbacks.length === 0 ? null : applyTransform(source, callbacks);
 }
 
-// Keep the old export name for backward compatibility with the plugin
+// Keep the old export name for backward compatibility with the plugin.
 export { transformDynamicToolExecute as transformDynamicToolAwait };
 
-async function parseSource(filename: string, source: string): Promise<AstNode> {
-  return (await parseWithNitroRolldownAst(filename, source)) as AstNode;
-}
-
-// ---------------------------------------------------------------------------
-// AST analysis
-// ---------------------------------------------------------------------------
-
-function findDynamicToolHandlers(source: string, ast: AstNode): HandlerInfo[] {
-  const handlers: HandlerInfo[] = [];
-
+function findDefineToolAliases(ast: AstNode): ReadonlySet<string> {
+  const aliases = new Set<string>();
   walkNode(ast, (node) => {
-    if (
-      node.type === "CallExpression" &&
-      node.callee?.type === "Identifier" &&
-      node.callee.name === "defineDynamic" &&
-      node.arguments?.length === 1
-    ) {
-      const arg = node.arguments[0]!;
-      if (arg.type === "ObjectExpression") {
-        const eventsProp = findProperty(arg, "events");
-        if (eventsProp?.value && (eventsProp.value as AstNode).type === "ObjectExpression") {
-          collectHandlers(source, eventsProp.value as AstNode, handlers);
-        }
-      }
+    if (node.type !== "ImportDeclaration") return true;
+    const source = node.source?.value;
+    if (typeof source !== "string" || (source !== "eve" && !source.startsWith("eve/"))) {
       return false;
     }
-    return true;
+    for (const specifier of node.specifiers ?? []) {
+      if (
+        specifier.type === "ImportSpecifier" &&
+        (specifier.imported?.name ?? specifier.imported?.value) === "defineTool" &&
+        specifier.local?.name
+      ) {
+        aliases.add(specifier.local.name);
+      }
+    }
+    return false;
   });
-
-  return handlers;
+  return aliases;
 }
 
-function collectHandlers(source: string, eventsObj: AstNode, handlers: HandlerInfo[]): void {
-  for (const prop of eventsObj.properties ?? []) {
-    if (prop.type !== "Property") continue;
-    const handler = prop.value as AstNode | undefined;
-    if (!handler) continue;
-
-    if (handler.type !== "ArrowFunctionExpression" && handler.type !== "FunctionExpression") {
-      continue;
-    }
-
-    const bodyNode = handler.body as AstNode | undefined;
-    if (!bodyNode) continue;
-
-    const bodyStart = findBlockBodyStart(bodyNode);
-    if (bodyStart === null) continue;
-
-    const paramNames = extractParamNames(handler);
-    const scopeVars = collectScopeVarDeclarations(bodyNode);
-    const executes = findExecuteFunctions(source, bodyNode);
-
-    if (executes.length > 0) {
-      handlers.push({
-        handlerNode: handler,
-        bodyStart,
-        scopeVars,
-        paramNames,
-        executes,
-      });
-    }
-  }
-}
-
-function findBlockBodyStart(node: AstNode): number | null {
-  if (node.type === "BlockStatement" && node.start !== undefined) {
-    return node.start;
-  }
-  if (
-    typeof node.body === "object" &&
-    !Array.isArray(node.body) &&
-    node.body?.type === "BlockStatement" &&
-    node.body.start !== undefined
-  ) {
-    return node.body.start;
-  }
-  return null;
-}
-
-function extractParamNames(fn: AstNode): string[] {
-  const names: string[] = [];
-  for (const param of fn.params ?? []) {
-    if (param.type === "Identifier" && param.name) {
-      names.push(param.name);
-    }
-  }
-  return names;
-}
-
-/**
- * Collects all variable declarations at the top level of a function
- * body (const, let, var). These are the potential closure variables
- * that execute functions might reference.
- */
-function collectScopeVarDeclarations(bodyNode: AstNode): string[] {
-  const vars: string[] = [];
-  collectVarsRecursive(bodyNode, vars);
-  return vars;
-}
-
-function collectVarsRecursive(node: AstNode | null | undefined, vars: string[]): void {
+function walkForCallbacks(
+  source: string,
+  node: AstNode | null | undefined,
+  results: CallbackInfo[],
+  nestedScopes: readonly ScopeEntry[],
+  defineToolAliases: ReadonlySet<string>,
+): void {
   if (!node) return;
 
-  // Stop at function boundaries — don't capture execute-local vars
-  if (
-    node.type === "FunctionExpression" ||
-    node.type === "ArrowFunctionExpression" ||
-    node.type === "FunctionDeclaration"
-  ) {
+  if (isFunction(node)) {
+    const bodyNode = node.body as AstNode | undefined;
+    if (!bodyNode) return;
+    const extended = [
+      ...nestedScopes,
+      {
+        params: extractParamNames(node),
+        vars: collectScopeVarDeclarations(bodyNode),
+      },
+    ];
+    walkForCallbacks(source, bodyNode, results, extended, defineToolAliases);
     return;
   }
 
-  if (node.type === "VariableDeclaration") {
-    for (const decl of node.declarations ?? []) {
-      collectDeclaredNames(decl, vars);
+  if (
+    node.type === "CallExpression" &&
+    node.callee?.type === "Identifier" &&
+    node.callee.name !== undefined &&
+    defineToolAliases.has(node.callee.name) &&
+    node.arguments?.length === 1 &&
+    node.arguments[0]?.type === "ObjectExpression"
+  ) {
+    collectToolCallbacks(source, node.arguments[0], results, nestedScopes);
+    return;
+  }
+
+  for (const value of Object.values(node)) {
+    if (Array.isArray(value)) {
+      for (const child of value) {
+        if (isAstNode(child)) {
+          walkForCallbacks(source, child, results, nestedScopes, defineToolAliases);
+        }
+      }
+    } else if (isAstNode(value)) {
+      walkForCallbacks(source, value, results, nestedScopes, defineToolAliases);
     }
-  }
-
-  // Also capture for-loop variable declarations (ForStatement.init,
-  // ForInStatement.left, ForOfStatement.left)
-  if (node.type === "ForStatement" && node.init) {
-    collectVarsRecursive(node.init, vars);
-  }
-  const nodeAny = node as Record<string, unknown>;
-  if ((node.type === "ForInStatement" || node.type === "ForOfStatement") && node.left) {
-    collectVarsRecursive(node.left, vars);
-  }
-
-  // Recurse into child nodes
-  if (Array.isArray(node.body)) {
-    for (const child of node.body) collectVarsRecursive(child, vars);
-  } else if (node.body && typeof node.body === "object" && "type" in node.body) {
-    collectVarsRecursive(node.body as AstNode, vars);
-  }
-  if (node.declarations) {
-    for (const decl of node.declarations) collectVarsRecursive(decl, vars);
-  }
-  if (node.expression) collectVarsRecursive(node.expression, vars);
-  if (Array.isArray(nodeAny.consequent)) {
-    for (const c of nodeAny.consequent) collectVarsRecursive(c as AstNode, vars);
-  } else if (nodeAny.consequent) {
-    collectVarsRecursive(nodeAny.consequent as AstNode, vars);
-  }
-  if (nodeAny.alternate) collectVarsRecursive(nodeAny.alternate as AstNode, vars);
-  if (nodeAny.block) collectVarsRecursive(nodeAny.block as AstNode, vars);
-  if (nodeAny.handler) collectVarsRecursive(nodeAny.handler as AstNode, vars);
-  if (nodeAny.finalizer) collectVarsRecursive(nodeAny.finalizer as AstNode, vars);
-  if (nodeAny.cases && Array.isArray(nodeAny.cases)) {
-    for (const c of nodeAny.cases) collectVarsRecursive(c as AstNode, vars);
   }
 }
 
-function collectDeclaredNames(node: AstNode, names: string[]): void {
-  if (node.type === "VariableDeclarator") {
-    collectPatternNames(node.id as AstNode | null, names);
+function collectToolCallbacks(
+  source: string,
+  tool: AstNode,
+  results: CallbackInfo[],
+  nestedScopes: readonly ScopeEntry[],
+): void {
+  collectCallbackProperty(
+    source,
+    findProperty(tool, "execute"),
+    "execute",
+    "execute",
+    results,
+    nestedScopes,
+  );
+  collectCallbackProperty(
+    source,
+    findProperty(tool, "toModelOutput"),
+    "toModelOutput",
+    "toModelOutput",
+    results,
+    nestedScopes,
+  );
+
+  const approval = findProperty(tool, "approval");
+  const approvalValue = approval?.value as AstNode | undefined;
+  if (approvalValue?.type === "ObjectExpression") {
+    collectCallbackProperty(
+      source,
+      findProperty(approvalValue, "request"),
+      "approvalRequest",
+      "request",
+      results,
+      nestedScopes,
+    );
+    collectCallbackProperty(
+      source,
+      findProperty(approvalValue, "response"),
+      "approvalResponse",
+      "response",
+      results,
+      nestedScopes,
+    );
+  } else {
+    collectCallbackProperty(source, approval, "approvalRequest", "approval", results, nestedScopes);
   }
+}
+
+function collectCallbackProperty(
+  source: string,
+  property: AstNode | undefined,
+  phase: CallbackPhase,
+  propertyName: CallbackPropertyName,
+  results: CallbackInfo[],
+  nestedScopes: readonly ScopeEntry[],
+): void {
+  if (property?.type !== "Property" || property.start === undefined || property.end === undefined) {
+    return;
+  }
+  const value = property.value as AstNode | undefined;
+  if (!value || value.start === undefined || value.end === undefined) return;
+
+  if (isFunction(value) || property.method === true) {
+    const bodyNode = value.body as AstNode | undefined;
+    if (!bodyNode) return;
+    results.push({
+      body: extractFnBody(source, value),
+      bodyNode,
+      isAsync: value.async === true,
+      isGenerator: value.generator === true,
+      isReference: false,
+      nestedScopes,
+      params: extractFnParams(source, value),
+      phase,
+      propertyName,
+      propEnd: property.end,
+      propStart: property.start,
+    });
+    return;
+  }
+
+  if (value.type === "Identifier") {
+    results.push({
+      body: `{ return ${source.slice(value.start, value.end)}(...__args); }`,
+      bodyNode: value,
+      isAsync: false,
+      isGenerator: false,
+      isReference: true,
+      nestedScopes,
+      params: "...__args",
+      phase,
+      propertyName,
+      propEnd: property.end,
+      propStart: property.start,
+    });
+  }
+}
+
+function applyTransform(source: string, callbacks: readonly CallbackInfo[]): { code: string } {
+  const replacements: Array<{ start: number; end: number; text: string }> = [];
+  const hoistedFunctions: string[] = [];
+
+  for (const [index, callback] of callbacks.entries()) {
+    const referencedNames = collectReferencedIdentifierNames(callback.bodyNode);
+    const candidateVars = callback.nestedScopes.flatMap((scope) => [
+      ...scope.params,
+      ...scope.vars,
+    ]);
+    const callbackParamNames = extractCallbackParamNames(callback.params);
+    const allVars = dedupeShadowed(candidateVars).filter(
+      (name) => !callbackParamNames.has(name) && referencedNames.has(name),
+    );
+    const closure = allVars.length > 0 ? `{ ${allVars.join(", ")} }` : "{}";
+    const safePhase = callback.phase.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+    const hoistedName =
+      callback.phase === "execute"
+        ? `__eve_dynamic_exec_${index}`
+        : `__eve_dynamic_${safePhase}_${index}`;
+    const originalParams = callback.params;
+    const hoistedParams = originalParams ? `__vars, ${originalParams}` : "__vars";
+    const varsDestructure = allVars.length > 0 ? `const ${closure} = __vars;\n  ` : "";
+    const bodyContent = callback.body.slice(1, -1).trim();
+    const asyncPrefix = callback.isAsync ? "async " : "";
+    const generatorStar = callback.isGenerator ? "*" : "";
+
+    hoistedFunctions.push(
+      `${asyncPrefix}function${generatorStar} ${hoistedName}(${hoistedParams}) {\n` +
+        `  ${varsDestructure}${bodyContent}\n` +
+        `}`,
+    );
+
+    const wrapper = createLiveWrapper(callback, hoistedName, closure);
+    const stamped = `__eveStampDynamicCallback(${wrapper}, ${hoistedName}, ${closure})`;
+    replacements.push({
+      end: callback.propEnd,
+      start: callback.propStart,
+      text: `${callback.propertyName}: ${stamped}`,
+    });
+  }
+
+  let code = source;
+  for (const replacement of replacements.sort((left, right) => right.start - left.start)) {
+    code = code.slice(0, replacement.start) + replacement.text + code.slice(replacement.end);
+  }
+
+  const registrySetup = [
+    `var __eveDurableCallbackSym = Symbol.for("eve:durable-dynamic-callback");`,
+    `function __eveStampDynamicCallback(callback, impl, closure) {`,
+    `  Object.defineProperty(callback, __eveDurableCallbackSym, { configurable: true, value: { callback: impl, closure } });`,
+    `  return callback;`,
+    `}`,
+  ].join("\n");
+  return { code: `${registrySetup}\n${code}\n\n${hoistedFunctions.join("\n")}\n` };
+}
+
+function createLiveWrapper(callback: CallbackInfo, hoistedName: string, closure: string): string {
+  if (callback.isReference) {
+    return `(...__args) => ${hoistedName}(${closure}, ...__args)`;
+  }
+  const asyncPrefix = callback.isAsync ? "async " : "";
+  if (callback.isGenerator) {
+    return `${asyncPrefix}function* (...__args) { yield* ${hoistedName}(${closure}, ...__args); }`;
+  }
+  const awaitPrefix = callback.isAsync ? "await " : "";
+  return `${asyncPrefix}(...__args) => ${awaitPrefix}${hoistedName}(${closure}, ...__args)`;
+}
+
+function dedupeShadowed(names: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (let index = names.length - 1; index >= 0; index--) {
+    const name = names[index]!;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    deduped.unshift(name);
+  }
+  return deduped;
+}
+
+function collectScopeVarDeclarations(bodyNode: AstNode): string[] {
+  const names: string[] = [];
+  walkNode(bodyNode, (node) => {
+    if (node !== bodyNode && isFunction(node)) return false;
+    if (node.type === "VariableDeclarator") collectPatternNames(node.id as AstNode | null, names);
+    if (node.type === "FunctionDeclaration" && node.id?.name) names.push(node.id.name);
+    return true;
+  });
+  return names;
 }
 
 function collectPatternNames(pattern: AstNode | null, names: string[]): void {
   if (!pattern) return;
-
   if (pattern.type === "Identifier" && pattern.name) {
     names.push(pattern.name);
     return;
   }
-
-  // Destructured: const { a, b } = ...
   if (pattern.type === "ObjectPattern") {
-    for (const prop of pattern.properties ?? []) {
-      if (prop.type === "Property") {
-        collectPatternNames(prop.value as AstNode | null, names);
-      } else if (prop.type === "RestElement") {
-        collectPatternNames(prop.argument as AstNode | null, names);
-      }
+    for (const property of pattern.properties ?? []) {
+      collectPatternNames(
+        property.type === "RestElement"
+          ? (property.argument as AstNode | null)
+          : (property.value as AstNode | null),
+        names,
+      );
     }
   }
-
-  // Destructured: const [a, b] = ...
   if (pattern.type === "ArrayPattern") {
-    for (const el of (pattern as AstNode & { elements?: (AstNode | null)[] }).elements ?? []) {
-      if (el) collectPatternNames(el, names);
-    }
+    for (const element of pattern.elements ?? []) collectPatternNames(element, names);
+  }
+  if (pattern.type === "AssignmentPattern") {
+    collectPatternNames(pattern.left as AstNode | null, names);
   }
 }
 
-/**
- * Finds execute function properties inside object expressions in the
- * handler's return value.
- */
-function findExecuteFunctions(source: string, bodyNode: AstNode): ExecuteInfo[] {
-  const results: ExecuteInfo[] = [];
-  walkForExecuteProps(source, bodyNode, results, []);
-  return results;
-}
-
-function walkForExecuteProps(
-  source: string,
-  node: AstNode | null | undefined,
-  results: ExecuteInfo[],
-  nestedScopes: readonly ScopeEntry[],
-): void {
-  if (!node) return;
-
-  // When crossing a function boundary, collect the function's params
-  // and body-level vars as a new scope entry, then continue walking
-  // inside. This lets us hoist execute functions from helpers, .map()
-  // callbacks, etc. — the wrapper captures all enclosing scope vars.
-  if (
-    node.type === "FunctionExpression" ||
-    node.type === "ArrowFunctionExpression" ||
-    node.type === "FunctionDeclaration"
-  ) {
-    const fnParams = extractParamNames(node);
-    const bodyNode = node.body as AstNode | undefined;
-    if (!bodyNode) return;
-    const fnVars = collectScopeVarDeclarations(bodyNode);
-    const extended = [...nestedScopes, { params: fnParams, vars: fnVars }];
-    // Walk into the function body with the extended scope chain
-    if (bodyNode.type === "BlockStatement") {
-      walkForExecuteProps(source, bodyNode, results, extended);
-    } else {
-      // Arrow with expression body: () => ({ execute() {} })
-      walkForExecuteProps(source, bodyNode, results, extended);
-    }
-    return;
-  }
-
-  // Only match `execute` inside a `defineTool(...)` call — not on bare objects.
-  if (
-    node.type === "CallExpression" &&
-    node.callee?.type === "Identifier" &&
-    node.callee.name === "defineTool" &&
-    node.arguments?.length === 1 &&
-    (node.arguments[0] as AstNode).type === "ObjectExpression"
-  ) {
-    const toolArg = node.arguments[0] as AstNode;
-    for (const prop of toolArg.properties ?? []) {
-      if (
-        prop.type === "Property" &&
-        !prop.computed &&
-        prop.key?.type === "Identifier" &&
-        prop.key.name === "execute" &&
-        prop.start !== undefined &&
-        prop.end !== undefined
-      ) {
-        const fn = prop.value as AstNode;
-        if (!fn || fn.start === undefined || fn.end === undefined) continue;
-
-        const isFn = fn.type === "FunctionExpression" || fn.type === "ArrowFunctionExpression";
-        const isMethod = prop.method === true;
-
-        if (isFn || isMethod) {
-          const params = extractFnParams(source, fn);
-          const body = extractFnBody(source, fn);
-          const bodyNode = fn.body as AstNode | undefined;
-          const isAsync = fn.async === true;
-
-          if (bodyNode) {
-            results.push({
-              propStart: prop.start,
-              propEnd: prop.end,
-              fnSource: source.slice(fn.start, fn.end),
-              isAsync,
-              params,
-              body,
-              bodyNode,
-              hoistedName: `__eve_dynamic_exec_${transformCounter++}`,
-              nestedScopes,
-            });
-          }
-        }
-      }
-    }
-    // Don't recurse into defineTool() arguments again — we already processed them.
-    return;
-  }
-
-  // Recurse into child nodes, threading the scope chain through
-  const walk = (child: AstNode | null | undefined) =>
-    walkForExecuteProps(source, child, results, nestedScopes);
-
-  if (Array.isArray(node.body)) {
-    for (const child of node.body) walk(child);
-  } else if (node.body && typeof node.body === "object" && "type" in node.body) {
-    walk(node.body as AstNode);
-  }
-  if (node.properties) {
-    for (const prop of node.properties) {
-      if (prop.value && typeof prop.value === "object" && "type" in (prop.value as AstNode)) {
-        walk(prop.value as AstNode);
-      }
-    }
-  }
-  if (node.callee) walk(node.callee);
-  if (node.arguments) {
-    for (const arg of node.arguments) walk(arg);
-  }
-  if (node.expression) walk(node.expression);
-  if (node.argument) walk(node.argument);
-  if (node.init) walk(node.init);
-  if (node.left) walk(node.left);
-  if (node.right) walk(node.right);
-  if (node.declarations) {
-    for (const decl of node.declarations) walk(decl);
-  }
-  const nodeAny = node as Record<string, unknown>;
-  if (Array.isArray(nodeAny.consequent)) {
-    for (const c of nodeAny.consequent) walk(c as AstNode);
-  } else if (nodeAny.consequent) {
-    walk(nodeAny.consequent as AstNode);
-  }
-  if (nodeAny.alternate) walk(nodeAny.alternate as AstNode);
-  if (nodeAny.block) walk(nodeAny.block as AstNode);
-  if (nodeAny.handler) walk(nodeAny.handler as AstNode);
-  if (nodeAny.finalizer) walk(nodeAny.finalizer as AstNode);
-  if (nodeAny.cases && Array.isArray(nodeAny.cases)) {
-    for (const c of nodeAny.cases) walk(c as AstNode);
-  }
+function extractParamNames(fn: AstNode): string[] {
+  const names: string[] = [];
+  for (const parameter of fn.params ?? []) collectPatternNames(parameter, names);
+  return names;
 }
 
 function extractFnParams(source: string, fn: AstNode): string {
   if (!fn.params || fn.params.length === 0) return "";
   const first = fn.params[0]!;
   const last = fn.params[fn.params.length - 1]!;
-  if (first.start === undefined || last.end === undefined) return "";
-  return source.slice(first.start, last.end);
+  return first.start === undefined || last.end === undefined
+    ? ""
+    : source.slice(first.start, last.end);
 }
 
 function extractFnBody(source: string, fn: AstNode): string {
   const body = fn.body as AstNode | undefined;
   if (!body || body.start === undefined || body.end === undefined) return "{}";
   const raw = source.slice(body.start, body.end);
-  if (fn.type === "ArrowFunctionExpression" && body.type !== "BlockStatement") {
-    return `{ return ${raw}; }`;
-  }
-  return raw;
+  return fn.type === "ArrowFunctionExpression" && body.type !== "BlockStatement"
+    ? `{ return ${raw}; }`
+    : raw;
 }
 
-// ---------------------------------------------------------------------------
-// Transform application
-// ---------------------------------------------------------------------------
-
-function applyTransform(source: string, handlers: HandlerInfo[]): { code: string } {
-  const replacements: Array<{ start: number; end: number; text: string }> = [];
-  const hoistedFunctions: string[] = [];
-  const registrations: string[] = [];
-  const allExecNames: string[] = [];
-
-  for (const handler of handlers) {
-    for (const exec of handler.executes) {
-      // Build the full set of candidate vars: handler scope + nested scopes
-      const candidateVars = [
-        ...handler.paramNames,
-        ...handler.scopeVars,
-        ...exec.nestedScopes.flatMap((s) => [...s.params, ...s.vars]),
-      ];
-
-      // Deduplicate, keeping last occurrence (inner scope shadows outer)
-      const seen = new Set<string>();
-      const deduped: string[] = [];
-      for (let i = candidateVars.length - 1; i >= 0; i--) {
-        if (!seen.has(candidateVars[i]!)) {
-          seen.add(candidateVars[i]!);
-          deduped.unshift(candidateVars[i]!);
-        }
-      }
-
-      // Only capture vars the execute body actually references. This
-      // avoids TDZ errors when the execute is inside a nested function
-      // that runs before later handler-level declarations are initialized.
-      const referencedNames = collectReferencedIdentifierNames(exec.bodyNode);
-
-      // Exclude names that collide with the execute function's own
-      // parameters — the hoisted function already has those as formal
-      // params, and a `const { name } = __vars` would be a duplicate
-      // binding SyntaxError.
-      const execParamNames = extractExecuteParamNames(exec.params);
-
-      const allVars = deduped.filter(
-        (name) => !execParamNames.has(name) && referencedNames.has(name),
-      );
-
-      const varsObj = allVars.length > 0 ? `{ ${allVars.join(", ")} }` : "{}";
-
-      const asyncPrefix = exec.isAsync ? "async " : "";
-      const varsDestructure = allVars.length > 0 ? `const ${varsObj} = __vars;\n  ` : "";
-      const originalParams = exec.params;
-      const hoistedParams = originalParams ? `__vars, ${originalParams}` : "__vars";
-      const bodyContent = exec.body.slice(1, -1).trim();
-      const stepId = `eve:dynamic-tool//${exec.hoistedName}`;
-
-      hoistedFunctions.push(
-        `${asyncPrefix}function ${exec.hoistedName}(${hoistedParams}) {\n` +
-          `  ${varsDestructure}${bodyContent}\n` +
-          `}`,
-      );
-
-      registrations.push(`${exec.hoistedName}.stepId = ${JSON.stringify(stepId)};`);
-      registrations.push(`__eveStepRegistry.set(${JSON.stringify(stepId)}, ${exec.hoistedName});`);
-      allExecNames.push(exec.hoistedName);
-
-      const wrapperParams = originalParams || "";
-      const paramNames = originalParams
-        ? splitParamsTopLevel(originalParams)
-            .map((p) => extractParamBindingName(p))
-            .join(", ")
-        : "";
-      const wrapperArgs = paramNames ? `${varsObj}, ${paramNames}` : varsObj;
-      const wrapperAsync = exec.isAsync ? "async " : "";
-      const wrapperAwait = exec.isAsync ? "await " : "";
-
-      replacements.push({
-        start: exec.propStart,
-        end: exec.propEnd,
-        text: [
-          `execute: ${wrapperAsync}(${wrapperParams}) => ${wrapperAwait}${exec.hoistedName}(${wrapperArgs})`,
-          `__executeStepFn: ${exec.hoistedName}`,
-          `__closureVars: ${varsObj}`,
-        ].join(",\n          "),
-      });
-    }
-  }
-
-  const sorted = [...replacements].sort((a, b) => b.start - a.start);
-
-  let result = source;
-
-  for (const edit of sorted) {
-    result = result.slice(0, edit.start) + edit.text + result.slice(edit.end);
-  }
-
-  // Prepend global step registry access — use var + if for
-  // compatibility with all bundler output modes.
-  const registrySetup = [
-    `var __eveStepRegistrySym = Symbol.for("@workflow/core//registeredSteps");`,
-    `if (!globalThis[__eveStepRegistrySym]) globalThis[__eveStepRegistrySym] = new Map();`,
-    `var __eveStepRegistry = globalThis[__eveStepRegistrySym];`,
-  ].join("\n");
-  result = `${registrySetup}\n${result}`;
-
-  // Append hoisted functions + registrations
-  const suffix = [...hoistedFunctions, ...registrations];
-  if (suffix.length > 0) {
-    result = `${result}\n\n${suffix.join("\n")}\n`;
-  }
-
-  return { code: result };
-}
-
-/**
- * Splits a parameter string on top-level commas, respecting nested
- * angle brackets (`<>`), parentheses, square brackets, and curly
- * braces. Commas inside `Record<string, unknown>` or
- * `import("...").Foo` are not treated as parameter separators.
- */
 function splitParamsTopLevel(raw: string): string[] {
   const parts: string[] = [];
   let depth = 0;
   let start = 0;
-  for (let i = 0; i < raw.length; i++) {
-    const ch = raw[i]!;
-    if (ch === "<" || ch === "(" || ch === "[" || ch === "{") depth++;
-    else if (ch === ">" || ch === ")" || ch === "]" || ch === "}") depth--;
-    else if (ch === "," && depth === 0) {
-      parts.push(raw.slice(start, i));
-      start = i + 1;
+  for (let index = 0; index < raw.length; index++) {
+    const character = raw[index]!;
+    if (character === "<" || character === "(" || character === "[" || character === "{") {
+      depth++;
+    } else if (character === ">" || character === ")" || character === "]" || character === "}") {
+      depth--;
+    } else if (character === "," && depth === 0) {
+      parts.push(raw.slice(start, index));
+      start = index + 1;
     }
   }
   parts.push(raw.slice(start));
   return parts;
 }
 
-/**
- * Extracts the runtime binding name from a single parameter string
- * like `input`, `_input: Record<string, unknown>`, or `{ msg }`.
- * Strips type annotations (after top-level `:`) and defaults
- * (after top-level `=`).
- */
-function extractParamBindingName(param: string): string {
-  const trimmed = param.trim();
+function extractParamBindingName(parameter: string): string {
+  const trimmed = parameter.trim();
   let depth = 0;
-  for (let i = 0; i < trimmed.length; i++) {
-    const ch = trimmed[i]!;
-    if (ch === "<" || ch === "(" || ch === "[" || ch === "{") depth++;
-    else if (ch === ">" || ch === ")" || ch === "]" || ch === "}") depth--;
-    else if (depth === 0 && (ch === ":" || ch === "=")) {
-      return trimmed.slice(0, i).trim();
+  for (let index = 0; index < trimmed.length; index++) {
+    const character = trimmed[index]!;
+    if (character === "<" || character === "(" || character === "[" || character === "{") {
+      depth++;
+    } else if (character === ">" || character === ")" || character === "]" || character === "}") {
+      depth--;
+    } else if (depth === 0 && (character === ":" || character === "=")) {
+      return trimmed.slice(0, index).trim();
     }
   }
   return trimmed;
 }
 
-/**
- * Extracts binding names from a raw execute parameter string.
- */
-function extractExecuteParamNames(paramString: string): Set<string> {
-  if (!paramString) return new Set();
-  const names = new Set<string>();
-  for (const part of splitParamsTopLevel(paramString)) {
-    const name = extractParamBindingName(part);
-    if (name) names.add(name);
+function extractCallbackParamNames(params: string): Set<string> {
+  const names: string[] = [];
+  if (!params) return new Set();
+  for (const parameter of splitParamsTopLevel(params)) {
+    const binding = extractParamBindingName(parameter);
+    if (binding.startsWith("...")) names.push(binding.slice(3));
+    else names.push(binding);
   }
-  return names;
+  return new Set(names);
+}
+
+function isFunction(node: AstNode): boolean {
+  return (
+    node.type === "ArrowFunctionExpression" ||
+    node.type === "FunctionDeclaration" ||
+    node.type === "FunctionExpression"
+  );
+}
+
+function isAstNode(value: unknown): value is AstNode {
+  return value !== null && typeof value === "object" && typeof (value as AstNode).type === "string";
 }

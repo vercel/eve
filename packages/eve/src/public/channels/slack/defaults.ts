@@ -37,13 +37,17 @@ function blockContainsRequestAction(block: unknown, requestId: string): boolean 
   if (typeof block !== "object" || block === null) return false;
   const candidate = block as { actions?: unknown; elements?: unknown };
   const requestActionPrefix = `eve_input:${requestId}`;
+  const approvalActionPrefix = `eve_input:tool-approval:${requestId}`;
   return [candidate.actions, candidate.elements].some(
     (entries) =>
       Array.isArray(entries) &&
       entries.some((entry) => {
         if (typeof entry !== "object" || entry === null) return false;
         const actionId = (entry as { action_id?: unknown }).action_id;
-        return typeof actionId === "string" && actionId.startsWith(requestActionPrefix);
+        return (
+          typeof actionId === "string" &&
+          (actionId.startsWith(requestActionPrefix) || actionId.startsWith(approvalActionPrefix))
+        );
       }),
   );
 }
@@ -208,18 +212,19 @@ export const defaultEvents: SlackChannelInternalEvents = {
     const card = cards[event.requestId];
     if (card === undefined || channel.state.channelId === null) return;
     const answerLabel = event.outcome === "approved" ? "Approve" : "Cancel";
+    const userId = channel.state.approvalResponderUsers?.[event.responderPrincipalId];
     const blocks = card.messageBlocks.flatMap((block) => {
       if (!blockContainsRequestAction(block, event.requestId)) return [block];
       if (typeof block !== "object" || block === null) return [];
       const candidate = block as Record<string, unknown>;
       if (candidate.type !== "card") {
-        return buildAnsweredBlocks({ answerLabel, promptBlocks: [], userId: card.userId });
+        return buildAnsweredBlocks({ answerLabel, promptBlocks: [], userId });
       }
       const { actions: _actions, ...withoutActions } = candidate;
       return buildAnsweredBlocks({
         answerLabel,
         promptBlocks: [withoutActions],
-        userId: card.userId,
+        userId,
       });
     });
     await channel.slack.request("chat.update", {

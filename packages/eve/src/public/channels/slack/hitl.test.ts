@@ -32,6 +32,20 @@ function makeRequest(overrides: Partial<InputRequest>): InputRequest {
 }
 
 describe("deriveHitlResponse", () => {
+  it("keeps Slack classification outside the durable input response type", () => {
+    const derived: NonNullable<ReturnType<typeof deriveHitlResponse>> = {
+      kind: "tool-approval",
+      response: {
+        // @ts-expect-error Slack classification is not part of InputResponse.
+        kind: "tool-approval",
+        optionId: "approve",
+        requestId: "approval_abc123",
+      },
+    };
+
+    expect(derived.kind).toBe("tool-approval");
+  });
+
   it("decodes a button click with a requestId that contains underscores", () => {
     // `requestId` is the AI SDK `action.callId`, which always starts
     // with `call_…` and contains underscores. The old encoding
@@ -42,7 +56,9 @@ describe("deriveHitlResponse", () => {
       value: "approve",
     });
 
-    expect(response).toEqual({ requestId: "call_abc123", optionId: "approve" });
+    expect(response).toEqual({
+      response: { requestId: "call_abc123", optionId: "approve" },
+    });
   });
 
   it("decodes a radio / select click from selectedOptionValue", () => {
@@ -51,7 +67,22 @@ describe("deriveHitlResponse", () => {
       selectedOptionValue: "weekly",
     });
 
-    expect(response).toEqual({ requestId: "call_xyz", optionId: "weekly" });
+    expect(response).toEqual({ response: { requestId: "call_xyz", optionId: "weekly" } });
+  });
+
+  it("preserves tool-approval metadata from a button action id", () => {
+    const response = deriveHitlResponse({
+      actionId: `${HITL_ACTION_PREFIX}tool-approval:approval_abc123:button:0`,
+      value: "approve",
+    });
+
+    expect(response).toEqual({
+      kind: "tool-approval",
+      response: {
+        optionId: "approve",
+        requestId: "approval_abc123",
+      },
+    });
   });
 
   it("returns null when neither value nor selectedOptionValue is set", () => {
@@ -159,8 +190,17 @@ describe("renderInputRequestBlocks", () => {
       body: { type: "mrkdwn", text: "*Approve tool call: mongodb-mutate*" },
     });
     expect(card.actions).toMatchObject([
-      { text: { text: "Cancel" }, value: "cancel" },
-      { style: "primary", text: { text: "Approve" }, value: "approve" },
+      {
+        action_id: `${HITL_ACTION_PREFIX}tool-approval:approval_1:button:0`,
+        text: { text: "Cancel" },
+        value: "cancel",
+      },
+      {
+        action_id: `${HITL_ACTION_PREFIX}tool-approval:approval_1:button:1`,
+        style: "primary",
+        text: { text: "Approve" },
+        value: "approve",
+      },
     ]);
 
     const details = blocks[1] as {
@@ -313,8 +353,10 @@ describe("renderInputRequestBlocks", () => {
 
     const response = deriveHitlResponse({ actionId: button.action_id, value: button.value });
     expect(response).toEqual({
-      requestId: "call_with_many_underscores_99",
-      optionId: "yes_please",
+      response: {
+        requestId: "call_with_many_underscores_99",
+        optionId: "yes_please",
+      },
     });
   });
 
@@ -356,8 +398,10 @@ describe("renderInputRequestBlocks", () => {
       selectedOptionValue: widget.options[0]!.value,
     });
     expect(response).toEqual({
-      requestId: "call_with_many_underscores_99",
-      optionId: "weekly_report",
+      response: {
+        requestId: "call_with_many_underscores_99",
+        optionId: "weekly_report",
+      },
     });
   });
 });

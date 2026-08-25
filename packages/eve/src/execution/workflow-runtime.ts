@@ -8,7 +8,6 @@ import {
 import type {
   CancelTurnInput,
   CancelTurnResult,
-  DeliverHookPayload,
   DispatchContinuationInput,
   DispatchSessionInput,
   GetEventStreamOptions,
@@ -27,11 +26,9 @@ import {
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { SpanKind, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
   getHookByToken,
   getRun,
-  resumeHook,
   start,
   type Run,
   type StartOptionsWithoutDeploymentId,
@@ -51,7 +48,7 @@ import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
 import { walkCauseChain } from "#shared/errors.js";
 import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { sendCommandToDelivery } from "#execution/session-command-wire.js";
+import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
@@ -84,7 +81,6 @@ export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
 
 const log = createLogger("execution.workflow-runtime");
-const workflowTracer = trace.getTracer("workflow");
 
 interface WorkflowHookRecord {
   readonly runId: string;
@@ -203,7 +199,7 @@ export function createWorkflowRuntime(config: {
 
       let events: ReadableStream<MessageStreamEvent> | undefined;
       const getEvents = () => {
-        events ??= createLiveEventStream(run.runId);
+        events ??= parseNdjsonStream<MessageStreamEvent>(() => getRun(run.runId).getReadable());
         return events;
       };
 
@@ -271,7 +267,7 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
 ): Promise<SessionCommandResult<TCommand>> {
   let hook: WorkflowHookRecord;
   try {
-    hook = normalizeWorkflowHook(await resumeHook(token, sessionHookPayload(command)));
+    hook = normalizeWorkflowHook(await resumeSessionInbox(token, command));
   } catch (error) {
     if (isInactiveCommandTarget(error)) {
       return inactiveCommandResult(command);
@@ -288,10 +284,6 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   }
 
   return activeCommandResult(command, hook.runId);
-}
-
-function sessionHookPayload(command: SessionCommand): SessionCommand | DeliverHookPayload {
-  return command.kind === "send" ? sendCommandToDelivery(command) : command;
 }
 
 function activeCommandResult<TCommand extends SessionCommand>(
@@ -421,46 +413,6 @@ export async function startWorkflowPreferLatest<TArgs extends unknown[], TResult
  */
 function shouldRouteToLatestDeployment(): boolean {
   return process.env.VERCEL_ENV === "production" || isEveDevEnvironment();
-}
-
-function createLiveEventStream(sessionId: string): ReadableStream<MessageStreamEvent> {
-  let sequence = 0;
-  return parseNdjsonStream<MessageStreamEvent>(() => getRun(sessionId).getReadable()).pipeThrough(
-    new TransformStream({
-      transform(event, controller) {
-        const eventSequence = sequence;
-        sequence += 1;
-        const readAtMs = Date.now();
-        controller.enqueue(event);
-        recordLiveStreamEventRead({ event, readAtMs, sequence: eventSequence, sessionId });
-      },
-    }),
-  );
-}
-
-function recordLiveStreamEventRead(input: {
-  readonly event: MessageStreamEvent;
-  readonly readAtMs: number;
-  readonly sequence: number;
-  readonly sessionId: string;
-}): void {
-  const writtenAtMs = Date.parse(input.event.meta?.at ?? "");
-  if (!Number.isFinite(writtenAtMs)) return;
-
-  try {
-    workflowTracer
-      .startSpan("workflow.stream.follow.read", {
-        attributes: {
-          "workflow.run.id": input.sessionId,
-          "workflow.stream.sequence": input.sequence,
-        },
-        kind: SpanKind.CLIENT,
-        startTime: writtenAtMs,
-      })
-      .end(input.readAtMs);
-  } catch {
-    // Telemetry must not interrupt event delivery.
-  }
 }
 
 function isLatestDeploymentUnsupportedError(error: unknown): boolean {

@@ -104,6 +104,9 @@ export type {
   AuthorizationRequiredStreamEvent,
   HandleMessageStreamEvent,
   MessageStreamEventMeta,
+  InputResolution,
+  InputResolutionOutcome,
+  InputResolvedStreamEvent,
   InputRequestedStreamEvent,
   MessageAppendedStreamEvent,
   MessageCompletedStreamEvent,
@@ -147,6 +150,8 @@ export {
   inputResponseSchema,
   isInputRequest,
   isInputResponse,
+  parseInputResponse,
+  parseInputResponses,
 } from "#runtime/input/types.js";
 
 export { resolveTextToResponse, resolveTextToResponses } from "#channel/resolve-text.js";

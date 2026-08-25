@@ -1572,13 +1572,13 @@ describe("TerminalRenderer (inline scrollback)", () => {
         {
           type: "tool-call",
           input: { taskIds: ["task_123"] },
-          toolCallId: "peek-1",
-          toolName: "task_peek",
+          toolCallId: "cancel-1",
+          toolName: "task_cancel",
         },
         {
           type: "tool-result",
-          output: { tasks: [{ status: "completed", taskId: "task_123" }] },
-          toolCallId: "peek-1",
+          output: { tasks: [{ status: "cancelled", taskId: "task_123" }] },
+          toolCallId: "cancel-1",
         },
         { type: "assistant-delta", id: "wake-1", delta: "Research finished." },
         { type: "assistant-complete", id: "wake-1" },

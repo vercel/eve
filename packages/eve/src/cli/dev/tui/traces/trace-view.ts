@@ -304,7 +304,7 @@ function renderConversation(
   if (state.conversationItems.length === 0) {
     return [
       chromeStyles(theme, options.surfaces).muted(
-        "  No conversation content in this trace — content capture may be off (EVE_TRACES_CONTENT).",
+        "  No conversation content in this trace; its export policy may have redacted it.",
       ),
     ];
   }

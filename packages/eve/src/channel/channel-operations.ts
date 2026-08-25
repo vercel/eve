@@ -18,7 +18,11 @@ import type {
   SessionCallback,
   TurnPolicy,
 } from "#channel/types.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import {
+  type InputResponse,
+  parseInputResponses,
+  type StrictInputResponses,
+} from "#runtime/input/types.js";
 import type { JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
 
@@ -38,23 +42,24 @@ export type ChannelSendOptions<TState = undefined> = [TState] extends [undefined
   ? BaseChannelSendOptions
   : BaseChannelSendOptions & { readonly state: TState };
 
-interface BaseChannelRespondOptions {
+interface BaseChannelRespondOptions<TState = undefined> {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
   readonly outputSchema?: JsonObject;
+  readonly state?: Partial<TState>;
 }
 
 /** Options for answering pending input requests at an existing continuation address. */
-export type ChannelRespondOptions = BaseChannelRespondOptions;
+export type ChannelRespondOptions<TState = undefined> = BaseChannelRespondOptions<TState>;
 
 /** Dynamic handle for whichever session currently owns one channel-local address. */
 export interface ChannelSource<TState = undefined> {
   /** Starts or resumes a turn with a user message. May create a session. */
   send(message: string | UserContent, options: ChannelSendOptions<TState>): Promise<Session>;
   /** Answers pending input requests. Never creates a session. */
-  respond(
-    inputResponses: readonly InputResponse[],
-    options: ChannelRespondOptions,
+  respond<const TResponses extends readonly InputResponse[]>(
+    inputResponses: StrictInputResponses<TResponses>,
+    options: ChannelRespondOptions<TState>,
   ): Promise<Session>;
   /** Cooperatively cancels the active turn without creating a session. */
   cancel(options?: { readonly turnId?: string }): Promise<CancelTurnResult>;
@@ -116,11 +121,13 @@ export function createChannelOperations<TState = undefined>(input: {
           if (inputResponses.length === 0) {
             throw new Error("respond() requires at least one input response.");
           }
+          const validatedInputResponses = parseInputResponses(inputResponses);
           return await bound.deliver(
             {
               context: options.context,
-              inputResponses,
+              inputResponses: validatedInputResponses,
               outputSchema: options.outputSchema,
+              state: options.state,
             },
             options,
           );

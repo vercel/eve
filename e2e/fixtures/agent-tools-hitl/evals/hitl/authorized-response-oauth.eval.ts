@@ -7,7 +7,7 @@ export default defineEval({
   tags: ["real-model"],
   description: "Approval response policy parks for fake OAuth, resumes, and settles.",
   async test(t) {
-    const parked = await t.send(`Call the \`${TOOL_NAME}\` tool with marker "${MARKER}".`);
+    await t.send(`Call the \`${TOOL_NAME}\` tool with marker "${MARKER}".`);
     const approval = t.requireInputRequest({ display: "confirmation", toolName: TOOL_NAME });
     const approvalTurn = await t.startRespond([
       {

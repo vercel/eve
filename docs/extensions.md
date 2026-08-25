@@ -102,6 +102,7 @@ The scaffold's `package.json` declares separate source and distribution roots:
     "extension": {
       "source": "./extension",
       "dist": "./dist/extension",
+      "externalDependencies": ["@acme/runtime-sdk"],
     },
   },
   "files": ["dist"],
@@ -121,6 +122,7 @@ The scaffold's `package.json` declares separate source and distribution roots:
     "typecheck": "tsc",
   },
   "dependencies": {
+    "@acme/runtime-sdk": "^x",
     "zod": "^x",
   },
   "devDependencies": {
@@ -149,7 +151,9 @@ eve extension build
 
 The exact `eve` development pin controls the extension authoring API and build tooling. The wildcard peer lets the consumer provide the runtime copy of eve. At consumption time, eve checks generated metadata, not the npm peer range. Do not add eve to regular `dependencies`.
 
-Put runtime packages such as `zod` or an SDK in `dependencies`. If a dependency cannot be bundled, such as a native addon, tell consumers to add it to `build.externalDependencies` in `agent.ts`.
+Put runtime packages such as `zod` or an SDK in `dependencies`. Most dependencies are bundled into the consuming agent automatically.
+
+When a package must keep normal Node.js package layout at runtime, add it to `eve.extension.externalDependencies`. Common cases include native addons and SDKs that load package-relative assets. `eve extension build` requires each listed package to also appear in `dependencies`, `optionalDependencies`, or `peerDependencies`, and records the requirement in the generated compatibility manifest. The consuming eve keeps the package external and preserves its complete package tree; consumers do not need to edit `agent.ts` or install the transitive package directly.
 
 Consumers can now add the built package to an agent. A workspace-only extension uses the same package contract but does not need to be published; see [Use an extension in a workspace](#use-an-extension-in-a-workspace).
 

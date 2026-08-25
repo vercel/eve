@@ -7,7 +7,7 @@ import {
 } from "#execution/durable-session-store.js";
 import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import { findSessionTaskEntry } from "#tasks/session-index.js";
 import {
@@ -178,10 +178,7 @@ export async function routeProxiedDeliverStep(
       deliveryMetadata: child.metadata.length === 0 ? undefined : child.metadata,
       payloads: child.payloads,
     };
-    await resumeHook(child.childContinuationToken, {
-      ...childDelivery,
-      payload: coalesceDeliverPayloads(child.payloads),
-    });
+    await resumeSessionInbox(child.childContinuationToken, childDelivery);
     // Successfully forwarded request IDs are retired so later deliveries
     // cannot route through stale entries.
     durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);

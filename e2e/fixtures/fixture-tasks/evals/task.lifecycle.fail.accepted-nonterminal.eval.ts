@@ -31,8 +31,8 @@ export default defineTaskEval({
     const failed = await waitForTaskStatus(t, t, "TASK-A2-CHILD-FAILURE-VERIFY", taskId, "failed");
     failed.expectOk();
     failed.messageIncludes("TASK-A2-FAILED");
-    const peeked = failed.requireToolCall("task_peek", { input: { taskIds: [taskId] } });
-    const view = requireTaskView(peeked.output, taskId);
+    const inspected = failed.requireToolCall("task_cancel", { input: { taskIds: [taskId] } });
+    const view = requireTaskView(inspected.output, taskId);
     await t.require(
       view,
       satisfies(

@@ -101,30 +101,54 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
     }
 
     while (true) {
+      const beforeStep = {
+        serializedContext: cursor.serializedContext,
+        sessionState: cursor.sessionState,
+      };
       const result = await turnStep(cursor.createStepInput(nextStepInput, cancellation?.signal));
       const pendingActionKeys =
         result.action === "dispatch-workflow-runtime-actions" || result.action === "park"
           ? result.pendingRuntimeActionKeys
           : undefined;
+      const hasBackgroundTasks = (result.backgroundTasks?.length ?? 0) > 0;
+
+      if (hasBackgroundTasks) {
+        if (result.backgroundTaskState === undefined) {
+          throw new Error("Background tasks were returned without their committed session state.");
+        }
+        await cursor.adopt({
+          serializedContext: beforeStep.serializedContext,
+          sessionState: result.backgroundTaskState,
+        });
+        await acknowledgeDelegatedTasksStep({ tasks: result.backgroundTasks ?? [] });
+      }
 
       // A cancel observed while the step was returning must still win: the
       // step may have missed the abort and completed normally. Pending
       // runtime-action batches are exempt — their wait observes the signal.
       if (result.action === "cancelled") {
         // The cancelled step returns only the context carve-outs required by
-        // the driver epilogue and later turns; adopt those before settling.
-        await cursor.adopt(result);
+        // the driver epilogue and later turns, plus the accepted user input in
+        // durable history. Adopt those before settling so a steered replacement
+        // keeps the interrupted request without committing partial model output.
+        await cursor.adopt({
+          serializedContext: result.serializedContext,
+          sessionState: result.backgroundTaskState ?? result.sessionState,
+        });
         await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
         return;
       }
 
-      if (cancellation?.signal.aborted === true && pendingActionKeys === undefined) {
+      if (
+        cancellation?.signal.aborted === true &&
+        (pendingActionKeys === undefined || hasBackgroundTasks)
+      ) {
         // Some worlds cannot interrupt a running step, so it can complete
         // normally after the workflow observes cancellation. Roll that result
         // back except for a session model selected by its one-time preamble.
         await cursor.adopt({
           serializedContext: preserveSerializedSessionDynamicModelSelection(
-            cursor.serializedContext,
+            beforeStep.serializedContext,
             result.serializedContext,
           ),
           sessionState: cursor.sessionState,

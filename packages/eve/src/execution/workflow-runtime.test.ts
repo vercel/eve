@@ -1,6 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-
-import { SpanKind } from "#compiled/@opentelemetry/api/index.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { ChannelRequestIdKey } from "#context/keys.js";
@@ -22,27 +20,6 @@ const getWorldMock = vi.fn();
 const resumeHookMock = vi.fn();
 const cancelRunMock = vi.fn();
 const startMock = vi.fn();
-const startSpanMock = vi.fn();
-const endSpanMock = vi.fn();
-
-vi.mock("#compiled/@opentelemetry/api/index.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("#compiled/@opentelemetry/api/index.js")>();
-  return {
-    ...actual,
-    trace: {
-      ...actual.trace,
-      getTracer: (name: string) => {
-        expect(name).toBe("workflow");
-        return {
-          startSpan: (...args: unknown[]) => {
-            startSpanMock(...args);
-            return { end: endSpanMock };
-          },
-        };
-      },
-    },
-  };
-});
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   cancelRun: (...args: unknown[]) => cancelRunMock(...args),
@@ -57,6 +34,10 @@ vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: vi.fn(),
 }));
 
+beforeEach(() => {
+  getHookByTokenMock.mockImplementation(async (token: string) => currentSessionHook(token));
+});
+
 afterEach(() => {
   getHookByTokenMock.mockReset();
   getRunMock.mockReset();
@@ -64,8 +45,6 @@ afterEach(() => {
   resumeHookMock.mockReset();
   cancelRunMock.mockReset();
   startMock.mockReset();
-  startSpanMock.mockReset();
-  endSpanMock.mockReset();
   vi.mocked(getCompiledRuntimeAgentBundle).mockReset();
   vi.unstubAllEnvs();
 });
@@ -121,15 +100,16 @@ describe("createWorkflowRuntime command dispatch", () => {
       }),
     ).resolves.toEqual({ sessionId: "driver-run", status: "accepted" });
 
-    expect(resumeHookMock).toHaveBeenCalledWith("test:token", {
+    expect(resumeHookMock).toHaveBeenCalledWith(currentSessionHook("test:token"), {
       auth: null,
       caller,
       kind: "deliver",
       payload: { message: "hello" },
       payloads: [{ message: "hello" }],
       requestId: "req_deliver",
+      version: 1,
     });
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
+    expect(getHookByTokenMock).toHaveBeenCalledWith("test:token");
   });
 
   it("dispatches commands through the stable session inbox", async () => {
@@ -142,10 +122,11 @@ describe("createWorkflowRuntime command dispatch", () => {
       }),
     ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
 
-    expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
-      kind: "clear",
-    });
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      currentSessionHook(sessionCommandHookToken("session-1")),
+      { kind: "clear", version: 1 },
+    );
+    expect(getHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"));
   });
 
   it("preserves the delivery payload through the stable session inbox", async () => {
@@ -158,14 +139,18 @@ describe("createWorkflowRuntime command dispatch", () => {
       }),
     ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
 
-    expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
-      auth: undefined,
-      caller: undefined,
-      kind: "deliver",
-      payload: { message: "hello" },
-      payloads: [{ message: "hello" }],
-      requestId: undefined,
-    });
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      currentSessionHook(sessionCommandHookToken("session-1")),
+      {
+        auth: undefined,
+        caller: undefined,
+        kind: "deliver",
+        payload: { message: "hello" },
+        payloads: [{ message: "hello" }],
+        requestId: undefined,
+        version: 1,
+      },
+    );
   });
 
   it.each([
@@ -175,7 +160,7 @@ describe("createWorkflowRuntime command dispatch", () => {
     { command: { kind: "reset" as const }, status: "no_active_session" },
   ])("maps a missing $command.kind target to $status", async ({ command, status }) => {
     const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
-    resumeHookMock.mockRejectedValue(new HookNotFoundError(NOT_FOUND_TOKEN));
+    getHookByTokenMock.mockRejectedValue(new HookNotFoundError(NOT_FOUND_TOKEN));
 
     await expect(
       buildRuntime().dispatchContinuation({
@@ -208,10 +193,10 @@ describe("createWorkflowRuntime command dispatch", () => {
         sessionId: "session-1",
       }),
     ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
-    expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
-      kind: "cancel",
-      turnId: "turn-2",
-    });
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      currentSessionHook(sessionCommandHookToken("session-1")),
+      { kind: "cancel", turnId: "turn-2", version: 1 },
+    );
   });
 
   it("maps missing and terminal targets to 'no_active_turn'", async () => {
@@ -250,9 +235,9 @@ describe("createWorkflowRuntime command dispatch", () => {
   it("waits for reset to release the stable command inbox", async () => {
     const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
     resumeHookMock.mockResolvedValue({ runId: "session-1" });
-    getHookByTokenMock.mockRejectedValue(
-      new HookNotFoundError(sessionCommandHookToken("session-1")),
-    );
+    getHookByTokenMock
+      .mockResolvedValueOnce(currentSessionHook("eve:token"))
+      .mockRejectedValue(new HookNotFoundError(sessionCommandHookToken("session-1")));
 
     await expect(
       buildRuntime().dispatchContinuation({
@@ -260,13 +245,22 @@ describe("createWorkflowRuntime command dispatch", () => {
         continuationToken: "eve:token",
       }),
     ).resolves.toEqual({ previousSessionId: "session-1", status: "reset" });
-    expect(resumeHookMock).toHaveBeenCalledWith("eve:token", {
+    expect(resumeHookMock).toHaveBeenCalledWith(currentSessionHook("eve:token"), {
       kind: "reset",
       reason: "User requested /new",
+      version: 1,
     });
     expect(getHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"));
   });
 });
+
+function currentSessionHook(token: string) {
+  return {
+    metadata: { sessionInboxWireVersion: 1 },
+    runId: "target-session",
+    token,
+  };
+}
 
 describe("createWorkflowRuntime#resolveContinuation", () => {
   function buildRuntime() {
@@ -358,7 +352,7 @@ describe("createWorkflowRuntime#createSession", () => {
           input: { message: "hello" },
           serializedContext: expect.objectContaining({
             "eve.bundle": { source: compiledArtifactsSource },
-            "eve.channel": { kind: "http", state: {} },
+            "eve.channel": expect.objectContaining({ kind: "http", state: {} }),
             "eve.mode": "task",
           }),
         },
@@ -366,7 +360,7 @@ describe("createWorkflowRuntime#createSession", () => {
       {
         allowReservedAttributes: true,
         attributes: {
-          "$eve.title": "hello",
+          "$eve.is_trace_content_visible": "false",
           "$eve.trigger": "http",
           "$eve.type": "session",
         },
@@ -375,7 +369,7 @@ describe("createWorkflowRuntime#createSession", () => {
     );
   });
 
-  it("uses an explicit title without changing the workflow model input", async () => {
+  it("withholds an explicit title for an unknown-audience workflow", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
     startMock.mockResolvedValue({ runId: "driver-run" });
@@ -391,7 +385,8 @@ describe("createWorkflowRuntime#createSession", () => {
 
     const [, workflowInput, startOptions] = startMock.mock.calls[0]!;
     expect(workflowInput[0].input.message).toBe(message);
-    expect(startOptions.attributes["$eve.title"]).toBe("ship it");
+    expect(startOptions.attributes["$eve.is_trace_content_visible"]).toBe("false");
+    expect(startOptions.attributes["$eve.title"]).toBeUndefined();
   });
 
   it("passes the configured session timeout to the durable workflow", async () => {
@@ -474,7 +469,7 @@ describe("createWorkflowRuntime#createSession", () => {
         allowReservedAttributes: true,
         attributes: {
           "$eve.channel_request_id": "req_run",
-          "$eve.title": "hello",
+          "$eve.is_trace_content_visible": "false",
           "$eve.trigger": "http",
           "$eve.type": "session",
         },
@@ -519,6 +514,7 @@ describe("createWorkflowRuntime#createSession", () => {
         "$eve.parent_turn": "turn-1",
         "$eve.root": "root-session",
         "$eve.subagent": "researcher",
+        "$eve.is_trace_content_visible": "false",
         "$eve.trigger": "subagent",
         "$eve.type": "subagent",
       },
@@ -543,7 +539,7 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(startMock).toHaveBeenNthCalledWith(1, workflowEntryReference, expect.any(Array), {
       allowReservedAttributes: true,
       attributes: {
-        "$eve.title": "hello",
+        "$eve.is_trace_content_visible": "false",
         "$eve.trigger": "http",
         "$eve.type": "session",
       },
@@ -552,7 +548,7 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(startMock).toHaveBeenNthCalledWith(2, workflowEntryReference, expect.any(Array), {
       allowReservedAttributes: true,
       attributes: {
-        "$eve.title": "hello",
+        "$eve.is_trace_content_visible": "false",
         "$eve.trigger": "http",
         "$eve.type": "session",
       },
@@ -586,7 +582,7 @@ describe("createWorkflowRuntime#createSession", () => {
       expect(startMock).toHaveBeenCalledWith(workflowEntryReference, expect.any(Array), {
         allowReservedAttributes: true,
         attributes: {
-          "$eve.title": "hello",
+          "$eve.is_trace_content_visible": "false",
           "$eve.trigger": "http",
           "$eve.type": "session",
         },
@@ -633,71 +629,4 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(getRunMock).toHaveBeenCalledWith("driver-run");
     expect(getReadable).toHaveBeenCalledTimes(1);
   });
-
-  it("records live-follow read spans and preserves events", async () => {
-    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      compiledArtifactsSource,
-      resolvedAgent: { config: {} },
-      turnAgent: createTestTurnAgent(),
-    } as never);
-    const events = [
-      { meta: { at: "invalid", id: "invalid" }, type: "test.event" },
-      { meta: { at: "2026-01-01T00:00:00.000Z", id: "valid" }, type: "test.event" },
-    ];
-    getRunMock.mockReturnValue({ getReadable: vi.fn(() => ndjsonReadable(...events)) });
-    startMock.mockResolvedValue({ runId: "driver-run" });
-    getHookByTokenMock.mockResolvedValue({ runId: "driver-run" });
-    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-01-01T00:00:00.123Z"));
-
-    const handle = await buildRuntime(compiledArtifactsSource).createSession({
-      adapter,
-      auth: null,
-      input: { message: "hello" },
-      mode: "task",
-    });
-
-    await expect(readAll(handle.events)).resolves.toEqual(events);
-    expect(startSpanMock).toHaveBeenCalledExactlyOnceWith("workflow.stream.follow.read", {
-      attributes: {
-        "workflow.run.id": "driver-run",
-        "workflow.stream.sequence": 1,
-      },
-      kind: SpanKind.CLIENT,
-      startTime: Date.parse("2026-01-01T00:00:00.000Z"),
-    });
-    expect(endSpanMock).toHaveBeenCalledExactlyOnceWith(Date.parse("2026-01-01T00:00:00.123Z"));
-  });
-
-  it("does not record replayable event streams", async () => {
-    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
-    const event = {
-      meta: { at: "2026-01-01T00:00:00.000Z", id: "event-1" },
-      type: "test.event",
-    };
-    getRunMock.mockReturnValue({ getReadable: vi.fn(() => ndjsonReadable(event)) });
-
-    await expect(
-      readAll(await buildRuntime(compiledArtifactsSource).getEventStream("driver-run")),
-    ).resolves.toEqual([event]);
-    expect(startSpanMock).not.toHaveBeenCalled();
-  });
 });
-
-function ndjsonReadable(...events: unknown[]): ReadableStream<Uint8Array> {
-  const bytes = new TextEncoder().encode(
-    events.map((event) => `${JSON.stringify(event)}\n`).join(""),
-  );
-  return new ReadableStream({
-    start(controller) {
-      controller.enqueue(bytes);
-      controller.close();
-    },
-  });
-}
-
-async function readAll<T>(stream: ReadableStream<T>): Promise<T[]> {
-  const values: T[] = [];
-  for await (const value of stream) values.push(value);
-  return values;
-}

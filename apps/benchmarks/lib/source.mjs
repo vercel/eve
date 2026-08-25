@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -45,6 +45,7 @@ function archiveSubject(repositoryRoot, description, label, createArchive, detai
       description,
       archive,
       digest,
+      dependencyArchive: dependencyArchive(archive),
       dependencyDigest: dependencyDigest(archive),
       ...details,
     };
@@ -55,7 +56,7 @@ function archiveSubject(repositoryRoot, description, label, createArchive, detai
 
 function dependencyDigest(archive) {
   const hash = createHash("sha256");
-  for (const path of [".npmrc", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"]) {
+  for (const path of dependencyPaths(archive)) {
     const content = execFileSync("tar", ["-xOzf", "-", path], {
       input: archive,
       maxBuffer: 10 * 1024 * 1024,
@@ -63,6 +64,43 @@ function dependencyDigest(archive) {
     hash.update(path).update("\0").update(content).update("\0");
   }
   return hash.digest("hex");
+}
+
+function dependencyArchive(archive) {
+  const directory = mkdtempSync(join(tmpdir(), "eve-authoring-dependencies-"));
+  const archivePath = join(directory, "dependencies.tar.gz");
+  try {
+    for (const path of dependencyPaths(archive)) {
+      const destination = join(directory, "input", path);
+      mkdirSync(join(destination, ".."), { recursive: true });
+      writeFileSync(
+        destination,
+        execFileSync("tar", ["-xOzf", "-", path], {
+          input: archive,
+          maxBuffer: 10 * 1024 * 1024,
+        }),
+      );
+    }
+    execFileSync("tar", ["-czf", archivePath, "-C", join(directory, "input"), "."]);
+    return readFileSync(archivePath);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function dependencyPaths(archive) {
+  const paths = execFileSync("tar", ["-tzf", "-"], { input: archive, encoding: "utf8" })
+    .split("\n")
+    .filter(Boolean);
+  return paths.filter(
+    (path) =>
+      path === ".npmrc" ||
+      path === "package.json" ||
+      path === "pnpm-lock.yaml" ||
+      path === "pnpm-workspace.yaml" ||
+      /(?:^|\/)package\.json$/u.test(path) ||
+      path.startsWith("patches/"),
+  );
 }
 
 function git(cwd, args, env = process.env) {

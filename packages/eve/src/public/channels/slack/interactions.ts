@@ -1,21 +1,7 @@
 /**
- * Slack `block_actions` + `view_submission` wire handling.
- *
- * The route handler reads the form-encoded body, hands it here, and we:
- *
- * 1. Decode `block_actions` payloads into a typed shape the channel can
- *    work with — actions, channel/thread metadata, the clicker, and the
- *    full original block list for answered-card updates.
- * 2. Open the freeform-answer modal inline when the click was a "Type
- *    your answer" button (Slack's `trigger_id` is only valid for ~3s,
- *    so this can't run under `waitUntil`).
- * 3. Authorize decoded fixed-choice and freeform submissions through
- *    `onInputResponse`, then resolve accepted answers against parked HITL
- *    requests.
- *
- * User-owned block actions flow through to the supplied `onInteraction`
- * callback. Always returns `Response("ok")` — followup work runs under
- * `waitUntil` so the webhook ACK is immediate.
+ * Slack `block_actions` + `view_submission` wire handling. It decodes and
+ * authorizes framework HITL responses, opens freeform modals inline before
+ * Slack's trigger expires, and forwards user-owned actions to `onInteraction`.
  */
 
 import {
@@ -32,7 +18,6 @@ import {
 } from "#public/channels/slack/api.js";
 import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
 import {
-  buildAnsweredBlocks,
   buildFreeformModalView,
   deriveHitlResponse,
   freeformRequestIdFromActionId,
@@ -43,11 +28,15 @@ import {
   isHitlAction,
   type HitlFreeformModalMetadata,
 } from "#public/channels/slack/hitl.js";
+import { readSlackTextObject } from "#public/channels/slack/inbound-content.js";
 import {
-  SLACK_CARD_SUBTEXT_MAX_LENGTH,
-  truncateCardSubtext,
-} from "#public/channels/slack/limits.js";
-import { authorizeInputResponse } from "#public/channels/slack/input-response.js";
+  updateAnsweredFreeformCard,
+  updateAnsweredHitlCard,
+} from "#public/channels/slack/interaction-cards.js";
+import {
+  approvalResponderStatePatch,
+  authorizeInputResponse,
+} from "#public/channels/slack/input-response.js";
 import type {
   SlackChannelConfig,
   SlackChannelState,
@@ -58,6 +47,7 @@ import type {
 } from "#public/channels/slack/slackChannel.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import { bindSlackSessionOperations } from "#public/channels/slack/session-operations.js";
+import { parseInputResponse } from "#runtime/input/types.js";
 
 const log = createLogger("slack.interactions");
 
@@ -68,6 +58,7 @@ const log = createLogger("slack.interactions");
 interface ParsedBlockActionsPayload {
   readonly actions: SlackInteractionAction[];
   readonly channelId: string;
+  readonly installationTeamId: string | undefined;
   readonly threadTs: string;
   readonly teamId: string | undefined;
   /**
@@ -112,7 +103,7 @@ export function parseBlockActionsPayload(
     username?: string;
     name?: string;
   };
-  const teamId = team?.id ?? userBlock.team_id;
+  const teamId = userBlock.team_id ?? team?.id;
   const user: SlackInteractionUser = {
     id: userBlock.id,
     username: userBlock.username,
@@ -132,6 +123,7 @@ export function parseBlockActionsPayload(
       user,
     })),
     channelId: channel,
+    installationTeamId: readInstallationTeamId(rawBody),
     threadTs,
     teamId,
     messageBlocks,
@@ -164,8 +156,9 @@ function parseSharedBlockActionsPayload(
       },
     })),
     channelId: body.channelId,
+    installationTeamId: readInstallationTeamId(body.raw),
     threadTs: body.threadTs,
-    teamId: body.teamId,
+    teamId: body.user?.teamId ?? body.teamId,
     messageBlocks: body.messageBlocks ?? [],
   };
 }
@@ -206,120 +199,32 @@ function findPromptBlocks(blocks: readonly unknown[]): unknown[] {
 }
 
 function readPromptTextFromBlocks(blocks: readonly unknown[]): string | undefined {
-  const prompt = findPromptBlock(blocks) as { text?: { text?: unknown } } | undefined;
-  const text = prompt?.text?.text;
-  return typeof text === "string" && text.length > 0 ? text : undefined;
-}
-
-function buildAnsweredHitlMessageBlocks(input: {
-  readonly actionId: string;
-  readonly answerLabel: string;
-  readonly messageBlocks: readonly unknown[];
-  readonly userId: string;
-}): unknown[] {
-  const actionBlockIndex = findActionBlockIndex(input.messageBlocks, input.actionId);
-  if (actionBlockIndex === -1) {
-    return buildAnsweredBlocks({
-      promptBlocks: findPromptBlocks(input.messageBlocks),
-      answerLabel: input.answerLabel,
-      userId: input.userId,
-    });
-  }
-
-  const actionBlock = input.messageBlocks[actionBlockIndex];
-  const answeredBlocks =
-    answeredBlocksFromActionBlock({
-      answerLabel: input.answerLabel,
-      block: actionBlock,
-      userId: input.userId,
-    }) ??
-    buildAnsweredBlocks({
-      promptBlocks: promptBlocksFromActionBlock(actionBlock),
-      answerLabel: input.answerLabel,
-      userId: input.userId,
-    });
-  return [
-    ...input.messageBlocks.slice(0, actionBlockIndex),
-    ...answeredBlocks,
-    ...input.messageBlocks.slice(actionBlockIndex + 1),
-  ];
-}
-
-function findActionBlockIndex(blocks: readonly unknown[], actionId: string): number {
-  return blocks.findIndex((block) => blockContainsActionId(block, actionId));
-}
-
-function blockContainsActionId(block: unknown, actionId: string): boolean {
-  if (!isObjectRecord(block)) return false;
-  return (
-    actionsContainActionId(block.elements, actionId) ||
-    actionsContainActionId(block.actions, actionId)
-  );
-}
-
-function actionsContainActionId(actions: unknown, actionId: string): boolean {
-  if (!Array.isArray(actions)) return false;
-  return actions.some((element) => isObjectRecord(element) && element.action_id === actionId);
+  const prompt = findPromptBlock(blocks) as { text?: unknown } | undefined;
+  const text = readSlackTextObject(prompt?.text);
+  return text.length > 0 ? text : undefined;
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function answeredBlocksFromActionBlock(input: {
-  readonly answerLabel: string;
-  readonly block: unknown;
-  readonly userId: string;
-}): unknown[] | undefined {
-  if (!isObjectRecord(input.block) || input.block.type !== "card") return undefined;
-
-  const { actions: _actions, subtext: _subtext, ...blockWithoutActions } = input.block;
-  const answeredCard = {
-    ...blockWithoutActions,
-    subtext: {
-      type: "mrkdwn",
-      text: formatAnsweredCardSubtext(input),
-      verbatim: false,
-    },
-  };
-  return hasCardContent(answeredCard) ? [answeredCard] : undefined;
-}
-
-const ANSWERED_CARD_SUBTEXT_PREFIX = ":white_check_mark: *";
-const ANSWERED_CARD_SUBTEXT_SUFFIX = "*";
-
-function formatAnsweredCardSubtext(input: {
-  readonly answerLabel: string;
-  readonly userId: string;
-}): string {
-  const attribution = input.userId.length > 0 ? ` by <@${input.userId}>` : "";
-  const labelBudget =
-    SLACK_CARD_SUBTEXT_MAX_LENGTH -
-    ANSWERED_CARD_SUBTEXT_PREFIX.length -
-    ANSWERED_CARD_SUBTEXT_SUFFIX.length -
-    attribution.length;
-  const label = truncateWithEllipsis(input.answerLabel, labelBudget);
-  return truncateCardSubtext(
-    `${ANSWERED_CARD_SUBTEXT_PREFIX}${label}${ANSWERED_CARD_SUBTEXT_SUFFIX}${attribution}`,
+function readInstallationTeamId(value: unknown): string | undefined {
+  if (!isObjectRecord(value)) return undefined;
+  const view = isObjectRecord(value.view) ? value.view : undefined;
+  const team = isObjectRecord(value.team) ? value.team : undefined;
+  const user = isObjectRecord(value.user) ? value.user : undefined;
+  // Slack Connect modal submissions put the installation workspace on the
+  // nested view, so it must win over the workspace that submitted the view.
+  const candidates = [
+    view?.app_installed_team_id,
+    value.app_installed_team_id,
+    team?.id,
+    user?.team_id,
+    view?.team_id,
+  ];
+  return candidates.find(
+    (candidate): candidate is string => typeof candidate === "string" && candidate.length > 0,
   );
-}
-
-function truncateWithEllipsis(value: string, maxLength: number): string {
-  if (maxLength <= 0) return "";
-  if (value.length <= maxLength) return value;
-  const sliceLength = Math.max(0, maxLength - 3);
-  return `${value.slice(0, sliceLength).trimEnd()}...`;
-}
-
-function promptBlocksFromActionBlock(block: unknown): unknown[] {
-  if (!isObjectRecord(block) || block.type !== "card") return [];
-
-  const { actions: _actions, ...blockWithoutActions } = block;
-  return hasCardContent(blockWithoutActions) ? [blockWithoutActions] : [];
-}
-
-function hasCardContent(block: Record<string, unknown>): boolean {
-  return block.body !== undefined || block.title !== undefined || block.hero_image !== undefined;
 }
 
 /** Channel-supplied dependencies for {@link handleInteractionPost}. */
@@ -373,8 +278,8 @@ export async function handleInteractionPost(
 
   const continuationToken = slackContinuationToken(interaction.channelId, interaction.threadTs);
   const hitlActions = interaction.actions.flatMap((action) => {
-    const response = deriveHitlResponse(action);
-    return response === null ? [] : [{ action, response }];
+    const derived = deriveHitlResponse(action);
+    return derived === null ? [] : [{ action, derived }];
   });
 
   if (hitlActions.length > 0) {
@@ -387,7 +292,7 @@ export async function handleInteractionPost(
         submission: {
           type: "block_actions",
           actions: hitlActions.map(({ action }) => action),
-          inputResponses: hitlActions.map(({ response }) => response),
+          inputResponses: hitlActions.map(({ derived }) => derived.response),
           messageTs: hitlActions[0]!.action.messageTs,
           user,
         },
@@ -404,6 +309,7 @@ export async function handleInteractionPost(
         botToken: deps.config.credentials?.botToken,
         channelId: interaction.channelId,
         threadTs: interaction.threadTs,
+        installationTeamId: interaction.installationTeamId,
         teamId: interaction.teamId,
       });
       const slackCtx: SlackInteractionContext = {
@@ -420,6 +326,7 @@ export async function handleInteractionPost(
           resolveSession: ctx.resolveSession,
           state: {
             channelId: interaction.channelId,
+            installationTeamId: interaction.installationTeamId ?? null,
             teamId: interaction.teamId ?? null,
             threadTs: interaction.threadTs,
             triggeringUserId: actionUser.id,
@@ -452,6 +359,7 @@ async function dispatchBlockInputResponses(input: {
   const result = await authorizeInputResponse({
     channelId: input.interaction.channelId,
     deps: input.deps,
+    installationTeamId: input.interaction.installationTeamId,
     submission: input.submission,
     teamId: input.interaction.teamId,
     threadTs: input.interaction.threadTs,
@@ -461,9 +369,18 @@ async function dispatchBlockInputResponses(input: {
   try {
     await input.ctx
       .from(slackContinuationToken(input.interaction.channelId, input.interaction.threadTs))
-      .respond(input.submission.inputResponses, { auth: result.auth });
+      .respond(input.submission.inputResponses, {
+        auth: result.auth,
+        state: approvalResponderStatePatch(input.submission, result.auth),
+      });
   } catch (error) {
     log.error("HITL interaction delivery failed", { error });
+    return;
+  }
+
+  if (
+    input.submission.actions.some((action) => deriveHitlResponse(action)?.kind === "tool-approval")
+  ) {
     return;
   }
 
@@ -505,6 +422,7 @@ async function openFreeformModal(input: {
       input.interaction.threadTs,
     ),
     channelId: input.interaction.channelId,
+    installationTeamId: input.interaction.installationTeamId,
     threadTs: input.interaction.threadTs,
     messageTs,
     requestId,
@@ -512,7 +430,9 @@ async function openFreeformModal(input: {
 
   const promptText = readPromptTextFromBlocks(input.interaction.messageBlocks);
   const view = buildFreeformModalView({ metadata, prompt: promptText });
-  const token = await resolveSlackBotToken(input.deps.config.credentials?.botToken);
+  const token = await resolveSlackBotToken(input.deps.config.credentials?.botToken, {
+    teamId: input.interaction.installationTeamId,
+  });
 
   const response = await fetch("https://slack.com/api/views.open", {
     method: "POST",
@@ -569,9 +489,10 @@ async function handleViewSubmission(
   const user = payload.user;
   const triggeringUserId = payload.userId;
   const teamId = user?.teamId ?? payload.teamId ?? null;
+  const installationTeamId = metadata.installationTeamId ?? readInstallationTeamId(payload.raw);
   const submission: SlackInputResponseSubmission = {
     type: "view_submission",
-    inputResponses: [{ requestId: metadata.requestId, text }],
+    inputResponses: [parseInputResponse({ requestId: metadata.requestId, text })],
     messageTs: metadata.messageTs,
     user: {
       id: triggeringUserId,
@@ -580,7 +501,17 @@ async function handleViewSubmission(
     },
   };
 
-  ctx.waitUntil(dispatchViewInputResponse({ ctx, deps, metadata, submission, teamId, text }));
+  ctx.waitUntil(
+    dispatchViewInputResponse({
+      ctx,
+      deps,
+      installationTeamId,
+      metadata,
+      submission,
+      teamId,
+      text,
+    }),
+  );
 
   return ack;
 }
@@ -588,6 +519,7 @@ async function handleViewSubmission(
 async function dispatchViewInputResponse(input: {
   readonly ctx: { from: ChannelFrom<SlackChannelState> };
   readonly deps: InteractionHandlerDeps;
+  readonly installationTeamId: string | undefined;
   readonly metadata: HitlFreeformModalMetadata;
   readonly submission: Extract<SlackInputResponseSubmission, { type: "view_submission" }>;
   readonly teamId: string | null;
@@ -596,6 +528,7 @@ async function dispatchViewInputResponse(input: {
   const result = await authorizeInputResponse({
     channelId: input.metadata.channelId,
     deps: input.deps,
+    installationTeamId: input.installationTeamId,
     submission: input.submission,
     teamId: input.teamId,
     threadTs: input.metadata.threadTs,
@@ -619,77 +552,11 @@ async function dispatchViewInputResponse(input: {
       messageTs: input.metadata.messageTs,
       answerLabel: input.text,
       userId: input.submission.user.id,
+      installationTeamId: input.installationTeamId,
       deps: input.deps,
     });
   } catch (error) {
     log.error("freeform answered-card update failed", { error });
-  }
-}
-
-async function updateAnsweredHitlCard(
-  interaction: ParsedBlockActionsPayload,
-  deps: InteractionHandlerDeps,
-): Promise<void> {
-  const hitlAction = interaction.actions.find((a) => isHitlAction(a.actionId));
-  if (!hitlAction || !hitlAction.messageTs) return;
-
-  const answerLabel = hitlAction.label ?? hitlAction.selectedOptionValue ?? hitlAction.value;
-  if (!answerLabel) return;
-
-  const blocks = buildAnsweredHitlMessageBlocks({
-    actionId: hitlAction.actionId,
-    answerLabel,
-    messageBlocks: interaction.messageBlocks,
-    userId: hitlAction.user.id,
-  });
-
-  const token = await resolveSlackBotToken(deps.config.credentials?.botToken);
-  const response = await fetch("https://slack.com/api/chat.update", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json; charset=utf-8",
-    },
-    body: JSON.stringify({
-      channel: interaction.channelId,
-      ts: hitlAction.messageTs,
-      blocks,
-      text: `Answered: ${answerLabel}`,
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(`Slack chat.update returned HTTP ${response.status}`);
-  }
-}
-
-async function updateAnsweredFreeformCard(input: {
-  readonly channelId: string;
-  readonly messageTs: string;
-  readonly answerLabel: string;
-  readonly userId?: string;
-  readonly deps: InteractionHandlerDeps;
-}): Promise<void> {
-  const blocks = buildAnsweredBlocks({
-    promptBlocks: [],
-    answerLabel: input.answerLabel,
-    userId: input.userId,
-  });
-  const token = await resolveSlackBotToken(input.deps.config.credentials?.botToken);
-  const response = await fetch("https://slack.com/api/chat.update", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json; charset=utf-8",
-    },
-    body: JSON.stringify({
-      channel: input.channelId,
-      ts: input.messageTs,
-      blocks,
-      text: `Answered: ${input.answerLabel}`,
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(`Slack chat.update returned HTTP ${response.status}`);
   }
 }
 

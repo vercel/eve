@@ -152,4 +152,15 @@ describe("inputResponseSchema", () => {
     expect(inputResponseSchema.parse(value)).toEqual(value);
     expect(isInputResponse(value)).toBe(true);
   });
+
+  it("rejects channel-local metadata", () => {
+    const value = {
+      kind: "tool-approval",
+      optionId: "approve",
+      requestId: "req-4",
+    };
+
+    expect(() => inputResponseSchema.parse(value)).toThrow();
+    expect(isInputResponse(value)).toBe(false);
+  });
 });

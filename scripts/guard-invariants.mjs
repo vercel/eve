@@ -92,7 +92,6 @@
  *             authoring roots, every historical epoch must be supported or
  *             dropped, every retained epoch needs a compiling fixture, and
  *             every public authoring value must belong to a capability.
- *
  *   rule 37 — The instrumentation lifecycle contract stays provider-neutral.
  *             `harness/instrumentation/lifecycle.ts` must not import from
  *             `ai`: its event payloads are eve's published shape, so deriving
@@ -102,6 +101,13 @@
  *             `pnpm --filter eve build`. Turbo owns workspace dependency
  *             ordering; nested builds race on eve's clean-and-publish dist
  *             directory and let consumers observe a partial package.
+ *   rule 40 — Every shipped wire-version module
+ *             (`src/execution/wire/*-wire.vN.ts`) must carry a colocated
+ *             `*-wire.vN.test.ts`. The session-inbox registry must also be
+ *             contiguous, name every module, and identify its highest version
+ *             as current. Version modules are append-only protocol history;
+ *             the paired test pins that version's schema/encoder or
+ *             migration/fixtures so a version cannot exist as untested code.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -415,6 +421,87 @@ function importSpecifier(node) {
     return node.arguments[0];
   }
   return undefined;
+}
+
+// ---------- Rule 40: wire versions carry colocated contract tests ----------
+
+const WIRE_FAMILY_DIR = "packages/eve/src/execution/wire";
+const SESSION_INBOX_WIRE_CONTRACT = `${WIRE_FAMILY_DIR}/session-inbox-contract.ts`;
+
+async function checkRule40WireContracts() {
+  /** @type {Violation[]} */
+  const violations = [];
+  let entries;
+  try {
+    entries = await readdir(join(REPO_ROOT, WIRE_FAMILY_DIR));
+  } catch {
+    return violations;
+  }
+
+  for (const name of entries) {
+    const match = name.match(/^([a-z0-9-]+)-wire\.v(\d+)\.ts$/);
+    if (match === null) continue;
+    const [, family, version] = match;
+
+    const testName = `${family}-wire.v${version}.test.ts`;
+    if (!entries.includes(testName)) {
+      violations.push({
+        rule: 40,
+        file: `${WIRE_FAMILY_DIR}/${name}`,
+        line: 1,
+        message: `wire family "${family}" version ${version} has no colocated contract test (${testName}). Pin this version's schema/encoder or migration/fixtures before shipping it.`,
+      });
+    }
+  }
+
+  const contractSource = await readFile(join(REPO_ROOT, SESSION_INBOX_WIRE_CONTRACT), "utf8");
+  const registryMatch = contractSource.match(
+    /SESSION_INBOX_WIRE_VERSIONS\s*=\s*\[([^\]]*)\]\s*as const/,
+  );
+  const tokens = registryMatch?.[1]
+    .split(",")
+    .map((token) => token.trim())
+    .filter(Boolean);
+  if (tokens === undefined || tokens.length === 0 || tokens.some((token) => !/^\d+$/.test(token))) {
+    violations.push({
+      rule: 40,
+      file: SESSION_INBOX_WIRE_CONTRACT,
+      line: 1,
+      message:
+        "SESSION_INBOX_WIRE_VERSIONS must be an explicit numeric tuple so CI can compare the declared protocol history with shipped version modules.",
+    });
+    return violations;
+  }
+
+  const line = contractSource.slice(0, registryMatch.index).split("\n").length;
+  const versions = tokens.map(Number);
+  const expectedVersions = versions.map((_, index) => index + 1);
+  if (JSON.stringify(versions) !== JSON.stringify(expectedVersions)) {
+    violations.push({
+      rule: 40,
+      file: SESSION_INBOX_WIRE_CONTRACT,
+      line,
+      message: `SESSION_INBOX_WIRE_VERSIONS must be contiguous and ascending from 1; found [${versions.join(", ")}]. Add new versions without renumbering or removing protocol history.`,
+    });
+  }
+
+  const shippedVersions = entries
+    .flatMap((name) => {
+      const match = name.match(/^session-inbox-wire\.v(\d+)\.ts$/);
+      return match === null ? [] : [Number(match[1])];
+    })
+    .sort((left, right) => left - right);
+  const registeredModules = [0, ...versions];
+  if (JSON.stringify(shippedVersions) !== JSON.stringify(registeredModules)) {
+    violations.push({
+      rule: 40,
+      file: SESSION_INBOX_WIRE_CONTRACT,
+      line,
+      message: `session-inbox wire modules [${shippedVersions.join(", ")}] must exactly match legacy v0 plus registered versions [${registeredModules.join(", ")}].`,
+    });
+  }
+
+  return violations;
 }
 
 // ---------- Rule 19: AsyncLocalStorage instances ----------
@@ -1270,6 +1357,9 @@ async function main() {
 
   // Rule 38
   violations.push(...(await checkRule38NoNestedEveBuild()));
+
+  // Rule 40
+  violations.push(...(await checkRule40WireContracts()));
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

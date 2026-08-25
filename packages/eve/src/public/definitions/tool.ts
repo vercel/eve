@@ -8,6 +8,7 @@ import type { PublicToolDefinition, ToolModelOutput } from "#shared/tool-definit
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { Approval } from "#public/definitions/approval.js";
 import type { JsonObject } from "#shared/json.js";
+import type { TaskDelegated, TaskExec, TaskReceipt } from "#shared/tool-task.js";
 import type {
   AuthorizationDefinition,
   ConnectionAuthorizationContext,
@@ -20,6 +21,10 @@ import {
   type DynamicEvents,
   type DynamicSentinel,
 } from "#shared/dynamic-tool-definition.js";
+import {
+  collectDurableDynamicToolCallbacks,
+  stampDurableDynamicToolCallbacks,
+} from "#shared/durable-dynamic-tool-callbacks.js";
 
 type ApprovalContextInput<TInput> = unknown extends TInput ? Record<string, unknown> : TInput;
 type DynamicEventMapHandler<TEvents extends DynamicEvents> = Extract<
@@ -31,6 +36,14 @@ type DynamicEventMapResult<TEvents extends DynamicEvents> = Awaited<
 >;
 
 export type { ToolModelOutput, ToolModelOutputPart } from "#shared/tool-definition.js";
+export type {
+  TaskBinding,
+  TaskDelegated,
+  TaskExec,
+  TaskExecutorBinding,
+  TaskReceipt,
+  TaskSendCommand,
+} from "#shared/tool-task.js";
 
 /**
  * Authorization provider passed to {@link ToolContext.getToken} or
@@ -120,6 +133,7 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
   TInput,
   TOutput
 > {
+  readonly execution?: never;
   execute(input: TInput, ctx: ToolContext): Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
   /**
    * Optional per-tool approval gate. The return value determines whether
@@ -143,6 +157,21 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }
 
+/** A tool whose executor can outlive the model tool-call phase as a durable task. */
+export interface BackgroundToolDefinition<
+  TInput = unknown,
+  TOutput = unknown,
+> extends PublicToolDefinition<TInput, TOutput> {
+  readonly execution: "background";
+  execute(
+    input: TInput,
+    ctx: ToolContext,
+    task: TaskExec,
+  ): Promise<TaskDelegated | TOutput> | TaskDelegated | TOutput;
+  approval?: Approval<ApprovalContextInput<TInput>>;
+  toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
+}
+
 type ToolOutputFromExecuteReturn<TReturn> =
   TReturn extends Promise<infer TOutput>
     ? TOutput
@@ -150,8 +179,22 @@ type ToolOutputFromExecuteReturn<TReturn> =
       ? TOutput
       : TReturn;
 
+type BackgroundToolOutputFromExecuteReturn<TReturn> =
+  ToolOutputFromExecuteReturn<TReturn> extends infer TOutput
+    ? TOutput extends TaskDelegated<infer TData>
+      ? TaskReceipt<TData>
+      : TOutput
+    : never;
+
 type ToolDefinitionWithExecuteReturn<TInput, TOutput, TReturn> = ToolDefinition<TInput, TOutput> & {
   execute(input: TInput, ctx: ToolContext): TReturn;
+};
+
+type BackgroundToolDefinitionWithExecuteReturn<TInput, TOutput, TReturn> = BackgroundToolDefinition<
+  TInput,
+  TOutput
+> & {
+  execute(input: TInput, ctx: ToolContext, task: TaskExec): TReturn;
 };
 
 /**
@@ -162,6 +205,32 @@ type ToolDefinitionWithExecuteReturn<TInput, TOutput, TReturn> = ToolDefinition<
  * For static tools, the runtime tool name is the filename slug. `defineTool`
  * stamps a brand that lifecycle code validates; it rejects raw object literals.
  */
+export function defineTool<
+  TSchema extends StandardSchemaV1<unknown, unknown> | StandardJSONSchemaV1<unknown, unknown>,
+  TReturn,
+>(definition: {
+  description: BackgroundToolDefinition<unknown, unknown>["description"];
+  execution: "background";
+  inputSchema: TSchema;
+  outputSchema?: PublicToolDefinition<
+    unknown,
+    BackgroundToolOutputFromExecuteReturn<TReturn>
+  >["outputSchema"];
+  execute(
+    input: StandardSchemaV1.InferOutput<TSchema>,
+    ctx: ToolContext,
+    task: TaskExec,
+  ): TReturn extends AsyncIterable<unknown> ? never : TReturn;
+  approval?: BackgroundToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approval"];
+  toModelOutput?: BackgroundToolDefinition<
+    unknown,
+    BackgroundToolOutputFromExecuteReturn<TReturn>
+  >["toModelOutput"];
+}): BackgroundToolDefinitionWithExecuteReturn<
+  StandardSchemaV1.InferOutput<TSchema>,
+  BackgroundToolOutputFromExecuteReturn<TReturn>,
+  TReturn
+>;
 export function defineTool<
   TInputSchema extends StandardSchemaV1<unknown, unknown> | StandardJSONSchemaV1<unknown, unknown>,
   TOutputSchema extends StandardJSONSchemaV1<unknown, unknown>,
@@ -236,8 +305,8 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
   definition: ToolDefinition<TInput, TOutput>,
 ): ToolDefinition<TInput, TOutput>;
 export function defineTool<TInput = unknown, TOutput = unknown>(
-  definition: ToolDefinition<TInput, TOutput>,
-): ToolDefinition<TInput, TOutput> {
+  definition: ToolDefinition<TInput, TOutput> | BackgroundToolDefinition<TInput, TOutput>,
+): ToolDefinition<TInput, TOutput> | BackgroundToolDefinition<TInput, TOutput> {
   if ((definition as { readonly auth?: unknown }).auth !== undefined) {
     throw new Error(
       `defineTool: The "auth" field is no longer supported. ` +
@@ -245,6 +314,14 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
     );
   }
   Object.assign(definition, { [TOOL_BRAND]: true });
+  stampDurableDynamicToolCallbacks(
+    definition,
+    collectDurableDynamicToolCallbacks({
+      approval: definition.approval as Approval<never> | undefined,
+      execute: definition.execute,
+      toModelOutput: definition.toModelOutput,
+    }),
+  );
   stampDefinitionKey(definition, `tool:${definition.description}`);
   return definition;
 }

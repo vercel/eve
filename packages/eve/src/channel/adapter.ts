@@ -4,7 +4,12 @@ import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload } from "#channel/types.js";
-import type { FetchFileResult, FetchFileFunction } from "#shared/channel-definition.js";
+import type {
+  FetchFileContext,
+  FetchFileResult,
+  FetchFileFunction,
+} from "#shared/channel-definition.js";
+import type { ChannelAudienceMetadata } from "#shared/channel-audience.js";
 
 const log = createLogger("channel.adapter");
 
@@ -95,9 +100,11 @@ export type ChannelEventHandlers<TCtx extends ChannelAdapterContext<any> = Chann
  * When fields are provided, staging prefers them over the values the
  * channel populated at ingestion time.
  */
-export type { FetchFileResult };
+export type { FetchFileContext, FetchFileResult };
 
-export type ChannelInstrumentationMetadata = Readonly<Record<string, unknown>>;
+export type ChannelInstrumentationMetadata = Readonly<
+  Record<string, unknown> & ChannelAudienceMetadata
+>;
 
 export type ChannelInstrumentationMetadataProjector = (
   state: Record<string, unknown> | undefined,

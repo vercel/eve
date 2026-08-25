@@ -6,6 +6,7 @@ import {
 } from "#compiled/@opentelemetry/api/index.js";
 import {
   isStepCount,
+  type LanguageModelCallEndEvent,
   type LanguageModel,
   type ModelMessage,
   type ProviderMetadata,
@@ -36,6 +37,8 @@ import {
   ParentSessionKey,
   ParentTraceContextKey,
   SessionCallbackKey,
+  TurnTaskDeliveryKey,
+  TurnTaskStateKey,
 } from "#context/keys.js";
 import {
   buildDynamicInstructionMessages,
@@ -53,6 +56,7 @@ import {
 import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.js";
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import {
   createActionResultEvent,
   createApprovalCandidateEvent,
@@ -60,6 +64,7 @@ import {
   createCompactionCompletedEvent,
   createCompactionRequestedEvent,
   createContextClearedEvent,
+  createInputResolvedEvent,
   createInputRequestedEvent,
   createResultCompletedEvent,
   createSessionWaitingEvent,
@@ -124,6 +129,7 @@ import {
   extractQuestionInputRequests,
   extractToolApprovalInputRequests,
 } from "#harness/input-extraction.js";
+import { renderPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
 import { createToolResultMessagePartFromToolError } from "#harness/action-result-helpers.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import {
@@ -137,6 +143,10 @@ import {
   shouldPrepareApprovalPolicyTools,
 } from "#harness/approval-delivery-coordinator.js";
 import { buildTelemetryRuntimeContext } from "#harness/instrumentation/runtime-context.js";
+import {
+  instrumentationHooksForAudience,
+  shouldCaptureInstrumentationContent,
+} from "#harness/instrumentation/content-policy.js";
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
 import {
   createInstrumentationHandleEvent,
@@ -167,7 +177,11 @@ import {
 import { getInstrumentationConfig } from "#harness/instrumentation/config.js";
 import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 import type { OtelHarnessSettings } from "#tracing/otel-declaration.js";
-import { normalizeUserContent, resolveAssistantStepText } from "#harness/messages.js";
+import {
+  normalizeModelMessages,
+  normalizeUserContent,
+  resolveAssistantStepText,
+} from "#harness/messages.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import {
   type AuthorizationSignal,
@@ -199,12 +213,18 @@ import {
   EMPTY_DELIVERY_SENTINEL,
   hasEmptyDeliverySentinel,
 } from "#shared/empty-delivery.js";
+import {
+  TASK_DELIVERY_INITIATING_INSTRUCTION,
+  TASK_DELIVERY_PENDING_INSTRUCTION,
+  TASK_DELIVERY_SETTLED_INSTRUCTION,
+} from "#tasks/delivery-context.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import {
   ensureOtelIntegration,
   getRegisteredTelemetryIntegrations,
 } from "#harness/ai-sdk-telemetry.js";
 import { getAdvertisedTools } from "#harness/advertised-tools.js";
+import { createBackgroundToolCallBatch } from "#harness/background-tools.js";
 import {
   applyLastToolCacheBreakpoint,
   applySystemCacheBreakpoint,
@@ -239,6 +259,7 @@ import {
 } from "#runtime/framework-tools/final-output.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { RunMode } from "#shared/run-mode.js";
+import { createHistoryViewPreparer } from "#shared/history-view.js";
 import {
   type CompactionConfig,
   type HarnessSession,
@@ -305,6 +326,7 @@ const MODEL_CALL_RETRY_BASE_DELAY_MS = 500;
 
 function enrichTelemetry(
   settings: OtelHarnessSettings | undefined,
+  channelAudience: ChannelAudience,
   agentName: string | undefined,
   runtimeContext?: Readonly<Record<string, unknown>>,
   bridgeIntegration?: Telemetry,
@@ -330,8 +352,10 @@ function enrichTelemetry(
         ? undefined
         : [bridgeIntegration, ...getRegisteredTelemetryIntegrations()],
     isEnabled: true,
-    recordInputs: settings?.recordInputs ?? false,
-    recordOutputs: settings?.recordOutputs ?? false,
+    recordInputs:
+      shouldCaptureInstrumentationContent(channelAudience) && (settings?.recordInputs ?? false),
+    recordOutputs:
+      shouldCaptureInstrumentationContent(channelAudience) && (settings?.recordOutputs ?? false),
   };
 }
 
@@ -616,6 +640,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     turnSpan?: Span,
   ): Promise<StepResult> {
     let session = initialSession;
+    const prepareHistory = createHistoryViewPreparer({
+      previous: config.historyView,
+      projector: config.historyProjector,
+    });
+    prepareHistory(session.history, session.state);
+    const projectHistory = (
+      messages: readonly ModelMessage[],
+      state: HarnessSession["state"],
+    ): readonly ModelMessage[] => prepareHistory(messages, state).messages;
 
     // Store the turn span context on the session so continuation steps
     // can restore the parent trace across step boundaries.
@@ -625,6 +658,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     let emissionState = getHarnessEmissionState(session.state);
     const store = contextStorage.getStore();
+    const channelInstrumentation = store?.get(ChannelInstrumentationKey);
+    const channelAudience = normalizeChannelAudience(channelInstrumentation?.metadata.audience);
+    const instrumentationHooks = instrumentationHooksForAudience(
+      config.instrumentation?.hooks,
+      channelAudience,
+    );
     const parent = store?.get(ParentSessionKey);
     const channel = store?.get(ChannelKey);
     const callback = store?.get(SessionCallbackKey);
@@ -638,10 +677,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     let activeAttemptScope: InstrumentationAttemptScope | undefined;
     const emit = createInstrumentationHandleEvent({
       agentName: config.runtimeIdentity?.agentName,
-      channelKind: store?.get(ChannelInstrumentationKey)?.kind,
+      channelAudience,
+      channelKind: channelInstrumentation?.kind,
       getAttemptScope: () => activeAttemptScope,
       handleEvent: baseEmit,
-      hooks: config.instrumentation?.hooks,
+      hooks: instrumentationHooks,
       parentLineage,
       parentTraceContext,
       rootSessionId: parent?.rootSessionId,
@@ -695,6 +735,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           : undefined;
       return await prepareTurnTraceContext({
         agentName: config.runtimeIdentity?.agentName,
+        channelAudience,
         instrumentation: config.instrumentation,
         parentLineage,
         parentTraceContext,
@@ -743,13 +784,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
               turnId: activeTurnId(emissionState),
             },
             force: true,
-            messages: [...session.history],
+            messages: [...projectHistory(session.history, session.state)],
             model: resolvedModel.model,
             onCompaction: config.onCompaction,
             resolveModel: config.resolveModel,
             runtimeIdentity: config.runtimeIdentity,
             session,
-            telemetry: enrichTelemetry(otelSettings, agentName) ?? undefined,
+            telemetry: enrichTelemetry(otelSettings, channelAudience, agentName) ?? undefined,
           });
 
           session = {
@@ -825,7 +866,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           stepIndex: emissionState.stepIndex,
           turnId: emissionState.turnId,
         }),
-        messages: resolvedRuntimeActions.messages,
+        messages: projectHistory(resolvedRuntimeActions.messages, session.state),
       });
     }
     const coordinated = await coordinateApprovalDelivery({
@@ -983,7 +1024,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         hasStepInput(input)
       ) {
         if (store !== undefined) {
-          prepareDynamicInstructionPreamble(store, parkedSession.history);
+          prepareDynamicInstructionPreamble(
+            store,
+            projectHistory(parkedSession.history, parkedSession.state),
+          );
         }
         let instructionMessages: ModelMessage[] = [];
         try {
@@ -1034,13 +1078,33 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       return { next: null, session: pending.session };
     }
 
-    if (config.instrumentation?.hooks !== undefined && pending.resolvedInputs !== undefined) {
+    if (pending.resolvedInputs !== undefined) {
       for (const batch of pending.resolvedInputs) {
-        await publishInputResolutions({
-          batch,
-          hooks: config.instrumentation.hooks,
-          sessionId: session.sessionId,
-        });
+        if (instrumentationHooks !== undefined) {
+          await publishInputResolutions({
+            batch,
+            hooks: instrumentationHooks,
+            sessionId: session.sessionId,
+          });
+        }
+        if (emit) {
+          await emit(
+            createInputResolvedEvent({
+              resolutions: batch.inputs.map((resolved) => {
+                const resolution = {
+                  kind: resolved.request.kind,
+                  outcome: resolved.outcome,
+                  requestId: resolved.request.requestId,
+                };
+                if (resolved.response === undefined) return resolution;
+                return { ...resolution, response: resolved.response };
+              }),
+              sequence: batch.event.sequence,
+              stepIndex: batch.event.stepIndex,
+              turnId: batch.event.turnId,
+            }),
+          );
+        }
       }
     }
 
@@ -1069,7 +1133,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     let instructionMessages: ModelMessage[] = [];
     if (emit && hasStepInput(input)) {
       if (store !== undefined) {
-        prepareDynamicInstructionPreamble(store, pending.session.history);
+        prepareDynamicInstructionPreamble(
+          store,
+          projectHistory(pending.session.history, pending.session.state),
+        );
       }
       try {
         const traceContext = await preparePreambleTrace();
@@ -1138,7 +1205,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (config.persistentSubagentSessions === true) {
       const store = getAgentHandleStore(session.state);
       if (store?.handles.some((handle) => handle.phase === "addressed") !== true) {
-        const announcement = resolveAgentsAnnouncement({ messages, store });
+        const announcement = resolveAgentsAnnouncement({
+          messages: projectHistory(messages, session.state),
+          store,
+        });
         if (announcement !== undefined) {
           messages.push({ content: announcement, role: "user" });
         }
@@ -1162,6 +1232,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       messages.push({ content, role: "user" });
     }
 
+    let projectedMessages = projectHistory(messages, session.state);
+
     // --- Model + tools ------------------------------------------------------
 
     // Direct harness unit tests may run without an ambient context.
@@ -1179,7 +1251,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             },
             type: "step.started",
           } as UnstampedMessageStreamEvent,
-          messages,
+          messages: projectedMessages,
         });
       }
       resolvedModel = await resolveActiveRuntimeModel({
@@ -1193,14 +1265,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     session = resolvedModel.session;
     const model = resolvedModel.model;
 
-    if (emit) {
-      await emitStepStarted(
-        emit,
-        emissionState,
-        requireSessionModelReference(session).id,
-        messages,
-      );
-    }
     const cachePath = detectPromptCachePath(model);
     const marker = cachePath.kind === "anthropic-direct" ? getAnthropicCacheMarker() : undefined;
 
@@ -1210,26 +1274,55 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // `messages` (which the harness uses to rebuild session history).
     const attributionHeaders = buildGatewayAttributionHeaders(model, config.runtimeIdentity);
 
-    ({ messages, session } = await maybeCompact({
+    const compaction = await maybeCompact({
       abortSignal: config.abortSignal,
       emit,
       emissionState,
-      messages,
+      messages: [...projectedMessages],
       model,
       onCompaction: config.onCompaction,
       resolveModel: config.resolveModel,
       runtimeIdentity: config.runtimeIdentity,
       session,
-      telemetry: enrichTelemetry(otelSettings, agentName) ?? undefined,
-    }));
+      telemetry: enrichTelemetry(otelSettings, channelAudience, agentName) ?? undefined,
+    });
+    session = compaction.session;
+    if (compaction.compacted) {
+      messages = compaction.messages;
+    }
+    projectedMessages = normalizeModelMessages(projectHistory(messages, session.state));
 
+    if (emit) {
+      await emitStepStarted(
+        emit,
+        emissionState,
+        requireSessionModelReference(session).id,
+        projectedMessages,
+      );
+    }
     const approvedTools = getApprovedTools(session);
 
+    const taskDeliveryPhase = ctx?.get(TurnTaskDeliveryKey);
+    const deliveryInstruction =
+      // A structured-output run must always produce its declared result.
+      session.outputSchema !== undefined ||
+      // Eligibility requires durable framework provenance from the active context.
+      ctx === undefined ||
+      // A child must always return its result to its parent, even when framework-triggered.
+      ctx.get(ParentSessionKey) !== undefined
+        ? undefined
+        : taskDeliveryPhase === "pending"
+          ? TASK_DELIVERY_PENDING_INSTRUCTION
+          : taskDeliveryPhase === "settled"
+            ? TASK_DELIVERY_SETTLED_INSTRUCTION
+            : // A schedule-initiated root turn may have nothing worth delivering.
+              isScheduleAppAuth(ctx.get(AuthKey))
+              ? CONDITIONAL_DELIVERY_INSTRUCTION
+              : taskDeliveryPhase === "initiating"
+                ? TASK_DELIVERY_INITIATING_INSTRUCTION
+                : undefined;
     const emptyDeliveryEnabled =
-      session.outputSchema === undefined &&
-      ctx !== undefined &&
-      isScheduleAppAuth(ctx.get(AuthKey)) &&
-      ctx.get(ParentSessionKey) === undefined;
+      deliveryInstruction !== undefined && taskDeliveryPhase !== "initiating";
 
     // --- Execute via ToolLoopAgent ------------------------------------------
 
@@ -1242,7 +1335,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // model call only. The result is transient — `messages` itself
     // remains ref-only so it can flow into `session.history` without
     // bloating every future step boundary.
-    const hydratedMessages = await hydrateSandboxAttachments(messages);
+    const hydratedMessages = await hydrateSandboxAttachments(projectedMessages);
 
     // AI SDK rejects role:"system" in `messages` — route system entries
     // from durable history to `instructions` instead.
@@ -1261,9 +1354,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       if (skillAnnouncement !== undefined && skillAnnouncement.length > 0) {
         systemMessages.push({ role: "system", content: skillAnnouncement });
       }
+      const taskState = ctx.get(TurnTaskStateKey);
+      if (taskState !== undefined) {
+        systemMessages.push({ role: "system", content: taskState });
+      }
     }
-    if (emptyDeliveryEnabled) {
-      systemMessages.push({ role: "system", content: CONDITIONAL_DELIVERY_INSTRUCTION });
+    if (deliveryInstruction !== undefined) {
+      systemMessages.push({
+        role: "system",
+        content: deliveryInstruction,
+      });
     }
 
     const modelMessages = nonSystemMessages;
@@ -1343,6 +1443,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         ? [...modelMessages, { role: "user" as const, content: opts.trailingUserNote }]
         : modelMessages;
       const harnessTools = buildHarnessToolsWithDynamicSubagents(config.tools, ctx);
+      const backgroundBatch = createBackgroundToolCallBatch();
       const advertisedHarnessTools = getAdvertisedTools({
         delegatedCaller: taskUpdatesEnabled,
         session,
@@ -1352,6 +1453,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       const flatTools = await buildToolSetWithProviderTools({
         approvedTools,
+        backgroundBatch,
         capabilities: config.capabilities,
         disabledProviderTools: opts.disabledProviderTools,
         modelReference: requireSessionModelReference(session),
@@ -1367,6 +1469,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         });
         const dynamicToolSet = buildToolSetFromDefinitions({
           approvedTools,
+          backgroundBatch,
           capabilities: config.capabilities,
           disabledProviderTools: opts.disabledProviderTools,
           tools: dynamicTools,
@@ -1410,7 +1513,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;
 
-      const instrumentationHooks = config.instrumentation?.hooks;
       const instrumentationTurnId = activeTurnId(emissionState);
       const attemptScope: InstrumentationAttemptScope | undefined =
         instrumentationHooks === undefined
@@ -1418,6 +1520,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           : {
               attemptId: `${session.sessionId}:${instrumentationTurnId}:${emissionState.stepIndex}:${opts.attemptIndex}`,
               attemptIndex: opts.attemptIndex,
+              channelAudience,
               functionId: otelSettings?.functionId ?? agentName,
               rootSessionId: parent?.rootSessionId ?? session.sessionId,
               sessionId: session.sessionId,
@@ -1448,6 +1551,22 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         headers: attributionHeaders,
         instructions,
         model,
+        onLanguageModelCallEnd(event: LanguageModelCallEndEvent) {
+          for (const part of event.content) {
+            if (
+              part.type !== "tool-call" ||
+              part.providerExecuted === true ||
+              isInvalidToolCall(part)
+            ) {
+              continue;
+            }
+            backgroundBatch.register({
+              callId: part.toolCallId,
+              input: part.input,
+              toolName: part.toolName,
+            });
+          }
+        },
         onToolExecutionEnd: logToolExecutionError,
         // Replaces the AI SDK's default `console.error`; the harness still
         // emits stream events, this just keeps the raw error from being silent.
@@ -1467,6 +1586,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         stopWhen: isStepCount(1),
         telemetry: enrichTelemetry(
           otelSettings,
+          channelAudience,
           agentName,
           telemetryRuntimeContext,
           bridgeIntegration,
@@ -1621,7 +1741,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       config,
       emit,
       emissionState,
-      messages,
+      messages: projectedMessages,
       session,
     });
     if (limitResult !== null) {
@@ -1880,6 +2000,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       emit,
       emissionState,
       delegatedCaller: taskUpdatesEnabled,
+      modelPromptMessageCount: projectedMessages.length,
       promptMessages: messages,
       result,
       runStep,
@@ -2399,6 +2520,7 @@ async function handleStepResult(input: {
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly delegatedCaller: boolean;
+  readonly modelPromptMessageCount: number;
   readonly promptMessages: readonly ModelMessage[];
   readonly result: HarnessStepResult;
   readonly runStep: StepFn;
@@ -2451,7 +2573,11 @@ async function handleStepResult(input: {
 
   const baseSession: HarnessSession = {
     ...session,
-    compaction: createNextCompactionConfig(session.compaction, promptMessages, result),
+    compaction: createNextCompactionConfig(
+      session.compaction,
+      input.modelPromptMessageCount,
+      result,
+    ),
   };
 
   const workflowContinuationSecurity =
@@ -2486,6 +2612,13 @@ async function handleStepResult(input: {
     excludedCallIds: new Set([...invalidInputToolCallIds, ...approvalRequestCallIds]),
   });
   const inputRequests: InputRequest[] = [...approvalRequests, ...questionRequests];
+  const pendingApprovals = renderPendingApprovalsSnippet(approvalRequests);
+  const parkedInputHistory: ModelMessage[] = [
+    ...promptMessages,
+    ...(pendingApprovals === undefined
+      ? []
+      : [{ content: pendingApprovals, role: "user" as const }]),
+  ];
   const advertisedRuntimeActionTools = getAdvertisedTools({
     delegatedCaller: input.delegatedCaller,
     session: baseSession,
@@ -2548,7 +2681,7 @@ async function handleStepResult(input: {
         turnId: emissionState.turnId,
       },
       responseMessages,
-      session: { ...baseSession, history: [...promptMessages] },
+      session: { ...baseSession, history: parkedInputHistory },
     });
 
     // The runtime-action batch already owns the shared assistant response.
@@ -2605,7 +2738,7 @@ async function handleStepResult(input: {
         })
         .map((request) => request.requestId),
       responseMessages,
-      session: { ...baseSession, history: [...promptMessages] },
+      session: { ...baseSession, history: parkedInputHistory },
     });
 
     if (emit) {
@@ -3055,7 +3188,7 @@ function parkOnWorkflowInterrupt(input: {
 
 function createNextCompactionConfig(
   current: CompactionConfig,
-  promptMessages: readonly ModelMessage[],
+  promptMessageCount: number,
   result: HarnessStepResult,
 ): CompactionConfig {
   const next: {
@@ -3072,7 +3205,7 @@ function createNextCompactionConfig(
 
   if (result.usage?.inputTokens !== undefined) {
     next.lastKnownInputTokens = result.usage.inputTokens;
-    next.lastKnownPromptMessageCount = promptMessages.length;
+    next.lastKnownPromptMessageCount = promptMessageCount;
   }
 
   return next;
@@ -3099,13 +3232,17 @@ async function maybeCompact(input: {
   readonly runtimeIdentity?: ToolLoopHarnessConfig["runtimeIdentity"];
   readonly session: HarnessSession;
   readonly telemetry?: TelemetryOptions;
-}): Promise<{ readonly messages: ModelMessage[]; readonly session: HarnessSession }> {
+}): Promise<{
+  readonly compacted: boolean;
+  readonly messages: ModelMessage[];
+  readonly session: HarnessSession;
+}> {
   const { emit, emissionState } = input;
   let messages = input.messages;
   const session = input.session;
 
   if (input.force !== true && !shouldCompact(messages, session.compaction)) {
-    return { messages, session };
+    return { compacted: false, messages, session };
   }
 
   const compaction = await resolveCompactionModel({
@@ -3155,7 +3292,7 @@ async function maybeCompact(input: {
     );
   }
 
-  return { messages, session };
+  return { compacted: true, messages, session };
 }
 
 /**

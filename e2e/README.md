@@ -123,6 +123,14 @@ The pinned-turn assertion is a deliberate tripwire: it must be flipped when
 turn dispatch gains preview latest-routing
 (https://github.com/vercel/eve/issues/582).
 
+`agent-channels/evals/custom-channels/cross-version-session-inbox.eval.ts`
+deploys the fixture with the published `eve@0.30.8`, holds a turn active in
+that old consumer, then redeploys the current checkout and sends a replacement
+message through the same durable session. It verifies both sides of the codec:
+the current producer must choose the old consumer's wire version, and the real
+old consumer must decode and buffer it. The eval then cancels the deliberately
+blocked turn and verifies that the old session runs the buffered follow-up.
+
 The eval redeploys from inside its test body: it mutates the agent source,
 runs `eve build` + `vc deploy`, and repoints a run-scoped Vercel alias at
 each new deployment, polling `/eve/v1/info` until the alias serves it.

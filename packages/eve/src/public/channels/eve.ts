@@ -46,7 +46,7 @@ import {
   createEveSessionStreamRoutePath,
   createEveSubagentStreamRoutePath,
 } from "#protocol/routes.js";
-import { type InputResponse, isInputResponse } from "#runtime/input/types.js";
+import { isInputResponse, type ValidatedInputResponse } from "#runtime/input/types.js";
 import { type AuthFn, routeAuth } from "#public/channels/auth.js";
 import {
   collectUploadPolicyViolations,
@@ -155,7 +155,7 @@ export interface EveChannelInput {
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
   /**
    * The trusted-forwarders policy: which transport-authenticated callers may
-   * assert a forwarded principal on the create-session route (the
+   * assert a forwarded principal on the create-session or continuation route (the
    * `forwardedPrincipal` body field a `defineRemoteAgent({ forwardPrincipal:
    * true })` sender emits). The predicate receives the *verified* route-auth
    * principal of the forwarder — who is asserting, never what is asserted —
@@ -164,12 +164,12 @@ export interface EveChannelInput {
    * A permissive predicate lets any authenticated forwarder assert any
    * principal.
    *
-   * When a trusted forwarder's assertion is accepted, the forwarded
-   * principal replaces the session principal (`session.auth.current` /
-   * `session.auth.initiator`) exactly as if that user had called this
-   * deployment directly, and the forwarder is recorded on the accepted
-   * contexts as the `eve:forwarded-by` attribute. Omit the option to reject
-   * every forwarded assertion with 403.
+   * When a trusted forwarder's assertion is accepted on session creation, the
+   * forwarded principal replaces `session.auth.current` and
+   * `session.auth.initiator`. On continuation, only `session.auth.current`
+   * changes; the initiator remains pinned to the session's creator. The
+   * forwarder is recorded on accepted contexts as the `eve:forwarded-by`
+   * attribute. Omit the option to reject every forwarded assertion with 403.
    */
   readonly trustedForwarders?: TrustedForwarders;
   /**
@@ -256,7 +256,12 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         const body = parseCreateBody(payload);
         if (body instanceof Response) return body;
-        const parentTraceContext = parseTraceparent(req.headers.get("traceparent"));
+        // Top-level sessions own their trace. Callback sessions are delegated
+        // remote agents and intentionally continue the dispatching agent trace.
+        const parentTraceContext =
+          body.callback === undefined
+            ? undefined
+            : parseTraceparent(req.headers.get("traceparent"));
 
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
@@ -365,6 +370,12 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (sessionId instanceof Response) return sessionId;
         const payload = await parseJsonRequest(req);
         if (payload instanceof Response) return payload;
+        const forwarded = await resolveForwardedPrincipal({
+          trustedForwarders: input.trustedForwarders,
+          forwarder: authResult,
+          payload,
+        });
+        if (forwarded instanceof Response) return forwarded;
         const body = parseSessionMessageBody(payload);
         if (body instanceof Response) return body;
 
@@ -372,10 +383,10 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (policyRejection !== null) return policyRejection;
 
         let context = body.context;
-        let dispatchAuth: SessionAuthContext | null = authResult;
+        let dispatchAuth: SessionAuthContext | null = forwarded.auth;
         if (body.message !== undefined) {
           const messageResult = await resolveOnMessage({
-            auth: authResult,
+            auth: forwarded.auth,
             config: input,
             message: body.message,
             request: req,
@@ -893,7 +904,7 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
 interface ParsedSessionMessageBody {
   callback?: SessionCallback;
   message?: string | UserContent;
-  inputResponses?: readonly InputResponse[];
+  inputResponses?: readonly ValidatedInputResponse[];
   context?: readonly string[];
   outputSchema?: JsonObject;
   turnPolicy?: TurnPolicy;
@@ -904,12 +915,6 @@ function parseSessionMessageBody(
 ): ParsedSessionMessageBody | Response {
   const tokenRejection = rejectSessionContinuationToken(payload);
   if (tokenRejection !== null) return tokenRejection;
-  if (payload.forwardedPrincipal !== undefined) {
-    return Response.json(
-      { error: "A forwarded principal is only accepted on session creation.", ok: false },
-      { status: 400 },
-    );
-  }
 
   const message = parseMessageField(payload.message);
   if (message instanceof Response) return message;
@@ -1063,9 +1068,10 @@ async function createSessionStreamResponse(request: Request, session: Session): 
     if (tailIndex !== undefined) {
       headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
     }
-    return new Response(serializeAsNdjson(events), {
-      headers,
-    });
+    return new Response(
+      serializeAsNdjson(events, request.signal, streamEventLimit(startIndex, tailIndex)),
+      { headers },
+    );
   } catch {
     return Response.json({ error: "Session not found.", ok: false }, { status: 404 });
   }
@@ -1250,7 +1256,9 @@ function checkUploadPolicy(
   );
 }
 
-function parseInputResponses(value: unknown): readonly InputResponse[] | Response | undefined {
+function parseInputResponses(
+  value: unknown,
+): readonly ValidatedInputResponse[] | Response | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value) || value.length === 0) {
     return Response.json(
@@ -1345,16 +1353,38 @@ function parseStartIndex(request: Request): number | undefined | Response {
   return parsed;
 }
 
-function serializeAsNdjson(events: ReadableStream<unknown>): ReadableStream<Uint8Array> {
+function streamEventLimit(
+  startIndex: number | undefined,
+  tailIndex: number | undefined,
+): number | undefined {
+  if (tailIndex === undefined) return undefined;
+  const resolvedStartIndex =
+    startIndex === undefined
+      ? 0
+      : startIndex < 0
+        ? Math.max(0, tailIndex + 1 + startIndex)
+        : startIndex;
+  return Math.max(0, tailIndex - resolvedStartIndex + 1);
+}
+
+function serializeAsNdjson(
+  events: ReadableStream<unknown>,
+  signal: AbortSignal,
+  eventLimit?: number,
+): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
-  return events.pipeThrough(
-    new TransformStream<unknown, Uint8Array>({
-      start(controller) {
-        controller.enqueue(encoder.encode("\n"));
-      },
-      transform(event, controller) {
-        controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
-      },
-    }),
-  );
+  let eventCount = 0;
+  const transform = new TransformStream<unknown, Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode("\n"));
+      if (eventLimit === 0) controller.terminate();
+    },
+    transform(event, controller) {
+      controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+      eventCount += 1;
+      if (eventCount === eventLimit) controller.terminate();
+    },
+  });
+  void events.pipeTo(transform.writable, { signal }).catch(() => {});
+  return transform.readable;
 }

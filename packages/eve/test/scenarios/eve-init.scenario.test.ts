@@ -13,6 +13,11 @@ import { useTemporaryDirectories } from "../../src/internal/testing/use-temporar
 
 const EVE_BIN_PATH = fileURLToPath(new URL("../../bin/eve.js", import.meta.url));
 const runFile = promisify(execFile);
+const RELEASE_AGE_MINUTES = "2880";
+// Changesets opens Version Packages PRs on `changeset-release/<base>`. Those
+// PRs bump package.json before npm has that version, so a real registry
+// install of the scaffolded eve range cannot succeed yet.
+const isChangesetReleasePr = process.env.GITHUB_HEAD_REF?.startsWith("changeset-release/") === true;
 
 const createScratchDirectory = useTemporaryDirectories();
 
@@ -155,6 +160,39 @@ async function createFakeNpmEnvironment(scratch: string): Promise<{
 }
 
 describe("eve init smoke", () => {
+  it.skipIf(isChangesetReleasePr)(
+    "resolves a standalone pnpm scaffold under the release-age policy",
+    async () => {
+      const scratch = await createScratchDirectory("eve-init-release-age-");
+      const env = {
+        ...withoutCodingAgentMarkers(process.env),
+        // The agent path skips the interactive dev handoff, which cannot run
+        // against the real pnpm install this scenario performs.
+        AI_AGENT: "claude",
+        CI: "true",
+        PNPM_CONFIG_MINIMUM_RELEASE_AGE: RELEASE_AGE_MINUTES,
+        // A fresh eve release is younger than the policy window, so resolution
+        // would rightly fail. Internal testing opts the framework package out
+        // through the environment instead of any scaffold-owned bypass.
+        PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE: '["eve"]',
+      };
+
+      const result = await runEveBin(scratch, ["init", "policy-agent"], env);
+
+      expect(result.exitCode, result.stderr).toBe(0);
+      const projectDir = join(scratch, "policy-agent");
+      await expect(
+        readFile(join(projectDir, "pnpm-workspace.yaml"), "utf8"),
+      ).resolves.not.toContain("minimumReleaseAgeExclude:");
+      await expect(
+        runFile("pnpm", ["add", "--ignore-scripts", "--lockfile-only", "is-number@7.0.0"], {
+          cwd: projectDir,
+          env,
+        }),
+      ).resolves.toMatchObject({ stderr: expect.any(String) });
+    },
+  );
+
   it("creates the base template with the default model and no Vercel state", async () => {
     const scratch = await createScratchDirectory("eve-init-");
     const fakePnpm = await createFakePnpmEnvironment(scratch);
@@ -166,39 +204,31 @@ describe("eve init smoke", () => {
     const projectDir = join(scratch, "smoke-agent");
     const canonicalProjectDir = await realpath(projectDir);
     const agentSource = await readFile(join(projectDir, "agent/agent.ts"), "utf8");
+    const readme = await readFile(join(projectDir, "README.md"), "utf8");
+    expect(readme).toContain("# smoke-agent");
+    expect(readme).toContain("## Getting started");
+    expect(readme).toContain("eve dev");
+    expect(readme).toContain("## Learn more");
+    expect(readme).toContain("## Deploy on Vercel");
+    expect(readme).toContain("eve deploy");
     const packageJson = JSON.parse(await readFile(join(projectDir, "package.json"), "utf8")) as {
       engines?: { node?: string };
     };
     expect(agentSource).toContain(DEFAULT_AGENT_MODEL_ID);
     expect(packageJson.engines?.node).toBe("24.x");
-    expect(await readFile(join(projectDir, "pnpm-workspace.yaml"), "utf8")).toContain(
-      '"eve@>=0.6.0-beta.13 <=0.7.0":',
+    await expect(readFile(join(projectDir, "pnpm-workspace.yaml"), "utf8")).resolves.toContain(
+      "minimumReleaseAgeStrict: true",
     );
     await expect(pathExists(join(projectDir, "app"))).resolves.toBe(false);
     await expect(pathExists(join(projectDir, ".vercel"))).resolves.toBe(false);
     await expect(pathExists(join(projectDir, "vercel.json"))).resolves.toBe(false);
     expect(await fakePnpm.readCalls()).toEqual([
       {
-        args: [
-          "--dir",
-          canonicalProjectDir,
-          "install",
-          "--no-frozen-lockfile",
-          "--config.minimum-release-age=0",
-        ],
+        args: ["--dir", canonicalProjectDir, "install", "--no-frozen-lockfile"],
         cwd: canonicalProjectDir,
       },
       {
-        args: [
-          "--dir",
-          canonicalProjectDir,
-          "--config.minimum-release-age=0",
-          "exec",
-          "eve",
-          "dev",
-          "--input",
-          "/model",
-        ],
+        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--input", "/model"],
         cwd: canonicalProjectDir,
       },
     ]);
@@ -236,11 +266,7 @@ describe("eve init smoke", () => {
       "export default withEve(nextConfig);",
     );
     const [installCall, devCall] = await fakePnpm.readCalls();
-    expect(installCall?.args.slice(-3)).toEqual([
-      "install",
-      "--no-frozen-lockfile",
-      "--config.minimum-release-age=0",
-    ]);
+    expect(installCall?.args.slice(-2)).toEqual(["install", "--no-frozen-lockfile"]);
     expect(devCall?.args.slice(-5)).toEqual(["exec", "eve", "dev", "--input", "/model"]);
   });
 
@@ -262,7 +288,7 @@ describe("eve init smoke", () => {
     await expect(pathExists(join(projectDir, "package-lock.json"))).resolves.toBe(true);
     expect(await fakeNpm.readCalls()).toEqual([
       {
-        args: ["install", "--min-release-age=0"],
+        args: ["install"],
         cwd: canonicalProjectDir,
       },
       {
@@ -301,13 +327,12 @@ describe("eve init smoke", () => {
       engines: { node: "24.x" },
     });
     expect(result.stdout).toContain('Overrode package.json engines.node from ">=24" to "24.x"');
-    expect(await readFile(join(scratch, "pnpm-workspace.yaml"), "utf8")).toContain(
-      '"eve@>=0.6.0-beta.13 <=0.7.0":',
+    await expect(readFile(join(scratch, "pnpm-workspace.yaml"), "utf8")).resolves.toContain(
+      "minimumReleaseAgeStrict: true",
     );
-    expect((await fakePnpm.readCalls()).map((call) => call.args.slice(-3))).toEqual([
-      ["install", "--no-frozen-lockfile", "--config.minimum-release-age=0"],
-      ["exec", "eve", "dev"],
-    ]);
+    const calls = await fakePnpm.readCalls();
+    expect(calls[0]?.args.slice(-2)).toEqual(["install", "--no-frozen-lockfile"]);
+    expect(calls[1]?.args.slice(-3)).toEqual(["exec", "eve", "dev"]);
   });
 
   it("scaffolds the current directory for a coding agent that omits the target", async () => {
@@ -325,13 +350,7 @@ describe("eve init smoke", () => {
     await expect(pathExists(join(scratch, ".git"))).resolves.toBe(true);
     expect(await fakePnpm.readCalls()).toEqual([
       {
-        args: [
-          "--dir",
-          canonicalProjectDir,
-          "install",
-          "--no-frozen-lockfile",
-          "--config.minimum-release-age=0",
-        ],
+        args: ["--dir", canonicalProjectDir, "install", "--no-frozen-lockfile"],
         cwd: canonicalProjectDir,
       },
     ]);
@@ -370,26 +389,11 @@ describe("eve init smoke", () => {
     await expect(pathExists(join(scratch, ".git"))).resolves.toBe(true);
     expect(await fakePnpm.readCalls()).toEqual([
       {
-        args: [
-          "--dir",
-          canonicalProjectDir,
-          "install",
-          "--no-frozen-lockfile",
-          "--config.minimum-release-age=0",
-        ],
+        args: ["--dir", canonicalProjectDir, "install", "--no-frozen-lockfile"],
         cwd: canonicalProjectDir,
       },
       {
-        args: [
-          "--dir",
-          canonicalProjectDir,
-          "--config.minimum-release-age=0",
-          "exec",
-          "eve",
-          "dev",
-          "--input",
-          "/model",
-        ],
+        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--input", "/model"],
         cwd: canonicalProjectDir,
       },
     ]);
@@ -417,13 +421,7 @@ describe("eve init smoke", () => {
     // later in a controllable background process.
     expect(await fakePnpm.readCalls()).toEqual([
       {
-        args: [
-          "--dir",
-          canonicalProjectDir,
-          "install",
-          "--no-frozen-lockfile",
-          "--config.minimum-release-age=0",
-        ],
+        args: ["--dir", canonicalProjectDir, "install", "--no-frozen-lockfile"],
         cwd: canonicalProjectDir,
       },
     ]);

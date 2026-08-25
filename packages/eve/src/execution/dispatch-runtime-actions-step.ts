@@ -68,6 +68,7 @@ export async function dispatchRuntimeActionsStep(
           outcome = await dispatchToAgentHandle({
             action: entry.action,
             agentId: entry.agentId,
+            auth: prepared.auth,
             bundle: createAgentContinuationBundle({
               action: entry.action,
               bundle,
