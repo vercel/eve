@@ -103,7 +103,7 @@ import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/s
 import { createExecutionHistoryView } from "#execution/history-view.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
-import { TASK_UPDATE_TOOL_NAME } from "#shared/task-tool.js";
+import { TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
 import { stageAttachmentsToSandbox } from "#harness/attachment-staging.js";
 
 const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =

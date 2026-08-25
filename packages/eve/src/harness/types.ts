@@ -10,7 +10,7 @@ import type { InputResponse } from "#shared/input.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import type { InternalToolDefinition } from "#shared/tool-definition.js";
+import type { InternalToolDefinition } from "#tools/definition.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";

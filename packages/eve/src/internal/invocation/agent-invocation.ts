@@ -1,4 +1,4 @@
-import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
+import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonValue } from "#shared/json.js";
 

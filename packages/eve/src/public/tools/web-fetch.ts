@@ -1,4 +1,4 @@
-import webFetchDefinition from "#tools/web-fetch.js";
+import webFetchDefinition from "#tools/provided/web-fetch.js";
 
 export {
   WEB_FETCH_INPUT_SCHEMA,
@@ -6,6 +6,6 @@ export {
   type WebFetchToolInput,
   type WebFetchToolOutput,
   webFetch,
-} from "#tools/web-fetch.js";
+} from "#tools/provided/web-fetch.js";
 
 export default webFetchDefinition;

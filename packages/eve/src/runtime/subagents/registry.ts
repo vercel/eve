@@ -5,11 +5,11 @@ import type {
   ResolvedRuntimeDelegationNode,
 } from "#runtime/types.js";
 import type { JsonObject } from "#shared/json.js";
-import { serializeInputSchema } from "#shared/tool-schema.js";
+import { serializeInputSchema } from "#tools/schema.js";
 import {
   PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA,
   SUBAGENT_TOOL_INPUT_SCHEMA,
-} from "#shared/agent-tool.js";
+} from "#tools/framework/agent-contract.js";
 
 /**
  * One runtime-owned subagent tracked by the prepared registry.

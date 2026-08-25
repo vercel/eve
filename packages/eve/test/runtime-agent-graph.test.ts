@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { compileFromMemory } from "../src/compiler/compile-from-memory.js";
-import { disableTool } from "../src/public/definitions/tool.js";
+import { disableTool } from "../src/tools/definition.js";
 import { resolveRuntimeAgentGraph } from "../src/runtime/resolve-agent-graph.js";
 
 describe("resolveRuntimeAgentGraph", () => {

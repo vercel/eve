@@ -78,8 +78,8 @@ export function createReadFileStamp(input: { content: string; filePath: string }
 /**
  * Persists one read-file stamp into the durable context state.
  *
- * Centralizes the context read-update-write so callers in `read-file-tool`
- * and `write-file-tool` do not duplicate the state mutation pattern.
+ * Centralizes the context read-update-write so the read and write file tools
+ * do not duplicate the state mutation pattern.
  */
 export function setReadFileStamp(ctx: AlsContext, targetKey: string, stamp: ReadFileStamp): void {
   const state = ctx.ensure(ReadFileStateKey, () => ({ byTarget: {} }));

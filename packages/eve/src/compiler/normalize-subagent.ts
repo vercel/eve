@@ -6,9 +6,9 @@ import {
   expectString,
 } from "#internal/authored-module.js";
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
-import { serializeOutputSchema, type ToolSchemaSource } from "#shared/tool-schema.js";
+import { serializeOutputSchema, type ToolSchemaSource } from "#tools/schema.js";
 import type { JsonObject } from "#shared/json.js";
-import { isDynamicSentinel, type DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
+import { isDynamicSentinel, type DynamicToolEventName } from "#dynamic/definition.js";
 import type { LocalSubagentSourceRef } from "#discover/manifest.js";
 
 const ALLOWED_DYNAMIC_SUBAGENT_EVENTS = new Set<DynamicToolEventName>([

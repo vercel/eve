@@ -1,4 +1,4 @@
-import bashDefinition from "#tools/bash.js";
+import bashDefinition from "#tools/provided/bash.js";
 
 export {
   BASH_INPUT_SCHEMA,
@@ -6,6 +6,6 @@ export {
   type BashToolInput,
   type BashToolOutput,
   bash,
-} from "#tools/bash.js";
+} from "#tools/provided/bash.js";
 
 export default bashDefinition;

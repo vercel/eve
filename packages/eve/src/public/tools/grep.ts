@@ -1,4 +1,4 @@
-import grepDefinition from "#tools/grep.js";
+import grepDefinition from "#tools/provided/grep.js";
 
 export {
   GREP_INPUT_SCHEMA,
@@ -6,6 +6,6 @@ export {
   type GrepToolInput,
   type GrepToolOutput,
   grep,
-} from "#tools/grep.js";
+} from "#tools/provided/grep.js";
 
 export default grepDefinition;

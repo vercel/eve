@@ -5,7 +5,7 @@ import {
   normalizeInstructionsDefinition,
   normalizeScheduleDefinition,
 } from "#internal/authored-definition/core.js";
-import { defineDynamic } from "#public/definitions/tool.js";
+import { defineDynamic } from "#dynamic/definition.js";
 
 const FAILURE_MESSAGE = "Expected the agent config to match the public eve shape.";
 

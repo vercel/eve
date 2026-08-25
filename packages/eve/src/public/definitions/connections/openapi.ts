@@ -6,7 +6,7 @@ import type {
 import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
 import { stampConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import type { Approval } from "#public/definitions/approval.js";
-import { stampDefinitionKey } from "#public/tool-result-narrowing.js";
+import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 
 /**

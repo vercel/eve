@@ -27,7 +27,7 @@ import type {
   AgentBuildDefinition,
   ModelRouting,
 } from "#shared/agent-definition.js";
-import type { InternalToolDefinition } from "#shared/tool-definition.js";
+import type { InternalToolDefinition } from "#tools/definition.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
 import type {
   AgentModuleBacking,

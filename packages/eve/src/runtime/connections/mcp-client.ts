@@ -2,8 +2,8 @@ import { createMCPClient, type MCPClient } from "#compiled/@ai-sdk/mcp/index.js"
 import type { ToolSet } from "ai";
 
 import { buildCallbackContext } from "#context/build-callback-context.js";
-import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
+import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
+import type { SessionContext } from "#context/session-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";

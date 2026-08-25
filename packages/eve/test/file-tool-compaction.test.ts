@@ -4,10 +4,10 @@ import { stubSpawnProcess } from "./_helpers/sandbox-session-stub.js";
 
 import { ContextContainer, contextStorage } from "../src/context/container.js";
 import { SandboxKey } from "../src/context/keys.js";
-import { executeReadFileOnSandbox } from "../src/execution/sandbox/read-file-tool.js";
+import { executeReadFileOnSandbox } from "../src/execution/sandbox/read-file.js";
 import type { SandboxAccess } from "../src/sandbox/state.js";
 import type { SandboxSession } from "../src/shared/sandbox-session.js";
-import { executeWriteFileOnSandbox } from "../src/execution/sandbox/write-file-tool.js";
+import { executeWriteFileOnSandbox } from "../src/execution/sandbox/write-file.js";
 import { ReadFileStateKey } from "../src/execution/tools/file-state.js";
 import { preserveFrameworkStateOnCompaction } from "../src/execution/compaction.js";
 

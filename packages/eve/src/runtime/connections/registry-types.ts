@@ -1,4 +1,4 @@
-import type { Approval } from "#public/definitions/approval.js";
+import type { Approval } from "#approval/definition.js";
 import type { ConnectionClient } from "#shared/connection-types.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 

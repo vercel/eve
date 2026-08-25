@@ -1,6 +1,6 @@
 import type { ModelMessage } from "ai";
 
-import type { DynamicResolveContext } from "#shared/dynamic-tool-definition.js";
+import type { DynamicResolveContext } from "#dynamic/definition.js";
 import type { AlsContext } from "#context/container.js";
 import {
   AuthKey,

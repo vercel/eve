@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { compileFromMemory } from "#compiler/compile-from-memory.js";
 import { buildAgentInfoResponse } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
-import { experimental_workflow } from "#public/definitions/tool.js";
-import { webSearch } from "#tools/web-search.js";
+import { experimental_workflow } from "#tools/workflow.js";
+import { webSearch } from "#tools/provided/web-search.js";
 
 describe("buildAgentInfoResponse", () => {
   it("projects v3 exclusively from the effective compiled graph", async () => {

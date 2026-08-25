@@ -1,8 +1,8 @@
 import type { FlexibleSchema } from "ai";
 
-import type { Approval } from "#public/definitions/approval.js";
-import type { ToolExecuteOptions } from "#shared/tool-definition.js";
-import type { TaskExec } from "#shared/tool-task.js";
+import type { Approval } from "#approval/definition.js";
+import type { ToolExecuteOptions } from "#tools/definition.js";
+import type { TaskExec } from "#tools/task.js";
 
 /**
  * Runtime-owned action metadata attached to one harness-visible tool.

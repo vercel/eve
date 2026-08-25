@@ -1,12 +1,12 @@
 import { asSchema } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
-import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
+import type { DynamicToolEntry } from "#tools/dynamic.js";
 import type { DurableDynamicToolMetadata } from "#context/keys.js";
-import { resolveApprovalPolicy, type ApprovalContext } from "#public/definitions/approval.js";
-import { defineTool, type ToolContext } from "#public/definitions/tool.js";
+import { resolveApprovalPolicy, type ApprovalContext } from "#approval/definition.js";
+import { defineTool, type ToolContext } from "#tools/definition.js";
 import type { JsonObject } from "#shared/json.js";
-import { serializeOutputSchema, type ToolSchema } from "#shared/tool-schema.js";
+import { serializeOutputSchema, type ToolSchema } from "#tools/schema.js";
 
 vi.mock("#context/build-callback-context.js", () => ({
   buildCallbackContext: () => ({
@@ -37,7 +37,7 @@ import {
   lookupDurableDynamicCallback,
   registerDurableDynamicCallback,
   stampDurableDynamicToolCallbacks,
-} from "#shared/durable-dynamic-tool-callbacks.js";
+} from "#tools/durable-callbacks.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import { createSessionStartedEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 

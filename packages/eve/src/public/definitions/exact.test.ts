@@ -24,11 +24,11 @@ import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
 import {
   defineTool,
-  experimental_workflow,
   type TaskReceipt,
   type TaskExec,
   type ToolDefinition,
-} from "#public/definitions/tool.js";
+} from "#public/tools/index.js";
+import { experimental_workflow } from "#public/tools/workflow.js";
 
 describe("definition helper exact inputs", () => {
   it("preserves literal inference for valid definitions", () => {

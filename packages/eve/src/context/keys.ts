@@ -20,7 +20,7 @@ import type {
 import { ContextKey } from "#context/key.js";
 import type { InstrumentationChannelDeliveryRef } from "#harness/instrumentation/lifecycle.js";
 import type { HandleEventFn } from "#harness/types.js";
-import type { DurableDynamicToolCallbacks } from "#shared/durable-dynamic-tool-callbacks.js";
+import type { DurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { SandboxAccess } from "#sandbox/state.js";

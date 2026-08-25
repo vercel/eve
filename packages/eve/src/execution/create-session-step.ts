@@ -14,7 +14,7 @@ import type { JsonObject } from "#shared/json.js";
 import { resolveEffectiveAgentRuntimeFromConfig } from "#execution/effective-agent-config.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { TASK_UPDATE_SESSION_INSTRUCTION } from "#execution/tasks/child/instructions.js";
-import { TASK_UPDATE_TOOL_NAME } from "#shared/task-tool.js";
+import { TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
 
 /**
  * Result returned by {@link createSessionStep}.

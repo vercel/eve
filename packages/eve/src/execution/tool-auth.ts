@@ -18,9 +18,9 @@ import {
   ConnectionAuthorizationFailedError,
   ConnectionAuthorizationRequiredError,
   isConnectionAuthorizationRequiredError,
-} from "#public/connections/errors.js";
-import type { ApprovalResponseAuth } from "#public/definitions/approval.js";
-import type { ToolAuthOptions, ToolAuthProvider, ToolContext } from "#public/definitions/tool.js";
+} from "#connections/errors.js";
+import type { ApprovalResponseAuth } from "#approval/definition.js";
+import type { ToolAuthOptions, ToolAuthProvider, ToolContext } from "#tools/definition.js";
 import { type AuthorizationChallenge, requestAuthorization } from "#harness/authorization.js";
 import {
   type AuthorizationDefinition,
@@ -35,8 +35,8 @@ import {
   startScopedAuthorization,
   type ScopedAuthorization,
 } from "#runtime/connections/scoped-authorization.js";
-import type { ToolExecuteOptions } from "#shared/tool-definition.js";
-import type { TaskExec } from "#shared/tool-task.js";
+import type { ToolExecuteOptions } from "#tools/definition.js";
+import type { TaskExec } from "#tools/task.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 
 /**

@@ -14,7 +14,7 @@ import {
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { createNodeHarnessTools } from "#execution/node-step.js";
-import { serializeInputSchema, serializeOutputSchema } from "#shared/tool-schema.js";
+import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import type { SandboxBackend } from "#public/definitions/sandbox-backend.js";
 import {

@@ -35,9 +35,9 @@ import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { SessionIdKey } from "#context/keys.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
-import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
+import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
 import type { AuthorizationCallback, ConnectionPrincipal } from "#shared/connection-types.js";
-import type { JsonValue } from "#public/types/json.js";
+import type { JsonValue } from "#shared/json.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import { createUlid } from "#shared/ulid.js";
 

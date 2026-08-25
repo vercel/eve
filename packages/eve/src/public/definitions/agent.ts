@@ -5,8 +5,8 @@ import type {
 } from "#shared/agent-definition.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
 import type { RemoteAgentDefinition } from "#public/definitions/remote-agent.js";
-import { defineDynamic as defineDynamicBase } from "#public/definitions/tool.js";
-import type { DynamicEvents, DynamicSentinel } from "#shared/dynamic-tool-definition.js";
+import { defineDynamic as defineDynamicBase } from "#dynamic/definition.js";
+import type { DynamicEvents, DynamicSentinel } from "#dynamic/definition.js";
 
 declare const DEFINED_AGENT: unique symbol;
 

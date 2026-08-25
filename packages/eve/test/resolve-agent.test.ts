@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { z } from "#compiled/zod/index.js";
 
 import { compileFromMemory } from "../src/compiler/compile-from-memory.js";
-import { defineTool } from "../src/public/definitions/tool.js";
+import { defineTool } from "../src/tools/definition.js";
 import { ResolveAgentError, resolveAgent } from "../src/runtime/resolve-agent.js";
-import { serializeInputSchema } from "../src/shared/tool-schema.js";
+import { serializeInputSchema } from "../src/tools/schema.js";
 
 describe("resolveAgent", () => {
   it("hydrates the effective compiled graph and reattaches tool execution", async () => {

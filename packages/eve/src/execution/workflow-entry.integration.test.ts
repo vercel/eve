@@ -16,17 +16,17 @@ import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";
+import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { isEventId } from "#protocol/event-id.js";
-import type { ToolContext } from "#public/definitions/tool.js";
+import type { ToolContext } from "#tools/definition.js";
 import type {
   AuthorizationDefinition,
   ConnectionPrincipal,
   TokenResult,
 } from "#shared/connection-types.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
-import { toInputSchema } from "#shared/tool-schema.js";
+import { toInputSchema } from "#tools/schema.js";
 
 function buildSerializedContext(overrides: {
   audience?: "public" | "private" | "unknown";

@@ -8,8 +8,8 @@ import type { ChannelRouteMethod, RouteContext } from "#public/definitions/chann
 import type { RouteHandler, WebSocketRouteHandler } from "#channel/routes.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import type { StreamEventHook } from "#public/definitions/hook.js";
-import type { Approval } from "#public/definitions/approval.js";
-import type { ToolModelOutput } from "#public/definitions/tool.js";
+import type { Approval } from "#approval/definition.js";
+import type { ToolModelOutput } from "#tools/definition.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 import type {
   AuthorizationDefinition,
@@ -33,11 +33,11 @@ import type {
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import type { InternalAgentDefinition } from "#shared/agent-definition.js";
 import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
-import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
+import type { InternalToolDefinitionWithExecuteFn } from "#tools/definition.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
 import type { SandboxBackend } from "#shared/sandbox-backend.js";
 import type { SandboxBootstrapContext, SandboxSessionContext } from "#shared/sandbox-definition.js";
-import type { ToolSchema } from "#shared/tool-schema.js";
+import type { ToolSchema } from "#tools/schema.js";
 import type { AgentSourceOwner } from "#compiler/source-graph.js";
 
 /**

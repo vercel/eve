@@ -1,6 +1,6 @@
-import type { ApprovalContext, ApprovalPolicy } from "#public/definitions/approval.js";
+import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
 import type { JsonObject } from "#shared/json.js";
-import { stampDurableDynamicCallback } from "#shared/durable-dynamic-tool-callbacks.js";
+import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
 
 function alwaysApproval(_closure: JsonObject): "user-approval" {
   return "user-approval";

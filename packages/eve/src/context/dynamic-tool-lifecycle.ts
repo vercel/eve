@@ -14,11 +14,8 @@ import { buildResolveContext } from "#context/dynamic-resolve-context.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createLogger } from "#internal/logging.js";
 import type { SessionStartedStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
-import {
-  ALLOWED_DYNAMIC_TOOL_EVENTS,
-  isBrandedToolEntry,
-} from "#shared/dynamic-tool-definition.js";
+import { ALLOWED_DYNAMIC_TOOL_EVENTS } from "#dynamic/definition.js";
+import { isBrandedToolEntry, type DynamicToolEntry } from "#tools/dynamic.js";
 import {
   hasUnregisteredDurableDynamicCallbacks,
   type DurableDynamicCallbackPhase,
@@ -27,10 +24,10 @@ import {
   type StampedDurableDynamicCallback,
   readDurableDynamicToolCallbacks,
   registerDurableDynamicCallback,
-} from "#shared/durable-dynamic-tool-callbacks.js";
+} from "#tools/durable-callbacks.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject } from "#shared/json.js";
-import { serializeInputSchema, serializeOutputSchema } from "#shared/tool-schema.js";
+import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 
 const log = createLogger("dynamic-tools");

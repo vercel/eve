@@ -788,9 +788,9 @@ describe("app runtime dependency tracing", () => {
       )
     ).join("\n");
 
-    expect(serverModuleSource).not.toContain("../execution/sandbox/bash-tool.js");
+    expect(serverModuleSource).not.toContain("../execution/sandbox/bash.js");
     expect(serverModuleSource).not.toContain("../execution/skills/activate.js");
-    expect(serverModuleSource).not.toContain("../execution/web-fetch/tool.js");
+    expect(serverModuleSource).not.toContain("../execution/web-fetch/execute.js");
     expect(functionEntries.some((entry) => entry.includes("node_modules/esbuild"))).toBe(false);
     expect(functionEntries.some((entry) => entry.includes("node_modules/.nf3/esbuild"))).toBe(
       false,

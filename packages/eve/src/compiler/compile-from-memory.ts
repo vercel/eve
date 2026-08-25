@@ -4,7 +4,7 @@ import type { JsonObject } from "#shared/json.js";
 import { createAgentSourceManifest } from "#discover/manifest.js";
 import { defineAgent, type AgentDefinition } from "#public/definitions/agent.js";
 import { defineSkill } from "#public/definitions/skill.js";
-import { defineTool, type ToolDefinition } from "#public/definitions/tool.js";
+import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import {
   createProgrammaticCompiledModuleMap,

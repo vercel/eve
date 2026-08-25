@@ -15,7 +15,7 @@ import {
   ALLOWED_DYNAMIC_INSTRUCTION_EVENTS,
   isDynamicSentinel,
   type DynamicToolEventName,
-} from "#shared/dynamic-tool-definition.js";
+} from "#dynamic/definition.js";
 
 /**
  * Compiled instructions entry produced from one authored `instructions/*`

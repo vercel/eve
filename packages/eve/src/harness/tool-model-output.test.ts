@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { toolOutput, toolOutputPart } from "#tools/output-builders.js";
+import { toolOutput, toolOutputPart } from "#tools/model-output.js";
 import { normalizeToolJsonOutput, normalizeToolModelOutput } from "#harness/tool-model-output.js";
 
 function normalize(output: unknown): unknown {

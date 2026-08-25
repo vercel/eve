@@ -1,4 +1,4 @@
-import webSearchDefinition from "#tools/web-search.js";
+import webSearchDefinition from "#tools/provided/web-search.js";
 
 export {
   type WebSearchProvider,
@@ -7,6 +7,6 @@ export {
   defaultWebSearch,
   isWebSearchToolDefinition,
   webSearch,
-} from "#tools/web-search.js";
+} from "#tools/provided/web-search.js";
 
 export default webSearchDefinition;

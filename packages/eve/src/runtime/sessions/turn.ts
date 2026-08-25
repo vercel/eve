@@ -1,6 +1,6 @@
 import type { Node } from "#shared/node.js";
 import type { SourceRef } from "#shared/source-ref.js";
-import type { InternalToolDefinition } from "#shared/tool-definition.js";
+import type { InternalToolDefinition } from "#tools/definition.js";
 import type { AgentSourceOwner } from "#compiler/source-graph.js";
 
 /**

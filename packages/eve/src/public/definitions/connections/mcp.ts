@@ -7,7 +7,7 @@ import type { ConnectionToolCallDefinition } from "#public/definitions/connectio
 import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
 import { stampConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import type { Approval } from "#public/definitions/approval.js";
-import { stampDefinitionKey } from "#public/tool-result-narrowing.js";
+import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 
 /**
  * Public definition for an MCP client connection authored in

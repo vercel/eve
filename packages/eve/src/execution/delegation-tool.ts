@@ -8,7 +8,7 @@ import {
   toInputSchema,
   toOutputSchema,
   type ToolSchemaSource,
-} from "#shared/tool-schema.js";
+} from "#tools/schema.js";
 
 type HarnessDelegationTool = Pick<
   PreparedRuntimeDelegationTool,

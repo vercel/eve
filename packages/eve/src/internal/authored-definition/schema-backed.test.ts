@@ -2,14 +2,11 @@ import { describe, expect, it } from "vitest";
 import { z as z3 } from "zod/v3";
 import { z } from "#compiled/zod/index.js";
 
-import {
-  defineTool,
-  defineDynamic,
-  disableTool,
-  experimental_workflow,
-} from "#public/definitions/tool.js";
+import { defineDynamic } from "#dynamic/definition.js";
+import { defineTool, disableTool } from "#tools/definition.js";
+import { experimental_workflow } from "#tools/workflow.js";
 import { once } from "#tools/approval/policies.js";
-import { webSearch } from "#tools/web-search.js";
+import { webSearch } from "#tools/provided/web-search.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
 
 const FAILURE_MESSAGE = "Expected the tool export to match the public eve shape.";

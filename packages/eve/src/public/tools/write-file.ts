@@ -1,4 +1,4 @@
-import writeFileDefinition from "#tools/write-file.js";
+import writeFileDefinition from "#tools/provided/write-file.js";
 
 export {
   WRITE_FILE_INPUT_SCHEMA,
@@ -6,6 +6,6 @@ export {
   type WriteFileToolInput,
   type WriteFileToolOutput,
   writeFile,
-} from "#tools/write-file.js";
+} from "#tools/provided/write-file.js";
 
 export default writeFileDefinition;

@@ -1,8 +1,8 @@
 import type { ToolSet } from "ai";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
-import { AGENT_TOOL_NAME } from "#shared/agent-tool.js";
-import { TASK_TOOL_NAMES, TASK_UPDATE_TOOL_NAME } from "#shared/task-tool.js";
+import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
+import { TASK_TOOL_NAMES, TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import {
   ensureWorkflowContinuationSecurity,

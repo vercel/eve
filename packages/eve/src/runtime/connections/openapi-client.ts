@@ -30,7 +30,7 @@ import type {
   ConnectionToolMetadata,
 } from "#shared/connection-types.js";
 import { isObject } from "#shared/guards.js";
-import { toInputSchema, type ToolSchema } from "#shared/tool-schema.js";
+import { toInputSchema, type ToolSchema } from "#tools/schema.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
 
 const log = createLogger("runtime.connections.openapi-client");

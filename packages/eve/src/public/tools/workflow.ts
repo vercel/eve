@@ -7,4 +7,4 @@ export {
   type ExperimentalWorkflowToolInput,
   experimental_workflow,
   isExperimentalWorkflowToolDefinition,
-} from "#public/definitions/tool.js";
+} from "#tools/workflow.js";

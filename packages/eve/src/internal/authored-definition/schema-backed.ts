@@ -1,8 +1,6 @@
-import {
-  isDisabledToolSentinel,
-  isExperimentalWorkflowToolDefinition,
-} from "#public/definitions/tool.js";
-import { isWebSearchToolDefinition } from "#tools/web-search.js";
+import { isDisabledToolSentinel } from "#tools/definition.js";
+import { isExperimentalWorkflowToolDefinition } from "#tools/workflow.js";
+import { isWebSearchToolDefinition } from "#tools/provided/web-search.js";
 import {
   expectFunction,
   expectObjectRecord,
@@ -10,18 +8,18 @@ import {
   expectPositiveInteger,
   expectString,
 } from "#internal/authored-module.js";
-import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
+import type { InternalToolDefinitionWithExecuteFn } from "#tools/definition.js";
 import {
   serializeInputSchema,
   serializeOutputSchema,
   type ToolSchemaSource,
-} from "#shared/tool-schema.js";
+} from "#tools/schema.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
 import {
   assertResolverOnlyDynamicSentinel,
   isDynamicSentinel,
   type DynamicToolEventName,
-} from "#shared/dynamic-tool-definition.js";
+} from "#dynamic/definition.js";
 
 /**
  * Canonical normalized shape of one authored tool default export.

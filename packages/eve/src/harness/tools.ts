@@ -7,7 +7,7 @@ import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
 import { WEB_SEARCH_TOOL_NAME } from "#harness/provider-tool-schemas.js";
 import { isObject } from "#shared/guards.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { resolveApprovalPolicy, type ApprovalStatus } from "#public/definitions/approval.js";
+import { resolveApprovalPolicy, type ApprovalStatus } from "#approval/definition.js";
 import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/provider-tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
@@ -20,7 +20,7 @@ import {
 } from "#harness/authorization.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { normalizeToolJsonOutput, normalizeToolModelOutput } from "#harness/tool-model-output.js";
-import type { ToolExecuteOptions } from "#shared/tool-definition.js";
+import type { ToolExecuteOptions } from "#tools/definition.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import {
   createBackgroundToolCallBatch,

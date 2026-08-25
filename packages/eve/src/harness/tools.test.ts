@@ -20,9 +20,9 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { buildToolApproval, buildToolSet, buildToolSetWithProviderTools } from "#harness/tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
-import type { ApprovalContext } from "#public/definitions/approval.js";
-import type { ToolContext } from "#public/definitions/tool.js";
-import type { ToolExecuteOptions } from "#shared/tool-definition.js";
+import type { ApprovalContext } from "#approval/definition.js";
+import type { ToolContext } from "#tools/definition.js";
+import type { ToolExecuteOptions } from "#tools/definition.js";
 
 function getJsonSchema(tool: unknown): unknown {
   return (tool as { inputSchema: { jsonSchema: unknown } }).inputSchema.jsonSchema;

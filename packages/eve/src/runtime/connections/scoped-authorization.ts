@@ -11,14 +11,14 @@
  */
 
 import { type AlsContext, contextStorage, loadContext } from "#context/container.js";
-import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
+import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
 import {
   type AuthorizationSignal,
   consumeAuthorizationResult,
   createAuthorizationAttempt,
   requestAuthorization,
 } from "#harness/authorization.js";
-import type { JsonValue } from "#public/types/json.js";
+import type { JsonValue } from "#shared/json.js";
 import {
   evictCachedToken,
   readCachedToken,

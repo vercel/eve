@@ -1,4 +1,4 @@
-import globDefinition from "#tools/glob.js";
+import globDefinition from "#tools/provided/glob.js";
 
 export {
   GLOB_INPUT_SCHEMA,
@@ -6,6 +6,6 @@ export {
   type GlobToolInput,
   type GlobToolOutput,
   glob,
-} from "#tools/glob.js";
+} from "#tools/provided/glob.js";
 
 export default globDefinition;
