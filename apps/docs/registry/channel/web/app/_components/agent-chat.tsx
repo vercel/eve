@@ -55,7 +55,7 @@ export function AgentChat({
   });
 
   const isBusy = agent.status === "submitted" || agent.status === "streaming";
-  const isRestoring = sessionId !== undefined && agent.events.length === 0 && isBusy;
+  const isResuming = agent.status === "resuming";
   const isEmpty = agent.data.messages.length === 0;
   const lastMessage = agent.data.messages.at(-1);
   const isPendingAssistantShell =
@@ -64,10 +64,10 @@ export function AgentChat({
   const showPendingThinking =
     isBusy &&
     (agent.status === "submitted" || lastMessage?.role !== "assistant" || isPendingAssistantShell);
-  const turnFailure = isBusy ? undefined : getLatestTurnFailure(agent.events);
+  const turnFailure = isBusy || isResuming ? undefined : getLatestTurnFailure(agent.events);
   const errorMessage = cancellationError ?? agent.error?.message ?? turnFailure;
   const hasConversationContent = sessionless || !isEmpty || errorMessage !== undefined;
-  const showConversationLayout = isRestoring || hasConversationContent;
+  const showConversationLayout = isResuming || hasConversationContent;
   const activeSessionId = sessionId ?? agent.session?.sessionId;
 
   const requestCancellation = () => {
@@ -79,7 +79,7 @@ export function AgentChat({
 
   const handleSubmit = async (message: PromptInputMessage) => {
     const text = message.text.trim();
-    if ((text.length === 0 && message.files.length === 0) || isRestoring) return;
+    if ((text.length === 0 && message.files.length === 0) || isResuming) return;
 
     setCancellationError(undefined);
     const options = isBusy ? { turnPolicy: "steer" as const } : undefined;
@@ -107,8 +107,8 @@ export function AgentChat({
 
   const composer = (
     <PromptInput onSubmit={handleSubmit}>
-      <PromptInputTextarea disabled={isRestoring} placeholder="Send a message…" />
-      {isBusy && !isRestoring ? (
+      <PromptInputTextarea disabled={isResuming} placeholder="Send a message…" />
+      {isBusy ? (
         <PromptInputButton
           aria-label="Stop"
           className="absolute right-12 bottom-2.5 rounded-full"
@@ -118,7 +118,10 @@ export function AgentChat({
           <SquareIcon className="size-3 fill-current" />
         </PromptInputButton>
       ) : null}
-      <PromptInputSubmit disabled={isRestoring} status={isBusy ? undefined : agent.status} />
+      <PromptInputSubmit
+        disabled={isResuming}
+        status={isBusy || isResuming ? undefined : agent.status}
+      />
     </PromptInput>
   );
 
@@ -145,7 +148,7 @@ export function AgentChat({
               isPendingAssistantShell &&
               message.id === lastMessage.id ? null : (
                 <AgentMessage
-                  canRespond={!isBusy}
+                  canRespond={!isBusy && !isResuming}
                   isStreaming={
                     agent.status === "streaming" && index === agent.data.messages.length - 1
                   }

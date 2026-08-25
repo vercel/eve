@@ -25,12 +25,13 @@ import type {
 } from "#client/types.js";
 
 /**
- * Lifecycle state of an {@link EveAgentStore}: `ready` (idle), `submitted`
- * (turn sent, awaiting the first event), `streaming` (events arriving), and
- * `error` (the turn failed). A turn advances `ready` to `submitted` to
- * `streaming` to `ready` (or `error`).
+ * Lifecycle state of an {@link EveAgentStore}: `ready` (idle), `resuming`
+ * (checking an attached session for continuation), `submitted` (turn sent,
+ * awaiting the first event), `streaming` (events arriving), and `error` (the
+ * turn failed). A new turn advances `ready` to `submitted` to `streaming` to
+ * `ready` (or `error`).
  */
-export type EveAgentStoreStatus = "error" | "ready" | "streaming" | "submitted";
+export type EveAgentStoreStatus = "error" | "ready" | "resuming" | "streaming" | "submitted";
 
 /**
  * Prepares one outbound turn immediately before the client sends it, e.g. to
@@ -197,6 +198,9 @@ export class EveAgentStore<TData> {
 
   async send<TOutput = unknown>(input: SendTurnPayload<TOutput>): Promise<void> {
     if (this.#activeTurn !== undefined) {
+      if (this.#status === "resuming") {
+        throw new Error("eve session is resuming.");
+      }
       return await this.#sendFollowUp(this.#activeTurn, input);
     }
 
@@ -298,7 +302,11 @@ export class EveAgentStore<TData> {
   }
 
   async #resume(): Promise<void> {
-    if (this.#status === "streaming" || this.#status === "submitted") {
+    if (
+      this.#status === "resuming" ||
+      this.#status === "streaming" ||
+      this.#status === "submitted"
+    ) {
       throw new Error("eve session is already processing a turn.");
     }
     if (this.#session === undefined) {
@@ -322,26 +330,30 @@ export class EveAgentStore<TData> {
     this.#activeTurn = turn;
     turn.resolveResponse(undefined);
     this.#error = undefined;
-    this.#status = "submitted";
+    this.#status = "resuming";
     this.#publish();
 
     try {
-      const replayed: MessageStreamEvent[] = [];
+      const hasCompleteInitialPrefix = this.#events.length === session.state.streamIndex;
+      const replayed: MessageStreamEvent[] = hasCompleteInitialPrefix ? [...this.#events] : [];
       for await (const event of session.stream({
         follow: false,
         signal: turn.abortController.signal,
-        startIndex: 0,
+        startIndex: hasCompleteInitialPrefix ? session.state.streamIndex : 0,
       })) {
         if (!this.#isActiveTurn(turn)) return;
         replayed.push(event);
-        this.#acceptServerEvent(event, false);
+        this.#acceptServerEvent(event, { publish: false, transitionToStreaming: false });
       }
 
       if (!this.#isActiveTurn(turn)) return;
-      this.#publish();
+      const replayTail = replayed.at(-1);
+      if (replayTail !== undefined) this.#applyTerminalStreamFailure(replayTail);
       const replaySettled = isSettledSessionTail(replayed);
-      if (!replaySettled || replayed.at(-1)?.type === "session.waiting") {
+      if (this.#error === undefined && (!replaySettled || replayTail?.type === "session.waiting")) {
         const pendingAuthorizations = collectPendingAuthorizations(replayed);
+        if (!replaySettled) this.#status = "streaming";
+        this.#publish();
         for await (const event of session.stream({
           signal: turn.abortController.signal,
           streamReconnectPolicy: replaySettled ? { reconnect: false } : undefined,
@@ -356,6 +368,9 @@ export class EveAgentStore<TData> {
             break;
           }
         }
+      } else {
+        this.#status = this.#error === undefined ? "ready" : "error";
+        this.#publish();
       }
 
       await this.#followSteeredTurns(turn);
@@ -547,14 +562,17 @@ export class EveAgentStore<TData> {
     });
   }
 
-  #acceptServerEvent(event: MessageStreamEvent, publish = true): void {
+  #acceptServerEvent(
+    event: MessageStreamEvent,
+    options: { readonly publish?: boolean; readonly transitionToStreaming?: boolean } = {},
+  ): void {
     if (!this.#seenEvents.admit(event)) return;
     this.#events = [...this.#events, event];
     this.#applyServerEvent(event);
     this.#callbacks.onEvent?.(event);
-    this.#status = "streaming";
+    if (options.transitionToStreaming ?? true) this.#status = "streaming";
     this.#applyTerminalStreamFailure(event);
-    if (publish) this.#publish();
+    if (options.publish ?? true) this.#publish();
   }
 
   #applyServerEvent(event: MessageStreamEvent): void {

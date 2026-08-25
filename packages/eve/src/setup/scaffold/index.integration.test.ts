@@ -245,8 +245,10 @@ describe("ensureChannel", () => {
       join(projectRoot, "app/_components/agent-chat.tsx"),
       "utf8",
     );
-    expect(agentChatSource).toContain("<PromptInputTextarea disabled={isRestoring}");
+    expect(agentChatSource).toContain("<PromptInputTextarea disabled={isResuming}");
     expect(agentChatSource).toContain('turnPolicy: "steer"');
+    expect(agentChatSource).toContain('const isResuming = agent.status === "resuming"');
+    expect(agentChatSource).toContain("canRespond={!isBusy && !isResuming}");
     expect(agentChatSource).toContain("{showPendingThinking ? <PendingThinking /> : null}");
     expect(agentChatSource).not.toContain("StatusDot");
     await expect(readFile(join(projectRoot, "next.config.ts"), "utf8")).resolves.toContain(

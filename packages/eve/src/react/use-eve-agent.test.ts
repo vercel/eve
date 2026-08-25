@@ -42,9 +42,12 @@ function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[
   );
 }
 
-function createBoundedStreamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
+function createBoundedStreamResponse(
+  events: readonly UnstampedMessageStreamEvent[],
+  tailIndex = events.length - 1,
+): Response {
   const response = createEagerStreamResponse(events);
-  response.headers.set("x-eve-stream-tail-index", String(events.length - 1));
+  response.headers.set("x-eve-stream-tail-index", String(tailIndex));
   return response;
 }
 
@@ -662,8 +665,8 @@ describe("useEveAgent", () => {
     ).rejects.toThrow("requires initialSession or session");
   });
 
-  it("automatically replays an initial session when resume is enabled", async () => {
-    const events = [
+  it("keeps settled hydrated history visible without publishing an active-turn status", async () => {
+    const events = stampTestEvents([
       createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
       createMessageCompletedEvent({
         message: "Hi there.",
@@ -672,17 +675,18 @@ describe("useEveAgent", () => {
         turnId: "turn_1",
       }),
       createSessionWaitingEvent(),
-    ];
+    ]);
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(createBoundedStreamResponse(events))
+      .mockResolvedValueOnce(createBoundedStreamResponse([], events.length - 1))
       .mockResolvedValueOnce(createEagerStreamResponse([]));
     let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
     const statuses: string[] = [];
 
     function TestComponent() {
       helpers = useEveAgent({
-        initialSession: { sessionId: "session_1", streamIndex: 0 },
+        initialEvents: events,
+        initialSession: { sessionId: "session_1", streamIndex: events.length },
         resume: true,
       });
       statuses.push(helpers.status);
@@ -691,11 +695,13 @@ describe("useEveAgent", () => {
 
     await act(async () => {
       create(createElement(TestComponent));
-      await vi.waitFor(() => expect(helpers?.events).toHaveLength(events.length));
+      await vi.waitFor(() => expect(helpers?.status).toBe("ready"));
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(statuses[0]).toBe("submitted");
+    expect(statuses[0]).toBe("resuming");
+    expect(statuses).not.toContain("submitted");
+    expect(statuses).not.toContain("streaming");
     expect(helpers?.status).toBe("ready");
     expect(helpers?.data).toEqual(
       completedTurnData({

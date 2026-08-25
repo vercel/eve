@@ -26,9 +26,9 @@ import type { MessageStreamEvent } from "#protocol/message.js";
 export type { PrepareSend };
 
 /**
- * Session lifecycle phase: `"ready"` (idle), `"submitted"` (request sent,
- * awaiting the first stream event), `"streaming"` (events arriving), or
- * `"error"`.
+ * Session lifecycle phase: `"ready"` (idle), `"resuming"` (checking an
+ * attached session), `"submitted"` (request sent, awaiting the first stream
+ * event), `"streaming"` (events arriving), or `"error"`.
  */
 export type UseEveAgentStatus = EveAgentStoreStatus;
 
@@ -71,7 +71,11 @@ export interface UseEveAgentReturn<TData> {
   ) => Promise<void>;
   /** Current session identity and stream cursor. */
   readonly session: ClientSessionState | undefined;
-  /** Lifecycle phase: `"ready"` (idle), `"submitted"` (request sent, awaiting first event), `"streaming"` (events arriving), or `"error"`. */
+  /**
+   * Lifecycle phase: `"ready"` (idle), `"resuming"` (checking an attached
+   * session), `"submitted"` (request sent, awaiting first event), `"streaming"`
+   * (events arriving), or `"error"`.
+   */
   readonly status: UseEveAgentStatus;
 }
 
