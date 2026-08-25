@@ -18,6 +18,7 @@ import type {
   SessionTurn,
 } from "#channel/types.js";
 import { ContextKey } from "#context/key.js";
+import { SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import type { InstrumentationChannelDeliveryRef } from "#harness/instrumentation/lifecycle.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { DurableDynamicToolCallbacks } from "#shared/durable-dynamic-tool-callbacks.js";
@@ -115,7 +116,9 @@ export const CapabilitiesKey = new ContextKey<SessionCapabilities>("eve.capabili
 /**
  * Optional framework-owned caller callback captured when the session is created.
  */
-export const SessionCallbackKey = new ContextKey<SessionCallback>("eve.sessionCallback");
+export const SessionCallbackKey = new ContextKey<SessionCallback>(
+  SESSION_CALLBACK_CONTEXT_KEY_NAME,
+);
 
 // ---------------------------------------------------------------------------
 // Derived keys — reconstructed by providers each step, never serialized.
