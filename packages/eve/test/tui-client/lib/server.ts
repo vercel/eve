@@ -250,7 +250,7 @@ async function waitForAgentServer(input: {
 
 /** Reads the agent name from a versioned `/eve/v1/info` response. */
 export function getAgentNameFromInfoPayload(payload: unknown): string | undefined {
-  if (!isRecord(payload) || payload.kind !== "eve-agent-info" || payload.version !== 3) {
+  if (!isRecord(payload) || payload.kind !== "eve-agent-info" || payload.version !== 4) {
     return undefined;
   }
 
