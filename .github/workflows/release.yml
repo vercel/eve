@@ -5,15 +5,15 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Queue runs instead of cancelling: aborting a run mid-`changeset publish`
-# can leave npm with only some of the packages published.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Do not abort an in-flight `changeset publish`: npm could be left with only
+    # some packages published. Keep this scoped to stable releases so every
+    # commit can run its continuous release independently.
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-stable
+      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write
@@ -70,4 +70,61 @@ jobs:
           version="$(jq -r '.[] | select(.name == "eve") | .version' <<< "$PUBLISHED_PACKAGES")"
           if [[ -n "$version" ]]; then
             gh release edit "eve@$version" --latest
+          fi
+
+  continuous-release:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare continuous release
+        id: prepare
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          version="$(node scripts/prepare-canary-release.mjs "$COMMIT_SHA")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build continuous release
+        run: pnpm --dir packages/eve run prepack
+
+      - name: Publish continuous release
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          published_version="$(npm view "eve@$VERSION" version 2>/dev/null || true)"
+
+          if [[ "$published_version" != "$VERSION" ]]; then
+            release_tag="main-${COMMIT_SHA:0:12}"
+            if [[ "$(git ls-remote origin refs/heads/main | cut -f1)" == "$COMMIT_SHA" ]]; then
+              release_tag="canary"
+            fi
+
+            npm publish ./packages/eve --tag "$release_tag" --provenance --ignore-scripts
+            echo "Install this commit with \`npm install eve@$VERSION\`." >> "$GITHUB_STEP_SUMMARY"
+            echo "This release was also published with the \`$release_tag\` tag." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "\`eve@$VERSION\` is already published." >> "$GITHUB_STEP_SUMMARY"
           fi

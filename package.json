@@ -29,7 +29,7 @@
     "test:e2e": "turbo run test:e2e --concurrency=1",
     "test:integration": "turbo run test:integration",
     "test:scenario": "turbo run test:scenario",
-    "test:unit": "turbo run test:unit",
+    "test:unit": "node --test scripts/prepare-canary-release.test.mjs && turbo run test:unit",
     "typecheck": "turbo run typecheck",
     "version-packages": "changeset version && node ./scripts/materialize-registry-release-requirements.mjs",
     "release": "pnpm build && node ./scripts/assert-changeset-publish-packages.mjs && changeset publish",

@@ -212,7 +212,18 @@ on when one exists. Do not create an issue solely to accompany a pull request.
 5. Make sure `pnpm lint`, `pnpm typecheck`, and `pnpm test` pass.
 6. Open the PR with a clear description of the problem and solution.
 
-Releases are managed with [Changesets](https://github.com/changesets/changesets) by the maintainers.
+Stable releases are managed with [Changesets](https://github.com/changesets/changesets) by the maintainers.
+Every commit pushed to `main` also publishes an immutable continuous release of
+the `eve` package. Install the latest successful build with:
+
+```bash
+npm install eve@canary
+```
+
+The release workflow summary includes the exact version for its commit. Use
+that `<semver>-<short-commit-id>` version when you need a reproducible install
+instead of the moving `canary` tag. Continuous releases do not update the
+changelog, create a GitHub release, or change npm's `latest` tag.
 
 ## Developer Certificate of Origin (DCO)
 
