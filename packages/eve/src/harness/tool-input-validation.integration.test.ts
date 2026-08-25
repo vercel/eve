@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { getPendingInputRequestIds } from "#harness/input-requests.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
-import { ASK_QUESTION_INPUT_SCHEMA, askQuestion } from "#public/tools/ask-question.js";
+import { ASK_QUESTION_INPUT_SCHEMA, askQuestion } from "#tools/builtins/ask-question.js";
 import { serializeInputSchema } from "#shared/tool-schema.js";
 
 const usage = {

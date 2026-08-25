@@ -12,7 +12,7 @@ import { ConnectionAuthorizationRequiredError } from "#public/connections/errors
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { ConnectionToolMetadata } from "#shared/connection-types.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
-import connectionSearch from "#public/tools/connection-search.js";
+import connectionSearch from "#tools/builtins/connection-search.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import {
   isBrandedToolEntry,

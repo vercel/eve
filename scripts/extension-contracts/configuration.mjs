@@ -21,7 +21,10 @@ export const PUBLIC_SURFACES = [
   { path: "src/public/channels/index.ts", capabilities: ["channel"] },
   { path: "src/public/schedules/index.ts", capabilities: ["schedule"] },
   { path: "src/public/index.ts", capabilities: ["subagent"] },
-  { path: "src/public/tools/index.ts", capabilities: ["tool", "dynamicTool"] },
+  {
+    paths: ["src/tools/index.ts", "src/tools/workflow.ts", "src/tools/builtins/web-search.ts"],
+    capabilities: ["tool", "dynamicTool"],
+  },
   { path: "src/public/connections/index.ts", capabilities: ["connection"] },
   { path: "src/public/hooks/index.ts", capabilities: ["hook"] },
   { path: "src/public/skills/index.ts", capabilities: ["skill", "dynamicSkill"] },
@@ -31,6 +34,10 @@ export const PUBLIC_SURFACES = [
   },
   { path: "src/public/context/index.ts", capabilities: ["state"] },
 ];
+
+export function publicSurfacePaths(surface) {
+  return surface.paths ?? [surface.path];
+}
 
 export function toPosix(path) {
   return sep === "/" ? path : path.split(sep).join("/");
@@ -351,8 +358,14 @@ export async function validateCapabilityConfiguration(configuration) {
   }
 
   for (const surface of PUBLIC_SURFACES) {
-    const publicSource = await readFile(join(EVE_ROOT, surface.path), "utf8");
-    const publicNames = collectExportNames(publicSource, { valuesOnly: true });
+    const paths = publicSurfacePaths(surface);
+    const publicNames = new Set();
+    for (const path of paths) {
+      const publicSource = await readFile(join(EVE_ROOT, path), "utf8");
+      for (const name of collectExportNames(publicSource, { valuesOnly: true })) {
+        publicNames.add(name);
+      }
+    }
     const contractNames = new Set();
     for (const capability of surface.capabilities) {
       const contractSource = await readFile(join(ENTRYPOINT_ROOT, `${capability}.ts`), "utf8");
@@ -370,7 +383,7 @@ export async function validateCapabilityConfiguration(configuration) {
         .filter(Boolean)
         .join("; ");
       issues.push({
-        file: toPosix(relative(REPO_ROOT, join(EVE_ROOT, surface.path))),
+        file: toPosix(relative(REPO_ROOT, join(EVE_ROOT, paths[0]))),
         message: `Capability contract roots are incomplete (${details}). Assign every public authoring value to one of: ${surface.capabilities.join(", ")}.`,
       });
     }

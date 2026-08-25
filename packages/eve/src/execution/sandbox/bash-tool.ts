@@ -42,8 +42,8 @@ export interface BashResult {
  * (where errors and final results typically appear) within the shared
  * {@link MAX_OUTPUT_LINES} / {@link MAX_OUTPUT_BYTES} limits.
  *
- * Used by the framework `bash` tool and by author tools constructed via
- * `defineBashTool`. Centralizing the executor here keeps the error
+ * Used by the framework `bash` tool and authored wrappers around its
+ * exported definition. Centralizing the executor here keeps the error
  * messages and result shape identical across all bash-style tools.
  */
 export async function executeBashOnSandbox(

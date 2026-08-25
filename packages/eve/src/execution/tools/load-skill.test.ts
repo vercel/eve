@@ -5,7 +5,7 @@ import { DynamicSkillManifestKey, SandboxKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
-import { loadSkill } from "#public/tools/load-skill.js";
+import { loadSkill } from "#tools/builtins/load-skill.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { createSandboxSkillHandle } from "#runtime/skills/sandbox-access.js";
 import type { ResolvedSkillDefinition } from "#runtime/types.js";

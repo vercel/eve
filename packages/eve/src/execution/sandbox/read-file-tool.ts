@@ -49,8 +49,8 @@ export interface ReadFileResult {
  * (offset, limit, line numbering, truncation), and persists a full-file
  * stamp into durable read-file state for stale-write detection.
  *
- * Used by the framework `read_file` tool and by author tools constructed
- * via `defineReadFileTool`.
+ * Used by the framework `read_file` tool and authored wrappers around its
+ * exported definition.
  */
 export async function executeReadFileOnSandbox(
   sandbox: SandboxSession,

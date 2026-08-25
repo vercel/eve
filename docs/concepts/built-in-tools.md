@@ -40,28 +40,24 @@ Review these default tools before production use. Disable, wrap, restrict, or re
 
 Some framework-provided tools stay out of the default set. Add the corresponding file when your agent needs one:
 
-| Tool       | Definition to export                       | Purpose                                            |
-| ---------- | ------------------------------------------ | -------------------------------------------------- |
-| `glob`     | `defineGlobTool()` from `eve/tools`        | Find sandbox files by glob pattern.                |
-| `grep`     | `defineGrepTool()` from `eve/tools`        | Search sandbox file contents by regex.             |
-| `Workflow` | `experimental_workflow()` from `eve/tools` | Orchestrate root-agent copies from generated code. |
-| `sleep`    | `sleep()` from `eve/tools/sleep`           | Pause and durably resume the current turn.         |
+| Tool       | Definition to export                                | Purpose                                            |
+| ---------- | --------------------------------------------------- | -------------------------------------------------- |
+| `glob`     | `glob` from `eve/tools/glob`                        | Find sandbox files by glob pattern.                |
+| `grep`     | `grep` from `eve/tools/grep`                        | Search sandbox file contents by regex.             |
+| `Workflow` | `experimental_workflow()` from `eve/tools/workflow` | Orchestrate root-agent copies from generated code. |
+| `sleep`    | `sleep()` from `eve/tools/sleep`                    | Pause and durably resume the current turn.         |
 
 For example, add file discovery and content search with two files:
 
 ```ts title="agent/tools/glob.ts"
-import { defineGlobTool } from "eve/tools";
-
-export default defineGlobTool();
+export { glob as default } from "eve/tools/glob";
 ```
 
 ```ts title="agent/tools/grep.ts"
-import { defineGrepTool } from "eve/tools";
-
-export default defineGrepTool();
+export { grep as default } from "eve/tools/grep";
 ```
 
-The filename supplies the model-facing tool name. You can pass a custom `description` to either helper. The tools run against the agent's sandbox and use the same schemas, results, and error behavior as eve's framework implementations.
+The filename supplies the model-facing tool name. The tools run against the agent's sandbox and use the same schemas, results, and error behavior as eve's framework implementations. Wrap either definition with `defineTool({ ...glob, description: "..." })` or `defineTool({ ...grep, description: "..." })` when you need to change its description or approval policy.
 
 The sections below cover `Workflow` and `sleep` in more detail.
 
@@ -100,7 +96,7 @@ Importing a definition does not add it to an agent; export it from the correspon
 Provider-managed web search has a dedicated configuration helper instead of an executable default:
 
 ```ts title="agent/tools/web_search.ts"
-import { webSearch } from "eve/tools";
+import { webSearch } from "eve/tools/web_search";
 
 export default webSearch({ provider: "parallel" });
 ```
@@ -142,7 +138,7 @@ A single turn can already call several subagents, and parallel tool calls dispat
 Export the experimental Workflow definition from `agent/tools/workflow.ts`. The helper name carries the "experimental" warning, but the tool the model actually sees is named `Workflow`.
 
 ```ts title="agent/tools/workflow.ts"
-import { experimental_workflow } from "eve/tools";
+import { experimental_workflow } from "eve/tools/workflow";
 
 export default experimental_workflow();
 ```
@@ -190,7 +186,7 @@ Workflow orchestration is capped in two independent ways.
 **Per-program call budget.** One Workflow program may dispatch at most `maxSubagents` subagent calls in total, counted across the whole program — sequential and parallel calls alike. Configure it on `experimental_workflow`; the default is 100. Calls beyond the budget do not start a child session; they resolve inside the program with a `WORKFLOW_SUBAGENT_LIMIT_REACHED` error result, and the budget is stated in the tool's description so the model sizes its fan-out to fit.
 
 ```ts title="agent/tools/workflow.ts"
-import { experimental_workflow } from "eve/tools";
+import { experimental_workflow } from "eve/tools/workflow";
 
 export default experimental_workflow({ maxSubagents: 4 });
 ```

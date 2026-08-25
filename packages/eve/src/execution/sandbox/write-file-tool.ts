@@ -38,8 +38,8 @@ export interface WriteFileResult {
  * Writes one text file to the sandbox with read-before-write
  * enforcement and stale-read detection for existing files.
  *
- * Used by the framework `write_file` tool and by author tools
- * constructed via `defineWriteFileTool`.
+ * Used by the framework `write_file` tool and authored wrappers around its
+ * exported definition.
  */
 export async function executeWriteFileOnSandbox(
   sandbox: SandboxSession,

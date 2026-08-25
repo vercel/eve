@@ -4,4 +4,4 @@ export {
   type DynamicToolResult,
   type DynamicToolSet,
   defineDynamic,
-} from "../../src/public/tools/index.ts";
+} from "../../src/tools/index.ts";

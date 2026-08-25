@@ -1,16 +1,17 @@
 export {
-  defineBashTool,
-  defineGlobTool,
-  defineGrepTool,
-  defineReadFileTool,
   defineTool,
-  defineWriteFileTool,
   disableTool,
-  experimental_workflow,
   isDisabledToolSentinel,
-  isExperimentalWorkflowToolDefinition,
   toolOutput,
   toolOutputPart,
   toolResultFrom,
+} from "../../src/tools/index.ts";
+export {
+  experimental_workflow,
+  isExperimentalWorkflowToolDefinition,
+} from "../../src/tools/workflow.ts";
+export {
+  defaultWebSearch,
+  isWebSearchToolDefinition,
   webSearch,
-} from "../../src/public/tools/index.ts";
+} from "../../src/tools/builtins/web-search.ts";
