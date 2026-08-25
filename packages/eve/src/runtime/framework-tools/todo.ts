@@ -35,6 +35,12 @@ export type TodoToolInput = z.infer<typeof TODO_INPUT_SCHEMA>;
 function formatTodoSummary(state: TodoState): string | undefined {
   if (state.items.length === 0) return undefined;
 
+  // A terminal-only list leaves no active work to resume, so re-injecting it
+  // after compaction would only revive stale completed tasks on the next turn.
+  if (state.items.every((item) => item.status === "completed" || item.status === "cancelled")) {
+    return undefined;
+  }
+
   const lines = state.items.map((item) => {
     const check = item.status === "completed" ? "x" : item.status === "cancelled" ? "-" : " ";
     return `- [${check}] [${item.priority}] ${item.content}`;
@@ -46,7 +52,9 @@ function formatTodoSummary(state: TodoState): string | undefined {
 /**
  * Builds the message that re-injects the current todo list after the harness
  * compacts message history, so the agent keeps its task list across
- * compaction. Returns `undefined` when there is no list to preserve.
+ * compaction. Returns `undefined` when there is no active work to preserve —
+ * the list is empty or every item has a terminal (completed/cancelled)
+ * status.
  */
 export function getTodoCompactionMessage(): ModelMessage | undefined {
   const state = loadContext().get(TodoStateKey);
