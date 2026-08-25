@@ -6,6 +6,7 @@ const TURN_COUNT = 100;
 export default defineEval({
   description: "Workflow stress: one durable session completes 100 sequential turns.",
   tags: ["stress", "workflow", "sequential"],
+  timeoutMs: 900_000,
 
   async test(t) {
     let sessionId: string | undefined;
