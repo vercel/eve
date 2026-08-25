@@ -103,16 +103,12 @@ describe("memory provider tools", () => {
     deployedVersion = 2;
     ctx.set(TurnMemoryLocksKey, createContext("user_2").require(TurnMemoryLocksKey));
 
-    await contextStorage.run(
+    await rebindMissingCompiledDynamicToolCallbacks({
       ctx,
-      async () =>
-        await rebindMissingCompiledDynamicToolCallbacks({
-          ctx,
-          event,
-          messages: [{ content: "new turn", role: "user" }],
-          resolvers: [compiledResolver],
-        }),
-    );
+      event,
+      messages: [{ content: "new turn", role: "user" }],
+      resolvers: [compiledResolver],
+    });
 
     const [replayed] = buildDynamicTools(ctx);
     if (replayed?.execute === undefined) throw new Error("Expected replayed execute callback.");
