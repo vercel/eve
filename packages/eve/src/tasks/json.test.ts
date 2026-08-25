@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { taskCancel } from "#public/tools/task-cancel.js";
-import { TASK_VIEWS_OUTPUT_SCHEMA } from "#shared/task-tool.js";
+import { taskCancel } from "#tools/framework/task-cancel.js";
+import { TASK_VIEWS_OUTPUT_SCHEMA } from "#tools/framework/task-contract.js";
 import { taskViewToJson } from "#tasks/json.js";
 import type { TaskView } from "#tasks/types.js";
 

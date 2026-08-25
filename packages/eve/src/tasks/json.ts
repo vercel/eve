@@ -1,7 +1,7 @@
 import type { z } from "#compiled/zod/index.js";
 
 import type { JsonValue } from "#shared/json.js";
-import { TASK_VIEW_JSON_SCHEMA } from "#shared/task-tool.js";
+import { TASK_VIEW_JSON_SCHEMA } from "#tools/framework/task-contract.js";
 import type { TaskView } from "#tasks/types.js";
 import { readSubagentTaskMetadata } from "#tasks/types.js";
 
