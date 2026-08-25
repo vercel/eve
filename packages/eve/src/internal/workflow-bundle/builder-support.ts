@@ -80,8 +80,9 @@ export interface WorkflowBundleDiscoveredEntries {
 
 export interface WorkflowBundleCreateWorkflowsBundleOptions {
   readonly additionalOutputs?: readonly WorkflowBundleOutput[];
-  readonly discoveredEntries?: WorkflowBundleDiscoveredEntries;
-  readonly inputFiles: readonly string[];
+  readonly appWorkflowFiles: readonly string[];
+  readonly frameworkSerdeFiles: readonly string[];
+  readonly frameworkWorkflowFiles: readonly string[];
   readonly outfile: string;
   readonly stepRegistrationsPath: string;
   readonly tsconfigPath?: string;
@@ -436,6 +437,24 @@ export async function bundleFinalWorkflowOutput(input: {
   });
 
   await writeWorkflowBundleAtomically(input.outfile, workflowFunctionCode);
+}
+
+// The transform emits bare `globalThis.__private_workflows.set(...)` calls, so
+// the Map must exist before any chunk runs.
+const WORKFLOW_REGISTRY_BANNER = "globalThis.__private_workflows = new Map();";
+
+/**
+ * Composes independently built driver chunks into the one script the driver
+ * VM evaluates. Chunks share state only through globals (the workflow
+ * registry, the serde class registry, `Symbol.for` context keys), so each one
+ * runs inside its own IIFE and their top-level declarations never collide.
+ */
+export function composeWorkflowDriverCode(chunks: readonly string[]): string {
+  const bodies = chunks
+    .map((chunk) => chunk.trim())
+    .filter((chunk) => chunk.length > 0)
+    .map((chunk) => `(function () {\n${chunk}\n})();`);
+  return [WORKFLOW_REGISTRY_BANNER, ...bodies].join("\n");
 }
 
 export function createWorkflowEntrypointSource(input: {
