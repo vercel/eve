@@ -11,12 +11,12 @@ export type DurableDynamicCallbackPhase =
 export type DurableDynamicCallbackFn = (closure: JsonObject, ...args: never[]) => unknown;
 
 /**
- * Persisted binding for one callback phase. Identity is
- * `(toolName, phase)` — carried by the surrounding metadata — so only the
- * snapshotted closure values persist.
+ * Persisted binding for one callback phase. The registration key distinguishes
+ * resolver registrations without coupling durable identity to source code.
  */
 export interface DurableDynamicCallbackReference {
   readonly closure: JsonObject;
+  readonly registrationKey?: string;
 }
 
 export interface DurableDynamicToolCallbacks {
@@ -42,9 +42,14 @@ export type LiveDurableDynamicToolCallbacks = Partial<{
 const STAMPED_CALLBACK = Symbol.for("eve:durable-dynamic-callback");
 export const DURABLE_DYNAMIC_TOOL_CALLBACKS = Symbol.for("eve:durable-dynamic-tool-callbacks");
 
-const REGISTRY = Symbol.for("eve:dynamic-tool-callbacks");
+const REGISTRY = Symbol.for("eve:dynamic-tool-callbacks:v2");
+const OWNED_REGISTRIES = Symbol.for("eve:dynamic-tool-callback-registries:v2");
 
-type Registry = Map<string, Map<DurableDynamicCallbackPhase, DurableDynamicCallbackFn>>;
+const LEGACY_REGISTRATION = Symbol.for("eve:dynamic-tool-callbacks:legacy-registration");
+
+type RegistrationKey = string | typeof LEGACY_REGISTRATION;
+type PhaseRegistry = Map<RegistrationKey, DurableDynamicCallbackFn>;
+type Registry = Map<string, Map<DurableDynamicCallbackPhase, PhaseRegistry>>;
 
 function getRegistry(): Registry {
   const global = globalThis as Record<symbol, Registry | undefined>;
@@ -56,29 +61,97 @@ function getRegistry(): Registry {
   return registry;
 }
 
+function getOwnedRegistries(): Map<string, Registry> {
+  const global = globalThis as Record<symbol, Map<string, Registry> | undefined>;
+  const existing = global[OWNED_REGISTRIES];
+  if (existing !== undefined) return existing;
+
+  const registries = new Map<string, Registry>();
+  global[OWNED_REGISTRIES] = registries;
+  return registries;
+}
+
+function getRegistryForOwner(owner: string | undefined): Registry {
+  if (owner === undefined) return getRegistry();
+  const registries = getOwnedRegistries();
+  const existing = registries.get(owner);
+  if (existing !== undefined) return existing;
+
+  const registry: Registry = new Map();
+  registries.set(owner, registry);
+  return registry;
+}
+
+function lookupInRegistry(
+  registry: Registry,
+  toolName: string,
+  phase: DurableDynamicCallbackPhase,
+  registrationKey: string | undefined,
+): DurableDynamicCallbackFn | undefined {
+  const registrations = registry.get(toolName)?.get(phase);
+  if (registrations === undefined) return undefined;
+  if (registrationKey !== undefined) return registrations.get(registrationKey);
+  const legacy = registrations.get(LEGACY_REGISTRATION);
+  if (legacy !== undefined) return legacy;
+  return registrations.size === 1 ? registrations.values().next().value : undefined;
+}
+
+/** Releases callback registrations after a terminal session completion. */
+export function clearDurableDynamicCallbacksForSession(sessionId: string): void {
+  getOwnedRegistries().delete(sessionId);
+}
+
 /**
  * Binds the current implementation of one tool callback phase. Re-resolution
- * replaces the binding, so replay after a redeploy runs the latest code.
+ * of the same registration replaces its binding, while distinct registrations
+ * remain isolated under the same tool name and phase.
  */
 export function registerDurableDynamicCallback(input: {
   readonly callback: DurableDynamicCallbackFn;
+  readonly owner?: string;
   readonly phase: DurableDynamicCallbackPhase;
+  readonly registrationKey?: string;
   readonly toolName: string;
 }): void {
-  const registry = getRegistry();
-  let phases = registry.get(input.toolName);
-  if (phases === undefined) {
-    phases = new Map();
-    registry.set(input.toolName, phases);
+  const registry = getRegistryForOwner(input.owner);
+  let tools = registry.get(input.toolName);
+  if (tools === undefined) {
+    tools = new Map();
+    registry.set(input.toolName, tools);
   }
-  phases.set(input.phase, input.callback);
+  let registrations = tools.get(input.phase);
+  if (registrations === undefined) {
+    registrations = new Map();
+    tools.set(input.phase, registrations);
+  }
+  const registrationKey = input.registrationKey ?? LEGACY_REGISTRATION;
+  const existing = registrations.get(registrationKey);
+  if (
+    registrationKey === LEGACY_REGISTRATION &&
+    existing !== undefined &&
+    existing !== input.callback
+  ) {
+    throw new Error(
+      `Dynamic tool "${input.toolName}" callback "${input.phase}" has multiple implementations ` +
+        "without distinct registration keys.",
+    );
+  }
+  registrations.set(registrationKey, input.callback);
 }
 
 export function lookupDurableDynamicCallback(
   toolName: string,
   phase: DurableDynamicCallbackPhase,
+  registrationKey?: string,
+  owner?: string,
 ): DurableDynamicCallbackFn | undefined {
-  return getRegistry().get(toolName)?.get(phase);
+  if (owner !== undefined) {
+    const ownedRegistry = getOwnedRegistries().get(owner);
+    return ownedRegistry === undefined
+      ? undefined
+      : lookupInRegistry(ownedRegistry, toolName, phase, registrationKey);
+  }
+  return lookupInRegistry(getRegistry(), toolName, phase, registrationKey);
 }
 
 /** Invokes a registered callback with its snapshotted closure and live arguments. */
@@ -93,11 +166,17 @@ export function callDurableDynamicCallback(
 /** True when any persisted callback of these tools has no registered binding. */
 export function hasUnregisteredDurableDynamicCallbacks(
   metadata: readonly { callbacks: DurableDynamicToolCallbacks; name: string }[],
+  owner?: string,
 ): boolean {
   return metadata.some((entry) =>
-    (Object.keys(entry.callbacks) as DurableDynamicCallbackPhase[]).some(
-      (phase) => lookupDurableDynamicCallback(entry.name, phase) === undefined,
-    ),
+    (Object.keys(entry.callbacks) as DurableDynamicCallbackPhase[]).some((phase) => {
+      const reference = entry.callbacks[phase];
+      return (
+        reference?.registrationKey === undefined ||
+        lookupDurableDynamicCallback(entry.name, phase, reference.registrationKey, owner) ===
+          undefined
+      );
+    }),
   );
 }
 

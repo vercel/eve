@@ -4,6 +4,7 @@ import { replayDynamicTools } from "#context/build-dynamic-tools.js";
 import type { ContextContainer } from "#context/container.js";
 import type { ContextKey } from "#context/key.js";
 import {
+  SessionIdKey,
   SessionDynamicToolMetadataKey,
   SessionDynamicToolRuntimeRevisionKey,
   StepDynamicToolMetadataKey,
@@ -60,8 +61,9 @@ function qualifyDynamicToolNames(
 export function replayDynamicSessionTools(
   metadata: readonly DurableDynamicToolMetadata[],
   _resolvers: readonly ResolvedDynamicToolResolver[],
+  sessionId: string,
 ): readonly HarnessToolDefinition[] {
-  return replayDynamicTools(metadata);
+  return replayDynamicTools(metadata, sessionId);
 }
 
 function durableKeyForEvent(
@@ -106,7 +108,9 @@ function readDynamicToolResult(
 
 function validateReference(input: {
   readonly name: string;
+  readonly owner?: string;
   readonly phase: DurableDynamicCallbackPhase;
+  readonly registrationKey: string;
   readonly stamped: StampedDurableDynamicCallback | undefined;
   readonly required: boolean;
 }): DurableDynamicCallbackReference | undefined {
@@ -149,15 +153,19 @@ function validateReference(input: {
   }
   registerDurableDynamicCallback({
     callback: input.stamped.callback,
+    owner: input.owner,
     phase: input.phase,
+    registrationKey: input.registrationKey,
     toolName: input.name,
   });
-  return { closure };
+  return { closure, registrationKey: input.registrationKey };
 }
 
 export function validateDurableDynamicToolCallbacks(
   name: string,
   entry: DynamicToolEntry,
+  registrationKey = JSON.stringify(["standalone", name]),
+  owner?: string,
 ): DurableDynamicToolCallbacks {
   const raw = readDurableDynamicToolCallbacks(entry) ?? {};
   const unknownPhases = Object.keys(raw).filter(
@@ -180,25 +188,33 @@ export function validateDurableDynamicToolCallbacks(
     entry.approval.response !== undefined;
   const execute = validateReference({
     name,
+    owner,
     phase: "execute",
+    registrationKey,
     stamped: raw.execute,
     required: true,
   })!;
   const approvalRequest = validateReference({
     name,
+    owner,
     phase: "approvalRequest",
+    registrationKey,
     stamped: raw.approvalRequest,
     required: hasApproval,
   });
   const approvalResponse = validateReference({
     name,
+    owner,
     phase: "approvalResponse",
+    registrationKey,
     stamped: raw.approvalResponse,
     required: hasApprovalResponse,
   });
   const toModelOutput = validateReference({
     name,
+    owner,
     phase: "toModelOutput",
+    registrationKey,
     stamped: raw.toModelOutput,
     required: entry.toModelOutput !== undefined,
   });
@@ -219,10 +235,17 @@ function createMetadata(input: {
   readonly entry: DynamicToolEntry;
   readonly entryKey: string;
   readonly name: string;
+  readonly owner: string;
+  readonly registrationKey: string;
   readonly resolver: ResolvedDynamicToolResolver;
 }): DurableDynamicToolMetadata {
   return {
-    callbacks: validateDurableDynamicToolCallbacks(input.name, input.entry),
+    callbacks: validateDurableDynamicToolCallbacks(
+      input.name,
+      input.entry,
+      input.registrationKey,
+      input.owner,
+    ),
     description: input.entry.description,
     entryKey: input.entryKey,
     inputSchema: serializeInputSchema(input.entry.inputSchema),
@@ -230,6 +253,29 @@ function createMetadata(input: {
     outputSchema: serializeOutputSchema(input.entry.outputSchema),
     resolverSlug: input.resolver.slug,
   };
+}
+
+function durableRegistrationScope(
+  ctx: ContextContainer,
+  event: UnstampedMessageStreamEvent,
+): readonly [string, string, ...(number | string)[]] {
+  const sessionId = ctx.get(SessionIdKey);
+  if (typeof sessionId !== "string" || sessionId.length === 0) {
+    throw new Error("Cannot register dynamic tool callbacks without a session id.");
+  }
+  if (event.type === "session.started") return ["session", sessionId];
+
+  const data = ("data" in event ? event.data : undefined) as
+    | { readonly stepIndex?: unknown; readonly turnId?: unknown }
+    | undefined;
+  if (typeof data?.turnId !== "string" || data.turnId.length === 0) {
+    throw new Error(`Cannot register ${event.type} dynamic tool callbacks without a turn id.`);
+  }
+  if (event.type === "turn.started") return ["turn", sessionId, data.turnId];
+  if (event.type === "step.started" && typeof data.stepIndex === "number") {
+    return ["step", sessionId, data.turnId, data.stepIndex];
+  }
+  throw new Error("Cannot register step.started dynamic tool callbacks without a step index.");
 }
 
 interface ResolvedDynamicToolEvent {
@@ -250,9 +296,17 @@ async function resolveToolsFromEvent(
       if (rawResult === null || rawResult === undefined) return null;
       const { entries, isSingle } = readDynamicToolResult(resolver, rawResult);
       const named = qualifyDynamicToolNames(resolver, isSingle, entries);
+      const registrationScope = durableRegistrationScope(ctx, event);
       return {
         metadata: named.map(({ name, entryKey, entry }) =>
-          createMetadata({ entry, entryKey, name, resolver }),
+          createMetadata({
+            entry,
+            entryKey,
+            name,
+            owner: registrationScope[1],
+            registrationKey: JSON.stringify([...registrationScope, resolver.slug, entryKey, name]),
+            resolver,
+          }),
         ),
         resolver,
       };
@@ -366,8 +420,13 @@ export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
 }): Promise<void> {
   const revisionChanged =
     input.ctx.get(SessionDynamicToolRuntimeRevisionKey) !== input.runtimeRevision;
+  const sessionId = input.ctx.get(SessionIdKey);
+  if (typeof sessionId !== "string" || sessionId.length === 0) {
+    throw new Error("Cannot rebind dynamic tool callbacks without a session id.");
+  }
   const needsRebind = hasUnregisteredDurableDynamicCallbacks(
     input.ctx.get(SessionDynamicToolMetadataKey) ?? [],
+    sessionId,
   );
   if (!revisionChanged && !needsRebind) return;
   const matching = input.resolvers.filter((resolver) =>
