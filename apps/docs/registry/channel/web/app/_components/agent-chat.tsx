@@ -8,6 +8,7 @@ import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
+  ConversationTopFade,
 } from "@/components/ai-elements/conversation";
 import { Message, MessageContent } from "@/components/ai-elements/message";
 import {
@@ -142,6 +143,7 @@ export function AgentChat({
               : `eve:web-chat-scroll:${activeSessionId}`
           }
         >
+          <ConversationTopFade className="top-14" />
           <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-20 pb-36 sm:px-6">
             {agent.data.messages.map((message, index) =>
               showPendingThinking &&
