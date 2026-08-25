@@ -1,11 +1,11 @@
-import { z as z3 } from "zod/v3";
+import { z } from "zod";
 
 import { defineTool } from "#public/tools/index.js";
 
 export default defineTool({
   description: "Start a report.",
   execution: "background",
-  inputSchema: z3.object({ reportId: z3.string() }),
+  inputSchema: z.object({ reportId: z.string() }),
   execute(input, _ctx, task) {
     void Promise.resolve().then(() =>
       task.send({ data: { reportId: input.reportId }, kind: "complete" }),
