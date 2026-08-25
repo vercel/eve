@@ -5,7 +5,7 @@ import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
   actionIdempotencyKey,
   type InstrumentationAttemptScope,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
 import {
   abandonInstrumentationState,
   instrumentationStateSlot,
@@ -15,7 +15,7 @@ import {
   releaseAllInstrumentationAttemptState,
   releaseAllInstrumentationState,
   takeInstrumentationActionScopeForCall,
-} from "#harness/instrumentation/state.js";
+} from "#instrumentation/state.js";
 
 describe("instrumentation state", () => {
   it("survives a serialized step boundary", async () => {

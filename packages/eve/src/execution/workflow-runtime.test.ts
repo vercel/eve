@@ -11,7 +11,7 @@ import {
   workflowEntryReference,
 } from "#execution/workflow-runtime.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { registerInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
+import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";

@@ -1,5 +1,5 @@
-import { createInstrumentationDispatcher } from "#harness/instrumentation/dispatch.js";
-import type { InstrumentationStateSlot } from "#harness/instrumentation/state.js";
+import { createInstrumentationDispatcher } from "#instrumentation/dispatch.js";
+import type { InstrumentationStateSlot } from "#instrumentation/state.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 

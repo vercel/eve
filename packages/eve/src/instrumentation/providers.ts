@@ -1,9 +1,9 @@
-import type { InstrumentationProviderDefinition } from "#harness/instrumentation/lifecycle.js";
+import type { InstrumentationProviderDefinition } from "#instrumentation/lifecycle.js";
 import {
   getInstrumentationRuntime,
   type InstrumentationRuntime,
-} from "#harness/instrumentation/runtime.js";
-import { createInstrumentationSetupContext } from "#harness/instrumentation/setup-context.js";
+} from "#instrumentation/runtime.js";
+import { createInstrumentationSetupContext } from "#instrumentation/setup-context.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
 import { agentRuns, localTraces } from "#public/instrumentation/otel.js";

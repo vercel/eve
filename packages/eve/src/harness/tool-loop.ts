@@ -153,8 +153,8 @@ import {
   createInstrumentationHandleEvent,
   publishInputResolutions,
 } from "#harness/instrumentation/native-events.js";
-import type { InstrumentationAttemptScope } from "#harness/instrumentation/lifecycle.js";
-import { attemptIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+import type { InstrumentationAttemptScope } from "#instrumentation/lifecycle.js";
+import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { resolveParentLineage } from "#harness/parent-lineage.js";
 import { prepareTurnTraceContext } from "#harness/prepare-trace-context.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -176,7 +176,7 @@ import {
   dropStaleSessionLimitContinuationResponses,
 } from "#harness/stale-input-responses.js";
 import { getInstrumentationConfig } from "#harness/instrumentation/config.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
+import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
 import type { OtelHarnessSettings } from "#tracing/otel-declaration.js";
 import {
   normalizeModelMessages,

@@ -1,4 +1,4 @@
-import type { InstrumentationEvent } from "#harness/instrumentation/lifecycle.js";
+import type { InstrumentationEvent } from "#instrumentation/lifecycle.js";
 
 /** Returns an immutable event projection with conversation content removed. */
 export function withoutInstrumentationContent(event: InstrumentationEvent): InstrumentationEvent {

@@ -11,8 +11,8 @@ import type {
   InstrumentationChannelDeliveryOutcome,
   InstrumentationChannelDeliveryTerminalEvent,
   InstrumentationHooks,
-} from "#harness/instrumentation/lifecycle.js";
-import { channelDeliveryIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
+import { channelDeliveryIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { instrumentationHooksForAudience } from "#harness/instrumentation/content-policy.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 

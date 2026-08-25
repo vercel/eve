@@ -4,7 +4,7 @@ import {
   instrumentationHooksForAudience,
   shouldCaptureInstrumentationContent,
 } from "#harness/instrumentation/content-policy.js";
-import type { InstrumentationHooks } from "#harness/instrumentation/lifecycle.js";
+import type { InstrumentationHooks } from "#instrumentation/lifecycle.js";
 
 afterEach(() => {
   vi.unstubAllEnvs();

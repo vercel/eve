@@ -1,5 +1,5 @@
-import type { InstrumentationHooks } from "#harness/instrumentation/lifecycle.js";
-import { withoutInstrumentationContent } from "#harness/instrumentation/content.js";
+import type { InstrumentationHooks } from "#instrumentation/lifecycle.js";
+import { withoutInstrumentationContent } from "#instrumentation/content.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 

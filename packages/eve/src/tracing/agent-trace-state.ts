@@ -5,7 +5,7 @@ import type {
   InstrumentationTraceContext,
   InstrumentationTurnFailedEvent,
   InstrumentationTurnSettledEvent,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 
 export interface AgentSessionTraceState {

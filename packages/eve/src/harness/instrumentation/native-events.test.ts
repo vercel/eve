@@ -20,16 +20,13 @@ import {
   createInstrumentationHandleEvent,
   publishInputResolutions,
 } from "#harness/instrumentation/native-events.js";
-import type {
-  InstrumentationEvent,
-  InstrumentationHooks,
-} from "#harness/instrumentation/lifecycle.js";
+import type { InstrumentationEvent, InstrumentationHooks } from "#instrumentation/lifecycle.js";
 import {
   actionIdempotencyKey,
   inputIdempotencyKey,
   sessionIdempotencyKey,
   turnIdempotencyKey,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 
 describe("createInstrumentationHandleEvent", () => {

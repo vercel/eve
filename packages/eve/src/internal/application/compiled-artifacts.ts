@@ -516,9 +516,7 @@ function createInstrumentationPluginSource(input: {
     ].join("\n");
   }
 
-  const registerProviderPath = resolvePackageSourceFilePath(
-    "src/harness/instrumentation/providers.ts",
-  );
+  const registerProviderPath = resolvePackageSourceFilePath("src/instrumentation/providers.ts");
   const slots = Object.entries(input.layout.modulePathsBySlot);
 
   return [

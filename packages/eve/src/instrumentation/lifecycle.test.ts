@@ -15,12 +15,12 @@ import {
   type InstrumentationModelCallStartedEvent,
   type InstrumentationProviderDefinition,
   type InstrumentationToolCallCompletedEvent,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
 import {
   findInstrumentationActionScopeForCall,
   instrumentationStateSlot,
   rememberInstrumentationActionScope,
-} from "#harness/instrumentation/state.js";
+} from "#instrumentation/state.js";
 
 const { logWarn } = vi.hoisted(() => ({ logWarn: vi.fn() }));
 vi.mock("#internal/logging.js", () => ({

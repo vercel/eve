@@ -3,9 +3,9 @@ import type { RuntimeTraceContext } from "#protocol/message.js";
 import type {
   InstrumentationParentLineage,
   InstrumentationTraceContext,
-} from "#harness/instrumentation/lifecycle.js";
-import { sessionIdempotencyKey, turnIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
-import type { HarnessInstrumentation } from "#harness/instrumentation/runtime.js";
+} from "#instrumentation/lifecycle.js";
+import { sessionIdempotencyKey, turnIdempotencyKey } from "#instrumentation/lifecycle.js";
+import type { HarnessInstrumentation } from "#instrumentation/runtime.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { SessionTraceSeed } from "#context/keys.js";
 

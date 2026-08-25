@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { turnIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+import { turnIdempotencyKey } from "#instrumentation/lifecycle.js";
 import {
   EVE_EVALUATION_ENV_FLAG,
   EVE_EVALUATION_RUN_ID_ENV,
@@ -11,7 +11,7 @@ import {
   registerInstrumentationProvider,
   seedInstrumentationProviders,
   shutdownInstrumentationProviders,
-} from "#harness/instrumentation/providers.js";
+} from "#instrumentation/providers.js";
 import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { agentRuns, localTraces, otelIntegration } from "#public/instrumentation/otel.js";

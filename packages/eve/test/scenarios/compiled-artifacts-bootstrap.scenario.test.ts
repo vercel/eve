@@ -200,8 +200,7 @@ describe("writeCompiledArtifactsFiles", () => {
     // The plugin resolves the registry by absolute path while the assertion
     // resolves it by package alias, so this also proves the globalThis rooting
     // survives two module instances.
-    const { getInstrumentationProviders } =
-      await import("../../src/harness/instrumentation/providers.js");
+    const { getInstrumentationProviders } = await import("../../src/instrumentation/providers.js");
 
     expect((globalThis as Record<string, unknown>).__eveProviderSetups).toEqual([
       "local:compiled-artifacts-providers-test-agent",

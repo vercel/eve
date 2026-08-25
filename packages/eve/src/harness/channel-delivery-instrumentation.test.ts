@@ -6,7 +6,7 @@ import { instrumentChannelDelivery } from "#harness/channel-delivery-instrumenta
 import {
   createInstrumentationHooks,
   type InstrumentationEvent,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
 
 describe("channel delivery instrumentation", () => {
   it("projects only known content and redacts it from metadata providers", async () => {

@@ -34,7 +34,7 @@ import {
   type InstrumentationParentLineage,
   type InstrumentationTraceContext,
   type InstrumentationUsage,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import {
@@ -44,7 +44,7 @@ import {
   modelCallIdempotencyKey,
   sessionIdempotencyKey,
   turnIdempotencyKey,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
 
 interface TestRuntime {
   readonly exporter: InMemorySpanExporter;

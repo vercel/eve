@@ -1,7 +1,7 @@
 import {
   getInstrumentationRuntime,
   type InstrumentationRuntime,
-} from "#harness/instrumentation/runtime.js";
+} from "#instrumentation/runtime.js";
 import { installInstrumentationRuntime } from "#tracing/install-instrumentation-runtime.js";
 import { createLocalTracesProcessor, resolveLocalTracesContent } from "#tracing/local-traces.js";
 import {

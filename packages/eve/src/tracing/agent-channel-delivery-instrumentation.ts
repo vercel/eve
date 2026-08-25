@@ -14,8 +14,8 @@ import type {
   InstrumentationHandlerContext,
   InstrumentationProviderDefinition,
   InstrumentationSessionStartedEvent,
-} from "#harness/instrumentation/lifecycle.js";
-import { sessionIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
+import { sessionIdempotencyKey } from "#instrumentation/lifecycle.js";
 import type { JsonValue } from "#shared/json.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";

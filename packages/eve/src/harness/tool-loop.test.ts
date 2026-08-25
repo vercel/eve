@@ -68,7 +68,7 @@ import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harn
 import {
   createInstrumentationHooks,
   type InstrumentationContextRunner,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
 import {
   CONDITIONAL_DELIVERY_INSTRUCTION,
   EMPTY_DELIVERY_SENTINEL,
@@ -119,7 +119,7 @@ vi.mock("./instrumentation/config.js", () => ({
 }));
 
 const mockGetInstrumentationRuntime = vi.fn().mockReturnValue(undefined);
-vi.mock("./instrumentation/runtime.js", () => ({
+vi.mock("#instrumentation/runtime.js", () => ({
   getInstrumentationRuntime: (...args: unknown[]) => mockGetInstrumentationRuntime(...args),
 }));
 

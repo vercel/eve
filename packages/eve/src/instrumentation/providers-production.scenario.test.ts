@@ -5,7 +5,7 @@ import {
   getInstrumentationProviders,
   registerInstrumentationProvider,
   seedInstrumentationProviders,
-} from "#harness/instrumentation/providers.js";
+} from "#instrumentation/providers.js";
 import { localTraces } from "#public/instrumentation/otel.js";
 
 afterEach(() => {

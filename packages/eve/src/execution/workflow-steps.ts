@@ -42,8 +42,8 @@ import {
   channelDeliveryErrorCode,
   instrumentChannelDelivery,
 } from "#harness/channel-delivery-instrumentation.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
-import { preserveSerializedInstrumentationState } from "#harness/instrumentation/state.js";
+import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
+import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";

@@ -45,8 +45,8 @@ import type {
   InstrumentationSessionTransitionEvent,
   InstrumentationTurnStartedEvent,
   InstrumentationTurnTerminalEvent,
-} from "#harness/instrumentation/lifecycle.js";
-import { attemptIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
+import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 
 interface SpanState {
   readonly context: Context;

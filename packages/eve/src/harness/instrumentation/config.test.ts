@@ -71,7 +71,7 @@ describe("instrumentation-config chunk-isolation regression", () => {
 
   it("installs harness telemetry settings on the instrumentation runtime", async () => {
     const { registerInstrumentationConfig } = await import("#harness/instrumentation/config.js");
-    const { getInstrumentationRuntime } = await import("#harness/instrumentation/runtime.js");
+    const { getInstrumentationRuntime } = await import("#instrumentation/runtime.js");
 
     await registerInstrumentationConfig(
       {
@@ -93,7 +93,7 @@ describe("instrumentation-config chunk-isolation regression", () => {
 
   it("disables input and output recording by default", async () => {
     const { registerInstrumentationConfig } = await import("#harness/instrumentation/config.js");
-    const { getInstrumentationRuntime } = await import("#harness/instrumentation/runtime.js");
+    const { getInstrumentationRuntime } = await import("#instrumentation/runtime.js");
 
     await registerInstrumentationConfig({}, { agentName: "test-agent" });
 

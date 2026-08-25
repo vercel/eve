@@ -4,7 +4,7 @@ import type {
   InstrumentationSessionStartedEvent,
   InstrumentationTraceContext,
   InstrumentationTurnStartedEvent,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { OtelHarnessSettings, RuntimeContextResolver } from "#tracing/otel-declaration.js";
 

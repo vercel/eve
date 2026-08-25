@@ -12,8 +12,8 @@ import type {
   InstrumentationActionStartedEvent,
   InstrumentationToolCallStartedEvent,
   InstrumentationToolCallTerminalEvent,
-} from "#harness/instrumentation/lifecycle.js";
-import { actionIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
+import { actionIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { AgentActionContext } from "#tracing/agent-action-instrumentation.js";
