@@ -61,8 +61,8 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
 
 ### What the Workflow SDK owns
 
-- `"use workflow"` as the first statement of `execute` makes it a durable body. eve hoists the
-  method into a workflow function named after the tool. You can also write the body as a top-level
+- `"use workflow"` as the first statement of `execute`, on its own line, makes it a durable body.
+  eve hoists the method into a workflow function named after the tool. You can also write the body as a top-level
   `async function` and reference it: `execute: deploy`.
 - `"use step"` marks a top-level `async function` in the tool module, or in any module it imports,
   as a step. Steps run in your app runtime with Node.js and `process.env`; they retry on failure and
