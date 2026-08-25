@@ -107,7 +107,7 @@ export type DispatchStartTarget =
       readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
     };
 
-/** Input contract shared by both dispatch steps so the turn workflow can select either. */
+/** Input contract for the single runtime-action dispatch step. */
 export interface RuntimeActionDispatchInput {
   readonly callbackBaseUrl?: string;
   /** Internal hook that receives child completion and HITL payloads. */
@@ -118,9 +118,9 @@ export interface RuntimeActionDispatchInput {
 }
 
 /**
- * Result contract shared by both dispatch steps. `pendingTasks` is
- * always empty in plain mode; keeping it on both keeps the turn
- * workflow's acknowledgement call site uniform.
+ * Result contract shared by the blocking and task-backed lifecycle helpers.
+ * `pendingTasks` is always empty in blocking mode so the turn workflow keeps
+ * one acknowledgement call site.
  */
 export interface RuntimeActionDispatchResult {
   readonly results: readonly RuntimeActionResult[];
@@ -132,7 +132,7 @@ export interface RuntimeActionDispatchResult {
   }[];
 }
 
-/** Everything preflight produces before either step's dispatch loop runs. */
+/** Everything preflight produces before either lifecycle dispatch loop runs. */
 export interface PreparedRuntimeActionDispatch {
   readonly adapter: ChannelAdapter;
   readonly adapterCtx: ChannelAdapterContext;

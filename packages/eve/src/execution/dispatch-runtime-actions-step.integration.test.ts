@@ -23,6 +23,7 @@ import type { HarnessSession } from "#harness/types.js";
 import { getSessionTaskIndex } from "#tasks/session-index.js";
 import { recordSessionTask } from "#tasks/session-index.js";
 import * as taskRunControl from "#execution/tasks/parent/run-parent.js";
+import * as taskDispatch from "#execution/tasks/parent/dispatch.js";
 import {
   AuthKey,
   CapabilitiesKey,
@@ -423,7 +424,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     expect(mocks.createSession).not.toHaveBeenCalled();
   });
 
-  it("records a tasks-mode child as an address and derives task identity separately", async () => {
+  it("replays a persisted task-mode start batch through the unified entry", async () => {
     const session = createStartSession({ kind: "local" });
     installContext(
       session,
@@ -472,7 +473,44 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     ]);
   });
 
-  it("silently rejects a tasks-mode start that failed before index admission", async () => {
+  it("executes task controls through the unified dispatch entry", async () => {
+    const session = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-cancel",
+          input: { taskIds: ["task-1"] },
+          kind: "tool-call",
+          toolName: "task_cancel",
+        },
+      ],
+      event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
+      responseMessages: [],
+      session: createBaseSession(),
+    });
+    installContext(session, undefined, true);
+    const result = {
+      callId: "call-cancel",
+      isError: false,
+      kind: "tool-result",
+      output: { tasks: [] },
+      toolName: "task_cancel",
+    } as const;
+    vi.spyOn(taskDispatch, "executeTaskControlAction").mockResolvedValue({ result, session });
+
+    const dispatched = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(taskDispatch.executeTaskControlAction).toHaveBeenCalledWith(
+      expect.objectContaining({ action: expect.objectContaining({ toolName: "task_cancel" }) }),
+    );
+    expect(dispatched.results).toEqual([result]);
+  });
+
+  it("rejects a persisted task-mode start that failed before index admission", async () => {
     const session = createStartSession({ kind: "local" });
     installContext(
       session,
@@ -755,7 +793,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
 });
 
 describe("dispatchRuntimeActionsStep agent delivery", () => {
-  it("rejects a tasks-mode continuation while the addressed agent has active work", async () => {
+  it("rejects a persisted task-mode continuation while the addressed agent has active work", async () => {
     const addressedHandle: AgentHandle = {
       address: LOCAL_PARKED_HANDLE.address,
       identity: LOCAL_PARKED_HANDLE.identity,
@@ -805,7 +843,7 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
     expect(mocks.startWorkflowPreferLatest).not.toHaveBeenCalled();
   });
 
-  it("passes the active turn principal to a tasks-mode continuation", async () => {
+  it("passes the active turn principal to a persisted task-mode continuation", async () => {
     const addressedHandle: AgentHandle = {
       address: LOCAL_PARKED_HANDLE.address,
       identity: LOCAL_PARKED_HANDLE.identity,

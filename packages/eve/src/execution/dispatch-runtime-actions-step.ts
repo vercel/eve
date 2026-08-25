@@ -56,8 +56,8 @@ export async function dispatchRuntimeActionsStep(
         continue;
       }
       if (entry.kind === "task-control") {
-        // Unreachable: the plan was built with `taskControls: false`.
-        throw new Error("Task-control actions require the task dispatch step.");
+        // Unreachable: task-mode plans return through dispatchTaskActions.
+        throw new Error("Task-control actions require task-mode dispatch.");
       }
 
       let outcome: DispatchOutcome;
