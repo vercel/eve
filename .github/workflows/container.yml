@@ -24,9 +24,9 @@ env:
   GHCR_REGISTRY: ghcr.io
   GHCR_IMAGE_NAME: vercel/eve
   VCR_REGISTRY: vcr.vercel.com
-  VCR_PROJECT_SLUG: eve-e2e
-  VCR_REPOSITORY: eve
-  VCR_TEAM_SLUG: curated-tests
+  VCR_PROJECT_SLUG: eve
+  VCR_REPOSITORY: base
+  VCR_TEAM_SLUG: vercel
 
 jobs:
   build:
@@ -97,10 +97,10 @@ jobs:
       - name: Validate VCR configuration
         if: github.event_name != 'pull_request'
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          EVE_VERCEL_IMAGE_TOKEN: ${{ secrets.EVE_VERCEL_IMAGE_TOKEN }}
         run: |
           missing=0
-          for name in VERCEL_TOKEN; do
+          for name in EVE_VERCEL_IMAGE_TOKEN; do
             if [ -z "${!name}" ]; then
               echo "::error::${name} must be configured to publish to VCR."
               missing=1
@@ -111,12 +111,12 @@ jobs:
       - name: Link Vercel project and pull OIDC token
         if: github.event_name != 'pull_request'
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          EVE_VERCEL_IMAGE_TOKEN: ${{ secrets.EVE_VERCEL_IMAGE_TOKEN }}
         run: |
           set -euo pipefail
 
-          pnpm dlx vercel@58.4.4 link --yes --project "$VCR_PROJECT_SLUG" --team "$VCR_TEAM_SLUG" --token "$VERCEL_TOKEN"
-          pnpm dlx vercel@58.4.4 env pull --yes --environment=preview --token "$VERCEL_TOKEN"
+          pnpm dlx vercel@58.4.4 link --yes --project "$VCR_PROJECT_SLUG" --team "$VCR_TEAM_SLUG" --token "$EVE_VERCEL_IMAGE_TOKEN"
+          pnpm dlx vercel@58.4.4 env pull --yes --environment=preview --token "$EVE_VERCEL_IMAGE_TOKEN"
 
           oidc_token="$(node -e '
             const fs = require("node:fs");
