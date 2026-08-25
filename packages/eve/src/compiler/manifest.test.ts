@@ -58,6 +58,7 @@ describe("compiled agent manifest v42", () => {
               method: "GET",
               source: {
                 backing: { kind: "resource", sourcePath: "/virtual/channels/loser.ts" },
+                form: "authored",
                 layer: "application",
                 logicalPath: "channels/loser.ts",
                 owner: { kind: "application" },

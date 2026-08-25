@@ -5,12 +5,20 @@ import {
   normalizeLogicalPath,
   stripLogicalPathExtension,
 } from "#discover/filesystem.js";
+import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 export type ProgrammaticModuleNamespace = Readonly<Record<string, unknown>>;
 
+export interface ProgrammaticModuleLoadContext {
+  readonly dependencies: Readonly<Record<string, ProgrammaticModuleNamespace>>;
+  readonly parameters: JsonObject;
+}
+
 export interface ProgrammaticAgentModule {
   readonly exportName?: string;
-  readonly loadNamespace: () => Promise<ProgrammaticModuleNamespace>;
+  readonly loadNamespace: (
+    context: ProgrammaticModuleLoadContext,
+  ) => Promise<ProgrammaticModuleNamespace>;
   readonly logicalPath: string;
   readonly semanticRevision?: string;
 }
@@ -26,9 +34,14 @@ export interface AgentSourceRegistration {
   readonly source: ProgrammaticAgentSource;
 }
 
+export interface AgentSourceRegistryOptions {
+  readonly templates?: readonly ProgrammaticAgentSource[];
+}
+
 export interface AgentSourceRegistry {
   readonly registrations: readonly AgentSourceRegistration[];
   readonly sources: ReadonlyMap<string, ProgrammaticAgentSource>;
+  readonly templates: ReadonlyMap<string, ProgrammaticAgentSource>;
 }
 
 class ImmutableProgrammaticSourceMap implements ReadonlyMap<string, ProgrammaticAgentSource> {
@@ -98,6 +111,8 @@ export type AgentSourceLayer =
   | "extension-override"
   | "application";
 
+export type AgentSourceForm = "derived" | "authored";
+
 export type AgentModuleBacking =
   | {
       readonly externalDependencies: readonly string[];
@@ -109,8 +124,10 @@ export type AgentModuleBacking =
       readonly sourcePath: string;
     }
   | {
+      readonly dependencies?: Readonly<Record<string, string>>;
       readonly kind: "programmatic";
       readonly moduleId: string;
+      readonly parameters?: JsonObject;
       readonly registryId: string;
       readonly revision: string;
       readonly semanticRevision?: string;
@@ -126,6 +143,7 @@ export type AgentSourceBacking =
 export interface AgentModuleCandidate {
   readonly backing: AgentModuleBacking;
   readonly exportName?: string;
+  readonly form: AgentSourceForm;
   readonly layer: AgentSourceLayer;
   readonly logicalPath: string;
   readonly nodeId: string;
@@ -141,6 +159,7 @@ export interface CompiledModuleBinding {
 
 export interface AgentSourceDescriptor {
   readonly backing: AgentSourceBacking;
+  readonly form: AgentSourceForm;
   readonly layer: AgentSourceLayer;
   readonly logicalPath: string;
   readonly owner: AgentSourceOwner;
@@ -149,6 +168,7 @@ export interface AgentSourceDescriptor {
 
 export interface AgentResourceCandidate {
   readonly backing: Extract<AgentSourceBacking, { readonly kind: "resource" }>;
+  readonly form: AgentSourceForm;
   readonly layer: AgentSourceLayer;
   readonly logicalPath: string;
   readonly nodeId: string;
@@ -185,6 +205,11 @@ const LAYER_PRECEDENCE: Readonly<Record<AgentSourceLayer, number>> = {
   application: 3,
 };
 
+const FORM_PRECEDENCE: Readonly<Record<AgentSourceForm, number>> = {
+  derived: 0,
+  authored: 1,
+};
+
 export function defineProgrammaticAgentSource(
   input: ProgrammaticAgentSource,
 ): ProgrammaticAgentSource {
@@ -219,21 +244,31 @@ export function defineProgrammaticAgentSource(
 
 export function createAgentSourceRegistry(
   registrations: readonly AgentSourceRegistration[],
+  options: AgentSourceRegistryOptions = {},
 ): AgentSourceRegistry {
   const sources = new Map<string, ProgrammaticAgentSource>();
-  const frozenRegistrations = registrations.map((registration) => {
-    const source = defineProgrammaticAgentSource(registration.source);
-    const existing = sources.get(source.id);
-    if (existing !== undefined) {
+  const templates = new Map<string, ProgrammaticAgentSource>();
+  const addSource = (inputSource: ProgrammaticAgentSource): ProgrammaticAgentSource => {
+    const source = defineProgrammaticAgentSource(inputSource);
+    if (sources.has(source.id)) {
       throw new Error(`Programmatic agent source id "${source.id}" is registered more than once.`);
     }
     sources.set(source.id, source);
+    return source;
+  };
+  const frozenRegistrations = registrations.map((registration) => {
+    const source = addSource(registration.source);
     return Object.freeze({ applyTo: registration.applyTo, source });
   });
+  for (const inputTemplate of options.templates ?? []) {
+    const template = addSource(inputTemplate);
+    templates.set(template.id, template);
+  }
 
   return Object.freeze({
     registrations: Object.freeze(frozenRegistrations),
     sources: new ImmutableProgrammaticSourceMap(sources),
+    templates: new ImmutableProgrammaticSourceMap(templates),
   });
 }
 
@@ -254,12 +289,72 @@ export function createProgrammaticModuleCandidates(input: {
         semanticRevision: module.semanticRevision,
       }),
       exportName: module.exportName,
+      form: "authored" as const,
       layer: input.layer,
       logicalPath: module.logicalPath,
       nodeId: input.nodeId,
       owner: input.owner,
       sourceId,
     });
+  });
+}
+
+export function createDerivedProgrammaticModuleCandidate(input: {
+  readonly dependencies: Readonly<Record<string, AgentModuleCandidate>>;
+  readonly layer: AgentSourceLayer;
+  readonly logicalPath: string;
+  readonly nodeId: string;
+  readonly owner: AgentSourceOwner;
+  readonly parameters?: JsonObject;
+  readonly sourceId: string;
+  readonly template: {
+    readonly moduleId: string;
+    readonly source: ProgrammaticAgentSource;
+  };
+}): AgentModuleCandidate {
+  const sourceId = expectNonEmpty(input.sourceId, "Derived programmatic module source id");
+  const logicalPath = validateProgrammaticLogicalPath(input.logicalPath);
+  const source = defineProgrammaticAgentSource(input.template.source);
+  const moduleId = validateProgrammaticLogicalPath(input.template.moduleId);
+  const module = source.modules.find((candidate) => candidate.logicalPath === moduleId);
+  if (module === undefined) {
+    throw new Error(
+      `Programmatic source "${source.id}" does not register template module "${moduleId}".`,
+    );
+  }
+  const dependencies = Object.freeze(
+    Object.fromEntries(
+      Object.entries(input.dependencies)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([alias, candidate]) => {
+          expectNonEmpty(alias, "Derived programmatic module dependency alias");
+          if (candidate.nodeId !== input.nodeId) {
+            throw new Error(
+              `Derived programmatic module "${sourceId}" cannot depend on source "${candidate.sourceId}" from another node.`,
+            );
+          }
+          return [alias, candidate.sourceId];
+        }),
+    ),
+  );
+  const parameters = Object.freeze(parseJsonObject(input.parameters ?? {}));
+  return Object.freeze({
+    backing: Object.freeze({
+      dependencies,
+      kind: "programmatic" as const,
+      moduleId,
+      parameters,
+      registryId: source.id,
+      revision: source.revision,
+      semanticRevision: module.semanticRevision,
+    }),
+    exportName: module.exportName,
+    form: "derived" as const,
+    layer: input.layer,
+    logicalPath,
+    nodeId: input.nodeId,
+    owner: input.owner,
+    sourceId,
   });
 }
 
@@ -288,18 +383,21 @@ export function composeAgentModuleCandidates(
   for (const [slot, slotCandidates] of [...candidatesBySlot].sort(([left], [right]) =>
     left.localeCompare(right),
   )) {
-    const seenLayers = new Set<AgentSourceLayer>();
+    const seenPrecedence = new Set<string>();
     for (const candidate of slotCandidates) {
-      if (seenLayers.has(candidate.layer)) {
+      const precedence = `${candidate.layer}:${candidate.form}`;
+      if (seenPrecedence.has(precedence)) {
         throw new Error(
-          `Agent source slot "${slot}" has more than one ${candidate.layer} candidate.`,
+          `Agent source slot "${slot}" has more than one ${candidate.layer} ${candidate.form} candidate.`,
         );
       }
-      seenLayers.add(candidate.layer);
+      seenPrecedence.add(precedence);
     }
 
     const ordered = [...slotCandidates].sort(
-      (left, right) => LAYER_PRECEDENCE[right.layer] - LAYER_PRECEDENCE[left.layer],
+      (left, right) =>
+        LAYER_PRECEDENCE[right.layer] - LAYER_PRECEDENCE[left.layer] ||
+        FORM_PRECEDENCE[right.form] - FORM_PRECEDENCE[left.form],
     );
     const winner = ordered[0]!;
     selected.set(slot, winner);
@@ -312,6 +410,8 @@ export function composeAgentModuleCandidates(
       });
     }
   }
+
+  validateSelectedCandidateDependencies(selected);
 
   return {
     composition: { entries: Object.freeze(entries) },
@@ -360,6 +460,7 @@ export function createCompiledModuleBinding(
 
 export async function loadProgrammaticModuleNamespace(input: {
   readonly backing: Extract<AgentModuleBacking, { readonly kind: "programmatic" }>;
+  readonly dependencyNamespaces?: Readonly<Record<string, ProgrammaticModuleNamespace>>;
   readonly registries: readonly AgentSourceRegistry[];
 }): Promise<ProgrammaticModuleNamespace> {
   const matchingSources = input.registries
@@ -389,7 +490,21 @@ export async function loadProgrammaticModuleNamespace(input: {
       `Programmatic module "${source.id}:${module.logicalPath}" semantic revision does not match the compiled binding.`,
     );
   }
-  const namespace = await module.loadNamespace();
+  const dependencies = Object.fromEntries(
+    Object.entries(input.backing.dependencies ?? {}).map(([alias, sourceId]) => {
+      const namespace = input.dependencyNamespaces?.[alias];
+      if (namespace === undefined) {
+        throw new Error(
+          `Programmatic module "${source.id}:${module.logicalPath}" requires unresolved binding "${sourceId}" as dependency "${alias}".`,
+        );
+      }
+      return [alias, namespace];
+    }),
+  );
+  const namespace = await module.loadNamespace({
+    dependencies: Object.freeze(dependencies),
+    parameters: Object.freeze(input.backing.parameters ?? {}),
+  });
   if (namespace === null || typeof namespace !== "object") {
     throw new Error(
       `Programmatic module "${source.id}:${module.logicalPath}" loader must return a module namespace object.`,
@@ -476,11 +591,28 @@ export function describeAgentSourceCandidate(
 ): AgentSourceDescriptor {
   return Object.freeze({
     backing: candidate.backing,
+    form: candidate.form,
     layer: candidate.layer,
     logicalPath: candidate.logicalPath,
     owner: candidate.owner,
     sourceId: candidate.sourceId,
   });
+}
+
+function validateSelectedCandidateDependencies(
+  selected: ReadonlyMap<string, AgentSourceCandidate>,
+): void {
+  const selectedSourceIds = new Set([...selected.values()].map((candidate) => candidate.sourceId));
+  for (const candidate of selected.values()) {
+    if (candidate.backing.kind !== "programmatic") continue;
+    for (const sourceId of Object.values(candidate.backing.dependencies ?? {})) {
+      if (!selectedSourceIds.has(sourceId)) {
+        throw new Error(
+          `Derived programmatic source "${candidate.sourceId}" depends on unselected source "${sourceId}".`,
+        );
+      }
+    }
+  }
 }
 
 function expectNonEmpty(value: string, label: string): string {

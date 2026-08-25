@@ -204,6 +204,7 @@ export function createFilesystemModuleCandidate(input: {
   return {
     backing,
     exportName: input.source.exportName,
+    form: "authored",
     layer: input.layer,
     logicalPath: input.logicalPath,
     nodeId: input.nodeId,
@@ -272,6 +273,7 @@ function projectManifest(input: {
             ? source.skillFilePath
             : join(input.manifest.agentRoot, source.logicalPath),
       },
+      form: "authored",
       layer: input.layer,
       logicalPath,
       nodeId: input.nodeId,
@@ -333,6 +335,7 @@ function projectManifest(input: {
     };
     const candidate: AgentResourceCandidate = {
       backing: { kind: "resource", sourcePath: source.entryPath },
+      form: "authored",
       layer: input.layer,
       logicalPath,
       nodeId: input.nodeId,

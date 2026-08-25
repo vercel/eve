@@ -79,7 +79,14 @@ async function hydrateCompiledNodeScope(
     try {
       modules[sourceId] =
         binding.backing.kind === "programmatic"
-          ? await loadFrameworkProgrammaticModule(binding.backing)
+          ? await loadFrameworkProgrammaticModule(
+              binding.backing,
+              Object.fromEntries(
+                Object.entries(binding.backing.dependencies ?? {}).map(
+                  ([alias, dependencySourceId]) => [alias, modules[dependencySourceId]!],
+                ),
+              ),
+            )
           : await loadAuthoredModuleNamespace(binding.backing.sourcePath, {
               externalDependencies: binding.backing.externalDependencies,
               extensionScopeNamespace: resolveCompiledModuleExtensionScopeNamespace(binding),
