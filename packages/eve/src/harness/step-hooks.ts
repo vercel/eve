@@ -31,7 +31,7 @@ import {
   mergeGatewayAutoCaching,
   type PromptCachePath,
 } from "#harness/prompt-cache.js";
-import { mergeOpenAISafetyIdentifier } from "#harness/openai-safety.js";
+import { mergeProviderSafetyIdentifier } from "#harness/provider-safety.js";
 import { createRuntimeActionRequestFromToolCall } from "#harness/runtime-actions.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
@@ -183,7 +183,7 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
     };
 
     const modelReference = requireSessionModelReference(session);
-    const providerOptions = mergeOpenAISafetyIdentifier(
+    const providerOptions = mergeProviderSafetyIdentifier(
       modelReference,
       modelReference.providerOptions,
       input.auth,

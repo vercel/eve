@@ -244,7 +244,7 @@ import {
   isInvalidToolCall,
 } from "#harness/tool-call-input-errors.js";
 import { buildStepHooks, emitStepActions, type HarnessStepResult } from "#harness/step-hooks.js";
-import { mergeOpenAISafetyIdentifier } from "#harness/openai-safety.js";
+import { mergeProviderSafetyIdentifier } from "#harness/provider-safety.js";
 import {
   buildToolApproval,
   buildToolSetFromDefinitions,
@@ -3288,7 +3288,7 @@ async function maybeCompact(input: {
   });
   const compactionModelReference =
     session.agent.compactionModelReference ?? requireSessionModelReference(session);
-  const providerOptions = mergeOpenAISafetyIdentifier(
+  const providerOptions = mergeProviderSafetyIdentifier(
     compactionModelReference,
     compaction.providerOptions,
     input.auth,
