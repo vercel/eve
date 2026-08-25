@@ -9,6 +9,7 @@ import {
   type AgentSourceRegistry,
   type CompiledModuleBinding,
   type AgentSourceOwner,
+  type ProgrammaticModuleNamespace,
 } from "#compiler/source-graph.js";
 import type { CompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
 
@@ -59,6 +60,7 @@ export function requireModuleBackedDefinitionLoadOptions(
  */
 export async function loadModuleBackedDefinition(input: {
   readonly binding: CompiledModuleBinding;
+  readonly dependencyNamespaces?: Readonly<Record<string, ProgrammaticModuleNamespace>>;
   readonly displayPath?: string;
   readonly kind: string;
   readonly loadNamespace: CompiledBindingNamespaceLoader;

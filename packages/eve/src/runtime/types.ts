@@ -39,6 +39,7 @@ import type { SandboxBackend } from "#shared/sandbox-backend.js";
 import type { SandboxBootstrapContext, SandboxSessionContext } from "#shared/sandbox-definition.js";
 import type { ToolSchema } from "#tools/schema.js";
 import type { AgentSourceOwner } from "#compiler/source-graph.js";
+import type { MemoryDefinition } from "#public/memory/index.js";
 
 /**
  * Runtime-owned source ref describing one additive config module import.
@@ -363,12 +364,21 @@ export interface ResolvedDynamicToolResolver extends Readonly<ModuleSourceRef> {
   readonly events: Readonly<
     Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
   >;
+  readonly rebindMissingCallbacks?: boolean;
   /**
    * Mount namespace when this resolver comes from an extension. Names of tools
    * the resolver produces are prefixed with `${extensionNamespace}__`.
    */
   readonly extensionNamespace?: string;
 }
+
+export type ResolvedMemoryDefinition = Readonly<
+  MemoryDefinition &
+    ModuleSourceRef & {
+      readonly slot: string;
+      readonly visibility: "scope" | "session";
+    }
+>;
 
 /**
  * Runtime resolver for dynamic skills declared via `defineDynamic({ events })`
@@ -437,6 +447,7 @@ export interface ResolvedAgent {
    */
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
   readonly hooks: readonly ResolvedHookDefinition[];
+  readonly memories: readonly ResolvedMemoryDefinition[];
   readonly skills: readonly ResolvedSkillDefinition[];
   readonly tools: readonly ResolvedToolDefinition[];
   readonly workspaceSpec: WorkspaceRuntimeSpec;

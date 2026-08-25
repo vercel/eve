@@ -57,6 +57,64 @@ function applicationOwnedEntries<TEntry extends { readonly sourceId: string }>(
 }
 
 describe("compiler artifacts", () => {
+  it("loads the selected memory and derived wrapper from a generated map in a fresh process", async () => {
+    const { agentRoot, appRoot } = await createAppRoot(
+      "eve-compiler-memory-wrapper-",
+      APP_ROOT_OPTIONS,
+    );
+    await mkdir(join(agentRoot, "memory"), { recursive: true });
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
+    await writeFile(join(agentRoot, "instructions.md"), "Remember durable preferences.");
+    await writeFile(
+      join(agentRoot, "memory", "profile.mjs"),
+      [
+        'import { defineMemory } from "eve/memory";',
+        'import { defineTool } from "eve/tools";',
+        "export default defineMemory({",
+        '  scope: "user_1",',
+        "  provider: {",
+        '    recall: async () => ({ messages: [{ id: "profile", content: "Likes tea" }] }),',
+        "    tools: async () => ({",
+        '      save: defineTool({ description: "Save profile.", inputSchema: {}, execute: async () => null }),',
+        "    }),",
+        "  },",
+        "});",
+        "",
+      ].join("\n"),
+    );
+
+    const compiled = await compileAgent({ startPath: appRoot });
+    const memory = compiled.manifest.memories[0]!;
+    const wrapper = compiled.manifest.dynamicTools.find((entry) => entry.slug === "profile")!;
+    const script = [
+      "const loaded = await import(process.argv[1]);",
+      "const modules = loaded.default.nodes.__root__.modules;",
+      "const memory = modules[process.argv[2]];",
+      "const wrapper = modules[process.argv[3]];",
+      "console.log(JSON.stringify({",
+      '  memory: typeof memory.default === "object",',
+      '  wrapper: typeof wrapper.default?.events?.["turn.started"] === "function",',
+      "}));",
+    ].join("\n");
+    const loaded = await runFile(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        script,
+        compiled.paths.moduleMapPath,
+        memory.sourceId,
+        wrapper.sourceId,
+      ],
+      { cwd: appRoot },
+    );
+
+    expect(JSON.parse(loaded.stdout)).toEqual({ memory: true, wrapper: true });
+  });
+
   it("uses the framework default model when agent.ts is omitted", async () => {
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-compiler-default-model-",
@@ -198,7 +256,7 @@ describe("compiler artifacts", () => {
           sourceId: "instructions.md",
         },
       ],
-      version: 14,
+      version: 15,
     });
     const compiledArtifact = normalizeArtifactValue(
       JSON.parse(compiledManifestText) as CompiledAgentManifest,

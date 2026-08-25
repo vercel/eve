@@ -34,7 +34,7 @@ The default eve channel inspects the agent, creates sessions, accepts callbacks 
 
 The session routes use only durable session IDs. Create a session explicitly, then put its returned ID in every follow-up, control, and stream path.
 
-`GET /eve/v1/health` is public and returns `{ ok: true, status: "ready", workflowId: string }`. `GET /eve/v1/info` uses the channel's auth policy and returns agent-info version 3. The TypeScript client validates both successful payloads: malformed health JSON throws `HealthResponseError`, malformed inspection JSON throws `AgentInfoResponseError`, and a non-success response from either route throws `ClientError`.
+`GET /eve/v1/health` is public and returns `{ ok: true, status: "ready", workflowId: string }`. `GET /eve/v1/info` uses the channel's auth policy and returns agent-info version 4. The TypeScript client validates both successful payloads: malformed health JSON throws `HealthResponseError`, malformed inspection JSON throws `AgentInfoResponseError`, and a non-success response from either route throws `ClientError`.
 
 ### Start and continue a session
 

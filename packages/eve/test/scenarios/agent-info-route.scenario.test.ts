@@ -83,7 +83,7 @@ describe("eve agent info route", () => {
     const payload = (await response.json()) as AgentInfoResponse;
 
     expect(payload.kind).toBe("eve-agent-info");
-    expect(payload.version).toBe(3);
+    expect(payload.version).toBe(4);
     expect(payload.mode).toBe("development");
     expect(payload.agent.model.id).toBe("openai/gpt-5.4");
     expect(payload.instructions.static[0]?.content).toContain("precise assistant");

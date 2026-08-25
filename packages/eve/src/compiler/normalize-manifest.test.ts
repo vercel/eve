@@ -19,6 +19,7 @@ import { defineAgent } from "#public/definitions/agent.js";
 import { defineChannel, GET, POST } from "#public/definitions/channel.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineTool, disableTool } from "#tools/definition.js";
+import { defineMemory } from "#public/memory/index.js";
 
 function manifest() {
   return createAgentSourceManifest({
@@ -55,7 +56,9 @@ describe("compileAgentManifest source graph", () => {
       {
         logicalPath: "agent.ts",
         loadNamespace: async () => ({
-          default: defineAgent({ model: "openai/gpt-5.4" }),
+          default: defineAgent({
+            model: "openai/gpt-5.4",
+          }),
         }),
       },
       {
@@ -366,6 +369,132 @@ describe("compileAgentManifest source graph", () => {
       sourceId: "test:application:hooks/auth/guard.ts",
       sourceKind: "module",
     });
+  });
+
+  it("compiles a selected memory and its provider-tool wrapper through total bindings", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "memory/profile.ts",
+        loadNamespace: async () => ({
+          default: defineMemory({
+            description: "Manage the caller profile.",
+            provider: {
+              recall: async () => ({ messages: [{ content: "Likes tea", id: "drink" }] }),
+              tools: async () => ({
+                save: defineTool({
+                  description: "Save a profile field.",
+                  execute: async () => ({ saved: true }),
+                  inputSchema: { type: "object" },
+                }),
+              }),
+            },
+            scope: "user_1",
+          }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+    const memory = compiled.memories[0]!;
+    const wrapper = compiled.dynamicTools.find((tool) => tool.slug === "profile")!;
+
+    expect(memory).toMatchObject({
+      description: "Manage the caller profile.",
+      logicalPath: "memory/profile.ts",
+      slot: "profile",
+      visibility: "scope",
+    });
+    expect(wrapper).toMatchObject({
+      eventNames: ["turn.started"],
+      logicalPath: "tools/profile.ts",
+      rebindMissingCallbacks: true,
+    });
+    expect(compiled.bindings[wrapper.sourceId]?.backing).toMatchObject({
+      dependencies: { memory: memory.sourceId },
+      kind: "programmatic",
+      metadata: {
+        memoryExportName: "default",
+        memoryLogicalPath: "memory/profile.ts",
+        slot: "profile",
+      },
+    });
+
+    const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
+      frameworkAgentSourceRegistry,
+      sourceRegistry,
+    ]);
+    expect(() => validateCompiledModuleMap(compiled, moduleMap)).not.toThrow();
+    expect(moduleMap.nodes.__root__?.modules[memory.sourceId]).toBeDefined();
+    expect(moduleMap.nodes.__root__?.modules[wrapper.sourceId]).toBeDefined();
+  });
+
+  it("lets an application tool replace the derived provider-tool wrapper", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "memory/profile.ts",
+        loadNamespace: async () => ({
+          default: defineMemory({ provider: { recall: async () => null }, scope: "user_1" }),
+        }),
+      },
+      {
+        logicalPath: "tools/profile.ts",
+        loadNamespace: async () => ({
+          default: defineTool({
+            description: "Application-owned profile tool.",
+            execute: async () => null,
+            inputSchema: {},
+          }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+
+    expect(compiled.memories).toHaveLength(1);
+    expect(compiled.dynamicTools).not.toContainEqual(expect.objectContaining({ slug: "profile" }));
+    expect(compiled.tools).toContainEqual(
+      expect.objectContaining({
+        description: "Application-owned profile tool.",
+        logicalPath: "tools/profile.ts",
+        name: "profile",
+      }),
+    );
+    expect(compiled.sourceComposition.entries).toContainEqual(
+      expect.objectContaining({
+        kind: "shadowed",
+        source: expect.objectContaining({
+          logicalPath: "tools/profile.ts",
+          owner: { feature: "memory", kind: "framework" },
+        }),
+      }),
+    );
+  });
+
+  it("lets an application disable the derived provider-tool wrapper", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "memory/profile.ts",
+        loadNamespace: async () => ({
+          default: defineMemory({ provider: { recall: async () => null }, scope: "user_1" }),
+        }),
+      },
+      {
+        logicalPath: "tools/profile.ts",
+        loadNamespace: async () => ({ default: disableTool() }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+
+    expect(compiled.memories).toHaveLength(1);
+    expect(compiled.dynamicTools).not.toContainEqual(expect.objectContaining({ slug: "profile" }));
+    expect(compiled.tools).not.toContainEqual(expect.objectContaining({ name: "profile" }));
   });
 
   it("rejects stale programmatic revisions before loading a namespace", async () => {

@@ -19,6 +19,8 @@ describe("discoverSubagents (memory)", () => {
           'throw new Error("local subagent modules should not execute during discovery");\n',
         "subagents/researcher/lib/client.js":
           'throw new Error("subagent lib modules should not execute during discovery");\n',
+        "subagents/researcher/memory/profile.ts":
+          'throw new Error("subagent memory modules should not execute during discovery");\n',
         "subagents/researcher/sandbox/sandbox.js":
           'throw new Error("subagent sandboxes should not execute during discovery");\n',
         "subagents/researcher/subagents/reviewer/agent.js":
@@ -75,6 +77,14 @@ describe("discoverSubagents (memory)", () => {
             sourceId: "instructions.md",
           },
         ],
+        memories: [
+          {
+            logicalPath: "memory/profile.ts",
+            slot: "profile",
+            sourceId: "memory/profile.ts",
+            sourceKind: "module",
+          },
+        ],
         sandbox: {
           sourceKind: "module",
           logicalPath: "sandbox/sandbox.js",
@@ -92,7 +102,7 @@ describe("discoverSubagents (memory)", () => {
             sourceId: "tools/search.js",
           },
         ],
-        version: 14,
+        version: 15,
       },
       rootPath: researcherRoot,
       sourceId: "subagents/researcher",
@@ -138,7 +148,7 @@ describe("discoverSubagents (memory)", () => {
           logicalPath: "agent.js",
           sourceId: "agent.js",
         },
-        version: 14,
+        version: 15,
       },
       rootPath: reviewerRoot,
       sourceId: "subagents/reviewer",

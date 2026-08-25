@@ -20,6 +20,11 @@ export default defineAgent({
 
 Compaction also preserves the framework's own tool state automatically. It resets read-before-write tracking (so a write afterward re-reads the file whose read evidence was summarized away) and re-injects the active todo list, so the model keeps its task list across the summary. There is no per-tool hook to configure.
 
+First-class [memory](../memory) participates in a separate lifecycle. eve asks
+providers to capture before compaction, excludes attributed recalled records
+from the summarizer, keeps their canonical latest values, and recalls again
+after the checkpoint.
+
 Clients and channels can also request compaction between turns. Call
 `ClientSession.compact()`, a channel route's `compact(address)`, or
 `attachSession(sessionId).compact()`. The request does not append a user message;
@@ -30,6 +35,8 @@ events as automatic compaction, followed by `session.waiting`.
 To discard model-message history instead of summarizing it, call the corresponding
 `clear()` method on any of those handles. Clearing preserves the session identity,
 system prompt, configured tools and skills, durable state, limits, and sandbox.
+It removes recalled memory records and framework memory bookkeeping, but it
+does not delete data from a memory provider's external store.
 Its stream boundary is `context.cleared` followed by `session.waiting`.
 
 ## What to read next
@@ -37,3 +44,4 @@ Its stream boundary is `context.cleared` followed by `session.waiting`.
 - [Built-in tools](./built-in-tools): review the default and opt-in framework tools and configure the model-facing tool set
 - [Execution model and durability](./execution-model-and-durability): understand how turns checkpoint and resume
 - [Context control](./context-control): choose what the model sees and when
+- [Memory](../memory): connect scoped, cross-session context to the harness lifecycle

@@ -6,6 +6,7 @@
     "---Build---",
     "agent-config",
     "instructions",
+    "memory",
     "tools",
     "connections",
     "channels",

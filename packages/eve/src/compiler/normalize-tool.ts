@@ -45,6 +45,7 @@ export async function compileToolEntry(
   const entry = normalizeToolDefinition(
     await loadModuleBackedDefinition({
       binding: options.binding,
+      dependencyNamespaces: options.dependencyNamespaces,
       kind: "tool",
       loadNamespace: options.loadNamespace,
       source,
@@ -95,6 +96,7 @@ export async function compileToolEntry(
         eventNames: [...entry.eventNames],
         exportName: source.exportName,
         logicalPath: source.logicalPath,
+        rebindMissingCallbacks: entry.rebindMissingCallbacks || undefined,
         slug: toolName,
         sourceId: source.sourceId,
         sourceKind: "module",

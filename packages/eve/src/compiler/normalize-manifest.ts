@@ -12,6 +12,7 @@ import {
   type CompiledDynamicSkillDefinition,
   type CompiledDynamicToolDefinition,
   type CompiledInstructionsDefinition,
+  type CompiledMemoryDefinition,
   type CompiledHookDefinition,
   type CompiledRemoteAgentNode,
   type CompiledSkillDefinition,
@@ -37,6 +38,7 @@ import {
 } from "#compiler/normalize-helpers.js";
 import { compileHookEntry } from "#compiler/normalize-hook.js";
 import { compileInstructionsEntry } from "#compiler/normalize-instructions.js";
+import { compileMemoryDefinition, deriveMemorySlot } from "#compiler/normalize-memory.js";
 import { compileSandboxDefinition } from "#compiler/normalize-sandbox.js";
 import { compileScheduleDefinition } from "#compiler/normalize-schedule.js";
 import { compileSkillSource } from "#compiler/normalize-skill.js";
@@ -73,6 +75,7 @@ import {
   composeAgentModuleCandidates,
   createCompiledModuleBinding,
   createProgrammaticModuleCandidates,
+  createProjectedProgrammaticModuleCandidate,
   describeAgentSourceCandidate,
   disableComposedCandidate,
   type AgentModuleCandidate,
@@ -80,8 +83,12 @@ import {
   type AgentSourceLayer,
   type AgentSourceOwner,
   type AgentSourceRegistry,
+  canonicalSourceSlot,
 } from "#compiler/source-graph.js";
-import { frameworkAgentSourceRegistry } from "#framework/sources/registry.js";
+import {
+  frameworkAgentSourceRegistry,
+  memoryWrapperSourceRegistration,
+} from "#framework/sources/registry.js";
 
 export interface CompileAgentManifestOptions {
   readonly diagnostics?: CompilerDiagnostic[];
@@ -349,6 +356,7 @@ class AgentGraphCompiler {
     for (const registry of this.registries) {
       const framework = registry === frameworkAgentSourceRegistry;
       for (const registration of registry.registrations) {
+        if (registration.applyTo === "loader-only") continue;
         if (registration.applyTo === "root" && !input.isRoot) continue;
         if (!framework && registration.applyTo === "all-local-nodes") {
           assertApplicationOverlayCanApplyToAllNodes(
@@ -366,9 +374,35 @@ class AgentGraphCompiler {
         (framework ? frameworkCandidates : applicationCandidates).push(...candidates);
       }
     }
+    const memoryWrapperCandidates = [...projected.candidates, ...applicationCandidates]
+      .filter(
+        (candidate): candidate is AgentModuleCandidate =>
+          candidate.backing.kind !== "resource" &&
+          (canonicalSourceSlot(candidate.logicalPath) === "memory" ||
+            canonicalSourceSlot(candidate.logicalPath).startsWith("memory/")),
+      )
+      .map((candidate) => {
+        const slot = deriveMemorySlot(candidate.logicalPath);
+        return createProjectedProgrammaticModuleCandidate({
+          dependencies: { memory: candidate.sourceId },
+          layer: "application-derived",
+          logicalPath: `tools/${slot}.ts`,
+          metadata: {
+            memoryExportName: candidate.exportName ?? "default",
+            memoryLogicalPath: candidate.logicalPath,
+            slot,
+          },
+          moduleId: "tools/memory-wrapper.ts",
+          nodeId: input.nodeId,
+          owner: { feature: "memory", kind: "framework" },
+          registration: memoryWrapperSourceRegistration,
+          sourceId: `eve:memory-wrapper:${candidate.sourceId}`,
+        });
+      });
     const orderedCandidates: AgentSourceCandidate[] = [
       ...frameworkCandidates,
       ...projected.candidates,
+      ...memoryWrapperCandidates,
       ...applicationCandidates,
     ];
     const composed = composeAgentModuleCandidates(orderedCandidates);
@@ -437,6 +471,7 @@ class AgentGraphCompiler {
     const instructions: CompiledInstructionsDefinition[] = [];
     const dynamicInstructions: CompiledDynamicInstructionsDefinition[] = [];
     const connections: CompiledConnectionDefinition[] = [];
+    const memories: CompiledMemoryDefinition[] = [];
     const hooks: CompiledHookDefinition[] = [];
     const schedules: CompiledScheduleDefinition[] = [];
     const channels: CompiledChannelDefinition[] = [];
@@ -504,6 +539,14 @@ class AgentGraphCompiler {
         }
         case "instrumentation":
           instrumentation = entry.source;
+          break;
+        case "memory":
+          memories.push(
+            await compileMemoryDefinition(entry.source, {
+              binding: binding!,
+              registries: this.registries,
+            }),
+          );
           break;
         case "sandbox":
           sandbox = await compileSandboxDefinition(input.manifest.agentRoot, entry.source, {
@@ -579,6 +622,7 @@ class AgentGraphCompiler {
       dynamicTools,
       extensionMounts: compileExtensionMounts(input.manifest, state.composed),
       hooks,
+      memories,
       instructions,
       instrumentation,
       sandbox,

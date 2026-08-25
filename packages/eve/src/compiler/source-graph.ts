@@ -30,7 +30,7 @@ export interface ProgrammaticAgentSource {
 }
 
 export interface AgentSourceRegistration {
-  readonly applyTo: "root" | "all-local-nodes";
+  readonly applyTo: "root" | "all-local-nodes" | "loader-only";
   readonly source: ProgrammaticAgentSource;
 }
 
@@ -110,6 +110,7 @@ export type AgentSourceLayer =
   | "framework-default"
   | "extension-package"
   | "extension-override"
+  | "application-derived"
   | "application";
 
 export type AgentSourceForm = "derived" | "direct";
@@ -127,6 +128,7 @@ export type AgentModuleBacking =
   | {
       readonly dependencies?: Readonly<Record<string, string>>;
       readonly kind: "programmatic";
+      readonly metadata?: JsonObject;
       readonly moduleId: string;
       readonly parameters?: JsonObject;
       readonly registryId: string;
@@ -203,7 +205,8 @@ const LAYER_PRECEDENCE: Readonly<Record<AgentSourceLayer, number>> = {
   "framework-default": 0,
   "extension-package": 1,
   "extension-override": 2,
-  application: 3,
+  "application-derived": 3,
+  application: 4,
 };
 
 const FORM_PRECEDENCE: Readonly<Record<AgentSourceForm, number>> = {
@@ -580,13 +583,21 @@ export function validateProgrammaticLogicalPath(input: string): string {
   const root = segments[0];
   const extensionless = stripLogicalPathExtension(logicalPath);
   const supported =
-    (segments.length === 1 && ["agent", "sandbox", "instrumentation"].includes(extensionless)) ||
+    (segments.length === 1 &&
+      ["agent", "memory", "sandbox", "instrumentation"].includes(extensionless)) ||
     (root === "sandbox" &&
       segments.length === 2 &&
       getSupportedModuleBaseName(fileName) === "sandbox") ||
-    (["channels", "connections", "hooks", "instructions", "schedules", "skills", "tools"].includes(
-      root!,
-    ) &&
+    ([
+      "channels",
+      "connections",
+      "hooks",
+      "instructions",
+      "memory",
+      "schedules",
+      "skills",
+      "tools",
+    ].includes(root!) &&
       segments.length >= 2);
   if (!supported) {
     throw new Error(
