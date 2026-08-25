@@ -85,6 +85,7 @@ describe("instrumentation-config chunk-isolation regression", () => {
 
     expect(getInstrumentationRuntime()?.otelSettings).toEqual({
       functionId: "weather",
+      isOtelTraceEnabled: false,
       recordInputs: true,
       recordOutputs: false,
       traceChannelRequests: true,
@@ -99,6 +100,7 @@ describe("instrumentation-config chunk-isolation regression", () => {
 
     expect(getInstrumentationRuntime()?.otelSettings).toEqual({
       functionId: undefined,
+      isOtelTraceEnabled: false,
       recordInputs: false,
       recordOutputs: false,
       traceChannelRequests: false,

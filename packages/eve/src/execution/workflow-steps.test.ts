@@ -680,6 +680,7 @@ describe("dispatchTurnStep", () => {
         allowReservedAttributes: true,
         attributes: {
           "$eve.channel_request_id": "req_turn",
+          "$eve.is_otel_trace_enabled": "false",
           "$eve.parent": "sess-test",
           "$eve.root": "sess-test",
           "$eve.is_trace_content_visible": "false",
@@ -719,6 +720,7 @@ describe("dispatchTurnStep", () => {
         allowReservedAttributes: true,
         attributes: {
           "$eve.channel_request_id": "req_turn",
+          "$eve.is_otel_trace_enabled": "false",
           "$eve.parent": "sess-test",
           "$eve.root": "sess-test",
           "$eve.is_trace_content_visible": "false",
@@ -742,6 +744,7 @@ describe("dispatchTurnStep", () => {
       allowReservedAttributes: true,
       attributes: {
         "$eve.channel_request_id": "req_turn",
+        "$eve.is_otel_trace_enabled": "false",
         "$eve.parent": "sess-test",
         "$eve.root": "sess-test",
         "$eve.is_trace_content_visible": "false",
@@ -753,6 +756,7 @@ describe("dispatchTurnStep", () => {
       allowReservedAttributes: true,
       attributes: {
         "$eve.channel_request_id": "req_turn",
+        "$eve.is_otel_trace_enabled": "false",
         "$eve.parent": "sess-test",
         "$eve.root": "sess-test",
         "$eve.is_trace_content_visible": "false",

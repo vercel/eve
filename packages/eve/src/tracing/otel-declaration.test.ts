@@ -84,6 +84,7 @@ describe("agentRunsIntegration", () => {
 
     expect(integration.spanProcessors).toHaveLength(1);
     expect(integration.spanProcessors[0]).not.toBe("auto");
+    expect(collectOtelPipeline([integration]).settings.isOtelTraceEnabled).toBe(true);
   });
 });
 
@@ -186,6 +187,7 @@ describe("collectOtelPipeline", () => {
     expect(collected.declared).toBe(true);
     expect(collected.settings).toStrictEqual({
       functionId: undefined,
+      isOtelTraceEnabled: false,
       recordInputs: true,
       recordOutputs: true,
       traceChannelRequests: false,
@@ -210,6 +212,7 @@ describe("collectOtelPipeline", () => {
     });
     expect(collected.settings).toStrictEqual({
       functionId: "weather",
+      isOtelTraceEnabled: false,
       // Nothing declared a destination, so nothing consumes content.
       recordInputs: false,
       recordOutputs: false,

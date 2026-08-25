@@ -103,6 +103,7 @@ export interface SessionTraceSeed {
   readonly traceFlags: number;
 }
 export const SessionTraceSeedKey = new ContextKey<SessionTraceSeed>("eve.sessionTraceSeed");
+export const OtelTraceEnabledKey = new ContextKey<boolean>("eve.otelTraceEnabled");
 
 export const SubagentDepthKey = new ContextKey<number>("eve.subagentDepth");
 

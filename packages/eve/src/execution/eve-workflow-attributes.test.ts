@@ -163,6 +163,7 @@ describe("buildSessionAttributes", () => {
 
     expect(attrs).toEqual({
       "$eve.channel_request_id": undefined,
+      "$eve.is_otel_trace_enabled": false,
       "$eve.is_trace_content_visible": true,
       "$eve.trace_id": undefined,
       "$eve.type": "session",
@@ -171,7 +172,7 @@ describe("buildSessionAttributes", () => {
     });
   });
 
-  it("marks unknown sessions denied and omits their content-derived title", () => {
+  it("marks unknown sessions denied while retaining their title for Front policy", () => {
     const attrs = buildSessionAttributes({
       inputMessage: "hi",
       serializedContext: {},
@@ -179,7 +180,19 @@ describe("buildSessionAttributes", () => {
 
     expect(attrs["$eve.trigger"]).toBeUndefined();
     expect(attrs["$eve.is_trace_content_visible"]).toBe(false);
-    expect(attrs["$eve.title"]).toBeUndefined();
+    expect(attrs["$eve.is_otel_trace_enabled"]).toBe(false);
+    expect(attrs["$eve.title"]).toBe("hi");
+  });
+
+  it("stamps hosted OTEL enablement without suppressing the stored title", () => {
+    const attrs = buildSessionAttributes({
+      inputMessage: "private prompt",
+      serializedContext: { "eve.otelTraceEnabled": true },
+    });
+
+    expect(attrs["$eve.is_otel_trace_enabled"]).toBe(true);
+    expect(attrs["$eve.is_trace_content_visible"]).toBe(false);
+    expect(attrs["$eve.title"]).toBe("private prompt");
   });
 
   it("allows unknown session content during local eve dev", () => {
@@ -244,6 +257,7 @@ describe("buildSubagentRootAttributes", () => {
 
     expect(attrs).toEqual({
       "$eve.channel_request_id": undefined,
+      "$eve.is_otel_trace_enabled": false,
       "$eve.is_trace_content_visible": true,
       "$eve.trace_id": undefined,
       "$eve.type": "subagent",
@@ -297,6 +311,7 @@ describe("buildTurnAttributes", () => {
 
     expect(attrs).toEqual({
       "$eve.channel_request_id": undefined,
+      "$eve.is_otel_trace_enabled": false,
       "$eve.is_trace_content_visible": true,
       "$eve.trace_id": undefined,
       "$eve.type": "turn",
