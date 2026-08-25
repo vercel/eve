@@ -97,69 +97,69 @@
       "default": "./dist/src/public/sveltekit/index.js"
     },
     "./tools/approval": {
-      "types": "./dist/src/tools/approval/index.d.ts",
-      "import": "./dist/src/tools/approval/index.js",
-      "default": "./dist/src/tools/approval/index.js"
+      "types": "./dist/src/public/tools/approval/index.d.ts",
+      "import": "./dist/src/public/tools/approval/index.js",
+      "default": "./dist/src/public/tools/approval/index.js"
     },
     "./tools/sleep": {
-      "types": "./dist/src/tools/builtins/sleep.d.ts",
-      "import": "./dist/src/tools/builtins/sleep.js",
-      "default": "./dist/src/tools/builtins/sleep.js"
+      "types": "./dist/src/public/tools/sleep.d.ts",
+      "import": "./dist/src/public/tools/sleep.js",
+      "default": "./dist/src/public/tools/sleep.js"
     },
     "./tools": {
-      "types": "./dist/src/tools/index.d.ts",
-      "import": "./dist/src/tools/index.js",
-      "default": "./dist/src/tools/index.js"
+      "types": "./dist/src/public/tools/index.d.ts",
+      "import": "./dist/src/public/tools/index.js",
+      "default": "./dist/src/public/tools/index.js"
     },
     "./tools/bash": {
-      "types": "./dist/src/tools/builtins/bash.d.ts",
-      "import": "./dist/src/tools/builtins/bash.js",
-      "default": "./dist/src/tools/builtins/bash.js"
+      "types": "./dist/src/public/tools/bash.d.ts",
+      "import": "./dist/src/public/tools/bash.js",
+      "default": "./dist/src/public/tools/bash.js"
     },
     "./tools/read_file": {
-      "types": "./dist/src/tools/builtins/read-file.d.ts",
-      "import": "./dist/src/tools/builtins/read-file.js",
-      "default": "./dist/src/tools/builtins/read-file.js"
+      "types": "./dist/src/public/tools/read-file.d.ts",
+      "import": "./dist/src/public/tools/read-file.js",
+      "default": "./dist/src/public/tools/read-file.js"
     },
     "./tools/write_file": {
-      "types": "./dist/src/tools/builtins/write-file.d.ts",
-      "import": "./dist/src/tools/builtins/write-file.js",
-      "default": "./dist/src/tools/builtins/write-file.js"
+      "types": "./dist/src/public/tools/write-file.d.ts",
+      "import": "./dist/src/public/tools/write-file.js",
+      "default": "./dist/src/public/tools/write-file.js"
     },
     "./tools/todo": {
-      "types": "./dist/src/tools/builtins/todo.d.ts",
-      "import": "./dist/src/tools/builtins/todo.js",
-      "default": "./dist/src/tools/builtins/todo.js"
+      "types": "./dist/src/public/tools/todo.d.ts",
+      "import": "./dist/src/public/tools/todo.js",
+      "default": "./dist/src/public/tools/todo.js"
     },
     "./tools/web_fetch": {
-      "types": "./dist/src/tools/builtins/web-fetch.d.ts",
-      "import": "./dist/src/tools/builtins/web-fetch.js",
-      "default": "./dist/src/tools/builtins/web-fetch.js"
+      "types": "./dist/src/public/tools/web-fetch.d.ts",
+      "import": "./dist/src/public/tools/web-fetch.js",
+      "default": "./dist/src/public/tools/web-fetch.js"
     },
     "./tools/web_search": {
-      "types": "./dist/src/tools/builtins/web-search.d.ts",
-      "import": "./dist/src/tools/builtins/web-search.js",
-      "default": "./dist/src/tools/builtins/web-search.js"
+      "types": "./dist/src/public/tools/web-search.d.ts",
+      "import": "./dist/src/public/tools/web-search.js",
+      "default": "./dist/src/public/tools/web-search.js"
     },
     "./tools/load_skill": {
-      "types": "./dist/src/tools/builtins/load-skill.d.ts",
-      "import": "./dist/src/tools/builtins/load-skill.js",
-      "default": "./dist/src/tools/builtins/load-skill.js"
+      "types": "./dist/src/public/tools/load-skill.d.ts",
+      "import": "./dist/src/public/tools/load-skill.js",
+      "default": "./dist/src/public/tools/load-skill.js"
     },
     "./tools/glob": {
-      "types": "./dist/src/tools/builtins/glob.d.ts",
-      "import": "./dist/src/tools/builtins/glob.js",
-      "default": "./dist/src/tools/builtins/glob.js"
+      "types": "./dist/src/public/tools/glob.d.ts",
+      "import": "./dist/src/public/tools/glob.js",
+      "default": "./dist/src/public/tools/glob.js"
     },
     "./tools/grep": {
-      "types": "./dist/src/tools/builtins/grep.d.ts",
-      "import": "./dist/src/tools/builtins/grep.js",
-      "default": "./dist/src/tools/builtins/grep.js"
+      "types": "./dist/src/public/tools/grep.d.ts",
+      "import": "./dist/src/public/tools/grep.js",
+      "default": "./dist/src/public/tools/grep.js"
     },
     "./tools/workflow": {
-      "types": "./dist/src/tools/workflow.d.ts",
-      "import": "./dist/src/tools/workflow.js",
-      "default": "./dist/src/tools/workflow.js"
+      "types": "./dist/src/public/tools/workflow.d.ts",
+      "import": "./dist/src/public/tools/workflow.js",
+      "default": "./dist/src/public/tools/workflow.js"
     },
     "./models/openai": {
       "types": "./dist/src/public/models/openai/index.d.ts",

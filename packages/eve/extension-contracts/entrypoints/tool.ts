@@ -5,13 +5,13 @@ export {
   toolOutput,
   toolOutputPart,
   toolResultFrom,
-} from "../../src/tools/index.ts";
+} from "../../src/public/tools/index.ts";
 export {
   experimental_workflow,
   isExperimentalWorkflowToolDefinition,
-} from "../../src/tools/workflow.ts";
+} from "../../src/public/tools/workflow.ts";
 export {
   defaultWebSearch,
   isWebSearchToolDefinition,
   webSearch,
-} from "../../src/tools/builtins/web-search.ts";
+} from "../../src/public/tools/web-search.ts";

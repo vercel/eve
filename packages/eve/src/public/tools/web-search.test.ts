@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { webSearch } from "#tools/builtins/web-search.js";
+import { webSearch } from "#public/tools/web-search.js";
 
 describe("webSearch", () => {
   it.each(["parallel", "exa"] as const)("configures the %s provider", (provider) => {

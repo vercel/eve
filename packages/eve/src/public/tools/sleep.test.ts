@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { readTurnSleepDurationMs } from "#harness/turn-sleep.js";
-import { sleep } from "#tools/builtins/sleep.js";
+import { sleep } from "#public/tools/sleep.js";
 
 describe("sleep", () => {
   it("defines a model-facing tool that requests a turn sleep in seconds", async () => {

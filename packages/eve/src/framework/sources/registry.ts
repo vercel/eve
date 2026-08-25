@@ -22,39 +22,39 @@ const localDefaults = defineProgrammaticAgentSource({
     },
     {
       logicalPath: "tools/bash.ts",
-      loadNamespace: () => import("#tools/builtins/bash.js"),
+      loadNamespace: () => import("#public/tools/bash.js"),
     },
     {
       logicalPath: "tools/read_file.ts",
-      loadNamespace: () => import("#tools/builtins/read-file.js"),
+      loadNamespace: () => import("#public/tools/read-file.js"),
     },
     {
       logicalPath: "tools/write_file.ts",
-      loadNamespace: () => import("#tools/builtins/write-file.js"),
+      loadNamespace: () => import("#public/tools/write-file.js"),
     },
     {
       logicalPath: "tools/todo.ts",
-      loadNamespace: () => import("#tools/builtins/todo.js"),
+      loadNamespace: () => import("#public/tools/todo.js"),
     },
     {
       logicalPath: "tools/web_fetch.ts",
-      loadNamespace: () => import("#tools/builtins/web-fetch.js"),
+      loadNamespace: () => import("#public/tools/web-fetch.js"),
     },
     {
       logicalPath: "tools/load_skill.ts",
-      loadNamespace: () => import("#tools/builtins/load-skill.js"),
+      loadNamespace: () => import("#public/tools/load-skill.js"),
     },
     {
       logicalPath: "tools/connection_search.ts",
-      loadNamespace: () => import("#tools/builtins/connection-search.js"),
+      loadNamespace: () => import("#tools/connection-search.js"),
     },
     {
       logicalPath: "tools/ask_question.ts",
-      loadNamespace: () => import("#tools/builtins/ask-question.js"),
+      loadNamespace: () => import("#tools/ask-question.js"),
     },
     {
       logicalPath: "tools/web_search.ts",
-      loadNamespace: () => import("#tools/builtins/web-search.js"),
+      loadNamespace: () => import("#public/tools/web-search.js"),
     },
   ],
 });
@@ -65,15 +65,15 @@ const rootDefaults = defineProgrammaticAgentSource({
   modules: [
     {
       logicalPath: "tools/agent.ts",
-      loadNamespace: () => import("#tools/builtins/agent.js"),
+      loadNamespace: () => import("#tools/agent.js"),
     },
     {
       logicalPath: "tools/task_update.ts",
-      loadNamespace: () => import("#tools/builtins/task-update.js"),
+      loadNamespace: () => import("#tools/task-update.js"),
     },
     {
       logicalPath: "tools/task_cancel.ts",
-      loadNamespace: () => import("#tools/builtins/task-cancel.js"),
+      loadNamespace: () => import("#tools/task-cancel.js"),
     },
     {
       logicalPath: "channels/eve.ts",

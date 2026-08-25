@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { always, never, once } from "#tools/approval/policies.js";
+import { always, never, once } from "#public/tools/approval/policies.js";
 import { readDurableDynamicCallback } from "#shared/durable-dynamic-tool-callbacks.js";
 
 describe("dynamic tool approval helpers", () => {

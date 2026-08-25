@@ -8,8 +8,8 @@ import {
   disableTool,
   experimental_workflow,
 } from "#public/definitions/tool.js";
-import { once } from "#tools/approval/policies.js";
-import { webSearch } from "#tools/builtins/web-search.js";
+import { once } from "#public/tools/approval/policies.js";
+import { webSearch } from "#public/tools/web-search.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
 
 const FAILURE_MESSAGE = "Expected the tool export to match the public eve shape.";

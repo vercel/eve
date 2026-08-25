@@ -2,7 +2,7 @@ import {
   isDisabledToolSentinel,
   isExperimentalWorkflowToolDefinition,
 } from "#public/definitions/tool.js";
-import { isWebSearchToolDefinition } from "#tools/builtins/web-search.js";
+import { isWebSearchToolDefinition } from "#public/tools/web-search.js";
 import {
   expectFunction,
   expectObjectRecord,

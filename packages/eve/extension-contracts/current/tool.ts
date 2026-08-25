@@ -1,3 +1,3 @@
-export * from "../../src/tools/index.ts";
-export * from "../../src/tools/workflow.ts";
-export * from "../../src/tools/builtins/web-search.ts";
+export * from "../../src/public/tools/index.ts";
+export * from "../../src/public/tools/workflow.ts";
+export * from "../../src/public/tools/web-search.ts";

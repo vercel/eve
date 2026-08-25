@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ASK_QUESTION_INPUT_SCHEMA, askQuestion } from "#tools/builtins/ask-question.js";
+import { ASK_QUESTION_INPUT_SCHEMA, askQuestion } from "#tools/ask-question.js";
 import { serializeInputSchema } from "#shared/tool-schema.js";
 
 describe("ASK_QUESTION_INPUT_SCHEMA", () => {
