@@ -1,6 +1,10 @@
 import type { SlackThreadMessage } from "#public/channels/slack/api.js";
 import type { SlackInboundContext } from "#public/channels/slack/inbound.js";
 
+const SLACK_RESPONSE_INSTRUCTIONS =
+  "Reply for Slack in concise Markdown. To mention a user from a Slack user ID, use " +
+  "`<@USER_ID>`; never use `@USER_ID`.";
+
 interface SlackModelMessageInput {
   readonly channelId?: string;
   readonly content: string;
@@ -32,12 +36,18 @@ export function formatSlackModelMessage(input: SlackModelMessageInput): string {
   ].join("\n");
 }
 
-/** Renders the triggering inbound Slack message as one attributed block. */
+/** Renders the triggering inbound Slack message with response guidance and attribution. */
 export function formatSlackInboundMessage(
   context: SlackInboundContext,
   message: { readonly markdown: string; readonly ts: string },
 ): string {
-  return formatSlackModelMessage({
+  const responseContext = [
+    "<slack_context>",
+    "response_medium: slack",
+    `response_instructions: ${SLACK_RESPONSE_INSTRUCTIONS}`,
+    "</slack_context>",
+  ].join("\n");
+  const attributedMessage = formatSlackModelMessage({
     channelId: context.channelId,
     content: message.markdown,
     senderId: context.userId || undefined,
@@ -46,6 +56,7 @@ export function formatSlackInboundMessage(
     threadTs: context.threadTs,
     ts: message.ts,
   });
+  return `${responseContext}\n\n${attributedMessage}`;
 }
 
 /**

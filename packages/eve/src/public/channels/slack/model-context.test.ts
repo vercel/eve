@@ -43,6 +43,11 @@ describe("Slack model context", () => {
 
     expect(block).toBe(
       [
+        "<slack_context>",
+        "response_medium: slack",
+        "response_instructions: Reply for Slack in concise Markdown. To mention a user from a Slack user ID, use `<@USER_ID>`; never use `@USER_ID`.",
+        "</slack_context>",
+        "",
         "<slack_message>",
         "sender_type: user",
         "sender_id: U_CURRENT",
