@@ -2,6 +2,7 @@ import {
   type AgentSourceRegistry,
   type CompiledModuleBinding,
   loadProgrammaticModuleNamespace,
+  memoizeModuleNamespaceFactories,
   type ProgrammaticModuleNamespace,
 } from "#compiler/source-graph.js";
 import { packageStateNamespace } from "#discover/extensions.js";
@@ -36,7 +37,7 @@ export function createCompiledBindingNamespaceLoader(input: {
       binding,
       loadDependency: (dependencySourceId) => load(dependencySourceId, nextLineage),
       registries: input.registries,
-    });
+    }).then(memoizeModuleNamespaceFactories);
     cache.set(sourceId, loading);
     return loading;
   };

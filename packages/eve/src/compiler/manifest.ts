@@ -375,7 +375,6 @@ const programmaticModuleBackingSchema = z
   .object({
     dependencies: z.record(z.string(), z.string()).readonly().optional(),
     kind: z.literal("programmatic"),
-    metadata: jsonObjectSchema.optional(),
     moduleId: z.string(),
     parameters: jsonObjectSchema.optional(),
     registryId: z.string(),

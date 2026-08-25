@@ -28,7 +28,7 @@ function toChatGptEndpoint(state: ChatGptAuthState | undefined) {
   return endpoint;
 }
 
-/** Projects v3 exclusively from the effective compiled graph. */
+/** Projects v4 exclusively from the effective compiled graph. */
 export function buildAgentInfoResponse(
   data: AgentInfoManifestData,
   input: {

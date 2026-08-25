@@ -1,13 +1,13 @@
 import type { MemoryDefinition, MemoryToolSet, MemoryToolsContext } from "#public/memory/index.js";
-import { defineDynamic } from "#public/definitions/tool.js";
-import { resolveApprovalPolicy } from "#public/definitions/approval.js";
+import { resolveApprovalPolicy } from "#approval/definition.js";
 import { loadContext } from "#context/container.js";
 import { TurnMemoryLocksKey } from "#context/keys.js";
 import { TOOL_SLUG_PATTERN } from "#discover/grammar.js";
+import { defineDynamic } from "#dynamic/definition.js";
 import { markDynamicCallbackRebind } from "#internal/dynamic-tool-rebind.js";
-import { isBrandedToolEntry } from "#shared/dynamic-tool-definition.js";
-import { stampDurableDynamicToolCallbacks } from "#shared/durable-dynamic-tool-callbacks.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import { stampDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
+import { isBrandedToolEntry } from "#tools/dynamic.js";
 
 export function createMemoryToolDynamicDefinition(definition: MemoryDefinition, slot: string) {
   return markDynamicCallbackRebind(

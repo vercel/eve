@@ -75,9 +75,9 @@ import {
   composeAgentModuleCandidates,
   createCompiledModuleBinding,
   createProgrammaticModuleCandidates,
-  createProjectedProgrammaticModuleCandidate,
   describeAgentSourceCandidate,
   disableComposedCandidate,
+  instantiateProgrammaticTemplate,
   type AgentModuleCandidate,
   type AgentSourceCandidate,
   type AgentSourceLayer,
@@ -87,7 +87,7 @@ import {
 } from "#compiler/source-graph.js";
 import {
   frameworkAgentSourceRegistry,
-  memoryWrapperSourceRegistration,
+  memoryWrapperTemplate,
 } from "#framework/sources/registry.js";
 
 export interface CompileAgentManifestOptions {
@@ -356,7 +356,6 @@ class AgentGraphCompiler {
     for (const registry of this.registries) {
       const framework = registry === frameworkAgentSourceRegistry;
       for (const registration of registry.registrations) {
-        if (registration.applyTo === "loader-only") continue;
         if (registration.applyTo === "root" && !input.isRoot) continue;
         if (!framework && registration.applyTo === "all-local-nodes") {
           assertApplicationOverlayCanApplyToAllNodes(
@@ -383,20 +382,17 @@ class AgentGraphCompiler {
       )
       .map((candidate) => {
         const slot = deriveMemorySlot(candidate.logicalPath);
-        return createProjectedProgrammaticModuleCandidate({
-          dependencies: { memory: candidate.sourceId },
-          layer: "application-derived",
+        return instantiateProgrammaticTemplate({
+          anchor: candidate,
+          dependencies: { memory: candidate },
           logicalPath: `tools/${slot}.ts`,
-          metadata: {
+          owner: { feature: "memory", kind: "framework" },
+          parameters: {
             memoryExportName: candidate.exportName ?? "default",
             memoryLogicalPath: candidate.logicalPath,
             slot,
           },
-          moduleId: "tools/memory-wrapper.ts",
-          nodeId: input.nodeId,
-          owner: { feature: "memory", kind: "framework" },
-          registration: memoryWrapperSourceRegistration,
-          sourceId: `eve:memory-wrapper:${candidate.sourceId}`,
+          template: memoryWrapperTemplate,
         });
       });
     const orderedCandidates: AgentSourceCandidate[] = [
@@ -544,7 +540,7 @@ class AgentGraphCompiler {
           memories.push(
             await compileMemoryDefinition(entry.source, {
               binding: binding!,
-              registries: this.registries,
+              loadNamespace,
             }),
           );
           break;

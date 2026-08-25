@@ -24,8 +24,8 @@ const moduleBacking = z.discriminatedUnion("kind", [
     .object({
       dependencies: z.record(z.string(), z.string()).optional(),
       kind: z.literal("programmatic"),
-      metadata: z.record(z.string(), z.unknown()).optional(),
       moduleId: z.string(),
+      parameters: z.record(z.string(), z.unknown()).optional(),
       registryId: z.string(),
       revision: z.string(),
       semanticRevision: z.string().optional(),
@@ -169,13 +169,8 @@ const sourceDescriptor = z
       moduleBacking,
       z.object({ kind: z.literal("resource"), sourcePath: z.string() }).strict(),
     ]),
-    layer: z.enum([
-      "framework-default",
-      "extension-package",
-      "extension-override",
-      "application-derived",
-      "application",
-    ]),
+    form: z.enum(["derived", "direct"]),
+    layer: z.enum(["framework-default", "extension-package", "extension-override", "application"]),
     logicalPath: z.string(),
     owner,
     sourceId: z.string(),
@@ -290,7 +285,7 @@ const workflow = z.discriminatedUnion("enabled", [
   z.object({ enabled: z.literal(true), source, toolName: z.string() }).strict(),
 ]);
 
-/** Runtime contract for the authoritative `/eve/v1/info` v3 response. */
+/** Runtime contract for the authoritative `/eve/v1/info` v4 response. */
 export const AgentInfoResultSchema = z
   .object({
     agent: z

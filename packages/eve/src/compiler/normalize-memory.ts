@@ -15,7 +15,7 @@ export async function compileMemoryDefinition(
     await loadModuleBackedDefinition({
       binding: options.binding,
       kind: "memory",
-      registries: options.registries,
+      loadNamespace: options.loadNamespace,
       source,
     }),
     `Expected the memory export "${source.exportName ?? "default"}" from "${source.logicalPath}" to be created with defineMemory().`,

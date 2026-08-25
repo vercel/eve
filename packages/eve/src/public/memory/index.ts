@@ -6,10 +6,10 @@ import type { SessionAuth } from "#context/keys.js";
 import type { Approval } from "#public/definitions/approval.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
-import type { ToolContext, ToolModelOutput } from "#public/definitions/tool.js";
-import type { DynamicResolveContext } from "#shared/dynamic-tool-definition.js";
+import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { MEMORY_DEFINITION_BRAND } from "#shared/memory-definition.js";
 import { resolveVercelProjectIdFromEnvironment } from "#shared/vercel-project.js";
+import type { ToolContext, ToolModelOutput } from "#tools/definition.js";
 
 export interface MemoryNamespaceContext {
   readonly appRoot: string;

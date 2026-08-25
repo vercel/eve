@@ -1,4 +1,4 @@
-import type { DynamicSentinel } from "#shared/dynamic-tool-definition.js";
+import type { DynamicSentinel } from "#dynamic/definition.js";
 
 const REBIND_MISSING_CALLBACKS = Symbol.for("eve:dynamic-rebind-missing-callbacks");
 

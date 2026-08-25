@@ -73,7 +73,9 @@ describe("compiler artifacts", () => {
       [
         'import { defineMemory } from "eve/memory";',
         'import { defineTool } from "eve/tools";',
-        "export default defineMemory({",
+        "export default () => {",
+        "  globalThis.__memoryFactoryCalls = (globalThis.__memoryFactoryCalls ?? 0) + 1;",
+        "  return defineMemory({",
         '  scope: "user_1",',
         "  provider: {",
         '    recall: async () => ({ messages: [{ id: "profile", content: "Likes tea" }] }),',
@@ -81,7 +83,8 @@ describe("compiler artifacts", () => {
         '      save: defineTool({ description: "Save profile.", inputSchema: {}, execute: async () => null }),',
         "    }),",
         "  },",
-        "});",
+        "  });",
+        "};",
         "",
       ].join("\n"),
     );
@@ -94,8 +97,10 @@ describe("compiler artifacts", () => {
       "const modules = loaded.default.nodes.__root__.modules;",
       "const memory = modules[process.argv[2]];",
       "const wrapper = modules[process.argv[3]];",
+      "const memoryDefinition = await memory.default();",
       "console.log(JSON.stringify({",
-      '  memory: typeof memory.default === "object",',
+      '  memory: typeof memoryDefinition.provider?.recall === "function",',
+      "  memoryFactoryCalls: globalThis.__memoryFactoryCalls,",
       '  wrapper: typeof wrapper.default?.events?.["turn.started"] === "function",',
       "}));",
     ].join("\n");
@@ -112,7 +117,11 @@ describe("compiler artifacts", () => {
       { cwd: appRoot },
     );
 
-    expect(JSON.parse(loaded.stdout)).toEqual({ memory: true, wrapper: true });
+    expect(JSON.parse(loaded.stdout)).toEqual({
+      memory: true,
+      memoryFactoryCalls: 1,
+      wrapper: true,
+    });
   });
 
   it("uses the framework default model when agent.ts is omitted", async () => {

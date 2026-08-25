@@ -18,6 +18,7 @@ import { frameworkAgentSourceRegistry } from "#framework/sources/registry.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineChannel, GET, POST } from "#public/definitions/channel.js";
 import { defineHook } from "#public/definitions/hook.js";
+import { resolveAgent } from "#runtime/resolve-agent.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 
@@ -372,24 +373,27 @@ describe("compileAgentManifest source graph", () => {
   });
 
   it("compiles a selected memory and its provider-tool wrapper through total bindings", async () => {
+    const definitionFactory = vi.fn(() =>
+      defineMemory({
+        description: "Manage the caller profile.",
+        provider: {
+          recall: async () => ({ messages: [{ content: "Likes tea", id: "drink" }] }),
+          tools: async () => ({
+            save: defineTool({
+              description: "Save a profile field.",
+              execute: async () => ({ saved: true }),
+              inputSchema: { type: "object" },
+            }),
+          }),
+        },
+        scope: "user_1",
+      }),
+    );
     const sourceRegistry = registry([
       {
         logicalPath: "memory/profile.ts",
         loadNamespace: async () => ({
-          default: defineMemory({
-            description: "Manage the caller profile.",
-            provider: {
-              recall: async () => ({ messages: [{ content: "Likes tea", id: "drink" }] }),
-              tools: async () => ({
-                save: defineTool({
-                  description: "Save a profile field.",
-                  execute: async () => ({ saved: true }),
-                  inputSchema: { type: "object" },
-                }),
-              }),
-            },
-            scope: "user_1",
-          }),
+          default: definitionFactory,
         }),
       },
     ]);
@@ -399,6 +403,7 @@ describe("compileAgentManifest source graph", () => {
     });
     const memory = compiled.memories[0]!;
     const wrapper = compiled.dynamicTools.find((tool) => tool.slug === "profile")!;
+    expect(definitionFactory).toHaveBeenCalledTimes(1);
 
     expect(memory).toMatchObject({
       description: "Manage the caller profile.",
@@ -414,7 +419,7 @@ describe("compileAgentManifest source graph", () => {
     expect(compiled.bindings[wrapper.sourceId]?.backing).toMatchObject({
       dependencies: { memory: memory.sourceId },
       kind: "programmatic",
-      metadata: {
+      parameters: {
         memoryExportName: "default",
         memoryLogicalPath: "memory/profile.ts",
         slot: "profile",
@@ -428,6 +433,11 @@ describe("compileAgentManifest source graph", () => {
     expect(() => validateCompiledModuleMap(compiled, moduleMap)).not.toThrow();
     expect(moduleMap.nodes.__root__?.modules[memory.sourceId]).toBeDefined();
     expect(moduleMap.nodes.__root__?.modules[wrapper.sourceId]).toBeDefined();
+    expect(definitionFactory).toHaveBeenCalledTimes(2);
+
+    const resolved = await resolveAgent({ manifest: compiled, moduleMap });
+    expect(resolved.memories).toHaveLength(1);
+    expect(definitionFactory).toHaveBeenCalledTimes(2);
   });
 
   it("lets an application tool replace the derived provider-tool wrapper", async () => {
