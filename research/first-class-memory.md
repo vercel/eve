@@ -33,12 +33,12 @@ turn-start recall through the same durable dynamic-capability machinery as a
 `turn.started` `defineDynamic` tool resolver.
 
 Memory definitions and provider tools compile through eve's canonical source
-graph. Each selected memory slot retains its authored binding and projects one
-compiler-owned programmatic `tools/<slot>.ts` wrapper that exports an ordinary
-`defineDynamic` resolver. The wrapper qualifies provider tool keys and passes
-them through the existing source composition, binding, module-map, dynamic-tool,
-approval, authorization, and replay paths. Memory does not add a runtime tool
-contribution seam or a second executable registry.
+graph. Each selected memory slot retains its direct binding and induces one
+derived `tools/<slot>.ts` module from a registered programmatic template. The
+template exports an ordinary `defineDynamic` resolver. It qualifies provider
+tool keys and passes them through the existing source composition, binding,
+module-map, dynamic-tool, approval, authorization, and replay paths. Memory
+does not add a runtime tool contribution seam or a second executable registry.
 
 ```text
 turn.started          ---> recall(phase: "turn.started") ---> tools
@@ -139,16 +139,35 @@ surface, because provider tools are ordinary dynamic tools.
 
 Memory is a source-graph primitive, not a post-compile runtime attachment. For
 `agent/memory/user.ts`, the compiler selects and binds the memory definition,
-then projects its provider-tool adapter as a programmatic source at
-`tools/user.ts`:
+then instantiates its registered provider-tool template at `tools/user.ts`:
 
 ```text
 memory/user.ts
   └─ selected memory definition
-       └─ programmatic tools/user.ts wrapper
+       └─ registered tools/user.ts template instance
             └─ compiled defineDynamic resolver
                  └─ user__<provider tool key>
 ```
+
+The instantiation API takes the memory candidate as its anchor and dependency:
+
+```ts
+instantiateProgrammaticTemplate({
+  anchor: memoryCandidate,
+  dependencies: { memory: memoryCandidate },
+  logicalPath: `tools/${slot}.ts`,
+  owner: { kind: "framework", feature: "memory" },
+  parameters: { memoryExportName, memoryLogicalPath, slot },
+  template: memoryWrapperTemplate,
+});
+```
+
+The registry-issued template handle fixes the loader and module identity. The
+constructor inherits the anchor's node and layer, derives the source ID from
+the template, target path, and anchor, and rejects dependencies from another
+node. A direct target in the same layer wins over the derived module. Memory
+therefore needs no special registration mode, source layer, or source-ID
+convention.
 
 The memory definition and wrapper each use the canonical candidate,
 composition, binding-validation, artifact, module-map, hydration, and runtime
@@ -172,20 +191,24 @@ slot, `tools: false`, `null`, or an empty result contributes no tools. Provider
 factories use eve's durable callback helpers when their callbacks cannot be
 stamped by authored-source transformation.
 
+Every module-map load also memoizes zero-argument definition-factory results
+within each module namespace. The direct memory binding and its derived wrapper
+therefore receive the same definition and provider instance, including when a
+module exports `() => defineMemory(...)`. A separately loaded compile or runtime
+module map gets a fresh materialization; there is no process-global provider
+registry.
+
 This architecture is a completion gate for the core implementation:
 filesystem, in-memory, generated, bundled, and hydrated module maps must load
 the same selected wrapper binding, and a parked provider tool must resume after
 a fresh-process callback rebind. A memory-only registry, post-resolution tool
 merge, or logical-path loading fallback fails that gate.
 
-Current eve automatically rebinds missing callbacks by rerunning
-`session.started` resolvers; it does not rerun an arbitrary
-`turn.started` resolver. The memory core must therefore prove that loading the
-selected wrapper binding registers the callbacks needed by persisted provider
-tools, or extend cold rebinding at the generic compiled-resolver boundary. Any
-such extension belongs to the ordinary dynamic-tool lifecycle, contains no
-memory types, preserves the parked call's captured closure values, and never
-reruns provider mutation.
+Compiled dynamic resolvers may opt into missing-callback rebinding at the
+generic compiled-resolver boundary. The memory wrapper uses that path to
+register the callback implementation needed by a persisted provider tool. The
+rebind machinery contains no memory types, preserves the parked call's captured
+closure values, and never reruns provider mutation.
 
 ## Model-facing description
 
@@ -197,7 +220,7 @@ interface MemoryDefinition {
   readonly namespace?: MemoryNamespaceDefinition;
   readonly provider: MemoryProvider;
   readonly scope: MemoryScopeDefinition;
-  readonly tools?: boolean;
+  readonly tools?: false;
   readonly visibility?: MemoryVisibility;
 }
 ```
@@ -515,7 +538,7 @@ boundaries. `recall` is required. `capture` and `tools` are optional.
 ```ts
 import type { ModelMessage } from "ai";
 import type { SessionContext } from "eve/context";
-import type { DynamicResolveContext, ToolDefinition } from "eve/tools";
+import type { DynamicResolveContext } from "eve/tools";
 
 interface MemoryRecallMessage {
   /** Provider context recalled into durable model history as a user-role message. */
@@ -597,7 +620,7 @@ interface MemoryToolsContext extends DynamicResolveContext {
   };
 }
 
-type MemoryToolSet = Readonly<Record<string, ToolDefinition>>;
+type MemoryToolSet = Readonly<Record<string, MemoryToolDefinition>>;
 
 interface MemoryProvider {
   recall(context: MemoryRecallContext): MemoryRecallResult | Promise<MemoryRecallResult>;
@@ -794,14 +817,13 @@ omit, or do nothing.
 
 Compaction is the canonicalization boundary for memory records. Trusted
 internal code partitions every attributed memory record — across every slot,
-namespace, scope, and visibility mode — away from ordinary conversation, folds
-keyed records to one live version or deletion tombstone per identity, and
-retains every immutable unkeyed append with its attribution. The free-form
-summary prompt is built from projected ordinary conversation only; no
-attributed memory record of any kind enters it. Canonical private memory state
-is reattached to the rewritten history, so items hidden from the currently
-active scope survive another scope's compaction, and sparse retrieval stays
-accumulative across compaction.
+namespace, scope, and visibility mode — away from ordinary conversation, keeps
+one live keyed record per identity, and retains every immutable unkeyed append
+with its attribution. The free-form summary prompt is built from projected
+ordinary conversation only; no attributed memory record of any kind enters it.
+Canonical private memory state is reattached to the rewritten history, so items
+hidden from the currently active scope survive another scope's compaction, and
+sparse retrieval stays accumulative across compaction.
 
 Because superseded versions and hidden scopes can grow while the visible
 prompt stays constant, eve triggers canonicalization on raw attributed-record
@@ -1146,9 +1168,10 @@ The generic prerequisites are on `main`: the projected-history seam
 ([#2352](https://github.com/vercel/eve/pull/2352)), durable dynamic callbacks
 ([#2354](https://github.com/vercel/eve/pull/2354)), name-and-phase callback
 identity ([#2384](https://github.com/vercel/eve/pull/2384)), and the canonical
-source graph and binding table
+source graph, binding table, and invariant-safe derived-template API
 ([#2404](https://github.com/vercel/eve/pull/2404),
-[#2516](https://github.com/vercel/eve/pull/2516)). The runtime-tool contribution
+[#2516](https://github.com/vercel/eve/pull/2516),
+[#2539](https://github.com/vercel/eve/pull/2539)). The runtime-tool contribution
 proposal in [#2347](https://github.com/vercel/eve/issues/2347) is superseded;
 memory uses the compile-time wrapper described above. The kernel-effects
 follow-up to #2516 is not a prerequisite because provider tools have ordinary
@@ -1157,12 +1180,13 @@ executors rather than native kernel effects.
 Implementation proceeds in two pull requests:
 
 1. The first-class memory core is implemented in
-   [#2534](https://github.com/vercel/eve/pull/2534), based directly on current
-   `main`. It adds the authoring and compiler surface, source-graph wrapper,
-   namespace and scope locks, recall records and projection, lifecycle,
-   compaction, agent-info v4, published documentation, and deterministic
-   end-to-end coverage. It does not restack or reuse the custom runtime
-   lifecycle from [#2142](https://github.com/vercel/eve/pull/2142).
+   [#2534](https://github.com/vercel/eve/pull/2534), rebased directly onto
+   current `main`. It uses #2539's registered template API and generic
+   per-module-map factory materialization, then adds the memory authoring and
+   compiler surface, namespace and scope locks, recall records and projection,
+   lifecycle, compaction, agent-info v4, published documentation, and
+   deterministic end-to-end coverage. It does not restack or reuse the custom
+   runtime lifecycle from [#2142](https://github.com/vercel/eve/pull/2142).
 2. After #2534 merges, the bounded `fileMemory()` provider in
    [#2144](https://github.com/vercel/eve/pull/2144) will be rebased onto current
    `main`. It retains only provider storage, document, backend, and concurrency
@@ -1170,7 +1194,8 @@ Implementation proceeds in two pull requests:
    [#2145](https://github.com/vercel/eve/pull/2145) is superseded.
 
 #2534 implements the core boundary through one selected source and binding
-authority for every memory definition and provider-tool wrapper, one projected
+authority for every memory definition and provider-tool wrapper, one
+materialization per definition factory in a module-map load, one projected
 history for message-bearing consumers, private memory canonicalization outside
 ordinary summarization, and generic cold callback rebinding with captured
 closures. Those invariants, the committed E2E fixture, and the required CI
