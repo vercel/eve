@@ -6190,6 +6190,67 @@ describe("createToolLoopHarness", () => {
     expect(toolResult).toEqual(resumedToolResultMessage.content[0]);
   });
 
+  it("defers an agents announcement until an approved sibling tool has produced its result", async () => {
+    const toolResultMessage = {
+      content: [
+        {
+          output: { type: "text", value: "ok" },
+          toolCallId: "call-1",
+          toolName: "bash",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
+    };
+    setupMockAgent({
+      content: [],
+      finishReason: "stop",
+      response: { messages: [{ content: "Done.", role: "assistant" }] },
+      responseMessages: [toolResultMessage, { content: "Done.", role: "assistant" }],
+      text: "Done.",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const pending = createPendingBashApprovalSession();
+    const session = {
+      ...pending,
+      state: {
+        ...pending.state,
+        [AGENT_HANDLES_STATE_KEY]: {
+          handles: [
+            {
+              address: {
+                continuationToken: "private-token",
+                kind: "agent/local" as const,
+                sessionId: "child-session-123456789012",
+              },
+              identity: {
+                id: "ag_research:123456789012",
+                name: "research",
+                nodeId: "subagents/research",
+              },
+              lastStatus: "waiting",
+              phase: "parked" as const,
+            },
+          ],
+        },
+      },
+    };
+    const harness = createToolLoopHarness(
+      createTestConfig("conversation", undefined, { tools: new Map() }),
+    );
+
+    await harness(session, {
+      inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+    });
+
+    const agent = vi.mocked(ToolLoopAgent).mock.results.at(-1)?.value;
+    if (agent === undefined) throw new Error("ToolLoopAgent mock did not return an instance.");
+    const messages = vi.mocked(agent.generate).mock.calls[0]?.[0].messages as ModelMessage[];
+    expect(JSON.stringify(messages)).not.toContain("[Agents]");
+  });
+
   it("does not persist provider-executed deferred tool-results as generic tool messages", async () => {
     const toolCallId = "srvtoolu_01HhTt9QAEancMSj7jE8CXN7";
     const webSearchOutput = [

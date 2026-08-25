@@ -1205,6 +1205,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const agentStore = getAgentHandleStore(session.state);
     if (
       agentStore !== undefined &&
+      !hasUnansweredToolCall(messages) &&
       agentStore.handles.some((handle) => handle.phase === "addressed") !== true
     ) {
       const announcement = resolveAgentsAnnouncement({
@@ -2334,6 +2335,26 @@ function extractToolResultCallIds(messages: readonly StepResponseMessage[]): Rea
   }
 
   return callIds;
+}
+
+/** True when provider history still owes a result for any assistant tool call. */
+function hasUnansweredToolCall(messages: readonly ModelMessage[]): boolean {
+  const callIds = new Set<string>();
+  const resultIds = new Set<string>();
+
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      if (typeof part !== "object" || part === null) continue;
+      if (part.type === "tool-call") callIds.add(part.toolCallId);
+      if (part.type === "tool-result") resultIds.add(part.toolCallId);
+    }
+  }
+
+  for (const callId of callIds) {
+    if (!resultIds.has(callId)) return true;
+  }
+  return false;
 }
 
 /**

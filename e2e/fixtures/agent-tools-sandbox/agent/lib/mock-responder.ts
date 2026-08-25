@@ -12,8 +12,11 @@ const SKILL_DIRECTIVE = /load the `([^`]+)` skill/iu;
  */
 export function respond(request: MockModelRequest): MockModelResponse | string {
   const message = request.lastUserMessage ?? "";
-  const roles = request.messages.map((entry) => entry.role);
-  const turnHasToolResult = roles.lastIndexOf("tool") > roles.lastIndexOf("user");
+  const lastAuthoredUserIndex = request.messages.findLastIndex(
+    (entry) => entry.role === "user" && !entry.text.trim().startsWith("[Agents]"),
+  );
+  const turnHasToolResult =
+    request.messages.findLastIndex((entry) => entry.role === "tool") > lastAuthoredUserIndex;
 
   const subagent = SUBAGENT_DIRECTIVE.exec(message);
   if (subagent?.[1] !== undefined && subagent[2] !== undefined) {
