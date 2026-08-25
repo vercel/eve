@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { ChannelInstrumentationKey, ParentTraceContextKey } from "#context/keys.js";
 import { instrumentChannelDelivery } from "#harness/channel-delivery-instrumentation.js";
+import { bindSessionInstrumentation } from "#instrumentation/bind-session.js";
 import {
   createInstrumentationHooks,
   type InstrumentationEvent,
 } from "#instrumentation/lifecycle.js";
+import type { InstrumentationRuntime } from "#instrumentation/runtime.js";
+import { planSessionInstrumentation } from "#instrumentation/session-plan.js";
 
 describe("channel delivery instrumentation", () => {
   it("projects only known content and redacts it from metadata providers", async () => {
@@ -38,11 +40,31 @@ describe("channel delivery instrumentation", () => {
       traceFlags: 1,
       traceId: "11111111111111111111111111111111",
     };
-    ctx.set(ChannelInstrumentationKey, {
-      kind: "channel:slack",
-      metadata: { audience: "public" },
+    const runtime: InstrumentationRuntime = {
+      forceFlush: async () => undefined,
+      hooks,
+      otelSettings: undefined,
+      runInContext: (_operation, execute) => execute(),
+      shutdown: async () => undefined,
+    };
+    const plan = planSessionInstrumentation({
+      runtime,
+      session: {
+        agentName: "test-agent",
+        channel: {
+          kind: "channel:slack",
+          metadata: { audience: "public" },
+        },
+        parentTraceContext,
+        rootSessionId: "session-1",
+      },
     });
-    ctx.set(ParentTraceContextKey, parentTraceContext);
+    const instrumentation = bindSessionInstrumentation({
+      plan,
+      rootSessionId: "session-1",
+      runtime,
+      sessionId: "session-1",
+    });
 
     await contextStorage.run(ctx, async () => {
       await instrumentChannelDelivery({
@@ -59,7 +81,7 @@ describe("channel delivery instrumentation", () => {
           kind: "deliver",
           payloads: [{ interaction: { secret: true }, message: "hello" }],
         },
-        hooks,
+        instrumentation,
         rootSessionId: "session-1",
         sequence: 0,
         sessionId: "session-1",
@@ -67,7 +89,7 @@ describe("channel delivery instrumentation", () => {
       });
       await instrumentChannelDelivery({
         ctx,
-        hooks,
+        instrumentation,
         includeTurn: true,
         outcome: "completed",
       });

@@ -11,7 +11,8 @@ import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
+import type { SessionInstrumentation } from "#instrumentation/session-plan.js";
+import { bindSessionInstrumentation } from "#instrumentation/bind-session.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
 import { UNSPECIFIED_INPUT_SCHEMA } from "#tools/schema.js";
@@ -74,6 +75,7 @@ export interface CreateExecutionNodeStepInput {
   readonly handleEvent?: HandleEventFn;
   readonly historyProjector?: HistoryViewProjector;
   readonly historyView?: PreparedHistoryView;
+  readonly instrumentation?: SessionInstrumentation;
   readonly mode: RunMode;
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
@@ -89,6 +91,14 @@ export interface CreateExecutionNodeStepInput {
  * tool, sandbox, and subagent wiring.
  */
 export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): StepFn {
+  const instrumentation =
+    input.instrumentation ??
+    bindSessionInstrumentation({
+      plan: undefined,
+      rootSessionId: "",
+      runtime: undefined,
+      sessionId: "",
+    });
   const resolveModel = createRuntimeModelResolver(input.modelResolutionScope);
   const dispatchModelEvent =
     input.node.turnAgent.dynamicModel === undefined
@@ -98,7 +108,6 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
           input.node.turnAgent.dynamicModel,
         );
   const tools = createNodeHarnessTools({ node: input.node });
-  const instrumentation = getInstrumentationRuntime();
   const step = createToolLoopHarness({
     abortSignal: input.abortSignal,
     capabilities: input.capabilities,
@@ -118,7 +127,6 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     runtimeIdentity: buildRuntimeIdentity(input.node),
     tools,
   });
-  if (instrumentation === undefined) return step;
   return async (session, stepInput) => {
     try {
       return await step(session, stepInput);

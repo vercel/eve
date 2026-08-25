@@ -1,26 +1,20 @@
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import type { AlsContext } from "#context/container.js";
-import {
-  ActiveChannelDeliveriesKey,
-  ChannelInstrumentationKey,
-  ParentTraceContextKey,
-  SessionTraceSeedKey,
-  type ActiveChannelDelivery,
-} from "#context/keys.js";
+import { ActiveChannelDeliveriesKey, type ActiveChannelDelivery } from "#context/keys.js";
 import type {
   InstrumentationChannelDeliveryOutcome,
   InstrumentationChannelDeliveryTerminalEvent,
   InstrumentationHooks,
 } from "#instrumentation/lifecycle.js";
 import { channelDeliveryIdempotencyKey } from "#instrumentation/lifecycle.js";
-import { instrumentationHooksForAudience } from "#harness/instrumentation/content-policy.js";
-import { normalizeChannelAudience } from "#shared/channel-audience.js";
+import type { SessionInstrumentation } from "#instrumentation/session-plan.js";
 
 interface ChannelDeliveryStartInstrumentation {
   readonly agentName?: string;
   readonly ctx: AlsContext;
   readonly delivery: DeliverHookPayload;
-  readonly hooks: InstrumentationHooks | undefined;
+  readonly hooks?: InstrumentationHooks;
+  readonly instrumentation?: SessionInstrumentation;
   readonly rootSessionId: string;
   readonly sequence: number;
   readonly sessionId: string;
@@ -31,7 +25,8 @@ interface ChannelDeliveryTerminalInstrumentation {
   readonly ctx: AlsContext;
   readonly error?: unknown;
   readonly errorCode?: string;
-  readonly hooks: InstrumentationHooks | undefined;
+  readonly hooks?: InstrumentationHooks;
+  readonly instrumentation?: SessionInstrumentation;
   readonly includeTurn: boolean;
   readonly outcome: InstrumentationChannelDeliveryOutcome;
 }
@@ -45,17 +40,15 @@ export function instrumentChannelDelivery(
 export async function instrumentChannelDelivery(
   input: ChannelDeliveryStartInstrumentation | ChannelDeliveryTerminalInstrumentation,
 ): Promise<void> {
+  const instrumentation = resolveInstrumentation(input);
+  if (instrumentation === undefined) return;
   if (!("delivery" in input)) {
     const active = input.ctx.get(ActiveChannelDeliveriesKey);
-    if (active === undefined || input.hooks === undefined) return;
+    if (active === undefined) return;
     const type =
       `channel.delivery.${input.outcome}` as InstrumentationChannelDeliveryTerminalEvent["type"];
     for (const item of active) {
-      const hooks = instrumentationHooksForAudience(
-        input.hooks,
-        normalizeChannelAudience(item.delivery.channelAudience),
-      );
-      await hooks?.publish({
+      await instrumentation.publish({
         agentName: item.agentName,
         delivery: item.delivery,
         error: input.error,
@@ -73,17 +66,12 @@ export async function instrumentChannelDelivery(
     return;
   }
 
-  if (input.hooks === undefined || input.delivery.deliveryMetadata === undefined) return;
+  if (input.delivery.deliveryMetadata === undefined) return;
 
   const active: ActiveChannelDelivery[] = [];
-  const channelAudience = normalizeChannelAudience(
-    input.ctx.get(ChannelInstrumentationKey)?.metadata.audience,
-  );
-  const hooks = instrumentationHooksForAudience(input.hooks, channelAudience);
   for (const metadata of input.delivery.deliveryMetadata) {
     const payload = input.delivery.payloads[metadata.payloadIndex];
     const delivery = {
-      channelAudience,
       channelKind: metadata.channelKind,
       channelName: metadata.channelName,
       deliveryId: metadata.deliveryId,
@@ -91,7 +79,9 @@ export async function instrumentChannelDelivery(
       requestTraceContext: metadata.requestTraceContext,
     };
     const deliveryInput =
-      !hooks?.capturesContent || payload === undefined ? undefined : projectDeliveryInput(payload);
+      !instrumentation.hooks.capturesContent || payload === undefined
+        ? undefined
+        : projectDeliveryInput(payload);
     const item: ActiveChannelDelivery = {
       agentName: input.agentName,
       delivery,
@@ -101,19 +91,25 @@ export async function instrumentChannelDelivery(
       turnId: input.turnId,
     };
     active.push(item);
-    await hooks?.publish({
+    await instrumentation.publish({
       agentName: item.agentName,
       delivery,
       idempotencyKey: channelDeliveryIdempotencyKey(input.sessionId, delivery.deliveryId),
       input: deliveryInput,
-      parentTraceContext: input.ctx.get(ParentTraceContextKey),
       rootSessionId: input.rootSessionId,
       sessionId: input.sessionId,
-      traceSeed: input.ctx.get(SessionTraceSeedKey),
       type: "channel.delivery.started",
     });
   }
   if (active.length > 0) input.ctx.set(ActiveChannelDeliveriesKey, active);
+}
+
+function resolveInstrumentation(
+  input: ChannelDeliveryStartInstrumentation | ChannelDeliveryTerminalInstrumentation,
+): Pick<SessionInstrumentation, "hooks" | "publish"> | undefined {
+  if (input.instrumentation !== undefined) return input.instrumentation;
+  if (input.hooks === undefined) return undefined;
+  return { hooks: input.hooks, publish: (event) => input.hooks!.publish(event) };
 }
 
 function projectDeliveryInput(payload: DeliverPayload) {

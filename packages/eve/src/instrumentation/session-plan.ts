@@ -6,8 +6,13 @@ import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import type { InstrumentationCapture } from "#instrumentation/lifecycle.js";
 import type {
+  InstrumentationContextRunner,
+  InstrumentationEvent,
+  InstrumentationHooks,
   InstrumentationParentLineage,
+  InstrumentationSessionStartedEvent,
   InstrumentationTraceContext,
+  InstrumentationTurnStartedEvent,
 } from "#instrumentation/lifecycle.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -348,26 +353,7 @@ export interface SessionTelemetryOptions {
 }
 
 /** Structural event input published by the harness. */
-export type InstrumentationEventInput =
-  | { readonly type: "session.started"; readonly sessionId: string }
-  | {
-      readonly type: "session.completed" | "session.waiting" | "session.failed";
-      readonly sessionId: string;
-      readonly turnId?: string;
-      readonly error?: unknown;
-    }
-  | {
-      readonly type: "turn.started";
-      readonly sessionId: string;
-      readonly turnId: string;
-      readonly sequence: number;
-    }
-  | {
-      readonly type: "turn.completed" | "turn.cancelled" | "turn.failed";
-      readonly sessionId: string;
-      readonly turnId: string;
-      readonly error?: unknown;
-    };
+export type InstrumentationEventInput = InstrumentationEvent;
 
 /** Input to {@link SessionInstrumentation.preparePreamble}. */
 export interface PreambleInput {
@@ -375,6 +361,7 @@ export interface PreambleInput {
   readonly turnId: string;
   readonly sequence: number;
   readonly sessionStarted: boolean;
+  readonly traceContext?: RuntimeTraceContext;
 }
 
 /** Input to {@link SessionInstrumentation.telemetryForAttempt}. */
@@ -412,6 +399,18 @@ export interface InstrumentationPropagation {
  * policy, re-read channel metadata, or change the producer capture level.
  */
 export interface SessionInstrumentation {
+  /** @internal Transitional AI SDK bridge surface. */
+  readonly hooks: InstrumentationHooks;
+  /** @internal Transitional AI SDK bridge surface. */
+  readonly prepareSessionTrace?: (
+    event: InstrumentationSessionStartedEvent,
+  ) => Promise<InstrumentationTraceContext>;
+  /** @internal Transitional AI SDK bridge surface. */
+  readonly prepareTurnTrace?: (
+    event: InstrumentationTurnStartedEvent,
+  ) => Promise<InstrumentationTraceContext>;
+  /** @internal Transitional AI SDK bridge surface. */
+  readonly runInContext: InstrumentationContextRunner;
   publish(event: InstrumentationEventInput): Promise<void>;
   preparePreamble(input: PreambleInput): Promise<RuntimeTraceContext | undefined>;
   telemetryForAttempt(input: AttemptInstrumentationInput): SessionTelemetryOptions | undefined;

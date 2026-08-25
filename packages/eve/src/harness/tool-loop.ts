@@ -37,7 +37,6 @@ import {
   ParentSessionKey,
   ParentTraceContextKey,
   SessionCallbackKey,
-  SessionTraceSeedKey,
   TurnTaskDeliveryKey,
   TurnTaskStateKey,
 } from "#context/keys.js";
@@ -156,7 +155,6 @@ import {
 import type { InstrumentationAttemptScope } from "#instrumentation/lifecycle.js";
 import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { resolveParentLineage } from "#harness/parent-lineage.js";
-import { prepareTurnTraceContext } from "#harness/prepare-trace-context.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
@@ -672,7 +670,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const taskUpdatesEnabled = taskOwned && config.tools.has(TASK_UPDATE_TOOL_NAME);
     const parentLineage = resolveParentLineage(parent, channel);
     const parentTraceContext = store?.get(ParentTraceContextKey);
-    const traceSeed = store?.get(SessionTraceSeedKey);
     let activeAttemptScope: InstrumentationAttemptScope | undefined;
     const emit = createInstrumentationHandleEvent({
       agentName: config.runtimeIdentity?.agentName,
@@ -732,20 +729,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
               traceId: spanContext.traceId,
             }
           : undefined;
-      return await prepareTurnTraceContext({
-        agentName: config.runtimeIdentity?.agentName,
-        channelAudience,
-        channelType: channelInstrumentation?.channelType,
-        instrumentation: config.instrumentation,
-        parentLineage,
-        parentTraceContext,
-        rootSessionId: parent?.rootSessionId ?? session.rootSessionId ?? session.sessionId,
+      if (config.instrumentation?.preparePreamble === undefined) return authoredTraceContext;
+      return await config.instrumentation.preparePreamble({
         sequence: emissionState.sequence,
         sessionId: session.sessionId,
         sessionStarted: emissionState.sessionStarted,
-        traceContext: authoredTraceContext,
-        traceSeed,
         turnId: `turn_${emissionState.sequence}`,
+        traceContext: authoredTraceContext,
       });
     };
 

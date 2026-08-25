@@ -43,6 +43,8 @@ import {
   instrumentChannelDelivery,
 } from "#harness/channel-delivery-instrumentation.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
+import { bindSessionInstrumentation } from "#instrumentation/bind-session.js";
+import { SessionInstrumentationPlanKey } from "#instrumentation/session-plan.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
@@ -193,7 +195,12 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     turnAgent: effectiveAgent.turnAgent,
   });
   const history = createExecutionHistoryView(initialSession);
-  const instrumentation = getInstrumentationRuntime();
+  const instrumentation = bindSessionInstrumentation({
+    plan: ctx.get(SessionInstrumentationPlanKey),
+    rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
+    runtime: getInstrumentationRuntime(),
+    sessionId: initialSession.sessionId,
+  });
   const initialEmissionState = getHarnessEmissionState(initialSession.state);
 
   if (rawInput.input?.kind === "deliver") {
@@ -202,7 +209,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         agentName: bundle.turnAgent.id,
         ctx,
         delivery: rawInput.input as DeliverHookPayload,
-        hooks: instrumentation?.hooks,
+        instrumentation,
         rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
         sequence: initialEmissionState.sequence,
         sessionId: initialSession.sessionId,
@@ -217,7 +224,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         ctx,
         error,
         errorCode: channelDeliveryErrorCode(error),
-        hooks: instrumentation?.hooks,
+        instrumentation,
         includeTurn: false,
         outcome: "failed",
       }),
@@ -294,7 +301,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     await contextStorage.run(ctx, () =>
       instrumentChannelDelivery({
         ctx,
-        hooks: instrumentation?.hooks,
+        instrumentation,
         includeTurn: false,
         outcome: "completed",
       }),
@@ -441,9 +448,8 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           prepareDynamicInstructionPreamble(ctx, history.messages(schemaSession));
           let instructionMessages: readonly import("ai").ModelMessage[] = [];
           const traceContext = await prepareWorkflowPreambleTrace({
-            ctx,
             emissionState,
-            runtimeIdentity,
+            instrumentation,
             session: schemaSession,
           });
           try {
@@ -509,6 +515,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           handleEvent,
           historyProjector: history.projector,
           historyView: history.prepare(modelSession),
+          instrumentation,
           mode,
           modelResolutionScope: {
             moduleMap: bundle.moduleMap,

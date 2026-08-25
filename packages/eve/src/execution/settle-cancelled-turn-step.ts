@@ -29,6 +29,8 @@ import { abandonRunningAgentTurns } from "#harness/handles/transitions.js";
 import { clearPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { createInstrumentationHandleEvent } from "#harness/instrumentation/native-events.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
+import { bindSessionInstrumentation } from "#instrumentation/bind-session.js";
+import { SessionInstrumentationPlanKey } from "#instrumentation/session-plan.js";
 import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
 import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import {
@@ -65,14 +67,18 @@ export async function settleCancelledTurnStep(input: {
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const instrumentation = getInstrumentationRuntime();
-
   let session = hydrateDurableSession({
     compactionOverrides: {
       thresholdPercent: effectiveAgent.thresholdPercent,
     },
     durable: durableSession,
     turnAgent: effectiveAgent.turnAgent,
+  });
+  const instrumentation = bindSessionInstrumentation({
+    plan: ctx.get(SessionInstrumentationPlanKey),
+    rootSessionId: session.rootSessionId ?? session.sessionId,
+    runtime: getInstrumentationRuntime(),
+    sessionId: session.sessionId,
   });
 
   let emissionState = getHarnessEmissionState(durableSession.state);
@@ -109,7 +115,7 @@ export async function settleCancelledTurnStep(input: {
             agentName: bundle.turnAgent.id,
             channelKind: ctx.get(ChannelInstrumentationKey)?.kind,
             handleEvent: baseEmit,
-            hooks: instrumentation?.hooks,
+            hooks: instrumentation.hooks,
             sessionId: session.sessionId,
             turnId: activeTurnId(emissionState),
           }) ?? baseEmit;
@@ -121,7 +127,7 @@ export async function settleCancelledTurnStep(input: {
       emissionState = scoped.result;
       session = scoped.session;
     } finally {
-      await instrumentation?.forceFlush();
+      await instrumentation.forceFlush();
       writer.releaseLock();
     }
   }

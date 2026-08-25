@@ -14,7 +14,7 @@ import type { InternalToolDefinition } from "#tools/definition.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import type { HarnessInstrumentation } from "#instrumentation/runtime.js";
+import type { SessionInstrumentation } from "#instrumentation/session-plan.js";
 import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
 
 /**
@@ -24,6 +24,21 @@ import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-
  * across workflow step boundaries.
  */
 export type SessionToolDefinition = Readonly<InternalToolDefinition>;
+
+type ToolLoopInstrumentation = Pick<SessionInstrumentation, "hooks" | "runInContext"> &
+  Partial<
+    Pick<
+      SessionInstrumentation,
+      | "forceFlush"
+      | "preparePreamble"
+      | "prepareSessionTrace"
+      | "prepareTurnTrace"
+      | "propagationFor"
+      | "publish"
+      | "runStep"
+      | "telemetryForAttempt"
+    >
+  >;
 
 /** Authored-key → opaque-value map stored on `session.state`. */
 export type SessionStateMap = Readonly<Record<string, unknown>>;
@@ -310,7 +325,7 @@ export interface ToolLoopHarnessConfig {
    * Internal lifecycle hooks injected into each actual model attempt.
    * Omitted in production until an instrumentation runtime opts in.
    */
-  readonly instrumentation?: HarnessInstrumentation;
+  readonly instrumentation?: ToolLoopInstrumentation;
   /**
    * Execution mode for the current harness.
    *
