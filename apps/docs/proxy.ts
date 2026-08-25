@@ -2,12 +2,13 @@ import { createProxy } from "@vercel/geistdocs/proxy";
 import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
 import { config as geistdocsConfig } from "@/lib/geistdocs/config";
 import { removeProxyMarkdownCanonical } from "@/lib/geistdocs/markdown-canonical";
-import { markdownRoutes } from "@/lib/geistdocs/markdown-routes";
+import { markdownNotFound, markdownRoutes } from "@/lib/geistdocs/markdown-routes";
 import { trackMdRequest } from "@/lib/geistdocs/md-tracking";
 
 const geistdocsProxy = createProxy({
   config: geistdocsConfig,
   markdownRoutes,
+  markdownNotFound,
   trackMarkdownRequest: trackMdRequest,
   before: ({ request }) => (request.nextUrl.pathname === "/nights" ? NextResponse.next() : null),
 });
