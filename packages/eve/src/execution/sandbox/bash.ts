@@ -21,7 +21,6 @@ export interface BashExecuteOptions {
 }
 
 export const DEFAULT_BASH_TIMEOUT_SECONDS = 300;
-export const MAX_BASH_TIMEOUT_SECONDS = 600;
 
 // ---------------------------------------------------------------------------
 // Result shape
@@ -59,8 +58,7 @@ export async function executeBashOnSandbox(
   args: BashInput,
   options?: BashExecuteOptions,
 ): Promise<BashResult> {
-  const timeoutMs =
-    Math.min(args.timeout ?? DEFAULT_BASH_TIMEOUT_SECONDS, MAX_BASH_TIMEOUT_SECONDS) * 1_000;
+  const timeoutMs = (args.timeout ?? DEFAULT_BASH_TIMEOUT_SECONDS) * 1_000;
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const abortSignal =
     options?.abortSignal === undefined

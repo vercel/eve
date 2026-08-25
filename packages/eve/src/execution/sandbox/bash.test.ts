@@ -3,11 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install.js";
 import type { SandboxCommandResult, SandboxSession } from "#shared/sandbox-session.js";
 
-import {
-  DEFAULT_BASH_TIMEOUT_SECONDS,
-  executeBashOnSandbox,
-  MAX_BASH_TIMEOUT_SECONDS,
-} from "./bash.js";
+import { DEFAULT_BASH_TIMEOUT_SECONDS, executeBashOnSandbox } from "./bash.js";
 
 describe("executeBashOnSandbox", () => {
   const previousDevFlag = process.env[EVE_DEV_ENV_FLAG];
@@ -54,9 +50,9 @@ describe("executeBashOnSandbox", () => {
       scenario: "honors a shorter requested timeout",
     },
     {
-      expectedTimeoutMs: MAX_BASH_TIMEOUT_SECONDS * 1_000,
-      input: { command: "sleep forever", timeout: MAX_BASH_TIMEOUT_SECONDS * 2 },
-      scenario: "caps a requested timeout at the maximum",
+      expectedTimeoutMs: 1_200_000,
+      input: { command: "sleep forever", timeout: 1_200 },
+      scenario: "honors a requested timeout above ten minutes",
     },
   ])("$scenario", async ({ expectedTimeoutMs, input }) => {
     const { abort, timeout } = mockTimeoutSignal();
