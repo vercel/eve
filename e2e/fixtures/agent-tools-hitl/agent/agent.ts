@@ -3,8 +3,8 @@ import { defineAgent, defineDynamic, type DynamicResolveContext } from "eve";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
 const AUTH_PROBE_DIRECTIVE = /call the auth-probe tool exactly once with marker "([^"]+)"/iu;
-const PENDING_APPROVAL_PROJECTION_MARKER = "[case: pending-approval-projection]";
-const PENDING_APPROVAL_PROJECTION_MODEL = "anthropic/claude-opus-4.8";
+const PENDING_APPROVAL_PROJECTION_MODEL_DIRECTIVE =
+  /\[pending-approval-projection-model: ([^\]]+)\]/u;
 const REPLY_DIRECTIVE = /reply with exactly ([A-Z0-9-]+)/iu;
 
 /**
@@ -44,9 +44,10 @@ export default defineAgent({
   model: defineDynamic({
     events: {
       "step.started": (_event, ctx) => {
-        if (userText(ctx.messages).includes(PENDING_APPROVAL_PROJECTION_MARKER)) {
-          return PENDING_APPROVAL_PROJECTION_MODEL;
-        }
+        const requestedModel = PENDING_APPROVAL_PROJECTION_MODEL_DIRECTIVE.exec(
+          userText(ctx.messages),
+        )?.[1];
+        if (requestedModel !== undefined) return requestedModel;
         return {
           model: baseConfig.model,
           modelContextWindowTokens: baseConfig.modelContextWindowTokens,
