@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ROOT_CONTEXT } from "#compiled/@opentelemetry/api/index.js";
+import { withNativeSamplingDecision } from "#tracing/native-sampling.js";
 import { registerOtelPipeline } from "#tracing/otel-registration.js";
 
 const { registerOTel } = vi.hoisted(() => ({ registerOTel: vi.fn() }));
@@ -29,9 +31,34 @@ describe("registerOtelPipeline", () => {
         instrumentations: [],
         propagators: expect.arrayContaining(["tracecontext", expect.any(Object)]),
         serviceName: "weather",
-        traceSampler: "always_on",
+        traceSampler: expect.any(Object),
       }),
     );
+  });
+
+  it("keeps native decisions authoritative while delegating unrelated roots", () => {
+    registerOTel.mockImplementation(() => undefined);
+    expect(() =>
+      registerOtelPipeline({
+        pipeline: { sampler: "always_off", spanProcessors: [] },
+        serviceName: "weather",
+      }),
+    ).toThrow();
+    const configuration = registerOTel.mock.calls.at(-1)?.[0] as {
+      traceSampler: {
+        shouldSample(...args: unknown[]): { readonly decision: number };
+      };
+    };
+    const sampler = configuration.traceSampler;
+
+    expect(
+      sampler.shouldSample(
+        withNativeSamplingDecision(ROOT_CONTEXT, true),
+        "1".repeat(32),
+        "agent.session",
+      ).decision,
+    ).toBe(2);
+    expect(sampler.shouldSample(ROOT_CONTEXT, "1".repeat(32), "authored.root").decision).toBe(0);
   });
 
   it("omits the sampler entirely rather than passing undefined", () => {

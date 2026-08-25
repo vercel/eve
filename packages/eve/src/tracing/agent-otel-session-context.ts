@@ -1,4 +1,4 @@
-import type { SpanContext, Tracer } from "#compiled/@opentelemetry/api/index.js";
+import { ROOT_CONTEXT, type SpanContext, type Tracer } from "#compiled/@opentelemetry/api/index.js";
 
 import {
   sessionIdempotencyKey,
@@ -12,6 +12,7 @@ import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import { evaluateTracePolicy, isSampledTrace } from "#tracing/sampled-trace.js";
 import type { AgentSessionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
+import { withNativeSamplingDecision } from "#tracing/native-sampling.js";
 
 interface AgentOtelSessionContextInput {
   readonly frameworkVersion: string;
@@ -54,17 +55,21 @@ export function createAgentOtelSessionContext(
         };
       }
       const startSpan = () =>
-        input.tracer.startSpan("agent.session", {
-          attributes: {
-            "agent.framework.name": "eve",
-            "agent.framework.version": input.frameworkVersion,
-            "agent.channel.audience": session.channelAudience,
-            "agent.name": session.agentName,
-            "agent.session.id": session.sessionId,
-            "agent.trace.schema.version": 2,
+        input.tracer.startSpan(
+          "agent.session",
+          {
+            attributes: {
+              "agent.framework.name": "eve",
+              "agent.framework.version": input.frameworkVersion,
+              "agent.channel.audience": session.channelAudience,
+              "agent.name": session.agentName,
+              "agent.session.id": session.sessionId,
+              "agent.trace.schema.version": 2,
+            },
+            root: true,
           },
-          root: true,
-        });
+          withNativeSamplingDecision(ROOT_CONTEXT, true),
+        );
       const span = input.idGenerator.withSpanId(session.traceSeed.spanId, () =>
         input.idGenerator.withTraceId(session.traceSeed!.traceId, startSpan),
       );

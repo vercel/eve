@@ -45,9 +45,8 @@ import {
 import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { bindSessionInstrumentation } from "#instrumentation/bind-session.js";
 import { SessionInstrumentationPlanKey } from "#instrumentation/session-plan.js";
-import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
+import { preserveSerializedSessionInstrumentation } from "#instrumentation/preservation.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
-import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
 import { readTurnSleepDurationMs } from "#harness/turn-sleep.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
@@ -553,11 +552,8 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
             backgroundTaskState: createDurableSessionState({ session: cancelledSession }),
             backgroundTasks: retained.backgroundTasks,
           }),
-      serializedContext: preserveSerializedInstrumentationState(
-        preserveSerializedAgentTraceState(
-          preserveSerializedSessionDynamicModelSelection(input.serializedContext, interrupted),
-          interrupted,
-        ),
+      serializedContext: preserveSerializedSessionInstrumentation(
+        preserveSerializedSessionDynamicModelSelection(input.serializedContext, interrupted),
         interrupted,
       ),
       sessionState: createDurableSessionState({ session: cancelledSession }),

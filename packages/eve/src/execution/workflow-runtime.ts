@@ -156,6 +156,7 @@ export function createWorkflowRuntime(config: {
         agentName: effectiveAgent.turnAgent.id,
         channel: channelInstrumentation,
         parentTraceContext: input.parentTraceContext,
+        parentTraceIsRemote: input.parentTraceIsRemote,
         parentLineage: instrumentationParentLineage,
         rootSessionId,
       };

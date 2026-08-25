@@ -482,6 +482,8 @@ export interface RunInput {
    * because trace state is scoped to one session's context.
    */
   readonly parentTraceContext?: SessionTraceContext;
+  /** Whether parentTraceContext crossed a remote agent boundary. */
+  readonly parentTraceIsRemote?: boolean;
   /**
    * Runtime-supplied session limits. Delegated local subagents use this to
    * carry the parent's remaining quota and delegation caps with the same limit

@@ -6,10 +6,12 @@ import {
   type Configuration,
   type SpanProcessor,
   type SpanProcessorOrName,
+  type SamplerOrName,
 } from "#compiled/@vercel/otel/index.js";
 
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { OtelPipeline } from "#tracing/otel-declaration.js";
+import { nativeSamplingDecision } from "#tracing/native-sampling.js";
 
 const REGISTRATION_SPAN_NAME = "eve.otel.registration";
 const REPLAY_DEDUPLICATION_LIMIT = 100_000;
@@ -131,7 +133,7 @@ export function registerOtelPipeline(input: {
     // passing an explicit `undefined` sampler.
     pipeline.sampler === undefined
       ? configuration
-      : { ...configuration, traceSampler: pipeline.sampler },
+      : { ...configuration, traceSampler: new NativeDecisionSampler(pipeline.sampler) },
   );
 
   const ownsTracer = globalTracerUses(idGenerator);
@@ -160,6 +162,53 @@ export function registerOtelPipeline(input: {
     idGenerator,
     shutdown: () => provider.shutdown!(),
   };
+}
+
+class NativeDecisionSampler {
+  private readonly delegate: SamplerOrName;
+
+  constructor(delegate: SamplerOrName) {
+    this.delegate = delegate;
+  }
+
+  shouldSample(...args: never[]): unknown {
+    const decision = nativeSamplingDecision(args[0]);
+    if (decision !== undefined) return { decision: decision ? 2 : 0 };
+    if (typeof this.delegate === "object") {
+      return Reflect.apply(this.delegate.shouldSample, this.delegate, args);
+    }
+    return namedSamplingResult(this.delegate, args[0], args[1]);
+  }
+
+  toString(): string {
+    return `NativeDecisionSampler{${String(this.delegate)}}`;
+  }
+}
+
+function namedSamplingResult(
+  sampler: Exclude<SamplerOrName, object>,
+  parentContext: unknown,
+  traceId: unknown,
+): { readonly decision: number } {
+  if (sampler === "always_off") return { decision: 0 };
+  if (sampler === "always_on") return { decision: 2 };
+  if (sampler.startsWith("parentbased_")) {
+    const parent = trace.getSpan(parentContext as Context)?.spanContext();
+    if (parent !== undefined) return { decision: (parent.traceFlags & 0x01) === 0x01 ? 2 : 0 };
+  }
+  if (sampler === "traceidratio" || sampler === "parentbased_traceidratio") {
+    const ratio = Number(process.env.OTEL_TRACES_SAMPLER_ARG ?? "1");
+    return { decision: samplesTraceId(traceId, ratio) ? 2 : 0 };
+  }
+  return { decision: 2 };
+}
+
+function samplesTraceId(traceId: unknown, ratio: number): boolean {
+  if (typeof traceId !== "string" || !Number.isFinite(ratio)) return false;
+  if (ratio <= 0) return false;
+  if (ratio >= 1) return true;
+  const prefix = Number.parseInt(traceId.slice(0, 8), 16);
+  return prefix / 0xffffffff < ratio;
 }
 
 /** Lifecycle retained from the tracer provider that owns every destination. */

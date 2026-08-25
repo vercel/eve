@@ -204,6 +204,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             },
             mode: body.mode ?? "conversation",
             parentTraceContext,
+            parentTraceIsRemote: parentTraceContext !== undefined,
             title: messageResult.title,
           });
         } catch (error) {

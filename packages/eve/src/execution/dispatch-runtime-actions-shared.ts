@@ -35,7 +35,10 @@ import {
   type RuntimeSession,
 } from "#execution/agent-handle-dispatch.js";
 import { getAgentHandleStore } from "#harness/handles/store.js";
-import { readActionTraceContext } from "#tracing/agent-trace-context-store.js";
+import {
+  readChildInstrumentationTraceContext,
+  readSessionInstrumentationTraceContext,
+} from "#instrumentation/propagation.js";
 import {
   assertUniqueRuntimeActionCallIds,
   getPendingRuntimeActionBatch,
@@ -65,7 +68,6 @@ import { hydrateDurableSession } from "#execution/session.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#execution/subagent-tool.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { readSessionTraceContext } from "#tracing/agent-trace-context-store.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
@@ -280,7 +282,10 @@ async function prepareActionDispatch(input: {
       input.fanoutSize ??
       plan.filter((entry) => entry.kind === "start" && entry.target.kind === "local").length,
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
-    parentTraceContext: readSessionTraceContext(input.serializedContext, session.sessionId),
+    parentTraceContext: readSessionInstrumentationTraceContext(
+      input.serializedContext,
+      session.sessionId,
+    ),
     plan,
     sandboxSessionId,
     serializedContext: input.serializedContext,
@@ -559,12 +564,12 @@ export async function startSubagent(input: {
   readonly target: DispatchStartTarget;
 }): Promise<DispatchOutcome> {
   const parentTraceContext =
-    readActionTraceContext(
-      input.serializedContext,
-      input.session.sessionId,
-      input.batchEvent.turnId,
-      input.target.action.callId,
-    ) ?? input.parentTraceContext;
+    readChildInstrumentationTraceContext({
+      callId: input.target.action.callId,
+      serializedContext: input.serializedContext,
+      sessionId: input.session.sessionId,
+      turnId: input.batchEvent.turnId,
+    }) ?? input.parentTraceContext;
 
   switch (input.target.kind) {
     case "local":

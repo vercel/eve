@@ -17,6 +17,7 @@ import {
 } from "#instrumentation/session-plan.js";
 import { recordErrorOnSpan } from "#internal/logging.js";
 import { normalizeInstrumentationChannelKind } from "#internal/instrumentation.js";
+import { withNativeSamplingDecision } from "#tracing/native-sampling.js";
 
 interface InstrumentationTurnTraceState {
   readonly spanId: string;
@@ -107,17 +108,25 @@ export function bindSessionInstrumentation(input: {
     runStep: async (step, execute) => {
       if (!usesOtel) return execute();
       const tracer = trace.getTracer("eve");
+      const nativeContext = withNativeSamplingDecision(
+        otelContext.active(),
+        plan?.sampled === true,
+      );
       const turnSpan = step.hasInput
-        ? tracer.startSpan("ai.eve.turn", {
-            attributes: {
-              "ai.telemetry.functionId":
-                input.runtime?.otelSettings?.functionId ?? step.agentName ?? "",
-              "eve.environment": step.environment,
-              "eve.session.id": step.sessionId,
-              "eve.turn.id": step.turnId,
-              "eve.version": step.eveVersion,
+        ? tracer.startSpan(
+            "ai.eve.turn",
+            {
+              attributes: {
+                "ai.telemetry.functionId":
+                  input.runtime?.otelSettings?.functionId ?? step.agentName ?? "",
+                "eve.environment": step.environment,
+                "eve.session.id": step.sessionId,
+                "eve.turn.id": step.turnId,
+                "eve.version": step.eveVersion,
+              },
             },
-          })
+            nativeContext,
+          )
         : undefined;
       const store = contextStorage.getStore();
       if (turnSpan !== undefined) {
@@ -126,13 +135,10 @@ export function bindSessionInstrumentation(input: {
       const stored = store?.get(InstrumentationTurnTraceKey);
       const parentContext =
         turnSpan !== undefined
-          ? trace.setSpan(otelContext.active(), turnSpan)
+          ? trace.setSpan(nativeContext, turnSpan)
           : stored === undefined
             ? undefined
-            : trace.setSpan(
-                otelContext.active(),
-                trace.wrapSpanContext({ ...stored, isRemote: true }),
-              );
+            : trace.setSpan(nativeContext, trace.wrapSpanContext({ ...stored, isRemote: true }));
       try {
         return parentContext === undefined
           ? await execute()

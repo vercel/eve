@@ -146,6 +146,60 @@ describe("planSessionInstrumentation", () => {
     });
   });
 
+  describe("remote admission veto", () => {
+    it("rejects a sampled remote parent when local policy rejects", () => {
+      const plan = planSessionInstrumentation({
+        runtime: makeRuntime({ otelSettings: { tracePolicy: () => false } }),
+        session: makeSession({
+          parentTraceContext: {
+            spanId: "parent-span-id",
+            traceFlags: 1,
+            traceId: "parent-trace-id",
+          },
+          parentTraceIsRemote: true,
+        }),
+      });
+
+      expect(parseSessionInstrumentationPlan(plan)).toMatchObject({
+        sampled: false,
+        traceFlags: 0,
+        traceId: "parent-trace-id",
+      });
+    });
+
+    it("keeps a sampled remote parent when local policy admits", () => {
+      const plan = planSessionInstrumentation({
+        runtime: makeRuntime({ otelSettings: { tracePolicy: () => true } }),
+        session: makeSession({
+          parentTraceContext: {
+            spanId: "parent-span-id",
+            traceFlags: 1,
+            traceId: "parent-trace-id",
+          },
+          parentTraceIsRemote: true,
+        }),
+      });
+
+      expect(parseSessionInstrumentationPlan(plan)?.sampled).toBe(true);
+    });
+
+    it("never promotes an unsampled remote parent", () => {
+      const plan = planSessionInstrumentation({
+        runtime: makeRuntime({ otelSettings: { tracePolicy: () => true } }),
+        session: makeSession({
+          parentTraceContext: {
+            spanId: "parent-span-id",
+            traceFlags: 0,
+            traceId: "parent-trace-id",
+          },
+          parentTraceIsRemote: true,
+        }),
+      });
+
+      expect(parseSessionInstrumentationPlan(plan)?.sampled).toBe(false);
+    });
+  });
+
   describe("no instrumentation runtime", () => {
     it("produces an inert plan", () => {
       const plan = planSessionInstrumentation({

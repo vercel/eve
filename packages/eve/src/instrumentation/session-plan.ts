@@ -39,6 +39,7 @@ export interface SessionInstrumentationPlanningInput {
   readonly agentName?: string;
   readonly channel?: ChannelInstrumentationProjection;
   readonly parentTraceContext?: InstrumentationTraceContext;
+  readonly parentTraceIsRemote?: boolean;
   readonly parentLineage?: InstrumentationParentLineage;
   readonly rootSessionId: string;
 }
@@ -196,6 +197,21 @@ export function planSessionInstrumentation(input: {
   const runtime = input.runtime;
 
   if (parentTraceContext !== undefined) {
+    const incomingSampled = (parentTraceContext.traceFlags & 0x01) === 0x01;
+    const sampled = input.session.parentTraceIsRemote
+      ? incomingSampled &&
+        evaluateTracePolicySafe(runtime?.otelSettings?.tracePolicy, {
+          agentName,
+          audience,
+          channelType,
+        })
+      : incomingSampled;
+    const effectiveParentTraceContext = {
+      ...parentTraceContext,
+      traceFlags: sampled
+        ? parentTraceContext.traceFlags | 0x01
+        : parentTraceContext.traceFlags & ~0x01,
+    };
     const data: SessionInstrumentationPlanData = {
       agentName,
       audience,
@@ -204,17 +220,14 @@ export function planSessionInstrumentation(input: {
       channelMetadata,
       traceId: parentTraceContext.traceId,
       spanId: parentTraceContext.spanId,
-      traceFlags: parentTraceContext.traceFlags,
-      sampled: (parentTraceContext.traceFlags & 0x01) === 0x01,
-      captureLevel: resolveCaptureLevel(
-        runtime,
-        parentTraceContext.traceFlags & 0x01 ? true : false,
-      ),
+      traceFlags: effectiveParentTraceContext.traceFlags,
+      sampled,
+      captureLevel: resolveCaptureLevel(runtime, sampled),
       functionId: runtime?.otelSettings?.functionId,
       isTraceContentVisible: shouldCaptureContent(audience),
       recordInputs: runtime?.otelSettings?.recordInputs,
       recordOutputs: runtime?.otelSettings?.recordOutputs,
-      parentTraceContext,
+      parentTraceContext: effectiveParentTraceContext,
       parentLineage,
       rootSessionId,
     };
