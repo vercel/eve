@@ -22,27 +22,27 @@ const localDefaults = defineProgrammaticAgentSource({
     },
     {
       logicalPath: "tools/bash.ts",
-      loadNamespace: () => import("#public/tools/bash.js"),
+      loadNamespace: () => import("#tools/bash.js"),
     },
     {
       logicalPath: "tools/read_file.ts",
-      loadNamespace: () => import("#public/tools/read-file.js"),
+      loadNamespace: () => import("#tools/read-file.js"),
     },
     {
       logicalPath: "tools/write_file.ts",
-      loadNamespace: () => import("#public/tools/write-file.js"),
+      loadNamespace: () => import("#tools/write-file.js"),
     },
     {
       logicalPath: "tools/todo.ts",
-      loadNamespace: () => import("#public/tools/todo.js"),
+      loadNamespace: () => import("#tools/todo.js"),
     },
     {
       logicalPath: "tools/web_fetch.ts",
-      loadNamespace: () => import("#public/tools/web-fetch.js"),
+      loadNamespace: () => import("#tools/web-fetch.js"),
     },
     {
       logicalPath: "tools/load_skill.ts",
-      loadNamespace: () => import("#public/tools/load-skill.js"),
+      loadNamespace: () => import("#tools/load-skill.js"),
     },
     {
       logicalPath: "tools/connection_search.ts",
@@ -54,7 +54,7 @@ const localDefaults = defineProgrammaticAgentSource({
     },
     {
       logicalPath: "tools/web_search.ts",
-      loadNamespace: () => import("#public/tools/web-search.js"),
+      loadNamespace: () => import("#tools/web-search.js"),
     },
   ],
 });

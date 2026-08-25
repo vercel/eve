@@ -21,7 +21,7 @@ export {
   type ToolModelOutput,
   type ToolModelOutputPart,
 } from "#public/definitions/tool.js";
-export { toolOutput, toolOutputPart } from "#public/tools/output-builders.js";
+export { toolOutput, toolOutputPart } from "#tools/output-builders.js";
 export type {
   DynamicToolEntry,
   DynamicEvents,

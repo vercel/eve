@@ -16,4 +16,4 @@ export type {
   ApprovalResponseSession,
   ApprovalStatus,
 } from "#public/definitions/approval.js";
-export { always, never, once } from "#public/tools/approval/policies.js";
+export { always, never, once } from "#tools/approval/policies.js";

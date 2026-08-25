@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey, type Session } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
-import { always, never, once } from "#public/tools/approval/policies.js";
+import { always, never, once } from "#tools/approval/policies.js";
 
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import {
