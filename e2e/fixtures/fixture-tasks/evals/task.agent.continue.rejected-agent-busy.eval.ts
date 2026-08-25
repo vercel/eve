@@ -4,6 +4,7 @@ import {
   parseToolErrorOutput,
   sendAndFollowQueuedTurn,
   waitForCompletedTask,
+  waitForTaskInput,
 } from "./shared.js";
 
 /** A persistent child with a nonterminal task rejects every competing continuation. */
@@ -14,6 +15,8 @@ export default defineTaskEval({
     primary: "task.agent.continue.rejected-agent-busy",
     setup: [
       "task.dispatch.start.accepted-acknowledged",
+      "task.input.require.accepted-valid-batch",
+      "task.input.answer.accepted-complete",
       "task.lifecycle.complete.accepted-nonterminal",
       "task.agent.continue.accepted-terminal-available",
     ],
@@ -69,7 +72,18 @@ export default defineTaskEval({
       status: "failed",
     });
 
-    await waitForCompletedTask(t, later.session, "CHILD-TASK-EXCLUSIVITY-VERIFY", admittedTaskId);
+    const blocked = await waitForTaskInput(t, later.session, "hold");
+    const released = await blocked.session.respond([
+      {
+        optionId: "approve",
+        requestId: blocked.request.requestId,
+      },
+    ]);
+    released.expectOk();
+    released.notEvent("step.started");
+    released.noFailedActions();
+
+    await waitForCompletedTask(t, blocked.session, "CHILD-TASK-EXCLUSIVITY-VERIFY", admittedTaskId);
   },
 });
 
