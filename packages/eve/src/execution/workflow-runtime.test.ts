@@ -374,7 +374,7 @@ describe("createWorkflowRuntime#createSession", () => {
     );
   });
 
-  it("stores an explicit title for Front to apply its display policy", async () => {
+  it("stores an explicit title alongside the trace-content policy", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
     startMock.mockResolvedValue({ runId: "driver-run" });

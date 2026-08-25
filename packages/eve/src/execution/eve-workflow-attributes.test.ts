@@ -172,7 +172,7 @@ describe("buildSessionAttributes", () => {
     });
   });
 
-  it("marks unknown sessions denied while retaining their title for Front policy", () => {
+  it("marks unknown sessions denied while retaining their stored title", () => {
     const attrs = buildSessionAttributes({
       inputMessage: "hi",
       serializedContext: {},
