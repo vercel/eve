@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { childProgressWork, rootProgressWork } from "#execution/progress-work.js";
+import { deriveChildWorkIdentity, deriveRootTurnWorkIdentity } from "#execution/activity-work.js";
 
-describe("progress work identity", () => {
+describe("activity work identity", () => {
   it("derives root work from the active root turn", () => {
     expect(
-      rootProgressWork({
+      deriveRootTurnWorkIdentity({
         auth: { current: null, initiator: null },
         sessionId: "root",
         turn: { id: "turn-1", sequence: 0 },
@@ -29,7 +29,7 @@ describe("progress work identity", () => {
       sessionId: "root",
       turnId: "turn-1",
     };
-    const child = childProgressWork({
+    const child = deriveChildWorkIdentity({
       callId: "call-a",
       kind: "subagent",
       name: "research",
@@ -37,7 +37,7 @@ describe("progress work identity", () => {
       parentTurnId: "turn-1",
       parentWork: root,
     });
-    const grandchild = childProgressWork({
+    const grandchild = deriveChildWorkIdentity({
       callId: "call-b",
       kind: "subagent",
       name: "tester",

@@ -1,16 +1,16 @@
-export const MAX_PROGRESS_EVENTS_PER_BATCH = 100;
+export const MAX_ACTIVITY_EVENTS_PER_BATCH = 100;
 
-export type ProgressWorkKind = "root-turn" | "subagent" | "remote-agent" | "task";
-export type ProgressWorkPhase = "running" | "completed" | "failed" | "cancelled";
-export type ProgressActionKind = "tool" | "skill";
-export type ProgressActionPhase = "running" | "completed" | "failed" | "rejected" | "cancelled";
-export type ProgressBlockerKind = "approval" | "authorization" | "input";
-export type ProgressBlockerPhase = "blocked" | "completed" | "cancelled" | "failed";
+export type ActivityWorkKind = "root-turn" | "subagent" | "remote-agent" | "task";
+export type ActivityWorkPhase = "running" | "completed" | "failed" | "cancelled";
+export type ActivityActionKind = "tool" | "skill";
+export type ActivityActionPhase = "running" | "completed" | "failed" | "rejected" | "cancelled";
+export type ActivityBlockerKind = "approval" | "authorization" | "input";
+export type ActivityBlockerPhase = "blocked" | "completed" | "cancelled" | "failed";
 
-export interface ProgressWorkIdentityV1 {
+export interface ActivityWorkIdentityV1 {
   readonly callId?: string;
   readonly id: string;
-  readonly kind: ProgressWorkKind;
+  readonly kind: ActivityWorkKind;
   readonly name?: string;
   readonly parentId?: string;
   readonly rootSessionId: string;
@@ -19,59 +19,65 @@ export interface ProgressWorkIdentityV1 {
   readonly turnId?: string;
 }
 
-export interface PendingProgressSettlementV1 {
+export interface PendingActivitySettlementV1 {
   readonly entityKind: "action" | "blocker" | "work";
   readonly eventId: string;
-  readonly outcome: ProgressActionPhase | ProgressBlockerPhase | ProgressWorkPhase;
+  readonly outcome: ActivityActionPhase | ActivityBlockerPhase | ActivityWorkPhase;
   readonly settledAt: string;
 }
 
-export interface ProgressWorkV1 extends ProgressWorkIdentityV1 {
-  readonly phase: ProgressWorkPhase;
+export interface ActivityWorkStateV1 extends ActivityWorkIdentityV1 {
+  readonly phase: ActivityWorkPhase;
   readonly settledAt?: string;
   readonly startedAt: string;
 }
 
-export interface ProgressActionV1 {
+export interface ActivityActionIdentityV1 {
   readonly id: string;
-  readonly kind: ProgressActionKind;
+  readonly kind: ActivityActionKind;
   readonly name: string;
   readonly parentWorkId: string;
-  readonly phase: ProgressActionPhase;
   readonly rootTurnId: string;
-  readonly settledAt?: string;
-  readonly startedAt: string;
   readonly stepIndex: number;
 }
 
-export interface ProgressBlockerV1 {
-  readonly id: string;
-  readonly kind: ProgressBlockerKind;
-  readonly label?: string;
-  readonly parentActionId?: string;
-  readonly parentWorkId: string;
-  readonly phase: ProgressBlockerPhase;
-  readonly rootTurnId: string;
+export interface ActivityActionStateV1 extends ActivityActionIdentityV1 {
+  readonly phase: ActivityActionPhase;
   readonly settledAt?: string;
   readonly startedAt: string;
 }
 
-export type ProgressEventV1 =
+export interface ActivityBlockerIdentityV1 {
+  readonly id: string;
+  readonly kind: ActivityBlockerKind;
+  readonly label?: string;
+  readonly parentActionId?: string;
+  readonly parentWorkId: string;
+  readonly rootTurnId: string;
+}
+
+export interface ActivityBlockerStateV1 extends ActivityBlockerIdentityV1 {
+  readonly phase: ActivityBlockerPhase;
+  readonly settledAt?: string;
+  readonly startedAt: string;
+}
+
+export type ActivityEventV1 =
   | {
       readonly eventId: string;
       readonly kind: "work.started";
       readonly startedAt: string;
-      readonly work: ProgressWorkIdentityV1;
+      readonly work: ActivityWorkIdentityV1;
     }
   | {
       readonly eventId: string;
       readonly kind: "work.settled";
-      readonly outcome: Exclude<ProgressWorkPhase, "running">;
+      readonly outcome: Exclude<ActivityWorkPhase, "running">;
       readonly settledAt: string;
       readonly workId: string;
     }
   | {
-      readonly action: Omit<ProgressActionV1, "phase" | "settledAt" | "startedAt">;
+      readonly action: ActivityActionIdentityV1;
       readonly eventId: string;
       readonly kind: "action.started";
       readonly startedAt: string;
@@ -80,11 +86,11 @@ export type ProgressEventV1 =
       readonly actionId: string;
       readonly eventId: string;
       readonly kind: "action.settled";
-      readonly outcome: Exclude<ProgressActionPhase, "running">;
+      readonly outcome: Exclude<ActivityActionPhase, "running">;
       readonly settledAt: string;
     }
   | {
-      readonly blocker: Omit<ProgressBlockerV1, "phase" | "settledAt" | "startedAt">;
+      readonly blocker: ActivityBlockerIdentityV1;
       readonly eventId: string;
       readonly kind: "blocker.started";
       readonly startedAt: string;
@@ -93,26 +99,26 @@ export type ProgressEventV1 =
       readonly blockerId: string;
       readonly eventId: string;
       readonly kind: "blocker.settled";
-      readonly outcome: Exclude<ProgressBlockerPhase, "blocked">;
+      readonly outcome: Exclude<ActivityBlockerPhase, "blocked">;
       readonly settledAt: string;
     };
 
-export interface ProgressBatchV1 {
-  readonly events: readonly ProgressEventV1[];
+export interface ActivityBatchV1 {
+  readonly events: readonly ActivityEventV1[];
   readonly version: 1;
 }
 
-export interface ProgressSnapshotV1 {
-  readonly actions: Readonly<Record<string, ProgressActionV1>>;
-  readonly blockers: Readonly<Record<string, ProgressBlockerV1>>;
-  readonly pendingSettlements: Readonly<Record<string, PendingProgressSettlementV1>>;
+export interface ActivitySnapshotV1 {
+  readonly actions: Readonly<Record<string, ActivityActionStateV1>>;
+  readonly blockers: Readonly<Record<string, ActivityBlockerStateV1>>;
+  readonly pendingSettlements: Readonly<Record<string, PendingActivitySettlementV1>>;
   readonly revision: number;
   readonly seenEventIds: readonly string[];
   readonly version: 1;
-  readonly work: Readonly<Record<string, ProgressWorkV1>>;
+  readonly work: Readonly<Record<string, ActivityWorkStateV1>>;
 }
 
-export function parseProgressWorkIdentityV1(value: unknown): ProgressWorkIdentityV1 | undefined {
+export function parseActivityWorkIdentityV1(value: unknown): ActivityWorkIdentityV1 | undefined {
   if (
     !isRecord(value) ||
     !hasOnlyKeys(value, [
@@ -155,17 +161,17 @@ export function parseProgressWorkIdentityV1(value: unknown): ProgressWorkIdentit
 }
 
 /** Parses known lifecycle events while ignoring additive unknown event kinds. */
-export function parseProgressBatchV1(value: unknown): ProgressBatchV1 | undefined {
+export function parseActivityBatchV1(value: unknown): ActivityBatchV1 | undefined {
   if (
     !isRecord(value) ||
     !hasOnlyKeys(value, ["events", "version"]) ||
     value.version !== 1 ||
     !Array.isArray(value.events) ||
-    value.events.length > MAX_PROGRESS_EVENTS_PER_BATCH
+    value.events.length > MAX_ACTIVITY_EVENTS_PER_BATCH
   )
     return undefined;
 
-  const events: ProgressEventV1[] = [];
+  const events: ActivityEventV1[] = [];
   for (const candidate of value.events) {
     if (!isRecord(candidate) || !isBoundedString(candidate.kind)) return undefined;
     const event = parseKnownEvent(candidate);
@@ -176,11 +182,11 @@ export function parseProgressBatchV1(value: unknown): ProgressBatchV1 | undefine
   return { events, version: 1 };
 }
 
-function parseKnownEvent(value: Record<string, unknown>): ProgressEventV1 | null | undefined {
+function parseKnownEvent(value: Record<string, unknown>): ActivityEventV1 | null | undefined {
   switch (value.kind) {
     case "work.started": {
       if (!hasOnlyKeys(value, ["eventId", "kind", "startedAt", "work"])) return undefined;
-      const work = parseProgressWorkIdentityV1(value.work);
+      const work = parseActivityWorkIdentityV1(value.work);
       if (!isIdentity(value.eventId) || !isBoundedString(value.startedAt) || work === undefined)
         return undefined;
       return { eventId: value.eventId, kind: "work.started", startedAt: value.startedAt, work };
@@ -263,9 +269,7 @@ function parseKnownEvent(value: Record<string, unknown>): ProgressEventV1 | null
   }
 }
 
-function parseActionIdentity(
-  value: unknown,
-): Omit<ProgressActionV1, "phase" | "settledAt" | "startedAt"> | undefined {
+function parseActionIdentity(value: unknown): ActivityActionIdentityV1 | undefined {
   if (
     !isRecord(value) ||
     !hasOnlyKeys(value, ["id", "kind", "name", "parentWorkId", "rootTurnId", "stepIndex"])
@@ -291,9 +295,7 @@ function parseActionIdentity(
   };
 }
 
-function parseBlockerIdentity(
-  value: unknown,
-): Omit<ProgressBlockerV1, "phase" | "settledAt" | "startedAt"> | undefined {
+function parseBlockerIdentity(value: unknown): ActivityBlockerIdentityV1 | undefined {
   if (
     !isRecord(value) ||
     !hasOnlyKeys(value, ["id", "kind", "label", "parentActionId", "parentWorkId", "rootTurnId"])

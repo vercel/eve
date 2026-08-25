@@ -1,7 +1,7 @@
 import type { Session } from "#context/keys.js";
-import type { ProgressWorkIdentityV1, ProgressWorkKind } from "#protocol/progress.js";
+import type { ActivityWorkIdentityV1, ActivityWorkKind } from "#protocol/activity.js";
 
-export function rootProgressWork(session: Session): ProgressWorkIdentityV1 {
+export function deriveRootTurnWorkIdentity(session: Session): ActivityWorkIdentityV1 {
   return {
     id: `root:${session.sessionId}:${session.turn.id}`,
     kind: "root-turn",
@@ -12,14 +12,14 @@ export function rootProgressWork(session: Session): ProgressWorkIdentityV1 {
   };
 }
 
-export function childProgressWork(input: {
+export function deriveChildWorkIdentity(input: {
   readonly callId: string;
-  readonly kind: Exclude<ProgressWorkKind, "root-turn">;
+  readonly kind: Exclude<ActivityWorkKind, "root-turn">;
   readonly name: string;
   readonly parentSessionId: string;
   readonly parentTurnId: string;
-  readonly parentWork: ProgressWorkIdentityV1;
-}): ProgressWorkIdentityV1 {
+  readonly parentWork: ActivityWorkIdentityV1;
+}): ActivityWorkIdentityV1 {
   return {
     callId: input.callId,
     id: `work:${input.parentSessionId}:${input.parentTurnId}:${input.callId}`,

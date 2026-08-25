@@ -1,22 +1,22 @@
-import { normalizeProgressText } from "#execution/progress-text.js";
+import { normalizeActivityText } from "#execution/activity-text.js";
 import {
-  type PendingProgressSettlementV1,
-  type ProgressActionPhase,
-  type ProgressActionV1,
-  type ProgressBatchV1,
-  type ProgressBlockerPhase,
-  type ProgressBlockerV1,
-  type ProgressEventV1,
-  type ProgressSnapshotV1,
-  type ProgressWorkPhase,
-  type ProgressWorkV1,
-} from "#protocol/progress.js";
+  type PendingActivitySettlementV1,
+  type ActivityActionPhase,
+  type ActivityActionStateV1,
+  type ActivityBatchV1,
+  type ActivityBlockerPhase,
+  type ActivityBlockerStateV1,
+  type ActivityEventV1,
+  type ActivitySnapshotV1,
+  type ActivityWorkPhase,
+  type ActivityWorkStateV1,
+} from "#protocol/activity.js";
 
-export const MAX_PROGRESS_EVENT_IDS = 1_000;
-export const MAX_PROGRESS_PENDING_SETTLEMENTS = 500;
-export const MAX_PROGRESS_ENTITIES = 500;
+export const MAX_ACTIVITY_EVENT_IDS = 1_000;
+export const MAX_ACTIVITY_PENDING_SETTLEMENTS = 500;
+export const MAX_ACTIVITY_ENTITIES = 500;
 
-export function createProgressSnapshot(): ProgressSnapshotV1 {
+export function createActivitySnapshot(): ActivitySnapshotV1 {
   return {
     actions: {},
     blockers: {},
@@ -28,10 +28,10 @@ export function createProgressSnapshot(): ProgressSnapshotV1 {
   };
 }
 
-export function reduceProgressBatch(
-  snapshot: ProgressSnapshotV1,
-  batch: ProgressBatchV1,
-): ProgressSnapshotV1 {
+export function reduceActivityBatch(
+  snapshot: ActivitySnapshotV1,
+  batch: ActivityBatchV1,
+): ActivitySnapshotV1 {
   let state = snapshot;
   let seenEventIds = snapshot.seenEventIds;
   let presentationChanged = false;
@@ -42,7 +42,7 @@ export function reduceProgressBatch(
     const next = reduceEvent(state, event);
     if (next === state) continue;
     accepted = true;
-    seenEventIds = appendBounded(seenEventIds, event.eventId, MAX_PROGRESS_EVENT_IDS);
+    seenEventIds = appendBounded(seenEventIds, event.eventId, MAX_ACTIVITY_EVENT_IDS);
     presentationChanged ||= presentationDiffers(state, next);
     state = next;
   }
@@ -52,13 +52,13 @@ export function reduceProgressBatch(
   return { ...state, revision: snapshot.revision + 1, seenEventIds };
 }
 
-function presentationDiffers(left: ProgressSnapshotV1, right: ProgressSnapshotV1): boolean {
+function presentationDiffers(left: ActivitySnapshotV1, right: ActivitySnapshotV1): boolean {
   return (
     left.actions !== right.actions || left.blockers !== right.blockers || left.work !== right.work
   );
 }
 
-function reduceEvent(snapshot: ProgressSnapshotV1, event: ProgressEventV1): ProgressSnapshotV1 {
+function reduceEvent(snapshot: ActivitySnapshotV1, event: ActivityEventV1): ActivitySnapshotV1 {
   switch (event.kind) {
     case "work.started":
       return startWork(snapshot, event);
@@ -76,9 +76,9 @@ function reduceEvent(snapshot: ProgressSnapshotV1, event: ProgressEventV1): Prog
 }
 
 function startWork(
-  snapshot: ProgressSnapshotV1,
-  event: Extract<ProgressEventV1, { readonly kind: "work.started" }>,
-): ProgressSnapshotV1 {
+  snapshot: ActivitySnapshotV1,
+  event: Extract<ActivityEventV1, { readonly kind: "work.started" }>,
+): ActivitySnapshotV1 {
   const current = snapshot.work[event.work.id];
   if (current !== undefined) return snapshot;
   const pending = pendingFor(snapshot, "work", event.work.id);
@@ -86,10 +86,10 @@ function startWork(
   const phase =
     pending?.outcome ??
     (parent !== undefined && parent.phase !== "running" ? "cancelled" : "running");
-  const work: ProgressWorkV1 = {
+  const work: ActivityWorkStateV1 = {
     ...event.work,
-    name: event.work.name === undefined ? undefined : normalizeProgressText(event.work.name),
-    phase: phase as ProgressWorkPhase,
+    name: event.work.name === undefined ? undefined : normalizeActivityText(event.work.name),
+    phase: phase as ActivityWorkPhase,
     settledAt: pending?.settledAt ?? (phase === "cancelled" ? parent?.settledAt : undefined),
     startedAt: event.startedAt,
   };
@@ -101,9 +101,9 @@ function startWork(
 }
 
 function settleWork(
-  snapshot: ProgressSnapshotV1,
-  event: Extract<ProgressEventV1, { readonly kind: "work.settled" }>,
-): ProgressSnapshotV1 {
+  snapshot: ActivitySnapshotV1,
+  event: Extract<ActivityEventV1, { readonly kind: "work.settled" }>,
+): ActivitySnapshotV1 {
   const current = snapshot.work[event.workId];
   if (current === undefined) return retainPending(snapshot, "work", event.workId, event);
   if (current.phase !== "running") return snapshot;
@@ -120,9 +120,9 @@ function settleWork(
 }
 
 function startAction(
-  snapshot: ProgressSnapshotV1,
-  event: Extract<ProgressEventV1, { readonly kind: "action.started" }>,
-): ProgressSnapshotV1 {
+  snapshot: ActivitySnapshotV1,
+  event: Extract<ActivityEventV1, { readonly kind: "action.started" }>,
+): ActivitySnapshotV1 {
   if (snapshot.actions[event.action.id] !== undefined) return snapshot;
   const pending = pendingFor(snapshot, "action", event.action.id);
   const parent = snapshot.work[event.action.parentWorkId];
@@ -133,8 +133,8 @@ function startAction(
     ...snapshot,
     actions: replaceBounded(snapshot.actions, event.action.id, {
       ...event.action,
-      name: normalizeProgressText(event.action.name),
-      phase: phase as ProgressActionPhase,
+      name: normalizeActivityText(event.action.name),
+      phase: phase as ActivityActionPhase,
       settledAt: pending?.settledAt ?? (phase === "cancelled" ? parent?.settledAt : undefined),
       startedAt: event.startedAt,
     }),
@@ -146,9 +146,9 @@ function startAction(
 }
 
 function settleAction(
-  snapshot: ProgressSnapshotV1,
-  event: Extract<ProgressEventV1, { readonly kind: "action.settled" }>,
-): ProgressSnapshotV1 {
+  snapshot: ActivitySnapshotV1,
+  event: Extract<ActivityEventV1, { readonly kind: "action.settled" }>,
+): ActivitySnapshotV1 {
   const current = snapshot.actions[event.actionId];
   if (current === undefined) return retainPending(snapshot, "action", event.actionId, event);
   if (current.phase !== "running") return snapshot;
@@ -163,9 +163,9 @@ function settleAction(
 }
 
 function startBlocker(
-  snapshot: ProgressSnapshotV1,
-  event: Extract<ProgressEventV1, { readonly kind: "blocker.started" }>,
-): ProgressSnapshotV1 {
+  snapshot: ActivitySnapshotV1,
+  event: Extract<ActivityEventV1, { readonly kind: "blocker.started" }>,
+): ActivitySnapshotV1 {
   if (snapshot.blockers[event.blocker.id] !== undefined) return snapshot;
   const pending = pendingFor(snapshot, "blocker", event.blocker.id);
   const parent = snapshot.work[event.blocker.parentWorkId];
@@ -177,8 +177,8 @@ function startBlocker(
     blockers: replaceBounded(snapshot.blockers, event.blocker.id, {
       ...event.blocker,
       label:
-        event.blocker.label === undefined ? undefined : normalizeProgressText(event.blocker.label),
-      phase: phase as ProgressBlockerPhase,
+        event.blocker.label === undefined ? undefined : normalizeActivityText(event.blocker.label),
+      phase: phase as ActivityBlockerPhase,
       settledAt: pending?.settledAt ?? (phase === "cancelled" ? parent?.settledAt : undefined),
       startedAt: event.startedAt,
     }),
@@ -190,9 +190,9 @@ function startBlocker(
 }
 
 function settleBlocker(
-  snapshot: ProgressSnapshotV1,
-  event: Extract<ProgressEventV1, { readonly kind: "blocker.settled" }>,
-): ProgressSnapshotV1 {
+  snapshot: ActivitySnapshotV1,
+  event: Extract<ActivityEventV1, { readonly kind: "blocker.settled" }>,
+): ActivitySnapshotV1 {
   const current = snapshot.blockers[event.blockerId];
   if (current === undefined) return retainPending(snapshot, "blocker", event.blockerId, event);
   if (current.phase !== "blocked") return snapshot;
@@ -207,11 +207,11 @@ function settleBlocker(
 }
 
 function retainPending(
-  snapshot: ProgressSnapshotV1,
-  entityKind: PendingProgressSettlementV1["entityKind"],
+  snapshot: ActivitySnapshotV1,
+  entityKind: PendingActivitySettlementV1["entityKind"],
   entityId: string,
-  event: Extract<ProgressEventV1, { readonly kind: `${string}.settled` }>,
-): ProgressSnapshotV1 {
+  event: Extract<ActivityEventV1, { readonly kind: `${string}.settled` }>,
+): ActivitySnapshotV1 {
   const key = pendingKey(entityKind, entityId);
   if (snapshot.pendingSettlements[key] !== undefined) return snapshot;
   return {
@@ -220,38 +220,38 @@ function retainPending(
       snapshot.pendingSettlements,
       key,
       { entityKind, eventId: event.eventId, outcome: event.outcome, settledAt: event.settledAt },
-      MAX_PROGRESS_PENDING_SETTLEMENTS,
+      MAX_ACTIVITY_PENDING_SETTLEMENTS,
     ),
   };
 }
 
 function pendingFor(
-  snapshot: ProgressSnapshotV1,
-  kind: PendingProgressSettlementV1["entityKind"],
+  snapshot: ActivitySnapshotV1,
+  kind: PendingActivitySettlementV1["entityKind"],
   id: string,
-): PendingProgressSettlementV1 | undefined {
+): PendingActivitySettlementV1 | undefined {
   return snapshot.pendingSettlements[pendingKey(kind, id)];
 }
 
-function pendingKey(kind: PendingProgressSettlementV1["entityKind"], id: string): string {
+function pendingKey(kind: PendingActivitySettlementV1["entityKind"], id: string): string {
   return `${kind}:${id}`;
 }
 
 function cancelOwnedActions(
-  actions: Readonly<Record<string, ProgressActionV1>>,
+  actions: Readonly<Record<string, ActivityActionStateV1>>,
   parentWorkId: string,
   settledAt: string,
-): Readonly<Record<string, ProgressActionV1>> {
+): Readonly<Record<string, ActivityActionStateV1>> {
   return mapOwned(actions, parentWorkId, (action) =>
     action.phase === "running" ? { ...action, phase: "cancelled", settledAt } : action,
   );
 }
 
 function cancelOwnedBlockers(
-  blockers: Readonly<Record<string, ProgressBlockerV1>>,
+  blockers: Readonly<Record<string, ActivityBlockerStateV1>>,
   parentWorkId: string,
   settledAt: string,
-): Readonly<Record<string, ProgressBlockerV1>> {
+): Readonly<Record<string, ActivityBlockerStateV1>> {
   return mapOwned(blockers, parentWorkId, (blocker) =>
     blocker.phase === "blocked" ? { ...blocker, phase: "cancelled", settledAt } : blocker,
   );
@@ -277,7 +277,7 @@ function replaceBounded<T>(
   values: Readonly<Record<string, T>>,
   key: string,
   value: T,
-  max = MAX_PROGRESS_ENTITIES,
+  max = MAX_ACTIVITY_ENTITIES,
 ): Readonly<Record<string, T>> {
   const next = { ...values, [key]: value };
   const overflow = Object.keys(next).length - max;

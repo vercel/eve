@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { createProgressSnapshot, reduceProgressBatch } from "#execution/session-progress.js";
-import { parseProgressBatchV1, type ProgressEventV1 } from "#protocol/progress.js";
+import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
+import { parseActivityBatchV1, type ActivityEventV1 } from "#protocol/activity.js";
 
 const work = {
   id: "root:session:turn",
@@ -10,14 +10,14 @@ const work = {
   rootTurnId: "turn",
 };
 
-function reduce(events: readonly ProgressEventV1[]) {
-  return reduceProgressBatch(createProgressSnapshot(), { events, version: 1 });
+function reduce(events: readonly ActivityEventV1[]) {
+  return reduceActivityBatch(createActivitySnapshot(), { events, version: 1 });
 }
 
-describe("progress protocol and reducer", () => {
+describe("activity protocol and reducer", () => {
   it("retains known siblings while ignoring additive unknown events", () => {
     expect(
-      parseProgressBatchV1({
+      parseActivityBatchV1({
         events: [
           { eventId: "future", kind: "detail.updated", message: "working" },
           { eventId: "started", kind: "work.started", startedAt: "2026-01-01", work },
@@ -32,7 +32,7 @@ describe("progress protocol and reducer", () => {
 
   it("rejects malformed known events", () => {
     expect(
-      parseProgressBatchV1({
+      parseActivityBatchV1({
         events: [{ eventId: "started", kind: "work.started", work }],
         version: 1,
       }),
@@ -42,7 +42,7 @@ describe("progress protocol and reducer", () => {
   it("deduplicates only by event id", () => {
     const event = { eventId: "started", kind: "work.started" as const, startedAt: "now", work };
     const first = reduce([event]);
-    const duplicate = reduceProgressBatch(first, { events: [event], version: 1 });
+    const duplicate = reduceActivityBatch(first, { events: [event], version: 1 });
     expect(duplicate).toBe(first);
   });
 
@@ -56,11 +56,11 @@ describe("progress protocol and reducer", () => {
         workId: work.id,
       },
     ]);
-    const started = reduceProgressBatch(settled, {
+    const started = reduceActivityBatch(settled, {
       events: [{ eventId: "started", kind: "work.started", startedAt: "earlier", work }],
       version: 1,
     });
-    const duplicateStart = reduceProgressBatch(started, {
+    const duplicateStart = reduceActivityBatch(started, {
       events: [{ eventId: "started-again", kind: "work.started", startedAt: "latest", work }],
       version: 1,
     });
@@ -69,8 +69,8 @@ describe("progress protocol and reducer", () => {
   });
 
   it("retains unmatched settlement without changing revision", () => {
-    const initial = createProgressSnapshot();
-    const next = reduceProgressBatch(initial, {
+    const initial = createActivitySnapshot();
+    const next = reduceActivityBatch(initial, {
       events: [
         {
           blockerId: "authorization:work:attempt",
