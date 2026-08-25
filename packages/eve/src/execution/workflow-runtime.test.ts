@@ -712,6 +712,40 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     expect(seed!.traceId).toMatch(/^[0-9a-f]{32}$/u);
   });
 
+  it("passes the channel adapter kind as channelType to the policy", async () => {
+    const idGenerator = new AgentSpanIdGenerator();
+    let captured: { channelType?: string } | undefined;
+    registerInstrumentationRuntime({
+      forceFlush: async () => undefined,
+      hooks: undefined as never,
+      idGenerator,
+      otelSettings: {
+        tracePolicy: (trace: { channelType?: string }) => {
+          captured = trace;
+          return true;
+        },
+        recordInputs: false,
+        recordOutputs: false,
+        traceChannelRequests: false,
+      },
+      prepareSessionTrace: vi.fn().mockResolvedValue(undefined),
+      runInContext: (_op: never, fn: () => unknown) => fn(),
+      shutdown: async () => undefined,
+    } as never);
+    mockBundleAndRun();
+    startMock.mockResolvedValue({ runId: "driver-run" });
+
+    await buildRuntime().createSession({
+      adapter: { kind: "slack" },
+      auth: null,
+      channelMetadata: { kind: "slack", metadata: { audience: "public" } },
+      input: { message: "hello" },
+      mode: "conversation",
+    });
+
+    expect(captured?.channelType).toBe("slack");
+  });
+
   it("allocates an unsampled trace seed when the policy is unsampled", async () => {
     installAgentOtelRuntime(new AgentSpanIdGenerator(), () => false);
     mockBundleAndRun();

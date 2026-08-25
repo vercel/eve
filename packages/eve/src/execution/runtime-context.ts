@@ -37,6 +37,7 @@ export function buildRunContext(input: {
   if (run.channelMetadata !== undefined) {
     const existing = ctx.get(ChannelInstrumentationKey);
     ctx.set(ChannelInstrumentationKey, {
+      channelType: existing?.channelType ?? run.channelMetadata.channelType,
       kind: existing?.kind ?? run.channelMetadata.kind,
       metadata: run.channelMetadata.metadata,
     });

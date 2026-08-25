@@ -14,6 +14,7 @@ export function evaluateTracePolicy(
   trace: {
     readonly agentName?: string;
     readonly audience: ChannelAudience;
+    readonly channelType?: string;
   },
 ): boolean {
   try {
@@ -21,6 +22,7 @@ export function evaluateTracePolicy(
       policy?.({
         agentName: trace.agentName,
         audience: trace.audience,
+        channelType: trace.channelType,
       }) ?? trace.audience === "public"
     );
   } catch {

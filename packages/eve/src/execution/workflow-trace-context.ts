@@ -26,6 +26,7 @@ export async function prepareWorkflowPreambleTrace(input: {
   return await prepareTurnTraceContext({
     agentName: input.runtimeIdentity.agentName,
     channelAudience: normalizeChannelAudience(channel?.metadata.audience),
+    channelType: channel?.channelType,
     instrumentation: getInstrumentationRuntime(),
     parentLineage: resolveParentLineage(parent, input.ctx.get(ChannelKey)),
     parentTraceContext: input.ctx.get(ParentTraceContextKey),

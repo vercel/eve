@@ -146,9 +146,11 @@ export function createWorkflowRuntime(config: {
         run: input,
       });
       const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
+      const channelInstrumentation = ctx.get(ChannelInstrumentationKey);
       const traceSeed = allocateSessionTraceSeed({
         agentName: effectiveAgent.turnAgent.id,
-        audience: normalizeChannelAudience(ctx.get(ChannelInstrumentationKey)?.metadata.audience),
+        audience: normalizeChannelAudience(channelInstrumentation?.metadata.audience),
+        channelType: channelInstrumentation?.channelType,
         parentTraceContext: input.parentTraceContext,
       });
       if (traceSeed !== undefined) {
@@ -453,6 +455,7 @@ function normalizeWorkflowHook(value: unknown): WorkflowHookRecord {
 function allocateSessionTraceSeed(input: {
   readonly agentName?: string;
   readonly audience: ReturnType<typeof normalizeChannelAudience>;
+  readonly channelType?: string;
   readonly parentTraceContext?: {
     readonly traceId: string;
     readonly spanId: string;
@@ -472,6 +475,7 @@ function allocateSessionTraceSeed(input: {
   const sampled = evaluateTracePolicy(instrumentation.otelSettings?.tracePolicy, {
     agentName: input.agentName,
     audience: input.audience,
+    channelType: input.channelType,
   });
   return {
     spanId: instrumentation.idGenerator.allocateSpanId(),

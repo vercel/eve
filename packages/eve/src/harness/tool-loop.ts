@@ -735,6 +735,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       return await prepareTurnTraceContext({
         agentName: config.runtimeIdentity?.agentName,
         channelAudience,
+        channelType: channelInstrumentation?.channelType,
         instrumentation: config.instrumentation,
         parentLineage,
         parentTraceContext,

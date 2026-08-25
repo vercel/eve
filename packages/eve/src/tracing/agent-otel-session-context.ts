@@ -39,6 +39,7 @@ export function createAgentOtelSessionContext(
   const openSessionTrace = (session: {
     readonly agentName?: string;
     readonly channelAudience: ChannelAudience;
+    readonly channelType?: string;
     readonly rootSessionId: string;
     readonly sessionId: string;
     readonly traceSeed?: InstrumentationTraceContext;
@@ -76,6 +77,7 @@ export function createAgentOtelSessionContext(
       !evaluateTracePolicy(input.tracePolicy, {
         agentName: session.agentName,
         audience: session.channelAudience,
+        channelType: session.channelType,
       })
     ) {
       return {
@@ -115,6 +117,7 @@ export function createAgentOtelSessionContext(
             ? openSessionTrace({
                 agentName: event.agentName,
                 channelAudience: normalizeChannelAudience(event.channelAudience),
+                channelType: event.channelType,
                 rootSessionId: event.rootSessionId,
                 sessionId: event.sessionId,
                 traceSeed: event.traceSeed,
