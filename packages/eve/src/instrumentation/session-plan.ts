@@ -10,7 +10,7 @@ import type {
   InstrumentationTraceContext,
 } from "#instrumentation/lifecycle.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
-import type { JsonObject } from "#shared/json.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 
 /**
  * Opaque serialized session instrumentation plan.
@@ -34,7 +34,6 @@ export interface SessionInstrumentationPlanningInput {
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly parentLineage?: InstrumentationParentLineage;
   readonly rootSessionId: string;
-  readonly sessionId: string;
 }
 
 /** Frozen session instrumentation facts, private to `src/instrumentation/`. */
@@ -57,6 +56,16 @@ export interface SessionInstrumentationPlanData {
 }
 
 const SCHEMA_VERSION = 1 as const;
+
+function toJsonObject(data: SessionInstrumentationPlanData): JsonObject {
+  const result: Record<string, JsonValue> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined) {
+      result[key] = value as JsonValue;
+    }
+  }
+  return result;
+}
 
 function isInstrumentationCaptureLevel(value: unknown): value is InstrumentationCapture {
   return value === "content" || value === "metadata";
@@ -177,10 +186,14 @@ export function planSessionInstrumentation(input: {
       parentLineage,
       rootSessionId,
     };
-    return { schemaVersion: SCHEMA_VERSION, data: data as unknown as JsonObject };
+    return { schemaVersion: SCHEMA_VERSION, data: toJsonObject(data) };
   }
 
-  if (runtime?.idGenerator === undefined || runtime.otelSettings === undefined) {
+  if (
+    runtime?.idGenerator === undefined ||
+    runtime.otelSettings === undefined ||
+    runtime.prepareSessionTrace === undefined
+  ) {
     const data: SessionInstrumentationPlanData = {
       agentName,
       audience,
@@ -194,7 +207,7 @@ export function planSessionInstrumentation(input: {
       isTraceContentVisible: shouldCaptureContent(audience),
       rootSessionId,
     };
-    return { schemaVersion: SCHEMA_VERSION, data: data as unknown as JsonObject };
+    return { schemaVersion: SCHEMA_VERSION, data: toJsonObject(data) };
   }
 
   const sampled = evaluateTracePolicySafe(runtime.otelSettings.tracePolicy, {
@@ -218,7 +231,7 @@ export function planSessionInstrumentation(input: {
     recordOutputs: runtime.otelSettings.recordOutputs,
     rootSessionId,
   };
-  return { schemaVersion: SCHEMA_VERSION, data: data as unknown as JsonObject };
+  return { schemaVersion: SCHEMA_VERSION, data: toJsonObject(data) };
 }
 
 function resolveCaptureLevel(
@@ -270,6 +283,7 @@ export interface InstrumentationPlanningRuntime {
     readonly recordOutputs?: boolean;
   };
   readonly hooks?: { readonly capturesContent: boolean };
+  readonly prepareSessionTrace?: unknown;
 }
 
 // ---------- Workflow attribute helpers ----------

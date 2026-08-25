@@ -38,6 +38,12 @@ import { isSampledTrace } from "#tracing/sampled-trace.js";
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { isNonEmptyString } from "#shared/guards.js";
+import {
+  readPlanTraceId,
+  readPlanIsTraceContentVisible,
+  readPlanChannelKind,
+  type SerializedSessionInstrumentation,
+} from "#instrumentation/session-plan.js";
 
 /**
  * Active compiled graph node id for the session's agent. Returned by
@@ -67,6 +73,17 @@ interface SerializedSessionParent {
   };
 }
 
+function readPlanFromContext(
+  serializedContext: Record<string, unknown>,
+): SerializedSessionInstrumentation | undefined {
+  const raw = serializedContext["eve.sessionInstrumentationPlan"];
+  if (raw === undefined || typeof raw !== "object" || raw === null) return undefined;
+  const record = raw as Record<string, unknown>;
+  if (record["schemaVersion"] !== 1) return undefined;
+  if (typeof record["data"] !== "object" || record["data"] === null) return undefined;
+  return raw as SerializedSessionInstrumentation;
+}
+
 /**
  * Parent session lineage decoded from the serialized run context.
  */
@@ -83,6 +100,8 @@ export interface SessionParentLineage {
  * tag emission silently drops undefined values.
  */
 export function readChannelKind(serializedContext: Record<string, unknown>): string | undefined {
+  const plan = readPlanFromContext(serializedContext);
+  if (plan !== undefined) return readPlanChannelKind(plan);
   const channel = serializedContext[CHANNEL_CONTEXT_KEY_NAME] as
     | SerializedChannelAdapter
     | undefined;
@@ -91,6 +110,8 @@ export function readChannelKind(serializedContext: Record<string, unknown>): str
 }
 
 export function isWorkflowTraceContentVisible(serializedContext: Record<string, unknown>): boolean {
+  const plan = readPlanFromContext(serializedContext);
+  if (plan !== undefined) return readPlanIsTraceContentVisible(plan);
   const channel = serializedContext[CHANNEL_CONTEXT_KEY_NAME] as
     | SerializedChannelAdapter
     | undefined;
@@ -98,6 +119,8 @@ export function isWorkflowTraceContentVisible(serializedContext: Record<string, 
 }
 
 export function readSessionTraceId(serializedContext: Record<string, unknown>): string | undefined {
+  const plan = readPlanFromContext(serializedContext);
+  if (plan !== undefined) return readPlanTraceId(plan);
   const seed = serializedContext["eve.sessionTraceSeed"] as SessionTraceSeed | undefined;
   if (seed === undefined || !isSampledTrace(seed)) return undefined;
   return isNonEmptyString(seed.traceId) ? seed.traceId : undefined;

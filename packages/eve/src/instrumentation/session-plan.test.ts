@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { ChannelInstrumentationProjection } from "#channel/instrumentation.js";
 import {
   planSessionInstrumentation,
   parseSessionInstrumentationPlan,
@@ -9,6 +10,7 @@ import {
   type InstrumentationPlanningRuntime,
   type SessionInstrumentationPlanningInput,
 } from "#instrumentation/session-plan.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 
 function makeRuntime(
   overrides: Partial<InstrumentationPlanningRuntime> = {},
@@ -24,6 +26,7 @@ function makeRuntime(
       recordOutputs: false,
     },
     hooks: { capturesContent: false },
+    prepareSessionTrace: () => undefined,
     ...overrides,
   };
 }
@@ -39,7 +42,6 @@ function makeSession(
       metadata: { audience: "public" },
     },
     rootSessionId: "session-1",
-    sessionId: "session-1",
     ...overrides,
   };
 }
@@ -119,7 +121,6 @@ describe("planSessionInstrumentation", () => {
           parentTraceContext,
           parentLineage: { callId: "call-1", sessionId: "parent-1", turnId: "turn_1" },
           rootSessionId: "parent-1",
-          sessionId: "child-1",
         }),
       });
       const data = parseSessionInstrumentationPlan(plan);
@@ -294,17 +295,15 @@ describe("planSessionInstrumentation", () => {
 
   describe("frozen classification", () => {
     it("snapshots audience at planning time", () => {
-      const metadata: { audience: string } = { audience: "public" };
-      const channel = { channelType: "web", kind: "web", metadata } as unknown as {
-        channelType: string;
-        kind: string;
-        metadata: { audience: string };
+      const metadata: { audience: ChannelAudience } = { audience: "public" };
+      const channel: ChannelInstrumentationProjection = {
+        channelType: "web",
+        kind: "web",
+        metadata,
       };
       const plan = planSessionInstrumentation({
         runtime: makeRuntime(),
-        session: makeSession({
-          channel: channel as unknown as SessionInstrumentationPlanningInput["channel"],
-        }),
+        session: makeSession({ channel }),
       });
       const data = parseSessionInstrumentationPlan(plan);
       expect(data?.audience).toBe("public");

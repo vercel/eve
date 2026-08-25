@@ -18,11 +18,7 @@ import type {
   SessionCommandResult,
 } from "#channel/types.js";
 import { serializeContext } from "#context/serialize.js";
-import {
-  ChannelInstrumentationKey,
-  SessionTraceSeedKey,
-  type SessionTraceSeed,
-} from "#context/keys.js";
+import { ChannelInstrumentationKey, ParentSessionKey, SessionTraceSeedKey } from "#context/keys.js";
 import {
   buildSessionAttributes,
   buildSubagentRootAttributes,
@@ -56,8 +52,14 @@ import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
-import { evaluateTracePolicy } from "#tracing/sampled-trace.js";
-import { normalizeChannelAudience } from "#shared/channel-audience.js";
+import { resolveParentLineage } from "#harness/parent-lineage.js";
+import {
+  planSessionInstrumentation,
+  readPlanTraceContext,
+  SessionInstrumentationPlanKey,
+  type SessionInstrumentationPlanningInput,
+} from "#instrumentation/session-plan.js";
+import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
@@ -147,12 +149,22 @@ export function createWorkflowRuntime(config: {
       });
       const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
       const channelInstrumentation = ctx.get(ChannelInstrumentationKey);
-      const traceSeed = allocateSessionTraceSeed({
+      const parent = ctx.get(ParentSessionKey);
+      const instrumentationParentLineage = resolveParentLineage(parent, ctx.get(ChannelKey));
+      const rootSessionId = parent?.rootSessionId ?? "";
+      const planInput: SessionInstrumentationPlanningInput = {
         agentName: effectiveAgent.turnAgent.id,
-        audience: normalizeChannelAudience(channelInstrumentation?.metadata.audience),
-        channelType: channelInstrumentation?.channelType,
+        channel: channelInstrumentation,
         parentTraceContext: input.parentTraceContext,
+        parentLineage: instrumentationParentLineage,
+        rootSessionId,
+      };
+      const plan = planSessionInstrumentation({
+        runtime: getInstrumentationRuntime(),
+        session: planInput,
       });
+      ctx.set(SessionInstrumentationPlanKey, plan);
+      const traceSeed = readPlanTraceContext(plan);
       if (traceSeed !== undefined) {
         ctx.set(SessionTraceSeedKey, traceSeed);
       }
@@ -449,37 +461,5 @@ function normalizeWorkflowHook(value: unknown): WorkflowHookRecord {
 
   return {
     runId,
-  };
-}
-
-function allocateSessionTraceSeed(input: {
-  readonly agentName?: string;
-  readonly audience: ReturnType<typeof normalizeChannelAudience>;
-  readonly channelType?: string;
-  readonly parentTraceContext?: {
-    readonly traceId: string;
-    readonly spanId: string;
-    readonly traceFlags: number;
-  };
-}): SessionTraceSeed | undefined {
-  if (input.parentTraceContext !== undefined) {
-    return {
-      spanId: input.parentTraceContext.spanId,
-      traceFlags: input.parentTraceContext.traceFlags,
-      traceId: input.parentTraceContext.traceId,
-    };
-  }
-  const instrumentation = getInstrumentationRuntime();
-  if (instrumentation?.prepareSessionTrace === undefined) return undefined;
-  if (instrumentation.idGenerator === undefined) return undefined;
-  const sampled = evaluateTracePolicy(instrumentation.otelSettings?.tracePolicy, {
-    agentName: input.agentName,
-    audience: input.audience,
-    channelType: input.channelType,
-  });
-  return {
-    spanId: instrumentation.idGenerator.allocateSpanId(),
-    traceFlags: sampled ? 1 : 0,
-    traceId: instrumentation.idGenerator.generateTraceId(),
   };
 }
