@@ -1,6 +1,7 @@
 import { BracesIcon } from "lucide-react";
 import type { ComponentType, SVGProps } from "react";
 import {
+  datadogLogo,
   githubLogo,
   linearLogo,
   notionLogo,
@@ -9,6 +10,7 @@ import {
   sentryLogo,
   slackLogo,
   typefullyLogo,
+  vercelLogo,
   webLogo,
 } from "@/lib/integrations/logos";
 import type { TemplateIntegration } from "@/lib/templates/data";
@@ -16,6 +18,7 @@ import type { TemplateIntegration } from "@/lib/templates/data";
 type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
 
 export const integrationIcons: Record<TemplateIntegration, IconComponent> = {
+  Datadog: datadogLogo,
   GitHub: githubLogo,
   "HTTP API": BracesIcon,
   Linear: linearLogo,
@@ -25,5 +28,6 @@ export const integrationIcons: Record<TemplateIntegration, IconComponent> = {
   Sentry: sentryLogo,
   Slack: slackLogo,
   Typefully: typefullyLogo,
+  Vercel: vercelLogo,
   "Web chat": webLogo,
 };
