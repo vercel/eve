@@ -5,25 +5,16 @@ import { join } from "node:path";
 import { prepareAuthoredWorkflowDirectives } from "./authored-workflow-directives.js";
 import { isAuthoredApplicationModule, isAuthoredApplicationRoot } from "./workflow-builders.js";
 
+// Only modules that mention a directive reach the parser: an app root holds
+// arbitrary source (React components, scripts) the pre-pass must never fail on.
+const DIRECTIVE_TEXT = /["'](?:use workflow|use step)["']/;
+
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]);
 
-// Build output, caches, and dependency trees never hold authored agent source.
-const IGNORED_DIRECTORIES = new Set([
-  ".cache",
-  ".eve",
-  ".git",
-  ".next",
-  ".nuxt",
-  ".output",
-  ".pnpm-store",
-  ".svelte-kit",
-  ".turbo",
-  ".vercel",
-  ".yarn",
-  "coverage",
-  "dist",
-  "node_modules",
-]);
+// Dependency trees, build output, and every hidden directory (`.eve`, `.next`,
+// `.output.eve-backup-*`, …) hold generated code, never authored agent source.
+// eve's own bundles carry `"use step"` strings that are not authored directives.
+const IGNORED_DIRECTORIES = new Set(["coverage", "dist", "node_modules"]);
 
 /** Authored application modules that declare Workflow directives. */
 export interface AuthoredWorkflowModules {
@@ -52,10 +43,9 @@ export async function discoverAuthoredWorkflowModules(
   const files = await collectSourceFiles(appRoot);
   for (const filePath of files.sort()) {
     if (!isAuthoredApplicationModule(filePath, appRoot)) continue;
-    const prepared = await prepareAuthoredWorkflowDirectives({
-      filePath,
-      source: await readFile(filePath, "utf8"),
-    });
+    const source = await readFile(filePath, "utf8");
+    if (!DIRECTIVE_TEXT.test(source)) continue;
+    const prepared = await prepareAuthoredWorkflowDirectives({ filePath, source });
     if (!prepared.hasDirectives) continue;
     directiveModules.push(filePath);
     if (prepared.hasWorkflowDirective) workflowModules.push(filePath);
@@ -79,7 +69,9 @@ async function collectSourceFiles(root: string): Promise<string[]> {
     for (const entry of entries) {
       const entryPath = join(directory, entry.name);
       if (entry.isDirectory()) {
-        if (!IGNORED_DIRECTORIES.has(entry.name)) await visit(entryPath);
+        if (!entry.name.startsWith(".") && !IGNORED_DIRECTORIES.has(entry.name)) {
+          await visit(entryPath);
+        }
         continue;
       }
       if (!entry.isFile()) continue;
