@@ -55,11 +55,37 @@ export default defineTool({
       `export const text = '"use workflow" is only a directive as a statement';`,
     );
     await write("node_modules/dep/index.js", `export async function f() { "use workflow"; }`);
+    await write(
+      ".output.eve-backup-crashed/server/_libs/eve+zod.mjs",
+      `const step = async function () { "use step"; };\nexport { step };`,
+    );
+    await write(
+      ".eve/builds/x/output/server/index.mjs",
+      `export async function f() { "use step"; }`,
+    );
     await write("dist/out.js", `export async function f() { "use step"; }`);
     await write("agent/README.md", `"use workflow"`);
 
     await expect(discoverAuthoredWorkflowModules(appRoot)).resolves.toEqual({
       directiveModules: [helper, tool],
+      workflowModules: [tool],
+    });
+  });
+
+  it("leaves modules without a directive unparsed, so JSX in plain .js never fails the scan", async () => {
+    await write(
+      "src/app/layout.js",
+      `export default function RootLayout({ children }) {
+  return <html><body>{children}</body></html>;
+}`,
+    );
+    const tool = await write(
+      "agent/tools/deploy.ts",
+      `export default { description: "d", async execute() { "use workflow"; return 1; } };`,
+    );
+
+    await expect(discoverAuthoredWorkflowModules(appRoot)).resolves.toEqual({
+      directiveModules: [tool],
       workflowModules: [tool],
     });
   });
