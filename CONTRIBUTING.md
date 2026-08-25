@@ -215,7 +215,9 @@ on when one exists. Do not create an issue solely to accompany a pull request.
 Stable releases are managed with [Changesets](https://github.com/changesets/changesets) by the maintainers.
 Every commit pushed to `main` also publishes an immutable
 [Changesets snapshot](https://changesets.dev/guide/snapshot-releases) of the
-`eve` package. Install the most recently published snapshot with:
+`eve` package. The continuous release excludes authored stable-release
+changesets, so it does not publish snapshots of the other public packages.
+Install the most recently published snapshot with:
 
 ```bash
 npm install eve@canary
@@ -225,7 +227,8 @@ The release workflow summary includes the exact calculated
 `<next-semver>-g<short-commit-id>` version for its commit. Use that version
 when you need a reproducible install instead of the moving `canary` tag.
 Continuous releases do not create a GitHub release or change npm's `latest`
-tag.
+tag. Runs are independent so every commit gets a snapshot; when pushes overlap,
+`canary` follows publish completion order rather than commit order.
 
 ## Developer Certificate of Origin (DCO)
 

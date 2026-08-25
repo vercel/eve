@@ -72,6 +72,9 @@ jobs:
             gh release edit "eve@$version" --latest
           fi
 
+  # Runs stay independent so every commit gets a snapshot. When pushes overlap,
+  # `canary` follows publish completion order and may briefly point to an older
+  # commit; immutable snapshot versions remain the reproducible install path.
   continuous-release:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -93,7 +96,6 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: "pnpm"
-          registry-url: "https://registry.npmjs.org"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -102,6 +104,9 @@ jobs:
         env:
           COMMIT_SHA: ${{ github.sha }}
         run: |
+          # Authored changesets belong to the stable release plan. Remove them
+          # from this ephemeral checkout so only eve receives a snapshot.
+          rm -f .changeset/*.md
           cat > .changeset/continuous-release.md <<EOF
           ---
           "eve": patch
