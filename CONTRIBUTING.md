@@ -223,12 +223,14 @@ Install the most recently published snapshot with:
 npm install eve@canary
 ```
 
-The release workflow summary includes the exact calculated
-`<next-semver>-g<short-commit-id>` version for its commit. Use that version
-when you need a reproducible install instead of the moving `canary` tag.
-Continuous releases do not create a GitHub release or change npm's `latest`
-tag. Runs are independent so every commit gets a snapshot; when pushes overlap,
-`canary` follows publish completion order rather than commit order.
+The release workflow summary includes the exact
+`<next-patch>-g<short-commit-id>` version for its commit. This version advances
+from the current stable release and does not predict the bump in the pending
+stable release plan. Use the exact version when you need a reproducible install
+instead of the moving `canary` tag. Continuous releases do not create a GitHub
+release or change npm's `latest` tag. Runs are independent so every commit gets
+a snapshot; when pushes overlap, `canary` follows publish completion order
+rather than commit order.
 
 ## Developer Certificate of Origin (DCO)
 

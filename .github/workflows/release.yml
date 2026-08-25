@@ -106,7 +106,11 @@ jobs:
         run: |
           # Authored changesets belong to the stable release plan. Remove them
           # from this ephemeral checkout so only eve receives a snapshot.
-          rm -f .changeset/*.md
+          for changeset in .changeset/*.md; do
+            if [[ "$changeset" != ".changeset/README.md" ]]; then
+              rm -f "$changeset"
+            fi
+          done
           cat > .changeset/continuous-release.md <<EOF
           ---
           "eve": patch
@@ -117,6 +121,11 @@ jobs:
 
           pnpm exec changeset version --snapshot \
             --snapshot-prerelease-template "g${COMMIT_SHA:0:12}"
+
+          # Changesets bumps peer dependents even when their workspace range
+          # remains valid. Restore the other publishable packages so this
+          # continuous release remains scoped to eve.
+          git checkout -- packages/eve-self-modification packages/eve-buzz-acp-adapter
 
       - name: Publish continuous release
         run: |
