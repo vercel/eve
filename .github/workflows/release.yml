@@ -123,9 +123,13 @@ jobs:
             --snapshot-prerelease-template "g${COMMIT_SHA:0:12}"
 
           # Changesets bumps peer dependents even when their workspace range
-          # remains valid. Restore the other publishable packages so this
-          # continuous release remains scoped to eve.
-          git checkout -- packages/eve-self-modification packages/eve-buzz-acp-adapter
+          # remains valid. Restore every sibling package so this continuous
+          # release remains structurally scoped to eve as packages are added.
+          for package_dir in packages/*; do
+            if [[ "$package_dir" != "packages/eve" ]]; then
+              git checkout -- "$package_dir"
+            fi
+          done
 
       - name: Publish continuous release
         run: |
