@@ -1,5 +1,4 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
-import { z } from "#compiled/zod/index.js";
 
 import { tell } from "#execution/tool-run/tell.js";
 
@@ -54,9 +53,16 @@ export type RunMessage =
 /** What an owner says to a run, on the run's own hook. */
 export type RunControlMessage = { readonly kind: "cancel"; readonly reason: string };
 
-export const runControlMessageSchema: z.ZodType<RunControlMessage> = z
-  .object({ kind: z.literal("cancel"), reason: z.string() })
-  .strict();
+/**
+ * Narrows a control-inbox payload. Hand-written rather than a zod schema: this
+ * runs in the replayed body, and a schema would pull all of zod into the
+ * workflow driver that ships inside every function bundle.
+ */
+export function isRunControlMessage(value: unknown): value is RunControlMessage {
+  if (typeof value !== "object" || value === null) return false;
+  const { kind, reason } = value as { kind?: unknown; reason?: unknown };
+  return kind === "cancel" && typeof reason === "string";
+}
 
 /**
  * The run identity `ask` and the report path attach to every message. Carried

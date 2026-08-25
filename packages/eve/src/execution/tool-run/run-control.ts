@@ -1,6 +1,6 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
-import { type RunControlMessage, runControlMessageSchema } from "#execution/tool-run/messages.js";
+import { isRunControlMessage, type RunControlMessage } from "#execution/tool-run/messages.js";
 
 /**
  * A run's control surface: the hook that is both its identity claim and the
@@ -65,10 +65,9 @@ async function consumeCancel(
       return await new Promise<never>(() => {});
     }
     if (next.done === true) return await new Promise<never>(() => {});
-    const parsed = runControlMessageSchema.safeParse(next.value);
-    if (!parsed.success) continue;
-    onCancel(parsed.data.reason);
-    throw new RunCancelledError(parsed.data.reason);
+    if (!isRunControlMessage(next.value)) continue;
+    onCancel(next.value.reason);
+    throw new RunCancelledError(next.value.reason);
   }
 }
 
