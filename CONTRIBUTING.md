@@ -213,17 +213,19 @@ on when one exists. Do not create an issue solely to accompany a pull request.
 6. Open the PR with a clear description of the problem and solution.
 
 Stable releases are managed with [Changesets](https://github.com/changesets/changesets) by the maintainers.
-Every commit pushed to `main` also publishes an immutable continuous release of
-the `eve` package. Install the latest successful build with:
+Every commit pushed to `main` also publishes an immutable
+[Changesets snapshot](https://changesets.dev/guide/snapshot-releases) of the
+`eve` package. Install the most recently published snapshot with:
 
 ```bash
 npm install eve@canary
 ```
 
-The release workflow summary includes the exact version for its commit. Use
-that `<semver>-<short-commit-id>` version when you need a reproducible install
-instead of the moving `canary` tag. Continuous releases do not update the
-changelog, create a GitHub release, or change npm's `latest` tag.
+The release workflow summary includes the exact calculated
+`<next-semver>-g<short-commit-id>` version for its commit. Use that version
+when you need a reproducible install instead of the moving `canary` tag.
+Continuous releases do not create a GitHub release or change npm's `latest`
+tag.
 
 ## Developer Certificate of Origin (DCO)
 

@@ -37,7 +37,7 @@ export default defineConfig({
       "test/scenarios/**",
       "test/vercel/**",
     ],
-    include: ["src/**/*.test.ts", "test/**/*.test.{ts,mjs}"],
+    include: ["src/**/*.test.ts", "test/**/*.test.ts"],
     setupFiles: ["./src/internal/testing/unit-guard.ts", "./test/setup/mock-ai-gateway.ts"],
     testTimeout: 5_000,
   },

@@ -11,5 +11,8 @@
     "version": false,
     "tag": false
   },
+  "snapshot": {
+    "useCalculatedVersion": true
+  },
   "ignore": []
 }

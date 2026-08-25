@@ -98,33 +98,27 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Prepare continuous release
-        id: prepare
+      - name: Version continuous release
         env:
           COMMIT_SHA: ${{ github.sha }}
         run: |
-          version="$(node scripts/prepare-canary-release.mjs "$COMMIT_SHA")"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          cat > .changeset/continuous-release.md <<EOF
+          ---
+          "eve": patch
+          ---
 
-      - name: Build continuous release
-        run: pnpm --dir packages/eve run prepack
+          Continuous release for $COMMIT_SHA.
+          EOF
+
+          pnpm exec changeset version --snapshot \
+            --snapshot-prerelease-template "g${COMMIT_SHA:0:12}"
 
       - name: Publish continuous release
-        env:
-          COMMIT_SHA: ${{ github.sha }}
-          VERSION: ${{ steps.prepare.outputs.version }}
         run: |
-          published_version="$(npm view "eve@$VERSION" version 2>/dev/null || true)"
+          pnpm build
+          node scripts/assert-changeset-publish-packages.mjs
+          pnpm exec changeset publish --tag canary --no-git-tag
 
-          if [[ "$published_version" != "$VERSION" ]]; then
-            release_tag="main-${COMMIT_SHA:0:12}"
-            if [[ "$(git ls-remote origin refs/heads/main | cut -f1)" == "$COMMIT_SHA" ]]; then
-              release_tag="canary"
-            fi
-
-            npm publish ./packages/eve --tag "$release_tag" --provenance --ignore-scripts
-            echo "Install this commit with \`npm install eve@$VERSION\`." >> "$GITHUB_STEP_SUMMARY"
-            echo "This release was also published with the \`$release_tag\` tag." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "\`eve@$VERSION\` is already published." >> "$GITHUB_STEP_SUMMARY"
-          fi
+          version="$(jq -r .version packages/eve/package.json)"
+          echo "Install this commit with \`npm install eve@$version\`." >> "$GITHUB_STEP_SUMMARY"
+          echo "Install the latest continuous release with \`npm install eve@canary\`." >> "$GITHUB_STEP_SUMMARY"
