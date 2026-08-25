@@ -58,7 +58,7 @@ export function bindSessionInstrumentation(input: {
   const usesOtel = input.runtime?.otelSettings !== undefined;
 
   return {
-    capturesContent: hooks.capturesContent,
+    capturesContent: plan?.captureLevel === "content",
     forceFlush: input.runtime?.forceFlush ?? (async () => undefined),
     hooks,
     preparePreamble: async (preamble) => {

@@ -152,7 +152,7 @@ import {
   convertStaleResponsesToUserMessage,
   dropStaleSessionLimitContinuationResponses,
 } from "#harness/stale-input-responses.js";
-import { getInstrumentationConfig } from "#harness/instrumentation/config.js";
+import { getInstrumentationConfig } from "#instrumentation/legacy-config.js";
 import {
   normalizeModelMessages,
   normalizeUserContent,

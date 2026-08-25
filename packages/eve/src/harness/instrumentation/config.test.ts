@@ -31,12 +31,12 @@ beforeEach(() => {
 describe("instrumentation-config chunk-isolation regression", () => {
   it("a config registered in one module evaluation is visible from another", async () => {
     vi.resetModules();
-    const moduleA = await import("#harness/instrumentation/config.js");
+    const moduleA = await import("#instrumentation/legacy-config.js");
     const config = { functionId: "test.instrumentation.cross-module.alice" };
     await moduleA.registerInstrumentationConfig(config, { agentName: "test-agent" });
 
     vi.resetModules();
-    const moduleB = await import("#harness/instrumentation/config.js");
+    const moduleB = await import("#instrumentation/legacy-config.js");
 
     // Pre-fix: moduleB's `registeredConfig` is a fresh `undefined` binding.
     // Post-fix: both evaluations share one globalThis-mounted slot.
@@ -45,7 +45,7 @@ describe("instrumentation-config chunk-isolation regression", () => {
 
   it("the config is mounted on globalThis under the canonical symbol", async () => {
     const globalKey = Symbol.for("eve.harness-instrumentation-config");
-    const { registerInstrumentationConfig } = await import("#harness/instrumentation/config.js");
+    const { registerInstrumentationConfig } = await import("#instrumentation/legacy-config.js");
 
     const canary = { functionId: "test.instrumentation.global-mount.canary" };
     await registerInstrumentationConfig(canary, { agentName: "test-agent" });
@@ -57,20 +57,20 @@ describe("instrumentation-config chunk-isolation regression", () => {
     const globalKey = Symbol.for("eve.harness-instrumentation-config");
 
     vi.resetModules();
-    const moduleA = await import("#harness/instrumentation/config.js");
+    const moduleA = await import("#instrumentation/legacy-config.js");
     const config = { functionId: "test.instrumentation.reimport.canary" };
     await moduleA.registerInstrumentationConfig(config, { agentName: "test-agent" });
     const firstRef = (globalThis as Record<symbol, unknown>)[globalKey];
 
     vi.resetModules();
-    await import("#harness/instrumentation/config.js");
+    await import("#instrumentation/legacy-config.js");
     const secondRef = (globalThis as Record<symbol, unknown>)[globalKey];
 
     expect(secondRef).toBe(firstRef);
   });
 
   it("installs harness telemetry settings on the instrumentation runtime", async () => {
-    const { registerInstrumentationConfig } = await import("#harness/instrumentation/config.js");
+    const { registerInstrumentationConfig } = await import("#instrumentation/legacy-config.js");
     const { getInstrumentationRuntime } = await import("#instrumentation/runtime.js");
 
     await registerInstrumentationConfig(
@@ -92,7 +92,7 @@ describe("instrumentation-config chunk-isolation regression", () => {
   });
 
   it("disables input and output recording by default", async () => {
-    const { registerInstrumentationConfig } = await import("#harness/instrumentation/config.js");
+    const { registerInstrumentationConfig } = await import("#instrumentation/legacy-config.js");
     const { getInstrumentationRuntime } = await import("#instrumentation/runtime.js");
 
     await registerInstrumentationConfig({}, { agentName: "test-agent" });
@@ -105,9 +105,45 @@ describe("instrumentation-config chunk-isolation regression", () => {
     });
   });
 
+  it("binds the same session control surface as provider runtimes", async () => {
+    const { registerInstrumentationConfig } = await import("#instrumentation/legacy-config.js");
+    const { getInstrumentationRuntime } = await import("#instrumentation/runtime.js");
+    const { planSessionInstrumentation } = await import("#instrumentation/session-plan.js");
+    const { bindSessionInstrumentation } = await import("#instrumentation/bind-session.js");
+    await registerInstrumentationConfig({ recordInputs: true }, { agentName: "test-agent" });
+    const runtime = getInstrumentationRuntime();
+    const plan = planSessionInstrumentation({
+      runtime,
+      session: {
+        agentName: "test-agent",
+        channel: { kind: "channel:test", metadata: { audience: "private" } },
+        rootSessionId: "session-1",
+      },
+    });
+
+    const controls = bindSessionInstrumentation({
+      plan,
+      rootSessionId: "session-1",
+      runtime,
+      sessionId: "session-1",
+    });
+
+    expect(controls).toEqual(
+      expect.objectContaining({
+        forceFlush: expect.any(Function),
+        preparePreamble: expect.any(Function),
+        propagationFor: expect.any(Function),
+        publish: expect.any(Function),
+        runStep: expect.any(Function),
+        telemetryForAttempt: expect.any(Function),
+      }),
+    );
+    expect(controls.capturesContent).toBe(true);
+  });
+
   it("awaits the setup callback with the resolved context", async () => {
     vi.resetModules();
-    const { registerInstrumentationConfig } = await import("#harness/instrumentation/config.js");
+    const { registerInstrumentationConfig } = await import("#instrumentation/legacy-config.js");
 
     const contexts: InstrumentationSetupContext[] = [];
     await registerInstrumentationConfig(

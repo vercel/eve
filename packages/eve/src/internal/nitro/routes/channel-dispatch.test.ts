@@ -24,7 +24,7 @@ import type { RouteHandlerArgs } from "#channel/routes.js";
 import {
   getInstrumentationConfig,
   registerInstrumentationConfig,
-} from "#harness/instrumentation/config.js";
+} from "#instrumentation/legacy-config.js";
 import type { Runtime } from "#channel/types.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { resolveVercelOidcCurrentProject } from "#channel/auth/vercel-oidc-project.js";

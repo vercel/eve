@@ -116,7 +116,7 @@ vi.mock("./ai-sdk-telemetry.js", () => ({
 }));
 
 const mockGetInstrumentationConfig = vi.fn().mockReturnValue(undefined);
-vi.mock("./instrumentation/config.js", () => ({
+vi.mock("#instrumentation/legacy-config.js", () => ({
   getInstrumentationConfig: (...args: unknown[]) => mockGetInstrumentationConfig(...args),
 }));
 
