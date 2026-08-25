@@ -33,6 +33,7 @@ Notes:
 - **`connection_search`** surfaces a connection's tools by their qualified name (e.g. `linear__list_issues`), which the model can then call directly. The model sees it only when the agent has connections.
 - **`web_search`** has no local executor; the provider runs it. AI Gateway models use Exa by default. To use Parallel instead, export `webSearch({ provider: "parallel" })` from `agent/tools/web_search.ts`. Direct provider models continue to use their native search implementation. To supply your own implementation, override it with `defineTool()`.
 - **`web_fetch`** follows up to ten redirects, rechecking every destination for SSRF safety. Non-success HTTP responses return a plain-text failure result with the response body when available instead of failing the tool call.
+- **`bash`** never replays a submitted command when its output stream is interrupted because the command may have already changed state. On Vercel, eve reattaches the persistent sandbox and tells the model that command completion is unknown so it can inspect state before deciding whether to retry.
 
 Review these default tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
 

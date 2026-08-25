@@ -56,11 +56,15 @@ export function adaptMultiplexedCommandToSandboxProcess<
 >(input: {
   readonly command: MultiplexedCommand<Log>;
   readonly getOutput: (log: Log) => OutputName;
+  readonly mapError?: (error: unknown) => Promise<unknown> | unknown;
 }): SandboxProcess {
   const encoder = new TextEncoder();
   const stdout = createOutputChannel();
   const stderr = createOutputChannel();
   const outputs: Record<OutputName, OutputChannel> = { stderr, stdout };
+  let mappedError: Promise<unknown> | undefined;
+  const mapError = (error: unknown): Promise<unknown> =>
+    (mappedError ??= Promise.resolve(input.mapError?.(error) ?? error));
 
   const logsDone = (async () => {
     try {
@@ -70,9 +74,10 @@ export function adaptMultiplexedCommandToSandboxProcess<
       stdout.close();
       stderr.close();
     } catch (error) {
-      stdout.error(error);
-      stderr.error(error);
-      throw error;
+      const mapped = await mapError(error);
+      stdout.error(mapped);
+      stderr.error(mapped);
+      throw mapped;
     }
   })();
   // The streams surface log failures immediately; retain the rejection for wait().
@@ -85,11 +90,15 @@ export function adaptMultiplexedCommandToSandboxProcess<
     stderr: stderr.stream,
     stdout: stdout.stream,
     wait() {
-      return (waitPromise ??= Promise.resolve().then(async () => {
-        const finished = await input.command.wait();
-        await logsDone;
-        return { exitCode: finished.exitCode };
-      }));
+      return (waitPromise ??= Promise.resolve()
+        .then(async () => {
+          const finished = await input.command.wait();
+          await logsDone;
+          return { exitCode: finished.exitCode };
+        })
+        .catch(async (error: unknown) => {
+          throw await mapError(error);
+        }));
     },
     kill() {
       return (killPromise ??= Promise.resolve().then(() => input.command.kill()));
