@@ -136,8 +136,8 @@ export function createVercelSandbox(
         );
       }
 
+      await ensureVercelSandboxBaseRuntime(session.sandbox);
       if (template === null && session.created) {
-        await ensureVercelSandboxBaseRuntime(session.sandbox);
         await applyInitialVercelNetworkPolicy(session.sandbox, createOptions.networkPolicy);
       }
 
