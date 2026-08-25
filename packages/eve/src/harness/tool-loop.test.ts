@@ -7512,6 +7512,7 @@ describe("createToolLoopHarness", () => {
     expect(serializedProjection).toMatch(/pending/iu);
     expect(serializedProjection).toContain("approval-1");
     expect(serializedProjection).toContain("bash");
+    expect(hasPendingInputBatch(result.session.state)).toBe(true);
     expect(getCompatibilityEventTypes(events)).toEqual([
       "session.started",
       "turn.started",
@@ -7690,6 +7691,8 @@ describe("createToolLoopHarness", () => {
         content.includes("bash")
       );
     };
+    const pendingApprovalInstructions = (index: number): string =>
+      JSON.stringify(vi.mocked(ToolLoopAgent).mock.calls[index]?.[0].instructions);
     const followupQuestions = [
       "What is the current status of my request?",
       "Has the requested action executed yet?",
@@ -7781,6 +7784,10 @@ describe("createToolLoopHarness", () => {
       expect(messages.every((message) => message.role !== "tool")).toBe(true);
       expect(messages.filter(isPendingApprovalProjection)).toHaveLength(1);
       expect(messages.findIndex(isPendingApprovalProjection)).toBe(1);
+      expect(pendingApprovalInstructions(callIndex)).toContain("Trusted eve runtime state");
+      expect(pendingApprovalInstructions(callIndex)).toContain("approval-1");
+      expect(pendingApprovalInstructions(callIndex)).toContain("bash");
+      expect(pendingApprovalInstructions(callIndex)).not.toContain("rm -rf /tmp/demo");
       expect(followup.session.history.filter(isPendingApprovalProjection)).toHaveLength(1);
       expect(hasDeferredStepInput(followup.session)).toBe(false);
       expect(hasPendingInputBatch(followup.session.state)).toBe(true);
