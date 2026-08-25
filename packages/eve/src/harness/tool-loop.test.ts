@@ -135,7 +135,6 @@ function declareTelemetry(config: Readonly<Record<string, unknown>> | undefined)
       : {
           otelSettings: {
             ...config,
-            isOtelTraceEnabled: config["isOtelTraceEnabled"] === true,
             traceChannelRequests: config["traceChannelRequests"] === true,
           },
         },

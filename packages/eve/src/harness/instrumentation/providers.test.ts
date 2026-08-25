@@ -15,7 +15,6 @@ import {
 import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { agentRuns, localTraces, otelIntegration } from "#public/instrumentation/otel.js";
-import { collectOtelPipeline } from "#tracing/otel-declaration.js";
 import {
   disableInstrumentation,
   type ProviderSetupContext,
@@ -202,41 +201,6 @@ describe("finalizeInstrumentationProviders", () => {
     vi.unstubAllEnvs();
     delete (globalThis as Record<symbol, unknown>)[REGISTRY_GLOBAL_KEY];
     delete (globalThis as Record<symbol, unknown>)[RUNTIME_GLOBAL_KEY];
-  });
-
-  it("reports the production Agent Runs destination as enabled", () => {
-    vi.stubEnv(DEVELOPMENT_WORKER_APP_ROOT_ENV, undefined);
-    vi.stubEnv("VERCEL_ENV", "production");
-    seedInstrumentationProviders();
-
-    const collected = collectOtelPipeline(
-      getInstrumentationProviders().map(({ provider }) => provider),
-    );
-
-    expect(collected.settings.isOtelTraceEnabled).toBe(true);
-  });
-
-  it("does not confuse another OTEL destination with Agent Runs", async () => {
-    await register("backend", otelIntegration());
-
-    const collected = collectOtelPipeline(
-      getInstrumentationProviders().map(({ provider }) => provider),
-    );
-
-    expect(collected.settings.isOtelTraceEnabled).toBe(false);
-  });
-
-  it("reports Agent Runs disabled when its production default is removed", async () => {
-    vi.stubEnv(DEVELOPMENT_WORKER_APP_ROOT_ENV, undefined);
-    vi.stubEnv("VERCEL_ENV", "production");
-    seedInstrumentationProviders();
-    await register("agent-runs", disableInstrumentation());
-
-    const collected = collectOtelPipeline(
-      getInstrumentationProviders().map(({ provider }) => provider),
-    );
-
-    expect(collected.settings.isOtelTraceEnabled).toBe(false);
   });
 
   it("publishes to an authored handler", async () => {

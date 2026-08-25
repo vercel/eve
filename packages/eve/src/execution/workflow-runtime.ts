@@ -157,10 +157,7 @@ export function createWorkflowRuntime(config: {
       if (traceSeed !== undefined) {
         ctx.set(SessionTraceSeedKey, traceSeed);
       }
-      ctx.set(
-        OtelTraceEnabledKey,
-        getInstrumentationRuntime()?.otelSettings?.isOtelTraceEnabled === true,
-      );
+      ctx.set(OtelTraceEnabledKey, getInstrumentationRuntime()?.otelSettings !== undefined);
       const serializedContext = serializeContext(ctx);
       const parentLineage = readParentLineage(serializedContext);
       const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;

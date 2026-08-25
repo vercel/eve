@@ -71,7 +71,6 @@ describe("installInstrumentationRuntime", () => {
     expect(providerFlush).toHaveBeenCalledOnce();
     expect(runtime.otelSettings).toEqual({
       functionId: undefined,
-      isOtelTraceEnabled: false,
       recordInputs: true,
       recordOutputs: true,
       traceChannelRequests: false,

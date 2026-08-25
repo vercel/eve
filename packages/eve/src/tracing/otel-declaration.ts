@@ -133,7 +133,6 @@ export interface OtelIntegrationOptions extends ContentOptions {
 
 const OTEL_DECLARATION = Symbol.for("eve.instrumentation.otel");
 const OTEL_INTEGRATION = Symbol.for("eve.instrumentation.otel-integration");
-const AGENT_RUNS_INTEGRATION = Symbol.for("eve.instrumentation.agent-runs");
 
 /**
  * The declared OpenTelemetry pipeline settings. eve collects this before
@@ -151,10 +150,6 @@ export interface OtelIntegration extends InstrumentationProvider {
   readonly content: ResolvedContentOptions;
   readonly runtimeContext?: (input: InstrumentationRuntimeContextInput) => JsonObject | undefined;
   readonly spanProcessors: readonly SpanProcessorOrName[];
-}
-
-interface AgentRunsIntegration extends OtelIntegration {
-  readonly [AGENT_RUNS_INTEGRATION]: true;
 }
 
 /**
@@ -212,8 +207,7 @@ function createOtelIntegration(
 
 /** Vercel Agent Runs through the production request-context transport. @internal */
 export function agentRunsIntegration(options: ManagedTraceOptions = {}): OtelIntegration {
-  const integration: AgentRunsIntegration = {
-    [AGENT_RUNS_INTEGRATION]: true,
+  return {
     [OTEL_INTEGRATION]: true,
     [PROVIDER]: true,
     content: resolveContentOptions(options),
@@ -225,7 +219,6 @@ export function agentRunsIntegration(options: ManagedTraceOptions = {}): OtelInt
       ),
     ],
   };
-  return integration;
 }
 
 function legacyContentRedactionPolicy(options: ContentOptions): SpanExportPolicy | undefined {
@@ -269,10 +262,6 @@ export function isOtelIntegration(value: unknown): value is OtelIntegration {
   );
 }
 
-function isAgentRunsIntegration(value: OtelIntegration): value is AgentRunsIntegration {
-  return (value as Partial<AgentRunsIntegration>)[AGENT_RUNS_INTEGRATION] === true;
-}
-
 /** The one pipeline a process can register. @internal */
 export interface OtelPipeline {
   readonly instrumentations?: readonly unknown[];
@@ -285,7 +274,6 @@ export interface OtelPipeline {
 /** What the harness reads at turn time, as opposed to at registration. @internal */
 export interface OtelHarnessSettings {
   readonly functionId?: string;
-  readonly isOtelTraceEnabled: boolean;
   readonly traceChannelRequests: boolean;
   readonly tracePolicy?: TraceCapturePolicy;
   /** Legacy `defineInstrumentation()` capture settings. Provider destinations capture fully. */
@@ -326,13 +314,11 @@ export function collectOtelPipeline(values: readonly unknown[]): CollectedOtel {
   let declaration: OtelDeclaration | undefined;
   let declared = false;
   let capturesContent = false;
-  let isOtelTraceEnabled = false;
 
   for (const value of values) {
     if (isOtelIntegration(value)) {
       declared = true;
       capturesContent = true;
-      isOtelTraceEnabled ||= isAgentRunsIntegration(value);
       spanProcessors.push(...value.spanProcessors);
       if (value.runtimeContext !== undefined) {
         runtimeContextResolvers.push(value.runtimeContext);
@@ -352,7 +338,6 @@ export function collectOtelPipeline(values: readonly unknown[]): CollectedOtel {
   const options = declaration?.options ?? {};
   const settings: OtelHarnessSettings = {
     functionId: options.functionId,
-    isOtelTraceEnabled,
     recordInputs: capturesContent,
     recordOutputs: capturesContent,
     traceChannelRequests: options.traceChannelRequests === true,

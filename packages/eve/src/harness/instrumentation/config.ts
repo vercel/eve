@@ -51,7 +51,6 @@ export async function registerInstrumentationConfig(
     hooks: createInstrumentationHooks([]),
     otelSettings: {
       functionId: config.functionId,
-      isOtelTraceEnabled: false,
       recordInputs: config.recordInputs === true,
       recordOutputs: config.recordOutputs === true,
       traceChannelRequests: config.traceChannelRequests === true,

@@ -685,7 +685,6 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       hooks: undefined as never,
       idGenerator,
       otelSettings: {
-        isOtelTraceEnabled: true,
         tracePolicy,
         recordInputs: false,
         recordOutputs: false,
@@ -736,7 +735,6 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       hooks: undefined as never,
       idGenerator,
       otelSettings: {
-        isOtelTraceEnabled: true,
         tracePolicy: (trace: { channelType?: string }) => {
           captured = trace;
           return true;
@@ -839,7 +837,6 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       hooks: undefined as never,
       idGenerator: new AgentSpanIdGenerator(),
       otelSettings: {
-        isOtelTraceEnabled: true,
         tracePolicy: () => true,
         recordInputs: false,
         recordOutputs: false,
