@@ -21,6 +21,6 @@
     "typescript": "catalog:"
   },
   "e2e": {
-    "modelMatrix": "smoke"
+    "modelMatrix": "default"
   }
 }
