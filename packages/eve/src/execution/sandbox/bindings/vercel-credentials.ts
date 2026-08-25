@@ -35,7 +35,7 @@ export async function getVercelSandboxCredentials(
 }
 
 function readNonEmptyString(object: object, key: string): string | undefined {
-  const value = Reflect.get(object, key);
+  const value = (object as Record<string, unknown>)[key];
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 

@@ -1,9 +1,11 @@
-import type { VercelEgressAuth } from "#execution/sandbox/bindings/vercel-egress-auth.js";
+import {
+  activateVercelEgressRules,
+  type VercelEgressAuth,
+  type VercelEgressDemand,
+} from "#execution/sandbox/bindings/vercel-egress-auth.js";
 import { normalizeVercelReadStream } from "#execution/sandbox/bindings/vercel-read-stream.js";
 import type { VercelSandbox } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 import { adaptMultiplexedCommandToSandboxProcess } from "#execution/sandbox/multiplexed-command.js";
-import { isAuthorizationInterrupt } from "#harness/authorization-interrupt.js";
-import { resolveVercelEgressPolicy } from "#execution/sandbox/bindings/vercel-egress-auth.js";
 import {
   clearVercelEgressDemandMarkers,
   readVercelEgressDemandedRuleIds,
@@ -24,29 +26,28 @@ import type {
 } from "#shared/sandbox-session.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 
+export interface CreateVercelSandboxHandleInput {
+  /** Credentials already activated in the sandbox policy by the attach. */
+  readonly credentials?: ReadonlyMap<string, TokenResult>;
+  readonly demand?: VercelEgressDemand;
+  readonly egressAuth?: VercelEgressAuth;
+  readonly sandbox: VercelSandbox;
+  readonly sessionKey: string;
+}
+
 export function createVercelSandboxHandle(
-  sandbox: VercelSandbox,
-  sessionKey: string,
-  egressAuth: VercelEgressAuth | undefined,
-  brokeredPolicy: SandboxNetworkPolicy | undefined,
-  initialCredentials: ReadonlyMap<string, TokenResult> = new Map(),
-  demandToken?: string,
+  input: CreateVercelSandboxHandleInput,
 ): SandboxBackendHandle<VercelSandboxSessionUseOptions> {
-  let credentials = new Map(initialCredentials);
-  const onRequestRuleIds =
-    egressAuth === undefined
-      ? []
-      : [...egressAuth.rules.values()]
-          .filter((rule) => rule.credentialResolution === "on-request")
-          .map((rule) => rule.id);
+  const { demand, egressAuth, sandbox, sessionKey } = input;
+  let credentials: ReadonlyMap<string, TokenResult> = new Map(input.credentials ?? []);
   const settleDemand =
-    egressAuth === undefined || onRequestRuleIds.length === 0
+    egressAuth === undefined || egressAuth.onRequestRuleIds.length === 0
       ? undefined
       : async (): Promise<void> => {
           const demanded = await readVercelEgressDemandedRuleIds(
             sandbox,
-            onRequestRuleIds,
-            demandToken,
+            egressAuth.onRequestRuleIds,
+            demand?.token,
           );
           if (demanded.length === 0) return;
           const unresolved = demanded.filter((ruleId) => !credentials.has(ruleId));
@@ -54,43 +55,23 @@ export function createVercelSandboxHandle(
             await clearVercelEgressDemandMarkers(sandbox, demanded);
             return;
           }
-          let resolved;
-          try {
-            resolved = await resolveVercelEgressPolicy(
-              egressAuth,
-              sessionKey,
-              unresolved,
-              sandbox.name,
-              demandToken,
-            );
-          } catch (error) {
-            // Interactive authorization parks the step. The demand markers
-            // survive so the resumed step's handle creation activates the
-            // approved credential before the model re-runs the command.
-            if (isAuthorizationInterrupt(error)) throw error;
-            await sandbox.update({
-              networkPolicy: egressAuth.buildPolicy(credentials, sandbox.name, demandToken),
-            });
-            await clearVercelEgressDemandMarkers(sandbox, unresolved);
-            throw error;
-          }
-          credentials = new Map([...credentials, ...resolved.credentials]);
-          await sandbox.update({
-            networkPolicy: egressAuth.buildPolicy(credentials, sandbox.name, demandToken),
+          credentials = await activateVercelEgressRules({
+            demand,
+            demandedRuleIds: demanded,
+            egressAuth,
+            heldCredentials: credentials,
+            ruleIds: unresolved,
+            sandbox,
+            sessionKey,
           });
-          await clearVercelEgressDemandMarkers(sandbox, unresolved);
-          if (resolved.unresolvedRuleIds.length > 0) {
-            throw new Error(
-              "Sandbox credentials remained unavailable for on-request rules: " +
-                `${formatVercelEgressRuleList(egressAuth, resolved.unresolvedRuleIds)}.`,
-            );
-          }
         };
-  return {
-    session: buildSandboxSession(
+  const buildSession = () =>
+    buildSandboxSession(
       createVercelInternalSandboxSession(sandbox, sessionKey, settleDemand),
-      createVercelNetworkPolicySetter(sandbox, onRequestRuleIds.length > 0),
-    ),
+      createVercelNetworkPolicySetter(sandbox, settleDemand !== undefined),
+    );
+  return {
+    session: buildSession(),
     useSessionFn: async (options?: VercelSandboxSessionUseOptions) => {
       if (options !== undefined) {
         if (egressAuth !== undefined && options.networkPolicy !== undefined) {
@@ -100,17 +81,16 @@ export function createVercelSandboxHandle(
         }
         await sandbox.update(options);
       }
-      if (brokeredPolicy !== undefined) {
-        await sandbox.update({ networkPolicy: brokeredPolicy });
+      if (egressAuth !== undefined) {
+        // Rebuild from the live credential set: demand may have settled
+        // since attach, so a snapshot policy would drop those credentials.
+        await sandbox.update({ networkPolicy: egressAuth.buildPolicy(credentials, demand) });
       }
-      return buildSandboxSession(
-        createVercelInternalSandboxSession(sandbox, sessionKey, settleDemand),
-        createVercelNetworkPolicySetter(sandbox, onRequestRuleIds.length > 0),
-      );
+      return buildSession();
     },
     async captureState() {
       const metadata: Record<string, unknown> = { sandboxName: sandbox.name };
-      if (demandToken !== undefined) metadata.demandToken = demandToken;
+      if (demand !== undefined) metadata.demandToken = demand.token;
       return {
         backendName: "vercel",
         metadata,
@@ -133,18 +113,6 @@ export function createVercelSandboxHandle(
       }
     },
   };
-}
-
-export function formatVercelEgressRuleList(
-  egressAuth: VercelEgressAuth,
-  ruleIds: readonly string[],
-): string {
-  return ruleIds
-    .map((ruleId) => {
-      const domain = egressAuth.rules.get(ruleId)?.domain;
-      return domain === undefined ? ruleId : `"${domain}" (${ruleId})`;
-    })
-    .join(", ");
 }
 
 async function stopVercelSandbox(sandbox: VercelSandbox): Promise<void> {

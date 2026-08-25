@@ -1,19 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { Command, Sandbox as SdkSandbox } from "#compiled/@vercel/sandbox/index.js";
-import { AuthorizationInterrupt } from "#harness/authorization-interrupt.js";
-import { requestAuthorization } from "#harness/authorization.js";
-import { resolveVercelEgressPolicy } from "#execution/sandbox/bindings/vercel-egress-auth.js";
+import {
+  extractVercelEgressAuth,
+  type VercelEgressAuth,
+} from "#execution/sandbox/bindings/vercel-egress-auth.js";
 import { vercelEgressRuleId } from "#execution/sandbox/bindings/vercel-egress-demand.js";
 import {
   createVercelInternalSandboxSession,
   createVercelNetworkPolicySetter,
   createVercelSandboxHandle,
 } from "#execution/sandbox/bindings/vercel-session.js";
-
-vi.mock("#execution/sandbox/bindings/vercel-egress-auth.js", () => ({
-  resolveVercelEgressPolicy: vi.fn(),
-}));
 
 function command(
   exitCode = 0,
@@ -30,6 +27,7 @@ function command(
 
 const DEMAND_TOKEN = "a".repeat(43);
 const RULE_ID = vercelEgressRuleId("api.example.com", 0);
+const DEMAND = { sandboxName: "sbx-under-test", token: DEMAND_TOKEN };
 
 function sandbox(commands: Command[], markers: Map<string, string> = new Map()): SdkSandbox {
   return {
@@ -48,23 +46,27 @@ function sandbox(commands: Command[], markers: Map<string, string> = new Map()):
   } as never;
 }
 
-function onRequestEgressAuth() {
-  return {
-    buildPolicy: vi.fn(
-      (credentials: ReadonlyMap<string, { token: string }>) =>
-        `policy:${[...credentials.keys()].join(",")}`,
-    ),
-    clearedPolicy: "policy:",
-    eagerRuleIds: [],
-    rules: new Map([[RULE_ID, { credentialResolution: "on-request", id: RULE_ID }]]),
-  } as never;
+function onRequestEgressAuth(getToken: () => Promise<{ token: string }>): VercelEgressAuth {
+  const { egressAuth } = extractVercelEgressAuth({
+    authProxyBaseUrl: "https://eve.example.com",
+    credentialResolution: "on-request",
+    networkPolicy: {
+      allow: {
+        "api.example.com": [
+          {
+            auth: { getToken },
+            transform: ({ token }: { token: string }) => [
+              { headers: { authorization: `Bearer ${token}` } },
+            ],
+          },
+        ],
+      },
+    },
+  });
+  return egressAuth!;
 }
 
 describe("Vercel on-request sandbox processes", () => {
-  beforeEach(() => {
-    vi.mocked(resolveVercelEgressPolicy).mockClear();
-  });
-
   it("allows authored policy replacement without on-request rules", async () => {
     const sdk = sandbox([]);
 
@@ -146,31 +148,22 @@ describe("Vercel on-request sandbox processes", () => {
   it("resolves a demanded credential after the command exits and clears the marker", async () => {
     const markers = new Map([[RULE_ID, DEMAND_TOKEN]]);
     const sdk = sandbox([command(22)], markers);
-    vi.mocked(resolveVercelEgressPolicy).mockResolvedValueOnce({
-      credentials: new Map([[RULE_ID, { token: "tok" }]]),
-      policy: `policy:${RULE_ID}`,
-      unresolvedRuleIds: [],
-    } as never);
-    const handle = createVercelSandboxHandle(
-      sdk,
-      "session-key",
-      onRequestEgressAuth(),
-      undefined,
-      new Map(),
-      DEMAND_TOKEN,
-    );
+    const getToken = vi.fn(async () => ({ token: "tok" }));
+    const egressAuth = onRequestEgressAuth(getToken);
+    const handle = createVercelSandboxHandle({
+      demand: DEMAND,
+      egressAuth,
+      sandbox: sdk,
+      sessionKey: "session-settle",
+    });
 
     const process = await handle.session.spawn({ command: "curl https://api.example.com" });
     await expect(process.wait()).resolves.toEqual({ exitCode: 22 });
 
-    expect(resolveVercelEgressPolicy).toHaveBeenCalledWith(
-      expect.anything(),
-      "session-key",
-      [RULE_ID],
-      "sbx-under-test",
-      DEMAND_TOKEN,
-    );
-    expect(sdk.update).toHaveBeenCalledWith({ networkPolicy: `policy:${RULE_ID}` });
+    expect(getToken).toHaveBeenCalledOnce();
+    expect(sdk.update).toHaveBeenCalledWith({
+      networkPolicy: egressAuth.buildPolicy(new Map([[RULE_ID, { token: "tok" }]]), DEMAND),
+    });
     expect(markers.size).toBe(0);
     expect(sdk.runCommand).toHaveBeenCalledOnce();
   });
@@ -178,60 +171,58 @@ describe("Vercel on-request sandbox processes", () => {
   it("ignores forged demand markers that do not carry the proxy-attested token", async () => {
     const markers = new Map([[RULE_ID, "forged-by-sandbox-code"]]);
     const sdk = sandbox([command(22)], markers);
-    const handle = createVercelSandboxHandle(
-      sdk,
-      "session-key",
-      onRequestEgressAuth(),
-      undefined,
-      new Map(),
-      DEMAND_TOKEN,
-    );
+    const getToken = vi.fn(async () => ({ token: "tok" }));
+    const handle = createVercelSandboxHandle({
+      demand: DEMAND,
+      egressAuth: onRequestEgressAuth(getToken),
+      sandbox: sdk,
+      sessionKey: "session-forged",
+    });
 
     const process = await handle.session.spawn({ command: "curl https://api.example.com" });
     await expect(process.wait()).resolves.toEqual({ exitCode: 22 });
 
-    expect(resolveVercelEgressPolicy).not.toHaveBeenCalled();
+    expect(getToken).not.toHaveBeenCalled();
     expect(sdk.update).not.toHaveBeenCalled();
     expect(markers.size).toBe(1);
   });
 
-  it("keeps demand markers when authorization parks so resume can activate the credential", async () => {
+  it("rebuilds the managed policy from live credentials in useSessionFn", async () => {
     const markers = new Map([[RULE_ID, DEMAND_TOKEN]]);
     const sdk = sandbox([command(22)], markers);
-    vi.mocked(resolveVercelEgressPolicy).mockRejectedValueOnce(
-      new AuthorizationInterrupt(requestAuthorization([])),
-    );
-    const handle = createVercelSandboxHandle(
-      sdk,
-      "session-key",
-      onRequestEgressAuth(),
-      undefined,
-      new Map(),
-      DEMAND_TOKEN,
-    );
+    const egressAuth = onRequestEgressAuth(async () => ({ token: "tok" }));
+    const handle = createVercelSandboxHandle({
+      demand: DEMAND,
+      egressAuth,
+      sandbox: sdk,
+      sessionKey: "session-rebuild",
+    });
 
     const process = await handle.session.spawn({ command: "curl https://api.example.com" });
-    await expect(process.wait()).rejects.toBeInstanceOf(AuthorizationInterrupt);
+    await process.wait();
+    vi.mocked(sdk.update).mockClear();
 
-    expect(markers.size).toBe(1);
-    expect(sdk.update).not.toHaveBeenCalled();
+    await handle.useSessionFn();
+
+    // The credential that settled mid-step must survive a policy rebuild.
+    expect(sdk.update).toHaveBeenCalledWith({
+      networkPolicy: egressAuth.buildPolicy(new Map([[RULE_ID, { token: "tok" }]]), DEMAND),
+    });
   });
 
   it("persists the demand token so the next step can verify surviving markers", async () => {
     const sdk = sandbox([]);
-    const handle = createVercelSandboxHandle(
-      sdk,
-      "session-key",
-      onRequestEgressAuth(),
-      undefined,
-      new Map(),
-      DEMAND_TOKEN,
-    );
+    const handle = createVercelSandboxHandle({
+      demand: DEMAND,
+      egressAuth: onRequestEgressAuth(async () => ({ token: "tok" })),
+      sandbox: sdk,
+      sessionKey: "session-capture",
+    });
 
     await expect(handle.captureState()).resolves.toEqual({
       backendName: "vercel",
       metadata: { demandToken: DEMAND_TOKEN, sandboxName: "sbx-under-test" },
-      sessionKey: "session-key",
+      sessionKey: "session-capture",
     });
   });
 
@@ -245,17 +236,11 @@ describe("Vercel on-request sandbox processes", () => {
 
   it("rejects onSession policy replacement for managed auth rules", async () => {
     const sdk = sandbox([]);
-    const handle = createVercelSandboxHandle(
-      sdk,
-      "sandbox",
-      {
-        buildPolicy: () => "deny-all",
-        clearedPolicy: "deny-all",
-        eagerRuleIds: [],
-        rules: new Map(),
-      },
-      "deny-all",
-    );
+    const handle = createVercelSandboxHandle({
+      egressAuth: onRequestEgressAuth(async () => ({ token: "tok" })),
+      sandbox: sdk,
+      sessionKey: "session-reject",
+    });
 
     await expect(handle.useSessionFn({ networkPolicy: "allow-all" })).rejects.toThrow(
       /onSession.*cannot replace/,

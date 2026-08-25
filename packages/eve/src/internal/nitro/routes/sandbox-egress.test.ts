@@ -96,6 +96,22 @@ describe("sandbox egress proxy route", () => {
     ]);
   });
 
+  it("rejects a route naming a sandbox that no longer exists", async () => {
+    get.mockRejectedValueOnce(Object.assign(new Error("Not found"), { response: { status: 404 } }));
+
+    const response = await sandboxEgressRoute({
+      req: new Request(
+        `https://eve.example/eve/v1/sandbox/egress/${RULE_B}/gone-sandbox/${DEMAND_TOKEN}/get`,
+        {
+          headers: { "vercel-sandbox-oidc-token": "signed" },
+        },
+      ),
+    });
+
+    expect(response.status).toBe(403);
+    expect(writeFiles).not.toHaveBeenCalled();
+  });
+
   it("rejects a route naming a different sandbox than the OIDC source", async () => {
     get.mockResolvedValueOnce({
       currentSession: () => ({ sessionId: "different-sandbox-id" }),

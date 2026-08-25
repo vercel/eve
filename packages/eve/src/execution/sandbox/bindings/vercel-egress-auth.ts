@@ -1,6 +1,12 @@
-import type { NetworkPolicyRule } from "#compiled/@vercel/sandbox/index.js";
-import { vercelEgressRuleId } from "#execution/sandbox/bindings/vercel-egress-demand.js";
-import { AuthorizationInterrupt } from "#harness/authorization-interrupt.js";
+import type { NetworkPolicyRule, Sandbox as SdkSandbox } from "#compiled/@vercel/sandbox/index.js";
+import {
+  clearVercelEgressDemandMarkers,
+  vercelEgressRuleId,
+} from "#execution/sandbox/bindings/vercel-egress-demand.js";
+import {
+  AuthorizationInterrupt,
+  isAuthorizationInterrupt,
+} from "#harness/authorization-interrupt.js";
 import type { VercelCreateOptions } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 import { type AuthorizationSignal, requestAuthorization } from "#harness/authorization.js";
 import { createLogger } from "#internal/logging.js";
@@ -44,15 +50,26 @@ type ResolvedCredentialEntry =
       readonly token: TokenResult;
     };
 
+/**
+ * Identity of one on-request policy build: the sandbox the triggers are
+ * minted for and the host-minted demand token embedded in its `forwardURL`
+ * rules. The two always travel together — a trigger is meaningless without
+ * the token that attests demand for it.
+ */
+export interface VercelEgressDemand {
+  readonly sandboxName: string;
+  readonly token: string;
+}
+
 export interface VercelEgressAuth {
   readonly callbackBaseUrl?: string;
   readonly buildPolicy: (
     credentials: ReadonlyMap<string, TokenResult>,
-    sandboxName?: string,
-    demandToken?: string,
+    demand?: VercelEgressDemand,
   ) => SandboxNetworkPolicy;
   readonly clearedPolicy: SandboxNetworkPolicy;
   readonly eagerRuleIds: readonly string[];
+  readonly onRequestRuleIds: readonly string[];
   readonly rules: ReadonlyMap<string, VercelManagedAuthRule>;
 }
 
@@ -92,42 +109,35 @@ export function extractVercelEgressAuth(options: VercelSandboxCreateOptions | un
   const rules = new Map(normalizedRules.map((rule) => [rule.id, rule]));
   const buildPolicy = (
     credentials: ReadonlyMap<string, TokenResult>,
-    sandboxName?: string,
-    demandToken?: string,
+    demand?: VercelEgressDemand,
   ): SandboxNetworkPolicy =>
-    buildManagedPolicy(
-      authoredPolicy,
-      normalizedRules,
-      credentials,
-      callbackBaseUrl,
-      sandboxName,
-      demandToken,
-    );
+    buildManagedPolicy(authoredPolicy, normalizedRules, credentials, callbackBaseUrl, demand);
   return {
     egressAuth: {
       callbackBaseUrl,
       buildPolicy,
       clearedPolicy: buildPolicy(new Map()),
-      eagerRuleIds: normalizedRules
-        .filter((rule) => rule.credentialResolution === "eager")
-        .map((rule) => rule.id),
+      eagerRuleIds: ruleIdsByResolution(normalizedRules, "eager"),
+      onRequestRuleIds: ruleIdsByResolution(normalizedRules, "on-request"),
       rules,
     },
     createOptions: createOptions as VercelCreateOptions,
   };
 }
 
-export async function resolveVercelEgressPolicy(
-  egressAuth: VercelEgressAuth,
-  sandboxScope: string,
-  ruleIds: readonly string[] = egressAuth.eagerRuleIds,
-  sandboxName?: string,
-  demandToken?: string,
-): Promise<{
+export interface ResolveVercelEgressPolicyInput {
+  readonly egressAuth: VercelEgressAuth;
+  /** Rules to resolve now. Defaults to the eager rules. */
+  readonly ruleIds?: readonly string[];
+  readonly sessionKey: string;
+}
+
+export async function resolveVercelEgressPolicy(input: ResolveVercelEgressPolicyInput): Promise<{
   readonly credentials: ReadonlyMap<string, TokenResult>;
-  readonly policy: SandboxNetworkPolicy;
   readonly unresolvedRuleIds: readonly string[];
 }> {
+  const { egressAuth, sessionKey } = input;
+  const ruleIds = input.ruleIds ?? egressAuth.eagerRuleIds;
   const entries: ResolvedCredentialEntry[] = await Promise.all(
     ruleIds.map(async (ruleId) => {
       const rule = egressAuth.rules.get(ruleId);
@@ -137,7 +147,7 @@ export async function resolveVercelEgressPolicy(
       const scoped: ScopedAuthorization = {
         authorization: rule.authorization,
         connection: { url: `https://${rule.domain}` },
-        scope: `sandbox:${sandboxScope}:${rule.id}`,
+        scope: `sandbox:${sessionKey}:${rule.id}`,
       };
       const justAuthorized = await completeScopedAuthorization(scoped);
 
@@ -209,26 +219,79 @@ export async function resolveVercelEgressPolicy(
         entry.kind === "token" && entry.token.token.length === 0,
     )
     .map((entry) => entry.label);
-  return {
-    credentials,
-    policy: egressAuth.buildPolicy(credentials, sandboxName, demandToken),
-    unresolvedRuleIds,
-  };
+  return { credentials, unresolvedRuleIds };
 }
 
-function discoverManagedRules(policy: VercelSandboxNetworkPolicy | undefined): Array<
-  Omit<VercelManagedAuthRule, "credentialResolution"> & {
-    credentialResolution?: VercelSandboxCredentialResolution;
-    readonly index: number;
-  }
-> {
-  if (typeof policy !== "object" || policy === null || Array.isArray(policy.allow)) return [];
-  const rules: Array<
-    Omit<VercelManagedAuthRule, "credentialResolution"> & {
-      credentialResolution?: VercelSandboxCredentialResolution;
-      readonly index: number;
+export interface ActivateVercelEgressRulesInput {
+  readonly demand: VercelEgressDemand | undefined;
+  /** Demanded rule ids whose markers this activation settles. */
+  readonly demandedRuleIds: readonly string[];
+  readonly egressAuth: VercelEgressAuth;
+  /** Credentials already active in the sandbox policy. */
+  readonly heldCredentials: ReadonlyMap<string, TokenResult>;
+  /** Rules to resolve now. */
+  readonly ruleIds: readonly string[];
+  readonly sandbox: SdkSandbox;
+  readonly sessionKey: string;
+}
+
+/**
+ * Resolves the given managed rules and activates them in the sandbox network
+ * policy, clearing the demand markers they settle.
+ *
+ * Interactive authorization propagates as an authorization interrupt with
+ * markers and policy untouched, so the demand survives the park and the
+ * resumed step's attach activates the approved credential. Any other
+ * resolution failure fails closed: the policy reverts to the already-held
+ * credentials and the markers are cleared. Demanded rules whose credentials
+ * remain unavailable raise an error after the resolved credentials are
+ * activated — the model retries; eve never replays commands.
+ */
+export async function activateVercelEgressRules(
+  input: ActivateVercelEgressRulesInput,
+): Promise<ReadonlyMap<string, TokenResult>> {
+  const { demand, demandedRuleIds, egressAuth, heldCredentials, sandbox, sessionKey } = input;
+  let resolved;
+  try {
+    resolved = await resolveVercelEgressPolicy({ egressAuth, ruleIds: input.ruleIds, sessionKey });
+  } catch (error) {
+    if (isAuthorizationInterrupt(error)) throw error;
+    try {
+      await sandbox.update({ networkPolicy: egressAuth.buildPolicy(heldCredentials, demand) });
+      await clearVercelEgressDemandMarkers(sandbox, demandedRuleIds);
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "Failed to activate sandbox egress credentials and restore the network policy.",
+      );
     }
-  > = [];
+    throw error;
+  }
+  const credentials = new Map([...heldCredentials, ...resolved.credentials]);
+  await sandbox.update({ networkPolicy: egressAuth.buildPolicy(credentials, demand) });
+  await clearVercelEgressDemandMarkers(sandbox, demandedRuleIds);
+  const unavailableRuleIds = resolved.unresolvedRuleIds.filter((ruleId) =>
+    demandedRuleIds.includes(ruleId),
+  );
+  if (unavailableRuleIds.length > 0) {
+    throw new Error(
+      "Sandbox credentials remained unavailable for on-request rules: " +
+        `${formatRuleList(egressAuth, unavailableRuleIds)}.`,
+    );
+  }
+  return credentials;
+}
+
+type DiscoveredAuthRule = Omit<VercelManagedAuthRule, "credentialResolution"> & {
+  readonly credentialResolution?: VercelSandboxCredentialResolution;
+  readonly index: number;
+};
+
+function discoverManagedRules(
+  policy: VercelSandboxNetworkPolicy | undefined,
+): DiscoveredAuthRule[] {
+  if (typeof policy !== "object" || policy === null || Array.isArray(policy.allow)) return [];
+  const rules: DiscoveredAuthRule[] = [];
   for (const [domain, domainRules] of Object.entries(policy.allow ?? {})) {
     for (const [index, rule] of domainRules.entries()) {
       if (!isAuthRule(rule)) continue;
@@ -261,13 +324,28 @@ function isAuthRule(rule: unknown): rule is VercelSandboxAuthNetworkPolicyRule {
   return typeof rule === "object" && rule !== null && "auth" in rule;
 }
 
+function ruleIdsByResolution(
+  rules: readonly VercelManagedAuthRule[],
+  resolution: VercelSandboxCredentialResolution,
+): readonly string[] {
+  return rules.filter((rule) => rule.credentialResolution === resolution).map((rule) => rule.id);
+}
+
+function formatRuleList(egressAuth: VercelEgressAuth, ruleIds: readonly string[]): string {
+  return ruleIds
+    .map((ruleId) => {
+      const domain = egressAuth.rules.get(ruleId)?.domain;
+      return domain === undefined ? ruleId : `"${domain}" (${ruleId})`;
+    })
+    .join(", ");
+}
+
 function buildManagedPolicy(
   policy: VercelSandboxNetworkPolicy | undefined,
   managedRules: ReadonlyArray<VercelManagedAuthRule & { readonly index: number }>,
   credentials: ReadonlyMap<string, TokenResult>,
   callbackBaseUrl: string | undefined,
-  sandboxName: string | undefined,
-  demandToken: string | undefined,
+  demand: VercelEgressDemand | undefined,
 ): SandboxNetworkPolicy {
   if (typeof policy !== "object" || policy === null || Array.isArray(policy.allow)) {
     throw new Error("vercel(): managed `auth` rules require record-form `networkPolicy.allow`.");
@@ -292,15 +370,11 @@ function buildManagedPolicy(
         if (authoredRule.match !== undefined) compiledRule.match = authoredRule.match;
         return [compiledRule];
       }
-      if (
-        managed.credentialResolution === "on-request" &&
-        sandboxName !== undefined &&
-        demandToken !== undefined
-      ) {
+      if (managed.credentialResolution === "on-request" && demand !== undefined) {
         const compiledRule: NetworkPolicyRule = {
           forwardURL:
             `${callbackBaseUrl}/eve/v1/sandbox/egress/${managed.id}/` +
-            `${encodeURIComponent(sandboxName)}/${demandToken}`,
+            `${encodeURIComponent(demand.sandboxName)}/${demand.token}`,
         };
         if (authoredRule.match !== undefined) compiledRule.match = authoredRule.match;
         return [compiledRule];

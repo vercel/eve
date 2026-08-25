@@ -1,9 +1,7 @@
-import { Sandbox } from "#compiled/@vercel/sandbox/index.js";
+import * as sandboxModule from "#compiled/@vercel/sandbox/index.js";
 import { defineSandboxProxy } from "#compiled/@vercel/sandbox/proxy.js";
-import {
-  getVercelSandboxCredentials,
-  getVercelSandboxFetch,
-} from "#execution/sandbox/bindings/vercel-credentials.js";
+import { getVercelSandboxCredentials } from "#execution/sandbox/bindings/vercel-credentials.js";
+import { getNamedVercelSandbox } from "#execution/sandbox/bindings/vercel-lookup.js";
 import {
   getVercelEgressDemandMarkerPath,
   isVercelEgressDemandToken,
@@ -27,8 +25,7 @@ export default async function sandboxEgressRoute(event: {
     async (_request, meta) => {
       let stage: EgressProxyStage = "credentials";
       try {
-        const createOptions = {};
-        const credentials = await getVercelSandboxCredentials(createOptions);
+        const credentials = await getVercelSandboxCredentials({});
         if (credentials.projectId !== meta.projectId || credentials.teamId !== meta.teamId) {
           return new Response(
             "eve: this egress route only serves sandboxes of the project that deployed it.",
@@ -37,13 +34,12 @@ export default async function sandboxEgressRoute(event: {
         }
 
         stage = "sandbox_lookup";
-        const sandbox = await Sandbox.get({
-          ...credentials,
-          fetch: getVercelSandboxFetch(createOptions),
-          name: route.sandboxName,
-          resume: false,
-        } as never);
-        if (sandbox.currentSession().sessionId !== meta.sandboxId) {
+        const sandbox = await getNamedVercelSandbox({
+          createOptions: {},
+          sandboxModule,
+          sandboxName: route.sandboxName,
+        });
+        if (sandbox === null || sandbox.currentSession().sessionId !== meta.sandboxId) {
           return new Response(
             "eve: this egress route only serves requests from the sandbox it was issued for.",
             { status: 403 },
