@@ -63,6 +63,14 @@ export default defineTool({
       ".eve/builds/x/output/server/index.mjs",
       `export async function f() { "use step"; }`,
     );
+    await write(
+      "src/components/banner.js",
+      `// "use step" helpers live in ../lib\nexport function Banner() { return <b>hi</b>; }`,
+    );
+    await write(
+      ".well-known/workflow/v1/flow.js",
+      `export async function generated() {\n  "use workflow";\n}`,
+    );
     await write("dist/out.js", `export async function f() { "use step"; }`);
     await write("agent/README.md", `"use workflow"`);
 
@@ -81,7 +89,13 @@ export default defineTool({
     );
     const tool = await write(
       "agent/tools/deploy.ts",
-      `export default { description: "d", async execute() { "use workflow"; return 1; } };`,
+      `export default {
+  description: "d",
+  async execute() {
+    "use workflow";
+    return 1;
+  },
+};`,
     );
 
     await expect(discoverAuthoredWorkflowModules(appRoot)).resolves.toEqual({
@@ -100,12 +114,26 @@ export default defineTool({
     });
   });
 
+  it("ignores a directive that is not on its own line, as the SDK pre-scan does", async () => {
+    await write(
+      "agent/tools/inline.ts",
+      `export default { description: "d", async execute() { "use workflow"; return 1; } };`,
+    );
+
+    await expect(discoverAuthoredWorkflowModules(appRoot)).resolves.toEqual({
+      directiveModules: [],
+      workflowModules: [],
+    });
+  });
+
   it("reports an invalid directive placement as a build error", async () => {
     await write(
       "agent/tools/bad.ts",
       `export default {
   execute() {
-    const inner = async () => { "use workflow"; };
+    const inner = async () => {
+      "use workflow";
+    };
     return inner();
   },
 };`,
