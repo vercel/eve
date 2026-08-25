@@ -8,28 +8,37 @@ last_updated: "2026-08-25"
 
 ## Decision
 
-Introduce a versioned `AgentRunnerV1` layer between eve's durable agent
-lifecycle and the implementation that performs agent work. The existing eve
-tool loop becomes the built-in runner. External packages may provide other
-runners without eve importing, compiling, or branching on those packages.
+Introduce a versioned `AgentRunnerV1` boundary between the eve runtime and the
+agent loop it hosts. The default harness remains eve's built-in agent loop and
+gains an internal runner adapter. External packages may provide other runners,
+including one that adapts AI SDK's `HarnessAgent`, without eve importing,
+compiling, or branching on those packages.
 
-An agent runner is not a new subagent protocol. eve continues to own root and
-child sessions, workflow steps, task handles, callbacks, cancellation,
-sandboxes, tools, hooks, auth, and protocol events. A runner owns only its
-native execution state and one durable slice of agent work.
+This proposal uses three distinct terms:
+
+- The **runtime** is eve's durable host. It owns root and child sessions,
+  workflow steps, task handles, callbacks, cancellation, sandboxes, tools,
+  hooks, auth, and protocol events.
+- A **runner** is an implementation of the `AgentRunnerV1` contract that the
+  runtime invokes for one durable slice of agent work. It owns only its
+  harness-specific execution state and opaque checkpoint.
+- A **harness** is a concrete agent loop behind a runner. eve's default harness
+  is one such loop; an AI SDK `HarnessAgent` and its selected harness adapter
+  can be another.
+
+The runner is the integration boundary, not a third orchestration system. It
+lets the runtime host different harnesses while preserving one durable
+lifecycle.
 
 ```text
-authored agent node
+eve runtime: durable session, workflow, and host capabilities
        |
        v
-eve durable session and context
+AgentRunnerV1 boundary
        |
-       v
-AgentRunnerV1 host
+       +-- built-in runner adapter --> eve default harness
        |
-       +-- built-in eve runner
-       |
-       +-- external package runner
+       +-- external runner adapter --> AI SDK HarnessAgent
 ```
 
 The contract is general. No source file in `eve` identifies HarnessAgent,
@@ -38,18 +47,27 @@ HarnessAgent settings. An external package such as `@eve/harness-agent` may use
 the contract, but it remains ordinary authored application code from eve's
 perspective.
 
+The current source layout does not yet reflect this ownership boundary.
+`packages/eve/src/harness/` contains the default model loop together with
+approval, input, event, and runtime-action state that the proposed runtime host
+must expose generically. This proposal separates responsibilities; it does not
+assume that moving a directory or renaming the existing harness creates the
+boundary.
+
 ## Problem
 
-The durable workflow already funnels root agents and local subagents through a
-`StepFn`, but the boundary is not implementation-neutral:
+The runtime already funnels root agents and local subagents through a `StepFn`,
+but that internal harness function is not an implementation-neutral provider
+boundary:
 
 - `RuntimeTurnAgent` requires an eve model, dynamic model, or dynamic config;
 - session construction and hydration store model-loop-specific agent, history,
   tool, and compaction data directly on `HarnessSession`;
 - turn preparation refreshes that data before selecting the step
   implementation;
-- `createExecutionNodeStep` constructs `createToolLoopHarness` directly;
-- the tool loop owns protocol emission, usage, approval, input, retry,
+- `createExecutionNodeStep` constructs the default harness directly through
+  `createToolLoopHarness`;
+- the default harness owns protocol emission, usage, approval, input, retry,
   compaction, and background-effect behavior that a second implementation
   would otherwise have to duplicate.
 
@@ -57,18 +75,18 @@ Adding a second hard-coded branch would make these dependencies worse. Adding
 HarnessAgent-specific compiler or manifest fields would also prevent other
 agent implementations from using the same seam.
 
-The runner layer must separate common durable lifecycle state from
-implementation-owned state, while preserving the existing behavior of the
-built-in eve runner.
+The runner layer must separate runtime-owned durable lifecycle state from
+harness-owned execution state while preserving the default harness's existing
+behavior.
 
 ## Scope
 
 This proposal will:
 
 - define one versioned, eve-owned runner contract;
-- let every local runtime node select a runner, including the root node and
+- let the runtime select a runner for every local node, including the root and
   declared subagents;
-- adapt the existing eve tool loop to that contract without changing its
+- adapt the default harness to that contract without changing its
   observable behavior;
 - allow an authored module to supply an external runner provider through the
   existing compiled module map;
@@ -79,7 +97,7 @@ This proposal will:
 
 This proposal does not:
 
-- add HarnessAgent or harness adapters to `eve`;
+- add HarnessAgent or external harness adapters to `eve`;
 - define a generic remote-agent wire protocol;
 - make live runner objects durable;
 - let packages mutate a global runner registry;
@@ -88,8 +106,9 @@ This proposal does not:
 
 ## Authoring API
 
-`defineAgent` becomes a union over the built-in model runner and a custom
-runner. `model` and `runner` are mutually exclusive.
+`defineAgent` becomes a union over the model-backed default harness and a
+custom runner. `model` configures the default harness; `runner` selects another
+implementation. The two fields are mutually exclusive.
 
 ```ts
 import { defineAgent } from "eve";
@@ -133,11 +152,11 @@ type AgentDefinition = AgentDefinitionBase &
   );
 ```
 
-Model-specific siblings such as `reasoning`, `modelOptions`,
+Default-harness settings such as `reasoning`, `modelOptions`,
 `modelContextWindowTokens`, and model compaction are invalid with a custom
 runner unless a later contract gives them runner-neutral meaning. Common
-settings such as `description`, session limits, and output schema remain on the
-agent definition.
+runtime settings such as `description`, session limits, and output schema
+remain on the agent definition.
 
 External packages construct a runner definition through a versioned entrypoint:
 
@@ -160,7 +179,7 @@ eve-owned marker so the compiler does not infer runner identity from object
 shape or package name.
 
 The definition and its `create` function are stateless. They may hold immutable
-configuration, but they must not retain a live native session across calls.
+configuration, but they must not retain a live harness session across calls.
 Durable continuation uses the runner checkpoint.
 
 ## Public contract
@@ -187,8 +206,8 @@ the only authority for loading the provider.
 
 ### Factory input
 
-eve creates a fresh runner inside the active context scope for each durable
-slice:
+The runtime creates a fresh runner inside the active eve context for each
+durable slice:
 
 ```ts
 interface AgentRunnerFactoryInputV1 {
@@ -202,9 +221,9 @@ interface AgentRunnerFactoryInputV1 {
 }
 ```
 
-The input contains only runner-neutral values and host services. It does not
-expose `HarnessSession`, `StepFn`, `StepResult`, a workflow handle, a channel
-adapter, or the resolved runtime graph.
+The input contains only runner-neutral values and runtime host services. It
+does not expose `HarnessSession`, `StepFn`, `StepResult`, a workflow handle, a
+channel adapter, or the resolved runtime graph.
 
 Instructions and skills are immutable eve-owned projections rather than
 authored definitions or AI SDK values:
@@ -228,8 +247,8 @@ interface AgentRunnerSkillV1 {
 }
 ```
 
-The host normalizes authored and dynamic skills into this shape. A runner may
-translate it again into its native skill representation.
+The runtime host normalizes authored and dynamic skills into this shape. A
+runner may translate it into the skill representation expected by its harness.
 
 ### Runner
 
@@ -249,7 +268,8 @@ interface AgentRunnerRunInputV1 {
 }
 ```
 
-Run input is also runner-neutral and durable:
+The model-visible run payload is runner-neutral and durable; `abortSignal` and
+`emit` are live runtime host values:
 
 ```ts
 interface AgentRunnerInputV1 {
@@ -275,17 +295,18 @@ interface AgentRunnerInputResponseV1 {
 }
 ```
 
-The host converts channel content into this representation before invoking a
-runner. The runner does not receive channel-specific delivery or auth values.
+The runtime host converts channel content into this representation before
+invoking a runner. The runner and its harness do not receive channel-specific
+delivery or auth values.
 
 One `run` call is one durable slice, not necessarily one model call or one
-complete turn. The built-in eve runner may return `continue` after a model or
-tool step. A native runner may complete its internal loop inside one slice and
-return `waiting` or `done`.
+complete turn. The default-harness runner may return `continue` after a model
+or tool step. A runner whose harness owns a complete internal loop may finish
+that loop inside one slice and return `waiting` or `done`.
 
-The workflow abort signal is the sole cancellation signal. A runner must stop
-native work and release runner-owned resources when it aborts. It cannot stop
-or destroy an eve-owned sandbox.
+The runtime's workflow abort signal is the sole cancellation signal. A runner
+must stop harness work and release runner-owned resources when it aborts. It
+cannot stop or destroy an eve-owned sandbox.
 
 ### Results
 
@@ -350,8 +371,8 @@ eve maps these states onto its internal lifecycle:
 | `done`           | Complete task mode and notify the delegating parent when one exists  |
 | `input-required` | Commit the checkpoint, expose the requests, and park until responses |
 
-The host, not the runner, produces `StepResult`, writes durable task effects,
-emits session boundaries, and notifies a parent.
+The runtime host, not the runner or harness, produces `StepResult`, writes
+durable task effects, emits session boundaries, and notifies a parent.
 
 ## Runner state and durability
 
@@ -366,19 +387,20 @@ interface DurableAgentRunnerStateV1 {
 ```
 
 The runtime validates JSON serializability before every commit. The checkpoint
-is opaque to eve. The provider validates its shape and owns migrations within
-its stable `id`; an incompatible checkpoint fails with an actionable error
-rather than starting a fresh native session silently.
+is opaque to eve. The runner provider validates its harness-specific shape and
+owns migrations within its stable `id`; an incompatible checkpoint fails with
+an actionable error rather than starting a fresh harness session silently.
 
-Live native agents, sessions, subprocess handles, streams, sandbox handles,
-and closures never enter durable state. A fresh process can load the provider,
-create a runner, and resume solely from the checkpoint and eve-owned session
-data.
+Live harness agents, harness sessions, subprocess handles, streams, sandbox
+handles, and closures never enter durable state. A fresh runtime process can
+load the provider, create a runner, and resume the harness solely from the
+checkpoint and eve-owned session data.
 
-The built-in eve runner may initially adapt its existing session data into this
-record rather than migrate all history in one change. The target architecture
-separates the common session envelope from built-in-runner state so custom
-runners do not require placeholder models, histories, or compaction settings.
+The default-harness runner may initially adapt its existing session data into
+this record rather than migrate all history in one change. The target
+architecture separates the runtime's common session envelope from default
+harness state so custom runners do not require model, history, or compaction
+fields that belong only to that harness.
 
 ## Events
 
@@ -406,18 +428,18 @@ type AgentRunnerEmitV1 = (event: AgentRunnerEventV1) => Promise<void>;
 ```
 
 The exact event union should remain minimal and derive from protocol behavior
-that eve can support for every runner. It must not reuse an AI SDK stream type
-as the public contract. An AI SDK-based package translates its native stream;
-another implementation need not depend on AI SDK.
+that the runtime can support for every runner. It must not reuse an AI SDK
+stream type as the public contract. An AI SDK HarnessAgent runner translates
+its harness stream; another runner need not depend on AI SDK.
 
-eve enriches runner events with session, turn, sequence, step, trace, and
-audience data, then routes them through the existing stream and hook pipeline.
-Runners cannot choose those identifiers or emit `session.started`,
+The runtime enriches runner events with session, turn, sequence, step, trace,
+and audience data, then routes them through the existing stream and hook
+pipeline. Runners cannot choose those identifiers or emit `session.started`,
 `subagent.called`, `session.waiting`, or other control-plane events.
 
 Host-executed tool events must be emitted exactly once. The tool host records
 those events when it executes a tool; a runner emits `tool.called` and
-`tool.completed` only for native tools that bypass the host.
+`tool.completed` only for harness-native tools that bypass the host.
 
 ## Tools and approvals
 
@@ -449,24 +471,25 @@ interface AgentRunnerToolHostV1 {
 }
 ```
 
-The host wraps authored execution with eve's callback context, auth scopes,
-connections, output normalization, task ownership, and event recording. The
-runner converts these definitions into its native tool format and never calls
-an authored execute function directly.
+The runtime host wraps authored execution with eve's callback context, auth
+scopes, connections, output normalization, task ownership, and event recording.
+The runner converts these definitions into its harness's tool format and never
+calls an authored execute function directly.
 
 When `evaluateApproval` returns `user-approval`, the runner must suspend its
-native turn and return `input-required` with a checkpoint. The next `run` input
-carries the settled response. A provider that cannot suspend and resume this
-boundary declares approval unsupported; eve rejects an incompatible authored
-tool surface before execution when possible.
+active harness turn and return `input-required` with a checkpoint. The next
+`run` input carries the settled response. A harness that cannot suspend and
+resume this boundary declares approval unsupported through its runner; eve
+rejects an incompatible authored tool surface before execution when possible.
 
-Background tools and subagent delegation remain host effects. The tool host
-records them outside runner-owned state and returns the model-visible receipt.
-Their task and child-session state never enters a runner checkpoint.
+Background tools and subagent delegation remain runtime host effects. The tool
+host records them outside runner-owned state and returns the model-visible
+receipt. Their task and child-session state never enters a runner checkpoint.
 
 ## Sandbox host
 
-The runner borrows the sandbox selected by the node's ordinary `sandbox.ts`:
+The runner and its harness borrow the sandbox selected by the runtime from the
+node's ordinary `sandbox.ts`:
 
 ```ts
 interface AgentRunnerSandboxHostV1 {
@@ -485,10 +508,10 @@ interface AgentRunnerPortLeaseV1 {
 }
 ```
 
-`reservePort` is a general optional network capability. The host resolves the
-backend-specific endpoint and owns the reservation. An external runner may use
-the endpoint but cannot add routes, inspect backend credentials, or destroy
-the sandbox.
+`reservePort` is a general optional network capability. The runtime host
+resolves the backend-specific endpoint and owns the reservation. An external
+runner may pass the endpoint to its harness but cannot add routes, inspect
+backend credentials, or destroy the sandbox.
 
 Parent sandbox sharing stays an eve sandbox definition concern:
 
@@ -505,8 +528,8 @@ Runner definitions do not add a second `sandbox: "parent"` setting.
 
 ## Capability negotiation
 
-The runner definition declares a closed capability record that eve can inspect
-at compilation and runtime:
+The runner definition declares a closed capability record that the compiler
+and runtime can inspect:
 
 ```ts
 interface AgentRunnerCapabilitiesV1 {
@@ -527,11 +550,12 @@ an agent node whose compiled resources require a capability that its runner
 does not support. More granular capabilities require a new additive contract
 field or a new API version; package-name checks are forbidden.
 
-Dynamic instructions, tools, and skills require a defined refresh point. V1
-resolves the node's effective resources before each runner slice and passes
-that immutable snapshot to the factory. A runner checkpoint may not assume the
-same resource snapshot on a later turn. Providers that cannot accept a changed
-resource declare the corresponding dynamic capability unsupported.
+Dynamic instructions, tools, and skills require a defined refresh point. The
+runtime resolves the node's effective resources before each runner slice and
+passes that immutable snapshot to the factory. A runner checkpoint may not
+assume the same resource snapshot on a later turn. Harnesses that cannot accept
+a changed resource declare the corresponding dynamic capability unsupported
+through their runner.
 
 ## Compilation and module loading
 
@@ -567,24 +591,25 @@ compiled graph, and create a second source system.
 ## External package boundary
 
 An external provider package depends on the versioned runner entrypoint and
-owns every dependency needed by its native implementation. For an
-`@eve/harness-agent` package, that includes `@ai-sdk/harness` and selected
-harness adapters. `eve` neither depends on nor vendors them.
+owns every dependency needed by its harness implementation. For an
+`@eve/harness-agent` package, that includes `@ai-sdk/harness`, `HarnessAgent`,
+and selected harness adapters. `eve` neither depends on nor vendors them.
 
 The package may expose third-party-specific configuration because that is its
 own API. The eve contract contains only runner-neutral types. This avoids
 forcing eve releases when the external library adds settings or adapters.
 
 The provider is trusted application code with the same authority as an
-authored tool or sandbox definition. The runner host narrows what it receives,
-but it is not a security isolation boundary for an untrusted npm package.
+authored tool or sandbox definition. The runtime host narrows what the runner
+and harness receive, but the contract is not a security isolation boundary for
+an untrusted npm package.
 
 ## Root agents, subagents, and remote agents
 
-The runner reference belongs to every compiled local agent node. The same
-runtime selection therefore applies to root agents and declared subagents.
-Subagent descriptions remain required because the parent needs a delegation
-description; a root description remains optional.
+The runner reference belongs to every compiled local agent node. The runtime
+therefore uses the same selection mechanism for root agents and declared
+subagents. Subagent descriptions remain required because the parent needs a
+delegation description; a root description remains optional.
 
 Root and child sessions share the runner SPI but retain their existing
 lifecycle differences:
@@ -595,18 +620,19 @@ lifecycle differences:
 - root channel delivery may contain attachments and contextual input that a
   delegated subagent message does not.
 
-The host normalizes those differences into `AgentRunnerInputV1`. A runner that
-does not support attachments or input requests fails through capability
-validation rather than receiving silently degraded input.
+The runtime host normalizes those differences into `AgentRunnerInputV1`. A
+runner that does not support attachments or input requests fails through
+capability validation rather than receiving silently degraded input.
 
 Remote agents remain eve protocol peers selected through `defineRemoteAgent`.
 They do not implement `AgentRunnerV1` in the parent process.
 
-## Built-in eve runner
+## Default harness adapter
 
-The existing eve model loop becomes the first implementation of
-`AgentRunnerV1`. An internal adapter translates between `AgentRunnerRunResultV1`
-and the current `StepResult` while the session state is separated.
+The existing default harness remains eve's built-in model loop. An internal
+runner adapter makes it the first implementation of `AgentRunnerV1` and
+translates between `AgentRunnerRunResultV1` and the runtime's current
+`StepResult` while session state is separated.
 
 The migration must preserve:
 
@@ -620,9 +646,9 @@ The migration must preserve:
 - event ordering, hooks, tracing, and usage;
 - task and subagent effects.
 
-The built-in implementation may use private helpers unavailable to external
+The default harness adapter may use private helpers unavailable to external
 providers. It must still satisfy the same observable runner contract. Private
-optimizations cannot add a second lifecycle path.
+optimizations cannot add a second runtime lifecycle path.
 
 ## Compatibility
 
@@ -645,29 +671,29 @@ checkpoint produced by a different provider, even when both implement V1.
 ## Failure behavior
 
 - A missing provider module or export fails before a runner starts.
-- A runtime definition whose ID, API version, or capabilities differ from the
-  compiled reference fails as a stale artifact.
+- A loaded runner definition whose ID, API version, or capabilities differ
+  from the compiled reference fails as a stale artifact.
 - A malformed or non-JSON checkpoint fails at the runner boundary.
-- A provider exception fails the active durable slice and follows eve's
-  existing workflow retry policy.
+- A runner or harness exception fails the active durable slice and follows the
+  runtime's existing workflow retry policy.
 - An abort propagates to the runner and then follows eve's existing turn and
   descendant cancellation lifecycle.
 - An unsupported node capability fails compilation when statically knowable
   and session creation otherwise.
 - A provider may not silently discard an incompatible checkpoint or restart a
-  native conversation.
+  harness session.
 
 ## Delivery
 
 1. Define the internal runner-neutral result, event, checkpoint, tool-host, and
    sandbox-host contracts. Add an adapter that maps them to the existing
    `StepFn` lifecycle.
-2. Adapt the built-in eve tool loop without exposing the new authoring API.
+2. Adapt the default harness without exposing the new authoring API.
    Prove byte-equivalent compiled output where the manifest has not yet gained
    a runner field and unchanged event behavior in integration tests.
-3. Split common durable session state from built-in-runner state. Remove the
-   requirement for custom runners to fabricate a model, history, or compaction
-   configuration.
+3. Split runtime-owned durable session state from default-harness state. Remove
+   the requirement for custom runners to carry model, history, or compaction
+   configuration that only the default harness uses.
 4. Add the generic runner variant to `defineAgent`, normalization, compiled
    manifest schemas, graph resolution, inspection, and module loading. Keep the
    module-map generator source-neutral.
@@ -675,7 +701,7 @@ checkpoint produced by a different provider, even when both implement V1.
    validation. Cover root and subagent nodes with a deterministic external test
    runner that has no AI SDK dependency.
 6. Implement `@eve/harness-agent` independently against V1. Its tests own
-   HarnessAgent conversion, native checkpoints, stream translation, sandbox
+   HarnessAgent conversion, harness checkpoints, stream translation, sandbox
    adaptation, and adapter compatibility.
 7. Add scenario and e2e coverage for one-shot subagents, persistent subagents,
    root conversations, cancellation, restart, structured output, tools, and
@@ -688,16 +714,15 @@ checkpoint produced by a different provider, even when both implement V1.
 - Every local agent node selects exactly one runner.
 - The compiled source reference, not a global registry or provider ID, loads an
   external runner.
-- eve owns durable lifecycle, control-plane events, tools, sandbox ownership,
-  callbacks, and task effects.
-- A runner owns only native execution and its opaque checkpoint.
+- The eve runtime owns durable lifecycle, control-plane events, tools, sandbox
+  ownership, callbacks, and task effects.
+- A runner owns only its harness execution and opaque checkpoint.
 - Runner checkpoints are JSON, provider-namespaced, and validated at every
   durable boundary.
-- Live runner and native-session objects never cross a workflow step boundary.
+- Live runner and harness-session objects never cross a workflow step boundary.
 - External runners never receive `HarnessSession`, `StepFn`, `StepResult`, or
   runtime graph internals.
 - The module-map compiler remains provider-neutral.
 - Root agents and local subagents use the same runner selection mechanism.
 - Remote agents continue to use the remote eve session protocol.
-- The built-in eve runner preserves current behavior while satisfying the same
-  V1 contract.
+- The default harness preserves current behavior through its runner adapter.
