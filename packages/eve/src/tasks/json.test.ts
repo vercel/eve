@@ -48,7 +48,7 @@ describe("taskCancel.outputSchema", () => {
   it("preserves the broad task-control output contract", () => {
     expect(taskCancel.outputSchema).toBe(TASK_VIEWS_OUTPUT_SCHEMA);
     expect(
-      taskCancel.outputSchema.parse({
+      TASK_VIEWS_OUTPUT_SCHEMA.parse({
         tasks: [
           {
             inputRequests: [{ prompt: "Choose" }],
