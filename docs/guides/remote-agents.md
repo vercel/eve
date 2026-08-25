@@ -86,15 +86,32 @@ To require structured output, set an `outputSchema` on the agent definition for 
 
 ## Outbound auth
 
-`auth` is an `OutboundAuthFn` from `eve/agents/auth` that attaches request headers to the outbound dispatch:
+Use `vercelOidc()` from `eve/agents/auth` when one Vercel-deployed eve agent calls another, as shown in the first example on this page.
 
-| Helper                          | Header                                                                       |
-| ------------------------------- | ---------------------------------------------------------------------------- |
-| `vercelOidc(opts?)`             | `Authorization: Bearer <Vercel OIDC token>` (deployment-to-deployment trust) |
-| `bearer(token)`                 | `Authorization: Bearer <token>` (static or lazily resolved)                  |
-| `basic({ username, password })` | `Authorization: Basic …`                                                     |
+For calls between different Vercel projects, allow the calling project on the receiving agent's eve channel:
 
-If you are calling another Vercel-deployed eve agent, reach for `vercelOidc()`. The remote verifies the OIDC token to authorize the caller. See [Auth & route protection](./auth-and-route-protection) for the receiving side.
+```ts title="agent/channels/eve.ts"
+import { vercelOidc, vercelSubject } from "eve/channels/auth";
+import { eveChannel } from "eve/channels/eve";
+
+export default eveChannel({
+  auth: [
+    vercelOidc({
+      subjects: [
+        vercelSubject({
+          teamSlug: "acme",
+          projectName: "calling-agent",
+          environment: "production",
+        }),
+      ],
+    }),
+  ],
+});
+```
+
+Set `teamSlug`, `projectName`, and `environment` to the calling deployment's Vercel OIDC subject. See [subject patterns and `vercelSubject(...)`](./auth-and-route-protection#subjects-patterns-and-vercelsubject) for other environments and wildcard matching.
+
+If [Vercel Deployment Protection](https://vercel.com/docs/deployment-protection) is active on the receiving project, also configure [Trusted Sources](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/trusted-sources) to allow the calling project and environment. The eve subject allowlist and Trusted Sources are separate checks; cross-project calls need both.
 
 ## Forwarding the caller identity
 
