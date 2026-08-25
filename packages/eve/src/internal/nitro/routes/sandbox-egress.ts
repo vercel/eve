@@ -7,6 +7,7 @@ import {
 import {
   getVercelEgressDemandMarkerPath,
   isVercelEgressDemandToken,
+  isVercelEgressRuleId,
 } from "#execution/sandbox/bindings/vercel-egress-demand.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
@@ -104,7 +105,7 @@ function readRoute(
     .split("/");
   if (
     ruleId === undefined ||
-    !/^r\d+-\d+$/.test(ruleId) ||
+    !isVercelEgressRuleId(ruleId) ||
     encodedSandboxName === undefined ||
     demandToken === undefined ||
     !isVercelEgressDemandToken(demandToken)

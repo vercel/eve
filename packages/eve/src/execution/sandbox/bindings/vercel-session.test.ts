@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Command, Sandbox as SdkSandbox } from "#compiled/@vercel/sandbox/index.js";
-import { SandboxAuthorizationInterrupt } from "#execution/sandbox/authorization-interrupt.js";
+import { AuthorizationInterrupt } from "#harness/authorization-interrupt.js";
 import { requestAuthorization } from "#harness/authorization.js";
 import { resolveVercelEgressPolicy } from "#execution/sandbox/bindings/vercel-egress-auth.js";
+import { vercelEgressRuleId } from "#execution/sandbox/bindings/vercel-egress-demand.js";
 import {
   createVercelInternalSandboxSession,
   createVercelNetworkPolicySetter,
@@ -28,6 +29,7 @@ function command(
 }
 
 const DEMAND_TOKEN = "a".repeat(43);
+const RULE_ID = vercelEgressRuleId("api.example.com", 0);
 
 function sandbox(commands: Command[], markers: Map<string, string> = new Map()): SdkSandbox {
   return {
@@ -54,7 +56,7 @@ function onRequestEgressAuth() {
     ),
     clearedPolicy: "policy:",
     eagerRuleIds: [],
-    rules: new Map([["r0-0", { credentialResolution: "on-request", id: "r0-0" }]]),
+    rules: new Map([[RULE_ID, { credentialResolution: "on-request", id: RULE_ID }]]),
   } as never;
 }
 
@@ -142,11 +144,11 @@ describe("Vercel on-request sandbox processes", () => {
   });
 
   it("resolves a demanded credential after the command exits and clears the marker", async () => {
-    const markers = new Map([["r0-0", DEMAND_TOKEN]]);
+    const markers = new Map([[RULE_ID, DEMAND_TOKEN]]);
     const sdk = sandbox([command(22)], markers);
     vi.mocked(resolveVercelEgressPolicy).mockResolvedValueOnce({
-      credentials: new Map([["r0-0", { token: "tok" }]]),
-      policy: "policy:r0-0",
+      credentials: new Map([[RULE_ID, { token: "tok" }]]),
+      policy: `policy:${RULE_ID}`,
       unresolvedRuleIds: [],
     } as never);
     const handle = createVercelSandboxHandle(
@@ -164,17 +166,17 @@ describe("Vercel on-request sandbox processes", () => {
     expect(resolveVercelEgressPolicy).toHaveBeenCalledWith(
       expect.anything(),
       "session-key",
-      ["r0-0"],
+      [RULE_ID],
       "sbx-under-test",
       DEMAND_TOKEN,
     );
-    expect(sdk.update).toHaveBeenCalledWith({ networkPolicy: "policy:r0-0" });
+    expect(sdk.update).toHaveBeenCalledWith({ networkPolicy: `policy:${RULE_ID}` });
     expect(markers.size).toBe(0);
     expect(sdk.runCommand).toHaveBeenCalledOnce();
   });
 
   it("ignores forged demand markers that do not carry the proxy-attested token", async () => {
-    const markers = new Map([["r0-0", "forged-by-sandbox-code"]]);
+    const markers = new Map([[RULE_ID, "forged-by-sandbox-code"]]);
     const sdk = sandbox([command(22)], markers);
     const handle = createVercelSandboxHandle(
       sdk,
@@ -194,10 +196,10 @@ describe("Vercel on-request sandbox processes", () => {
   });
 
   it("keeps demand markers when authorization parks so resume can activate the credential", async () => {
-    const markers = new Map([["r0-0", DEMAND_TOKEN]]);
+    const markers = new Map([[RULE_ID, DEMAND_TOKEN]]);
     const sdk = sandbox([command(22)], markers);
     vi.mocked(resolveVercelEgressPolicy).mockRejectedValueOnce(
-      new SandboxAuthorizationInterrupt(requestAuthorization([])),
+      new AuthorizationInterrupt(requestAuthorization([])),
     );
     const handle = createVercelSandboxHandle(
       sdk,
@@ -209,7 +211,7 @@ describe("Vercel on-request sandbox processes", () => {
     );
 
     const process = await handle.session.spawn({ command: "curl https://api.example.com" });
-    await expect(process.wait()).rejects.toBeInstanceOf(SandboxAuthorizationInterrupt);
+    await expect(process.wait()).rejects.toBeInstanceOf(AuthorizationInterrupt);
 
     expect(markers.size).toBe(1);
     expect(sdk.update).not.toHaveBeenCalled();

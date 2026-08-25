@@ -1,5 +1,6 @@
 import type { NetworkPolicyRule } from "#compiled/@vercel/sandbox/index.js";
-import { SandboxAuthorizationInterrupt } from "#execution/sandbox/authorization-interrupt.js";
+import { vercelEgressRuleId } from "#execution/sandbox/bindings/vercel-egress-demand.js";
+import { AuthorizationInterrupt } from "#harness/authorization-interrupt.js";
 import type { VercelCreateOptions } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 import { type AuthorizationSignal, requestAuthorization } from "#harness/authorization.js";
 import { createLogger } from "#internal/logging.js";
@@ -154,7 +155,7 @@ export async function resolveVercelEgressPolicy(
           if (justAuthorized) {
             throw new ConnectionAuthorizationFailedError(scoped.scope, {
               message:
-                `Sandbox egress rule "${ruleId}" rejected the token immediately after ` +
+                `Sandbox egress rule for "${rule.domain}" rejected the token immediately after ` +
                 "authorization.",
               reason: "token_rejected_after_authorization",
               retryable: false,
@@ -169,7 +170,7 @@ export async function resolveVercelEgressPolicy(
           if (supportsInteractiveAuthorization(rule.authorization)) {
             throw new ConnectionAuthorizationFailedError(scoped.scope, {
               message:
-                `Sandbox egress rule "${ruleId}" requires sign-in, but no authorization ` +
+                `Sandbox egress rule for "${rule.domain}" requires sign-in, but no authorization ` +
                 "callback URL could be minted for this run (missing session context).",
               reason: "authorization_callback_unavailable",
               retryable: false,
@@ -178,6 +179,7 @@ export async function resolveVercelEgressPolicy(
         }
 
         logger.warn("sandbox credential unavailable; leaving route closed", {
+          domain: rule.domain,
           ruleId,
           error,
         });
@@ -190,7 +192,7 @@ export async function resolveVercelEgressPolicy(
     entry.kind === "authorization" ? entry.signal.challenges : [],
   );
   if (challenges.length > 0) {
-    throw new SandboxAuthorizationInterrupt(requestAuthorization(challenges));
+    throw new AuthorizationInterrupt(requestAuthorization(challenges));
   }
 
   const credentials = new Map(
@@ -227,11 +229,10 @@ function discoverManagedRules(policy: VercelSandboxNetworkPolicy | undefined): A
       readonly index: number;
     }
   > = [];
-  let domainIndex = 0;
   for (const [domain, domainRules] of Object.entries(policy.allow ?? {})) {
     for (const [index, rule] of domainRules.entries()) {
       if (!isAuthRule(rule)) continue;
-      const id = `r${domainIndex}-${index}`;
+      const id = vercelEgressRuleId(domain, index);
       if (typeof rule.transform !== "function") {
         throw new Error(
           `vercel(): egress rule "${domain}"[${index}] must define a transform function.`,
@@ -252,7 +253,6 @@ function discoverManagedRules(policy: VercelSandboxNetworkPolicy | undefined): A
         index,
       });
     }
-    domainIndex += 1;
   }
   return rules;
 }

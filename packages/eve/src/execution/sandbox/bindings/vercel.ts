@@ -10,6 +10,7 @@ import {
   createVercelInternalSandboxSession,
   createVercelNetworkPolicySetter,
   createVercelSandboxHandle,
+  formatVercelEgressRuleList,
 } from "#execution/sandbox/bindings/vercel-session.js";
 import {
   clearVercelEgressDemandMarkers,
@@ -193,9 +194,8 @@ export function createVercelSandbox(
           );
           if (unavailableDemandedRuleIds.length > 0) {
             throw new Error(
-              `Sandbox credentials remained unavailable for on-request rules: ${unavailableDemandedRuleIds.join(
-                ", ",
-              )}.`,
+              "Sandbox credentials remained unavailable for on-request rules: " +
+                `${formatVercelEgressRuleList(extracted.egressAuth, unavailableDemandedRuleIds)}.`,
             );
           }
         } catch (error) {

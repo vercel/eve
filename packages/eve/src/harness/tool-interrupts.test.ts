@@ -15,7 +15,7 @@ import {
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { readToolInterrupt, stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { wrapToolExecute } from "#harness/tools.js";
-import { SandboxAuthorizationInterrupt } from "#execution/sandbox/authorization-interrupt.js";
+import { AuthorizationInterrupt } from "#harness/authorization-interrupt.js";
 import { ToolOutputSerializationError } from "#harness/tool-output-serialization.js";
 
 function signalWithVerifier(): AuthorizationSignal {
@@ -115,7 +115,7 @@ describe("wrapToolExecute", () => {
     const wrapped = wrapToolExecute({
       ...baseDef,
       execute: async () => {
-        throw new SandboxAuthorizationInterrupt(signal);
+        throw new AuthorizationInterrupt(signal);
       },
     })!;
     const ctx = new ContextContainer();

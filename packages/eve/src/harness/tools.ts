@@ -2,7 +2,7 @@ import { type ToolApprovalConfiguration, type ToolApprovalStatus, type ToolSet, 
 
 import type { SessionCapabilities } from "#channel/types.js";
 import { loadContext } from "#context/container.js";
-import { isSandboxAuthorizationInterrupt } from "#execution/sandbox/authorization-interrupt.js";
+import { isAuthorizationInterrupt } from "#harness/authorization-interrupt.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
@@ -220,7 +220,7 @@ export function wrapToolExecute(
             })
           : execute(input, options);
     } catch (error) {
-      if (!isSandboxAuthorizationInterrupt(error)) {
+      if (!isAuthorizationInterrupt(error)) {
         return Promise.reject(error);
       }
       output = error.signal;
@@ -233,7 +233,7 @@ export function wrapToolExecute(
     return Promise.resolve(output).then(
       (value) => normalizeToolExecuteOutput(value, definition.name, options),
       (error) => {
-        if (!isSandboxAuthorizationInterrupt(error)) throw error;
+        if (!isAuthorizationInterrupt(error)) throw error;
         return normalizeToolExecuteOutput(error.signal, definition.name, options);
       },
     );

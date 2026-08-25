@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 import type { Sandbox as SdkSandbox } from "#compiled/@vercel/sandbox/index.js";
 import { normalizeVercelReadStream } from "#execution/sandbox/bindings/vercel-read-stream.js";
@@ -7,6 +7,24 @@ import { streamToBuffer } from "#execution/sandbox/stream-utils.js";
 export const VERCEL_EGRESS_DEMAND_DIRECTORY = "/tmp/eve-egress-demand";
 
 const DEMAND_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+
+const RULE_ID_PATTERN = /^r-[0-9a-f]{12}-\d+$/;
+
+/**
+ * Derives the stable identity of a managed egress rule from its domain and
+ * its index within that domain's rule list. Consent grants, resolved tokens,
+ * and demand markers are all keyed by this id, so it must not depend on the
+ * ordering of domains in the authored policy: reordering the policy must
+ * never re-attribute a grant minted for one domain to another.
+ */
+export function vercelEgressRuleId(domain: string, index: number): string {
+  const domainHash = createHash("sha256").update(domain).digest("hex").slice(0, 12);
+  return `r-${domainHash}-${String(index)}`;
+}
+
+export function isVercelEgressRuleId(value: string): boolean {
+  return RULE_ID_PATTERN.test(value);
+}
 
 /**
  * Mints the proxy-attested demand token for one sandbox policy build.
@@ -26,7 +44,7 @@ export function isVercelEgressDemandToken(value: string): boolean {
 }
 
 export function getVercelEgressDemandMarkerPath(ruleId: string): string {
-  if (!/^r\d+-\d+$/.test(ruleId)) {
+  if (!isVercelEgressRuleId(ruleId)) {
     throw new Error(`Invalid sandbox egress rule id "${ruleId}".`);
   }
   return `${VERCEL_EGRESS_DEMAND_DIRECTORY}/${ruleId}`;

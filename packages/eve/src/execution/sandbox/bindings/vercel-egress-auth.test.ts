@@ -6,7 +6,7 @@ import {
   extractVercelEgressAuth,
   resolveVercelEgressPolicy,
 } from "#execution/sandbox/bindings/vercel-egress-auth.js";
-import { isSandboxAuthorizationInterrupt } from "#execution/sandbox/authorization-interrupt.js";
+import { isAuthorizationInterrupt } from "#harness/authorization-interrupt.js";
 import { CallbackBaseUrlKey } from "#harness/authorization.js";
 import type { VercelSandboxNetworkPolicyRule } from "#public/sandbox/vercel-sandbox.js";
 
@@ -116,7 +116,9 @@ describe("Vercel sandbox route auth", () => {
         allow: {},
         subnets: undefined,
       },
-      unresolvedRuleIds: ["r0-0"],
+      // Rule ids derive from the domain (sha256 prefix) plus the rule index,
+      // so reordering the authored policy cannot re-attribute grants.
+      unresolvedRuleIds: ["r-d0c43d388506-0"],
     });
   });
 
@@ -159,12 +161,12 @@ describe("Vercel sandbox route auth", () => {
       async () => await resolveVercelEgressPolicy(egressAuth!, "sandbox").catch((value) => value),
     );
 
-    expect(isSandboxAuthorizationInterrupt(error)).toBe(true);
+    expect(isAuthorizationInterrupt(error)).toBe(true);
     expect(startAuthorization).toHaveBeenCalledWith(
       expect.objectContaining({
         // The attempt id segment is a freshly minted ULID.
         callbackUrl: expect.stringMatching(
-          /^https:\/\/app\.example\.com\/eve\/v1\/connections\/sandbox%3Asandbox%3Ar0-0\/callback\/[0-9A-Z]{26}\/session%3Aauth$/,
+          /^https:\/\/app\.example\.com\/eve\/v1\/connections\/sandbox%3Asandbox%3Ar-d0c43d388506-0\/callback\/[0-9A-Z]{26}\/session%3Aauth$/,
         ),
       }),
     );

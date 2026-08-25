@@ -275,7 +275,7 @@ import { vercel } from "eve/sandbox/vercel";
 export default defineSandbox({
   backend: vercel({
     credentialResolution: "on-request",
-    authProxyBaseUrl: "https://eve-tunnel.example.com",
+    authProxyBaseUrl: "https://my-agent.example.com",
     networkPolicy: {
       allow: {
         "api.github.com": [
@@ -310,9 +310,9 @@ export default defineSandbox({
 - `"eager"` resolves all eager rules before eve returns the sandbox to authored code.
 - `"on-request"` resolves only a rule actually reached by an awaited sandbox process. Unused rules never prompt.
 
-On-request resolution uses Vercel's `forwardURL` firewall capability. The authenticated proxy writes a demand marker into the originating sandbox and returns HTTP 428. eve terminates the blocked awaited command, resolves only the demanded rules, then replays the command. Missing interactive credentials park and resume through eve's normal callback lifecycle. Replay can repeat effects performed before the blocked request, so commands should be safe to retry. Detached or otherwise un-awaited processes do not support demand-triggered consent.
+On-request resolution uses Vercel's `forwardURL` firewall capability. The first request to an unresolved route reaches eve's authenticated egress proxy, which records demand for the rule and answers HTTP 428 with a body explaining that authorization was requested. eve never kills or replays the command: the blocked request fails like any other network error, the command runs to completion, and after it exits eve resolves only the demanded rules and activates them in the sandbox policy. Credentials that require sign-in park the step through eve's normal interactive-authorization flow and activate when the step resumes; in that case the tool call surfaces the authorization challenge instead of the command's output. Either way, the agent re-runs what it needs once the route is authorized — side effects from before the blocked request ran exactly once and are never repeated by eve. Demand settles when an awaited command exits, so detached or otherwise un-awaited processes do not trigger consent.
 
-Both modes require Vercel Pro or Enterprise because firewall transformations are not available on Hobby. On-request mode additionally uses a beta Vercel capability and requires a public HTTPS eve endpoint. Vercel deployments derive that endpoint automatically; local development must set `authProxyBaseUrl` to a public HTTPS tunnel or deployment. eve also uses this origin for interactive authorization callbacks, avoiding protected immutable deployment URLs when an explicit public origin is configured.
+Both modes require Vercel Pro or Enterprise because firewall transformations are not available on Hobby. On-request mode additionally uses a beta Vercel capability and requires a public HTTPS eve endpoint. Vercel deployments derive that endpoint automatically; local development must set `authProxyBaseUrl` to a public HTTPS origin that serves this eve app, such as a tunnel or a deployment. eve also uses this origin for interactive authorization callbacks, avoiding protected immutable deployment URLs when an explicit public origin is configured.
 
 eve removes resolved tokens after every step. Unresolved eager routes remain closed, while unresolved on-request routes revert to their trigger rules. Managed policies reject authored `forwardURL` rules and reject replacement through `onSession({ use })`. `sandbox.setNetworkPolicy()` is also rejected when on-request rules exist because a second policy writer would remove eve's triggers. With eager-only rules, it replaces the complete active policy until the step ends. Brokered credentials are unavailable during template bootstrap.
 

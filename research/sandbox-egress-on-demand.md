@@ -1,6 +1,6 @@
 ---
 issue: https://github.com/vercel/eve/pull/59
-last_updated: "2026-06-27"
+last_updated: "2026-08-24"
 status: in_progress
 ---
 
@@ -48,8 +48,12 @@ policy, exactly as it already is for connection tools.
 4. Credentials that require sign-in raise the standard authorization interrupt through the tool
    boundary. The step parks; demand records survive the park so the resumed step's sandbox
    attachment activates the approved credential before the model re-runs anything.
-5. Side effects that ran before the blocked request happened exactly once, and the model can see
-   they happened because output is never retracted. The model re-runs only what it needs to.
+5. Side effects that ran before the blocked request happened exactly once. In the non-interactive
+   path the command's output is delivered unchanged, so the model sees what ran. In the
+   interactive path the settle check raises the authorization interrupt from the awaited
+   `wait()`, so the demanding tool call surfaces the authorization challenge instead of the
+   command's output; the model learns what ran by re-running or inspecting the sandbox after
+   resume. Either way the model re-runs only what it needs to.
 
 Failed attempts are ordinary command failures. There is no replay counter, no output buffering or
 rollback, and no process kill/restart machinery.
@@ -59,7 +63,10 @@ rollback, and no process kill/restart machinery.
 Consent is scoped to the sandbox session. Approving a rule grants that sandbox session access to
 the route for the lifetime of the underlying authorization: the grant is stored per
 `(sandbox session key, rule)`, so later steps resolve it non-interactively — the same model as
-connections, where one approval covers every subsequent tool call. Activation is sandbox-wide by
+connections, where one approval covers every subsequent tool call. Rule identity is derived from
+the rule's domain (a sha256 prefix) plus its index within that domain's rule list, never from the
+position of the domain in the authored policy: reordering domains across deploys cannot
+re-attribute a stored grant, resolved token, or surviving demand marker to a different domain. Activation is sandbox-wide by
 construction (the firewall policy is the enforcement primitive), so a subagent sharing its
 parent's sandbox shares its authorized egress; credential isolation inside a shared sandbox would
 be theater, since the sandbox already shares filesystem, processes, and env.

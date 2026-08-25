@@ -191,7 +191,7 @@ describe("createVercelSandbox", () => {
           "api.example.com": [
             {
               forwardURL: expect.stringMatching(
-                /^https:\/\/eve\.example\.com\/eve\/v1\/sandbox\/egress\/r0-0\/session-key\/[A-Za-z0-9_-]{43}$/,
+                /^https:\/\/eve\.example\.com\/eve\/v1\/sandbox\/egress\/r-d0c43d388506-0\/session-key\/[A-Za-z0-9_-]{43}$/,
               ),
             },
           ],
