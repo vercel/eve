@@ -148,8 +148,9 @@ export function createCompiledRuntimeModelCatalogLoader(
 
   return {
     async getModelLimits(modelId) {
-      const normalizedId = normalizeCatalogModelId(modelId);
-      const builtInLimits = builtInCompiledRuntimeModelLimitsById.get(normalizedId);
+      const builtInLimits =
+        builtInCompiledRuntimeModelLimitsById.get(modelId) ??
+        builtInCompiledRuntimeModelLimitsById.get(normalizeCatalogModelId(modelId));
       if (builtInLimits !== undefined) {
         return builtInLimits;
       }
@@ -157,7 +158,7 @@ export function createCompiledRuntimeModelCatalogLoader(
       const resolved = await resolveModelsFromCacheOrFetch();
 
       if (resolved !== null) {
-        const model = findCatalogModelBySlug(resolved.models, normalizedId);
+        const model = findCatalogModelBySlug(resolved.models, modelId);
         if (model) {
           for (const p of model.providers) {
             const limits = modelCatalogLimitsFromProvider(p);
