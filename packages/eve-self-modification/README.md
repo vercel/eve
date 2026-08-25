@@ -33,4 +33,8 @@ export { default } from "@eve/self-modification/sandbox";
 export { default } from "@eve/self-modification";
 ```
 
-Set `model` in the agent definition to choose the self-modification subagent's model; it defaults to `anthropic/claude-sonnet-5`. The sandbox mounts the application's authored `agent/` directory read-write at `/source` and the installed eve package's version-matched documentation read-only at `/eve-docs`. The extension contributes the official eve authoring skill, adapted to use that documentation mount, and `selfmod__edit_file` for one or more exact targeted edits to an existing file without rewriting it. Its instructions direct independent discovery calls to run concurrently and reserve `write_file` for new files or complete rewrites.
+Set `model` in the agent definition to choose the self-modification subagent's model; it defaults to `anthropic/claude-sonnet-5`. The sandbox mounts the application's authored `agent/` directory read-write at `/source` and the installed eve package's version-matched documentation read-only at `/eve-docs`.
+
+The extension contributes `selfmod__edit_file` for one or more exact targeted edits to an existing file without rewriting it. Its instructions direct independent discovery calls to run concurrently and reserve `write_file` for new files or complete rewrites.
+
+The extension also provides `selfmod__search_registry` to search the eve registry for channels, connections, extensions, and other integrations the project can add. Registry search is read-only: it reports each item's address, whether the authored tree already holds it, and the eve version it requires. Registry installation is outside the source sandbox. In a local `eve dev` session, the subagent recommends `/add channel/slack`; you enter the command, review the item and its changes, and complete its setup prompts.

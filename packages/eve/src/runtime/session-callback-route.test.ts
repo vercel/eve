@@ -1,13 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { EVE_CALLBACK_ROUTE_PATTERN } from "#protocol/routes.js";
 import type { RouteContext } from "#public/definitions/channel.js";
-import {
-  getSessionCallbackChannelDefinitions,
-  getSessionCallbackChannelNames,
-  handleSessionCallbackRequest,
-  HTTP_SESSION_CALLBACK_CHANNEL_NAME_PREFIX,
-} from "#runtime/session-callback-route.js";
+import { handleSessionCallbackRequest } from "#execution/session-callback-route.js";
 
 const resumeHookMock = vi.fn();
 const TASK_ID = "task_1";
@@ -20,22 +14,6 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
 describe("session callback route", () => {
   beforeEach(() => {
     resumeHookMock.mockReset();
-  });
-
-  it("registers the POST framework callback route", () => {
-    expect(getSessionCallbackChannelDefinitions()).toEqual([
-      expect.objectContaining({
-        method: "POST",
-        name: `${HTTP_SESSION_CALLBACK_CHANNEL_NAME_PREFIX}/post`,
-        urlPath: EVE_CALLBACK_ROUTE_PATTERN,
-      }),
-    ]);
-  });
-
-  it("uses route-aligned logical names for disableRoute", () => {
-    const names = getSessionCallbackChannelNames();
-    expect(names).toEqual(new Set([`${HTTP_SESSION_CALLBACK_CHANNEL_NAME_PREFIX}/post`]));
-    expect([...names].some((name) => name.startsWith(".well-known/"))).toBe(false);
   });
 
   it("forwards remote task turn-start identity to the task hook", async () => {

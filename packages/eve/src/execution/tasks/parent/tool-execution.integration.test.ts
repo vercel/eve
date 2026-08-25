@@ -45,15 +45,31 @@ describe("background subagent tool execution", () => {
   });
 
   it("runs concurrent local and remote defineTool calls as independent durable tasks", async () => {
-    const runtime = createTestRuntime({ agent: { name: "background-subagent" } });
+    const runtime = await createTestRuntime({ agent: { name: "background-subagent" } });
 
     await runtime.run(async () => {
       const remoteNode = {
+        backing: {
+          kind: "resource",
+          sourcePath: "/virtual/eve-memory-app/agent/subagents/reviewer.ts",
+        },
+        binding: runtime.manifest.bindings["subagents/reviewer.ts"] ?? {
+          backing: {
+            kind: "programmatic",
+            moduleId: "subagents/reviewer.ts",
+            registryId: "memory:background-subagent",
+            revision: "memory:background-subagent",
+          },
+          logicalPath: "subagents/reviewer.ts",
+          owner: { kind: "application" },
+        },
         description: "Remote reviewer",
         entryPath: "/virtual/eve-memory-app/agent/subagents/reviewer.ts",
         logicalPath: "subagents/reviewer.ts",
         name: "reviewer",
         nodeId: "remote/reviewer",
+        owner: { kind: "application" },
+        parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
         path: "/eve/v1/session",
         rootPath: "/virtual/eve-memory-app/agent",
         sourceId: "subagents/reviewer.ts",

@@ -3,8 +3,8 @@ import { type AlsContext, ContextContainer, contextStorage } from "#context/cont
 import { ContextKey } from "#context/key.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
-import type { AuthorizationDefinition } from "#runtime/connections/types.js";
-import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
+import type { AuthorizationDefinition } from "#shared/connection-types.js";
+import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
 
 type ResolvedAuthorization = Readonly<AuthorizationDefinition> | undefined;
 type AuthorizationResolverCache = Map<ResolvedConnectionDefinition, Promise<ResolvedAuthorization>>;

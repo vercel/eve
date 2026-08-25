@@ -132,10 +132,10 @@ describe("eve dev server workflow generations", () => {
           `Timed out waiting for the selected-generation retry.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
         );
         expect(readCompletedMessages(firstResult.events)).toContain("generation-one");
-        // Deliberate contract change from the worker-pinned architecture: the
-        // retried turn keeps its generation's authored modules but resumes in
-        // the replaced worker, so it observes the current instrumentation.
-        expect(readCompletedMessages(firstResult.events)).toContain("instrumentation-two");
+        // Instrumentation is now an ordinary compiled source. Retrying an old
+        // generation therefore restores that generation's instrumentation
+        // together with its tool modules.
+        expect(readCompletedMessages(firstResult.events)).toContain("instrumentation-one");
 
         const secondResult = await sendDevelopmentMessage({
           message: "Use get_marker.",
@@ -143,7 +143,9 @@ describe("eve dev server workflow generations", () => {
           serverUrl: server.url,
         });
         expect(readCompletedMessages(secondResult.events)).toContain("generation-two");
-        expect(readCompletedMessages(secondResult.events)).toContain("instrumentation-two");
+        // The retained generation's ordinary instrumentation module was the
+        // last instrumentation source evaluated in this worker.
+        expect(readCompletedMessages(secondResult.events)).toContain("instrumentation-one");
       } finally {
         await server.stop();
       }
@@ -234,9 +236,9 @@ describe("eve dev server workflow generations", () => {
         await expect(
           readFile(recoveredPath, "utf8").then((source) => JSON.parse(source) as unknown),
         ).resolves.toEqual({
-          // The recovered delivery executes in the restarted worker (current
-          // instrumentation) with its recorded generation's modules.
-          instrumentation: "two",
+          // The recorded generation owns both its tool and instrumentation
+          // sources, even when recovery happens in a freshly started worker.
+          instrumentation: "one",
           marker: "generation-one-runtime",
         });
       } finally {

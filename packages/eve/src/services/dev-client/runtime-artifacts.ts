@@ -17,10 +17,22 @@ import {
  */
 export async function readDevelopmentRuntimeArtifactsRevision(input: {
   readonly serverUrl: string;
+  readonly signal?: AbortSignal;
+  readonly timeoutMs?: number;
 }): Promise<string | undefined> {
   try {
     const url = new URL(EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH, input.serverUrl);
-    const response = await fetch(url);
+    const timeoutSignal =
+      input.timeoutMs === undefined ? undefined : AbortSignal.timeout(input.timeoutMs);
+    const signal =
+      input.signal === undefined
+        ? timeoutSignal
+        : timeoutSignal === undefined
+          ? input.signal
+          : AbortSignal.any([input.signal, timeoutSignal]);
+    const request: RequestInit = { redirect: "error" };
+    if (signal !== undefined) request.signal = signal;
+    const response = await fetch(url, request);
     return await parseDevelopmentRuntimeArtifactsRevision(response);
   } catch {
     return undefined;

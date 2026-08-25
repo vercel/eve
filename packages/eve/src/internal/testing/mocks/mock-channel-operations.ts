@@ -7,7 +7,7 @@ import type {
   InternalChannelSource,
 } from "#channel/channel-operations.js";
 import { INTERNAL_CHANNEL_DELIVER } from "#channel/channel-operations.js";
-import { type InputResponse, inputResponseSchema } from "#runtime/input/types.js";
+import { type InputResponse, inputResponseSchema } from "#shared/input.js";
 
 export type ObservedChannelDelivery<TState> =
   | (ChannelSendOptions<TState> & { readonly message: string | UserContent })

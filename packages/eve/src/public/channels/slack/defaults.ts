@@ -27,7 +27,7 @@ import type {
   SlackContext,
   SlackMentionResult,
 } from "#public/channels/slack/slackChannel.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 
 const log = createLogger("slack.defaults");
 const REASONING_TYPING_REFRESH_INTERVAL_MS = 5_000;

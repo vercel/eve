@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { classifyInputRequest, isApprovalRequest } from "#harness/input-request-class.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
-import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
+import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
 
 describe("classifyInputRequest", () => {
   const action = {

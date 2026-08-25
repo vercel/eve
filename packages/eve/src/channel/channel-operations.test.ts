@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createChannelOperations, type ChannelSource } from "#channel/channel-operations.js";
 import type { Runtime } from "#channel/types.js";
-import { type InputResponse, parseInputResponses } from "#runtime/input/types.js";
+import { type InputResponse, parseInputResponses } from "#shared/input.js";
 
 function authoredChannelRespondTypeChecks(source: ChannelSource): void {
   const responseWithMetadata = {

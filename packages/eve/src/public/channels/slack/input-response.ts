@@ -32,6 +32,7 @@ export async function authorizeInputResponse(input: {
     readonly config: SlackChannelConfig;
     readonly onInputResponse: NonNullable<SlackChannelConfig["onInputResponse"]>;
   };
+  readonly installationTeamId: string | null | undefined;
   readonly submission: SlackInputResponseSubmission;
   readonly teamId: string | null | undefined;
   readonly threadTs: string;
@@ -47,6 +48,7 @@ export async function authorizeInputResponse(input: {
     botToken: input.deps.config.credentials?.botToken,
     channelId: input.channelId,
     threadTs: input.threadTs,
+    installationTeamId: input.installationTeamId ?? undefined,
     teamId: input.teamId ?? undefined,
   });
   const ctx: SlackInputResponseContext = { defaultAuth, slack, thread };

@@ -47,21 +47,16 @@ export async function prepareMaterializedAuthoredModules(input: {
   readonly moduleMapPath: string;
 }): Promise<PreparedMaterializedAuthoredModules> {
   const moduleMapCode = await bundleAuthoredModuleMapForGeneration(input);
-  const layout = resolveInstrumentationLayout({
-    agentRoot: input.manifest.agentRoot,
-    providersEnabled: input.manifest.config.experimental?.instrumentationProviders ?? false,
-  });
+  const providersEnabled = input.manifest.config.experimental?.instrumentationProviders ?? false;
+  const layout = providersEnabled
+    ? resolveInstrumentationLayout({ agentRoot: input.manifest.agentRoot, providersEnabled: true })
+    : undefined;
   const externalDependencies = input.manifest.config.build?.externalDependencies ?? [];
   const bundleInstrumentationModule = async (sourcePath: string): Promise<string> =>
     await bundleAuthoredModuleForGeneration(sourcePath, { externalDependencies });
   let instrumentation: PreparedMaterializedInstrumentation | undefined;
 
-  if (layout?.kind === "file") {
-    instrumentation = {
-      kind: "file",
-      moduleCode: await bundleInstrumentationModule(layout.modulePath),
-    };
-  } else if (layout?.kind === "directory") {
+  if (layout?.kind === "directory") {
     const moduleCodeBySlot: Record<string, string> = {};
     for (const [slot, sourcePath] of Object.entries(layout.modulePathsBySlot)) {
       moduleCodeBySlot[slot] = await bundleInstrumentationModule(sourcePath);

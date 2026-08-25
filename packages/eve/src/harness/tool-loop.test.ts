@@ -7702,8 +7702,8 @@ describe("createToolLoopHarness", () => {
     expect(parked.session.history.filter(isPendingApprovalProjection)).toHaveLength(1);
     expect(hasPendingInputBatch(parked.session.state)).toBe(true);
 
-    // Every follow-up runs as an ordinary turn, but none may open another
-    // tool call while the original approval remains unresolved.
+    // Every follow-up runs as an ordinary turn with tools available while the
+    // original approval remains unresolved.
     let pendingSession = parked.session;
     for (const [index, question] of followupQuestions.entries()) {
       const followup = await runStep(pendingSession, {
@@ -7714,9 +7714,9 @@ describe("createToolLoopHarness", () => {
 
       expect(followup.next).toBeNull();
       expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(callIndex + 1);
-      expect(vi.mocked(ToolLoopAgent).mock.calls[callIndex]?.[0]).toMatchObject({
-        toolChoice: "none",
-      });
+      const settings = vi.mocked(ToolLoopAgent).mock.calls[callIndex]?.[0];
+      expect(settings?.toolChoice).not.toBe("none");
+      expect(settings?.tools).toHaveProperty("bash");
       expect(messages.at(-1)).toEqual({ content: question, role: "user" });
       expect(messages.every((message) => message.role !== "tool")).toBe(true);
       expect(messages.filter(isPendingApprovalProjection)).toHaveLength(1);
@@ -7735,8 +7735,10 @@ describe("createToolLoopHarness", () => {
 
     const denialIndex = followupQuestions.length + 1;
     const denialMessages = readGenerateMessages(denialIndex);
+    const denialSettings = vi.mocked(ToolLoopAgent).mock.calls[denialIndex]?.[0];
     expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(denialIndex + 1);
-    expect(vi.mocked(ToolLoopAgent).mock.calls[denialIndex]?.[0].toolChoice).not.toBe("none");
+    expect(denialSettings?.toolChoice).not.toBe("none");
+    expect(denialSettings?.tools).toHaveProperty("bash");
     expect(denialMessages.slice(-2)).toEqual([
       {
         content: [
@@ -7785,6 +7787,118 @@ describe("createToolLoopHarness", () => {
       content: "Okay, I will not run that command.",
       role: "assistant",
     });
+  });
+
+  it("executes an unrelated tool while an earlier approval stays open", async () => {
+    const bashExecute = vi.fn().mockResolvedValue("deleted");
+    const statusExecute = vi.fn().mockResolvedValue("ready");
+
+    vi.mocked(ToolLoopAgent).mockImplementation(function (
+      this: MockAgentInstance,
+      settings: MockAgentSettings & {
+        tools?: Record<
+          string,
+          {
+            execute?: (
+              input: unknown,
+              options: { toolCallId: string },
+            ) => Promise<unknown> | unknown;
+          }
+        >;
+      },
+    ) {
+      const { onStepFinish, prepareStep } = settings;
+      const executeStatus = settings.tools?.["status"]?.execute;
+      if (executeStatus === undefined) {
+        throw new Error("status tool was not executable.");
+      }
+
+      this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
+        if (prepareStep) {
+          await prepareStep({
+            context: undefined,
+            messages: options.messages,
+            model: {},
+            stepNumber: 0,
+            steps: [],
+          });
+        }
+
+        const toolCall = {
+          input: {},
+          toolCallId: "status-call",
+          toolName: "status",
+          type: "tool-call" as const,
+        };
+        const output = await executeStatus(toolCall.input, {
+          toolCallId: toolCall.toolCallId,
+        });
+        const toolResult = {
+          input: toolCall.input,
+          output,
+          toolCallId: toolCall.toolCallId,
+          toolName: toolCall.toolName,
+          type: "tool-result" as const,
+        };
+        const result = {
+          finishReason: "tool-calls",
+          response: {
+            messages: [
+              { content: [toolCall], role: "assistant" as const },
+              { content: [toolResult], role: "tool" as const },
+            ],
+          },
+          text: "",
+          toolCalls: [toolCall],
+          toolResults: [toolResult],
+        };
+        if (onStepFinish) await onStepFinish(result);
+        return createMockGenerateResult(result);
+      });
+      return this;
+    } as MockAgentConstructor);
+
+    const pendingSession = createPendingBashApprovalSession();
+    const session = {
+      ...pendingSession,
+      agent: {
+        ...pendingSession.agent,
+        tools: [
+          ...pendingSession.agent.tools,
+          { description: "Read status", name: "status", inputSchema: { type: "object" } },
+        ],
+      },
+    };
+    const config = createTestConfig("conversation", undefined, {
+      tools: new Map([
+        [
+          "bash",
+          {
+            description: "Run shell commands",
+            execute: bashExecute,
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "bash",
+          },
+        ],
+        [
+          "status",
+          {
+            description: "Read status",
+            execute: statusExecute,
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "status",
+          },
+        ],
+      ]),
+    });
+
+    const result = await createToolLoopHarness(config)(session, {
+      message: "Check the status while that waits.",
+    });
+
+    expect(statusExecute).toHaveBeenCalledOnce();
+    expect(bashExecute).not.toHaveBeenCalled();
+    expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
   });
 
   it("parks a second input batch while an earlier approval stays open", async () => {
@@ -7950,6 +8064,9 @@ describe("createToolLoopHarness", () => {
       message: "Ask me which color to use.",
     });
     expect(questionTurn.next).toBeNull();
+    const questionSettings = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+    expect(questionSettings?.toolChoice).not.toBe("none");
+    expect(questionSettings?.tools).toHaveProperty("bash");
     expect(getPendingInputRequestIds(questionTurn.session.state)).toEqual(
       new Set(["approval-1", "question-call"]),
     );

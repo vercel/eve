@@ -13,10 +13,14 @@ export const metadata: Metadata = {
   ...titleMetadata,
   description,
   alternates: canonicalAlternates(canonicalRoutes.benchmarks),
-  openGraph: titleMetadata.openGraph,
+  openGraph: {
+    ...titleMetadata.openGraph,
+    images: ["/benchmarks/opengraph-image"],
+  },
   twitter: {
     ...titleMetadata.twitter,
     card: "summary_large_image",
+    images: ["/benchmarks/twitter-image"],
   },
 };
 

@@ -4,7 +4,7 @@ import type {
   RuntimeActionRequest,
   RuntimeRemoteAgentCallActionRequest,
   RuntimeSubagentCallActionRequest,
-} from "#runtime/actions/types.js";
+} from "#shared/action-types.js";
 
 export type DelegatedRuntimeActionRequest =
   | RuntimeRemoteAgentCallActionRequest

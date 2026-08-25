@@ -15,7 +15,7 @@ import {
   type InputRequest,
   parseInputResponse,
   type ValidatedInputResponse,
-} from "#runtime/input/types.js";
+} from "#shared/input.js";
 
 /** Maps Discord component kinds (ACTION_ROW, BUTTON, STRING_SELECT, TEXT_INPUT) to their wire `type` integers used in component payloads. */
 export const DISCORD_COMPONENT_TYPE = {

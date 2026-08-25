@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { RuntimeRegistryError } from "../src/internal/runtime-registry.js";
-import {
-  createRuntimeSubagentRegistry,
-  PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA,
-} from "../src/runtime/subagents/registry.js";
+import { createRuntimeSubagentRegistry } from "../src/runtime/subagents/registry.js";
+import { PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA } from "../src/shared/agent-tool.js";
 import type { ResolvedRuntimeSubagentNode } from "../src/runtime/types.js";
 
 const SUBAGENT_TOOL_INPUT_SCHEMA = {

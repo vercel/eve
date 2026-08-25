@@ -7,7 +7,7 @@ import { SandboxKey } from "../src/context/keys.js";
 import type { SandboxAccess } from "../src/sandbox/state.js";
 import { defineReadFileTool } from "../src/public/tools/define-read-file-tool.js";
 import { serializeInputSchema } from "../src/shared/tool-schema.js";
-import { ReadFileStateKey } from "../src/runtime/framework-tools/file-state.js";
+import { ReadFileStateKey } from "../src/execution/tools/file-state.js";
 
 function createFakeAccess(files: Record<string, string>): SandboxAccess {
   return {

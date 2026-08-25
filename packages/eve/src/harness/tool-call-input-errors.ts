@@ -1,6 +1,6 @@
 import type { ToolSet, TypedToolCall, TypedToolError } from "ai";
 
-import type { RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeToolCallActionRequest } from "#shared/action-types.js";
 import { resolveToolCallInputObject } from "#harness/runtime-actions.js";
 
 /**

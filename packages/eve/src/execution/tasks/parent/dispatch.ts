@@ -21,13 +21,13 @@ import type {
   RuntimeActionRequest,
   RuntimeActionResult,
   RuntimeToolCallActionRequest,
-} from "#runtime/actions/types.js";
+} from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import {
   TASK_CANCEL_TOOL_NAME,
   TASK_CONTROL_TOOL_NAMES,
   TASK_UPDATE_TOOL_NAME,
-} from "#runtime/framework-tools/tasks.js";
+} from "#shared/task-tool.js";
 import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
 import {
   isTerminalTaskStatus,

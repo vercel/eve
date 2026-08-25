@@ -187,6 +187,7 @@ interface InstrumentationChannelDeliveryScope {
   readonly rootSessionId: string;
   readonly sequence?: number;
   readonly sessionId: string;
+  readonly traceSeed?: InstrumentationTraceContext;
   readonly turnId?: string;
 }
 
@@ -291,6 +292,7 @@ export interface InstrumentationSessionStartedEvent {
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId: string;
   readonly sessionId: string;
+  readonly traceSeed?: InstrumentationTraceContext;
 }
 
 export type InstrumentationTraceContext = RuntimeTraceContext;

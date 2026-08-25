@@ -495,10 +495,16 @@ export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
   adapters: { x: createXAdapter() },
   state: createMemoryState(),
+  // X buffers replies and posts once rather than editing a streamed message.
+  streaming: false,
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onDirectMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 
@@ -509,8 +515,8 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 export default channel;
 \`\`\`
 
-Credentials come from the \`createXAdapter\` config or the adapter's environment variables; see the [X adapter docs](https://chat-sdk.dev/adapters/official/x).`,
-    configure: `The adapter mounts its webhook at \`/eve/v1/x\`. Point your X account activity webhook at it. The adapter owns provider auth, verification, and delivery, while eve owns session dispatch, streaming, typing, and human-in-the-loop. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for routes, streaming, and state options.`,
+For a DM-only agent, keep \`bot.onDirectMessage\` and remove the \`bot.onNewMention\` and \`bot.onSubscribedMessage\` handlers. Configure the app's credentials and webhook before deploying.`,
+    configure: `Follow the [X adapter documentation](https://chat-sdk.dev/adapters/official/x) to configure authentication, webhook verification, and Activity API subscriptions. Register the deployed agent's \`/eve/v1/x\` route as the X webhook URL. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve route and state options.`,
   },
   "chat-sdk-messenger": {
     logo: "messenger",

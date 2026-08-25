@@ -52,6 +52,7 @@ export function mockTool(input: MockToolInput): ResolvedToolDefinition {
     inputSchema: toInputSchema(input.inputSchema ?? null),
     logicalPath,
     name: input.name,
+    owner: { kind: "application" },
     sourceId: logicalPath,
     sourceKind: "module",
   };

@@ -8,8 +8,8 @@ import type {
   ConnectionAuthResolver,
   HeadersDefinition,
   ToolFilterDefinition,
-} from "#runtime/connections/types.js";
-import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
+} from "#shared/connection-types.js";
+import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 

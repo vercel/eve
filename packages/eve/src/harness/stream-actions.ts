@@ -1,5 +1,5 @@
 import { createActionsRequestedEvent } from "#protocol/message.js";
-import type { RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeToolCallActionRequest } from "#shared/action-types.js";
 import type { HarnessEmitFn } from "#harness/types.js";
 
 interface ActionEventCoordinates {

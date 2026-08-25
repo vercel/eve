@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.44.3",
+  "version": "0.44.4",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -111,10 +111,45 @@
       "import": "./dist/src/public/tools/index.js",
       "default": "./dist/src/public/tools/index.js"
     },
-    "./tools/defaults": {
-      "types": "./dist/src/public/tools/defaults.d.ts",
-      "import": "./dist/src/public/tools/defaults.js",
-      "default": "./dist/src/public/tools/defaults.js"
+    "./tools/bash": {
+      "types": "./dist/src/public/tools/bash.d.ts",
+      "import": "./dist/src/public/tools/bash.js",
+      "default": "./dist/src/public/tools/bash.js"
+    },
+    "./tools/read_file": {
+      "types": "./dist/src/public/tools/read-file.d.ts",
+      "import": "./dist/src/public/tools/read-file.js",
+      "default": "./dist/src/public/tools/read-file.js"
+    },
+    "./tools/write_file": {
+      "types": "./dist/src/public/tools/write-file.d.ts",
+      "import": "./dist/src/public/tools/write-file.js",
+      "default": "./dist/src/public/tools/write-file.js"
+    },
+    "./tools/todo": {
+      "types": "./dist/src/public/tools/todo.d.ts",
+      "import": "./dist/src/public/tools/todo.js",
+      "default": "./dist/src/public/tools/todo.js"
+    },
+    "./tools/web_fetch": {
+      "types": "./dist/src/public/tools/web-fetch.d.ts",
+      "import": "./dist/src/public/tools/web-fetch.js",
+      "default": "./dist/src/public/tools/web-fetch.js"
+    },
+    "./tools/load_skill": {
+      "types": "./dist/src/public/tools/load-skill.d.ts",
+      "import": "./dist/src/public/tools/load-skill.js",
+      "default": "./dist/src/public/tools/load-skill.js"
+    },
+    "./tools/glob": {
+      "types": "./dist/src/public/tools/glob.d.ts",
+      "import": "./dist/src/public/tools/glob.js",
+      "default": "./dist/src/public/tools/glob.js"
+    },
+    "./tools/grep": {
+      "types": "./dist/src/public/tools/grep.d.ts",
+      "import": "./dist/src/public/tools/grep.js",
+      "default": "./dist/src/public/tools/grep.js"
     },
     "./models/openai": {
       "types": "./dist/src/public/models/openai/index.d.ts",
@@ -195,6 +230,11 @@
       "types": "./dist/src/public/context/index.d.ts",
       "import": "./dist/src/public/context/index.js",
       "default": "./dist/src/public/context/index.js"
+    },
+    "./internal/programmatic-source-loader": {
+      "types": "./dist/src/internal/programmatic-source-loader.d.ts",
+      "import": "./dist/src/internal/programmatic-source-loader.js",
+      "default": "./dist/src/internal/programmatic-source-loader.js"
     },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",

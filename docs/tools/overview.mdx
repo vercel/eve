@@ -4,7 +4,7 @@ description: "Define typed actions the agent can call, and gate sensitive ones o
 url: /tools
 ---
 
-A tool is a typed action the agent can call, such as hitting an API, running a query, or writing a file. The action stays in code you control. Tools run in your app runtime with full access to `process.env`, not in the [sandbox](/docs/sandbox).
+A tool is a typed action the agent can call, such as hitting an API, running a query, or writing a file. Define a tool when you implement the action in code you control. To give the model tools published by an external MCP or OpenAPI service, use a [connection](/docs/connections) instead. Authored tools run in your app runtime with full access to `process.env`, not in the [sandbox](/docs/sandbox).
 
 ## Define a tool
 

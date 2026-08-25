@@ -1,7 +1,7 @@
 import { trace } from "#compiled/@opentelemetry/api/index.js";
 
 import { createLogger } from "#internal/logging.js";
-import type { RuntimeActionResult } from "#runtime/actions/types.js";
+import type { RuntimeActionResult } from "#shared/action-types.js";
 
 const log = createLogger("execution.subagent-usage-span");
 

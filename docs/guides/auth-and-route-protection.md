@@ -21,7 +21,7 @@ The route-auth policy lives on the HTTP channel factory (`agent/channels/eve.ts`
 
 These routes are protected by the channel's auth policy. eve fails closed by default: production traffic is rejected unless you configure an authenticator that accepts it, and anonymous access requires an explicit `none()`.
 
-`GET /eve/v1/health` is always public and skips the walk entirely, so load balancers and uptime monitors can probe it without credentials.
+The health route created by `eveChannel()` is public and skips the walk entirely, so load balancers and uptime monitors can probe it without credentials. Replacing `agent/channels/eve.ts` with a custom `defineChannel(...)` or disabling that slot also replaces or removes the health route.
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -215,7 +215,7 @@ export default eveChannel({
 });
 ```
 
-In production, `placeholderAuth()` returns a structured `401` so a generated web chat app can say "auth isn't configured yet" instead of throwing an internal error. Replace it before a browser caller submits a production request: swap in your app's `AuthFn` or one of the shipped helpers. Delete the authored channel file entirely and eve falls back to the framework default `[vercelOidc(), localDev(), placeholderAuth()]`, which also rejects production traffic.
+In production, `placeholderAuth()` returns a structured `401` so a generated web chat app can say "auth isn't configured yet" instead of throwing an internal error. Replace it before a browser caller submits a production request: swap in your app's `AuthFn` or one of the shipped helpers. Delete the authored channel file entirely and eve selects the default channel source with `[vercelOidc(), localDev(), placeholderAuth()]`, which also rejects production traffic.
 
 You do not have to keep `vercelOidc()` in the final policy. For a self-hosted app, an app-embedded frontend, or any deployment that uses a non-Vercel identity system, use `httpBasic()`, `jwtHmac()`, `jwtEcdsa()`, generic `oidc()`, or a custom `AuthFn` that maps your verified user/session/API key into a `SessionAuthContext`.
 

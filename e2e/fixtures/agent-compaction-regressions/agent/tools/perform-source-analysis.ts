@@ -1,6 +1,6 @@
 import { defineState } from "eve/context";
 import { defineTool } from "eve/tools";
-import { todo } from "eve/tools/defaults";
+import { todo } from "eve/tools/todo";
 import { z } from "zod";
 
 const completionMarker = "SOURCE_ANALYSIS_COMPLETE";

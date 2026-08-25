@@ -52,7 +52,7 @@ import type {
   RuntimeSubagentCallActionRequest,
   RuntimeSubagentDispatchFailure,
   RuntimeToolCallActionRequest,
-} from "#runtime/actions/types.js";
+} from "#shared/action-types.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import {
   createRecursiveAgentRootOnlyResult,

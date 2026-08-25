@@ -20,7 +20,7 @@ import {
   stringifyUnknown,
   toMessageInputRequest,
 } from "#client/message-action-parts.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import type { InputResponse } from "#shared/input.js";
 import type {
   AuthorizationCompletedStreamEvent,
   InputResolution,

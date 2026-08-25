@@ -2,7 +2,7 @@
  * Skill authoring helpers and runtime accessors.
  */
 
-export type { SkillFile, SkillHandle } from "#execution/skills/types.js";
+export type { SkillFile, SkillHandle } from "#shared/skill-types.js";
 export {
   defineSkill,
   type NamedSkillDefinition,

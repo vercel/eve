@@ -8,7 +8,7 @@ import {
   upsertProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
-import type { InputRequest, InputRequestKind } from "#runtime/input/types.js";
+import type { InputRequest, InputRequestKind } from "#shared/input.js";
 import type { HarnessSession } from "#harness/types.js";
 
 function createSession(state?: Record<string, unknown>): HarnessSession {

@@ -273,7 +273,7 @@ Production `eve build` expects the extension distribution to exist already. Keep
 
 ### Override a contribution
 
-Use a directory mount to replace or remove an extension contribution. Put the mount declaration in `extension.ts` and add overrides beside it:
+Use a directory mount to keep overrides beside the mount declaration. Put the declaration in `extension.ts` and add overrides beside it:
 
 ```
 agent/extensions/crm/
@@ -307,7 +307,7 @@ export default disableTool();
 
 Hooks and instruction fragments are additive, so they cannot be replaced. To replace a dynamic tool, use a dynamic definition in the same slot; dynamic tools win over same-named static tools at runtime. `disableTool()` removes either kind.
 
-The `crm__` prefix is reserved for this directory mount. A consumer cannot override the extension from `agent/tools/`, `agent/connections/`, `agent/subagents/`, or another agent-root slot.
+You can also place an override in the corresponding agent-root slot by using the final qualified name. For example, `agent/tools/crm__search.ts` replaces `tools/search.ts` from the extension package or its directory override. Application sources have the highest precedence, so an agent-root override wins when both forms exist.
 
 ### Use an extension tool result in a hook
 

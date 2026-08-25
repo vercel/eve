@@ -4,7 +4,7 @@ description: "Expose external MCP and OpenAPI servers to the model, with connect
 url: /connections
 ---
 
-A connection wires an agent into an external server you don't author, either an MCP server (Linear, GitHub, a warehouse) or any HTTP API with an OpenAPI document. eve handles the parts you'd otherwise hand-roll, discovering the remote tools, surfacing them to the model, and brokering auth.
+A connection wires an agent into an external server you don't author, either an MCP server (Linear, GitHub, a warehouse) or any HTTP API with an OpenAPI document. eve handles the parts you'd otherwise hand-roll, discovering the remote tools, surfacing them to the model, and brokering auth. To instead let eve communicate with users through an external service, use a [channel](/docs/channels/overview).
 
 Connections live under `agent/connections/`. The runtime name comes from the filename, so `agent/connections/linear.ts` registers as `"linear"`. The model never sees a connection's URL or credentials. It discovers tools through the built-in `connection_search` and calls them by their qualified name, `<connection>__<tool>` (e.g. `linear__list_issues`).
 

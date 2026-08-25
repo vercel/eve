@@ -1,305 +1,123 @@
 import { describe, expect, it } from "vitest";
 
+import { compileFromMemory } from "#compiler/compile-from-memory.js";
 import {
+  COMPILED_AGENT_MANIFEST_VERSION,
   compiledAgentManifestSchema,
-  createCompiledAgentResources,
-  createCompiledAgentManifest,
   createCompiledAgentNodeManifest,
 } from "#compiler/manifest.js";
-import { classifyModelRouting } from "#internal/classify-model-routing.js";
+import {
+  validateCompiledAgentManifest,
+  validateCompiledModuleMap,
+} from "#compiler/validate-artifact.js";
 
-describe("compiledAgentManifestSchema", () => {
-  it("accepts authored HEAD and OPTIONS channel routes", () => {
-    const channel = {
-      adapterKind: "mcp",
-      kind: "channel" as const,
-      logicalPath: "channels/mcp.ts",
-      name: "mcp",
-      sourceId: "channel-mcp",
+describe("compiled agent manifest v42", () => {
+  it("round-trips a real compiled graph through the serialized schema", async () => {
+    const { manifest } = await compileFromMemory({
+      model: "openai/gpt-5.4",
+      tools: [{ name: "weather" }],
+    });
+
+    const parsed = compiledAgentManifestSchema.parse(JSON.parse(JSON.stringify(manifest)));
+    expect(parsed.version).toBe(COMPILED_AGENT_MANIFEST_VERSION);
+    expect(() => validateCompiledAgentManifest(parsed)).not.toThrow();
+  });
+
+  it("rejects a missing required binding", async () => {
+    const { manifest } = await compileFromMemory({
+      model: "openai/gpt-5.4",
+      tools: [{ name: "weather" }],
+    });
+    const weather = manifest.tools.find((tool) => tool.name === "weather")!;
+    const bindings = { ...manifest.bindings };
+    delete bindings[weather.sourceId];
+
+    expect(() => validateCompiledAgentManifest({ ...manifest, bindings })).toThrow(
+      "has no compiled binding",
+    );
+  });
+
+  it("rejects unreferenced bindings and invalid route provenance", async () => {
+    const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+    const configBinding = manifest.bindings[manifest.config.source.sourceId]!;
+
+    expect(() =>
+      validateCompiledAgentManifest({
+        ...manifest,
+        bindings: { ...manifest.bindings, orphan: configBinding },
+      }),
+    ).toThrow("is not referenced");
+
+    expect(() =>
+      validateCompiledAgentManifest({
+        ...manifest,
+        channelRoutes: {
+          ...manifest.channelRoutes,
+          shadowed: [
+            {
+              method: "GET",
+              source: {
+                backing: { kind: "resource", sourcePath: "/virtual/channels/loser.ts" },
+                layer: "application",
+                logicalPath: "channels/loser.ts",
+                owner: { kind: "application" },
+                sourceId: "loser",
+              },
+              urlPath: "/loser",
+              winnerSourceId: "missing",
+            },
+          ],
+        },
+      }),
+    ).toThrow("dangling winner");
+  });
+
+  it("rejects module maps whose keys diverge from total bindings", async () => {
+    const { manifest, moduleMap } = await compileFromMemory({ model: "openai/gpt-5.4" });
+    const root = moduleMap.nodes.__root__!;
+
+    expect(() =>
+      validateCompiledModuleMap(manifest, {
+        nodes: { ...moduleMap.nodes, __root__: { modules: { ...root.modules, orphan: {} } } },
+      }),
+    ).toThrow("do not match its bindings");
+  });
+
+  it("rejects a disconnected subagent parent cycle", async () => {
+    const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+    const agent = createCompiledAgentNodeManifest(manifest);
+    const parent = {
+      agent,
+      backing: { kind: "resource" as const, sourcePath: "/virtual/subagents/parent" },
+      description: "Parent agent.",
+      entryPath: "/virtual/subagents/parent",
+      logicalPath: "subagents/parent",
+      name: "parent",
+      nodeId: "parent-node",
+      owner: { kind: "application" as const },
+      parentNodeId: "child-node",
+      rootPath: "/virtual/subagents/parent",
+      sourceId: "parent-source",
       sourceKind: "module" as const,
-      urlPath: "/.well-known/oauth-protected-resource",
     };
-    const manifest = createCompiledAgentManifest({
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      channels: [
-        { ...channel, method: "HEAD" },
-        { ...channel, method: "OPTIONS" },
-      ],
-      config: {
-        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
-        name: "app",
-      },
+    const child = {
+      ...parent,
+      description: "Child agent.",
+      entryPath: "/virtual/subagents/parent/subagents/child",
+      logicalPath: "subagents/child",
+      name: "child",
+      nodeId: "child-node",
+      parentNodeId: parent.nodeId,
+      rootPath: "/virtual/subagents/parent/subagents/child",
+      sourceId: "child-source",
+    };
+    const corrupted = compiledAgentManifestSchema.parse({
+      ...manifest,
+      subagents: [parent, child],
     });
 
-    const parsed = compiledAgentManifestSchema.parse(manifest);
-    expect(
-      parsed.channels.map((entry) => (entry.kind === "channel" ? entry.method : null)),
-    ).toEqual(["HEAD", "OPTIONS"]);
-  });
-
-  it("requires exactly one static description or dynamic resolver for each subagent", () => {
-    const manifest = createCompiledAgentManifest({
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      config: {
-        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
-        name: "app",
-      },
-    });
-    const subagent = {
-      agent: createCompiledAgentNodeManifest({
-        agentRoot: "/app/agent/subagents/research",
-        appRoot: "/app",
-        config: {
-          model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
-          name: "research",
-        },
-      }),
-      entryPath: "subagents/research/agent.ts",
-      logicalPath: "subagents/research",
-      name: "research",
-      nodeId: "research",
-      rootPath: "/app/agent/subagents/research",
-      sourceId: "subagents/research/agent.ts",
-      sourceKind: "module",
-    } as const;
-    const parses = (variant: Readonly<Record<string, unknown>>): boolean =>
-      compiledAgentManifestSchema.safeParse({
-        ...manifest,
-        subagents: [{ ...subagent, ...variant }],
-      }).success;
-
-    expect(parses({ description: "Research requests." })).toBe(true);
-    expect(
-      parses({
-        agent: createCompiledAgentResources({
-          agentRoot: "/app/agent/subagents/research",
-          appRoot: "/app",
-        }),
-        configResolver: {
-          eventNames: ["session.started"],
-          logicalPath: "agent.ts",
-          sourceId: "agent.ts",
-          sourceKind: "module",
-        },
-      }),
-    ).toBe(true);
-    expect(parses({})).toBe(false);
-    expect(
-      parses({
-        description: "Research requests.",
-        configResolver: {
-          eventNames: ["session.started"],
-          logicalPath: "agent.ts",
-          sourceId: "agent.ts",
-          sourceKind: "module",
-        },
-      }),
-    ).toBe(false);
-  });
-
-  it("preserves reasoning configuration", () => {
-    const manifest = createCompiledAgentManifest({
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      config: {
-        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
-        name: "app",
-        reasoning: "high",
-      },
-    });
-
-    const parsed = compiledAgentManifestSchema.parse(manifest);
-
-    expect(parsed.config.reasoning).toBe("high");
-  });
-
-  it("preserves runtime limits configuration", () => {
-    const manifest = createCompiledAgentManifest({
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      config: {
-        limits: {
-          maxInputTokensPerSession: 200_000,
-          maxOutputTokensPerSession: 20_000,
-          sessionTimeoutMs: 86_400_000,
-        },
-        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
-        name: "app",
-      },
-    });
-
-    const parsed = compiledAgentManifestSchema.parse(manifest);
-
-    expect(parsed.config.limits).toEqual({
-      maxInputTokensPerSession: 200_000,
-      maxOutputTokensPerSession: 20_000,
-      sessionTimeoutMs: 86_400_000,
-    });
-  });
-
-  it("rejects the removed maxSubagentDepth limit", () => {
-    const manifest = createCompiledAgentManifest({
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      config: {
-        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
-        name: "app",
-      },
-    });
-
-    expect(() =>
-      compiledAgentManifestSchema.parse({
-        ...manifest,
-        config: { ...manifest.config, limits: { maxSubagentDepth: 4 } },
-      }),
-    ).toThrow();
-  });
-
-  it("rejects the removed agent-level maxSubagents limit", () => {
-    const manifest = createCompiledAgentManifest({
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      config: {
-        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
-        name: "app",
-      },
-    });
-
-    expect(() =>
-      compiledAgentManifestSchema.parse({
-        ...manifest,
-        config: { ...manifest.config, limits: { maxSubagents: 4 } },
-      }),
-    ).toThrow();
-  });
-
-  it("preserves experimental Workflow tool configuration", () => {
-    const manifest = createCompiledAgentManifest({
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      config: {
-        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
-        name: "app",
-      },
-      workflowTool: { maxSubagents: 6 },
-    });
-
-    const parsed = compiledAgentManifestSchema.parse(manifest);
-
-    expect(parsed.workflowTool).toEqual({ maxSubagents: 6 });
-  });
-
-  it("preserves web search provider configuration", () => {
-    const manifest = createCompiledAgentManifest({
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      config: {
-        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
-        name: "app",
-      },
-      webSearchProvider: "exa",
-    });
-
-    const parsed = compiledAgentManifestSchema.parse(manifest);
-
-    expect(parsed.webSearchProvider).toBe("exa");
-  });
-
-  it("preserves dynamic model resolver source", () => {
-    const manifest = createCompiledAgentManifest({
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      config: {
-        dynamicModel: {
-          eventNames: ["session.started"],
-          logicalPath: "agent.ts",
-          sourceId: "agent-config",
-          sourceKind: "module",
-        },
-        name: "app",
-      },
-    });
-
-    const parsed = compiledAgentManifestSchema.parse(manifest);
-
-    expect(parsed.config.dynamicModel).toEqual({
-      eventNames: ["session.started"],
-      logicalPath: "agent.ts",
-      sourceId: "agent-config",
-      sourceKind: "module",
-    });
-    expect(parsed.config.model).toBeUndefined();
-  });
-
-  it("rejects compiled configs with both static and dynamic models", () => {
-    expect(() =>
-      compiledAgentManifestSchema.parse({
-        ...createCompiledAgentManifest({
-          agentRoot: "/app/agent",
-          appRoot: "/app",
-          config: {
-            model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
-            name: "app",
-          },
-        }),
-        config: {
-          dynamicModel: {
-            eventNames: ["session.started"],
-            logicalPath: "agent.ts",
-            sourceId: "agent-config",
-            sourceKind: "module",
-          },
-          model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
-          name: "app",
-        },
-      }),
-    ).toThrow();
-  });
-
-  it("preserves uncapped (false) session token limits", () => {
-    const manifest = createCompiledAgentManifest({
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      config: {
-        limits: {
-          maxInputTokensPerSession: false,
-          maxOutputTokensPerSession: false,
-          sessionTimeoutMs: false,
-        },
-        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
-        name: "app",
-      },
-    });
-
-    const parsed = compiledAgentManifestSchema.parse(manifest);
-
-    expect(parsed.config.limits).toEqual({
-      maxInputTokensPerSession: false,
-      maxOutputTokensPerSession: false,
-      sessionTimeoutMs: false,
-    });
-  });
-
-  it("accepts compiled workflow world configuration", () => {
-    const manifest = createCompiledAgentManifest({
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      config: {
-        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
-        name: "app",
-        experimental: {
-          workflow: {
-            world: "@acme/eve-world",
-          },
-        },
-      },
-    });
-
-    const parsed = compiledAgentManifestSchema.safeParse(manifest);
-
-    expect(parsed.success).toBe(true);
-    expect(manifest.config.experimental?.workflow).toEqual({ world: "@acme/eve-world" });
+    expect(() => validateCompiledAgentManifest(corrupted)).toThrow(
+      "subagent graph contains a cycle",
+    );
   });
 });

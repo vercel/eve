@@ -1,5 +1,3 @@
-import { z } from "#compiled/zod/index.js";
-
 import { RuntimeRegistry, RuntimeRegistryError } from "#internal/runtime-registry.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import type {
@@ -8,6 +6,10 @@ import type {
 } from "#runtime/types.js";
 import type { JsonObject } from "#shared/json.js";
 import { serializeInputSchema } from "#shared/tool-schema.js";
+import {
+  PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA,
+  SUBAGENT_TOOL_INPUT_SCHEMA,
+} from "#shared/agent-tool.js";
 
 /**
  * One runtime-owned subagent tracked by the prepared registry.
@@ -38,35 +40,6 @@ export interface RuntimeSubagentRegistry {
  * Stable input schema lowered onto every subagent tool. Subagents always
  * accept one free-form `message` string from the parent agent.
  */
-export const SUBAGENT_TOOL_INPUT_SCHEMA = z.strictObject({
-  message: z
-    .string()
-    .describe(
-      "The message to send to the subagent. Provide all context the subagent needs to complete the task; the subagent does not see the parent's history.",
-    ),
-  outputSchema: z
-    .looseObject({})
-    .describe(
-      "Only provide a non-empty JSON Schema when the caller explicitly requests structured output; otherwise omit this field. The subagent must match a provided schema, and that structured output becomes the tool result.",
-    )
-    .optional(),
-});
-
-/**
- * Extended subagent tool input schema for agents that opt into
- * `experimental.subagentPersistentSessions`: adds the `agentId` field the
- * model uses to continue a previous delegation.
- */
-export const PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA = SUBAGENT_TOOL_INPUT_SCHEMA.extend({
-  agentId: z
-    .string()
-    .nullable()
-    .describe(
-      "Only pass this to continue a previous delegation: the id of an agent from the <agents> list. To start a new agent — the common case — omit this field entirely (or pass null or an empty string).",
-    )
-    .optional(),
-});
-
 const SUBAGENT_TOOL_INPUT_JSON_SCHEMA = serializeInputSchema(SUBAGENT_TOOL_INPUT_SCHEMA);
 
 const PERSISTENT_SUBAGENT_TOOL_INPUT_JSON_SCHEMA = serializeInputSchema(

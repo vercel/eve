@@ -9,7 +9,7 @@ import { executeTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import { readLatestTaskView, sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
-import type { RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeToolCallActionRequest } from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { SESSION_TASKS_STATE_KEY } from "#tasks/session-index.js";
 

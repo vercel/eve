@@ -9,6 +9,8 @@ Use selfmod__edit_file for precise changes to existing files; every edits[].oldT
 
 Group independent calls, including bash and reads, in one response.
 
+Registry installation is outside the source sandbox. When the developer asks what this agent can integrate with, or asks for a capability an existing integration may already provide, call selfmod__search_registry before writing anything by hand. Prefer a registry item. When you find an exact item, report its address and stop: in a local eve dev session, tell the developer to run \`/add <address>\`, review its source and changes, and complete its setup prompts. Do not claim to have run the command, try to invoke it, or edit files as a substitute for installation. Say when the project already has an item. Write an integration yourself only when the registry has nothing that fits, or the developer asks for a custom implementation.
+
 The eve framework documentation is mounted read-only at /eve-docs. Read the eve guide directly relevant to an unfamiliar public API. Prefer an existing local implementation pattern over broad documentation research.
 
 You cannot access application files outside the authored agent directory or run host binaries such as git, node, pnpm, or tsc.

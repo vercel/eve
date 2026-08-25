@@ -15,11 +15,7 @@ import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type {
-  InputResponse,
-  StrictInputResponses,
-  ValidatedInputResponse,
-} from "#runtime/input/types.js";
+import type { InputResponse, StrictInputResponses, ValidatedInputResponse } from "#shared/input.js";
 import {
   buildSlackBinding,
   buildSlackWorkspaceHandle,
@@ -44,6 +40,7 @@ import {
   parseMessageEvent,
   type SlackEvent,
   slackEventBotUserId,
+  slackEventInstallationTeamId,
   type SlackEventEnvelope,
   type SlackInboundContext,
   type SlackMessage,
@@ -198,6 +195,8 @@ export interface SlackChannelState {
   threadTs: string | null;
   /** Slack team id, when the inbound event carried one. */
   teamId: string | null;
+  /** Slack workspace whose app installation supplies this session's credentials. */
+  installationTeamId?: string | null;
   /**
    * Slack user id of the actor that triggered the current session/turn.
    * Captured on every inbound mention so default handlers (e.g.
@@ -255,7 +254,8 @@ export interface SlackInstrumentationMetadata extends Record<string, unknown> {
  */
 export interface SlackChannelCredentials {
   /**
-   * Bot token for all outbound Slack Web API calls. Falls back to
+   * Bot token for all outbound Slack Web API calls. Function providers receive
+   * the app installation workspace id when Slack supplies one. Falls back to
    * `process.env.SLACK_BOT_TOKEN` when omitted.
    */
   readonly botToken?: SlackBotToken;
@@ -277,6 +277,8 @@ export interface SlackChannelCredentials {
 export interface SlackReceiveTarget {
   readonly channelId: string;
   readonly threadTs?: string;
+  /** Slack workspace whose app installation supplies credentials for this send. */
+  readonly installationTeamId?: string;
   /**
    * Optional message posted into the Slack channel before the agent runs.
    * The post becomes the thread root and the first turn is threaded under
@@ -674,6 +676,7 @@ function rebuildSlackContext(
     botToken: credentials?.botToken,
     channelId: state.channelId ?? "",
     threadTs: state.threadTs ?? "",
+    installationTeamId: state.installationTeamId ?? undefined,
     teamId: state.teamId ?? undefined,
     onThreadTsChanged(ts) {
       state.threadTs = ts;
@@ -763,6 +766,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       channelId: null as string | null,
       threadTs: null as string | null,
       teamId: null as string | null,
+      installationTeamId: null as string | null,
       triggeringUserId: null,
       pendingToolCallMessage: null,
       lastReasoningTypingAtMs: null,
@@ -861,6 +865,8 @@ async function receiveOnSlack(
   deps: {
     readonly from: ChannelFrom<SlackChannelState>;
     readonly credentials: SlackChannelCredentials | undefined;
+    /** Installation workspace inherited from an inbound trigger. */
+    readonly installationTeamId?: string;
     /** Slack team id seeded into session state, when the trigger carried one. */
     readonly teamId?: string;
     /** Slack user id seeded into session state, when the trigger carried one. */
@@ -874,6 +880,10 @@ async function receiveOnSlack(
   }
   const requestedThreadTs =
     typeof receiveTarget.threadTs === "string" ? receiveTarget.threadTs : "";
+  const installationTeamId =
+    typeof receiveTarget.installationTeamId === "string"
+      ? receiveTarget.installationTeamId
+      : deps.installationTeamId;
   const initialMessage = receiveTarget.initialMessage;
   if (initialMessage && requestedThreadTs.length > 0) {
     throw new Error(
@@ -887,6 +897,7 @@ async function receiveOnSlack(
       botToken: deps.credentials?.botToken,
       channelId,
       threadTs: "",
+      installationTeamId,
       teamId: deps.teamId,
     });
     const postInput: { card: CardElement; fallbackText?: string } = {
@@ -907,6 +918,7 @@ async function receiveOnSlack(
     auth: input.auth,
     state: {
       channelId,
+      installationTeamId: installationTeamId ?? null,
       threadTs: threadTs || null,
       teamId: deps.teamId ?? null,
       triggeringUserId: deps.triggeringUserId ?? null,
@@ -979,6 +991,7 @@ async function handleEventPost(input: {
   if (envelope === null) return new Response("ok");
   const appId = typeof envelope.api_app_id === "string" ? envelope.api_app_id : undefined;
   const botUserId = slackEventBotUserId(envelope);
+  const installationTeamId = slackEventInstallationTeamId(envelope);
 
   // Handler precedence, in fall-through order:
   // 1) an authored mention/DM handler for its own event kind,
@@ -1000,6 +1013,7 @@ async function handleEventPost(input: {
             resolveSession: input.resolveSession,
             credentials: config.credentials,
             handler,
+            installationTeamId,
             kind,
             message,
             threadContext: config.threadContext,
@@ -1016,6 +1030,7 @@ async function handleEventPost(input: {
             resolveSession: input.resolveSession,
             credentials: config.credentials,
             handler,
+            installationTeamId,
             kind,
             message,
             threadContext: config.threadContext,
@@ -1043,6 +1058,7 @@ async function handleEventPost(input: {
             resolveSession: input.resolveSession,
             credentials: config.credentials,
             handler: config.onMessage!,
+            installationTeamId,
             kind: "channel_message",
             message,
             threadContext: config.threadContext,
@@ -1063,6 +1079,7 @@ async function handleEventPost(input: {
         credentials: config.credentials,
         envelope,
         handler: onEvent,
+        installationTeamId,
       });
   }
 
@@ -1107,6 +1124,7 @@ async function dispatchSlackMessage(input: {
   readonly resolveSession: ChannelResolveSession;
   readonly credentials: SlackChannelCredentials | undefined;
   readonly handler: NonNullable<SlackChannelConfig["onMessage"]>;
+  readonly installationTeamId: string | undefined;
   readonly kind: "app_mention" | "channel_message" | "direct_message";
   readonly message: SlackMessage;
   readonly threadContext: LoadThreadContextMessagesOptions | undefined;
@@ -1119,12 +1137,14 @@ async function dispatchSlackMessage(input: {
     botUserId: input.botUserId,
     channelId: input.message.channelId,
     threadTs: input.message.threadTs,
+    installationTeamId: input.installationTeamId,
     teamId: input.message.teamId,
   });
   const author = input.message.author;
   const channelState: SlackChannelState = {
     audience: "unknown",
     channelId: input.message.channelId,
+    installationTeamId: input.installationTeamId ?? null,
     teamId: input.message.teamId ?? null,
     threadTs: input.message.threadTs,
     triggeringUserId: author?.userId ?? null,
@@ -1199,6 +1219,7 @@ async function dispatchSlackEvent(input: {
   readonly credentials: SlackChannelCredentials | undefined;
   readonly envelope: SlackEventEnvelope;
   readonly handler: NonNullable<SlackChannelConfig["onEvent"]>;
+  readonly installationTeamId: string | undefined;
 }): Promise<void> {
   const eventTeamId = input.envelope.event.team_id;
   const teamId =
@@ -1226,6 +1247,7 @@ async function dispatchSlackEvent(input: {
         {
           from: input.from,
           credentials: input.credentials,
+          installationTeamId: input.installationTeamId,
           teamId,
           ...(typeof input.envelope.event.user === "string"
             ? { triggeringUserId: input.envelope.event.user }
@@ -1234,6 +1256,7 @@ async function dispatchSlackEvent(input: {
       ),
     slack: buildSlackWorkspaceHandle({
       botToken: input.credentials?.botToken,
+      installationTeamId: input.installationTeamId,
       teamId,
     }),
     waitUntil(task) {

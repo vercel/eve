@@ -6,6 +6,7 @@ import {
   parseDirectMessageEvent,
   parseMessageEvent,
   parseSlackEventEnvelope,
+  slackEventInstallationTeamId,
   slackMessageFromWebhookPayload,
 } from "#public/channels/slack/inbound.js";
 
@@ -52,6 +53,33 @@ describe("parseSlackEventEnvelope", () => {
 
   it("throws for invalid JSON", () => {
     expect(() => parseSlackEventEnvelope("not-json")).toThrow();
+  });
+});
+
+describe("slackEventInstallationTeamId", () => {
+  const envelope = (
+    authorizations: readonly { is_bot?: boolean; team_id?: string; user_id?: string }[],
+  ) => ({ type: "event_callback" as const, authorizations });
+
+  it("prefers the bot installation over other authorizations", () => {
+    expect(
+      slackEventInstallationTeamId(
+        envelope([
+          { is_bot: false, team_id: "T_USER", user_id: "U1" },
+          { is_bot: true, team_id: "T_BOT", user_id: "U_BOT" },
+        ]),
+      ),
+    ).toBe("T_BOT");
+  });
+
+  it("falls back to an authorization that omits is_bot", () => {
+    expect(slackEventInstallationTeamId(envelope([{ team_id: "T_UNKNOWN" }]))).toBe("T_UNKNOWN");
+  });
+
+  it("accepts an is_bot false authorization for a bot app_mention", () => {
+    expect(
+      slackEventInstallationTeamId(envelope([{ is_bot: false, team_id: "T_INSTALLATION" }])),
+    ).toBe("T_INSTALLATION");
   });
 });
 

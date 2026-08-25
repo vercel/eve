@@ -6,51 +6,33 @@ import type {
   CompiledAgentNodeManifest,
   CompiledAgentResources,
 } from "#compiler/manifest.js";
-import type { ModuleSourceRef } from "#shared/source-ref.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import {
-  collectModuleRefsForManifest,
+  collectModuleBindingsForManifest,
   compiledModuleMapSchema,
+  resolveCompiledModuleExtensionScopeNamespace,
   type CompiledModuleMap,
 } from "#compiler/module-map.js";
+import { loadFrameworkProgrammaticModule } from "#framework/sources/registry.js";
+import { loadAuthoredModuleNamespace } from "#internal/authored-module-loader.js";
+import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
 import type { RuntimeDiskCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { formatValidationError } from "#runtime/validation.js";
-import { loadAuthoredModuleNamespace } from "#internal/authored-module-loader.js";
-import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
 
-/**
- * Ambient namespace read by `defineExtension` when it is evaluated from a module
- * the bundler could not scope — specifically a mount's extension package, which
- * resolves cross-package and so loads unbundled in the dev/eval loader. Set only
- * around the synchronous evaluation of one mount module (see below), so it never
- * leaks into consumer code.
- */
 const EXT_CONFIG_SCOPE = Symbol.for("eve.ext-config-scope");
 
-/**
- * Loads a disk-backed module map by hydrating authored modules directly from
- * source. This is for dev/build flows that need tsconfig alias support and
- * source reloads without relying on Node's module cache for module-map.mjs.
- */
+/** Hydrates the compiled module map from the exact physical bindings in the manifest. */
 export async function loadCompiledModuleMapFromAuthoredSource(input: {
   readonly compiledArtifactsSource: RuntimeDiskCompiledArtifactsSource;
 }): Promise<CompiledModuleMap> {
   const manifest = await loadCompiledManifest({
     compiledArtifactsSource: input.compiledArtifactsSource,
   });
-
   return await hydrateCompiledModuleMapFromManifest(
     manifest,
     input.compiledArtifactsSource.appRoot,
   );
-}
-
-interface ExtensionScopeIndex {
-  /** Mount namespace (from `ext:<ns>:` source ids) to package namespace. */
-  readonly byMountNamespace: ReadonlyMap<string, string>;
-  /** Mount module source id to package namespace. */
-  readonly byMountSourceId: ReadonlyMap<string, string>;
 }
 
 async function hydrateCompiledModuleMapFromManifest(
@@ -66,76 +48,47 @@ async function hydrateCompiledModuleMapFromManifest(
   }
 
   const nodes: CompiledModuleMap["nodes"] = {};
-  const nodeManifests: Array<{
-    additionalModuleRef?: ModuleSourceRef;
-    agentRoot: string;
-    externalDependencies: readonly string[];
-    manifest: CompiledAgentNodeManifest | CompiledAgentResources;
-    nodeId: string;
+  const nodeManifests: ReadonlyArray<{
+    readonly manifest: CompiledAgentNodeManifest | CompiledAgentResources;
+    readonly nodeId: string;
   }> = [
-    {
-      agentRoot: manifest.agentRoot,
-      externalDependencies: manifest.config.build?.externalDependencies ?? [],
-      manifest,
-      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
-    },
+    { manifest, nodeId: ROOT_COMPILED_AGENT_NODE_ID },
     ...[...manifest.subagents]
       .sort((left, right) => left.nodeId.localeCompare(right.nodeId))
-      .map((subagent) => ({
-        additionalModuleRef: subagent.configResolver,
-        agentRoot: subagent.agent.agentRoot,
-        externalDependencies:
-          subagent.configResolver === undefined
-            ? (subagent.agent.config.build?.externalDependencies ?? [])
-            : (subagent.configResolver.build?.externalDependencies ?? []),
-        manifest: subagent.agent,
-        nodeId: subagent.nodeId,
-      })),
+      .map((subagent) => ({ manifest: subagent.agent, nodeId: subagent.nodeId })),
   ];
-  const nodeManifestById = new Map(nodeManifests.map((entry) => [entry.nodeId, entry.manifest]));
-  const parentNodeIdByChild = new Map(
-    manifest.subagentEdges.map((edge) => [edge.childNodeId, edge.parentNodeId]),
-  );
-  const extensionNamespacesByNodeId = new Map<string, ReadonlyMap<string, string>>();
-  const extensionNamespacesForNode = (nodeId: string): ReadonlyMap<string, string> => {
-    const cached = extensionNamespacesByNodeId.get(nodeId);
-    if (cached !== undefined) return cached;
-
-    const parentNodeId = parentNodeIdByChild.get(nodeId);
-    const namespaces = new Map(
-      parentNodeId === undefined ? [] : extensionNamespacesForNode(parentNodeId),
-    );
-    for (const mount of nodeManifestById.get(nodeId)?.extensionMounts ?? []) {
-      namespaces.set(mount.namespace, mount.packageNamespace);
-    }
-    extensionNamespacesByNodeId.set(nodeId, namespaces);
-    return namespaces;
-  };
-
-  for (const nodeManifest of nodeManifests) {
-    const scopeIndex: ExtensionScopeIndex = {
-      byMountNamespace: extensionNamespacesForNode(nodeManifest.nodeId),
-      byMountSourceId: new Map(
-        nodeManifest.manifest.extensionMounts.map((mount) => [
-          mount.mountSourceId,
-          mount.packageNamespace,
-        ]),
-      ),
-    };
-    nodes[nodeManifest.nodeId] = {
-      modules: await hydrateCompiledNodeScope({
-        agentRoot: nodeManifest.agentRoot,
-        additionalModuleRef: nodeManifest.additionalModuleRef,
-        externalDependencies: nodeManifest.externalDependencies,
-        manifest: nodeManifest.manifest,
-        scopeIndex,
-      }),
+  for (const node of nodeManifests) {
+    nodes[node.nodeId] = {
+      modules: await hydrateCompiledNodeScope(node.manifest),
     };
   }
+  return { nodes };
+}
 
-  return {
-    nodes,
-  };
+async function hydrateCompiledNodeScope(
+  manifest: CompiledAgentNodeManifest | CompiledAgentResources,
+): Promise<CompiledModuleMap["nodes"][string]["modules"]> {
+  const mountScopes = new Map(
+    manifest.extensionMounts.map((mount) => [mount.mountSourceId, mount.packageNamespace]),
+  );
+  const container = globalThis as Record<symbol, unknown>;
+  const modules: CompiledModuleMap["nodes"][string]["modules"] = {};
+  for (const { binding, sourceId } of collectModuleBindingsForManifest(manifest)) {
+    const mountConfigScope = mountScopes.get(sourceId);
+    if (mountConfigScope !== undefined) container[EXT_CONFIG_SCOPE] = mountConfigScope;
+    try {
+      modules[sourceId] =
+        binding.backing.kind === "programmatic"
+          ? await loadFrameworkProgrammaticModule(binding.backing)
+          : await loadAuthoredModuleNamespace(binding.backing.sourcePath, {
+              externalDependencies: binding.backing.externalDependencies,
+              extensionScopeNamespace: resolveCompiledModuleExtensionScopeNamespace(binding),
+            });
+    } finally {
+      if (mountConfigScope !== undefined) container[EXT_CONFIG_SCOPE] = undefined;
+    }
+  }
+  return modules;
 }
 
 async function loadMaterializedCompiledModuleMap(input: {
@@ -149,66 +102,10 @@ async function loadMaterializedCompiledModuleMap(input: {
   const parsed = compiledModuleMapSchema.safeParse(
     moduleNamespace.moduleMap ?? moduleNamespace.default,
   );
-
   if (!parsed.success) {
     throw new Error(
       `Expected materialized authored module map "${moduleMapPath}" to export a valid compiled eve module map. ${formatValidationError(parsed.error)}`,
     );
   }
-
   return parsed.data;
-}
-
-/**
- * Resolves the package namespace an extension-owned source id belongs to.
- * Composed sources are keyed `ext:<mountNamespace>:<originalSourceId>`.
- */
-function extensionNamespaceForSourceId(
-  sourceId: string,
-  index: ExtensionScopeIndex,
-): string | undefined {
-  const match = sourceId.match(/^ext:([^:]+):/);
-  return match === null ? undefined : index.byMountNamespace.get(match[1]!);
-}
-
-async function hydrateCompiledNodeScope(input: {
-  additionalModuleRef?: ModuleSourceRef;
-  agentRoot: string;
-  externalDependencies: readonly string[];
-  manifest: CompiledAgentNodeManifest | CompiledAgentResources;
-  scopeIndex: ExtensionScopeIndex;
-}): Promise<CompiledModuleMap["nodes"][string]["modules"]> {
-  const refs = [
-    ...collectModuleRefsForManifest(input.manifest),
-    ...(input.additionalModuleRef === undefined ? [] : [input.additionalModuleRef]),
-  ].sort((left, right) => left.sourceId.localeCompare(right.sourceId));
-  const container = globalThis as Record<symbol, unknown>;
-  const modules: CompiledModuleMap["nodes"][string]["modules"] = {};
-
-  for (const ref of refs) {
-    const modulePath = join(input.agentRoot, ref.logicalPath);
-    const extensionScopeNamespace = extensionNamespaceForSourceId(ref.sourceId, input.scopeIndex);
-
-    // A mount module (e.g. `agent/extensions/crm.ts`) imports the extension
-    // package cross-package, so its config handle loads unbundled and the
-    // bundler cannot scope it. Set the ambient config scope around this one
-    // synchronous load so the mount's `defineExtension` binds under the package
-    // namespace — matching what the extension's own bundled tools read.
-    const mountConfigScope = input.scopeIndex.byMountSourceId.get(ref.sourceId);
-    if (mountConfigScope !== undefined) {
-      container[EXT_CONFIG_SCOPE] = mountConfigScope;
-    }
-    try {
-      modules[ref.sourceId] = await loadAuthoredModuleNamespace(modulePath, {
-        externalDependencies: input.externalDependencies,
-        extensionScopeNamespace,
-      });
-    } finally {
-      if (mountConfigScope !== undefined) {
-        container[EXT_CONFIG_SCOPE] = undefined;
-      }
-    }
-  }
-
-  return modules;
 }

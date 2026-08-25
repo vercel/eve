@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Card, CardText } from "#compiled/chat/index.js";
 import { decodeSlackApiBody } from "#public/channels/slack/api-encoding.js";
-import { buildSlackBinding, callSlackApi } from "#public/channels/slack/api.js";
+import {
+  buildSlackBinding,
+  callSlackApi,
+  resolveSlackBotToken,
+  type SlackBotTokenContext,
+} from "#public/channels/slack/api.js";
 
 interface FetchCall {
   url: string;
@@ -954,5 +959,43 @@ describe("auto-anchor on first post", () => {
     await Promise.all([thread.post("a"), thread.post("b"), thread.post("c")]);
 
     expect(anchors).toHaveLength(1);
+  });
+});
+
+describe("Slack bot token context", () => {
+  let mock: ReturnType<typeof buildFetchMock>;
+
+  beforeEach(() => {
+    mock = buildFetchMock();
+    vi.stubGlobal("fetch", mock.fetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("passes explicit identity to a context-aware token provider", async () => {
+    const botToken = vi.fn((context: SlackBotTokenContext) => {
+      expect(context).toEqual({ teamId: "T01" });
+      return "xoxb-team-one";
+    });
+
+    await callSlackApi({
+      botToken,
+      context: { teamId: "T01" },
+      operation: "auth.test",
+      body: {},
+    });
+
+    expect(botToken).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps zero-argument token providers supported", async () => {
+    const botToken = vi.fn(() => "xoxb-legacy");
+
+    const token = await resolveSlackBotToken(botToken, { teamId: "T01" });
+
+    expect(token).toBe("xoxb-legacy");
+    expect(botToken).toHaveBeenCalledTimes(1);
   });
 });

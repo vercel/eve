@@ -7,7 +7,7 @@ import {
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 import { resolveConnectionDefinition } from "#runtime/resolve-connection.js";
-import type { ConnectionAuthResolver, HeadersDefinition } from "#runtime/connections/types.js";
+import type { ConnectionAuthResolver, HeadersDefinition } from "#shared/connection-types.js";
 
 describe("resolveConnectionDefinition", () => {
   it("preserves live MCP callbacks for request-time resolution", async () => {

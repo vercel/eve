@@ -1671,7 +1671,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-gchat#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1697,7 +1697,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-whatsapp#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1721,7 +1721,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-x#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1746,7 +1746,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-messenger#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1770,7 +1770,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-zernio#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1794,7 +1794,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-velt#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1819,7 +1819,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-sendblue#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1843,7 +1843,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-novu#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1867,7 +1867,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-liveblocks#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1912,7 +1912,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-kapso#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1957,7 +1957,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-dial#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1982,7 +1982,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-agentphone#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -2006,7 +2006,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-lark#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -2030,7 +2030,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-beeper#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -2055,7 +2055,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-resend#configure",
           "implementation": "chat-sdk"
         }
       }

@@ -275,7 +275,10 @@ async function installScenarioDependencies(input: {
     // A project .npmrc overrides any host-global release-age gate, which
     // would otherwise reject the workspace's freshly published dependency
     // versions and make the test outcome depend on host configuration.
-    await writeFile(join(input.appRoot, ".npmrc"), "min-release-age=0\n");
+    await writeFile(
+      join(input.appRoot, ".npmrc"),
+      "registry=https://registry.npmjs.org/\nmin-release-age=0\n",
+    );
     await runInstallCommand(input.appRoot, "npm", [
       "install",
       "--no-audit",
@@ -293,6 +296,7 @@ async function installScenarioDependencies(input: {
       join(input.appRoot, "bunfig.toml"),
       ["[install]", "minimumReleaseAge = 0", ""].join("\n"),
     );
+    await writeFile(join(input.appRoot, ".npmrc"), "registry=https://registry.npmjs.org/\n");
     await runInstallCommand(input.appRoot, "bun", ["install", "--ignore-scripts"]);
     return;
   }
@@ -320,6 +324,10 @@ async function runInstallCommand(
   try {
     await runFile(command, [...args], {
       cwd: appRoot,
+      env: {
+        ...process.env,
+        NPM_CONFIG_USERCONFIG: join(appRoot, ".npmrc"),
+      },
       maxBuffer: 10 * 1024 * 1024,
       shell: process.platform === "win32",
     });

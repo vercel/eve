@@ -43,7 +43,7 @@ export interface ConversationItem {
   readonly error: boolean;
 }
 
-/** Dispatch lineage for a subagent turn, read from the turn span. */
+/** Dispatch lineage for a subagent turn, read from its parent action span. */
 export interface ConversationSubagent {
   /** Subagent name, when the turn arrived through the subagent adapter. */
   readonly name?: string;
@@ -63,7 +63,7 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
   for (const span of trace.spans) {
     if (span.name !== "agent.turn") continue;
     const turnId = stringAttribute(span, "agent.turn.id");
-    const subagent = turnSubagent(span);
+    const subagent = turnSubagent(span, byId);
     if (turnId !== undefined && subagent !== undefined) subagents.set(turnId, subagent);
   }
   const entries: { readonly item: ConversationItem; readonly order: bigint }[] = [];
@@ -192,14 +192,21 @@ function subagentFor(
   return undefined;
 }
 
-/** Reads the dispatch lineage a subagent turn carries on its turn span. */
-function turnSubagent(turn: LocalTraceSpan): ConversationSubagent | undefined {
-  const parentTurnId = stringAttribute(turn, "agent.parent.turn.id");
+/** Reads subagent identity from the action span that directly parents its turn. */
+function turnSubagent(
+  turn: LocalTraceSpan,
+  byId: ReadonlyMap<string, LocalTraceSpan>,
+): ConversationSubagent | undefined {
+  const parent = turn.parentSpanId === undefined ? undefined : byId.get(turn.parentSpanId);
+  if (parent?.name !== "agent.action") return undefined;
+  const kind = stringAttribute(parent, "agent.action.kind");
+  if (kind !== "subagent-call" && kind !== "remote-agent-call") return undefined;
+  const parentTurnId = stringAttribute(parent, "agent.turn.id");
   if (parentTurnId === undefined) return undefined;
-  const name = stringAttribute(turn, "agent.subagent.name");
+  const name = stringAttribute(parent, "agent.action.name");
   return {
     name: name === undefined ? undefined : stripTerminalControls(name),
-    parentCallId: stringAttribute(turn, "agent.parent.call_id"),
+    parentCallId: stringAttribute(parent, "agent.action.call_id"),
     parentTurnId,
   };
 }

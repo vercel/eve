@@ -3,7 +3,7 @@ title: "Built-in Tools"
 description: "The default and opt-in tools eve provides, including HarnessAgent, Workflow, glob, grep, and sleep."
 ---
 
-eve provides a default tool set for every agent and additional framework tools you can add with one file. Use this page to review what the model can call, opt into more capabilities, or override and disable defaults. For custom tools, see [Tools](../tools).
+eve provides a default tool set for every agent and additional tools you can add with one file. Each default occupies the same `agent/tools/<name>.ts` slot you would author yourself, so an authored definition replaces it and `disableTool()` removes it. Use this page to review what the model can call, opt into more capabilities, or override and disable defaults. For custom tools, see [Tools](../tools).
 
 ## Default tools
 
@@ -30,8 +30,9 @@ Notes:
 
 - **`agent`** is available only in the root session. Its child uses the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and fresh [state](./state). The child receives neither `agent` nor `Workflow`; declared subagents do not receive the built-in `agent` either. See [Subagents](../subagents).
 - **`load_skill`** only pulls instructions into context. It adds no new execution surface, because behavior still comes from the tools the agent already has.
-- **`connection_search`** surfaces a connection's tools by their qualified name (e.g. `linear__list_issues`), which the model can then call directly. It's registered only when the agent has connections.
+- **`connection_search`** surfaces a connection's tools by their qualified name (e.g. `linear__list_issues`), which the model can then call directly. The model sees it only when the agent has connections.
 - **`web_search`** has no local executor; the provider runs it. AI Gateway models use Exa by default. To use Parallel instead, export `webSearch({ provider: "parallel" })` from `agent/tools/web_search.ts`. Direct provider models continue to use their native search implementation. To supply your own implementation, override it with `defineTool()`.
+- **`web_fetch`** follows up to ten redirects, rechecking every destination for SSRF safety. Non-success HTTP responses return a plain-text failure result with the response body when available instead of failing the tool call.
 
 Review these default tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
 
@@ -71,7 +72,7 @@ Author a tool at the same slug and it takes over the built-in of that name. The 
 
 ```ts title="agent/tools/write_file.ts"
 import { defineTool } from "eve/tools";
-import { writeFile } from "eve/tools/defaults";
+import { writeFile } from "eve/tools/write_file";
 
 export default defineTool({
   ...writeFile, // keep the default description, schema, and executor
@@ -82,7 +83,20 @@ export default defineTool({
 });
 ```
 
-Framework tool definitions are importable from `eve/tools/defaults` (`bash`, `readFile`, `writeFile`, `glob`, `grep`, `webFetch`, `todo`, `loadSkill`), so you can spread, wrap, or patch them. Importing a definition does not add it to an agent; export it from the corresponding `agent/tools/*.ts` file. Skip the spread and your replacement owns its own context. A fresh `defineTool` for `todo` won't inherit the framework's durable state key.
+Import each reusable definition from its own subpath:
+
+| Definition  | Import                 | Registered by default |
+| ----------- | ---------------------- | --------------------- |
+| `bash`      | `eve/tools/bash`       | Yes                   |
+| `readFile`  | `eve/tools/read_file`  | Yes                   |
+| `writeFile` | `eve/tools/write_file` | Yes                   |
+| `todo`      | `eve/tools/todo`       | Yes                   |
+| `webFetch`  | `eve/tools/web_fetch`  | Yes                   |
+| `loadSkill` | `eve/tools/load_skill` | Yes                   |
+| `glob`      | `eve/tools/glob`       | No                    |
+| `grep`      | `eve/tools/grep`       | No                    |
+
+Importing a definition does not add it to an agent; export it from the corresponding `agent/tools/*.ts` file. Skip the spread and your replacement owns its own context. A fresh `defineTool` for `todo` does not inherit the default's durable state key.
 
 Provider-managed web search has a dedicated configuration helper instead of an executable default:
 
@@ -112,7 +126,7 @@ If the filename matches no known framework tool, resolution fails instead of sil
 
 Three moves shape the harness. The right one depends on whether the model should keep the built-in capability.
 
-- **Override** when you want the same capability with different behavior. Spread the default from `eve/tools/defaults` and wrap it (logging, an extra guard, a different backend), and the model still sees a tool by that name. Spreading keeps the default's description, schema, and any framework state, such as the `todo` tool's durable state key. Drop the spread and your replacement owns its own context, losing that wiring.
+- **Override** when you want the same capability with different behavior. Import its definition from the matching `eve/tools/<name>` subpath and wrap it (logging, an extra guard, or a different backend), and the model still sees a tool by that name. Spreading keeps the default's description, schema, and any framework state, such as the `todo` tool's durable state key. Drop the spread and your replacement owns its own context, losing that wiring.
 - **Disable** when the model should not have the capability at all. A `disableTool()` sentinel removes the built-in, and the model never sees it. Reach for this to lock down `bash` or `web_fetch` in an agent that should not run shell commands or fetch arbitrary URLs.
 - **Author a new tool** when you want a capability the harness does not ship. Give it a fresh slug under `agent/tools/` and it joins the built-ins instead of replacing one. See [Tools](../tools) for the authoring model.
 

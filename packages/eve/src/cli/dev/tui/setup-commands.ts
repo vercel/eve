@@ -47,6 +47,8 @@ export interface TuiSetupCommandInput {
   renderer: TuiSetupCommandRenderer;
   /** Initial model-flow step authorized by the runner's boot evidence. */
   initialModelStep?: "provider";
+  /** Registry address from `/add <item>`, opening that item instead of the browser. */
+  initialRegistryAddress?: string;
   /** Live ChatGPT identity shown only inside model configuration UI. */
   chatGptAccountLabel?: string;
   /** Suspends development runtime artifacts while registry installation and setup mutate them. */
@@ -258,7 +260,15 @@ async function executeSetupCommand(
         return outcome;
       }
       case "add": {
-        const result = await flows.runRegistryFlow({ appRoot, prompter, signal });
+        const registryInput: Parameters<TuiSetupFlows["runRegistryFlow"]>[0] = {
+          appRoot,
+          prompter,
+          signal,
+        };
+        if (input.initialRegistryAddress !== undefined) {
+          registryInput.initialAddress = input.initialRegistryAddress;
+        }
+        const result = await flows.runRegistryFlow(registryInput);
         if (result.kind === "cancelled") {
           return { message: "/add dismissed.", preserveFlowDiagnostics: true };
         }

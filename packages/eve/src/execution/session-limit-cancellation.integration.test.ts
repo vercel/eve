@@ -77,7 +77,7 @@ function requestIdFromPromptTurn(events: readonly UnstampedMessageStreamEvent[])
 
 describe("session-limit continuation decline integration", () => {
   it("cancels the turn and keeps the session resumable when the user declines", async () => {
-    const runtime = createTestRuntime({
+    const runtime = await createTestRuntime({
       agent: { limits: { maxInputTokensPerSession: 1 }, name: "limit-decline-root" },
     });
     const continuationToken = "http:limit-decline-root";
@@ -143,7 +143,7 @@ describe("session-limit continuation decline integration", () => {
   }, 60_000);
 
   it("fails a zero-quota delegation fast and declines the root's own prompt", async () => {
-    const runtime = createTestRuntime({
+    const runtime = await createTestRuntime({
       agent: { limits: { maxInputTokensPerSession: 1 }, name: "limit-decline-child" },
     });
     const continuationToken = "http:limit-decline-child";

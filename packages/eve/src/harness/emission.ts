@@ -48,10 +48,7 @@ import {
   isInvalidToolCall,
   resolveProviderToolCallRequest,
 } from "#harness/tool-call-input-errors.js";
-import type {
-  RuntimeActionRequest,
-  RuntimeToolResultActionResult,
-} from "#runtime/actions/types.js";
+import type { RuntimeActionRequest, RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
 import { normalizeModelStreamError } from "#harness/model-call-error.js";
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";

@@ -99,6 +99,7 @@ function createResolvedToolDefinition(input: {
     },
     logicalPath: input.logicalPath,
     name: input.name,
+    owner: { kind: "application" },
     sourceId: input.sourceId,
     sourceKind: "module",
   };

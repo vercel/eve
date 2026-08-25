@@ -14,6 +14,10 @@ import { useTemporaryDirectories } from "../../src/internal/testing/use-temporar
 const EVE_BIN_PATH = fileURLToPath(new URL("../../bin/eve.js", import.meta.url));
 const runFile = promisify(execFile);
 const RELEASE_AGE_MINUTES = "2880";
+// Changesets opens Version Packages PRs on `changeset-release/<base>`. Those
+// PRs bump package.json before npm has that version, so a real registry
+// install of the scaffolded eve range cannot succeed yet.
+const isChangesetReleasePr = process.env.GITHUB_HEAD_REF?.startsWith("changeset-release/") === true;
 
 const createScratchDirectory = useTemporaryDirectories();
 
@@ -88,6 +92,9 @@ async function createFakePnpmEnvironment(scratch: string): Promise<{
   const env = {
     ...withoutCodingAgentMarkers(baseEnv),
     EVE_INIT_PNPM_LOG: logPath,
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "commit.gpgsign",
+    GIT_CONFIG_VALUE_0: "false",
     GIT_AUTHOR_EMAIL: "eve-init@example.com",
     GIT_AUTHOR_NAME: "eve Init",
     GIT_COMMITTER_EMAIL: "eve-init@example.com",
@@ -134,6 +141,9 @@ async function createFakeNpmEnvironment(scratch: string): Promise<{
   const env = {
     ...withoutCodingAgentMarkers(baseEnv),
     EVE_INIT_NPM_LOG: logPath,
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "commit.gpgsign",
+    GIT_CONFIG_VALUE_0: "false",
     GIT_AUTHOR_EMAIL: "eve-init@example.com",
     GIT_AUTHOR_NAME: "eve Init",
     GIT_COMMITTER_EMAIL: "eve-init@example.com",
@@ -156,35 +166,38 @@ async function createFakeNpmEnvironment(scratch: string): Promise<{
 }
 
 describe("eve init smoke", () => {
-  it("resolves a standalone pnpm scaffold under the release-age policy", async () => {
-    const scratch = await createScratchDirectory("eve-init-release-age-");
-    const env = {
-      ...withoutCodingAgentMarkers(process.env),
-      // The agent path skips the interactive dev handoff, which cannot run
-      // against the real pnpm install this scenario performs.
-      AI_AGENT: "claude",
-      CI: "true",
-      PNPM_CONFIG_MINIMUM_RELEASE_AGE: RELEASE_AGE_MINUTES,
-      // A fresh eve release is younger than the policy window, so resolution
-      // would rightly fail. Internal testing opts the framework package out
-      // through the environment instead of any scaffold-owned bypass.
-      PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE: '["eve"]',
-    };
+  it.skipIf(isChangesetReleasePr)(
+    "resolves a standalone pnpm scaffold under the release-age policy",
+    async () => {
+      const scratch = await createScratchDirectory("eve-init-release-age-");
+      const env = {
+        ...withoutCodingAgentMarkers(process.env),
+        // The agent path skips the interactive dev handoff, which cannot run
+        // against the real pnpm install this scenario performs.
+        AI_AGENT: "claude",
+        CI: "true",
+        PNPM_CONFIG_MINIMUM_RELEASE_AGE: RELEASE_AGE_MINUTES,
+        // A fresh eve release is younger than the policy window, so resolution
+        // would rightly fail. Internal testing opts the framework package out
+        // through the environment instead of any scaffold-owned bypass.
+        PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE: '["eve"]',
+      };
 
-    const result = await runEveBin(scratch, ["init", "policy-agent"], env);
+      const result = await runEveBin(scratch, ["init", "policy-agent"], env);
 
-    expect(result.exitCode, result.stderr).toBe(0);
-    const projectDir = join(scratch, "policy-agent");
-    await expect(readFile(join(projectDir, "pnpm-workspace.yaml"), "utf8")).resolves.not.toContain(
-      "minimumReleaseAgeExclude:",
-    );
-    await expect(
-      runFile("pnpm", ["add", "--ignore-scripts", "--lockfile-only", "is-number@7.0.0"], {
-        cwd: projectDir,
-        env,
-      }),
-    ).resolves.toMatchObject({ stderr: expect.any(String) });
-  });
+      expect(result.exitCode, result.stderr).toBe(0);
+      const projectDir = join(scratch, "policy-agent");
+      await expect(
+        readFile(join(projectDir, "pnpm-workspace.yaml"), "utf8"),
+      ).resolves.not.toContain("minimumReleaseAgeExclude:");
+      await expect(
+        runFile("pnpm", ["add", "--ignore-scripts", "--lockfile-only", "is-number@7.0.0"], {
+          cwd: projectDir,
+          env,
+        }),
+      ).resolves.toMatchObject({ stderr: expect.any(String) });
+    },
+  );
 
   it("creates the base template with the default model and no Vercel state", async () => {
     const scratch = await createScratchDirectory("eve-init-");

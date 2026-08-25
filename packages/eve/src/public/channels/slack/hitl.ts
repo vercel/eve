@@ -23,7 +23,7 @@ import {
   type InputRequest,
   parseInputResponse,
   type ValidatedInputResponse,
-} from "#runtime/input/types.js";
+} from "#shared/input.js";
 
 /**
  * Wire-format prefix every framework HITL widget mints onto its
@@ -275,6 +275,8 @@ export function formatInputRequestFallbackText(request: InputRequest): string {
 export interface HitlFreeformModalMetadata {
   readonly continuationToken: string;
   readonly channelId: string;
+  /** Workspace whose app installation supplies credentials for modal follow-up API calls. */
+  readonly installationTeamId?: string;
   readonly threadTs: string;
   readonly messageTs: string;
   readonly requestId: string;

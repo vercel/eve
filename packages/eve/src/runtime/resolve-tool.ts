@@ -7,6 +7,7 @@ import { isToolSchema, toInputSchema, toOutputSchema } from "#shared/tool-schema
 import { toErrorMessage } from "#shared/errors.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
+import type { AgentSourceOwner } from "#compiler/source-graph.js";
 
 /**
  * Resolves one compiled authored tool into a runtime-owned definition
@@ -21,7 +22,20 @@ export async function resolveToolDefinition(
   definition: CompiledToolDefinition,
   moduleMap: CompiledModuleMap,
   nodeId: string | undefined,
+  owner: AgentSourceOwner,
 ): Promise<ResolvedToolDefinition> {
+  if (!definition.hasExecute) {
+    return {
+      description: definition.description,
+      inputSchema: toInputSchema(definition.inputSchema),
+      logicalPath: definition.logicalPath,
+      name: definition.name,
+      outputSchema: toOutputSchema(definition.outputSchema),
+      owner,
+      sourceId: definition.sourceId,
+      sourceKind: "module",
+    };
+  }
   try {
     const resolvedExportValue = await loadResolvedModuleExport({
       definition,
@@ -38,6 +52,7 @@ export async function resolveToolDefinition(
       kind: "tool",
       logicalPath: definition.logicalPath,
       name: definition.name,
+      owner,
     } as const;
 
     const sourceKey = `tool-source:${definition.sourceId}`;
@@ -48,7 +63,7 @@ export async function resolveToolDefinition(
     const execute = expectFunction(
       resolvedRecord.execute,
       describe(definition, "to provide an execute function"),
-    ) as ResolvedToolDefinition["execute"];
+    ) as NonNullable<ResolvedToolDefinition["execute"]>;
     const inputSchema = isToolSchema(resolvedRecord.inputSchema)
       ? resolvedRecord.inputSchema
       : toInputSchema(definition.inputSchema);
@@ -64,6 +79,7 @@ export async function resolveToolDefinition(
       inputSchema,
       logicalPath: definition.logicalPath,
       name: definition.name,
+      owner,
       outputSchema,
       sourceId: definition.sourceId,
       sourceKind: "module",

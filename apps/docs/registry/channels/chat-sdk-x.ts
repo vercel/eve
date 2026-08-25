@@ -7,10 +7,16 @@ export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
   adapters: { x: createXAdapter() },
   state: createMemoryState(),
+  // X buffers replies and posts once rather than editing a streamed message.
+  streaming: false,
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onDirectMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 

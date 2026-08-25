@@ -1,4 +1,5 @@
 export {
+  defaultLinqAuth,
   linqChannel,
   type LinqChannel,
   type LinqChannelConfig,

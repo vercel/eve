@@ -58,7 +58,7 @@ export interface LinqChannelConfig {
   readonly credentials?: LinqChannelCredentials;
   /** Per-event overrides for the underlying Chat SDK channel. */
   readonly events?: ChatSdkChannelEvents<{ linq: ReturnType<typeof createLinqAdapter> }>;
-  /** Inbound message policy. Defaults to dispatching every message with no user auth. */
+  /** Inbound message policy. Defaults to dispatching with the Linq message author's user auth. */
   readonly onMessage?: (
     ctx: LinqInboundMessageContext,
     message: Message,
@@ -150,8 +150,25 @@ async function resolveCredentialValue(value: LinqCredentialValue): Promise<strin
   return typeof value === "function" ? await value() : value;
 }
 
-async function defaultOnMessage(): Promise<LinqInboundResult> {
-  return { auth: null };
+/** Default Linq auth projection for inbound Chat SDK message authors. */
+export function defaultLinqAuth(message: Message): SessionAuthContext {
+  const attributes: Record<string, string> = {};
+  if (message.author.userName !== undefined) attributes.user_name = message.author.userName;
+  return {
+    attributes,
+    authenticator: "linq-message",
+    issuer: "linq",
+    principalId: `linq:${message.author.userId}`,
+    principalType: message.author.isBot ? "service" : "user",
+    subject: message.author.userId,
+  };
+}
+
+async function defaultOnMessage(
+  _ctx: LinqInboundMessageContext,
+  message: Message,
+): Promise<LinqInboundResult> {
+  return { auth: defaultLinqAuth(message) };
 }
 
 async function dispatchMessage(

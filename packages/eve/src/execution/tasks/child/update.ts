@@ -7,7 +7,7 @@ import {
 } from "#execution/subagent-adapter-state.js";
 import { createTaskControlError } from "#execution/tasks/parent/control-shared.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#shared/action-types.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-id.js";
 import type { TaskInboundUpdate } from "#tasks/types.js";
 

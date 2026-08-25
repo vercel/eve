@@ -90,7 +90,9 @@ export async function buildExtensionPackage(
       requires: await deriveExtensionCapabilityRequirements({
         declarationModule,
         manifest,
+        packageName: config.packageName,
         runtimeDependencies: config.runtimeDependencies,
+        shortName: config.shortName,
         sourceRoot: config.sourceRoot,
       }),
     });

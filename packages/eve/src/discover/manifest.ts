@@ -20,7 +20,7 @@ export const AGENT_SOURCE_MANIFEST_KIND = "eve-agent-discovery-manifest";
 /**
  * Current manifest schema version.
  */
-export const AGENT_SOURCE_MANIFEST_VERSION = 13;
+export const AGENT_SOURCE_MANIFEST_VERSION = 14;
 
 /**
  * Channel source reference preserved by the discovery manifest.
@@ -215,6 +215,8 @@ export interface AgentSourceManifest {
    * Empty when no instructions are authored.
    */
   instructions: InstructionsSourceRef[];
+  /** Authored single-file instrumentation module, when present. */
+  instrumentation?: ModuleSourceRef;
   /**
    * Authored sandbox module discovered for this agent, or `null` when
    * the agent does not declare one. Every agent owns at most one
@@ -257,6 +259,7 @@ export interface CreateAgentSourceManifestInput {
    */
   packageName?: string;
   instructions?: readonly InstructionsSourceRef[];
+  instrumentation?: ModuleSourceRef;
   sandbox?: SandboxSourceRef | null;
   sandboxWorkspaces?: readonly SandboxWorkspaceFolderSourceRef[];
   schedules?: readonly ScheduleSourceRef[];
@@ -337,6 +340,9 @@ export function createAgentSourceManifest(
 
   if (input.configModule !== undefined) {
     manifest.configModule = input.configModule;
+  }
+  if (input.instrumentation !== undefined) {
+    manifest.instrumentation = input.instrumentation;
   }
 
   return manifest;

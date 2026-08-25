@@ -1,5 +1,30 @@
 # @eve/self-modification
 
+## 5.0.4
+
+### Patch Changes
+
+- 7941ad9: Include authored TypeScript entrypoints in the published package so installed self-modification scaffolds compile without workspace source, and clean generated scaffold output before each build.
+- 05a53cd: The self-modification subagent can now search the eve registry. A new
+  `selfmod__search_registry` tool reports the channels, MCP connections,
+  extensions, and observability integrations a project can add — each with its
+  item address, whether the authored tree already holds it, and the eve version it
+  requires — so the subagent recommends `eve add channel/slack` instead of
+  hand-writing an integration the registry already ships. Search is read-only and
+  installs nothing. Results include pagination metadata so every match can be
+  retrieved, and bundle searches include their component names and metadata.
+- Updated dependencies [dbfa01c]
+- Updated dependencies [5a029d9]
+- Updated dependencies [2bbb775]
+- Updated dependencies [2a34f75]
+- Updated dependencies [1b1f2dd]
+- Updated dependencies [8f2bf7a]
+- Updated dependencies [bca1304]
+- Updated dependencies [50488a1]
+- Updated dependencies [94a0952]
+- Updated dependencies [4464e4d]
+  - eve@0.44.4
+
 ## 5.0.3
 
 ### Patch Changes
