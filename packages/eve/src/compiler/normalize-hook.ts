@@ -16,7 +16,7 @@ export async function compileHookEntry(
     await loadModuleBackedDefinition({
       binding: options.binding,
       kind: "hook",
-      registries: options.registries,
+      loadNamespace: options.loadNamespace,
       source,
     }),
     `Expected the hook export "${source.exportName ?? "default"}" from "${source.logicalPath}" to return an object.`,

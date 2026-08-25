@@ -23,7 +23,7 @@ export async function compileSandboxDefinition(
   const loaded = await loadModuleBackedDefinition({
     binding: options.binding,
     kind: "sandbox",
-    registries: options.registries,
+    loadNamespace: options.loadNamespace,
     source,
   });
   const inheritsParent = await resolveParentSandboxSelector(loaded, message);

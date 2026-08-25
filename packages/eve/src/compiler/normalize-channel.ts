@@ -32,7 +32,7 @@ export async function compileChannelDefinition(
   const rawValue = await loadModuleBackedDefinition({
     binding: options.binding,
     kind: "channel",
-    registries: options.registries,
+    loadNamespace: options.loadNamespace,
     source,
   });
 

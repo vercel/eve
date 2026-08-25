@@ -13,6 +13,7 @@ import { loadAuthoredModuleNamespace } from "#internal/authored-module-loader.js
 import { extensionUsesState } from "#internal/nitro/host/extension-state-usage.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { SourceDefinitionCompileOptions } from "#compiler/normalize-helpers.js";
+import { createCompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
 
 /** Derives only the extension-facing contracts used by one authored tree. */
 export async function deriveExtensionCapabilityRequirements(input: {
@@ -103,30 +104,34 @@ function createLoadOptions(
     readonly shortName: string;
     readonly sourceRoot: string;
   },
-  source: { readonly logicalPath: string },
+  source: { readonly logicalPath: string; readonly sourceId: string },
   moduleRoot: string,
 ): SourceDefinitionCompileOptions & {
   readonly binding: NonNullable<SourceDefinitionCompileOptions["binding"]>;
-  readonly registries: readonly [];
+  readonly loadNamespace: NonNullable<SourceDefinitionCompileOptions["loadNamespace"]>;
 } {
   const owner = {
     kind: "extension" as const,
     namespace: input.shortName,
     packageName: input.packageName,
   };
-  return {
-    binding: {
-      backing: {
-        externalDependencies: input.runtimeDependencies,
-        extensionScope: { namespace: input.shortName, sourceRoot: input.sourceRoot },
-        kind: "filesystem",
-        sourcePath: join(moduleRoot, source.logicalPath),
-      },
-      logicalPath: source.logicalPath,
-      owner,
+  const binding = {
+    backing: {
+      externalDependencies: input.runtimeDependencies,
+      extensionScope: { namespace: input.shortName, sourceRoot: input.sourceRoot },
+      kind: "filesystem" as const,
+      sourcePath: join(moduleRoot, source.logicalPath),
     },
+    logicalPath: source.logicalPath,
     owner,
-    registries: [],
+  };
+  return {
+    binding,
+    loadNamespace: createCompiledBindingNamespaceLoader({
+      bindings: { [source.sourceId]: binding },
+      registries: [],
+    }),
+    owner,
   };
 }
 

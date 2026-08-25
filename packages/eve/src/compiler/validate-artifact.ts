@@ -186,6 +186,7 @@ export function validateCompiledAgentResources(
       fail(`compiled binding "${sourceId}" is not referenced by its node manifest`);
     }
   }
+  validateProgrammaticBindingDependencies(node.bindings);
 
   const activeSourceIds = new Set([
     ...referencedModuleSources.keys(),
@@ -255,6 +256,40 @@ function validateBinding(
   ) {
     fail(`extension-owned filesystem binding "${sourceId}" has no extension scope`);
   }
+}
+
+function validateProgrammaticBindingDependencies(
+  bindings: Readonly<Record<string, CompiledModuleBinding>>,
+): void {
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (sourceId: string): void => {
+    if (visited.has(sourceId)) return;
+    if (visiting.has(sourceId)) {
+      fail(`programmatic binding dependency cycle includes "${sourceId}"`);
+    }
+    const binding = bindings[sourceId];
+    if (binding === undefined) fail(`programmatic binding dependency "${sourceId}" is missing`);
+    visiting.add(sourceId);
+    if (binding.backing.kind === "programmatic") {
+      for (const [alias, dependencySourceId] of Object.entries(
+        binding.backing.dependencies ?? {},
+      )) {
+        if (alias.trim().length === 0) {
+          fail(`programmatic binding "${sourceId}" has an empty dependency alias`);
+        }
+        if (bindings[dependencySourceId] === undefined) {
+          fail(
+            `programmatic binding "${sourceId}" depends on missing binding "${dependencySourceId}"`,
+          );
+        }
+        visit(dependencySourceId);
+      }
+    }
+    visiting.delete(sourceId);
+    visited.add(sourceId);
+  };
+  for (const sourceId of Object.keys(bindings)) visit(sourceId);
 }
 
 function collectReferencedModuleSources(

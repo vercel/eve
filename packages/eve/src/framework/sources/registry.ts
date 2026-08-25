@@ -8,7 +8,7 @@ import {
   type ProgrammaticModuleNamespace,
 } from "#compiler/source-graph.js";
 
-const revision = `eve@${resolveInstalledPackageInfo().version}:compiled-manifest-v42`;
+const revision = `eve@${resolveInstalledPackageInfo().version}:compiled-manifest-v43`;
 
 const localDefaults = defineProgrammaticAgentSource({
   id: "eve:defaults",
@@ -93,9 +93,11 @@ export const frameworkAgentSourceRegistry: AgentSourceRegistry = createAgentSour
 
 export async function loadFrameworkProgrammaticModule(
   backing: Extract<AgentModuleBacking, { readonly kind: "programmatic" }>,
+  dependencyNamespaces?: Readonly<Record<string, ProgrammaticModuleNamespace>>,
 ): Promise<ProgrammaticModuleNamespace> {
   return await loadProgrammaticModuleNamespace({
     backing,
+    dependencyNamespaces,
     registries: [frameworkAgentSourceRegistry],
   });
 }

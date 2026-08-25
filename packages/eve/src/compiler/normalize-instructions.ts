@@ -72,7 +72,7 @@ export async function compileInstructionsEntry(
   const exportValue = await loadModuleBackedDefinition({
     binding: loadOptions.binding,
     kind: "instructions",
-    registries: loadOptions.registries,
+    loadNamespace: loadOptions.loadNamespace,
     source,
   });
 
