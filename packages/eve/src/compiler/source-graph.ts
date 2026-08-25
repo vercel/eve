@@ -38,16 +38,21 @@ export interface AgentSourceRegistryOptions {
   readonly templates?: readonly ProgrammaticAgentSource[];
 }
 
+export interface RegisteredProgrammaticTemplate {
+  readonly module: ProgrammaticAgentModule;
+  readonly source: ProgrammaticAgentSource;
+}
+
 export interface AgentSourceRegistry {
   readonly registrations: readonly AgentSourceRegistration[];
   readonly sources: ReadonlyMap<string, ProgrammaticAgentSource>;
-  readonly templates: ReadonlyMap<string, ProgrammaticAgentSource>;
+  readonly templates: ReadonlyMap<string, RegisteredProgrammaticTemplate>;
 }
 
-class ImmutableProgrammaticSourceMap implements ReadonlyMap<string, ProgrammaticAgentSource> {
-  readonly #values: ReadonlyMap<string, ProgrammaticAgentSource>;
+class ImmutableProgrammaticSourceMap<T> implements ReadonlyMap<string, T> {
+  readonly #values: ReadonlyMap<string, T>;
 
-  constructor(values: ReadonlyMap<string, ProgrammaticAgentSource>) {
+  constructor(values: ReadonlyMap<string, T>) {
     this.#values = new Map(values);
     Object.freeze(this);
   }
@@ -60,26 +65,22 @@ class ImmutableProgrammaticSourceMap implements ReadonlyMap<string, Programmatic
     return "ImmutableProgrammaticSourceMap";
   }
 
-  [Symbol.iterator](): MapIterator<[string, ProgrammaticAgentSource]> {
+  [Symbol.iterator](): MapIterator<[string, T]> {
     return this.#values[Symbol.iterator]();
   }
 
-  entries(): MapIterator<[string, ProgrammaticAgentSource]> {
+  entries(): MapIterator<[string, T]> {
     return this.#values.entries();
   }
 
   forEach(
-    callbackfn: (
-      value: ProgrammaticAgentSource,
-      key: string,
-      map: ReadonlyMap<string, ProgrammaticAgentSource>,
-    ) => void,
+    callbackfn: (value: T, key: string, map: ReadonlyMap<string, T>) => void,
     thisArg?: unknown,
   ): void {
     this.#values.forEach((value, key) => callbackfn.call(thisArg, value, key, this));
   }
 
-  get(key: string): ProgrammaticAgentSource | undefined {
+  get(key: string): T | undefined {
     return this.#values.get(key);
   }
 
@@ -91,7 +92,7 @@ class ImmutableProgrammaticSourceMap implements ReadonlyMap<string, Programmatic
     return this.#values.keys();
   }
 
-  values(): MapIterator<ProgrammaticAgentSource> {
+  values(): MapIterator<T> {
     return this.#values.values();
   }
 }
@@ -111,7 +112,7 @@ export type AgentSourceLayer =
   | "extension-override"
   | "application";
 
-export type AgentSourceForm = "derived" | "authored";
+export type AgentSourceForm = "derived" | "direct";
 
 export type AgentModuleBacking =
   | {
@@ -207,8 +208,10 @@ const LAYER_PRECEDENCE: Readonly<Record<AgentSourceLayer, number>> = {
 
 const FORM_PRECEDENCE: Readonly<Record<AgentSourceForm, number>> = {
   derived: 0,
-  authored: 1,
+  direct: 1,
 };
+
+const registeredProgrammaticTemplates = new WeakSet<RegisteredProgrammaticTemplate>();
 
 export function defineProgrammaticAgentSource(
   input: ProgrammaticAgentSource,
@@ -247,7 +250,7 @@ export function createAgentSourceRegistry(
   options: AgentSourceRegistryOptions = {},
 ): AgentSourceRegistry {
   const sources = new Map<string, ProgrammaticAgentSource>();
-  const templates = new Map<string, ProgrammaticAgentSource>();
+  const templates = new Map<string, RegisteredProgrammaticTemplate>();
   const addSource = (inputSource: ProgrammaticAgentSource): ProgrammaticAgentSource => {
     const source = defineProgrammaticAgentSource(inputSource);
     if (sources.has(source.id)) {
@@ -261,8 +264,15 @@ export function createAgentSourceRegistry(
     return Object.freeze({ applyTo: registration.applyTo, source });
   });
   for (const inputTemplate of options.templates ?? []) {
-    const template = addSource(inputTemplate);
-    templates.set(template.id, template);
+    const source = addSource(inputTemplate);
+    if (source.modules.length !== 1) {
+      throw new Error(
+        `Programmatic template source "${source.id}" must register exactly one module.`,
+      );
+    }
+    const template = Object.freeze({ module: source.modules[0]!, source });
+    registeredProgrammaticTemplates.add(template);
+    templates.set(source.id, template);
   }
 
   return Object.freeze({
@@ -289,7 +299,7 @@ export function createProgrammaticModuleCandidates(input: {
         semanticRevision: module.semanticRevision,
       }),
       exportName: module.exportName,
-      form: "authored" as const,
+      form: "direct" as const,
       layer: input.layer,
       logicalPath: module.logicalPath,
       nodeId: input.nodeId,
@@ -299,27 +309,27 @@ export function createProgrammaticModuleCandidates(input: {
   });
 }
 
-export function createDerivedProgrammaticModuleCandidate(input: {
+export function instantiateProgrammaticTemplate(input: {
+  readonly anchor: AgentModuleCandidate;
   readonly dependencies: Readonly<Record<string, AgentModuleCandidate>>;
-  readonly layer: AgentSourceLayer;
   readonly logicalPath: string;
-  readonly nodeId: string;
   readonly owner: AgentSourceOwner;
   readonly parameters?: JsonObject;
-  readonly sourceId: string;
-  readonly template: {
-    readonly moduleId: string;
-    readonly source: ProgrammaticAgentSource;
-  };
+  readonly template: RegisteredProgrammaticTemplate;
 }): AgentModuleCandidate {
-  const sourceId = expectNonEmpty(input.sourceId, "Derived programmatic module source id");
+  if (!registeredProgrammaticTemplates.has(input.template)) {
+    throw new Error("Derived programmatic modules require a registered template.");
+  }
   const logicalPath = validateProgrammaticLogicalPath(input.logicalPath);
-  const source = defineProgrammaticAgentSource(input.template.source);
-  const moduleId = validateProgrammaticLogicalPath(input.template.moduleId);
-  const module = source.modules.find((candidate) => candidate.logicalPath === moduleId);
-  if (module === undefined) {
+  const anchorSourceId = expectNonEmpty(
+    input.anchor.sourceId,
+    "Derived programmatic module anchor source id",
+  );
+  const sourceId = `${input.template.source.id}:${logicalPath}:from:${anchorSourceId}`;
+  const dependencyCandidates = Object.values(input.dependencies);
+  if (!dependencyCandidates.some((candidate) => candidate.sourceId === anchorSourceId)) {
     throw new Error(
-      `Programmatic source "${source.id}" does not register template module "${moduleId}".`,
+      `Derived programmatic module "${sourceId}" must include its anchor source as a dependency.`,
     );
   }
   const dependencies = Object.freeze(
@@ -328,7 +338,7 @@ export function createDerivedProgrammaticModuleCandidate(input: {
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([alias, candidate]) => {
           expectNonEmpty(alias, "Derived programmatic module dependency alias");
-          if (candidate.nodeId !== input.nodeId) {
+          if (candidate.nodeId !== input.anchor.nodeId) {
             throw new Error(
               `Derived programmatic module "${sourceId}" cannot depend on source "${candidate.sourceId}" from another node.`,
             );
@@ -342,17 +352,17 @@ export function createDerivedProgrammaticModuleCandidate(input: {
     backing: Object.freeze({
       dependencies,
       kind: "programmatic" as const,
-      moduleId,
+      moduleId: input.template.module.logicalPath,
       parameters,
-      registryId: source.id,
-      revision: source.revision,
-      semanticRevision: module.semanticRevision,
+      registryId: input.template.source.id,
+      revision: input.template.source.revision,
+      semanticRevision: input.template.module.semanticRevision,
     }),
-    exportName: module.exportName,
+    exportName: input.template.module.exportName,
     form: "derived" as const,
-    layer: input.layer,
+    layer: input.anchor.layer,
     logicalPath,
-    nodeId: input.nodeId,
+    nodeId: input.anchor.nodeId,
     owner: input.owner,
     sourceId,
   });

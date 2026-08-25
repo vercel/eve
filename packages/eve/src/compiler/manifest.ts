@@ -399,7 +399,7 @@ const agentSourceDescriptorSchema: z.ZodType<AgentSourceDescriptor> = z
       programmaticModuleBackingSchema,
       resourceSourceBackingSchema,
     ]),
-    form: z.enum(["derived", "authored"]),
+    form: z.enum(["derived", "direct"]),
     layer: z.enum(["framework-default", "extension-package", "extension-override", "application"]),
     logicalPath: z.string(),
     owner: agentSourceOwnerSchema,

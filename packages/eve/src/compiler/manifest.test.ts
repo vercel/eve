@@ -11,7 +11,7 @@ import {
   validateCompiledModuleMap,
 } from "#compiler/validate-artifact.js";
 
-describe("compiled agent manifest v42", () => {
+describe("compiled agent manifest v43", () => {
   it("round-trips a real compiled graph through the serialized schema", async () => {
     const { manifest } = await compileFromMemory({
       model: "openai/gpt-5.4",
@@ -58,7 +58,7 @@ describe("compiled agent manifest v42", () => {
               method: "GET",
               source: {
                 backing: { kind: "resource", sourcePath: "/virtual/channels/loser.ts" },
-                form: "authored",
+                form: "direct",
                 layer: "application",
                 logicalPath: "channels/loser.ts",
                 owner: { kind: "application" },

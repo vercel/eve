@@ -181,6 +181,17 @@ interface AgentSourceRegistryOptions {
   readonly templates?: readonly ProgrammaticAgentSource[];
 }
 
+interface RegisteredProgrammaticTemplate {
+  readonly module: ProgrammaticAgentModule;
+  readonly source: ProgrammaticAgentSource;
+}
+
+interface AgentSourceRegistry {
+  readonly registrations: readonly AgentSourceRegistration[];
+  readonly sources: ReadonlyMap<string, ProgrammaticAgentSource>;
+  readonly templates: ReadonlyMap<string, RegisteredProgrammaticTemplate>;
+}
+
 function createAgentSourceRegistry(
   registrations: readonly AgentSourceRegistration[],
   options?: AgentSourceRegistryOptions,
@@ -219,16 +230,17 @@ default sandbox uses an explicit stable token so unrelated eve source changes
 do not discard durable sandbox state.
 
 Registries are explicitly assembled, statically imported, and immutable before
-compilation. Registrations are source overlays; templates are loadable module
-implementations used only by derived candidates and never inject candidates on
-their own. Registries are not global, side-effect-populated, or mutable at
-runtime. `root` applies only to the application root. `all-local-nodes` is a
-finite overlay applied after filesystem and extension nodes are discovered; it
-rejects `agent.ts`, `subagents/**`, `channels/**`, `schedules/**`, and
-`extensions/**`. A closed internal framework registration is the narrow
-exception that may provide the default `agent.ts` for every already-discovered
-local node. Arbitrary programmatic sources cannot use config to expand the
-graph recursively.
+compilation. Registrations are source overlays; each template is a single
+loadable module implementation used only by derived candidates and never
+injects a candidate on its own. Registration returns an opaque template handle,
+so candidate construction cannot accept an arbitrary unregistered source.
+Registries are not global, side-effect-populated, or mutable at runtime. `root`
+applies only to the application root. `all-local-nodes` is a finite overlay
+applied after filesystem and extension nodes are discovered; it rejects
+`agent.ts`, `subagents/**`, `channels/**`, `schedules/**`, and `extensions/**`.
+A closed internal framework registration is the narrow exception that may
+provide the default `agent.ts` for every already-discovered local node.
+Arbitrary programmatic sources cannot use config to expand the graph recursively.
 
 Framework registry modules contain literal dynamic imports inside namespace
 loaders. They do not statically import or evaluate definition modules while
@@ -254,7 +266,7 @@ type AgentSourceOwner =
 type AgentSourceLayer =
   "framework-default" | "extension-package" | "extension-override" | "application";
 
-type AgentSourceForm = "derived" | "authored";
+type AgentSourceForm = "derived" | "direct";
 
 interface AgentModuleCandidate {
   readonly backing:
@@ -285,6 +297,9 @@ interface AgentModuleCandidate {
 }
 ```
 
+`direct` means contributed to a slot without derivation; it does not imply a
+filesystem-authored or application-owned source.
+
 `logicalPath` is never used as an import path. Filesystem loading uses
 `sourcePath` plus its external-dependency and extension scope. Programmatic
 loading uses the exact registry/module/revision tuple. Missing or
@@ -307,14 +322,28 @@ selected memory/profile.ts ──dependency "memory"──> derived tools/profil
                                      ordinary slot composition and binding
 ```
 
-`createDerivedProgrammaticModuleCandidate` records dependency aliases as
-selected source IDs and behavior-critical JSON `parameters` in the
-programmatic backing. It does not evaluate either module. Dependencies must
-belong to the same node and remain selected after composition; an authored
-candidate wins over a derived candidate within the same source layer. Normal
-cross-layer precedence still applies, so an application-derived capability can
-replace an extension contribution while an application-authored source can
-replace or disable the derived capability.
+```ts
+function instantiateProgrammaticTemplate(input: {
+  readonly anchor: AgentModuleCandidate;
+  readonly dependencies: Readonly<Record<string, AgentModuleCandidate>>;
+  readonly logicalPath: string;
+  readonly owner: AgentSourceOwner;
+  readonly parameters?: JsonObject;
+  readonly template: RegisteredProgrammaticTemplate;
+}): AgentModuleCandidate;
+```
+
+`instantiateProgrammaticTemplate` requires a registry-issued template and an
+anchor candidate. It inherits the anchor's node and layer, derives stable
+provenance from the template, target path, and anchor source ID, and records
+dependency aliases as selected source IDs plus behavior-critical JSON
+`parameters` in the programmatic backing. The anchor must be one of those
+dependencies, every dependency must belong to its node, and all dependencies
+must remain selected after composition. The constructor does not evaluate any
+module. A direct candidate wins over a derived candidate within the same source
+layer. Normal cross-layer precedence still applies, so an application-derived
+capability can replace an extension contribution while a direct application
+source can replace or disable the derived capability.
 
 Templates are not an open projection callback or a mutable registry. A closed
 compiler feature decides when to instantiate one from the already-discovered
@@ -322,6 +351,9 @@ source graph, then the ordinary composer, binding table, normalizers, and
 module maps take over. Compiled dependency graphs reject missing bindings and
 cycles. Compilation, in-memory hydration, and generated module maps resolve
 dependencies in order and cache each selected namespace once per phase.
+Namespace caching does not cache materialized zero-argument definition exports;
+a feature that requires one shared definition instance across multiple slots
+must provide a separate per-phase materialization boundary.
 
 ### Required compiled bindings
 
@@ -408,7 +440,7 @@ definitions. Precedence is:
 
 ```text
 framework default < extension package < extension override < application
-derived < authored within one layer
+derived < direct within one layer
 ```
 
 For each slot it:
@@ -1089,7 +1121,7 @@ documentation.
 
 ### Follow-up — derived slot composition
 
-Programmatic templates, derived-vs-authored precedence within a layer, binding
+Programmatic templates, derived-vs-direct precedence within a layer, binding
 dependencies, serialized parameters, and dependency-aware namespace loading
 land as one focused source-graph extension before memory builds on the graph.
 `COMPILED_AGENT_MANIFEST_VERSION` moves from 42 to 43. This follow-up carries a
