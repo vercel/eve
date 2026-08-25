@@ -1,9 +1,13 @@
 import { defineEval } from "eve/evals";
 
 /**
- * Measures the consent round-trip for sandbox egress authorization:
- * challenge shown -> callback accepted -> parked turn resumed. Exists to
- * diagnose dev-world wake-up latency; not part of any CI suite.
+ * Automates the interactive park/resume crossing for sandbox egress
+ * authorization and measures the consent round-trip: challenge shown ->
+ * callback accepted -> parked turn resumed. `eve eval` sessions run as a
+ * synthetic authenticated user, so the eager interactive rule parks instead
+ * of failing. Requires linked-project Vercel Sandbox credentials
+ * (`vercel link && vercel env pull`); run on demand, not part of any CI
+ * suite.
  */
 export default defineEval({
   description: "Latency probe: sandbox egress consent callback to resume.",

@@ -38,6 +38,13 @@ In the TUI:
 4. Follow-up: `curl https://example.com` — blocked; egress is
    deny-by-default.
 
+The same flow runs unattended as an eval — the harness authenticates as a
+synthetic user and fetches the consent callback itself:
+
+```sh
+eve eval latency-probe
+```
+
 ## Mode 2 — on-request 428 flow (runs on a Vercel deployment)
 
 The full fail-fast loop — first request answered 428 by the egress proxy,

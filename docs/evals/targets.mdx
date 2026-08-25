@@ -31,7 +31,7 @@ Sessions attached this way are full `EveEvalSession`s: you can keep driving them
 
 ## Authentication
 
-Local targets send no auth: `eve eval` owns the dev server it boots. For a remote `--url`, eve gets the expected Vercel owner and project from `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` when both are set. Otherwise it reads `.vercel/project.json`. Eve then asks Vercel to resolve the exact HTTPS origin and sends ambient credentials only when the project IDs match. An arbitrary URL remains anonymous.
+For local targets, `eve eval` owns the dev server it boots: it mints a per-run secret, and the eval client presents it as the session bearer. The server authenticates it as a synthetic eval user (`principalType: "user"`), so user-scoped flows behave as they do for a real signed-in user — interactive connection authorization and sandbox egress consent park the turn and resume once the challenge URL is opened (an eval can `fetch` it directly), instead of failing on the synthetic local-dev principal. The secret never leaves the `eve eval` process, so ordinary deployments and `eve dev` servers cannot mint this principal. For a remote `--url`, eve gets the expected Vercel owner and project from `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` when both are set. Otherwise it reads `.vercel/project.json`. Eve then asks Vercel to resolve the exact HTTPS origin and sends ambient credentials only when the project IDs match. An arbitrary URL remains anonymous.
 
 After verification, eve sends the available Vercel credentials:
 

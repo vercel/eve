@@ -17,9 +17,19 @@ describe("resolveEvalClientOptions", () => {
     vi.unstubAllEnvs();
   });
 
-  it("uses a bare client for local targets", () => {
+  it("uses a bare client for local targets outside an evaluation run", () => {
     const options = resolveEvalClientOptions({ kind: "local", url: "http://127.0.0.1:3000" });
     expect(options).toEqual({ host: "http://127.0.0.1:3000" });
+  });
+
+  it("sends the evaluation run id as the local bearer so sessions get a user principal", () => {
+    vi.stubEnv("EVE_EVALUATION", "1");
+    vi.stubEnv("EVE_EVALUATION_RUN_ID", "run-id-123");
+    const options = resolveEvalClientOptions({ kind: "local", url: "http://127.0.0.1:3000" });
+    expect(options).toEqual({
+      auth: { bearer: "run-id-123" },
+      host: "http://127.0.0.1:3000",
+    });
   });
 
   it("keeps the synchronous remote options anonymous", () => {

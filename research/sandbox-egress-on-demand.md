@@ -1,6 +1,6 @@
 ---
 issue: https://github.com/vercel/eve/pull/59
-last_updated: "2026-08-24"
+last_updated: "2026-08-27"
 status: in_progress
 ---
 
@@ -81,16 +81,21 @@ through the ordinary fail → retry loop. Reference counting was rejected: paren
 steps run in different workflows with no shared durable home for a counter, and a leaked count
 pins credentials open, inverting the failure mode to the dangerous side.
 
-## Remaining work before merge
+## Interactive coverage
 
-- **Interactive park-crossing e2e coverage.** The `on-request-egress` eval in `agent-tools-sandbox`
-  covers the non-interactive loop end to end on a real deployment (forwardURL → proxy → attested
-  demand → settle → authorized retry). The interactive park/resume crossing has been validated
-  manually (the `egress-demo` fixture: eager interactive rule → park → local consent callback →
-  resume → authorized request, ~5s click-to-resume against a real Vercel Sandbox), but automating
-  it as an eval is blocked: interactive authorization is user-scoped in v1 and eval sessions carry
-  the synthetic `local-dev` principal, so the flow fails terminally before parking. The eval
-  harness needs a way to run a user-authenticated session.
+The `on-request-egress` eval in `agent-tools-sandbox` covers the non-interactive loop end to end
+on a real deployment (forwardURL → proxy → attested demand → settle → authorized retry).
+
+For the interactive park/resume crossing, the eval harness now runs user-authenticated sessions:
+`eve eval` mints a per-run secret, sends it as the local session bearer, and the framework channel
+authenticates it as a synthetic eval user (`principalType: "user"`), so user-scoped interactive
+authorization parks and resumes instead of failing terminally on the `local-dev` principal. The
+`egress-demo` fixture's `latency-probe` eval automates the crossing locally (eager interactive
+rule → park → consent callback fetched by the eval → resume → authorized request) against a real
+Vercel Sandbox; it needs linked-project sandbox credentials, so it is run on demand rather than
+in CI. Promoting an interactive crossing into a CI e2e suite remains a follow-up: the local-world
+suite would need Vercel Sandbox credentials wired into the fixture's local mode, and deployed
+worlds cannot share the run-id bearer with the remote harness.
 
 Proxy failure responses are part of the contract: every 403/500 body states what happened and
 what the caller can do, failures leave the route closed, and `authProxyBaseUrl` documents that
