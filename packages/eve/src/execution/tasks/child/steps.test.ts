@@ -1,7 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { formatTaskNotification } from "#execution/tasks/child/steps.js";
-import type { TaskView } from "#tasks/types.js";
+import {
+  formatTaskNotification,
+  wakeTaskAuthorizationParentStep,
+} from "#execution/tasks/child/steps.js";
+import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import type { TaskInboundAuthorizationEvent, TaskView } from "#tasks/types.js";
+
+vi.mock("#execution/wire/session-inbox-resume.js", () => ({
+  resumeSessionInbox: vi.fn(),
+}));
 
 const metadata = {
   agentId: "agent-reviewer",
@@ -56,5 +64,59 @@ describe("formatTaskNotification", () => {
     } satisfies TaskView;
 
     expect(formatTaskNotification(view)).toBe("Background task task-1 (reviewer) is cancelled.");
+  });
+});
+
+describe("wakeTaskAuthorizationParentStep", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("uses distinct delivery ids for candidate lifecycle transitions at one tool step", async () => {
+    const request = {
+      callId: "call-task",
+      childSessionId: "child-session-1",
+      event: {
+        data: {
+          candidateId: "candidate-1",
+          outcome: "pending" as const,
+          requestId: "approval-1",
+          responderPrincipalId: "user-1",
+          sequence: 1,
+          stepIndex: 2,
+          turnId: "turn-child",
+        },
+        type: "approval.candidate" as const,
+      },
+      kind: "authorization-event" as const,
+      subagentName: "research",
+    } satisfies TaskInboundAuthorizationEvent;
+
+    await wakeTaskAuthorizationParentStep({
+      request,
+      taskId: "task-1",
+      token: "parent-token",
+    });
+    await wakeTaskAuthorizationParentStep({
+      request: {
+        ...request,
+        event: {
+          ...request.event,
+          data: { ...request.event.data, outcome: "rejected" },
+        },
+      },
+      taskId: "task-1",
+      token: "parent-token",
+    });
+
+    const deliveryIds = vi
+      .mocked(resumeSessionInbox)
+      .mock.calls.map(([, command]) =>
+        "taskDeliveryId" in command ? command.taskDeliveryId : undefined,
+      );
+    expect(deliveryIds).toEqual([
+      expect.stringMatching(/:candidate-1:pending$/),
+      expect.stringMatching(/:candidate-1:rejected$/),
+    ]);
   });
 });

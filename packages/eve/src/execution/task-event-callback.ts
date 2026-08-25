@@ -4,13 +4,14 @@ import { fireTaskEventCallbackStep } from "#execution/session-callback-step.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 /**
- * Forwards one task child's blocking transition to its parent's session
+ * Forwards one task child's channel-owned transition to its parent's session
  * callback.
  *
  * Task children report HITL and authorization transitions exclusively to the
- * parent's task run, so the run can block/unblock the task under one durable
- * decision and only the parent channel owns the interaction. Returns whether
- * the event was forwarded and must therefore be suppressed locally.
+ * parent's task run. Blocking events let that run own the task transition;
+ * approval lifecycle events let the parent channel settle the interaction
+ * without changing task state. Returns whether the event was forwarded and
+ * must therefore be suppressed locally.
  */
 export async function forwardTaskEventToSessionCallback(
   ctx: ContextContainer,
@@ -20,6 +21,8 @@ export async function forwardTaskEventToSessionCallback(
   if (callback?.taskId === undefined) return false;
   if (
     event.type !== "input.requested" &&
+    event.type !== "approval.candidate" &&
+    event.type !== "approval.settled" &&
     event.type !== "authorization.required" &&
     event.type !== "authorization.completed"
   ) {

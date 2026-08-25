@@ -1,15 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import { emitRecordedTaskInputRequestStep } from "#execution/subagent-event-proxy-step.js";
-import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
+import {
+  emitRecordedTaskAuthorizationEventStep,
+  emitRecordedTaskInputRequestStep,
+} from "#execution/subagent-event-proxy-step.js";
+import {
+  acceptTaskAuthorizationEventStep,
+  recordTaskInputRequestStep,
+} from "#execution/tasks/parent/hitl-proxy-steps.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 
 vi.mock("#execution/subagent-event-proxy-step.js", () => ({
+  emitRecordedTaskAuthorizationEventStep: vi.fn(),
   emitRecordedTaskInputRequestStep: vi.fn(),
 }));
 vi.mock("#execution/tasks/parent/hitl-proxy-steps.js", () => ({
+  acceptTaskAuthorizationEventStep: vi.fn(),
   recordTaskInputRequestStep: vi.fn(),
 }));
 vi.mock("#execution/proxied-deliver-step.js", () => ({
@@ -84,6 +92,66 @@ describe("task HITL delivery routing", () => {
     );
     expect(vi.mocked(recordTaskInputRequestStep).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(emitRecordedTaskInputRequestStep).mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it("emits the namespaced approval event returned by the ownership step", async () => {
+    const namespacedApproval = {
+      callId: "call-task",
+      childSessionId: "child-session",
+      event: {
+        data: {
+          outcome: "approved" as const,
+          requestId: "task-1:request-1",
+          responderPrincipalId: "user-1",
+          sequence: 1,
+          stepIndex: 2,
+          turnId: "turn-child",
+        },
+        type: "approval.settled" as const,
+      },
+      kind: "subagent-authorization-event" as const,
+      subagentName: "research",
+    };
+    vi.mocked(acceptTaskAuthorizationEventStep).mockResolvedValue({
+      accepted: true,
+      hookPayload: namespacedApproval,
+    });
+    vi.mocked(emitRecordedTaskAuthorizationEventStep).mockResolvedValue({
+      serializedContext: { adapter: "updated" },
+      sessionState: state(false),
+    });
+
+    const result = await routeDeliverToChildren({
+      delivery: {
+        kind: "deliver",
+        payloads: [
+          {
+            task: {
+              authorizationEvents: [
+                {
+                  hookPayload: {
+                    ...namespacedApproval,
+                    event: {
+                      ...namespacedApproval.event,
+                      data: { ...namespacedApproval.event.data, requestId: "request-1" },
+                    },
+                  },
+                  taskId: "task-1",
+                },
+              ],
+            },
+          },
+        ],
+      },
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: state(false),
+    });
+
+    expect(result).toMatchObject({ kind: "continue", remainder: undefined });
+    expect(emitRecordedTaskAuthorizationEventStep).toHaveBeenCalledWith(
+      expect.objectContaining({ hookPayload: namespacedApproval }),
     );
   });
 

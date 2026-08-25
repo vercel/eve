@@ -67,10 +67,16 @@ export async function wakeTaskAuthorizationParentStep(input: {
   if (input.request.event.type === "authorization.required") {
     payload.message = `Background task ${input.taskId} needs authorization.`;
   }
+  const lifecycleIdentity =
+    input.request.event.type === "approval.candidate"
+      ? `:${input.request.event.data.candidateId}:${input.request.event.data.outcome}`
+      : input.request.event.type === "approval.settled"
+        ? `:${input.request.event.data.outcome}`
+        : "";
   const command: SessionCommand = {
     kind: "send",
     payload,
-    taskDeliveryId: `${input.taskId}:authorization:${input.request.event.type}:${data.turnId}:${data.stepIndex}:${data.sequence}:${taskAuthorizationRequestId(input.request.event)}`,
+    taskDeliveryId: `${input.taskId}:authorization:${input.request.event.type}:${data.turnId}:${data.stepIndex}:${data.sequence}:${taskAuthorizationRequestId(input.request.event)}${lifecycleIdentity}`,
   };
   try {
     await resumeSessionInbox(input.token, command);

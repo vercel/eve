@@ -428,10 +428,10 @@ export interface TaskInboundUpdate {
 }
 
 /**
- * Arrives when the delegated child emits `authorization.required` or
- * `authorization.completed`. The former exposes an authorization blocker in
- * the task view; the latter clears it. The event is forwarded separately
- * to the parent and is never copied into the view.
+ * Arrives when the delegated child emits an authorization or approval lifecycle
+ * event. Authorization events update the task view's blocker; approval events
+ * only settle the parent channel's HITL UI. Every event is forwarded separately
+ * to the parent and approval events are never copied into the view.
  */
 export interface TaskInboundAuthorizationEvent {
   readonly callId: string;

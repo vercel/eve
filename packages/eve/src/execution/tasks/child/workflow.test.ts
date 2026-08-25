@@ -75,6 +75,49 @@ function appendedStatuses(): readonly string[] {
   return vi.mocked(appendTaskViewStep).mock.calls.map(([input]) => input.view.status);
 }
 
+function createApprovalLifecycleEvents(): {
+  readonly candidate: SubagentAuthorizationEventHookPayload;
+  readonly settled: SubagentAuthorizationEventHookPayload;
+} {
+  return {
+    candidate: {
+      callId: "call-task",
+      childSessionId: "child-session-1",
+      event: {
+        data: {
+          candidateId: "candidate-1",
+          outcome: "pending",
+          requestId: "approval-1",
+          responderPrincipalId: "user-1",
+          sequence: 1,
+          stepIndex: 2,
+          turnId: "turn-child",
+        },
+        type: "approval.candidate",
+      },
+      kind: "subagent-authorization-event",
+      subagentName: "research",
+    },
+    settled: {
+      callId: "call-task",
+      childSessionId: "child-session-1",
+      event: {
+        data: {
+          outcome: "approved",
+          requestId: "approval-1",
+          responderPrincipalId: "user-1",
+          sequence: 1,
+          stepIndex: 3,
+          turnId: "turn-child",
+        },
+        type: "approval.settled",
+      },
+      kind: "subagent-authorization-event",
+      subagentName: "research",
+    },
+  };
+}
+
 describe("taskRunWorkflow", () => {
   it("forwards child updates after dispatch acknowledgement without changing the view", async () => {
     const update = {
@@ -423,26 +466,12 @@ describe("taskRunWorkflow", () => {
     );
   });
 
-  it("ignores approval lifecycle events and still wakes on terminal settlement", async () => {
+  it("projects approval lifecycle events without changing the task lifecycle", async () => {
+    const { candidate, settled } = createApprovalLifecycleEvents();
     mockCommandHook([
       { command: { kind: "ready" }, kind: "task-command" },
-      {
-        callId: "call-task",
-        childSessionId: "child-session-1",
-        event: {
-          data: {
-            outcome: "approved",
-            requestId: "stale-1",
-            responderPrincipalId: "user-1",
-            sequence: 1,
-            stepIndex: 2,
-            turnId: "turn-child",
-          },
-          type: "approval.settled",
-        },
-        kind: "subagent-authorization-event",
-        subagentName: "research",
-      },
+      candidate,
+      settled,
       { command: { data: "done", kind: "complete" }, kind: "task-command" },
     ]);
 
@@ -452,10 +481,66 @@ describe("taskRunWorkflow", () => {
       parentContinuationToken: "parent-session-token",
     });
 
-    expect(wakeTaskAuthorizationParentStep).not.toHaveBeenCalled();
+    expect(appendedStatuses()).toEqual(["working", "working", "completed"]);
+    expect(wakeTaskAuthorizationParentStep).toHaveBeenNthCalledWith(1, {
+      request: { ...candidate, kind: "authorization-event" },
+      taskId: "task_abc123",
+      token: "parent-session-token",
+    });
+    expect(wakeTaskAuthorizationParentStep).toHaveBeenNthCalledWith(2, {
+      request: { ...settled, kind: "authorization-event" },
+      taskId: "task_abc123",
+      token: "parent-session-token",
+    });
     expect(wakeTaskParentStep).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ view: expect.objectContaining({ status: "completed" }) }),
     );
+  });
+
+  it("holds early approval lifecycle events until before the terminal wake", async () => {
+    const { candidate, settled } = createApprovalLifecycleEvents();
+    mockCommandHook([
+      candidate,
+      settled,
+      { command: { data: "done", kind: "complete" }, kind: "task-command" },
+      { command: { kind: "ready" }, kind: "task-command" },
+    ]);
+
+    await taskRunWorkflow({
+      taskInboxToken: "task-token",
+      initialView: createWorkingView(),
+      parentContinuationToken: "parent-session-token",
+    });
+
+    expect(wakeTaskAuthorizationParentStep).toHaveBeenCalledTimes(2);
+    expect(wakeTaskParentStep).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ view: expect.objectContaining({ status: "completed" }) }),
+    );
+    expect(vi.mocked(wakeTaskAuthorizationParentStep).mock.invocationCallOrder[1]).toBeLessThan(
+      vi.mocked(wakeTaskParentStep).mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it("projects approval settlement while a cancelled task waits for its executor", async () => {
+    const { settled } = createApprovalLifecycleEvents();
+    mockCommandHook([
+      { command: { kind: "ready" }, kind: "task-command" },
+      { command: { kind: "cancel" }, kind: "task-command" },
+      settled,
+    ]);
+
+    await taskRunWorkflow({
+      taskInboxToken: "task-token",
+      initialView: createWorkingView(),
+      parentContinuationToken: "parent-session-token",
+    });
+
+    expect(appendedStatuses()).toEqual(["working", "working", "cancelled"]);
+    expect(wakeTaskAuthorizationParentStep).toHaveBeenCalledExactlyOnceWith({
+      request: { ...settled, kind: "authorization-event" },
+      taskId: "task_abc123",
+      token: "parent-session-token",
+    });
   });
 
   it("never wakes twice for one blocked child", async () => {

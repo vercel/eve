@@ -379,7 +379,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     event: UnstampedMessageStreamEvent,
     messages?: readonly import("ai").ModelMessage[],
   ): Promise<void> => {
-    // A remote task's parent owns its HITL. Forward blocking events over
+    // A remote task's parent owns its HITL. Forward channel-owned events over
     // the task callback and keep them out of the child's local channel;
     // otherwise two TUIs can present and answer the same request.
     const forwardedToTaskParent = await forwardTaskEventToSessionCallback(ctx, event);

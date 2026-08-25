@@ -90,6 +90,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
 
     let view = input.initialView;
     let pendingInputRequest: TaskInboundInputRequest | undefined;
+    let pendingApprovalEvents: TaskInboundAuthorizationEvent[] = [];
     let pendingAuthorizationEvents: TaskInboundAuthorizationEvent[] = [];
     let pendingUpdates: TaskInboundUpdate[] = [];
     let dispatchAcknowledged = false;
@@ -102,15 +103,22 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
         next.value.kind === "subagent-authorization-event"
           ? { ...next.value, kind: "authorization-event" }
           : next.value;
-      // Approval lifecycle events (`approval.candidate`/`approval.settled`)
-      // are intra-child responder bookkeeping, not task blockers: only
-      // `authorization.required`/`authorization.completed` may block or
-      // unblock a task. Forwarding them would mint bogus `answered`
-      // commands and race the terminal wake.
+      // Approval lifecycle events are channel bookkeeping, not task blockers.
+      // Project them to the parent channel without translating them into task
+      // commands, which would otherwise mint bogus `answered` transitions.
       if (
         payload.kind === "authorization-event" &&
         (payload.event.type === "approval.candidate" || payload.event.type === "approval.settled")
       ) {
+        if (dispatchAcknowledged) {
+          await wakeTaskAuthorizationParentStep({
+            request: payload,
+            taskId: view.taskId,
+            token: input.parentContinuationToken,
+          });
+        } else if (!dispatchAcknowledged) {
+          pendingApprovalEvents.push(payload);
+        }
         continue;
       }
       const isReadinessCommand =
@@ -154,6 +162,14 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       }
       if (command === undefined) continue;
       if (isReadinessCommand && isTerminalTaskStatus(view.status)) {
+        for (const request of pendingApprovalEvents) {
+          await wakeTaskAuthorizationParentStep({
+            request,
+            taskId: view.taskId,
+            token: input.parentContinuationToken,
+          });
+        }
+        pendingApprovalEvents = [];
         for (const update of pendingUpdates) {
           await wakeTaskUpdateParentStep({
             token: input.parentContinuationToken,
@@ -172,6 +188,16 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       const becameReady = !isReadyTaskStatus(view.status) && isReadyTaskStatus(result.view.status);
       view = result.view;
       await appendTaskViewStep({ view });
+      const routableApprovalEvents =
+        dispatchAcknowledged && !isRejectedDispatch ? pendingApprovalEvents : [];
+      for (const request of routableApprovalEvents) {
+        await wakeTaskAuthorizationParentStep({
+          request,
+          taskId: view.taskId,
+          token: input.parentContinuationToken,
+        });
+      }
+      if (routableApprovalEvents.length > 0) pendingApprovalEvents = [];
       const routableAuthorizationEvents =
         dispatchAcknowledged && !becameTerminal ? pendingAuthorizationEvents : [];
       for (const request of routableAuthorizationEvents) {
