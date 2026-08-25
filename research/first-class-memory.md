@@ -1156,24 +1156,25 @@ executors rather than native kernel effects.
 
 Implementation proceeds in two pull requests:
 
-1. A new first-class memory core branch starts from current `main`. It adds the
-   authoring and compiler surface, source-graph wrapper, namespace and scope
-   locks, recall records and projection, lifecycle, compaction, published
-   documentation, and deterministic end-to-end coverage. It does not restack
-   or reuse the custom runtime lifecycle from
-   [#2142](https://github.com/vercel/eve/pull/2142).
-2. The bounded `fileMemory()` provider in
-   [#2144](https://github.com/vercel/eve/pull/2144) is rebased onto the merged
-   core. It retains only provider storage, document, backend, and concurrency
+1. The first-class memory core is implemented in
+   [#2534](https://github.com/vercel/eve/pull/2534), based directly on current
+   `main`. It adds the authoring and compiler surface, source-graph wrapper,
+   namespace and scope locks, recall records and projection, lifecycle,
+   compaction, agent-info v4, published documentation, and deterministic
+   end-to-end coverage. It does not restack or reuse the custom runtime
+   lifecycle from [#2142](https://github.com/vercel/eve/pull/2142).
+2. After #2534 merges, the bounded `fileMemory()` provider in
+   [#2144](https://github.com/vercel/eve/pull/2144) will be rebased onto current
+   `main`. It retains only provider storage, document, backend, and concurrency
    work, and absorbs final file-provider e2e coverage. The separate e2e tail in
    [#2145](https://github.com/vercel/eve/pull/2145) is superseded.
 
-The core implementation is complete only when one selected source and binding
-authority explains every memory definition and provider-tool wrapper, every
-message-bearing consumer receives the same projected history, compaction
-cannot summarize or lose private memory records, and a parked provider tool
-survives a real fresh-process reconstruction without memory-specific callback
-or origin machinery.
+#2534 implements the core boundary through one selected source and binding
+authority for every memory definition and provider-tool wrapper, one projected
+history for message-bearing consumers, private memory canonicalization outside
+ordinary summarization, and generic cold callback rebinding with captured
+closures. Those invariants, the committed E2E fixture, and the required CI
+checks remain the merge gate. M2 must not begin on the pre-M1 base.
 
 ## Primary references
 
