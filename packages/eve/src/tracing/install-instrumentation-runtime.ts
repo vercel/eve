@@ -10,6 +10,7 @@ import {
   type InstrumentationRuntime,
 } from "#harness/instrumentation/runtime.js";
 import { createLogger, formatError } from "#internal/logging.js";
+import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js";
 import { hasSessionRelease, type LocalTracesProcessor } from "#tracing/local-traces.js";
@@ -81,6 +82,7 @@ export function installInstrumentationRuntime(input: {
       serialAfter,
       serialBefore,
     }),
+    idGenerator: otelRuntime?.idGenerator ?? new AgentSpanIdGenerator(),
     otelSettings: input.collected.declared ? input.collected.settings : undefined,
     prepareSessionTrace,
     prepareTurnTrace,

@@ -26,9 +26,9 @@ import type {
 export type { PrepareSend };
 
 /**
- * Lifecycle phase of a `useEveAgent` session: `"ready"` (idle), `"submitted"`
- * (request sent, awaiting first event), `"streaming"` (events arriving), or
- * `"error"`.
+ * Lifecycle phase of a `useEveAgent` session: `"ready"` (idle), `"resuming"`
+ * (checking an attached session), `"submitted"` (request sent, awaiting first
+ * event), `"streaming"` (events arriving), or `"error"`.
  */
 export type UseEveAgentStatus = EveAgentStoreStatus;
 
@@ -69,7 +69,11 @@ export interface UseEveAgentReturn<TData> {
   ) => Promise<void>;
   /** Current session identity and stream cursor. */
   readonly session: ComputedRef<ClientSessionState | undefined>;
-  /** Lifecycle phase: `"ready"` (idle), `"submitted"` (request sent, awaiting first event), `"streaming"` (events arriving), or `"error"`. */
+  /**
+   * Lifecycle phase: `"ready"` (idle), `"resuming"` (checking an attached
+   * session), `"submitted"` (request sent, awaiting first event), `"streaming"`
+   * (events arriving), or `"error"`.
+   */
   readonly status: ComputedRef<UseEveAgentStatus>;
 }
 

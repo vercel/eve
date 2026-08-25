@@ -107,8 +107,6 @@ export interface ContentOptions {
 export interface TraceCaptureContext {
   readonly agentName?: string;
   readonly audience: ChannelAudience;
-  readonly rootSessionId: string;
-  readonly sessionId: string;
 }
 
 export type TraceCapturePolicy = (trace: TraceCaptureContext) => boolean;

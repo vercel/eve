@@ -29,6 +29,7 @@ export type { PrepareSend };
  * Lifecycle status of an eve agent session.
  *
  * - `"ready"`: idle, accepting a new turn.
+ * - `"resuming"`: checking an attached session for events; submission is disabled.
  * - `"submitted"`: a turn was sent, no stream events received yet.
  * - `"streaming"`: stream events are arriving for the active turn.
  * - `"error"`: the last turn ended in a terminal failure (see `snapshot.error`).
@@ -220,7 +221,7 @@ export function useEveAgent<TData>(
   );
   const visibleSnapshot =
     autoResumePending && snapshot.status === "ready"
-      ? { ...snapshot, status: "submitted" as const }
+      ? { ...snapshot, status: "resuming" as const }
       : snapshot;
 
   return useMemo(

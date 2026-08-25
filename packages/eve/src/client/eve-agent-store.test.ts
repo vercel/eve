@@ -50,9 +50,12 @@ function streamResponse(events: readonly MessageStreamEvent[]): Response {
   );
 }
 
-function boundedStreamResponse(events: readonly MessageStreamEvent[]): Response {
+function boundedStreamResponse(
+  events: readonly MessageStreamEvent[],
+  tailIndex = events.length - 1,
+): Response {
   const response = streamResponse(events);
-  response.headers.set("x-eve-stream-tail-index", String(events.length - 1));
+  response.headers.set("x-eve-stream-tail-index", String(tailIndex));
   return response;
 }
 
@@ -210,7 +213,100 @@ describe("EveAgentStore stream overlap", () => {
 });
 
 describe("EveAgentStore session resume", () => {
-  it("publishes a replayed terminal failure with error status", async () => {
+  it("keeps a settled hydrated snapshot resuming until catch-up returns ready", async () => {
+    const events = turnEvents();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(boundedStreamResponse([], events.length - 1))
+      .mockResolvedValueOnce(streamResponse([]));
+    const store = new EveAgentStore({
+      initialEvents: events,
+      initialSession: { sessionId: "session_1", streamIndex: events.length },
+      reducer: defaultMessageReducer(),
+    });
+    const statuses: string[] = [];
+    store.subscribe(() => statuses.push(store.snapshot.status));
+
+    await store.resume();
+
+    expect(statuses[0]).toBe("resuming");
+    expect(statuses).not.toContain("submitted");
+    expect(statuses).not.toContain("streaming");
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.events).toEqual(events);
+    expect(
+      new URL(fetchMock.mock.calls[0]![0].toString(), "http://localhost").searchParams.get(
+        "startIndex",
+      ),
+    ).toBe(String(events.length));
+  });
+
+  it("replays from index zero when the hydrated log does not match its cursor", async () => {
+    const events = turnEvents();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(boundedStreamResponse(events))
+      .mockResolvedValueOnce(streamResponse([]));
+    const store = new EveAgentStore({
+      initialEvents: events.slice(0, 1),
+      initialSession: { sessionId: "session_1", streamIndex: 2 },
+      reducer: defaultMessageReducer(),
+    });
+
+    await store.resume();
+
+    expect(
+      new URL(fetchMock.mock.calls[0]![0].toString(), "http://localhost").searchParams.get(
+        "startIndex",
+      ),
+    ).toBeNull();
+    expect(store.snapshot.events).toEqual(events);
+    expect(store.snapshot.status).toBe("ready");
+  });
+
+  it("moves an unsettled hydrated snapshot to streaming before following it", async () => {
+    const [received, started, completed, waiting] = stampTestEvents([
+      createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
+      createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Hi there.",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createSessionWaitingEvent(),
+    ] as UnstampedMessageStreamEvent[]);
+    const initialEvents = [received!, started!];
+    const live = controlledStreamResponse();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(boundedStreamResponse([], initialEvents.length - 1))
+      .mockResolvedValueOnce(live.response);
+    const store = new EveAgentStore({
+      initialEvents,
+      initialSession: { sessionId: "session_1", streamIndex: initialEvents.length },
+      reducer: defaultMessageReducer(),
+    });
+
+    const resuming = store.resume();
+    expect(store.snapshot.status).toBe("resuming");
+    await vi.waitFor(() => expect(store.snapshot.status).toBe("streaming"));
+    expect(
+      new URL(fetchMock.mock.calls[0]![0].toString(), "http://localhost").searchParams.get(
+        "startIndex",
+      ),
+    ).toBe(String(initialEvents.length));
+
+    live.emit(completed!);
+    live.emit(waiting!);
+    live.close();
+    await resuming;
+
+    expect(store.snapshot.status).toBe("ready");
+  });
+
+  it("publishes a hydrated terminal failure with error status", async () => {
     const failed = stampTestEvents([
       createSessionFailedEvent({
         code: "SESSION_FAILED",
@@ -218,9 +314,10 @@ describe("EveAgentStore session resume", () => {
         sessionId: "session_1",
       }),
     ])[0]!;
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(boundedStreamResponse([failed]));
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(boundedStreamResponse([], 0));
     const store = new EveAgentStore({
-      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      initialEvents: [failed],
+      initialSession: { sessionId: "session_1", streamIndex: 1 },
       reducer: defaultMessageReducer(),
     });
     const published: Array<{ eventType: string | undefined; status: string }> = [];
@@ -233,9 +330,7 @@ describe("EveAgentStore session resume", () => {
 
     await store.resume();
 
-    expect(published.find((snapshot) => snapshot.eventType === "session.failed")?.status).toBe(
-      "error",
-    );
+    expect(published).toContainEqual({ eventType: "session.failed", status: "error" });
     expect(store.snapshot.error?.message).toBe("Session failed.");
   });
 

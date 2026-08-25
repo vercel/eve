@@ -6,6 +6,8 @@ const { cancel, data, status, error, respond, send } = useEveAgent();
 type EveFilePart = Extract<EveMessagePart, { type: "file" }>;
 
 const isBusy = computed(() => status.value === "submitted" || status.value === "streaming");
+const isResuming = computed(() => status.value === "resuming");
+const isInputDisabled = computed(() => isBusy.value || isResuming.value);
 const isEmpty = computed(() => data.value.messages.length === 0);
 const cancellationError = ref<string>();
 const errorMessage = computed(() => cancellationError.value ?? error.value?.message);
@@ -37,7 +39,7 @@ const messageText = ref("");
 
 function submitMessage() {
   const text = messageText.value.trim();
-  if (!text || isBusy.value) return;
+  if (!text || isInputDisabled.value) return;
   cancellationError.value = undefined;
   messageText.value = "";
   void send(text);
@@ -241,7 +243,7 @@ function formatBytes(size: number | undefined): string | undefined {
                 <ToolBlock
                   v-else-if="part.type === 'dynamic-tool'"
                   :part="part as EveDynamicToolPart"
-                  :can-respond="!isBusy"
+                  :can-respond="!isInputDisabled"
                   @input-responses="handleInputResponses"
                 />
               </template>
@@ -257,7 +259,7 @@ function formatBytes(size: number | undefined): string | undefined {
         >
           <textarea
             v-model="messageText"
-            :disabled="isBusy"
+            :disabled="isInputDisabled"
             placeholder="Send a message…"
             rows="1"
             class="min-h-20 flex-1 resize-none border-0 bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
@@ -276,7 +278,7 @@ function formatBytes(size: number | undefined): string | undefined {
           <button
             v-else
             type="submit"
-            :disabled="!messageText.trim()"
+            :disabled="isInputDisabled || !messageText.trim()"
             class="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
           >
             <svg

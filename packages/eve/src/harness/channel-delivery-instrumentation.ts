@@ -4,6 +4,7 @@ import {
   ActiveChannelDeliveriesKey,
   ChannelInstrumentationKey,
   ParentTraceContextKey,
+  SessionTraceSeedKey,
   type ActiveChannelDelivery,
 } from "#context/keys.js";
 import type {
@@ -108,6 +109,7 @@ export async function instrumentChannelDelivery(
       parentTraceContext: input.ctx.get(ParentTraceContextKey),
       rootSessionId: input.rootSessionId,
       sessionId: input.sessionId,
+      traceSeed: input.ctx.get(SessionTraceSeedKey),
       type: "channel.delivery.started",
     });
   }

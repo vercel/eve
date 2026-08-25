@@ -108,8 +108,6 @@ describe("localTracePolicy", () => {
     expect(
       localTracePolicy({
         audience,
-        rootSessionId: "session-1",
-        sessionId: "session-1",
       }),
     ).toBe(accepted);
   });
