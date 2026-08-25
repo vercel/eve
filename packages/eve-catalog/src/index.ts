@@ -524,6 +524,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "firecrawl",
+    name: "Firecrawl",
+    kind: "connection",
+    tagline: "Search, scrape, crawl, and extract live web data as LLM-ready markdown or JSON.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Firecrawl: search the live web, scrape pages as LLM-ready markdown or structured JSON, map site URLs, crawl multi-page sites, parse files, and monitor pages for changes.",
+      mcp: { url: "https://mcp.firecrawl.dev/v2/mcp" },
+    },
+  },
+  {
     slug: "hugging-face",
     name: "Hugging Face",
     kind: "connection",

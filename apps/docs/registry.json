@@ -612,6 +612,22 @@
       ]
     },
     {
+      "name": "connection/firecrawl",
+      "type": "registry:item",
+      "title": "Firecrawl",
+      "description": "Search, scrape, crawl, and extract live web data as LLM-ready markdown or JSON.",
+      "envVars": {
+        "FIRECRAWL_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/connections/firecrawl.ts",
+          "type": "registry:file",
+          "target": "agent/connections/firecrawl.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/hugging-face",
       "type": "registry:item",
       "title": "Hugging Face",
