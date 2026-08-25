@@ -533,6 +533,48 @@ describe("eveChannel — stream cursor", () => {
     expect(new TextDecoder().decode(firstChunk.value)).toBe("\n");
   });
 
+  it.each(["session.waiting", "session.completed", "session.failed"])(
+    "closes the response at %s so buffering intermediaries can flush",
+    async (type) => {
+      const handler = createEveStreamHandler({ auth: none() });
+      const cancelled = vi.fn();
+      handler.getEventStream.mockResolvedValueOnce(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue({
+              data: { continuationToken: "session-id", wait: "next-user-message" },
+              type,
+            });
+          },
+          cancel: cancelled,
+        }),
+      );
+      const abort = new AbortController();
+
+      const response = await handler.fetch(
+        "https://eve.test/eve/v1/session/test-session-id/stream",
+        { signal: abort.signal },
+      );
+      const reader = response.body!.getReader();
+      await reader.read();
+      await reader.read();
+      const completion = reader.read().then(
+        ({ done }: { done: boolean }) => (done ? "closed" : "data"),
+        () => "aborted",
+      );
+
+      const state = await Promise.race([
+        completion,
+        new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 25)),
+      ]);
+      abort.abort();
+      await completion;
+
+      expect(state).toBe("closed");
+      await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce());
+    },
+  );
+
   it("cancels the durable stream when the request aborts", async () => {
     const handler = createEveStreamHandler({ auth: none() });
     const cancelled = vi.fn();
@@ -606,8 +648,8 @@ describe("eveChannel — stream cursor", () => {
     handler.getEventStream.mockResolvedValueOnce(
       new ReadableStream({
         start(controller) {
-          controller.enqueue({ sequence: 0 });
-          controller.enqueue({ sequence: 1 });
+          controller.enqueue({ sequence: 0, type: "session.waiting" });
+          controller.enqueue({ sequence: 1, type: "turn.started" });
         },
         cancel: cancelled,
       }),
@@ -617,7 +659,9 @@ describe("eveChannel — stream cursor", () => {
       "https://eve.test/eve/v1/session/test-session-id/stream?includeTailIndex=1",
     );
 
-    await expect(response.text()).resolves.toBe('\n{"sequence":0}\n{"sequence":1}\n');
+    await expect(response.text()).resolves.toBe(
+      '\n{"sequence":0,"type":"session.waiting"}\n{"sequence":1,"type":"turn.started"}\n',
+    );
     await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce());
   });
 
