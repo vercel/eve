@@ -16,6 +16,7 @@ import type { ClientSession } from "#client/session.js";
 import type {
   CancelSessionResult,
   ClientAuth,
+  ClientCredentialsPolicy,
   HeadersValue,
   RespondTurnOptions,
   SendTurnOptions,
@@ -79,7 +80,7 @@ export interface UseEveAgentReturn<TData> {
  * Configuration for a Svelte eve agent session.
  *
  * Read once when `useEveAgent` creates its store; create a new binding to
- * change host, reducer, or session. To rotate credentials or headers without
+ * change host, reducer, or session. To rotate auth tokens or headers without
  * recreating the binding, pass function values to `auth` or `headers`, which
  * the client resolves before each HTTP request.
  */
@@ -92,10 +93,12 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    */
   readonly agent?: string;
   /**
-   * Credentials for the auto-created session. Pass function values to refresh
+   * Authentication for the auto-created session. Pass function values to refresh
    * per request. Ignored when `session` is supplied.
    */
   readonly auth?: ClientAuth;
+  /** Browser credentials mode for every request made by the auto-created client. */
+  readonly credentials?: ClientCredentialsPolicy;
   /**
    * Custom headers for the auto-created session. Pass a function to resolve
    * fresh values per request. Ignored when `session` is supplied.
@@ -131,7 +134,7 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
   readonly resume?: boolean;
   /**
    * Pre-built client session to bind to. When omitted, the binding creates its
-   * own session from `auth`, `headers`, and `host`.
+   * own session from `auth`, `credentials`, `headers`, and `host`.
    */
   readonly session?: ClientSession;
 }
@@ -237,6 +240,7 @@ export function useEveAgent<TData>(
   const reducer = options.reducer ?? (defaultMessageReducer() as EveAgentReducer<TData>);
   const store = new EveAgentStore<TData>({
     auth: options.auth,
+    credentials: options.credentials,
     headers: options.headers,
     host: resolveEveAgentHost({ agent: options.agent, host: options.host }),
     initialEvents: options.initialEvents,

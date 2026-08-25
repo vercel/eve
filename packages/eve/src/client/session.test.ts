@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ClientError } from "#client/client-error.js";
 import { ClientSession } from "#client/session.js";
-import type { ClientSessionState } from "#client/types.js";
+import type { ClientCredentialsPolicy, ClientSessionState } from "#client/types.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -11,13 +11,14 @@ afterEach(() => {
 function createSession(
   state: ClientSessionState = { sessionId: "session_1", streamIndex: 0 },
   options: {
+    readonly credentials?: ClientCredentialsPolicy;
     readonly redirect?: "error" | "follow" | "manual";
     readonly resolveHeaders?: () => Promise<Headers>;
   } = {},
 ) {
   const context: ConstructorParameters<typeof ClientSession>[0] = {
     host: "https://eve.test",
-    redirect: options.redirect,
+    requestPolicy: { credentials: options.credentials, redirect: options.redirect },
     resolveHeaders: options.resolveHeaders ?? (async () => new Headers()),
   };
 
@@ -77,6 +78,37 @@ function createBoundedStreamResponse(events: readonly unknown[]) {
 }
 
 describe("ClientSession", () => {
+  it("applies its credentials policy to sends, streams, and session controls", async () => {
+    const credentials: Array<ClientCredentialsPolicy | undefined> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      credentials.push(init?.credentials);
+      const pathname = new URL(String(request)).pathname;
+      if (pathname.endsWith("/stream")) {
+        return createStreamResponse([{ data: {}, type: "session.completed" }]);
+      }
+      if (pathname.endsWith("/reset")) {
+        return Response.json({
+          ok: true,
+          previousSessionId: "session_1",
+          status: "reset",
+        });
+      }
+      return Response.json(
+        { ok: true, sessionId: "session_1", status: "accepted" },
+        { status: 202 },
+      );
+    });
+    const session = createSession(undefined, { credentials: "include" });
+
+    await (await session.send("hello")).result();
+    await session.cancel();
+    await session.clear();
+    await session.compact();
+    await session.reset();
+
+    expect(credentials).toEqual(["include", "include", "include", "include", "include", "include"]);
+  });
+
   it("cancels an accepted turn before its stream settles with freshly resolved auth", async () => {
     let headerResolution = 0;
     const requests: Array<{ headers: Headers; method: string; url: string }> = [];

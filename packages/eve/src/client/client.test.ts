@@ -100,6 +100,40 @@ describe("Client request policy", () => {
     }
   });
 
+  it("applies its credentials policy to info, health, raw fetch, and sessions", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json(AGENT_INFO))
+      .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`),
+      );
+    const client = new Client({ credentials: "include", host: "https://eve.test" });
+
+    await client.info();
+    await client.health();
+    await client.fetch("/custom");
+    await (await client.sessions.create({ message: "hello" })).response.result();
+
+    expect(fetchMock.mock.calls).toHaveLength(5);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init?.credentials).toBe("include");
+    }
+  });
+
+  it("allows a raw fetch to override its credentials policy", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null));
+    const client = new Client({ credentials: "include", host: "https://eve.test" });
+
+    await client.fetch("/custom", { credentials: "omit" });
+
+    expect(fetchMock.mock.calls[0]?.[1]?.credentials).toBe("omit");
+  });
+
   it("expands vercelOidc auth into the bearer and trusted-oidc headers", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")

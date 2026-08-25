@@ -4,6 +4,7 @@ import { EVE_SESSION_ROUTE_PATH, createEveSessionRoutePath } from "#protocol/rou
 import { ClientError } from "#client/client-error.js";
 import { MessageResponse } from "#client/message-response.js";
 import { followStreamIterable } from "#client/open-stream.js";
+import { applyClientRequestPolicy, type ClientRequestPolicy } from "#client/request-policy.js";
 import {
   cancelClientSession,
   clearClientSession,
@@ -18,7 +19,6 @@ import type {
   ClearResult,
   ClientSessionState,
   CompactResult,
-  ClientRedirectPolicy,
   RespondTurnOptions,
   ResetResult,
   SendTurnInput,
@@ -34,7 +34,7 @@ import type {
  */
 export interface ClientSessionContext {
   readonly host: string;
-  readonly redirect?: ClientRedirectPolicy;
+  readonly requestPolicy: ClientRequestPolicy;
   resolveHeaders(perRequest?: Readonly<Record<string, string>>): Promise<Headers>;
 }
 
@@ -248,7 +248,7 @@ export class ClientSession {
       host: this.#context.host,
       keepAlive: input.keepAlive,
       resolveHeaders: () => this.#context.resolveHeaders(input.headers),
-      redirect: this.#context.redirect,
+      requestPolicy: this.#context.requestPolicy,
       sessionId: this.#state.sessionId,
       signal: input.signal,
       startIndex: input.startIndex,
@@ -282,13 +282,18 @@ async function postTurn(
 
   const headers = await context.resolveHeaders(input.headers);
   headers.set("content-type", "application/json");
-  const response = await fetch(createClientUrl(context.host, path), {
-    body: JSON.stringify(body),
-    headers,
-    method: "POST",
-    redirect: context.redirect,
-    signal: input.signal ?? null,
-  });
+  const response = await fetch(
+    createClientUrl(context.host, path),
+    applyClientRequestPolicy(
+      {
+        body: JSON.stringify(body),
+        headers,
+        method: "POST",
+        signal: input.signal ?? null,
+      },
+      context.requestPolicy,
+    ),
+  );
   if (!response.ok) {
     const responseBody = await response.text();
     throw new ClientError(response.status, responseBody, response.headers);

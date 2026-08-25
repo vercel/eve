@@ -68,6 +68,9 @@ export const VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER = "x-vercel-trusted-oidc-idp-t
 /** Redirect modes supported by the configured fetch implementation. */
 export type ClientRedirectPolicy = NonNullable<RequestInit["redirect"]>;
 
+/** Browser credentials modes supported by the configured fetch implementation. */
+export type ClientCredentialsPolicy = NonNullable<RequestInit["credentials"]>;
+
 /**
  * Configuration for creating a new {@link Client}.
  */
@@ -90,6 +93,13 @@ export interface ClientOptions {
    * that need to be refreshed alongside the bearer credential).
    */
   readonly headers?: HeadersValue;
+
+  /**
+   * Browser credentials mode for every client request. Cross-origin cookies
+   * also require a matching server CORS policy. {@link Client.fetch} may
+   * override this value per call.
+   */
+  readonly credentials?: ClientCredentialsPolicy;
 
   /**
    * Redirect policy for every request, including streams. Overrides a

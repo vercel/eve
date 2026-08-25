@@ -9,7 +9,7 @@ For browser chat UIs, start with [`useEveAgent`](../frontend/overview). For wire
 
 ## Create a client
 
-A `Client` binds one host, auth policy, and header policy:
+A `Client` binds one host and request policy for auth, headers, credentials, and redirects:
 
 ```ts
 import { Client } from "eve/client";
@@ -96,6 +96,19 @@ const client = new Client({
 ```
 
 Set `redirect` to `"manual"` or `"error"` on credential-bearing clients so fetch cannot forward custom authorization headers to another origin. The policy applies to inspection requests, custom fetches, session creation, and event streams.
+
+For cross-origin cookie authentication, set `credentials: "include"`. The policy applies to every request, session-control operation, and stream reconnect. A raw `Client.fetch()` call can override it for that request:
+
+```ts
+const client = new Client({
+  host: "https://agent.example.com",
+  credentials: "include",
+});
+
+await client.fetch("/custom", { credentials: "omit" });
+```
+
+The agent's [eve channel CORS policy](../../channels/eve#cors) must also allow credentials and the calling origin.
 
 Per-request headers can be attached to an individual turn:
 

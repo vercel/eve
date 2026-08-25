@@ -102,7 +102,9 @@ Post to `/eve/v1/session/:sessionId/reset` to terminally retire that session. Re
 The eve channel leaves CORS untouched by default. Pass `cors: true` to enable
 permissive browser CORS with preflight handling, or pass an options object to
 narrow origins, methods, and headers. Route auth still runs on the actual
-session requests.
+session requests. Credentialed cross-origin requests require a specific
+frontend origin and `credentials: true`; do not use the wildcard origin for
+credentialed requests.
 
 Enable or narrow CORS only when browser clients call the channel directly:
 
@@ -114,6 +116,7 @@ export default eveChannel({
   auth: [vercelOidc(), localDev()],
   cors: {
     origin: "https://app.example.com",
+    credentials: true,
     methods: ["GET", "POST"],
     allowedHeaders: ["authorization", "content-type"],
   },

@@ -47,6 +47,7 @@ export type {
   ClearResult,
   CompactResult,
   ClientAuth,
+  ClientCredentialsPolicy,
   ClientOptions,
   ClientRedirectPolicy,
   HeadersValue,
