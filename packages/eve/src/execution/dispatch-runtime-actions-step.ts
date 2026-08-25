@@ -1,7 +1,7 @@
 /**
  * Starts or continues every pending runtime action for the parked parent
- * session, with children reporting straight back to the parent turn via
- * `parentContinuationToken`.
+ * session. The resolved agent config selects ordinary blocking dispatch or
+ * durable background-task dispatch after one shared preflight.
  *
  * The batch is classified into a dispatch plan first (reject / resume /
  * start), then each entry dispatches and emits one
@@ -10,9 +10,6 @@
  * and confirms it (`running`) once the child reports coordinates, so the
  * returned snapshot-bearing state owns every child it may have created.
  *
- * Agents running `experimental.tasks` never reach this step: the turn
- * workflow selects `dispatchTaskStep`, the task-mode sibling that wraps
- * each dispatch in the delegated-task lifecycle.
  */
 
 import { type DispatchOutcome, dispatchToAgentHandle } from "#execution/agent-handle-dispatch.js";
@@ -25,6 +22,7 @@ import {
   startSubagent,
 } from "#execution/dispatch-runtime-actions-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
+import { dispatchTaskActions } from "#execution/tasks/parent/dispatch-task-actions.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
 export async function dispatchRuntimeActionsStep(
@@ -35,11 +33,11 @@ export async function dispatchRuntimeActionsStep(
   const prepared = await prepareRuntimeActionDispatch({
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,
-    taskControls: false,
   });
   if (prepared === undefined) {
     return { results: [], sessionState: input.sessionState, pendingTasks: [] };
   }
+  if (prepared.taskMode) return dispatchTaskActions(input, prepared);
 
   const { batch, bundle, session } = prepared;
   const persistentSessions =

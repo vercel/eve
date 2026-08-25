@@ -11,7 +11,6 @@ import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-st
 import { sendTurnControlStep, type TurnInboxPayload } from "#execution/turn-control-protocol.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
-import { dispatchTaskStep } from "#execution/tasks/parent/dispatch-task-step.js";
 import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
 import {
   migrateTurnWorkflowInput,
@@ -188,20 +187,15 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
 
       // A pending runtime-action batch (model-driven `park` or dynamic-workflow
       // interrupt) is resolved in-line so the turn stays alive across the wait;
-      // the arms differ only in their dispatch path: the workflow adapter for
-      // interrupt-sourced batches, and the task-mode sibling when the agent
-      // runs `experimental.tasks`.
+      // interrupt-sourced batches use their workflow adapter; ordinary parked
+      // batches use one dispatch step that selects task mode from the resolved
+      // agent config.
       if (pendingActionKeys !== undefined) {
         await cursor.adopt(result);
-        const hasPendingTasks = result.action === "park" && result.tasksEnabled;
-        let dispatch;
-        if (result.action === "dispatch-workflow-runtime-actions") {
-          dispatch = dispatchWorkflowRuntimeActionsStep;
-        } else if (hasPendingTasks) {
-          dispatch = dispatchTaskStep;
-        } else {
-          dispatch = dispatchRuntimeActionsStep;
-        }
+        const dispatch =
+          result.action === "dispatch-workflow-runtime-actions"
+            ? dispatchWorkflowRuntimeActionsStep
+            : dispatchRuntimeActionsStep;
         const dispatchResult = await dispatch({
           callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
           parentContinuationToken: inbox.token,

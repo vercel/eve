@@ -1,10 +1,6 @@
 /**
- * Machinery shared by the two runtime-action dispatch steps:
- * `dispatchRuntimeActionsStep` (plain mode) and `dispatchTaskStep`
- * (task mode). Both run the same preflight → plan → dispatch → emit
- * skeleton over one pending batch and differ only in the per-entry
- * delegation lifecycle, so planning, subagent starts, and the
- * replay-safe `subagent.called` emission tail live here.
+ * Shared runtime-action dispatch machinery. One preflight and plan feeds the
+ * blocking or task-backed per-entry lifecycle selected by the resolved agent.
  */
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -159,6 +155,7 @@ export interface PreparedRuntimeActionDispatch {
   readonly serializedContext: Record<string, unknown>;
   readonly plan: readonly DispatchPlanEntry[];
   readonly session: RuntimeSession;
+  readonly taskMode: boolean;
 }
 
 /**
@@ -171,24 +168,20 @@ export interface PreparedRuntimeActionDispatch {
 export async function prepareRuntimeActionDispatch(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-  /**
-   * Classify task-control calls as
-   * task-control plan entries. Only task mode plans them; in plain mode
-   * those calls fail as unsupported batch actions.
-   */
-  readonly taskControls: boolean;
 }): Promise<PreparedRuntimeActionDispatch | undefined> {
   const durableSession = await readDurableSession(input.sessionState);
   const batch = getPendingRuntimeActionBatch(durableSession.state);
 
   if (batch === undefined || batch.actions.length === 0) return undefined;
   const ctx = await deserializeContext(input.serializedContext);
+  const taskMode = ctx.require(BundleKey).resolvedAgent.config?.experimental?.tasks === true;
   return await prepareActionDispatch({
     batch,
     ctx,
     durableSession,
     serializedContext: input.serializedContext,
-    taskControls: input.taskControls,
+    taskControls: taskMode,
+    taskMode,
   });
 }
 
@@ -212,6 +205,7 @@ export async function prepareAgentActionDispatch(input: {
     fanoutSize: input.localFanoutSize,
     serializedContext: input.serializedContext,
     taskControls: false,
+    taskMode: false,
   });
 }
 
@@ -228,6 +222,7 @@ async function prepareActionDispatch(input: {
   readonly fanoutSize?: number;
   readonly serializedContext: Record<string, unknown>;
   readonly taskControls: boolean;
+  readonly taskMode: boolean;
 }): Promise<PreparedRuntimeActionDispatch> {
   const { batch, durableSession } = input;
   assertUniqueRuntimeActionCallIds(batch.actions);
@@ -285,6 +280,7 @@ async function prepareActionDispatch(input: {
     sandboxSessionId,
     serializedContext: input.serializedContext,
     session,
+    taskMode: input.taskMode,
   };
 }
 

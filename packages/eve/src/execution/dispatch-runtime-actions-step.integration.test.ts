@@ -8,7 +8,6 @@ import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { prepareAgentActionDispatch } from "#execution/dispatch-runtime-actions-shared.js";
-import { dispatchTaskStep } from "#execution/tasks/parent/dispatch-task-step.js";
 import {
   resolvePendingRuntimeActions,
   setPendingRuntimeActionBatch,
@@ -353,10 +352,11 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       child: { inheritsParent: true, name: "research", nodeId: "subagents/research" },
       registry: createSandboxRegistry(backend),
       session,
+      tasks: true,
     });
     vi.spyOn(taskRunControl, "sendTaskCommandToOwner").mockResolvedValue({ runId: "task-run-1" });
 
-    await dispatchTaskStep({
+    await dispatchRuntimeActionsStep({
       parentContinuationToken: "turn-inbox",
       parentWritable: createWritable(),
       serializedContext: {},
@@ -434,9 +434,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       runId: "task-run-1",
     });
 
-    // Tasks-mode dispatch routes through dispatchTaskStep; the turn workflow
-    // never sends `experimental.tasks` agents to dispatchRuntimeActionsStep.
-    const result = await dispatchTaskStep({
+    const result = await dispatchRuntimeActionsStep({
       parentContinuationToken: "turn-inbox",
       parentWritable: createWritable(),
       serializedContext: {},
@@ -484,7 +482,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     mocks.createSession.mockRejectedValue(new Error("child start failed"));
     vi.spyOn(taskRunControl, "sendTaskCommandToOwner").mockResolvedValue({ runId: "task-run-1" });
 
-    const result = await dispatchTaskStep({
+    const result = await dispatchRuntimeActionsStep({
       parentContinuationToken: "turn-inbox",
       parentWritable: createWritable(),
       serializedContext: {},
@@ -792,7 +790,7 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
       taskId: "task_active",
     });
 
-    const result = await dispatchTaskStep({
+    const result = await dispatchRuntimeActionsStep({
       parentContinuationToken: "turn-inbox",
       parentWritable: createWritable(),
       serializedContext: {},
@@ -819,7 +817,7 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
     });
     installContext(session, undefined, true, TURN_AUTH);
 
-    const result = await dispatchTaskStep({
+    const result = await dispatchRuntimeActionsStep({
       parentContinuationToken: "turn-inbox",
       parentWritable: createWritable(),
       serializedContext: {},
@@ -1352,6 +1350,7 @@ function installSandboxContext(input: {
   };
   readonly registry: RuntimeSandboxRegistry;
   readonly session: HarnessSession;
+  readonly tasks?: boolean;
 }): void {
   const root = {
     agent: { config: { name: "parent-agent" }, connections: [] },
@@ -1385,7 +1384,9 @@ function installSandboxContext(input: {
   ctx.set(BundleKey, {
     compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
     graph: { nodesByNodeId, root },
-    resolvedAgent: { config: {} },
+    resolvedAgent: {
+      config: input.tasks ? { experimental: { tasks: true } } : {},
+    },
     subagentRegistry: { subagentsByNodeId },
     turnAgent: input.session.agent,
   } as never);

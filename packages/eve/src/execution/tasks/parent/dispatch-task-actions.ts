@@ -1,6 +1,6 @@
 /**
- * Task-mode sibling of `dispatchRuntimeActionsStep`, selected by the turn
- * workflow when the agent enables `experimental.tasks`.
+ * Task-mode dispatch helper selected inside `dispatchRuntimeActionsStep` when
+ * the resolved agent enables `experimental.tasks`.
  *
  * Same plan → dispatch → emit skeleton, but every delegation is wrapped in
  * the durable task lifecycle: the task record and its inbox token
@@ -23,7 +23,7 @@ import {
 import { createAgentContinuationBundle } from "#execution/agent-continuation-bundle.js";
 import {
   emitSubagentCalled,
-  prepareRuntimeActionDispatch,
+  type PreparedRuntimeActionDispatch,
   type RuntimeActionDispatchInput,
   type RuntimeActionDispatchResult,
   startSubagent,
@@ -44,20 +44,10 @@ import {
 } from "#execution/tasks/parent/continuation-dispatch.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
-export async function dispatchTaskStep(
+export async function dispatchTaskActions(
   input: RuntimeActionDispatchInput,
+  prepared: PreparedRuntimeActionDispatch,
 ): Promise<RuntimeActionDispatchResult> {
-  "use step";
-
-  const prepared = await prepareRuntimeActionDispatch({
-    serializedContext: input.serializedContext,
-    sessionState: input.sessionState,
-    taskControls: true,
-  });
-  if (prepared === undefined) {
-    return { results: [], sessionState: input.sessionState, pendingTasks: [] };
-  }
-
   const { batch, bundle, session } = prepared;
   // Acquired only once preflight can no longer throw, so a planning failure
   // never leaks the writer lock.
