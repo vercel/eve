@@ -121,6 +121,27 @@ describe("buildSandboxSession", () => {
     expect(result).toEqual({ exitCode: 0, stderr: "", stdout: "hello" });
   });
 
+  it("kills a spawned process when run is aborted", async () => {
+    const controller = new AbortController();
+    const kill = vi.fn(async () => {});
+    const process: SandboxProcess = {
+      kill,
+      stderr: new ReadableStream(),
+      stdout: new ReadableStream(),
+      wait: async () => await new Promise(() => {}),
+    };
+    const session = buildSandboxSession(
+      createTestPrimitives({ spawn: vi.fn(async () => process) }),
+    );
+    const run = session.run({ abortSignal: controller.signal, command: "sleep forever" });
+    const rejection = expect(run).rejects.toMatchObject({ name: "TimeoutError" });
+
+    controller.abort(new DOMException("The command timed out.", "TimeoutError"));
+
+    await rejection;
+    expect(kill).toHaveBeenCalledOnce();
+  });
+
   it("does not pollute stderr with framework command progress logs", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const spawn = vi.fn(async () => syntheticProcess({ exitCode: 0, stdout: "hello" }));

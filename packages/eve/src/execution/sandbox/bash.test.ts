@@ -3,7 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install.js";
 import type { SandboxCommandResult, SandboxSession } from "#shared/sandbox-session.js";
 
-import { executeBashOnSandbox } from "./bash.js";
+import {
+  DEFAULT_BASH_TIMEOUT_SECONDS,
+  executeBashOnSandbox,
+  MAX_BASH_TIMEOUT_SECONDS,
+} from "./bash.js";
 
 describe("executeBashOnSandbox", () => {
   const previousDevFlag = process.env[EVE_DEV_ENV_FLAG];
@@ -37,7 +41,75 @@ describe("executeBashOnSandbox", () => {
     expect(log).toHaveBeenCalledWith("eve: starting sandbox command: ls -la /workspace");
     expect(log).toHaveBeenCalledWith("eve: sandbox command finished (exit 0): ls -la /workspace");
   });
+
+  it.each([
+    {
+      expectedTimeoutMs: DEFAULT_BASH_TIMEOUT_SECONDS * 1_000,
+      input: { command: "sleep forever" },
+      scenario: "uses the default timeout",
+    },
+    {
+      expectedTimeoutMs: 10_000,
+      input: { command: "sleep forever", timeout: 10 },
+      scenario: "honors a shorter requested timeout",
+    },
+    {
+      expectedTimeoutMs: MAX_BASH_TIMEOUT_SECONDS * 1_000,
+      input: { command: "sleep forever", timeout: MAX_BASH_TIMEOUT_SECONDS * 2 },
+      scenario: "caps a requested timeout at the maximum",
+    },
+  ])("$scenario", async ({ expectedTimeoutMs, input }) => {
+    const { abort, timeout } = mockTimeoutSignal();
+    const execution = executeBashOnSandbox(createAbortingTestSandboxSession(), input);
+    const rejection = expect(execution).rejects.toMatchObject({ name: "TimeoutError" });
+
+    expect(timeout).toHaveBeenCalledWith(expectedTimeoutMs);
+    abort();
+
+    await rejection;
+  });
+
+  it("composes the command timeout with turn cancellation", async () => {
+    const controller = new AbortController();
+    const sandbox = createAbortingTestSandboxSession();
+    const execution = executeBashOnSandbox(
+      sandbox,
+      { command: "sleep forever" },
+      { abortSignal: controller.signal },
+    );
+    const rejection = expect(execution).rejects.toMatchObject({ name: "AbortError" });
+
+    controller.abort(new DOMException("The turn was cancelled.", "AbortError"));
+
+    await rejection;
+  });
 });
+
+function mockTimeoutSignal() {
+  const controller = new AbortController();
+  const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(controller.signal);
+  return {
+    abort: () => controller.abort(new DOMException("The command timed out.", "TimeoutError")),
+    timeout,
+  };
+}
+
+function createAbortingTestSandboxSession(): SandboxSession {
+  const sandbox = createTestSandboxSession({ exitCode: 0, stderr: "", stdout: "" });
+  return {
+    ...sandbox,
+    run: vi.fn(
+      async ({ abortSignal }) =>
+        await new Promise<SandboxCommandResult>((_resolve, reject) => {
+          if (abortSignal?.aborted === true) {
+            reject(abortSignal.reason);
+            return;
+          }
+          abortSignal?.addEventListener("abort", () => reject(abortSignal.reason), { once: true });
+        }),
+    ),
+  };
+}
 
 function createTestSandboxSession(result: SandboxCommandResult): SandboxSession {
   return {

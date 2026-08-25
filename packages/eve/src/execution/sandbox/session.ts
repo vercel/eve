@@ -36,12 +36,36 @@ export function buildSandboxSession(
 ): SandboxSession {
   async function run(options: SandboxRunOptions) {
     const process = await primitives.spawn(options);
-    const [stdout, stderr, { exitCode }] = await Promise.all([
+    const completed = Promise.all([
       collectStreamToString(process.stdout),
       collectStreamToString(process.stderr),
       process.wait(),
     ]);
-    return { exitCode, stderr, stdout };
+    const abortSignal = options.abortSignal;
+    if (abortSignal === undefined) {
+      const [stdout, stderr, { exitCode }] = await completed;
+      return { exitCode, stderr, stdout };
+    }
+
+    let onAbort!: () => void;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      onAbort = () => {
+        void Promise.resolve(process.kill()).catch(() => {});
+        reject(abortSignal.reason);
+      };
+      if (abortSignal.aborted) {
+        onAbort();
+      } else {
+        abortSignal.addEventListener("abort", onAbort, { once: true });
+      }
+    });
+
+    try {
+      const [stdout, stderr, { exitCode }] = await Promise.race([completed, aborted]);
+      return { exitCode, stderr, stdout };
+    } finally {
+      abortSignal.removeEventListener("abort", onAbort);
+    }
   }
   return {
     id: primitives.id,

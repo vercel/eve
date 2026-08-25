@@ -1,6 +1,11 @@
 import { z } from "#compiled/zod/index.js";
 
-import { executeBashOnSandbox, type BashInput } from "#execution/sandbox/bash.js";
+import {
+  DEFAULT_BASH_TIMEOUT_SECONDS,
+  executeBashOnSandbox,
+  MAX_BASH_TIMEOUT_SECONDS,
+  type BashInput,
+} from "#execution/sandbox/bash.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 
 /**
@@ -8,6 +13,13 @@ import { defineTool, type ToolDefinition } from "#tools/definition.js";
  */
 export const BASH_INPUT_SCHEMA = z.strictObject({
   command: z.string().describe("The shell command to execute."),
+  timeout: z
+    .number()
+    .positive()
+    .describe(
+      `Optional timeout in seconds. Defaults to ${DEFAULT_BASH_TIMEOUT_SECONDS}, max ${MAX_BASH_TIMEOUT_SECONDS}.`,
+    )
+    .optional(),
 });
 
 /**
@@ -32,9 +44,14 @@ export type BashToolOutput = z.infer<typeof BASH_OUTPUT_SCHEMA>;
  * top-level import here does not force those backends to initialize eagerly.
  */
 export const bash: ToolDefinition<BashToolInput, BashToolOutput> = defineTool({
-  description: "Execute a shell command in the shared workspace environment.",
+  description: [
+    "Execute a shell command in the shared workspace environment.",
+    `Commands time out after ${DEFAULT_BASH_TIMEOUT_SECONDS} seconds by default and may request up to ${MAX_BASH_TIMEOUT_SECONDS} seconds.`,
+  ].join(" "),
   async execute(input, ctx) {
-    return await executeBashOnSandbox(await ctx.getSandbox(), input as BashInput);
+    return await executeBashOnSandbox(await ctx.getSandbox(), input as BashInput, {
+      abortSignal: ctx.abortSignal,
+    });
   },
   inputSchema: BASH_INPUT_SCHEMA,
   outputSchema: BASH_OUTPUT_SCHEMA,

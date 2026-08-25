@@ -13,7 +13,15 @@ const MAX_LOG_COMMAND_LENGTH = 240;
  */
 export interface BashInput {
   readonly command: string;
+  readonly timeout?: number;
 }
+
+export interface BashExecuteOptions {
+  readonly abortSignal?: AbortSignal;
+}
+
+export const DEFAULT_BASH_TIMEOUT_SECONDS = 300;
+export const MAX_BASH_TIMEOUT_SECONDS = 600;
 
 // ---------------------------------------------------------------------------
 // Result shape
@@ -49,8 +57,16 @@ export interface BashResult {
 export async function executeBashOnSandbox(
   sandbox: SandboxSession,
   args: BashInput,
+  options?: BashExecuteOptions,
 ): Promise<BashResult> {
-  const raw = await runWithDevelopmentSandboxProgress(sandbox, args.command);
+  const timeoutMs =
+    Math.min(args.timeout ?? DEFAULT_BASH_TIMEOUT_SECONDS, MAX_BASH_TIMEOUT_SECONDS) * 1_000;
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const abortSignal =
+    options?.abortSignal === undefined
+      ? timeoutSignal
+      : AbortSignal.any([options.abortSignal, timeoutSignal]);
+  const raw = await runWithDevelopmentSandboxProgress(sandbox, args.command, abortSignal);
 
   const stdoutResult = truncateTail(raw.stdout);
   const stderrResult = truncateTail(raw.stderr);
@@ -81,10 +97,11 @@ export async function executeBashOnSandbox(
 async function runWithDevelopmentSandboxProgress(
   sandbox: SandboxSession,
   command: string,
+  abortSignal: AbortSignal,
 ): Promise<Awaited<ReturnType<SandboxSession["run"]>>> {
   logDevelopmentSandboxCommand(`eve: starting sandbox command: ${formatCommand(command)}`);
   if (!isEveDevEnvironment()) {
-    return await sandbox.run({ command });
+    return await sandbox.run({ abortSignal, command });
   }
 
   const startedAt = Date.now();
@@ -97,7 +114,7 @@ async function runWithDevelopmentSandboxProgress(
   timer.unref?.();
 
   try {
-    const result = await sandbox.run({ command });
+    const result = await sandbox.run({ abortSignal, command });
     logDevelopmentSandboxCommand(
       `eve: sandbox command finished (exit ${result.exitCode}): ${formatCommand(command)}`,
     );
