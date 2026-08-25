@@ -1,5 +1,5 @@
 import { z } from "#compiled/zod/index.js";
-import { taskViewJsonSchema } from "#tasks/json.js";
+import { taskViewOutputSchema } from "#tasks/json.js";
 
 export const TASK_CANCEL_TOOL_NAME = "task_cancel";
 export const TASK_UPDATE_TOOL_NAME = "task_update";
@@ -22,7 +22,7 @@ export const TASK_UPDATE_INPUT_SCHEMA = z.strictObject({
 });
 
 export const TASK_VIEWS_OUTPUT_SCHEMA = z.object({
-  tasks: z.array(taskViewJsonSchema),
+  tasks: z.array(taskViewOutputSchema),
 });
 
 export const SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA = z.strictObject({

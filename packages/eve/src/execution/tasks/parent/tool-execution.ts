@@ -27,11 +27,7 @@ import {
 import { recordTaskAgentAddress } from "#harness/handles/transitions.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { recordSessionTask } from "#tasks/session-index.js";
-import {
-  readSubagentExecutor,
-  TOOL_TASK_METADATA_KIND,
-  type TaskInboundUpdate,
-} from "#tasks/types.js";
+import { readSubagentExecutor, type TaskInboundUpdate } from "#tasks/types.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import {
   beginBackgroundTask,
@@ -225,7 +221,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     const emission = getHarnessEmissionState(this.initialSession.state);
     const task = await beginBackgroundTask({
       callId: input.options.toolCallId,
-      metadata: { kind: TOOL_TASK_METADATA_KIND, name: input.definition.name },
+      metadata: { kind: "tool", name: input.definition.name },
       parentSessionId: this.initialSession.sessionId,
       parentStepIndex: emission.stepIndex,
       parentTurnId: activeTurnId(emission),

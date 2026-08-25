@@ -55,6 +55,32 @@ export const taskViewJsonSchema = z.discriminatedUnion("status", [
   z.object({ ...taskViewJsonBaseShape, status: z.literal("cancelled") }),
 ]);
 
+/** Broad schema advertised by task-control tool outputs. */
+export const taskViewOutputSchema = z.object({
+  inputRequests: z.array(z.unknown()).optional(),
+  lastOutput: z
+    .object({
+      data: z.unknown(),
+      type: z.enum(["result", "error"]),
+    })
+    .optional(),
+  metadata: z.union([
+    z.object({
+      agentId: z.string(),
+      kind: z.literal("subagent"),
+      mode: z.enum(["local", "remote"]),
+      name: z.string(),
+    }),
+    z.object({
+      data: z.record(z.string(), z.unknown()).optional(),
+      kind: z.string(),
+      name: z.string(),
+    }),
+  ]),
+  status: z.enum(["working", "input_required", "completed", "failed", "cancelled"]),
+  taskId: z.string(),
+});
+
 /**
  * Model-visible task view, inferred from {@link taskViewJsonSchema}.
  *

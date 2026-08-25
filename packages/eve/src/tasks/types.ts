@@ -41,9 +41,6 @@ export interface TaskMetadata {
 
 export type SubagentTaskMetadata = TaskMetadata;
 
-/** Metadata kind recorded for tasks delegated by an authored background tool. */
-export const TOOL_TASK_METADATA_KIND = "tool";
-
 /** Executor-neutral metadata retained by a non-subagent durable task. */
 export interface BackgroundTaskMetadata {
   readonly kind: string;

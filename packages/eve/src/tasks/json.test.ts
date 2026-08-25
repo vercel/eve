@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { taskViewToJson } from "#tasks/json.js";
+import { taskViewOutputSchema, taskViewToJson } from "#tasks/json.js";
 import type { TaskView } from "#tasks/types.js";
 
 describe("taskViewToJson", () => {
@@ -39,5 +39,19 @@ describe("taskViewToJson", () => {
       status: "completed",
       taskId: "task-1",
     });
+  });
+});
+
+describe("taskViewOutputSchema", () => {
+  it("preserves the broad task-control output contract", () => {
+    expect(
+      taskViewOutputSchema.parse({
+        inputRequests: [{ prompt: "Choose" }],
+        lastOutput: { data: "partial", type: "result" },
+        metadata: { data: { source: "custom" }, kind: "tool", name: "report" },
+        status: "working",
+        taskId: "task-1",
+      }),
+    ).toMatchObject({ status: "working", taskId: "task-1" });
   });
 });
