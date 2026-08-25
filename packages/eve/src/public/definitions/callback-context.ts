@@ -1,4 +1,4 @@
-import type { SkillHandle } from "#execution/skills/types.js";
+import type { SkillHandle } from "#shared/skill-types.js";
 import type { RuntimeSandboxSession } from "#shared/sandbox-session.js";
 import type { SessionAuth, SessionParent, SessionTurn } from "#context/keys.js";
 

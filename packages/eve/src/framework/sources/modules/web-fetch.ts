@@ -1,1 +1,1 @@
-export { webFetch as default } from "#public/tools/web-fetch.js";
+export { webFetch as default } from "#tools/web-fetch.js";

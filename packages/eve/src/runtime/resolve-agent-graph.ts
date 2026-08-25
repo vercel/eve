@@ -390,7 +390,7 @@ function attachInheritedSandboxWorkspaceResources(input: {
   readonly nodesByNodeId: ReadonlyMap<string, ResolvedAgentGraphBundle["root"]>;
 }): void {
   const parentNodeIdByChildNodeId = new Map(
-    input.manifest.subagentEdges.map((edge) => [edge.childNodeId, edge.parentNodeId]),
+    input.manifest.subagents.map((subagent) => [subagent.nodeId, subagent.parentNodeId]),
   );
 
   for (const [nodeId, node] of input.nodesByNodeId) {
@@ -459,15 +459,15 @@ function createChildNodeIdsByParentNodeId(
 ): ReadonlyMap<string, readonly string[]> {
   const childNodeIdsByParentNodeId = new Map<string, string[]>();
 
-  for (const edge of manifest.subagentEdges) {
-    const existing = childNodeIdsByParentNodeId.get(edge.parentNodeId);
+  for (const subagent of manifest.subagents) {
+    const existing = childNodeIdsByParentNodeId.get(subagent.parentNodeId);
 
     if (existing === undefined) {
-      childNodeIdsByParentNodeId.set(edge.parentNodeId, [edge.childNodeId]);
+      childNodeIdsByParentNodeId.set(subagent.parentNodeId, [subagent.nodeId]);
       continue;
     }
 
-    existing.push(edge.childNodeId);
+    existing.push(subagent.nodeId);
   }
 
   return childNodeIdsByParentNodeId;

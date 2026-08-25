@@ -329,14 +329,6 @@ export type CompiledSubagentNode = Readonly<
 export type { CompiledRemoteAgentNode } from "#compiler/remote-agent-node.js";
 
 /**
- * Parent-child edge connecting two compiled agent nodes.
- */
-export interface CompiledSubagentEdge {
-  readonly childNodeId: string;
-  readonly parentNodeId: string;
-}
-
-/**
  * Versioned compiled manifest emitted by the compiler and loaded by runtime.
  */
 export type CompiledAgentManifest = z.infer<typeof compiledAgentManifestSchema>;
@@ -945,13 +937,6 @@ const compiledSubagentNodeSchema: z.ZodType<CompiledSubagentNode> = z.union([
     .strict(),
 ]);
 
-const compiledSubagentEdgeSchema: z.ZodType<CompiledSubagentEdge> = z
-  .object({
-    childNodeId: z.string(),
-    parentNodeId: z.string(),
-  })
-  .strict();
-
 /**
  * One mounted extension recorded on a compiled agent manifest. The runtime
  * evaluates {@link mountLogicalPath} at module-map load so the mount's factory
@@ -1005,7 +990,6 @@ export const compiledAgentManifestSchema = z
     sandboxWorkspaces: z.array(compiledSandboxWorkspaceSchema),
     schedules: z.array(compiledScheduleDefinitionSchema),
     skills: z.array(compiledSkillSourceSchema).readonly(),
-    subagentEdges: z.array(compiledSubagentEdgeSchema),
     subagents: z.array(compiledSubagentNodeSchema),
     instructions: z.array(compiledInstructionsSchema).readonly().default([]),
     instrumentation: moduleSourceRefSchema.optional(),
@@ -1219,7 +1203,6 @@ export function createCompiledAgentManifest(input: {
   readonly sandboxWorkspaces?: readonly CompiledSandboxWorkspace[];
   readonly schedules?: readonly CompiledScheduleDefinition[];
   readonly skills?: readonly CompiledSkillDefinition[];
-  readonly subagentEdges?: readonly CompiledSubagentEdge[];
   readonly subagents?: readonly CompiledSubagentNode[];
   readonly instructions?: readonly CompiledInstructionsDefinition[];
   readonly instrumentation?: ModuleSourceRef;
@@ -1231,7 +1214,6 @@ export function createCompiledAgentManifest(input: {
     ...createCompiledAgentNodeManifest(input),
     kind: COMPILED_AGENT_MANIFEST_KIND,
     extensionMounts: [...(input.extensionMounts ?? [])],
-    subagentEdges: [...(input.subagentEdges ?? [])],
     subagents: [...(input.subagents ?? [])],
     version: COMPILED_AGENT_MANIFEST_VERSION,
   };

@@ -1,1 +1,1 @@
-export { bash as default } from "#public/tools/bash.js";
+export { bash as default } from "#tools/bash.js";

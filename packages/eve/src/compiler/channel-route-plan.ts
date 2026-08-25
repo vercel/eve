@@ -72,9 +72,26 @@ export function createCompiledChannelRoutePlan(input: {
 function derivePreflights(
   effective: readonly CompiledChannelDefinition[],
 ): CompiledChannelPreflightDefinition[] {
+  const corsRoutes = effective.filter(
+    (channel) => channel.method !== "WEBSOCKET" && channel.cors !== undefined,
+  );
+  for (const [index, route] of corsRoutes.entries()) {
+    const conflict = corsRoutes
+      .slice(index + 1)
+      .find(
+        (candidate) =>
+          routePatternsOverlap(route.urlPath, candidate.urlPath) &&
+          JSON.stringify(route.cors) !== JSON.stringify(candidate.cors),
+      );
+    if (conflict !== undefined) {
+      throw new Error(
+        `compile/channel-cors-conflict: overlapping routes at "${route.urlPath}" and "${conflict.urlPath}" declare different CORS policies.`,
+      );
+    }
+  }
+
   const byPath = new Map<string, CompiledChannelDefinition[]>();
-  for (const channel of effective) {
-    if (channel.method === "WEBSOCKET" || channel.cors === undefined) continue;
+  for (const channel of corsRoutes) {
     const identity = normalizeRoutePattern(channel.urlPath);
     const routes = byPath.get(identity) ?? [];
     routes.push(channel);

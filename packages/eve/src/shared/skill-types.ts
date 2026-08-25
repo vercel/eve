@@ -9,7 +9,7 @@ export interface SkillFile {
 }
 
 /**
- * Handle to one authored skill, returned by `ctx.getSkill()`.
+ * Public handle to one authored skill, returned by `ctx.getSkill()`.
  *
  * Exposes skill metadata and reads files from a skill package.
  */

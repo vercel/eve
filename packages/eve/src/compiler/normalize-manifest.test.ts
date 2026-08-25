@@ -16,7 +16,7 @@ import { createProgrammaticCompiledModuleMap } from "#compiler/module-map.js";
 import { validateCompiledModuleMap } from "#compiler/validate-artifact.js";
 import { frameworkAgentSourceRegistry } from "#framework/sources/registry.js";
 import { defineAgent } from "#public/definitions/agent.js";
-import { defineChannel, GET } from "#public/definitions/channel.js";
+import { defineChannel, GET, POST } from "#public/definitions/channel.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineTool, disableTool } from "#public/definitions/tool.js";
 
@@ -281,6 +281,61 @@ describe("compileAgentManifest source graph", () => {
     await expect(
       compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
     ).rejects.toThrow("compile/channel-route-duplicate");
+  });
+
+  it("rejects conflicting CORS policies across overlapping route patterns", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "channels/accounts-read.ts",
+        loadNamespace: async () => ({
+          default: defineChannel({
+            cors: { origin: ["https://read.example.com"] },
+            routes: [GET("/accounts/:id", async () => new Response())],
+          }),
+        }),
+      },
+      {
+        logicalPath: "channels/accounts-write.ts",
+        loadNamespace: async () => ({
+          default: defineChannel({
+            cors: { origin: ["https://write.example.com"] },
+            routes: [POST("/accounts/me", async () => new Response())],
+          }),
+        }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow("compile/channel-cors-conflict");
+  });
+
+  it("allows identical CORS policies across overlapping route patterns", async () => {
+    const cors = { origin: ["https://app.example.com"] } as const;
+    const sourceRegistry = registry([
+      {
+        logicalPath: "channels/accounts-read.ts",
+        loadNamespace: async () => ({
+          default: defineChannel({
+            cors,
+            routes: [GET("/accounts/:id", async () => new Response())],
+          }),
+        }),
+      },
+      {
+        logicalPath: "channels/accounts-write.ts",
+        loadNamespace: async () => ({
+          default: defineChannel({
+            cors,
+            routes: [POST("/accounts/me", async () => new Response())],
+          }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
+
+    expect(compiled.channelRoutes.preflight).toHaveLength(2);
   });
 
   it("loads programmatic hooks and persists exact event subscriptions", async () => {

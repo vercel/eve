@@ -1,1 +1,1 @@
-export { loadSkill as default } from "#public/tools/load-skill.js";
+export { loadSkill as default } from "#tools/load-skill.js";

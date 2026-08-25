@@ -639,7 +639,6 @@ describe("application Nitro creation", () => {
     });
     const {
       kind: _kind,
-      subagentEdges: _subagentEdges,
       subagents: _subagents,
       version: _version,
       ...subagentAgent

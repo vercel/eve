@@ -17,7 +17,6 @@ import {
   type CompiledSkillDefinition,
   type CompiledScheduleDefinition,
   type CompiledSandboxDefinition,
-  type CompiledSubagentEdge,
   type CompiledSubagentNode,
   type CompiledToolDefinition,
   type CompiledWorkflowToolDefinition,
@@ -101,7 +100,6 @@ interface NodeCompileInput {
 
 interface CompiledLocalNodeResult {
   readonly descendants: readonly CompiledSubagentNode[];
-  readonly edges: readonly CompiledSubagentEdge[];
   readonly manifest: CompiledAgentNodeManifest;
 }
 
@@ -152,7 +150,6 @@ export async function compileAgentManifest(
   return createCompiledAgentManifest({
     ...root.manifest,
     diagnosticsSummary,
-    subagentEdges: root.edges,
     subagents,
   });
 }
@@ -206,7 +203,6 @@ class AgentGraphCompiler {
     });
     return {
       descendants: children.nodes,
-      edges: children.edges,
       manifest,
     };
   }
@@ -216,12 +212,10 @@ class AgentGraphCompiler {
     state: FinalizedNodeSourceState,
     inheritedExternalDependencies: readonly string[],
   ): Promise<{
-    readonly edges: readonly CompiledSubagentEdge[];
     readonly nodes: readonly CompiledSubagentNode[];
     readonly remoteAgents: readonly CompiledRemoteAgentNode[];
   }> {
     const nodes: CompiledSubagentNode[] = [];
-    const edges: CompiledSubagentEdge[] = [];
     const remoteAgents: CompiledRemoteAgentNode[] = [];
     const selectedSourceIds = collectSelectedSourceIds(state.composed);
     const subagents = state.projected.subagents.filter((source) =>
@@ -332,10 +326,9 @@ class AgentGraphCompiler {
         };
       }
       nodes.push(node, ...children.nodes);
-      edges.push({ childNodeId: nodeId, parentNodeId: input.nodeId }, ...children.edges);
     }
 
-    return { edges, nodes, remoteAgents };
+    return { nodes, remoteAgents };
   }
 
   private composeNodeSources(

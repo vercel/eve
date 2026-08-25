@@ -1,1 +1,1 @@
-export { default } from "#public/tools/connection-search.js";
+export { default } from "#tools/connection-search.js";

@@ -4,6 +4,7 @@ import { compileFromMemory } from "#compiler/compile-from-memory.js";
 import {
   COMPILED_AGENT_MANIFEST_VERSION,
   compiledAgentManifestSchema,
+  createCompiledAgentNodeManifest,
 } from "#compiler/manifest.js";
 import {
   validateCompiledAgentManifest,
@@ -80,5 +81,43 @@ describe("compiled agent manifest v42", () => {
         nodes: { ...moduleMap.nodes, __root__: { modules: { ...root.modules, orphan: {} } } },
       }),
     ).toThrow("do not match its bindings");
+  });
+
+  it("rejects a disconnected subagent parent cycle", async () => {
+    const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+    const agent = createCompiledAgentNodeManifest(manifest);
+    const parent = {
+      agent,
+      backing: { kind: "resource" as const, sourcePath: "/virtual/subagents/parent" },
+      description: "Parent agent.",
+      entryPath: "/virtual/subagents/parent",
+      logicalPath: "subagents/parent",
+      name: "parent",
+      nodeId: "parent-node",
+      owner: { kind: "application" as const },
+      parentNodeId: "child-node",
+      rootPath: "/virtual/subagents/parent",
+      sourceId: "parent-source",
+      sourceKind: "module" as const,
+    };
+    const child = {
+      ...parent,
+      description: "Child agent.",
+      entryPath: "/virtual/subagents/parent/subagents/child",
+      logicalPath: "subagents/child",
+      name: "child",
+      nodeId: "child-node",
+      parentNodeId: parent.nodeId,
+      rootPath: "/virtual/subagents/parent/subagents/child",
+      sourceId: "child-source",
+    };
+    const corrupted = compiledAgentManifestSchema.parse({
+      ...manifest,
+      subagents: [parent, child],
+    });
+
+    expect(() => validateCompiledAgentManifest(corrupted)).toThrow(
+      "subagent graph contains a cycle",
+    );
   });
 });

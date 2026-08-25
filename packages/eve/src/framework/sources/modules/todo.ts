@@ -1,1 +1,1 @@
-export { todo as default } from "#public/tools/todo.js";
+export { todo as default } from "#tools/todo.js";

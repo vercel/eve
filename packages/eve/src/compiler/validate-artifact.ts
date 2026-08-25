@@ -5,6 +5,7 @@ import type {
   CompiledChannelDefinition,
   CompiledSubagentNode,
 } from "#compiler/manifest.js";
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { CompiledModuleBinding } from "#compiler/source-graph.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { collectModuleBindingsForManifest } from "#compiler/module-map.js";
@@ -14,7 +15,7 @@ type CompiledNode = CompiledAgentNodeManifest | CompiledAgentResources;
 
 /** Validates invariants that cannot be expressed by the serialized Zod shape. */
 export function validateCompiledAgentManifest(manifest: CompiledAgentManifest): void {
-  const nodes = new Map<string, CompiledNode>([["__root__", manifest]]);
+  const nodes = new Map<string, CompiledNode>([[ROOT_COMPILED_AGENT_NODE_ID, manifest]]);
   for (const subagent of manifest.subagents) {
     if (nodes.has(subagent.nodeId)) {
       fail(`subagent node id "${subagent.nodeId}" is duplicated`);
@@ -22,26 +23,11 @@ export function validateCompiledAgentManifest(manifest: CompiledAgentManifest): 
     nodes.set(subagent.nodeId, subagent.agent);
     validateSubagentRecord(subagent);
   }
-
-  const edges = new Set<string>();
-  for (const edge of manifest.subagentEdges) {
-    if (!nodes.has(edge.parentNodeId))
-      fail(`subagent edge parent "${edge.parentNodeId}" is missing`);
-    if (!nodes.has(edge.childNodeId)) fail(`subagent edge child "${edge.childNodeId}" is missing`);
-    const key = `${edge.parentNodeId}\0${edge.childNodeId}`;
-    if (edges.has(key))
-      fail(`subagent edge "${edge.parentNodeId}" -> "${edge.childNodeId}" is duplicated`);
-    edges.add(key);
-  }
-  for (const subagent of manifest.subagents) {
-    if (!edges.has(`${subagent.parentNodeId}\0${subagent.nodeId}`)) {
-      fail(`subagent node "${subagent.nodeId}" has no matching parent edge`);
-    }
-  }
+  validateSubagentTree(manifest, nodes);
 
   validateCompiledAgentResources(manifest, {
     activeResourceSourceIds: manifest.subagents
-      .filter((node) => node.parentNodeId === "__root__")
+      .filter((node) => node.parentNodeId === ROOT_COMPILED_AGENT_NODE_ID)
       .map((node) => node.sourceId),
   });
   for (const subagent of manifest.subagents) {
@@ -65,6 +51,33 @@ export function validateCompiledAgentManifest(manifest: CompiledAgentManifest): 
       ],
       "tool and subagent public name",
     );
+  }
+}
+
+function validateSubagentTree(
+  manifest: CompiledAgentManifest,
+  nodes: ReadonlyMap<string, CompiledNode>,
+): void {
+  const parentByNodeId = new Map(
+    manifest.subagents.map((subagent) => [subagent.nodeId, subagent.parentNodeId]),
+  );
+  for (const subagent of manifest.subagents) {
+    if (!nodes.has(subagent.parentNodeId)) {
+      fail(`subagent node "${subagent.nodeId}" has missing parent "${subagent.parentNodeId}"`);
+    }
+    const lineage = new Set<string>();
+    let nodeId = subagent.nodeId;
+    while (nodeId !== ROOT_COMPILED_AGENT_NODE_ID) {
+      if (lineage.has(nodeId)) {
+        fail(`subagent graph contains a cycle at node "${nodeId}"`);
+      }
+      lineage.add(nodeId);
+      const parentNodeId = parentByNodeId.get(nodeId);
+      if (parentNodeId === undefined) {
+        fail(`subagent node "${subagent.nodeId}" is not reachable from the root`);
+      }
+      nodeId = parentNodeId;
+    }
   }
 }
 
@@ -177,6 +190,7 @@ export function validateCompiledAgentResources(
   const activeSourceIds = new Set([
     ...referencedModuleSources.keys(),
     ...collectActiveResourceSourceIds(node),
+    ...node.remoteAgents.map((remote) => remote.sourceId),
     ...(options.activeResourceSourceIds ?? []),
   ]);
   const disabledSourceIds = new Set<string>();
