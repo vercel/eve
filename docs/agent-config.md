@@ -49,15 +49,16 @@ version uses hyphens (`claude-opus-4-8`), while the Gateway id above uses a dot
 
 Model use is subject to the terms, data-processing commitments, retention behavior, and available controls of the selected provider and routing path. Review the [AI Gateway model catalog](https://vercel.com/ai-gateway/models) for gateway-routed models, and review the provider's terms when you configure a direct `LanguageModel`.
 
-For every OpenAI model call, eve sets `providerOptions.openai.safetyIdentifier`
-from the active turn's [`auth.current`](./guides/auth-and-route-protection#what-reaches-ctxsessionauth)
-principal. The value is a SHA-256 fingerprint of the principal's authenticator,
-issuer, type, id, and subject; eve does not send the raw principal fields or
-attributes as the safety identifier. The fingerprint follows the current caller
-when a later turn changes users. When `auth.current` is `null`, eve does not add
-or replace the option. This applies to OpenAI compaction calls too. eve replaces
-an authored `openai.safetyIdentifier` with the active caller's fingerprint while
-preserving the other provider options.
+For every OpenAI model call, eve fills
+`providerOptions.openai.safetyIdentifier` from the active turn's
+[`auth.current`](./guides/auth-and-route-protection#what-reaches-ctxsessionauth)
+principal when you have not configured that option. The default value is a
+SHA-256 fingerprint of the principal's authenticator, issuer, type, id, and
+subject; eve does not send the raw principal fields or attributes as the safety
+identifier. The fingerprint follows the current caller when a later turn
+changes users. An authored `openai.safetyIdentifier` takes precedence and is
+forwarded unchanged. When `auth.current` is `null`, eve does not add the option.
+The same rules apply to OpenAI compaction calls.
 
 ### Choose the model dynamically
 

@@ -10087,7 +10087,7 @@ describe("createToolLoopHarness", () => {
           modelReference: {
             id: "openai/gpt-5.6-sol",
             providerOptions: {
-              openai: { safetyIdentifier: "authored", store: false },
+              openai: { store: false },
             },
           },
           system: "",

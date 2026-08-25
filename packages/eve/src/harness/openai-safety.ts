@@ -4,8 +4,7 @@ import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 
 /**
  * Adds OpenAI's end-user safety identifier without disclosing the raw eve
- * principal. The framework-owned value replaces an authored value so every
- * request follows the active turn's caller.
+ * principal. An authored value takes precedence over the framework default.
  */
 export function mergeOpenAISafetyIdentifier(
   modelReference: RuntimeModelReference,
@@ -19,6 +18,9 @@ export function mergeOpenAISafetyIdentifier(
   const openai = providerOptions?.openai;
   const openaiOptions =
     openai !== null && typeof openai === "object" && !Array.isArray(openai) ? openai : undefined;
+  if (openaiOptions !== undefined && Object.hasOwn(openaiOptions, "safetyIdentifier")) {
+    return providerOptions;
+  }
 
   return {
     ...providerOptions,

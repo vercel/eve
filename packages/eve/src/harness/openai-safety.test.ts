@@ -14,12 +14,31 @@ const auth: SessionAuthContext = {
 };
 
 describe("mergeOpenAISafetyIdentifier", () => {
-  it("sets a fingerprint of the active caller while preserving OpenAI options", () => {
+  it("preserves an authored safety identifier", () => {
+    const providerOptions = {
+      gateway: { caching: "auto" },
+      openai: { safetyIdentifier: "authored", store: false },
+    };
+
+    expect(mergeOpenAISafetyIdentifier({ id: "openai/gpt-5.6-sol" }, providerOptions, auth)).toBe(
+      providerOptions,
+    );
+  });
+
+  it("treats an authored null as explicit", () => {
+    const providerOptions = { openai: { safetyIdentifier: null } };
+
+    expect(mergeOpenAISafetyIdentifier({ id: "openai/gpt-5.6-sol" }, providerOptions, auth)).toBe(
+      providerOptions,
+    );
+  });
+
+  it("sets a fingerprint of the active caller while preserving other options", () => {
     const result = mergeOpenAISafetyIdentifier(
       { id: "openai/gpt-5.6-sol" },
       {
         gateway: { caching: "auto" },
-        openai: { safetyIdentifier: "authored", store: false },
+        openai: { store: false },
       },
       auth,
     );
