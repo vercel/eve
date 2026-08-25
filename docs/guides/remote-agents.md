@@ -20,15 +20,15 @@ export default defineRemoteAgent({
 
 `defineRemoteAgent` accepts:
 
-| Parameter          | Type                                          | Required | Default           | Description                                                                                                                                                                          |
-| ------------------ | --------------------------------------------- | -------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `url`              | `string \| (() => string \| Promise<string>)` | Yes      | n/a               | Base URL of the remote eve deployment to call. A string is baked at compile time; a function is resolved at runtime (see [Runtime URLs](#runtime-urls)).                             |
-| `description`      | `string`                                      | Yes      | n/a               | Model-visible delegation description.                                                                                                                                                |
-| `auth`             | `OutboundAuthFn`                              | No       | none              | Outbound auth hook from `eve/agents/auth`.                                                                                                                                           |
-| `forwardPrincipal` | `boolean`                                     | No       | `false`           | Forward the dispatching turn's session principal to the remote deployment (see [Forwarding the caller identity](#forwarding-the-caller-identity)).                                   |
-| `headers`          | `HeadersValue`                                | No       | none              | Static or lazily resolved request headers.                                                                                                                                           |
-| `path`             | `string`                                      | No       | `/eve/v1/session` | Route appended to `url` for the create-session request.                                                                                                                              |
-| `outputSchema`     | `StandardSchema \| JSON Schema`               | No       | none              | Structured return type the caller requires. Enforced by the remote agent like any task-mode output schema. Set it on the definition to apply to every call, or override it per call. |
+| Parameter          | Type                                          | Required | Default           | Description                                                                                                                                              |
+| ------------------ | --------------------------------------------- | -------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`              | `string \| (() => string \| Promise<string>)` | Yes      | n/a               | Base URL of the remote eve deployment to call. A string is baked at compile time; a function is resolved at runtime (see [Runtime URLs](#runtime-urls)). |
+| `description`      | `string`                                      | Yes      | n/a               | Model-visible delegation description.                                                                                                                    |
+| `auth`             | `OutboundAuthFn`                              | No       | none              | Outbound auth hook from `eve/agents/auth`.                                                                                                               |
+| `forwardPrincipal` | `boolean`                                     | No       | `false`           | Forward the dispatching turn's session principal to the remote deployment (see [Forwarding the caller identity](#forwarding-the-caller-identity)).       |
+| `headers`          | `HeadersValue`                                | No       | none              | Static or lazily resolved request headers.                                                                                                               |
+| `path`             | `string`                                      | No       | `/eve/v1/session` | Route appended to `url` for the create-session request.                                                                                                  |
+| `outputSchema`     | `StandardSchema \| JSON Schema`               | No       | none              | Structured return type for fresh calls. A per-call schema overrides it; an `agentId` continuation must pass its own per-call schema.                     |
 
 ## Dynamic remote agents
 
@@ -82,7 +82,7 @@ The function may be async and must return a non-empty string. `auth` and `header
 
 To the model, a remote agent is another subagent tool. You call it the same way you call a local subagent, with a `message` and an optional `outputSchema`. The message must carry the full task, including any context the remote agent needs, because it never receives the parent's conversation history.
 
-To get one structured result back instead of an open-ended reply, set an `outputSchema` on the agent definition or on an individual call. The remote agent then runs in task mode, a single-shot delegation that returns structured output as the tool result. See [Subagents](../subagents) for how task mode works.
+To get structured output from a fresh call, set `outputSchema` on the agent definition or that call. For an `agentId` continuation, pass `outputSchema` on the continuation; the definition-level fallback is not reapplied. In blocking mode, the structured value is the subagent tool result. With `experimental.tasks`, the initial result is a working task receipt and the structured value arrives later as terminal task data; the persistent remote child remains available through `agentId`. See [Subagents](../subagents) and [Background tasks](/docs/tools/background-tasks).
 
 ## Outbound auth
 
@@ -128,17 +128,18 @@ A receiver on an eve version that predates all principal forwarding may instead 
 
 ## How remote dispatch and callbacks work
 
-A local subagent runs inline. A remote one runs in its own deployment, so dispatch is asynchronous:
+Local and remote subagents share the same model-facing lifecycle, but a remote one crosses a deployment boundary and reports through callbacks:
 
-1. The parent starts a task-mode session on the remote's `POST /eve/v1/session`, passing a framework callback URL.
-2. The parent turn parks (suspends durably without holding compute; see [Execution model & durability](../concepts/execution-model-and-durability)) until the remote posts a terminal callback.
-3. When the callback arrives, the parent resumes and surfaces the result.
+1. The parent starts a session on the remote's `POST /eve/v1/session`, passing a framework callback URL.
+2. In blocking mode, the parent turn parks (suspends durably without holding compute; see [Execution model & durability](../concepts/execution-model-and-durability)) until the remote posts a terminal callback.
+3. With `experimental.tasks`, the parent receives a working receipt after admission and continues; later remote callbacks update the task and wake the parent when appropriate.
+4. When a blocking callback or terminal task notification arrives, the parent surfaces the result.
 
-The parent stream carries the same `subagent.called`, `action.result`, and `subagent.completed` events as local delegation. For a remote call, `subagent.called.data.remote.url` records the target.
+The parent stream carries the same `subagent.called`, `action.result`, and `subagent.completed` events as local delegation. For a remote call, `subagent.called.data.remote.url` records the target. `subagent.completed` means the delegation call settled; with `backgroundTask.status: "working"`, it records task admission rather than remote child termination.
 
-Cancelling the parent while a remote call is active sends an authenticated `POST /eve/v1/session/:childSessionId/cancel` to the remote and waits for that request to be accepted before the parent settles. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.cancelled` → `session.waiting` on its own stream; an older or unreachable remote is logged but cannot turn the parent's cancellation into a failure.
+In blocking mode, cancelling the parent while a remote call is active sends an authenticated `POST /eve/v1/session/:childSessionId/cancel` to the remote and waits for that request to be accepted before the parent settles. An admitted background task survives cancellation of its initiating turn; use `task_cancel` to cancel that task and propagate a cooperative abort to the remote child. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.cancelled` → `session.waiting` on its own stream; an older or unreachable remote is logged but cannot turn the parent's cancellation into a failure.
 
-Both failure paths surface to the parent as a failed tool result, so the caller can explain or recover within the same session. A failed _start_ returns the error inline. A remote that starts and then fails posts a terminal failure callback, which the parent receives as an errored subagent result carrying the remote's error (or `REMOTE_AGENT_FAILED` when none is supplied). Terminal callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than marking the task complete, so the engine retries it.
+A failed _start_ returns an inline error before either blocking output or a background receipt exists. After a blocking remote starts, a terminal failure callback becomes the original errored subagent tool result. Under `experimental.tasks`, the original call has already returned a working receipt; the same callback transitions the task to `failed` and delivers a later framework notification. Missing remote error data maps to `REMOTE_AGENT_FAILED`. Terminal callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than marking the task complete, so the engine retries it.
 
 ## What to read next
 

@@ -3,13 +3,11 @@
 These evals are executable evidence for the background-task contract. They do
 not define that contract.
 
-When sources disagree, use this precedence:
-
-1. `research/tools-as-tasks.md` for settled externally observable intent.
-2. Public tool and protocol contracts.
-3. `packages/eve/src/tasks/types.ts` and `transitions.ts` for executable
-   lifecycle semantics.
-4. Evals and lower-level implementation as evidence.
+Verify shipped behavior against published documentation, public tool and
+protocol contracts, `packages/eve/src/tasks/types.ts`, transition logic, and
+focused tests. These sources must agree; treat disagreement as a contract bug
+to resolve rather than choosing one source automatically. Research plans record
+proposed or unsettled design intent, while evals provide end-to-end evidence.
 
 Every `*.eval.ts` case uses `defineTaskEval` and declares exactly one primary
 transition. The canonical specification in `task-transition.ts` supplies its
