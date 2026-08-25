@@ -270,8 +270,16 @@ describe("compiled vendor assets", () => {
         readFile(join(COMPILED_VENDOR_ROOT, "@workflow/core/runtime/run.d.ts"), "utf8"),
       ]);
 
-    expect(indexDts).toContain("Just the core utilities");
-    expect(indexDts).toContain("from '#compiled/@workflow/errors/index.js'");
+    const upstreamIndexDts = await readFile(
+      join(dirname(dirname(require.resolve("@workflow/core"))), "dist/index.d.ts"),
+      "utf8",
+    );
+
+    expect(indexDts).toBe(
+      rewriteDeclarationImports(upstreamIndexDts, {
+        "@workflow/errors": "#compiled/@workflow/errors/index.js",
+      }),
+    );
     expect(createHookDts).toContain("Creates a {@link Hook}");
     expect(workflowDts).toBe(`export * from "./workflow/index.js";\n`);
     expect(workflowIndexDts).toContain("from '#compiled/@workflow/errors/index.js'");
