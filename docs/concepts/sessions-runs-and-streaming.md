@@ -54,6 +54,8 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `action.result`           | A tool call returned.                                                                                            |
 | `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or `ask_question`); carries `requests`. |
 | `input.resolved`          | The server accepted terminal human-input outcomes; carries `resolutions` with responses when provided.           |
+| `approval.candidate`      | A responder-bound approval attempt changed state; carries `candidateId` and `outcome`.                           |
+| `approval.settled`        | An approval request resolved as `approved` or `cancelled`.                                                       |
 | `subagent.called`         | A subagent was delegated; carries `childSessionId` to attach to.                                                 |
 | `subagent.completed`      | A delegated subagent finished.                                                                                   |
 | `reasoning.appended`      | A reasoning delta (incremental, with cumulative text so far).                                                    |

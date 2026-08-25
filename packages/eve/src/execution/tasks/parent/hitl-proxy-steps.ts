@@ -2,6 +2,7 @@ import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import { createTaskInputCapabilityToken } from "#execution/task-input-capability.js";
+import { readTaskView } from "#execution/tasks/parent/control-shared.js";
 import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { createRemoteTaskInputCallbackUrl } from "#execution/workflow-callback-url.js";
 import {
@@ -136,32 +137,76 @@ export async function acceptTaskAuthorizationEventStep(input: {
   readonly hookPayload: SubagentAuthorizationEventHookPayload;
   readonly sessionState: DurableSessionState;
   readonly taskId: string;
-}): Promise<boolean> {
+}): Promise<
+  | { readonly accepted: false }
+  | { readonly accepted: true; readonly hookPayload: SubagentAuthorizationEventHookPayload }
+> {
   "use step";
 
   const durableSession = await readDurableSession(input.sessionState);
   const entry = findSessionTaskEntry(durableSession.state, input.taskId);
-  if (entry === undefined) return false;
+  if (entry === undefined) return { accepted: false };
   const entryMetadata = readSubagentTaskMetadata(entry);
-  if (entryMetadata === undefined) return false;
+  if (entryMetadata === undefined) return { accepted: false };
   const handle = (getAgentHandleStore(durableSession.state)?.handles ?? []).find(
     (candidate) =>
       candidate.phase === "addressed" && candidate.identity.id === entryMetadata.agentId,
   );
-  if (
-    handle?.phase !== "addressed" ||
-    handle.address.sessionId !== input.hookPayload.childSessionId
-  ) {
-    return false;
-  }
-  const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
+  const handleMatches =
+    handle?.phase === "addressed" && handle.address.sessionId === input.hookPayload.childSessionId;
+  const view = await readTaskView(entry);
   const viewMetadata = view === undefined ? undefined : readSubagentTaskMetadata(view);
-  return (
-    view !== undefined &&
-    !isTerminalTaskStatus(view.status) &&
+  const viewMatches =
     view.executor?.childSessionId === input.hookPayload.childSessionId &&
-    viewMetadata?.agentId === entryMetadata.agentId
-  );
+    viewMetadata?.agentId === entryMetadata.agentId;
+  const eventType = input.hookPayload.event.type;
+  const isApprovalLifecycleEvent =
+    eventType === "approval.candidate" || eventType === "approval.settled";
+  if (isApprovalLifecycleEvent) {
+    if (!viewMatches || (!isTerminalTaskStatus(view.status) && !handleMatches)) {
+      return { accepted: false };
+    }
+    return {
+      accepted: true,
+      hookPayload: namespaceTaskApprovalEvent(input.hookPayload, input.taskId),
+    };
+  }
+  if (!handleMatches || isTerminalTaskStatus(view.status) || !viewMatches) {
+    return { accepted: false };
+  }
+  return { accepted: true, hookPayload: input.hookPayload };
+}
+
+function namespaceTaskApprovalEvent(
+  hookPayload: SubagentAuthorizationEventHookPayload,
+  taskId: string,
+): SubagentAuthorizationEventHookPayload {
+  switch (hookPayload.event.type) {
+    case "approval.candidate":
+      return {
+        ...hookPayload,
+        event: {
+          ...hookPayload.event,
+          data: {
+            ...hookPayload.event.data,
+            requestId: createTaskInputRequestId(taskId, hookPayload.event.data.requestId),
+          },
+        },
+      };
+    case "approval.settled":
+      return {
+        ...hookPayload,
+        event: {
+          ...hookPayload.event,
+          data: {
+            ...hookPayload.event.data,
+            requestId: createTaskInputRequestId(taskId, hookPayload.event.data.requestId),
+          },
+        },
+      };
+    default:
+      return hookPayload;
+  }
 }
 
 /** Caches terminal task views before their workflow runs can expire. */

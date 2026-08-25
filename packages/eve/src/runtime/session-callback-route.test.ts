@@ -117,6 +117,58 @@ describe("session callback route", () => {
     });
   });
 
+  it.each([
+    {
+      data: {
+        candidateId: "candidate-1",
+        outcome: "pending",
+        requestId: "req-1",
+        responderPrincipalId: "user-1",
+        sequence: 3,
+        stepIndex: 2,
+        turnId: "turn-child",
+      },
+      type: "approval.candidate",
+    },
+    {
+      data: {
+        outcome: "approved",
+        requestId: "req-1",
+        responderPrincipalId: "user-1",
+        sequence: 3,
+        stepIndex: 3,
+        turnId: "turn-child",
+      },
+      type: "approval.settled",
+    },
+  ])("forwards a remote task $type event to the owning task hook", async (event) => {
+    resumeHookMock.mockResolvedValue(undefined);
+    const response = await handleSessionCallbackRequest(
+      new Request(`https://app.example.com/eve/v1/callback/${TASK_TOKEN}`, {
+        body: JSON.stringify({
+          callId: "call-task",
+          childContinuationToken: "remote-child-token",
+          childSessionId: "child-session",
+          event,
+          kind: "task.authorization",
+          subagentName: "research",
+          taskId: TASK_ID,
+        }),
+        method: "POST",
+      }),
+      createRouteContext({ token: TASK_TOKEN }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(resumeHookMock).toHaveBeenCalledWith(TASK_TOKEN, {
+      callId: "call-task",
+      childSessionId: "child-session",
+      event,
+      kind: "authorization-event",
+      subagentName: "research",
+    });
+  });
+
   it("forwards remote task updates to the owning task hook", async () => {
     resumeHookMock.mockResolvedValue(undefined);
     const response = await handleSessionCallbackRequest(

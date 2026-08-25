@@ -67,9 +67,9 @@ export async function routeDeliverToChildren(input: {
       sessionState,
       taskId: request.taskId,
     });
-    if (!accepted) continue;
+    if (!accepted.accepted) continue;
     const emitted = await emitRecordedTaskAuthorizationEventStep({
-      hookPayload: request.hookPayload,
+      hookPayload: accepted.hookPayload,
       parentWritable: input.parentWritable,
       serializedContext,
       sessionState,

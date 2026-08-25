@@ -63,6 +63,30 @@ const taskAuthorizationEventSchema: z.ZodType<SubagentAuthorizationEvent> = z.di
   [
     z.looseObject({
       data: z.looseObject({
+        candidateId: z.string(),
+        outcome: z.enum(["pending", "rejected", "failed", "timed-out", "stale"]),
+        reason: z.string().optional(),
+        requestId: z.string(),
+        responderPrincipalId: z.string(),
+        sequence: eventCoordinateSchema,
+        stepIndex: eventCoordinateSchema,
+        turnId: z.string(),
+      }),
+      type: z.literal("approval.candidate"),
+    }),
+    z.looseObject({
+      data: z.looseObject({
+        outcome: z.enum(["approved", "cancelled"]),
+        requestId: z.string(),
+        responderPrincipalId: z.string(),
+        sequence: eventCoordinateSchema,
+        stepIndex: eventCoordinateSchema,
+        turnId: z.string(),
+      }),
+      type: z.literal("approval.settled"),
+    }),
+    z.looseObject({
+      data: z.looseObject({
         attemptId: z.string().optional(),
         authorization: authorizationChallengeSchema.optional(),
         description: z.string(),
