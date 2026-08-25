@@ -7,6 +7,7 @@ import type {
   CompiledAgentResources,
 } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
+import { memoizeModuleNamespaceFactories } from "#compiler/source-graph.js";
 import {
   collectModuleBindingsForManifest,
   compiledModuleMapSchema,
@@ -87,10 +88,12 @@ async function hydrateCompiledNodeScope(
                 ),
               ),
             )
-          : await loadAuthoredModuleNamespace(binding.backing.sourcePath, {
-              externalDependencies: binding.backing.externalDependencies,
-              extensionScopeNamespace: resolveCompiledModuleExtensionScopeNamespace(binding),
-            });
+          : memoizeModuleNamespaceFactories(
+              await loadAuthoredModuleNamespace(binding.backing.sourcePath, {
+                externalDependencies: binding.backing.externalDependencies,
+                extensionScopeNamespace: resolveCompiledModuleExtensionScopeNamespace(binding),
+              }),
+            );
     } finally {
       if (mountConfigScope !== undefined) container[EXT_CONFIG_SCOPE] = undefined;
     }

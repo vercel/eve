@@ -9,7 +9,7 @@ settled conversation afterward, and can expose tools that operate on the same
 locked scope.
 
 eve owns the lifecycle and model-facing history. Your provider owns storage,
-retrieval, retention, and deletion. M1 does not include a built-in filesystem
+retrieval, retention, and deletion. eve does not include a built-in filesystem
 provider.
 
 ## Add a memory slot
@@ -66,8 +66,8 @@ Provider tools are ordinary `defineTool()` values, so schemas, approvals, and
 `toModelOutput` work normally. Their callbacks remain replayable after a
 process restart or deployment.
 
-Use `defineMemoryProvider()` when several slots share a provider factory or
-when you want its contract checked separately:
+Use `defineMemoryProvider()` when several slots share one provider or when you
+want its contract checked separately:
 
 ```ts
 import { defineMemoryProvider } from "eve/memory";
@@ -81,9 +81,10 @@ export const provider = defineMemoryProvider({
 
 ## Choose a scope
 
-`scope` decides who or what shares memory. It accepts a string, a tuple of
-strings, `null`, or a resolver. Resolve tenant and caller identity from trusted
-authentication or channel metadata, never from model input:
+`scope` decides who or what shares memory. Set it to a string or `null`, or use
+a resolver that returns a string, a tuple of strings, or `null`. Resolve tenant
+and caller identity from trusted authentication or channel metadata, never from
+model input:
 
 ```ts title="agent/memory/account.ts"
 import { defineMemory } from "eve/memory";

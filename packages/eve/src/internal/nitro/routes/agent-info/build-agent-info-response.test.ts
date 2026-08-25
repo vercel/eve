@@ -100,7 +100,7 @@ describe("buildAgentInfoResponse", () => {
         binding: expect.objectContaining({
           backing: expect.objectContaining({
             dependencies: { memory: response.memories[0]?.sourceId },
-            metadata: expect.objectContaining({ slot: "profile" }),
+            parameters: expect.objectContaining({ slot: "profile" }),
           }),
         }),
         slug: "profile",

@@ -44,6 +44,7 @@ describe("compiled module maps", () => {
       }
     }
     expect(source).toContain("loadFrameworkProgrammaticModule");
+    expect(source).toContain("memoizeModuleNamespaceFactories");
   });
 
   it("collects exactly the node binding table plus explicit remote bindings", async () => {

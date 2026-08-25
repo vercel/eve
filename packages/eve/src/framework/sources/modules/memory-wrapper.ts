@@ -9,10 +9,9 @@ import type { ProgrammaticModuleLoadContext } from "#compiler/source-graph.js";
 export async function loadMemoryWrapperNamespace(
   context: ProgrammaticModuleLoadContext,
 ): Promise<Readonly<Record<string, unknown>>> {
-  const metadata = context.metadata;
-  const slot = metadata?.slot;
-  const logicalPath = metadata?.memoryLogicalPath;
-  const exportName = metadata?.memoryExportName;
+  const slot = context.parameters.slot;
+  const logicalPath = context.parameters.memoryLogicalPath;
+  const exportName = context.parameters.memoryExportName;
   const dependency = context.dependencies.memory;
   if (
     typeof slot !== "string" ||

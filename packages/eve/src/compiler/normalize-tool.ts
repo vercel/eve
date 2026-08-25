@@ -45,7 +45,6 @@ export async function compileToolEntry(
   const entry = normalizeToolDefinition(
     await loadModuleBackedDefinition({
       binding: options.binding,
-      dependencyNamespaces: options.dependencyNamespaces,
       kind: "tool",
       loadNamespace: options.loadNamespace,
       source,

@@ -9,6 +9,32 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 export type ProgrammaticModuleNamespace = Readonly<Record<string, unknown>>;
 
+/** Shares zero-argument definition-factory results within one module-map load. */
+export function memoizeModuleNamespaceFactories(
+  namespace: ProgrammaticModuleNamespace,
+): ProgrammaticModuleNamespace {
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(namespace).map(([exportName, exportValue]) => {
+        if (typeof exportValue !== "function") return [exportName, exportValue];
+        let invocation: Promise<unknown> | undefined;
+        const memoized = new Proxy(exportValue, {
+          apply(target, thisArgument, argumentsList) {
+            if (argumentsList.length > 0) {
+              return Reflect.apply(target, thisArgument, argumentsList);
+            }
+            invocation ??= Promise.resolve().then(() =>
+              Reflect.apply(target, thisArgument, argumentsList),
+            );
+            return invocation;
+          },
+        });
+        return [exportName, memoized];
+      }),
+    ),
+  );
+}
+
 export interface ProgrammaticModuleLoadContext {
   readonly dependencies: Readonly<Record<string, ProgrammaticModuleNamespace>>;
   readonly parameters: JsonObject;
@@ -30,7 +56,7 @@ export interface ProgrammaticAgentSource {
 }
 
 export interface AgentSourceRegistration {
-  readonly applyTo: "root" | "all-local-nodes" | "loader-only";
+  readonly applyTo: "root" | "all-local-nodes";
   readonly source: ProgrammaticAgentSource;
 }
 
@@ -110,7 +136,6 @@ export type AgentSourceLayer =
   | "framework-default"
   | "extension-package"
   | "extension-override"
-  | "application-derived"
   | "application";
 
 export type AgentSourceForm = "derived" | "direct";
@@ -128,7 +153,6 @@ export type AgentModuleBacking =
   | {
       readonly dependencies?: Readonly<Record<string, string>>;
       readonly kind: "programmatic";
-      readonly metadata?: JsonObject;
       readonly moduleId: string;
       readonly parameters?: JsonObject;
       readonly registryId: string;
@@ -205,8 +229,7 @@ const LAYER_PRECEDENCE: Readonly<Record<AgentSourceLayer, number>> = {
   "framework-default": 0,
   "extension-package": 1,
   "extension-override": 2,
-  "application-derived": 3,
-  application: 4,
+  application: 3,
 };
 
 const FORM_PRECEDENCE: Readonly<Record<AgentSourceForm, number>> = {

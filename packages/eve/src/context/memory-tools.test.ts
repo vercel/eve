@@ -8,8 +8,8 @@ import {
 } from "#context/dynamic-tool-lifecycle.js";
 import { AuthKey, SessionIdKey, SessionKey, TurnMemoryLocksKey } from "#context/keys.js";
 import { createMemoryToolDynamicDefinition } from "#context/memory-tools.js";
-import { resolveApprovalPolicy } from "#public/definitions/approval.js";
-import { defineTool } from "#public/definitions/tool.js";
+import { resolveApprovalPolicy } from "#approval/definition.js";
+import { defineTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 import { always } from "#public/tools/approval/index.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
@@ -68,7 +68,7 @@ function resolver(version: () => number): ResolvedDynamicToolResolver {
     logicalPath: "tools/profile.ts",
     rebindMissingCallbacks: true,
     slug: "profile",
-    sourceId: "eve:memory-wrapper:memory/profile.ts",
+    sourceId: "eve:memory-wrapper:tools/profile.ts:from:application:memory/profile.ts",
     sourceKind: "module",
   };
 }

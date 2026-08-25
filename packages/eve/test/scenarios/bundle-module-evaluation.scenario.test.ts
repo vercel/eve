@@ -115,10 +115,8 @@ describe("eve dist single-chunk module evaluation", () => {
     const loaded = await import(pathToFileURL(outfile).href);
     const registry = loaded.default.frameworkAgentSourceRegistry;
     const modules = registry.registrations.flatMap(
-      (registration: {
-        applyTo: string;
-        source: { modules: Array<{ loadNamespace(): Promise<unknown> }> };
-      }) => (registration.applyTo === "loader-only" ? [] : registration.source.modules),
+      (registration: { source: { modules: Array<{ loadNamespace(): Promise<unknown> }> } }) =>
+        registration.source.modules,
     );
     expect(modules.length).toBeGreaterThan(0);
     for (const module of modules) {
