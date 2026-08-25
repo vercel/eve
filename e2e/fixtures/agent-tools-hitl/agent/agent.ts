@@ -1,8 +1,10 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { defineAgent } from "eve";
+import { defineAgent, defineDynamic, type DynamicResolveContext } from "eve";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
 const AUTH_PROBE_DIRECTIVE = /call the auth-probe tool exactly once with marker "([^"]+)"/iu;
+const PENDING_APPROVAL_PROJECTION_MARKER = "[case: pending-approval-projection]";
+const PENDING_APPROVAL_PROJECTION_MODEL = "anthropic/claude-opus-4.8";
 const REPLY_DIRECTIVE = /reply with exactly ([A-Z0-9-]+)/iu;
 
 /**
@@ -35,7 +37,33 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   return `Mock reply: ${message}`;
 }
 
+const baseConfig = e2eAgentConfig({ mock: respond });
+
 export default defineAgent({
-  ...e2eAgentConfig({ mock: respond }),
+  experimental: baseConfig.experimental,
+  model: defineDynamic({
+    events: {
+      "step.started": (_event, ctx) => {
+        if (userText(ctx.messages).includes(PENDING_APPROVAL_PROJECTION_MARKER)) {
+          return PENDING_APPROVAL_PROJECTION_MODEL;
+        }
+        return {
+          model: baseConfig.model,
+          modelContextWindowTokens: baseConfig.modelContextWindowTokens,
+        };
+      },
+    },
+  }),
   reasoning: "high",
 });
+
+function userText(messages: DynamicResolveContext["messages"]): string {
+  return messages
+    .filter((message) => message.role === "user")
+    .map((message) =>
+      typeof message.content === "string"
+        ? message.content
+        : message.content.map((part) => (part.type === "text" ? part.text : "")).join(" "),
+    )
+    .join("\n");
+}
