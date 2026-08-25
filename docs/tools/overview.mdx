@@ -58,10 +58,11 @@ can retry a step and replay overlapping snapshots.
 
 ### Experimental background execution
 
+Enable `experimental.tasks` to run authored tools or subagent calls as durable background work.
 `defineTool({ execution: "background" })` receives a third `task` argument. Returning a normal
 value completes the durable task with that value. Returning `task.delegated({ executor, receipt })`
-returns a `working` receipt immediately while an external executor continues the task.
-The root agent must enable `experimental.tasks`; eve rejects background tools at build time otherwise.
+returns a `working` receipt immediately while an external executor continues the task. eve rejects
+background tools at build time when the root agent has not enabled the experiment.
 
 This contract currently supports framework-owned task executors, including local and remote
 subagents when `experimental.tasks` is enabled. After delegating, an in-process executor reports
@@ -75,6 +76,9 @@ cohort and instructs the model to acknowledge that the work started without wait
 Later task-triggered parent turns receive fresh state for the same cohort. The model is instructed
 to keep related intermediate results silent while any task remains pending. Once every related
 task is terminal, the state includes their outputs so the model can combine the useful results.
+
+See [Background tasks](/docs/tools/background-tasks) for activation, lifecycle, cancellation, human input,
+and the current authored-tool boundary.
 
 ### The `ctx` parameter
 

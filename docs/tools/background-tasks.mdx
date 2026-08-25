@@ -1,0 +1,199 @@
+---
+title: "Background Tasks"
+description: "Run long-lived tools and subagent calls as durable, cancellable work without blocking the parent turn."
+---
+
+Delegated background tasks let the parent agent continue after work starts: the originating tool
+call returns a receipt. A background tool that returns a normal value instead waits for `execute`
+and completes immediately with that value. For delegated work, terminal results and explicit
+progress updates can start or nudge a later parent turn; human-input requests route through the
+parent session without running the parent model.
+
+This API is experimental. Enable it on the root agent:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  experimental: {
+    tasks: true,
+  },
+  model: "anthropic/claude-opus-4.8",
+});
+```
+
+`experimental.tasks` is root-only. With the flag enabled, local and remote subagent calls run as
+background tasks instead of blocking the parent turn. Authored tools opt in individually with
+`execution: "background"`. eve rejects an authored background tool at build time when the root
+agent has not enabled the experiment.
+
+## Define a background tool
+
+Set `execution: "background"` on a tool. Its `execute` function receives a third `task` argument:
+
+```ts title="agent/tools/build_report.ts"
+import { defineTool, type TaskExec } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Build a report without blocking the current turn.",
+  execution: "background",
+  inputSchema: z.object({ projectId: z.string() }),
+  async execute({ projectId }, _ctx, task) {
+    // Replays reuse this key instead of creating a second external job.
+    const jobId = task.binding.taskId;
+    const delegated = task.delegated({
+      executor: { data: { jobId }, kind: "report-builder" },
+      receipt: { jobId, projectId },
+    });
+
+    // The next event-loop turn begins only after execute returns the sentinel.
+    setImmediate(() => {
+      void runReportExecutor({ jobId, projectId, send: task.send }).catch(() => {
+        // Cancellation or delivery failure leaves the durable task state authoritative.
+      });
+    });
+    return delegated;
+  },
+});
+
+async function runReportExecutor(input: {
+  jobId: string;
+  projectId: string;
+  send: TaskExec["send"];
+}) {
+  try {
+    await input.send({ kind: "update", message: `Building report ${input.jobId}.` });
+    // createReportOnce must deduplicate this stable key across retries/processes.
+    await input.send({
+      kind: "complete",
+      data: await createReportOnce(input.jobId, input.projectId),
+    });
+  } catch (error) {
+    await input.send({ kind: "fail", data: String(error) });
+  }
+}
+```
+
+By default, the model receives a receipt containing `status: "working"` and a `taskId`. The task stays active
+after `execute` returns because `task.delegated(...)` transfers lifecycle ownership to the
+executor. Use `task.send(...)` to publish later transitions:
+
+- `update` records a brief activity message without completing the task.
+- `complete` records the terminal result.
+- `fail` records a terminal error.
+- `cancel` records terminal cancellation.
+
+Returning a normal value instead of `task.delegated(...)` completes the task with that value.
+
+For a delegated tool, `outputSchema` and `toModelOutput` apply to the immediate receipt, not the
+later `complete` data. The receipt is the original provider tool call's only result. Completion
+arrives later as framework-authored conversation input, never as a second result for the same tool
+call. If you customize `toModelOutput`, preserve `taskId` when the model needs to cancel the task.
+
+The in-process `task.send(...)` callback is not restart-safe. If the process exits, the callback
+cannot report completion. `executor` is an opaque durable binding recorded for replay equality and
+framework-owned cancellation routing; eve does not know how to cancel an arbitrary authored
+executor kind. The cross-process executor binding used by framework-owned subagent tasks is not a
+stable authored API yet; do not persist or reconstruct private task tokens from model-visible data.
+
+## Subagents as tasks
+
+With `experimental.tasks`, every local and remote subagent call returns a task receipt after the
+child acknowledges its private address. The child keeps running in its own durable session while
+the parent continues. The model can start several subagents and work with their receipts without
+waiting for all child turns to finish.
+
+The task and child session have different identities:
+
+- `taskId` identifies one unit of work and its terminal lifecycle.
+- `agentId` identifies the reusable child session. A later call can pass `agentId` to start a new
+  task against that same child after its current task is terminal.
+
+A continuation sent while the child still has active work fails with `AGENT_BUSY`. Task receipts
+and notifications never expose the private routing token used between the parent and child.
+
+## Notifications and delivery
+
+eve groups tasks accepted by one initiating turn. The initiating turn receives framework-authored
+state and is instructed to acknowledge that work started instead of waiting for final results.
+
+When task state changes, eve uses different parent paths:
+
+- Completion or failure starts or nudges a parent model turn with the result or error. Cancellation
+  is terminal but carries neither.
+- An explicit child `task_update`, where available, starts or nudges a parent model turn with a
+  terse activity notification.
+- A question or other input-request batch wakes the session workflow only long enough to emit
+  `input.requested`. The parent model does not run; the human response routes directly to the
+  blocked child. Authorization blockers also enter `input_required`, but their framework message
+  may run a silent parent model turn after eve emits the authorization event.
+
+If related tasks are still running, eve instructs the model not to publish a partial combined
+answer. Once the cohort is terminal, the parent receives the outputs together so it can produce
+one useful result.
+
+Task-triggered model turns can intentionally produce no channel message. The public parent stream
+shows the original working receipt, task notifications as ordinary framework messages, and proxied
+HITL events; it does not expose a dedicated structured `TaskView` lifecycle event.
+
+## Cancel tasks
+
+The root agent receives `task_cancel` while the experiment is enabled. The model passes one or
+more owned `taskId` values:
+
+```ts
+{
+  taskIds: ["task_..."];
+}
+```
+
+Cancellation is terminal from the parent's perspective. eve commits the task as `cancelled` before
+it propagates a cooperative abort to a framework-owned subagent executor. A child that finishes
+afterward cannot overwrite the cancelled state. Generic authored executor bindings have no public
+cancellation adapter, so their external work may continue. A late callback may still reach the task
+hook, but its transition is ignored and cannot replace the cancelled state. Cancelling an already
+terminal task is a no-op.
+
+Task IDs and their indexed terminal views remain session-owned. A parent cannot use `task_cancel`
+to control another session's task; cancelling an owned terminal task is a no-op.
+
+## Human input and authorization
+
+A background subagent can request input or tool authorization after the initiating turn ends. eve
+proxies the request through the parent session so the active channel can present it to a person.
+The response routes directly to the waiting child; it does not require the parent model to interpret
+or repeat the answer.
+
+Remote children use the same parent-owned input flow. The remote deployment must support the same
+task callback protocol as the parent deployment; upgrade both sides before depending on background
+remote HITL.
+
+## Durability and retries
+
+Task identity is replay-stable for one parent session, turn, and tool-call ID. Framework subagent
+dispatch also uses deterministic child addressing to avoid duplicate child sessions. An authored
+background tool's `execute` function can still run again when a durable step replays, including its
+external-dispatch call. Execution becomes terminal at `completed`, `failed`, or `cancelled`, but the
+parent session retains the owned terminal task view in its index until the session ends.
+
+This does not make arbitrary external side effects exactly-once. An interrupted tool step can run
+again before eve commits its result. Protect charges, writes, and notifications with an upstream
+idempotency key or an application operation record. See [Execution model and durability](/docs/concepts/execution-model-and-durability#resuming-after-a-crash).
+
+## Current boundaries
+
+- The API is behind `experimental.tasks` and may change in any release.
+- The experiment changes all subagent calls owned by the root agent; per-subagent background
+  selection is not available yet.
+- `task_update` is available to task-owned copies of the root agent because they reuse the root
+  node's task tools. Ordinary declared local subagent nodes do not receive it. A remote child may
+  expose it when its own active root enables tasks. `task_cancel` is available to the owning root
+  session.
+- The model-facing `Workflow` tool is unavailable while the global tasks experiment converts all
+  subagents to background definitions; its current host executes only runtime-action subagents.
+- The task executor binding and cross-process callback token are framework-owned, not stable public
+  authoring contracts.
+
+For ordinary blocking delegation and `agentId` continuation, see [Subagents](/docs/subagents). For
+tool approval and input requests, see [Human in the loop](/docs/human-in-the-loop).

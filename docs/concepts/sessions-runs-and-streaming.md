@@ -43,36 +43,36 @@ curl http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream
 
 The stream is newline-delimited JSON (NDJSON), one event per line:
 
-| Event                     | Meaning                                                                                                          |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `session.started`         | A durable session was created; carries `trace` when the runtime is traced.                                       |
-| `turn.started`            | A new turn began; carries the active `trace` when the runtime is traced.                                         |
-| `message.received`        | An inbound user message was accepted; carries flattened text plus structured text/file parts.                    |
-| `step.started`            | A model step began.                                                                                              |
-| `actions.requested`       | The model requested one or more actions, including tool calls; calls stream before execution.                    |
-| `action.partial`          | A locally executed tool generator yielded a preliminary output snapshot.                                         |
-| `action.result`           | A tool call returned.                                                                                            |
-| `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or `ask_question`); carries `requests`. |
-| `input.resolved`          | The server accepted terminal human-input outcomes; carries `resolutions` with responses when provided.           |
-| `subagent.called`         | A subagent was delegated; carries `childSessionId` to attach to.                                                 |
-| `subagent.completed`      | A delegated subagent finished.                                                                                   |
-| `reasoning.appended`      | A reasoning delta (incremental, with cumulative text so far).                                                    |
-| `reasoning.completed`     | The finalized reasoning block.                                                                                   |
-| `message.appended`        | An assistant text delta (incremental, with cumulative text so far).                                              |
-| `message.completed`       | A finalized assistant text block.                                                                                |
-| `result.completed`        | The finalized structured result for a turn that requested an output schema; carries `result`.                    |
-| `compaction.requested`    | Context-window compaction began; carries `modelId`, `sessionId`, `turnId`, `usageInputTokens`.                   |
-| `compaction.completed`    | A compaction checkpoint was written to durable history.                                                          |
-| `authorization.required`  | A connection needs OAuth; carries `name`, `description`, and an `authorization` challenge.                       |
-| `authorization.completed` | A connection's authorization resolved; carries `outcome`.                                                        |
-| `step.completed`          | A model step finished; carries `finishReason` and usage.                                                         |
-| `step.failed`             | A model step failed; carries `{ code, message, details? }`.                                                      |
-| `turn.completed`          | The turn finished.                                                                                               |
-| `turn.failed`             | The turn failed; carries `{ code, message, details? }`.                                                          |
-| `turn.cancelled`          | The turn was cancelled before finishing; always followed by `session.waiting`.                                   |
-| `session.waiting`         | The session parked and is ready for the next message.                                                            |
-| `session.failed`          | The session failed.                                                                                              |
-| `session.completed`       | The session reached a terminal end.                                                                              |
+| Event                     | Meaning                                                                                                                   |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `session.started`         | A durable session was created; carries `trace` when the runtime is traced.                                                |
+| `turn.started`            | A new turn began; carries the active `trace` when the runtime is traced.                                                  |
+| `message.received`        | An inbound user message was accepted; carries flattened text plus structured text/file parts.                             |
+| `step.started`            | A model step began.                                                                                                       |
+| `actions.requested`       | The model requested one or more actions, including tool calls; calls stream before execution.                             |
+| `action.partial`          | A locally executed tool generator yielded a preliminary output snapshot.                                                  |
+| `action.result`           | A tool call returned.                                                                                                     |
+| `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or `ask_question`); carries `requests`.          |
+| `input.resolved`          | The server accepted terminal human-input outcomes; carries `resolutions` with responses when provided.                    |
+| `subagent.called`         | A subagent was delegated; carries `childSessionId` to attach to.                                                          |
+| `subagent.completed`      | The delegation call settled. With `backgroundTask.status: "working"`, this records task admission, not child termination. |
+| `reasoning.appended`      | A reasoning delta (incremental, with cumulative text so far).                                                             |
+| `reasoning.completed`     | The finalized reasoning block.                                                                                            |
+| `message.appended`        | An assistant text delta (incremental, with cumulative text so far).                                                       |
+| `message.completed`       | A finalized assistant text block.                                                                                         |
+| `result.completed`        | The finalized structured result for a turn that requested an output schema; carries `result`.                             |
+| `compaction.requested`    | Context-window compaction began; carries `modelId`, `sessionId`, `turnId`, `usageInputTokens`.                            |
+| `compaction.completed`    | A compaction checkpoint was written to durable history.                                                                   |
+| `authorization.required`  | A connection needs OAuth; carries `name`, `description`, and an `authorization` challenge.                                |
+| `authorization.completed` | A connection's authorization resolved; carries `outcome`.                                                                 |
+| `step.completed`          | A model step finished; carries `finishReason` and usage.                                                                  |
+| `step.failed`             | A model step failed; carries `{ code, message, details? }`.                                                               |
+| `turn.completed`          | The turn finished.                                                                                                        |
+| `turn.failed`             | The turn failed; carries `{ code, message, details? }`.                                                                   |
+| `turn.cancelled`          | The turn was cancelled before finishing; always followed by `session.waiting`.                                            |
+| `session.waiting`         | The session parked and is ready for the next message.                                                                     |
+| `session.failed`          | The session failed.                                                                                                       |
+| `session.completed`       | The session reached a terminal end.                                                                                       |
 
 The optional `data.trace` on session and turn starts contains eve-owned W3C trace coordinates: `traceId`, `spanId`, and `traceFlags`. Use it to correlate stream consumers such as eval reporters with an observability backend. An uninstrumented target omits it.
 

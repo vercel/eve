@@ -145,6 +145,10 @@ export default experimental_workflow();
 
 Without that file, the `Workflow` tool stays off. It earns its keep only when the agent has subagents (or the built-in `agent`) worth coordinating:
 
+`Workflow` is also unavailable while the root enables `experimental.tasks`. That experiment
+converts subagents to background tool definitions, while the current Workflow host executes only
+runtime-action subagents.
+
 ```ts title="agent/subagents/analyst/agent.ts"
 import { defineAgent } from "eve";
 
