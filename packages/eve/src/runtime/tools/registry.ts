@@ -80,6 +80,7 @@ async function createPreparedRuntimeTool(
     logicalPath: definition.logicalPath,
     name: definition.name,
     outputSchema: serializeOutputSchema(definition.outputSchema),
+    owner: definition.owner,
     sourceId: definition.sourceId,
   };
 }

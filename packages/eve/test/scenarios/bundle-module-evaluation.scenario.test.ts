@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildWithNitroRolldown } from "#internal/bundler/nitro-rolldown.js";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
+import { linkWorkspaceEvePackage } from "#internal/testing/scenario-app.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 
 const createScratchDirectory = useTemporaryDirectories();
@@ -95,17 +96,20 @@ describe("eve dist single-chunk module evaluation", () => {
   }, 180_000);
 
   it("every framework tool definition is defined in the concatenated chunk (no silent `undefined` slots)", async () => {
-    // Defense in depth: catches any future cycle that lands a
-    // `*_TOOL_DEFINITION` after the registry in the bundle.
+    // Defense in depth: catches any future cycle that leaves a framework
+    // tool module's default export undefined after the bundle evaluates.
     const scratch = await createScratchDirectory("eve-framework-tools-eval-");
+    // The framework source registry stamps its revision from the installed
+    // eve package, which the bundled chunk resolves via node_modules.
+    await linkWorkspaceEvePackage(scratch);
     const outDir = join(scratch, "out");
     await mkdir(outDir, { recursive: true });
 
     const entryFile = join(scratch, "entry.mjs");
-    const eveEntry = resolvePackageSourceFilePath("src/runtime/framework-tools/index.ts");
+    const eveEntry = resolvePackageSourceFilePath("src/internal/agent-sources.ts");
     await writeFile(
       entryFile,
-      `import * as ft from ${JSON.stringify(eveEntry)};\nexport default ft;\n`,
+      `import * as agentSources from ${JSON.stringify(eveEntry)};\nexport default agentSources;\n`,
     );
 
     const outfile = await bundleEveDistAsSingleChunk({
@@ -114,13 +118,21 @@ describe("eve dist single-chunk module evaluation", () => {
       outDir,
     });
 
-    const loaded = await import(pathToFileURL(outfile).href);
-    const tools = loaded.default.getAllFrameworkToolDefinitions();
-    expect(tools.length).toBeGreaterThan(0);
-    for (const tool of tools) {
-      expect(tool, "framework tool entry must be defined").toBeDefined();
-      expect(typeof tool.name).toBe("string");
-      expect(tool.name.length).toBeGreaterThan(0);
+    const loaded = (await import(pathToFileURL(outfile).href)) as {
+      default: typeof import("#internal/agent-sources.js");
+    };
+    const registry = loaded.default.getFrameworkAgentSourceRegistry();
+    const toolModules = registry.registrations.flatMap((registration) =>
+      registration.source.modules.filter((module) => module.logicalPath.startsWith("tools/")),
+    );
+    expect(toolModules.length).toBeGreaterThan(0);
+    for (const toolModule of toolModules) {
+      const namespace = await toolModule.loadNamespace();
+      const definition = namespace[toolModule.exportName ?? "default"];
+      expect(
+        definition,
+        `framework tool module "${toolModule.logicalPath}" must evaluate to a defined export`,
+      ).toBeDefined();
     }
   }, 180_000);
 });

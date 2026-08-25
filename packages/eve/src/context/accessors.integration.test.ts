@@ -22,7 +22,7 @@ describe("buildCallbackContext – session", () => {
   });
 
   it("returns the active session identity across async boundaries", async () => {
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
 
     const session = await runtime.runAsSession(
       {
@@ -50,7 +50,7 @@ describe("buildCallbackContext – session", () => {
   });
 
   it("preserves parent lineage on the public session", async () => {
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
 
     const session = await runtime.runAsSession(
       {
@@ -88,7 +88,7 @@ describe("buildCallbackContext – getSandbox", () => {
         "echo ready": { exitCode: 0, stderr: "", stdout: "ready" },
       },
     });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
 
     const live = (await runtime.runAsSession({ sandbox }, async () => {
       await Promise.resolve();
@@ -106,7 +106,7 @@ describe("buildCallbackContext – getSandbox", () => {
       id: "sbx_public_sandbox_file",
       initialFiles: { "note.txt": "file content" },
     });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
 
     const live = (await runtime.runAsSession(
       { sandbox },
@@ -130,7 +130,7 @@ describe("buildCallbackContext – getSandbox", () => {
         stops += 1;
       },
     });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
 
     await runtime.runAsSession({ sandbox }, async () => {
       const live: RuntimeSandboxSession = await buildCallbackContext().getSandbox();
@@ -147,7 +147,7 @@ describe("buildCallbackContext – getSkill", () => {
   });
 
   it("throws when authored runtime execution does not include skill access", async () => {
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
 
     await expect(
       runtime.runAsSession({}, () => buildCallbackContext().getSkill("semantic-model")),
@@ -168,7 +168,7 @@ describe("buildCallbackContext – getSkill", () => {
         "/workspace/skills/semantic-model/references/catalog.yml": "entities: []\n",
       },
     });
-    const runtime = createTestRuntime({ skills: [skill.source] });
+    const runtime = await createTestRuntime({ skills: [skill.source] });
 
     const result = await runtime.runAsSession({ sandbox }, async () => {
       await Promise.resolve();

@@ -4,17 +4,12 @@ import {
   executeWriteFileOnSandbox,
   type WriteFileInput,
 } from "#execution/sandbox/write-file-tool.js";
-import { requireSandboxSession } from "#execution/sandbox/require-sandbox.js";
-import type { ResolvedToolDefinition } from "#runtime/types.js";
-import type { ToolExecuteOptions } from "#shared/tool-definition.js";
+import { defineTool } from "#public/definitions/tool.js";
 
 /**
- * Shared input schema used by the framework `write_file` tool and any author
- * tool constructed via {@link defineWriteFileTool}.
- *
- * Exported so the public `defineWriteFileTool` factory and the framework
- * `WRITE_FILE_TOOL_DEFINITION` use the exact same schema object — keeping
- * model input contracts in sync without duplication.
+ * Input schema for the framework `write_file` tool and any author tool
+ * constructed via {@link defineWriteFileTool}. Single source of truth so
+ * model input contracts stay in sync without duplication.
  */
 export const WRITE_FILE_INPUT_SCHEMA = z.strictObject({
   content: z.string().describe("Complete replacement file contents."),
@@ -24,8 +19,8 @@ export const WRITE_FILE_INPUT_SCHEMA = z.strictObject({
 });
 
 /**
- * Shared output schema used by the framework `write_file` tool and any author
- * tool constructed via {@link defineWriteFileTool}.
+ * Output schema for the framework `write_file` tool and any author tool
+ * constructed via {@link defineWriteFileTool}.
  */
 export const WRITE_FILE_OUTPUT_SCHEMA = z.strictObject({
   existed: z.boolean(),
@@ -33,16 +28,12 @@ export const WRITE_FILE_OUTPUT_SCHEMA = z.strictObject({
 });
 
 /**
- * Framework-owned executor that delegates to the default sandbox.
+ * Framework `write_file` tool: writes a file in the agent's sandbox with
+ * read-before-write enforcement and stale-read detection. Import from
+ * `eve/tools/write_file` to spread, wrap, or re-export it from
+ * `agent/tools/write_file.ts`.
  */
-async function executeWriteFile(input: unknown, options?: ToolExecuteOptions): Promise<unknown> {
-  return executeWriteFileOnSandbox(
-    await requireSandboxSession(options?.abortSignal),
-    input as WriteFileInput,
-  );
-}
-
-export const WRITE_FILE_TOOL_DEFINITION: ResolvedToolDefinition = {
+export default defineTool({
   description: [
     "Writes a file to the local filesystem.",
     "",
@@ -53,11 +44,8 @@ export const WRITE_FILE_TOOL_DEFINITION: ResolvedToolDefinition = {
     "- NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.",
     "- Only use emojis if the user explicitly requests it. Avoid writing emojis to files unless asked.",
   ].join("\n"),
-  execute: executeWriteFile,
   inputSchema: WRITE_FILE_INPUT_SCHEMA,
-  logicalPath: "eve:framework/write-file",
-  name: "write_file",
   outputSchema: WRITE_FILE_OUTPUT_SCHEMA,
-  sourceId: "eve:write-file-tool",
-  sourceKind: "module",
-};
+  execute: async (input, ctx) =>
+    executeWriteFileOnSandbox(await ctx.getSandbox(), input as WriteFileInput),
+});

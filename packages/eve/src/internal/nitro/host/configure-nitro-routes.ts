@@ -30,28 +30,6 @@ import {
 import { registerChannelVirtualHandlers } from "#internal/nitro/host/channel-routes.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 
-function registerHandler(
-  nitro: Nitro,
-  options: {
-    handlerPath: string;
-    method?: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
-    route: string;
-  },
-): void {
-  const virtualId = `#eve-route-handler/${options.method ?? "ALL"} ${options.route}`;
-  const handlerPath = stringifyEsmImportSpecifier(options.handlerPath);
-
-  nitro.options.handlers.push({
-    handler: virtualId,
-    method: options.method,
-    route: options.route,
-  });
-  nitro.options.virtual[virtualId] = [
-    `import handler from ${handlerPath};`,
-    "export default handler;",
-  ].join("\n");
-}
-
 function resolveNitroWorkflowBuildDirectory(nitro: Nitro): string {
   return join(nitro.options.buildDir, "workflow");
 }
@@ -272,32 +250,11 @@ async function registerWorkflowArtifactBuildHook(
 
 function registerApplicationRoutes(
   nitro: Nitro,
-  preparedHost: PreparedApplicationHost,
   artifactsConfig: NitroArtifactsConfig,
   registry: ApplicationRouteRegistry,
 ): void {
   for (const route of registry.routes) {
     switch (route.kind) {
-      case "home": {
-        addFrameworkVirtualHandler(nitro, {
-          args: JSON.stringify({
-            agentName: preparedHost.compileResult.manifest.config.name,
-          }),
-          handlerExport: "handleHomePageRequest",
-          method: route.method,
-          modulePath: resolvePackageSourceFilePath("src/internal/nitro/routes/index.ts"),
-          route: route.path,
-        });
-        break;
-      }
-      case "health": {
-        registerHandler(nitro, {
-          handlerPath: resolvePackageSourceFilePath("src/internal/nitro/routes/health.ts"),
-          method: route.method,
-          route: route.path,
-        });
-        break;
-      }
       case "channel":
       case "channel-preflight": {
         registerChannelVirtualHandlers(nitro, {
@@ -408,7 +365,7 @@ export async function configureDevelopmentNitroRoutes(
     configuredWorld: preparedHost.compileResult.manifest.config.experimental?.workflow?.world,
   });
   const routeRegistry = createApplicationRouteRegistry(preparedHost, { development: true });
-  registerApplicationRoutes(nitro, preparedHost, artifactsConfig, routeRegistry);
+  registerApplicationRoutes(nitro, artifactsConfig, routeRegistry);
 
   const workflowBundlePath = join(workflowBuildDirectory, "workflows.mjs");
   const directHandlers: WorkflowDirectHandlerEntry[] = [];
@@ -456,12 +413,7 @@ export async function configureProductionNitroRoutes(
   await registerWorkflowArtifactBuildHook(nitro, syncWorkflowArtifacts);
 
   const routeRegistry = createApplicationRouteRegistry(preparedHost);
-  registerApplicationRoutes(
-    nitro,
-    preparedHost,
-    createProductionNitroArtifactsConfig(),
-    routeRegistry,
-  );
+  registerApplicationRoutes(nitro, createProductionNitroArtifactsConfig(), routeRegistry);
 
   const workflowBundlePath = join(preparedHost.workflowBuildDir, "workflows.mjs");
   const hasConfiguredWorkflowWorld =

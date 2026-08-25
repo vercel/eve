@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   type CompiledChannelDefinition,
   type CompiledConnectionDefinition,
+  type CompiledSandboxDefinition,
   type CompiledScheduleDefinition,
   type CompiledSkillDefinition,
   type CompiledSubagentEdge,
@@ -22,6 +23,21 @@ import {
 const APP_ROOT = "/app";
 const AGENT_ROOT = "/app/agent";
 const GENERATOR_VERSION = "0.0.0-test";
+
+const SANDBOX: CompiledSandboxDefinition = {
+  logicalPath: "sandbox.ts",
+  sourceHash: "sandbox-hash",
+  sourceId: "sandbox.ts",
+  sourceKind: "module",
+};
+
+const EMPTY_NODE_INPUTS = {
+  bindings: {},
+  sandbox: SANDBOX,
+  sourceComposition: { disabled: [], shadowed: [] },
+} as const;
+
+const EMPTY_CHANNEL_ROUTES = { effective: [], preflight: [], shadowed: [] } as const;
 
 function makeTool(name: string): CompiledToolDefinition {
   return {
@@ -111,6 +127,7 @@ function makePackagedSkill(name: string): CompiledSkillDefinition {
 function makeSubagent(name: string): CompiledSubagentNode {
   return {
     agent: createCompiledAgentNodeManifest({
+      ...EMPTY_NODE_INPUTS,
       agentRoot: `${AGENT_ROOT}/subagents/${name}`,
       appRoot: APP_ROOT,
       config: {
@@ -138,15 +155,16 @@ describe("buildVercelAgentSummary", () => {
       parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
     };
     const manifest = createCompiledAgentManifest({
+      ...EMPTY_NODE_INPUTS,
       agentRoot: AGENT_ROOT,
       appRoot: APP_ROOT,
+      channelRoutes: EMPTY_CHANNEL_ROUTES,
       channels: [
         makeChannel({ name: "slack", adapterKind: "slack" }),
         makeChannel({ name: "weather-bot", adapterKind: "weather-slack" }),
         makeChannel({ name: "messages", adapterKind: "http" }),
         makeChannel({ name: "stripe", adapterKind: "stripe-webhook" }),
         makeChannel({ name: "mystery" }),
-        { kind: "disabled", logicalPath: "channels/disabled.ts", name: "disabled" },
       ],
       config: {
         description: "An agent for tests.",
@@ -284,8 +302,7 @@ describe("buildVercelAgentSummary", () => {
       },
     ]);
 
-    // Disabled channels are dropped; remaining channels are normalized to
-    // the four-value display type.
+    // Channels are normalized to the four-value display type.
     expect(summary.channels).toEqual([
       {
         adapterKind: "slack",
@@ -328,7 +345,7 @@ describe("buildVercelAgentSummary", () => {
       },
     ]);
 
-    expect(summary.sandbox).toBeNull();
+    expect(summary.sandbox).toEqual({ logicalPath: "sandbox.ts" });
 
     expect(summary.subagents).toEqual([
       {
@@ -343,8 +360,10 @@ describe("buildVercelAgentSummary", () => {
 
   it("surfaces the package version when no generatorVersion is given", () => {
     const manifest = createCompiledAgentManifest({
+      ...EMPTY_NODE_INPUTS,
       agentRoot: AGENT_ROOT,
       appRoot: APP_ROOT,
+      channelRoutes: EMPTY_CHANNEL_ROUTES,
       config: {
         model: { id: "openai/gpt-5.4", routing: { kind: "gateway", target: "openai" } },
         name: "minimal-agent",
@@ -360,8 +379,10 @@ describe("buildVercelAgentSummary", () => {
 
   it("captures module-backed instructions with their resolved content and role", () => {
     const manifest = createCompiledAgentManifest({
+      ...EMPTY_NODE_INPUTS,
       agentRoot: AGENT_ROOT,
       appRoot: APP_ROOT,
+      channelRoutes: EMPTY_CHANNEL_ROUTES,
       config: {
         model: { id: "openai/gpt-5.4", routing: { kind: "gateway", target: "openai" } },
         name: "module-instructions-agent",

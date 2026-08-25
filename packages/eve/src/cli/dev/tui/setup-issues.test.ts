@@ -16,49 +16,42 @@ function context(overrides: Partial<BootDetectionContext> = {}): BootDetectionCo
 }
 
 type AgentInfo = NonNullable<BootDetectionContext["info"]>;
+type StaticAgentInfoModel = Extract<AgentInfo["agent"]["model"], { readonly id: string }>;
 
-/** A minimal but fully-typed `/eve/v1/info` payload carrying a routing decision. */
-function infoWithRouting(
-  routing: AgentInfo["agent"]["model"]["routing"],
-  endpoint?: AgentInfo["agent"]["model"]["endpoint"],
-): AgentInfo {
+/** A minimal but fully-typed `/eve/v1/info` payload carrying an endpoint status. */
+function infoWithEndpoint(endpoint?: StaticAgentInfoModel["endpoint"]): AgentInfo {
   const model: AgentInfo["agent"]["model"] =
-    routing.kind === "dynamic"
-      ? { routing }
-      : endpoint === undefined
-        ? { id: "m", routing }
-        : { endpoint, id: "m", routing };
+    endpoint === undefined
+      ? { id: "m", routing: { kind: "static" } }
+      : { endpoint, id: "m", routing: { kind: "static" } };
 
   return {
     agent: {
       agentRoot: "/a",
       appRoot: "/a",
+      config: { source: { logicalPath: "agent.ts", owner: "application", sourceId: "agent.ts" } },
       model,
       name: "Agent",
+      nodeId: "__root__",
     },
     capabilities: { devRoutes: true },
-    channels: { authored: [], available: [], disabledFramework: [], framework: [] },
+    channels: { routes: [], shadowed: [], total: 0 },
+    composition: { disabled: [], shadowed: [] },
     connections: [],
     diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
     hooks: [],
-    instructions: { dynamic: [], static: [] },
+    instructions: { dynamicResolvers: [], entries: [] },
+    kernel: { prepared: [] },
     kind: "eve-agent-info",
     mode: "development",
-    sandbox: null,
+    remoteAgents: { entries: [], total: 0 },
+    sandbox: { source: { logicalPath: "sandbox.ts", owner: "framework", sourceId: "sandbox.ts" } },
     schedules: [],
-    skills: { dynamic: [], static: [] },
+    skills: { dynamicResolvers: [], entries: [] },
     subagents: { local: [], total: 0 },
-    tools: {
-      authored: [],
-      available: [],
-      disabledFramework: [],
-      dynamic: [],
-      framework: [],
-      reserved: [],
-    },
-    version: 2,
-    workflow: { enabled: false, toolName: "Workflow" },
-    workspace: { resourceRoot: null, rootEntries: [] },
+    tools: { dynamicResolvers: [], entries: [] },
+    version: 3,
+    workspace: { rootEntries: [] },
   };
 }
 
@@ -71,10 +64,7 @@ describe("BOOT_DETECTIONS", () => {
   });
 
   it("diagnoses a disconnected gateway", async () => {
-    const info = infoWithRouting(
-      { kind: "gateway", target: "openai" },
-      { kind: "gateway", connected: false },
-    );
+    const info = infoWithEndpoint({ kind: "gateway", connected: false });
 
     const issues = await detectSetupIssues(context({ info }));
     expect(issues).toEqual([
@@ -92,10 +82,7 @@ describe("BOOT_DETECTIONS", () => {
   ])(
     "treats a newly loaded gateway credential as configured while runtime info catches up",
     async (key, value) => {
-      const info = infoWithRouting(
-        { kind: "gateway", target: "openai" },
-        { kind: "gateway", connected: false },
-      );
+      const info = infoWithEndpoint({ kind: "gateway", connected: false });
 
       await expect(detectSetupIssues(context({ env: { [key]: value }, info }))).resolves.toEqual(
         [],
@@ -103,11 +90,8 @@ describe("BOOT_DETECTIONS", () => {
     },
   );
 
-  it("uses compiled gateway routing before a stale endpoint kind", () => {
-    const info = infoWithRouting(
-      { kind: "gateway", target: "openai" },
-      { kind: "external", provider: "anthropic" },
-    );
+  it("upgrades a disconnected gateway endpoint when a local credential is loaded", () => {
+    const info = infoWithEndpoint({ kind: "gateway", connected: false });
 
     expect(normalizeLocalModelEndpoint(info, { AI_GATEWAY_API_KEY: "key" })).toMatchObject({
       agent: {
@@ -130,22 +114,19 @@ describe("BOOT_DETECTIONS", () => {
   });
 
   it("stays quiet for an external-provider model — gateway linking/credentials don't apply", async () => {
-    const info = infoWithRouting({ kind: "external", provider: "anthropic" });
+    const info = infoWithEndpoint({ kind: "external", provider: "anthropic" });
     // No gateway env credentials and the unlinked appRoot would otherwise flag.
     expect(await detectSetupIssues(context({ info }))).toEqual([]);
   });
 
   it("stays quiet when the runtime resolved linked-project OIDC", async () => {
-    const info = infoWithRouting(
-      { kind: "gateway", target: "openai" },
-      { kind: "gateway", connected: true, credential: "oidc" },
-    );
+    const info = infoWithEndpoint({ kind: "gateway", connected: true, credential: "oidc" });
 
     expect(await detectSetupIssues(context({ info }))).toEqual([]);
   });
 
   it("skips a throwing detection instead of failing the boot", async () => {
-    const info = infoWithRouting({ kind: "gateway", target: "openai" });
+    const info = infoWithEndpoint({ kind: "gateway", connected: false });
     const issues = await detectSetupIssues(context({ env: { AI_GATEWAY_API_KEY: "k" }, info }), [
       {
         id: "broken",

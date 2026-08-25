@@ -8,10 +8,6 @@ import type {
   CompiledSkillDefinition,
 } from "#compiler/manifest.js";
 import {
-  loadModuleBackedDefinition,
-  type ModuleBackedDefinitionLoadOptions,
-} from "#compiler/normalize-helpers.js";
-import {
   assertResolverOnlyDynamicSentinel,
   isDynamicSentinel,
   type DynamicToolEventName,
@@ -32,11 +28,10 @@ export type CompiledSkillEntry =
  * package directory) into the normalized shape stored on the compiled
  * agent manifest.
  */
-export async function compileSkillSource(
-  agentRoot: string,
+export function compileSkillSource(
   source: SkillSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
-): Promise<CompiledSkillEntry> {
+  exportValue?: unknown,
+): CompiledSkillEntry {
   if (source.sourceKind === "skill-package") {
     return { kind: "skill", definition: compileSkillPackageSource(source) };
   }
@@ -46,35 +41,29 @@ export async function compileSkillSource(
       source.definition,
       `Expected the compiled skill definition at "${source.logicalPath}" to match the public eve shape.`,
     );
-    return {
-      kind: "skill",
-      definition: {
-        description: definition.description,
-        files: definition.files,
-        license: definition.license,
-        logicalPath: source.logicalPath,
-        markdown: definition.markdown,
-        metadata:
-          definition.metadata === undefined
-            ? undefined
-            : {
-                ...definition.metadata,
-              },
-        name: stripLogicalPathExtension(source.logicalPath).replace(/^skills\//, ""),
-        sourceId: source.sourceId,
-        sourceKind: source.sourceKind,
-      },
+    const compiled: CompiledSkillDefinition = {
+      description: definition.description,
+      license: definition.license,
+      logicalPath: source.logicalPath,
+      markdown: definition.markdown,
+      metadata:
+        definition.metadata === undefined
+          ? undefined
+          : {
+              ...definition.metadata,
+            },
+      name: stripLogicalPathExtension(source.logicalPath).replace(/^skills\//, ""),
+      sourceId: source.sourceId,
+      sourceKind: source.sourceKind,
     };
+    if (definition.files !== undefined) {
+      (compiled as { files?: typeof definition.files }).files = definition.files;
+    }
+    return { kind: "skill", definition: compiled };
   }
 
-  // Module-backed skill — load the export and check for DynamicSentinel.
-  const exportValue = await loadModuleBackedDefinition({
-    agentRoot,
-    externalDependencies: options.externalDependencies,
-    kind: "skill",
-    source,
-  });
-
+  // Module-backed skill — the caller loaded the export through its
+  // binding; classify DynamicSentinel vs static skill.
   if (isDynamicSentinel(exportValue)) {
     assertResolverOnlyDynamicSentinel(
       exportValue,
@@ -99,25 +88,25 @@ export async function compileSkillSource(
     `Expected the skill export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
   );
 
-  return {
-    kind: "skill",
-    definition: {
-      description: definition.description,
-      files: definition.files,
-      license: definition.license,
-      logicalPath: source.logicalPath,
-      markdown: definition.markdown,
-      metadata:
-        definition.metadata === undefined
-          ? undefined
-          : {
-              ...definition.metadata,
-            },
-      name: stripLogicalPathExtension(source.logicalPath).replace(/^skills\//, ""),
-      sourceId: source.sourceId,
-      sourceKind: source.sourceKind,
-    },
+  const compiled: CompiledSkillDefinition = {
+    description: definition.description,
+    license: definition.license,
+    logicalPath: source.logicalPath,
+    markdown: definition.markdown,
+    metadata:
+      definition.metadata === undefined
+        ? undefined
+        : {
+            ...definition.metadata,
+          },
+    name: stripLogicalPathExtension(source.logicalPath).replace(/^skills\//, ""),
+    sourceId: source.sourceId,
+    sourceKind: source.sourceKind,
   };
+  if (definition.files !== undefined) {
+    (compiled as { files?: typeof definition.files }).files = definition.files;
+  }
+  return { kind: "skill", definition: compiled };
 }
 
 function compileSkillPackageSource(

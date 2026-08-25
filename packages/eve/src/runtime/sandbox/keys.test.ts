@@ -8,6 +8,11 @@ import {
 } from "#compiler/artifacts.js";
 import { createCompiledAgentManifest } from "#compiler/manifest.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import {
+  EMPTY_CHANNEL_ROUTE_PLAN,
+  EMPTY_SOURCE_COMPOSITION,
+  testCompiledSandbox,
+} from "#internal/testing/compiled-node-fixtures.js";
 import { createFakeVercelOidcToken } from "#internal/testing/vercel-oidc-token.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { withBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
@@ -19,6 +24,11 @@ import {
 const RUNTIME_SANDBOX_CONTRACT_VERSION = 7;
 
 const CONTENT_HASH = "a".repeat(64);
+
+// Keys derive from the compiled sandbox record's sourceId — the framework
+// default composes into the manifest like any other source, so no
+// runtime-owned default sandbox id exists anymore.
+const SANDBOX_SOURCE_ID = testCompiledSandbox().sourceId;
 
 function createMetadataFixture(generatorVersion: string): CompileMetadata {
   return {
@@ -44,7 +54,7 @@ function sha256(value: string): string {
 
 function expectedTemplateKey(input: { scopeSource: string; version: string }): string {
   const scope = sha256(input.scopeSource).slice(0, 16);
-  const versionHash = sha256(`workspace-content:${CONTENT_HASH}:__root__:eve:default-sandbox`);
+  const versionHash = sha256(`workspace-content:${CONTENT_HASH}:__root__:${SANDBOX_SOURCE_ID}`);
   const templateHash = sha256(
     `${input.version}:${RUNTIME_SANDBOX_CONTRACT_VERSION}:${versionHash}`,
   ).slice(0, 20);
@@ -56,7 +66,7 @@ async function deriveTemplateKey(): Promise<string | null> {
     backendName: "local",
     compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
     nodeId: "__root__",
-    sourceId: "eve:default-sandbox",
+    sourceId: SANDBOX_SOURCE_ID,
     templatePlan: { contentHash: CONTENT_HASH, kind: "workspace-content" },
   });
 }
@@ -68,10 +78,14 @@ function withBundledMetadata<T>(
   const manifest = createCompiledAgentManifest({
     agentRoot: "/virtual/app/agent",
     appRoot: "/virtual/app",
+    bindings: {},
+    channelRoutes: EMPTY_CHANNEL_ROUTE_PLAN,
     config: {
       model: { id: "openai/gpt-5-mini", routing: { kind: "gateway", target: "openai" } },
       name: "keys-test-agent",
     },
+    sandbox: testCompiledSandbox(),
+    sourceComposition: EMPTY_SOURCE_COMPOSITION,
   });
 
   return withBundledCompiledArtifacts({ manifest, metadata, moduleMap: { nodes: {} } }, fn);
@@ -86,7 +100,7 @@ async function deriveSessionKey(input?: {
     compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
     nodeId: "__root__",
     sessionId: "session_1",
-    sourceId: "eve:default-sandbox",
+    sourceId: SANDBOX_SOURCE_ID,
     templatePlan: {
       contentHash: input?.contentHash ?? CONTENT_HASH,
       kind: "workspace-content",

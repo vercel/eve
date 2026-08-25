@@ -13,14 +13,17 @@ import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { materializeWorkspaceResources } from "#compiler/workspace-resources.js";
 
 /**
- * Stable diagnostics artifact kind emitted by the compiler.
+ * Stable compiler diagnostics artifact kind. Version 2 replaces the
+ * discovery-only diagnostics artifact: discovery, normalization, and route
+ * planning append to one persisted diagnostic union.
  */
-const DISCOVERY_DIAGNOSTICS_ARTIFACT_KIND = "eve-discovery-diagnostics";
+export const COMPILER_DIAGNOSTICS_ARTIFACT_KIND = "eve-compiler-diagnostics";
 
 /**
- * Current diagnostics artifact schema version.
+ * Current compiler diagnostics artifact schema version. Loaders reject the
+ * earlier discovery-only serialized shape rather than repairing it.
  */
-const DISCOVERY_DIAGNOSTICS_ARTIFACT_VERSION = 1;
+export const COMPILER_DIAGNOSTICS_ARTIFACT_VERSION = 2;
 
 /**
  * Stable compile metadata artifact kind emitted by the compiler.
@@ -47,13 +50,13 @@ export interface CompilerArtifactPaths {
 }
 
 /**
- * Machine-readable discovery diagnostics artifact written by the compiler.
+ * Machine-readable compiler diagnostics artifact written by the compiler.
  */
-interface DiscoveryDiagnosticsArtifact {
+export interface CompilerDiagnosticsArtifact {
   diagnostics: DiscoverDiagnostic[];
-  kind: typeof DISCOVERY_DIAGNOSTICS_ARTIFACT_KIND;
+  kind: typeof COMPILER_DIAGNOSTICS_ARTIFACT_KIND;
   summary: DiscoverDiagnosticsSummary;
-  version: typeof DISCOVERY_DIAGNOSTICS_ARTIFACT_VERSION;
+  version: typeof COMPILER_DIAGNOSTICS_ARTIFACT_VERSION;
 }
 
 /**
@@ -106,7 +109,7 @@ interface WriteCompilerArtifactsInput {
  */
 interface WriteCompilerArtifactsResult {
   compiledManifest: CompiledAgentManifest;
-  diagnosticsArtifact: DiscoveryDiagnosticsArtifact;
+  diagnosticsArtifact: CompilerDiagnosticsArtifact;
   metadata: CompileMetadata;
   moduleMapSource: string;
   paths: CompilerArtifactPaths;
@@ -139,16 +142,17 @@ function resolveCompilerArtifactPathsAt(
 }
 
 /**
- * Creates the diagnostics artifact written alongside the source manifest.
+ * Creates the compiler diagnostics artifact written alongside the source
+ * manifest.
  */
-function createDiscoveryDiagnosticsArtifact(
+export function createCompilerDiagnosticsArtifact(
   diagnostics: readonly DiscoverDiagnostic[],
-): DiscoveryDiagnosticsArtifact {
+): CompilerDiagnosticsArtifact {
   return {
     diagnostics: [...diagnostics],
-    kind: DISCOVERY_DIAGNOSTICS_ARTIFACT_KIND,
+    kind: COMPILER_DIAGNOSTICS_ARTIFACT_KIND,
     summary: summarizeDiscoverDiagnostics(diagnostics),
-    version: DISCOVERY_DIAGNOSTICS_ARTIFACT_VERSION,
+    version: COMPILER_DIAGNOSTICS_ARTIFACT_VERSION,
   };
 }
 
@@ -207,11 +211,14 @@ export async function writeCompilerArtifacts(
     input.appRoot,
     input.artifactLocations.publishedRoot,
   );
-  const diagnosticsArtifact = createDiscoveryDiagnosticsArtifact(input.diagnostics);
+  // The diagnostic accumulator stays open until route planning completes so
+  // compile warnings join the serialized artifact and its summary.
+  const compilerDiagnostics: DiscoverDiagnostic[] = [...input.diagnostics];
   const compiledManifest = await materializeWorkspaceResources({
     compileDirectoryPath: paths.compileDirectoryPath,
-    manifest: await compileAgentManifest(input.manifest),
+    manifest: await compileAgentManifest(input.manifest, { diagnostics: compilerDiagnostics }),
   });
+  const diagnosticsArtifact = createCompilerDiagnosticsArtifact(compilerDiagnostics);
   const compiledManifestJson = serializeArtifactJson(compiledManifest);
   const discoveryManifestJson = serializeArtifactJson(input.manifest);
   const diagnosticsArtifactJson = serializeArtifactJson(diagnosticsArtifact);

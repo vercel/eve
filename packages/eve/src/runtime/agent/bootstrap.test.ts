@@ -3,18 +3,33 @@ import { describe, expect, it } from "vitest";
 import { createResolvedRuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import { AGENT_TOOL_NAME } from "#runtime/framework-tools/agent.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
+import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import type { ResolvedAgent } from "#runtime/types.js";
 
 function createResolvedAgentForTest(overrides: Partial<ResolvedAgent> = {}): ResolvedAgent {
   const agent: Partial<ResolvedAgent> = {
     config: { name: "test-agent" } as ResolvedAgent["config"],
     connections: [],
-    disabledFrameworkTools: [],
     instructions: [],
     skills: [],
     ...overrides,
   };
   return agent as ResolvedAgent;
+}
+
+// The framework `agent` delegation capability exists only when the compiled
+// manifest carries a framework-owned `tools/agent.ts` row. Prepared tools
+// surface that ownership via `owner`.
+function frameworkAgentPreparedTool(): PreparedRuntimeTool {
+  return {
+    description: "Delegate a focused subtask to a fresh copy of yourself.",
+    inputSchema: null,
+    kind: "authored-tool",
+    logicalPath: "tools/agent.ts",
+    name: AGENT_TOOL_NAME,
+    owner: { feature: "tools/agent", kind: "framework" },
+    sourceId: "eve-root:tools/agent.ts",
+  };
 }
 
 describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
@@ -67,7 +82,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
         } as ResolvedAgent["config"],
       }),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
-      tools: [],
+      tools: [frameworkAgentPreparedTool()],
     });
 
     expect(turnAgent.instructions).toContainEqual(expect.stringContaining("Pass `agentId`"));
@@ -78,7 +93,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest(),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
-      tools: [],
+      tools: [frameworkAgentPreparedTool()],
     });
 
     expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("Pass `agentId`"));
@@ -93,7 +108,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
         } as ResolvedAgent["config"],
       }),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
-      tools: [],
+      tools: [frameworkAgentPreparedTool()],
     });
 
     expect(turnAgent.instructions).toContainEqual(expect.stringContaining("availability=busy"));
@@ -116,6 +131,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
           kind: "authored-tool",
           logicalPath: `tools/${AGENT_TOOL_NAME}.ts`,
           name: AGENT_TOOL_NAME,
+          owner: { kind: "application" },
           sourceId: `tools/${AGENT_TOOL_NAME}.ts`,
         },
       ],
@@ -124,15 +140,16 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
     expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("Pass `agentId`"));
   });
 
-  it("omits the messaging instruction when the root disables the framework agent tool", () => {
+  it("omits the messaging instruction when the compiled manifest carries no framework agent row", () => {
+    // A disabled `tools/agent.ts` slot compiles no row, so the prepared
+    // toolset simply lacks a framework-owned "agent" entry.
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest({
         config: {
           experimental: { subagentPersistentSessions: true },
           name: "test-agent",
         } as ResolvedAgent["config"],
-        disabledFrameworkTools: [AGENT_TOOL_NAME],
-      } as Partial<ResolvedAgent>),
+      }),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
       tools: [],
     });
@@ -149,7 +166,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
         } as ResolvedAgent["config"],
       }),
       nodeId: "subagents/researcher",
-      tools: [],
+      tools: [frameworkAgentPreparedTool()],
     });
 
     expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("Pass `agentId`"));

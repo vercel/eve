@@ -1,6 +1,7 @@
 import type { CompiledToolDefinition } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
+import { isHarnessOwnedToolDefinition } from "#shared/harness-owned-tool.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
 import { registerDefinitionSource, stampDefinitionKey } from "#public/tool-result-narrowing.js";
 import { isToolSchema, toInputSchema, toOutputSchema } from "#shared/tool-schema.js";
@@ -21,6 +22,7 @@ export async function resolveToolDefinition(
   definition: CompiledToolDefinition,
   moduleMap: CompiledModuleMap,
   nodeId: string | undefined,
+  options: { readonly owner?: ResolvedToolDefinition["owner"] } = {},
 ): Promise<ResolvedToolDefinition> {
   try {
     const resolvedExportValue = await loadResolvedModuleExport({
@@ -45,10 +47,17 @@ export async function resolveToolDefinition(
     registerDefinitionSource(sourceKey, sourceEntry);
     registerDefinitionSource(`tool:${resolvedRecord.description}`, sourceEntry);
 
-    const execute = expectFunction(
-      resolvedRecord.execute,
-      describe(definition, "to provide an execute function"),
-    ) as ResolvedToolDefinition["execute"];
+    // Harness-owned framework definitions (`ask_question`, `agent`,
+    // `task_update`, `task_cancel`, the `web_search` sentinel) carry no
+    // module executor — the harness supplies their behavior. Every other
+    // tool must export one.
+    const execute =
+      resolvedRecord.execute === undefined && isHarnessOwnedToolDefinition(resolvedRecord)
+        ? undefined
+        : (expectFunction(
+            resolvedRecord.execute,
+            describe(definition, "to provide an execute function"),
+          ) as ResolvedToolDefinition["execute"]);
     const inputSchema = isToolSchema(resolvedRecord.inputSchema)
       ? resolvedRecord.inputSchema
       : toInputSchema(definition.inputSchema);
@@ -65,6 +74,7 @@ export async function resolveToolDefinition(
       logicalPath: definition.logicalPath,
       name: definition.name,
       outputSchema,
+      owner: options.owner,
       sourceId: definition.sourceId,
       sourceKind: "module",
       ...extractOptionalHooks(resolvedRecord, definition),

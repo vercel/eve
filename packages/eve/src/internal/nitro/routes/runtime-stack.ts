@@ -19,6 +19,7 @@ import {
  * `fetch` with a `RouteContext` built from `runtime`.
  */
 export interface NitroChannelRuntimeBundle {
+  readonly agentName: string | undefined;
   readonly channels: readonly ResolvedChannelDefinition[];
   readonly resolveRemoteAgentStreamHeaders?: RemoteAgentStreamHeadersResolver;
   readonly runtime: Runtime;
@@ -42,6 +43,7 @@ export async function resolveNitroChannelRuntimeBundle(
   });
   const runtime = createWorkflowRuntime({ compiledArtifactsSource });
   return {
+    agentName: bundle.resolvedAgent.config?.name,
     channels: bundle.graph.root.channels,
     resolveRemoteAgentStreamHeaders: async (input) =>
       await resolveRemoteAgentStreamHeaders({ bundle, ...input }),

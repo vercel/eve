@@ -4,6 +4,11 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createCompiledAgentManifest } from "#compiler/manifest.js";
+import {
+  EMPTY_CHANNEL_ROUTE_PLAN,
+  EMPTY_SOURCE_COMPOSITION,
+  testCompiledSandbox,
+} from "#internal/testing/compiled-node-fixtures.js";
 import type { DevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
 import { STRUCTURAL_RELOAD_LOG_LINE } from "#internal/nitro/host/dev-watcher-log.js";
@@ -384,6 +389,10 @@ function createPreparedHost(
       manifest: createCompiledAgentManifest({
         agentRoot,
         appRoot,
+        bindings: {},
+        channelRoutes: EMPTY_CHANNEL_ROUTE_PLAN,
+        sandbox: testCompiledSandbox(),
+        sourceComposition: EMPTY_SOURCE_COMPOSITION,
         config: {
           model: { id: "openai/gpt-5-mini", routing: { kind: "gateway", target: "openai" } },
           name: "watch-agent",

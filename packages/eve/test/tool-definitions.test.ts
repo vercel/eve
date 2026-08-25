@@ -1,23 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  bash,
-  glob,
-  grep,
-  loadSkill,
-  readFile,
-  todo,
-  webFetch,
-  writeFile,
-} from "../src/public/tools/defaults.js";
+import bash from "../src/public/tools/bash.js";
+import glob from "../src/public/tools/glob.js";
+import grep from "../src/public/tools/grep.js";
+import loadSkill from "../src/public/tools/load-skill.js";
+import readFile from "../src/public/tools/read-file.js";
+import todo from "../src/public/tools/todo.js";
+import webFetch from "../src/public/tools/web-fetch.js";
+import writeFile from "../src/public/tools/write-file.js";
 
 /**
- * Smoke tests for the `eve/tools/defaults` barrel exports.
+ * Smoke tests for the per-tool `eve/tools/<name>` default exports.
  *
- * These verify that every re-exported default carries its expected shape
- * so wiring breakage in the barrel re-export chain surfaces immediately.
+ * These verify that every canonical public tool definition carries its
+ * expected shape so wiring breakage surfaces immediately.
  */
-describe("tool defaults barrel exports", () => {
+describe("public tool definition exports", () => {
   it("bash has description and execute", () => {
     expect(bash.description).toBeTypeOf("string");
     expect(bash.execute).toBeTypeOf("function");

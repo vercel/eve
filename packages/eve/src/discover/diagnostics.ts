@@ -11,12 +11,17 @@ export type DiscoverDiagnosticSeverity = z.infer<typeof discoverDiagnosticSeveri
 export const discoverDiagnosticSeveritySchema = z.union([z.literal("error"), z.literal("warning")]);
 
 /**
- * Structured discovery diagnostic emitted while classifying authored sources.
+ * Structured compiler diagnostic emitted while classifying authored sources
+ * during discovery, normalizing selected sources, or planning channel
+ * routes. Every source-specific locator carries at least one of the
+ * `sourcePath`, `sourceId`, or `logicalPath` fields; candidates produced by
+ * composition carry both `sourceId` and `logicalPath`, and programmatic
+ * sources never fabricate a physical path.
  */
 export type DiscoverDiagnostic = z.infer<typeof discoverDiagnosticSchema>;
 
 /**
- * Zod schema for one structured discovery diagnostic.
+ * Zod schema for one structured compiler diagnostic.
  */
 export const discoverDiagnosticSchema = z
   .object({
@@ -25,19 +30,38 @@ export const discoverDiagnosticSchema = z
      */
     code: z.string(),
     /**
+     * Agent-root-relative logical path associated with the diagnostic.
+     */
+    logicalPath: z.string().optional(),
+    /**
      * Human-readable diagnostic message.
      */
     message: z.string(),
     /**
-     * Discovery severity.
+     * Compiled node id the diagnostic belongs to.
+     */
+    nodeId: z.string().optional(),
+    /**
+     * Diagnostic severity.
      */
     severity: discoverDiagnosticSeveritySchema,
     /**
+     * Stable source id associated with the diagnostic.
+     */
+    sourceId: z.string().optional(),
+    /**
      * Absolute source path associated with the diagnostic.
      */
-    sourcePath: z.string(),
+    sourcePath: z.string().optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (diagnostic) =>
+      diagnostic.sourcePath !== undefined ||
+      diagnostic.sourceId !== undefined ||
+      diagnostic.logicalPath !== undefined,
+    { message: "A compiler diagnostic requires at least one source locator." },
+  );
 
 /**
  * Summary counts emitted alongside discovery manifests and CLI output.

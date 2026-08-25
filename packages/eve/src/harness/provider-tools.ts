@@ -7,7 +7,7 @@ import {
   WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
   WEB_SEARCH_OPENAI_OUTPUT_SCHEMA,
   WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA,
-  WEB_SEARCH_TOOL_DEFINITION,
+  WEB_SEARCH_TOOL_NAME,
 } from "#runtime/framework-tools/web-search.js";
 import type { JsonObject } from "#shared/json.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
@@ -34,7 +34,7 @@ const UPSTREAM_TOOL_TYPE_TO_FRAMEWORK_NAME: Readonly<Record<string, string>> = {
   // Anthropic's stable web search tool. The Bedrock and Vertex
   // Anthropic backends reject this type because they only host the
   // older Claude Messages surface.
-  web_search_20250305: WEB_SEARCH_TOOL_DEFINITION.name,
+  web_search_20250305: WEB_SEARCH_TOOL_NAME,
 };
 
 /**

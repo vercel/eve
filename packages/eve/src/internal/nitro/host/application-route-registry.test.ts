@@ -1,104 +1,72 @@
 import { describe, expect, it } from "vitest";
 
+import type {
+  CompiledChannelDefinition,
+  CompiledChannelPreflightDefinition,
+} from "#compiler/manifest.js";
+import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import {
+  createApplicationRouteRegistry,
   createApplicationRouteRegistryFromInput,
-  mergeApplicationChannelRouteRegistrations,
 } from "#internal/nitro/host/application-route-registry.js";
 
-describe("mergeApplicationChannelRouteRegistrations", () => {
-  it("applies authored overrides, disabled defaults, and framework-first route dedupe", () => {
-    const registrations = mergeApplicationChannelRouteRegistrations({
-      frameworkChannelNames: new Set(["callback", "eve", "shared"]),
-      frameworkChannels: [
-        { method: "POST", name: "eve", urlPath: "/framework/session" },
-        { method: "POST", name: "callback", urlPath: "/callback" },
-        { method: "GET", name: "shared", urlPath: "/duplicate" },
-      ],
-      manifestChannels: [
-        { kind: "disabled", name: "callback" },
-        { kind: "channel", method: "POST", name: "eve", urlPath: "/authored/session" },
-        { kind: "channel", method: "GET", name: "custom", urlPath: "/duplicate" },
-      ],
-    });
+function channelRoute(input: {
+  readonly cors?: NormalizedChannelCorsOptions;
+  readonly method: CompiledChannelDefinition["method"];
+  readonly name: string;
+  readonly urlPath: string;
+}): CompiledChannelDefinition {
+  return {
+    ...(input.cors !== undefined && { cors: input.cors }),
+    kind: "channel",
+    logicalPath: `channels/${input.name}.ts`,
+    method: input.method,
+    name: input.name,
+    sourceId: `channels/${input.name}.ts`,
+    sourceKind: "module",
+    urlPath: input.urlPath,
+  };
+}
 
-    expect(registrations).toEqual([
-      { cors: undefined, method: "GET", route: "/duplicate" },
-      { cors: undefined, method: "POST", route: "/authored/session" },
-    ]);
-  });
-
-  it("rejects disable files that do not name a framework channel", () => {
-    expect(() =>
-      mergeApplicationChannelRouteRegistrations({
-        frameworkChannelNames: new Set(["eve"]),
-        frameworkChannels: [],
-        manifestChannels: [{ kind: "disabled", name: "unknown" }],
-      }),
-    ).toThrow(
-      'agent/channels/unknown.ts exports disableRoute() but "unknown" is not a framework channel',
-    );
-  });
-});
+function preflight(input: {
+  readonly cors: NormalizedChannelCorsOptions;
+  readonly sourceIds: readonly string[];
+  readonly urlPath: string;
+}): CompiledChannelPreflightDefinition {
+  return input;
+}
 
 describe("createApplicationRouteRegistryFromInput", () => {
-  it("centralizes package, channel, development, and workflow precedence", () => {
+  it("projects effective routes in plan order, then preflights, dev routes, and the workflow route", () => {
     const cors = { origin: ["https://example.com"] } as const;
     const registry = createApplicationRouteRegistryFromInput({
+      channelRoutePlan: {
+        effective: [
+          channelRoute({ cors, method: "POST", name: "hooks", urlPath: "/hooks" }),
+          channelRoute({ cors, method: "GET", name: "hooks", urlPath: "/hooks" }),
+          channelRoute({ cors, method: "WEBSOCKET", name: "socket", urlPath: "/socket/:room" }),
+          channelRoute({ method: "GET", name: "home", urlPath: "/" }),
+        ],
+        preflight: [preflight({ cors, sourceIds: ["channels/hooks.ts"], urlPath: "/hooks" })],
+        shadowed: [],
+      },
       development: true,
-      frameworkChannelNames: new Set(),
-      frameworkChannels: [],
-      manifestChannels: [
-        { cors, kind: "channel", method: "POST", name: "hooks", urlPath: "/hooks" },
-        { cors, kind: "channel", method: "GET", name: "hooks", urlPath: "/hooks" },
-        { cors, kind: "channel", method: "POST", name: "copy", urlPath: "/hooks" },
-        {
-          cors,
-          kind: "channel",
-          method: "WEBSOCKET",
-          name: "socket",
-          urlPath: "/socket/:room",
-        },
-        {
-          kind: "channel",
-          method: "GET",
-          name: "reserved-health",
-          urlPath: "/eve/v1/health",
-        },
-        {
-          kind: "channel",
-          method: "GET",
-          name: "dev-shadow",
-          urlPath: "/eve/v1/dev/runtime-artifacts",
-        },
-      ],
     });
 
     expect(registry.channelRegistrations).toEqual([
       { cors, method: "POST", route: "/hooks" },
       { cors, method: "GET", route: "/hooks" },
       { cors, method: "WEBSOCKET", route: "/socket/:room" },
-      {
-        cors: undefined,
-        method: "GET",
-        route: "/eve/v1/dev/runtime-artifacts",
-      },
+      { cors: undefined, method: "GET", route: "/" },
     ]);
     expect(registry.routes).toEqual([
-      { kind: "home", method: "GET", path: "/" },
-      { kind: "health", method: "GET", path: "/eve/v1/health" },
-      { kind: "health", method: "HEAD", path: "/eve/v1/health" },
       { cors, kind: "channel", method: "POST", path: "/hooks" },
-      { cors, kind: "channel-preflight", method: "OPTIONS", path: "/hooks" },
       { cors, kind: "channel", method: "GET", path: "/hooks" },
+      { cors, kind: "channel", method: "WEBSOCKET", path: "/socket/:room" },
+      { cors: undefined, kind: "channel", method: "GET", path: "/" },
+      { cors, kind: "channel-preflight", method: "OPTIONS", path: "/hooks" },
       {
-        cors,
-        kind: "channel",
-        method: "WEBSOCKET",
-        path: "/socket/:room",
-      },
-      {
-        cors: undefined,
-        kind: "channel",
+        kind: "development-artifacts",
         method: "GET",
         path: "/eve/v1/dev/runtime-artifacts",
       },
@@ -113,20 +81,68 @@ describe("createApplicationRouteRegistryFromInput", () => {
         path: "/.well-known/workflow/v1/flow",
       },
     ]);
+    expect(registry.channelRoutes).toEqual(
+      registry.routes.filter(
+        (route) => route.kind === "channel" || route.kind === "channel-preflight",
+      ),
+    );
+  });
+
+  it("performs no second merge: identical plan entries are mounted verbatim", () => {
+    const registry = createApplicationRouteRegistryFromInput({
+      channelRoutePlan: {
+        effective: [
+          channelRoute({ method: "GET", name: "first", urlPath: "/duplicate" }),
+          channelRoute({ method: "GET", name: "second", urlPath: "/duplicate" }),
+        ],
+        preflight: [],
+        shadowed: [],
+      },
+    });
+
+    expect(registry.channelRegistrations).toEqual([
+      { cors: undefined, method: "GET", route: "/duplicate" },
+      { cors: undefined, method: "GET", route: "/duplicate" },
+    ]);
   });
 
   it("omits development routes outside development", () => {
     const registry = createApplicationRouteRegistryFromInput({
-      frameworkChannelNames: new Set(),
-      frameworkChannels: [],
-      manifestChannels: [],
+      channelRoutePlan: {
+        effective: [channelRoute({ method: "GET", name: "home", urlPath: "/" })],
+        preflight: [],
+        shadowed: [],
+      },
     });
 
+    expect(registry.routes.map((route) => route.kind)).toEqual(["channel", "workflow"]);
+  });
+});
+
+describe("createApplicationRouteRegistry", () => {
+  it("reads the compiled channel route plan from the prepared host manifest", () => {
+    const preparedHost = {
+      compileResult: {
+        manifest: {
+          channelRoutes: {
+            effective: [channelRoute({ method: "GET", name: "health", urlPath: "/eve/v1/health" })],
+            preflight: [],
+            shadowed: [],
+          },
+        },
+      },
+    };
+
+    const registry = createApplicationRouteRegistry(preparedHost, { development: true });
+
     expect(registry.routes.map((route) => route.kind)).toEqual([
-      "home",
-      "health",
-      "health",
+      "channel",
+      "development-artifacts",
+      "development-schedule",
       "workflow",
+    ]);
+    expect(registry.channelRegistrations).toEqual([
+      { cors: undefined, method: "GET", route: "/eve/v1/health" },
     ]);
   });
 });

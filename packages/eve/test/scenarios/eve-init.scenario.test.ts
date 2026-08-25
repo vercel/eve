@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { readFile, realpath, writeFile } from "node:fs/promises";
+import { devNull } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -92,6 +93,14 @@ async function createFakePnpmEnvironment(scratch: string): Promise<{
     GIT_AUTHOR_NAME: "eve Init",
     GIT_COMMITTER_EMAIL: "eve-init@example.com",
     GIT_COMMITTER_NAME: "eve Init",
+    // Host git config (e.g. mandatory commit signing) must not affect the
+    // scaffold's initial commit.
+    GIT_CONFIG_GLOBAL: devNull,
+    GIT_CONFIG_SYSTEM: devNull,
+    // The test runner may itself be launched through npm/npx, whose user
+    // agent would flip `eve init` onto the npm scaffold path. Pin the pnpm
+    // user agent so detection matches the fake pnpm binary.
+    npm_config_user_agent: "pnpm/10.0.0 npm/? node/v24.0.0 darwin arm64",
     npm_execpath: fakePnpmPath,
   };
 
@@ -138,6 +147,10 @@ async function createFakeNpmEnvironment(scratch: string): Promise<{
     GIT_AUTHOR_NAME: "eve Init",
     GIT_COMMITTER_EMAIL: "eve-init@example.com",
     GIT_COMMITTER_NAME: "eve Init",
+    // Host git config (e.g. mandatory commit signing) must not affect the
+    // scaffold's initial commit.
+    GIT_CONFIG_GLOBAL: devNull,
+    GIT_CONFIG_SYSTEM: devNull,
     npm_config_user_agent: "npm/11.0.0 node/v24.0.0 darwin arm64",
     npm_execpath: fakeNpmPath,
   };
@@ -164,6 +177,9 @@ describe("eve init smoke", () => {
       // against the real pnpm install this scenario performs.
       AI_AGENT: "claude",
       CI: "true",
+      // Pin pnpm detection: the test runner may be launched through npm/npx,
+      // whose inherited user agent would flip init onto the npm scaffold.
+      npm_config_user_agent: "pnpm/10.0.0 npm/? node/v24.0.0 darwin arm64",
       PNPM_CONFIG_MINIMUM_RELEASE_AGE: RELEASE_AGE_MINUTES,
       // A fresh eve release is younger than the policy window, so resolution
       // would rightly fail. Internal testing opts the framework package out

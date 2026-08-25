@@ -1,4 +1,3 @@
-import type { ResolvedToolDefinition } from "#runtime/types.js";
 import type { JsonObject } from "#shared/json.js";
 
 /**
@@ -306,19 +305,5 @@ export const WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA: JsonObject = {
   ],
 };
 
-/**
- * Framework-provided web search tool definition.
- *
- * Omits `execute` — the execution layer skips executor creation for tools
- * without it, and the harness injects the real provider-managed tool at
- * step time.
- */
-export const WEB_SEARCH_TOOL_DEFINITION: ResolvedToolDefinition = {
-  description:
-    "Search the web for real-time information. Use this to find up-to-date information about current events, recent developments, or topics that may have changed since the knowledge cutoff.",
-  inputSchema: null,
-  logicalPath: "eve:framework/web-search",
-  name: "web_search",
-  sourceId: "eve:web-search-tool",
-  sourceKind: "module",
-};
+/** Stable model-visible name for the provider-managed web search tool. */
+export const WEB_SEARCH_TOOL_NAME = "web_search";

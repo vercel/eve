@@ -48,24 +48,18 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
             ...skill.metadata,
           },
   })) satisfies ResolvedSkillDefinition[];
-  // Disabled channel entries (kind === "disabled") are filtered out here
-  // and surfaced separately on `ResolvedAgent.disabledFrameworkChannels`
-  // so the graph resolver can remove the corresponding framework defaults.
   const resolvedChannels: ResolvedChannelDefinition[] = [];
-  const disabledFrameworkChannels: string[] = [];
 
   for (const channelEntry of input.manifest.channels) {
-    if (channelEntry.kind === "disabled") {
-      disabledFrameworkChannels.push(channelEntry.name);
-      continue;
-    }
     resolvedChannels.push(
       await resolveChannelDefinition(channelEntry, input.moduleMap, input.nodeId),
     );
   }
   const resolvedTools = await Promise.all(
     input.manifest.tools.map((toolDefinition) =>
-      resolveToolDefinition(toolDefinition, input.moduleMap, input.nodeId),
+      resolveToolDefinition(toolDefinition, input.moduleMap, input.nodeId, {
+        owner: input.manifest.bindings[toolDefinition.sourceId]?.owner,
+      }),
     ),
   );
   const resolvedDynamicInstructionsResolvers = await Promise.all(
@@ -96,17 +90,21 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
       resolveConnectionDefinition(connectionDefinition, input.moduleMap, input.nodeId),
     ),
   );
-  const authoredSandbox =
-    input.manifest.sandbox === null
-      ? null
-      : await resolveSandboxDefinition(input.manifest.sandbox, input.moduleMap, input.nodeId);
-  const instructions = input.manifest.instructions.map(createResolvedInstructionsDefinition);
+  const sandbox = await resolveSandboxDefinition(
+    input.manifest.sandbox,
+    input.moduleMap,
+    input.nodeId,
+  );
+  const instructions = input.manifest.instructions.map((entry) =>
+    createResolvedInstructionsDefinition(
+      entry,
+      entry.owner ?? input.manifest.bindings[entry.sourceId]?.owner,
+    ),
+  );
   const workspaceResourceRoot = input.manifest.workspaceResourceRoot;
   const resolvedAgent: ResolvedAgent = {
     channels: resolvedChannels,
     connections: resolvedConnections,
-    disabledFrameworkChannels,
-    disabledFrameworkTools: [...input.manifest.disabledFrameworkTools],
     workflowTool:
       input.manifest.workflowTool === undefined
         ? undefined
@@ -122,7 +120,7 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
       appRoot: input.manifest.appRoot,
       diagnosticsSummary: input.manifest.diagnosticsSummary,
     },
-    sandbox: authoredSandbox,
+    sandbox,
     workspaceResourceRoot,
     skills: resolvedSkills,
     tools: resolvedTools,
@@ -136,11 +134,13 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
 
 function createResolvedInstructionsDefinition(
   instructions: CompiledInstructionsDefinition,
+  owner: ResolvedInstructionsDefinition["owner"],
 ): ResolvedInstructionsDefinition {
   return {
     content: instructions.content,
     name: instructions.name,
     logicalPath: instructions.logicalPath,
+    owner,
     role: instructions.role,
     sourceId: instructions.sourceId,
     sourceKind: instructions.sourceKind,

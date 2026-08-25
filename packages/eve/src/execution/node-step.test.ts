@@ -191,17 +191,28 @@ function createTestTurnAgent(overrides?: Partial<StaticRuntimeTurnAgent>): Runti
   };
 }
 
+// Framework capabilities exist only when the compiled manifest carries their
+// rows: a framework-owned prepared tool named "agent" becomes the harness
+// delegation tool (root only), and framework-owned task_* rows become the
+// harness task definitions when tasks are enabled.
+function frameworkPreparedTool(name: string): StaticRuntimeTurnAgent["tools"][number] {
+  return {
+    description: `Framework ${name} tool.`,
+    inputSchema: null,
+    kind: "authored-tool",
+    logicalPath: `tools/${name}.ts`,
+    name,
+    owner: { feature: `tools/${name}`, kind: "framework" },
+    sourceId: `eve-root:tools/${name}.ts`,
+  };
+}
+
 function createTestNode(
   turnAgent?: RuntimeTurnAgent,
   overrides: Partial<ResolvedRuntimeAgentNode> = {},
 ): ResolvedRuntimeAgentNode {
-  const agent = {} as ResolvedRuntimeAgentNode["agent"];
-
   return {
-    agent: {
-      ...agent,
-      disabledFrameworkTools: [],
-    },
+    agent: {} as ResolvedRuntimeAgentNode["agent"],
     channels: [],
     hookRegistry: createEmptyHookRegistry(),
     nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
@@ -238,7 +249,9 @@ function createNoopRuntime(): Runtime {
 
 describe("createNodeHarnessTools", () => {
   it("guides the model to split large tasks across parallel agent calls", () => {
-    const agentTool = createNodeHarnessTools({ node: createTestNode() }).get("agent");
+    const agentTool = createNodeHarnessTools({
+      node: createTestNode(createTestTurnAgent({ tools: [frameworkPreparedTool("agent")] })),
+    }).get("agent");
 
     expect(agentTool?.description).toContain("split a large task into independent pieces");
     expect(agentTool?.description).toContain("multiple `agent` calls in one response");
@@ -255,29 +268,30 @@ describe("createNodeHarnessTools", () => {
 
   it("does not give declared subagent nodes the built-in agent tool", () => {
     const tools = createNodeHarnessTools({
-      node: createTestNode(undefined, { nodeId: "subagents/researcher" }),
+      node: createTestNode(createTestTurnAgent({ tools: [frameworkPreparedTool("agent")] }), {
+        nodeId: "subagents/researcher",
+      }),
     });
 
     expect(tools.has("agent")).toBe(false);
   });
 
-  it("does not give the root node the built-in agent tool when it is disabled", () => {
-    const node = createTestNode();
-    const tools = createNodeHarnessTools({
-      node: {
-        ...node,
-        agent: {
-          ...node.agent,
-          disabledFrameworkTools: ["agent"],
-        },
-      },
-    });
+  it("does not inject the agent tool when the compiled manifest has no framework agent row", () => {
+    // A disabled `tools/agent.ts` slot compiles no row, so the prepared
+    // toolset lacks the framework-owned entry and no delegation tool exists.
+    const tools = createNodeHarnessTools({ node: createTestNode() });
 
     expect(tools.has("agent")).toBe(false);
   });
 
   it("does not inject task tools without experimental.tasks", () => {
-    const tools = createNodeHarnessTools({ node: createTestNode() });
+    const tools = createNodeHarnessTools({
+      node: createTestNode(
+        createTestTurnAgent({
+          tools: [frameworkPreparedTool("task_cancel"), frameworkPreparedTool("task_update")],
+        }),
+      ),
+    });
 
     for (const name of ["task_cancel", "task_update"]) {
       expect(tools.has(name)).toBe(false);
@@ -285,7 +299,11 @@ describe("createNodeHarnessTools", () => {
   });
 
   it("injects the task tools when experimental.tasks is on", () => {
-    const node = createTestNode();
+    const node = createTestNode(
+      createTestTurnAgent({
+        tools: [frameworkPreparedTool("task_cancel"), frameworkPreparedTool("task_update")],
+      }),
+    );
     const tools = createNodeHarnessTools({
       node: {
         ...node,
@@ -305,6 +323,7 @@ describe("createNodeHarnessTools", () => {
 
   it("executes local and remote subagents as background tools only with experimental.tasks", () => {
     const delegationTools: StaticRuntimeTurnAgent["tools"] = [
+      frameworkPreparedTool("agent"),
       {
         description: "Delegate local research.",
         inputSchema: { type: "object" },
@@ -362,15 +381,18 @@ describe("createNodeHarnessTools", () => {
     ).toBe(2);
   });
 
-  it("respects disableTool for individual task tools", () => {
-    const node = createTestNode();
+  it("injects only the task tools present as framework-owned compiled rows", () => {
+    // Disabling `tools/task_cancel.ts` removes its row at compile time, so
+    // only the surviving task_update row yields a harness definition.
+    const node = createTestNode(
+      createTestTurnAgent({ tools: [frameworkPreparedTool("task_update")] }),
+    );
     const tools = createNodeHarnessTools({
       node: {
         ...node,
         agent: {
           ...node.agent,
           config: { experimental: { tasks: true }, model: { id: "test-model" }, name: "test" },
-          disabledFrameworkTools: ["task_cancel"],
         },
       },
     });

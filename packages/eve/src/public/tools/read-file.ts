@@ -1,17 +1,12 @@
 import { z } from "#compiled/zod/index.js";
 
 import { executeReadFileOnSandbox, type ReadFileInput } from "#execution/sandbox/read-file-tool.js";
-import { requireSandboxSession } from "#execution/sandbox/require-sandbox.js";
-import type { ResolvedToolDefinition } from "#runtime/types.js";
-import type { ToolExecuteOptions } from "#shared/tool-definition.js";
+import { defineTool } from "#public/definitions/tool.js";
 
 /**
- * Shared input schema used by the framework `read_file` tool and any author
- * tool constructed via {@link defineReadFileTool}.
- *
- * Exported so the public `defineReadFileTool` factory and the framework
- * `READ_FILE_TOOL_DEFINITION` use the exact same schema object — keeping
- * model input contracts in sync without duplication.
+ * Input schema for the framework `read_file` tool and any author tool
+ * constructed via {@link defineReadFileTool}. Single source of truth so
+ * model input contracts stay in sync without duplication.
  */
 export const READ_FILE_INPUT_SCHEMA = z.strictObject({
   filePath: z
@@ -32,8 +27,8 @@ export const READ_FILE_INPUT_SCHEMA = z.strictObject({
 });
 
 /**
- * Shared output schema used by the framework `read_file` tool and any author
- * tool constructed via {@link defineReadFileTool}.
+ * Output schema for the framework `read_file` tool and any author tool
+ * constructed via {@link defineReadFileTool}.
  */
 export const READ_FILE_OUTPUT_SCHEMA = z.strictObject({
   content: z.string(),
@@ -44,16 +39,12 @@ export const READ_FILE_OUTPUT_SCHEMA = z.strictObject({
 });
 
 /**
- * Framework-owned executor that delegates to the default sandbox.
+ * Framework `read_file` tool: reads a file from the agent's sandbox and
+ * records the read-before-write stamp used by `write_file`. Import from
+ * `eve/tools/read_file` to spread, wrap, or re-export it from
+ * `agent/tools/read_file.ts`.
  */
-async function executeReadFile(input: unknown, options?: ToolExecuteOptions): Promise<unknown> {
-  return executeReadFileOnSandbox(
-    await requireSandboxSession(options?.abortSignal),
-    input as ReadFileInput,
-  );
-}
-
-export const READ_FILE_TOOL_DEFINITION: ResolvedToolDefinition = {
+export default defineTool({
   description: [
     "Read a file from the local filesystem. If the path does not exist, an error is returned.",
     "",
@@ -67,11 +58,8 @@ export const READ_FILE_TOOL_DEFINITION: ResolvedToolDefinition = {
     "- Call this tool in parallel when you know there are multiple files you want to read.",
     "- Avoid tiny repeated slices (30 line chunks). If you need more context, read a larger window.",
   ].join("\n"),
-  execute: executeReadFile,
   inputSchema: READ_FILE_INPUT_SCHEMA,
-  logicalPath: "eve:framework/read-file",
-  name: "read_file",
   outputSchema: READ_FILE_OUTPUT_SCHEMA,
-  sourceId: "eve:read-file-tool",
-  sourceKind: "module",
-};
+  execute: async (input, ctx) =>
+    executeReadFileOnSandbox(await ctx.getSandbox(), input as ReadFileInput),
+});

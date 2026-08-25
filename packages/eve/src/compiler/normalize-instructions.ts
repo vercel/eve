@@ -6,10 +6,6 @@ import type {
   CompiledInstructionsDefinition,
 } from "#compiler/manifest.js";
 import {
-  loadModuleBackedDefinition,
-  type ModuleBackedDefinitionLoadOptions,
-} from "#compiler/normalize-helpers.js";
-import {
   assertResolverOnlyDynamicSentinel,
   ALLOWED_DYNAMIC_INSTRUCTION_EVENTS,
   isDynamicSentinel,
@@ -43,11 +39,10 @@ export type CompiledInstructionsEntry =
  * classified and their event names recorded; the resolver runs at
  * runtime.
  */
-export async function compileInstructionsEntry(
-  agentRoot: string,
+export function compileInstructionsEntry(
   source: InstructionsSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
-): Promise<CompiledInstructionsEntry> {
+  exportValue?: unknown,
+): CompiledInstructionsEntry {
   if (source.sourceKind === "markdown") {
     const definition = normalizeInstructionsDefinition(
       source.definition,
@@ -65,13 +60,6 @@ export async function compileInstructionsEntry(
       },
     };
   }
-
-  const exportValue = await loadModuleBackedDefinition({
-    agentRoot,
-    externalDependencies: options.externalDependencies,
-    kind: "instructions",
-    source,
-  });
 
   if (isDynamicSentinel(exportValue)) {
     assertResolverOnlyDynamicSentinel(
@@ -117,22 +105,4 @@ export async function compileInstructionsEntry(
       sourceKind: source.sourceKind,
     },
   };
-}
-
-/**
- * @deprecated Use {@link compileInstructionsEntry} instead. Kept for
- * backwards compatibility with callers that pass a single source.
- */
-export async function compileInstructions(
-  agentRoot: string,
-  source: InstructionsSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
-): Promise<CompiledInstructionsDefinition> {
-  const entry = await compileInstructionsEntry(agentRoot, source, options);
-  if (entry.kind === "dynamic-instructions") {
-    throw new Error(
-      `Expected static instructions from "${source.logicalPath}" but got a dynamic resolver. Use compileInstructionsEntry instead.`,
-    );
-  }
-  return entry.definition;
 }

@@ -1,17 +1,12 @@
 import { z } from "#compiled/zod/index.js";
 
 import { executeGlobOnSandbox, type GlobInput } from "#execution/sandbox/glob-tool.js";
-import { requireSandboxSession } from "#execution/sandbox/require-sandbox.js";
-import type { ResolvedToolDefinition } from "#runtime/types.js";
-import type { ToolExecuteOptions } from "#shared/tool-definition.js";
+import { defineTool } from "#public/definitions/tool.js";
 
 /**
- * Shared input schema used by the framework `glob` tool and any author tool
- * constructed via {@link defineGlobTool}.
- *
- * Exported so the public `defineGlobTool` factory and the framework
- * `GLOB_TOOL_DEFINITION` use the exact same schema object — keeping model
- * input contracts in sync without duplication.
+ * Input schema for the framework `glob` tool and any author tool constructed
+ * via {@link defineGlobTool}. Single source of truth so model input contracts
+ * stay in sync without duplication.
  */
 export const GLOB_INPUT_SCHEMA = z.strictObject({
   limit: z
@@ -34,8 +29,8 @@ export const GLOB_INPUT_SCHEMA = z.strictObject({
 });
 
 /**
- * Shared output schema used by the framework `glob` tool and any author tool
- * constructed via {@link defineGlobTool}.
+ * Output schema for the framework `glob` tool and any author tool constructed
+ * via {@link defineGlobTool}.
  */
 export const GLOB_OUTPUT_SCHEMA = z.strictObject({
   content: z.string(),
@@ -45,16 +40,11 @@ export const GLOB_OUTPUT_SCHEMA = z.strictObject({
 });
 
 /**
- * Framework-owned executor that delegates to the default sandbox.
+ * Framework `glob` tool: finds files by glob pattern in the agent's sandbox.
+ * Import from `eve/tools/glob` to spread, wrap, or re-export it from
+ * `agent/tools/glob.ts`.
  */
-async function executeGlob(input: unknown, options?: ToolExecuteOptions): Promise<unknown> {
-  return executeGlobOnSandbox(
-    await requireSandboxSession(options?.abortSignal),
-    input as GlobInput,
-  );
-}
-
-export const GLOB_TOOL_DEFINITION: ResolvedToolDefinition = {
+export default defineTool({
   description: [
     "Fast file pattern matching tool that works with any codebase size.",
     "",
@@ -63,11 +53,7 @@ export const GLOB_TOOL_DEFINITION: ResolvedToolDefinition = {
     "- Returns matching file paths.",
     "- Call this tool in parallel when you know there are multiple patterns to search for.",
   ].join("\n"),
-  execute: executeGlob,
   inputSchema: GLOB_INPUT_SCHEMA,
-  logicalPath: "eve:framework/glob",
-  name: "glob",
   outputSchema: GLOB_OUTPUT_SCHEMA,
-  sourceId: "eve:glob-tool",
-  sourceKind: "module",
-};
+  execute: async (input, ctx) => executeGlobOnSandbox(await ctx.getSandbox(), input as GlobInput),
+});

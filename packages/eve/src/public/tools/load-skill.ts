@@ -3,27 +3,40 @@ import { z } from "#compiled/zod/index.js";
 import { loadContext } from "#context/container.js";
 import { DynamicSkillManifestKey, SandboxKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
+import { SkillCatalogKey } from "#context/providers/skill-catalog-key.js";
+import { defineTool } from "#public/definitions/tool.js";
 import { loadSkillFromSandbox } from "#runtime/skills/sandbox-access.js";
-import type { ResolvedSkillDefinition, ResolvedToolDefinition } from "#runtime/types.js";
+
+/**
+ * Input schema for the framework `load_skill` tool. Single source of truth so
+ * model input contracts stay in sync without duplication.
+ */
+export const SKILL_INPUT_SCHEMA = z.strictObject({
+  skill: z.string().describe("Available skill name or id."),
+});
+
+/**
+ * Output schema for the framework `load_skill` tool.
+ */
+export const SKILL_OUTPUT_SCHEMA = z.string();
 
 /**
  * Typed input accepted by {@link executeLoadSkillTool}.
  */
-type LoadSkillInput = z.infer<typeof SKILL_INPUT_SCHEMA>;
+export type LoadSkillInput = z.infer<typeof SKILL_INPUT_SCHEMA>;
 
 /**
  * Executes the `load_skill` tool.
  *
- * Returns authored skill instructions directly from the resolved agent.
- * Active dynamic skills take precedence and remain sandbox-backed because
- * their full package content is currently materialized there at runtime.
+ * Returns authored skill instructions directly from the active node's skill
+ * catalog on the runtime context. Active dynamic skills take precedence and
+ * remain sandbox-backed because their full package content is currently
+ * materialized there at runtime.
  */
-async function executeLoadSkillTool(
-  args: LoadSkillInput,
-  authoredSkills: readonly ResolvedSkillDefinition[],
-): Promise<unknown> {
+export async function executeLoadSkillTool(args: LoadSkillInput): Promise<string> {
   const ctx = loadContext();
   const { skill } = args;
+  const authoredSkills = ctx.get(SkillCatalogKey) ?? [];
   const dynamicSkillNames = availableDynamicSkillNames(ctx);
   const availableSkills = [
     ...new Set([...authoredSkills.map((entry) => entry.name), ...dynamicSkillNames]),
@@ -75,16 +88,13 @@ function formatSkillNotFoundError(skill: string, availableSkills: readonly strin
   return `No skill named "${skill}".${hint}`;
 }
 
-// ---------------------------------------------------------------------------
-// Tool definition
-// ---------------------------------------------------------------------------
-
-export const SKILL_INPUT_SCHEMA = z.strictObject({
-  skill: z.string().describe("Available skill name or id."),
-});
-export const SKILL_OUTPUT_SCHEMA = z.string();
-
-const SKILL_TOOL_METADATA = {
+/**
+ * Framework `load_skill` tool: returns a named authored skill's instructions
+ * directly; dynamic skills remain sandbox-backed. Import from
+ * `eve/tools/load_skill` to spread, wrap, or re-export it from
+ * `agent/tools/load_skill.ts`.
+ */
+export default defineTool({
   description: [
     "Load the full instructions for one available skill by name or id.",
     "Use this tool when the request clearly matches a listed skill description or when the user explicitly asks for that skill.",
@@ -92,24 +102,6 @@ const SKILL_TOOL_METADATA = {
     'Choose the "skill" value from the Available skills block.',
   ].join(" "),
   inputSchema: SKILL_INPUT_SCHEMA,
-  logicalPath: "eve:framework/load-skill",
-  name: "load_skill",
   outputSchema: SKILL_OUTPUT_SCHEMA,
-  sourceId: "eve:load-skill-tool",
-  sourceKind: "module" as const,
-};
-
-/**
- * Creates a node-specific `load_skill` definition with authored skills bound
- * into its executor.
- */
-export function createSkillToolDefinition(
-  authoredSkills: readonly ResolvedSkillDefinition[],
-): ResolvedToolDefinition {
-  return {
-    ...SKILL_TOOL_METADATA,
-    execute: (input) => executeLoadSkillTool(input as LoadSkillInput, authoredSkills),
-  };
-}
-
-export const SKILL_TOOL_DEFINITION = createSkillToolDefinition([]);
+  execute: async (input) => executeLoadSkillTool(input as LoadSkillInput),
+});

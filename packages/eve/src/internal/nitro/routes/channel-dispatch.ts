@@ -12,6 +12,7 @@ import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
 import {
   attachAgentInfoRouteResponse,
+  attachAgentPresentationMetadata,
   attachRouteChannelName,
   attachRemoteAgentStreamHeadersResolver,
   attachRouteSessionCreator,
@@ -251,19 +252,22 @@ function buildRouteArgs(
 
   const args = attachRouteSessionCreator(
     attachRouteChannelName(
-      attachAgentInfoRouteResponse(
-        {
-          attachSession,
-          ...channelOperations,
-          params,
-          requestIp,
-          to,
-          waitUntil,
-        },
-        async () => {
-          const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
-          return await handleAgentInfoRequest(config);
-        },
+      attachAgentPresentationMetadata(
+        attachAgentInfoRouteResponse(
+          {
+            attachSession,
+            ...channelOperations,
+            params,
+            requestIp,
+            to,
+            waitUntil,
+          },
+          async () => {
+            const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
+            return await handleAgentInfoRequest(config);
+          },
+        ),
+        { agentName: bundle.agentName ?? "eve" },
       ),
       channelName,
     ),

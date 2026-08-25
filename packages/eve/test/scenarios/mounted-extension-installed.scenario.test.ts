@@ -300,7 +300,7 @@ describe("mounted extension installed under node_modules", () => {
     const status = graph.root.agent.channels.find((entry) => entry.name === "crm__status");
     expect(status).toMatchObject({
       method: "GET",
-      sourceId: "ext:crm:channels/status.mjs",
+      sourceId: "ext:crm:channels/crm__status.mjs",
       urlPath: "/crm/status",
     });
     if (status === undefined) throw new Error("Expected the extension channel to resolve.");
@@ -315,7 +315,7 @@ describe("mounted extension installed under node_modules", () => {
     expect(sync).toMatchObject({
       cron: "0 9 * * *",
       hasRun: true,
-      sourceId: "ext:crm:schedules/sync.mjs",
+      sourceId: "ext:crm:schedules/crm__sync.mjs",
     });
     if (sync === undefined) throw new Error("Expected the extension schedule to compile.");
     const syncDefinition = (await loadResolvedModuleExport({
@@ -337,18 +337,23 @@ describe("mounted extension installed under node_modules", () => {
     const reviewer = graph.root.subagentRegistry.subagentsByName.get("crm__reviewer");
     expect(reviewer?.definition).toMatchObject({
       name: "crm__reviewer",
-      sourceId: "ext:crm:subagents/reviewer",
+      sourceId: "ext:crm:subagents/crm__reviewer",
     });
     const reviewerNode = graph.nodesByNodeId.get(reviewer!.definition.nodeId);
     const key = reviewerNode?.agent.tools.find((entry) => entry.name === "key");
     await expect(key?.execute?.({}, { messages: [], toolCallId: "call_3" })).resolves.toEqual({
       apiKey: "sk-installed",
     });
+    // The compiled remote node's `sourceId` keys its config-module binding
+    // (for an installed extension that path lives under node_modules); the
+    // projected extension identity is the node id.
     expect(
       graph.root.subagentRegistry.subagentsByName.get("crm__weather")?.definition,
     ).toMatchObject({
       kind: "remote",
-      sourceId: "ext:crm:subagents/weather.mjs",
+      name: "crm__weather",
+      nodeId: "ext:crm:subagents/crm__weather",
+      sourceId: expect.stringMatching(/^ext:crm:/) as unknown,
       url: "https://weather.example.com",
     });
 

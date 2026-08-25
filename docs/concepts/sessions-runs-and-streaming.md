@@ -244,7 +244,7 @@ Start with the [Client SDK](../guides/client/overview) guide. It covers basic us
 
 ## Inspect the agent over HTTP
 
-`GET /eve/v1/info` returns a JSON inspection snapshot for the running agent: model, static instructions, authored and framework tools, skills, channels, schedules, subagents, sandbox, connections, hooks, workflow, and workspace metadata. Static instructions are an ordered array whose entries expose `content` and `role`; dynamic resolver output is runtime context and is not included. The route uses the resolved `eveChannel()` auth when `agent/channels/eve.ts` authors one; otherwise it falls back to the framework default of Vercel OIDC plus local development access.
+`GET /eve/v1/info` returns a JSON inspection snapshot for the running agent: model, static instructions, tools, skills, mounted channel routes, schedules, local subagents and remote agents, sandbox, connections, hooks, and workspace metadata. Each entry carries a `source` recording the file path it was authored at and whether the application, an extension, or the framework owns it. Static instructions are an ordered array whose entries expose `content` and `role`; dynamic resolver output is runtime context and is not included. The route is part of the [eve channel](../channels/eve), so it uses the channel's `auth`; the framework default channel accepts Vercel OIDC plus local development access.
 
 ```bash
 curl http://127.0.0.1:2000/eve/v1/info

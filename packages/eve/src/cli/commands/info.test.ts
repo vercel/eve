@@ -7,6 +7,7 @@ import {
   createCompiledAgentNodeManifest,
   type CompiledChannelEntry,
   type CompiledInstructionsDefinition,
+  type CompiledSandboxDefinition,
   type CompiledScheduleDefinition,
   type CompiledSubagentNode,
   ROOT_COMPILED_AGENT_NODE_ID,
@@ -27,6 +28,19 @@ const MESSAGING = {
 const APP_ROOT = "/virtual/app";
 const AGENT_ROOT = "/virtual/app/agent";
 
+const SANDBOX: CompiledSandboxDefinition = {
+  logicalPath: "sandbox.ts",
+  sourceHash: "sandbox-hash",
+  sourceId: "sandbox.ts",
+  sourceKind: "module",
+};
+
+const EMPTY_NODE_INPUTS = {
+  bindings: {},
+  sandbox: SANDBOX,
+  sourceComposition: { disabled: [], shadowed: [] },
+} as const;
+
 function makeSchedule(name: string): CompiledScheduleDefinition {
   return {
     cron: "0 9 * * *",
@@ -42,6 +56,7 @@ function makeSchedule(name: string): CompiledScheduleDefinition {
 function makeSubagent(name: string): CompiledSubagentNode {
   return {
     agent: createCompiledAgentNodeManifest({
+      ...EMPTY_NODE_INPUTS,
       agentRoot: `${AGENT_ROOT}/subagents/${name}`,
       appRoot: APP_ROOT,
       config: {
@@ -93,8 +108,10 @@ function makeCompiledState(
     },
   ];
   const manifest = createCompiledAgentManifest({
+    ...EMPTY_NODE_INPUTS,
     agentRoot: AGENT_ROOT,
     appRoot: APP_ROOT,
+    channelRoutes: { effective: [], preflight: [], shadowed: [] },
     config: {
       model: {
         id: "anthropic/claude-sonnet-5",

@@ -160,7 +160,7 @@ function createHandle(input: {
 
 function capabilitiesFromInfo(info: AgentInfoResult): EveEvalTargetCapabilities {
   return {
-    devRoutes: info.capabilities?.devRoutes ?? info.mode === "development",
+    devRoutes: info.capabilities.devRoutes,
   };
 }
 
@@ -189,7 +189,7 @@ async function waitForTargetHealth(client: Client, url: string): Promise<void> {
 }
 
 function assertAgentInfoShape(info: AgentInfoResult, url: string): void {
-  if (info.kind !== "eve-agent-info" || info.version !== 2) {
+  if (info.kind !== "eve-agent-info" || info.version !== 3) {
     throw new Error(`Eval target ${url} returned an unrecognized /eve/v1/info payload.`);
   }
 }

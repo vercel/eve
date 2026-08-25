@@ -108,7 +108,7 @@ function createWorkspaceExtensionToolSource(description: string): string {
 }
 
 async function workspaceExtensionToolDescription(serverUrl: string): Promise<string | undefined> {
-  return (await fetchAgentInfo(serverUrl)).tools.authored.find(
+  return (await fetchAgentInfo(serverUrl)).tools.entries.find(
     (tool) => tool.name === "workspace__marker",
   )?.description;
 }

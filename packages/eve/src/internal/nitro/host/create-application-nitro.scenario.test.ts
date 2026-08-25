@@ -23,6 +23,10 @@ import {
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
 import { resolveNitroBuildDirectory } from "#internal/application/paths.js";
+import {
+  EMPTY_SOURCE_COMPOSITION,
+  testCompiledSandbox,
+} from "#internal/testing/compiled-node-fixtures.js";
 import type {
   PreparedApplicationHost,
   PreparedDevelopmentApplicationHost,
@@ -622,6 +626,9 @@ describe("application Nitro creation", () => {
       agent: createCompiledAgentNodeManifest({
         agentRoot: "/tmp/weather-agent/agent/subagents/investigator",
         appRoot: "/tmp/weather-agent",
+        bindings: {},
+        sandbox: testCompiledSandbox(),
+        sourceComposition: EMPTY_SOURCE_COMPOSITION,
         config: {
           build: {
             externalDependencies: ["subagent-external", "sharp"],

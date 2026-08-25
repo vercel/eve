@@ -4,7 +4,7 @@ import { z } from "#compiled/zod/index.js";
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { TODO_COMPACTION_PRESERVATION_LABEL } from "#harness/compaction-prompt.js";
-import type { ResolvedToolDefinition } from "#runtime/types.js";
+import { defineTool } from "#public/definitions/tool.js";
 
 // ---------------------------------------------------------------------------
 // Durable context key
@@ -136,7 +136,14 @@ export const TODO_OUTPUT_SCHEMA = z.strictObject({
   todos: z.array(TODO_ITEM_SCHEMA),
 });
 
-export const TODO_TOOL_DEFINITION: ResolvedToolDefinition = {
+/**
+ * Framework `todo` tool: a durable, session-scoped task list. Its executor
+ * reads and writes the framework's internal todo state ({@link TodoStateKey}),
+ * so spreading or wrapping this definition keeps the durable state behavior.
+ * Import from `eve/tools/todo` to spread, wrap, or re-export it from
+ * `agent/tools/todo.ts`.
+ */
+export default defineTool({
   description: [
     "Use this tool to create and manage a structured task list for the current session.",
     "This helps you track progress, organize complex tasks, and demonstrate thoroughness.",
@@ -158,11 +165,7 @@ export const TODO_TOOL_DEFINITION: ResolvedToolDefinition = {
     "- Mark tasks in_progress when you start, completed when done",
     "- Only have ONE task in_progress at a time",
   ].join("\n"),
-  execute: async (input) => executeTodoTool((input ?? {}) as TodoToolInput),
   inputSchema: TODO_INPUT_SCHEMA,
-  logicalPath: "eve:framework/todo",
-  name: "todo",
   outputSchema: TODO_OUTPUT_SCHEMA,
-  sourceId: "eve:todo-tool",
-  sourceKind: "module",
-};
+  execute: async (input) => executeTodoTool((input ?? {}) as TodoToolInput),
+});

@@ -1,5 +1,5 @@
 import { executeGrepOnSandbox, type GrepInput } from "#execution/sandbox/grep-tool.js";
-import { GREP_INPUT_SCHEMA, GREP_OUTPUT_SCHEMA } from "#runtime/framework-tools/grep.js";
+import { GREP_INPUT_SCHEMA, GREP_OUTPUT_SCHEMA } from "#public/tools/grep.js";
 import type { ToolDefinition } from "#public/definitions/tool.js";
 
 /**

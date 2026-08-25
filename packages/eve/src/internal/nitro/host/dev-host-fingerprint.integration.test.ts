@@ -4,6 +4,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createCompiledAgentManifest, type CompiledAgentManifest } from "#compiler/manifest.js";
+import {
+  EMPTY_SOURCE_COMPOSITION,
+  testCompiledSandbox,
+} from "#internal/testing/compiled-node-fixtures.js";
 import { computeDevelopmentHostFingerprint } from "#internal/nitro/host/dev-host-fingerprint.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
 
@@ -41,7 +45,11 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
   const manifest = createCompiledAgentManifest({
     agentRoot,
     appRoot,
+    bindings: {},
+    channelRoutes: { effective: variant.channels ?? [], preflight: [], shadowed: [] },
     channels: variant.channels ?? [],
+    sandbox: testCompiledSandbox(),
+    sourceComposition: EMPTY_SOURCE_COMPOSITION,
     config: {
       model: { id: "openai/gpt-5-mini", routing: { kind: "gateway", target: "openai" } },
       name: "fingerprint-host",

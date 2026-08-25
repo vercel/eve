@@ -4,6 +4,7 @@ import { isNextJsProject, type ChannelKind } from "#setup/scaffold/index.js";
 import type { DisabledChannelReasons } from "#setup/cli/index.js";
 
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
+import { loadDiscoveredModuleExport } from "#compiler/normalize-helpers.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 
@@ -43,12 +44,14 @@ export async function inspectExistingChannelRegistrations(
   const slackOwners = new Set<string>();
 
   for (const source of manifest.channels) {
-    const compiled = await compileChannelDefinition(agentRoot, source);
-    const definitions = Array.isArray(compiled) ? compiled : [compiled];
-    for (const definition of definitions) {
-      if (definition.kind !== "channel") {
-        continue;
-      }
+    const compiled = compileChannelDefinition(
+      source,
+      await loadDiscoveredModuleExport({ agentRoot, source }),
+    );
+    if (compiled.kind !== "channel") {
+      continue;
+    }
+    for (const definition of compiled.definitions) {
       if (definition.method === "POST" && definition.urlPath === EVE_SESSION_ROUTE_PATH) {
         webRouteOwners.add(source.logicalPath);
       }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildHomePageResponse } from "#internal/nitro/routes/index.js";
+import { buildHomePageResponse } from "#public/channels/home.js";
 
 function buildResponseForRequest(url: string, headers?: Record<string, string>): Response {
   return buildHomePageResponse({ agentName: "support-agent" }, new Request(url, { headers }));

@@ -1,13 +1,12 @@
 import { z } from "#compiled/zod/index.js";
 
 import { executeWebFetchTool, type WebFetchInput } from "#execution/web-fetch/tool.js";
-import type { ResolvedToolDefinition } from "#runtime/types.js";
-import type { ToolExecuteOptions } from "#shared/tool-definition.js";
+import { defineTool } from "#public/definitions/tool.js";
 
-async function executeWebFetch(input: unknown, options?: ToolExecuteOptions): Promise<unknown> {
-  return executeWebFetchTool(input as WebFetchInput, { abortSignal: options?.abortSignal });
-}
-
+/**
+ * Input schema for the framework `web_fetch` tool. Single source of truth so
+ * model input contracts stay in sync without duplication.
+ */
 export const WEB_FETCH_INPUT_SCHEMA = z.strictObject({
   format: z
     .enum(["markdown", "text", "html"])
@@ -19,6 +18,9 @@ export const WEB_FETCH_INPUT_SCHEMA = z.strictObject({
   url: z.string().describe("The fully-formed URL to fetch content from. Must start with https://."),
 });
 
+/**
+ * Output schema for the framework `web_fetch` tool.
+ */
 export const WEB_FETCH_OUTPUT_SCHEMA = z.strictObject({
   content: z.string(),
   contentType: z.string(),
@@ -26,7 +28,12 @@ export const WEB_FETCH_OUTPUT_SCHEMA = z.strictObject({
   url: z.string(),
 });
 
-export const WEB_FETCH_TOOL_DEFINITION: ResolvedToolDefinition = {
+/**
+ * Framework `web_fetch` tool: fetches a webpage and returns its content in
+ * the requested format. Import from `eve/tools/web_fetch` to spread, wrap,
+ * or re-export it from `agent/tools/web_fetch.ts`.
+ */
+export default defineTool({
   description: [
     "Fetch a webpage and return its content in the requested format. Use this to retrieve and analyze content from URLs.",
     "",
@@ -38,11 +45,8 @@ export const WEB_FETCH_TOOL_DEFINITION: ResolvedToolDefinition = {
     "- Maximum response size is 5 MB; content is further capped at the shared tool-output budget (50 KB / 2000 lines)",
     "- This tool is read-only and does not modify any files",
   ].join("\n"),
-  execute: executeWebFetch,
   inputSchema: WEB_FETCH_INPUT_SCHEMA,
-  logicalPath: "eve:framework/web-fetch",
-  name: "web_fetch",
   outputSchema: WEB_FETCH_OUTPUT_SCHEMA,
-  sourceId: "eve:web-fetch-tool",
-  sourceKind: "module",
-};
+  execute: async (input, ctx) =>
+    executeWebFetchTool(input as WebFetchInput, { abortSignal: ctx.abortSignal }),
+});

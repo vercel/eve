@@ -1,7 +1,6 @@
 import { z } from "#compiled/zod/index.js";
 
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import type { ResolvedToolDefinition } from "#runtime/types.js";
 
 /**
  * Framework task tools for `experimental.tasks`.
@@ -74,11 +73,11 @@ export const SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA = z.strictObject({
   taskId: z.string(),
 });
 
-const TASK_CANCEL_DESCRIPTION =
+export const TASK_CANCEL_DESCRIPTION =
   "Request cooperative cancellation of one or more background tasks. " +
   "Cancellation is final: a task that finishes after you cancel it stays cancelled. Cancelling an already-finished task changes nothing.";
 
-const TASK_UPDATE_DESCRIPTION =
+export const TASK_UPDATE_DESCRIPTION =
   "Briefly tell the parent agent what this background task is currently doing. " +
   "Report activity, not preliminary findings or results.";
 
@@ -107,48 +106,25 @@ export function createTaskToolHarnessDefinitions(): readonly HarnessToolDefiniti
 }
 
 /**
- * Whether one node's sessions receive the task tools.
+ * Whether one node's sessions receive the named task tool.
  *
- * Mirrors `isImplicitAgentToolAvailable`: the compile step already
- * rejects `experimental.tasks` on subagents, authored tools with the
- * same name shadow the framework tool, and `disableTool(name)` removes
- * individual tools. Root-node self-delegated children share this node's
- * config, so advertised-tools uses caller/session shape to expose only
- * `task_update` to delegated task children.
+ * Mirrors `isImplicitAgentToolAvailable`: the capability prepares only when
+ * the canonical `tools/task_*.ts` slot survived composition with framework
+ * ownership and the root enabled `experimental.tasks`. Root-node
+ * self-delegated children share this node's config, so advertised-tools
+ * uses caller/session shape to expose only `task_update` to delegated task
+ * children.
  */
 export function isTaskToolAvailable(input: {
-  readonly disabledFrameworkTools: readonly string[];
-  readonly hasAuthoredTool: boolean;
   readonly tasksEnabled: boolean;
   readonly toolName: string;
+  readonly tools: readonly {
+    readonly name: string;
+    readonly owner?: { readonly kind: string };
+  }[];
 }): boolean {
   return (
     input.tasksEnabled &&
-    !input.disabledFrameworkTools.includes(input.toolName) &&
-    !input.hasAuthoredTool
+    input.tools.some((tool) => tool.name === input.toolName && tool.owner?.kind === "framework")
   );
 }
-
-function createResolvedTaskToolStub(input: {
-  readonly description: string;
-  readonly name: string;
-}): ResolvedToolDefinition {
-  return {
-    description: input.description,
-    inputSchema: null,
-    logicalPath: `eve:framework/${input.name}`,
-    name: input.name,
-    sourceId: `eve:${input.name}-tool`,
-    sourceKind: "module",
-  };
-}
-
-/**
- * Registry-shaped metadata for the task tools. Not registered in the
- * tool registry (the harness injects the real definitions per node);
- * these entries exist so `disableTool(name)` validates the names.
- */
-export const TASK_TOOL_DEFINITIONS: readonly ResolvedToolDefinition[] = [
-  createResolvedTaskToolStub({ description: TASK_CANCEL_DESCRIPTION, name: TASK_CANCEL_TOOL_NAME }),
-  createResolvedTaskToolStub({ description: TASK_UPDATE_DESCRIPTION, name: TASK_UPDATE_TOOL_NAME }),
-];

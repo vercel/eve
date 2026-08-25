@@ -19,12 +19,26 @@ const TestTurnAgent: RuntimeTurnAgent = {
 
 describe("createSessionStep", () => {
   it("adds task_update guidance to a task-owned session system prompt", async () => {
+    // task_update guidance requires a framework-owned task_update row in the
+    // node's compiled toolset — presence is decided by source composition.
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       resolvedAgent: {
         config: { experimental: { tasks: true } },
-        disabledFrameworkTools: [],
       },
-      turnAgent: TestTurnAgent,
+      turnAgent: {
+        ...TestTurnAgent,
+        tools: [
+          {
+            description: "Report task progress.",
+            inputSchema: null,
+            kind: "authored-tool",
+            logicalPath: "tools/task_update.ts",
+            name: "task_update",
+            owner: { feature: "tools/task_update", kind: "framework" },
+            sourceId: "eve-root:tools/task_update.ts",
+          },
+        ],
+      },
     } as never);
 
     const { state } = await createSessionStep({
@@ -43,7 +57,6 @@ describe("createSessionStep", () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       resolvedAgent: {
         config: {},
-        disabledFrameworkTools: [],
       },
       turnAgent: TestTurnAgent,
     } as never);

@@ -6,6 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createCompiledAgentManifest } from "#compiler/manifest.js";
 import {
+  EMPTY_CHANNEL_ROUTE_PLAN,
+  EMPTY_SOURCE_COMPOSITION,
+  testCompiledSandbox,
+} from "#internal/testing/compiled-node-fixtures.js";
+import {
   APPLICATION_BUILD_PROFILE_SCHEMA_VERSION,
   type ApplicationBuildProfile,
 } from "#internal/application/build-profile.js";
@@ -125,6 +130,10 @@ function createPreparedHost(appRoot: string): PreparedApplicationHost {
   const manifest = createCompiledAgentManifest({
     agentRoot,
     appRoot,
+    bindings: {},
+    channelRoutes: EMPTY_CHANNEL_ROUTE_PLAN,
+    sandbox: testCompiledSandbox(),
+    sourceComposition: EMPTY_SOURCE_COMPOSITION,
     config: {
       model: { id: "openai/gpt-5.4", routing: { kind: "gateway", target: "openai" } },
       name: "scenario-test-agent",

@@ -1,15 +1,5 @@
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
-import { defaultSandbox } from "#public/sandbox/backends/default.js";
 import type { ResolvedSandboxDefinition } from "#runtime/types.js";
-
-/**
- * Stable internal source id for the framework-owned default sandbox.
- *
- * Used by the runtime template/session key derivation and by prewarm
- * to distinguish the shared framework sandbox from per-node authored
- * overrides.
- */
-export const DEFAULT_SANDBOX_SOURCE_ID = "eve:default-sandbox";
 
 /**
  * Resolved sandbox tracked by the runtime-owned registry.
@@ -50,15 +40,16 @@ export interface RuntimeSandboxRegistry {
 }
 
 /**
- * Builds the runtime-owned registry for one resolved authored agent's
- * sandbox, preferring the authored override and falling back to the
- * framework default.
+ * Builds the runtime-owned registry for one resolved agent's selected
+ * sandbox. Every compiled node carries exactly one selected sandbox — the
+ * framework default composes like any other source, so no runtime fallback
+ * exists here.
  */
 export function createRuntimeSandboxRegistry(input: {
-  readonly authoredSandbox: ResolvedSandboxDefinition | null;
+  readonly sandbox: ResolvedSandboxDefinition;
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
 }): RuntimeSandboxRegistry {
-  const definition = input.authoredSandbox ?? createFrameworkSandboxDefinition();
+  const definition = input.sandbox;
   if (
     definition.inheritsParent === true &&
     (input.workspaceResourceRoot.contentHash !== undefined ||
@@ -73,25 +64,5 @@ export function createRuntimeSandboxRegistry(input: {
       definition,
       workspaceResourceRoot: input.workspaceResourceRoot,
     },
-  };
-}
-
-/**
- * Builds the framework default sandbox definition used when no agent
- * authored override is present.
- *
- * The `backend` is resolved through {@link defaultSandbox} on each
- * call so the framework default picks up the same environment-aware
- * fallback as authored sandboxes that omit `backend` (`vercel()`
- * on hosted Vercel, then Docker, microsandbox, or just-bash by availability). Implemented as
- * a factory rather than a constant so the environment is read at
- * graph-resolution time rather than at module-load time.
- */
-export function createFrameworkSandboxDefinition(): ResolvedSandboxDefinition {
-  return {
-    backend: defaultSandbox(),
-    logicalPath: "eve:framework/default-sandbox",
-    sourceId: DEFAULT_SANDBOX_SOURCE_ID,
-    sourceKind: "module",
   };
 }

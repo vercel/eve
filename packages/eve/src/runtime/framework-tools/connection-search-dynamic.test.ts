@@ -11,8 +11,7 @@ import {
 import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { ConnectionRegistry, ConnectionToolMetadata } from "#runtime/connections/types.js";
-import { extractDiscoveredTools } from "#runtime/framework-tools/connection-search-dynamic.js";
-import { getFrameworkDynamicToolResolvers } from "#runtime/framework-tools/index.js";
+import connectionSearchDynamicDefinition from "#runtime/framework-tools/connection-search-dynamic.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import {
   isBrandedToolEntry,
@@ -20,9 +19,6 @@ import {
   type DynamicToolSet,
 } from "#shared/dynamic-tool-definition.js";
 import { readDurableDynamicToolCallbacks } from "#shared/durable-dynamic-tool-callbacks.js";
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Msg = any;
 
 function connection(name: string): ResolvedConnectionDefinition {
   return {
@@ -36,6 +32,18 @@ function connection(name: string): ResolvedConnectionDefinition {
   };
 }
 
+function resolveContext(sessionId = "test-session"): DynamicResolveContext {
+  return {
+    channel: {},
+    messages: [],
+    session: { auth: { current: null, initiator: null }, id: sessionId },
+  };
+}
+
+function getConnectionSearchResolve() {
+  return connectionSearchDynamicDefinition.events["step.started"]!;
+}
+
 async function executeConnectionSearch(
   registry: ConnectionRegistry,
   input: { readonly connection?: string; readonly keywords: string; readonly limit?: number },
@@ -46,19 +54,11 @@ async function executeConnectionSearch(
   setupContext?.(ctx);
 
   return contextStorage.run(ctx, async () => {
-    const resolve = getConnectionSearchResolver().events["step.started"]!;
-    const resolved = (await resolve({}, {
-      channel: {},
-      messages: [],
-      session: { auth: { current: null, initiator: null }, id: "test-session" },
-    } satisfies DynamicResolveContext)) as DynamicToolSet;
+    const resolve = getConnectionSearchResolve();
+    const resolved = (await resolve({}, resolveContext())) as DynamicToolSet;
 
     return resolved["connection_search"]!.execute(input, {} as ToolContext);
   });
-}
-
-function getConnectionSearchResolver() {
-  return getFrameworkDynamicToolResolvers()[0]!;
 }
 
 function registry(input: {
@@ -81,6 +81,10 @@ function registry(input: {
 }
 
 describe("connection dynamic tools", () => {
+  it("resolves at step.started only", () => {
+    expect(Object.keys(connectionSearchDynamicDefinition.events)).toEqual(["step.started"]);
+  });
+
   it("contributes no tools when no connections are available", async () => {
     const ctx = new ContextContainer();
     ctx.set(
@@ -90,66 +94,42 @@ describe("connection dynamic tools", () => {
         loadTools: {},
       }),
     );
-    const resolve = getConnectionSearchResolver().events["step.started"]!;
+    const resolve = getConnectionSearchResolve();
 
-    const tools = await contextStorage.run(ctx, () =>
-      resolve(
-        {},
-        {
-          channel: {},
-          messages: [],
-          session: { auth: { current: null, initiator: null }, id: "test-session" },
-        },
-      ),
-    );
+    const tools = await contextStorage.run(ctx, () => resolve({}, resolveContext()));
 
     expect(tools).toBeNull();
   });
 
-  it("uses the shared resolver and public tool definitions", async () => {
+  it("re-derives discovered tools from the durable connection-search results", async () => {
     const linear = connection("linear");
     const connectionRegistry = registry({
       connections: [linear],
-      loadTools: { linear: async () => [] },
-    });
-    const messages: Msg[] = [
-      {
-        role: "tool",
-        content: [
+      loadTools: {
+        linear: async () => [
           {
-            type: "tool-result",
-            toolCallId: "call-1",
-            toolName: "connection_search",
-            output: [
-              {
-                connection: "linear",
-                description: "List issues",
-                inputSchema: { type: "object" },
-                qualifiedName: "linear__list_issues",
-                tool: "list_issues",
-              },
-            ],
+            description: "List issues",
+            inputSchema: { type: "object" },
+            name: "list_issues",
           },
         ],
       },
-    ];
+    });
     const ctx = new ContextContainer();
     ctx.set(ConnectionRegistryKey, connectionRegistry);
-    const resolver = getConnectionSearchResolver();
-    const resolve = resolver.events["step.started"]!;
+    const resolve = getConnectionSearchResolve();
 
     const tools = await contextStorage.run(ctx, async () => {
-      return (await resolve(
-        {},
-        {
-          channel: {},
-          messages,
-          session: { auth: { current: null, initiator: null }, id: "test-session" },
-        },
-      )) as DynamicToolSet;
+      const initial = (await resolve({}, resolveContext())) as DynamicToolSet;
+      expect(Object.keys(initial)).toEqual(["connection_search"]);
+
+      // A successful search records its matches on the durable results key —
+      // the sole source of discovered tools (history is never rescanned).
+      await initial["connection_search"]!.execute({ keywords: "list issues" }, {} as ToolContext);
+
+      return (await resolve({}, resolveContext())) as DynamicToolSet;
     });
 
-    expect(resolver.eventNames).toEqual(["step.started"]);
     expect(Object.keys(tools)).toEqual(["connection_search", "linear__list_issues"]);
     expect(Object.values(tools).every(isBrandedToolEntry)).toBe(true);
   });
@@ -429,12 +409,8 @@ describe("connection_search", () => {
     });
 
     const result = await contextStorage.run(ctx, async () => {
-      const resolve = getConnectionSearchResolver().events["step.started"]!;
-      const tools = (await resolve({}, {
-        channel: {},
-        messages: [],
-        session: { auth: { current: null, initiator: null }, id: "session-auth-replay" },
-      } satisfies DynamicResolveContext)) as DynamicToolSet;
+      const resolve = getConnectionSearchResolve();
+      const tools = (await resolve({}, resolveContext("session-auth-replay"))) as DynamicToolSet;
       const reference = readDurableDynamicToolCallbacks(tools["connection_search"]!)!.execute!;
 
       return await reference.callback(reference.closure, {
@@ -444,152 +420,5 @@ describe("connection_search", () => {
     });
 
     expect(isAuthorizationSignal(result)).toBe(true);
-  });
-});
-
-describe("extractDiscoveredTools", () => {
-  it("extracts tools from raw array output", () => {
-    const messages: Msg[] = [
-      { role: "user", content: [{ type: "text", text: "search" }] },
-      {
-        role: "tool",
-        content: [
-          {
-            type: "tool-result",
-            toolCallId: "call-1",
-            toolName: "connection_search",
-            output: [
-              {
-                connection: "linear",
-                tool: "list_issues",
-                qualifiedName: "linear__list_issues",
-                description: "List issues",
-                inputSchema: { type: "object" },
-                outputSchema: { type: "object" },
-              },
-            ],
-          },
-        ],
-      },
-    ];
-
-    const result = extractDiscoveredTools(messages);
-    expect(result).toHaveLength(1);
-    expect(result[0]!.qualifiedName).toBe("linear__list_issues");
-    expect(result[0]!.connection).toBe("linear");
-    expect(result[0]!.tool).toBe("list_issues");
-    expect(result[0]!.outputSchema).toEqual({ type: "object" });
-  });
-
-  it("extracts tools from ToolResultOutput json wrapper", () => {
-    const messages: Msg[] = [
-      {
-        role: "tool",
-        content: [
-          {
-            type: "tool-result",
-            toolCallId: "call-1",
-            toolName: "connection_search",
-            output: {
-              type: "json",
-              value: [
-                {
-                  connection: "linear",
-                  tool: "list_issues",
-                  qualifiedName: "linear__list_issues",
-                  description: "List issues",
-                  inputSchema: { type: "object" },
-                },
-              ],
-            },
-          },
-        ],
-      },
-    ];
-
-    const result = extractDiscoveredTools(messages);
-    expect(result).toHaveLength(1);
-    expect(result[0]!.qualifiedName).toBe("linear__list_issues");
-  });
-
-  it("returns empty for no tool results", () => {
-    const messages: Msg[] = [{ role: "user", content: [{ type: "text", text: "hello" }] }];
-    expect(extractDiscoveredTools(messages)).toHaveLength(0);
-  });
-
-  it("deduplicates by qualifiedName (latest wins)", () => {
-    const messages: Msg[] = [
-      {
-        role: "tool",
-        content: [
-          {
-            type: "tool-result",
-            toolCallId: "call-1",
-            toolName: "connection_search",
-            output: [
-              {
-                connection: "linear",
-                tool: "list_issues",
-                qualifiedName: "linear__list_issues",
-                description: "Old description",
-              },
-            ],
-          },
-        ],
-      },
-      {
-        role: "tool",
-        content: [
-          {
-            type: "tool-result",
-            toolCallId: "call-2",
-            toolName: "connection_search",
-            output: [
-              {
-                connection: "linear",
-                tool: "list_issues",
-                qualifiedName: "linear__list_issues",
-                description: "New description",
-              },
-            ],
-          },
-        ],
-      },
-    ];
-
-    const result = extractDiscoveredTools(messages);
-    expect(result).toHaveLength(1);
-    expect(result[0]!.description).toBe("New description");
-  });
-
-  it("skips items without tool or qualifiedName", () => {
-    const messages: Msg[] = [
-      {
-        role: "tool",
-        content: [
-          {
-            type: "tool-result",
-            toolCallId: "call-1",
-            toolName: "connection_search",
-            output: [
-              {
-                connection: "linear",
-                description: "No tool or qualifiedName",
-              },
-              {
-                connection: "linear",
-                tool: "list_issues",
-                qualifiedName: "linear__list_issues",
-                description: "Valid",
-              },
-            ],
-          },
-        ],
-      },
-    ];
-
-    const result = extractDiscoveredTools(messages);
-    expect(result).toHaveLength(1);
-    expect(result[0]!.description).toBe("Valid");
   });
 });

@@ -27,7 +27,7 @@ export default disableTool();
 `,
     "agent/tools/bash.ts": `import { defineTool } from "eve/tools";
 import { always } from "eve/tools/approval";
-import { bash } from "eve/tools/defaults";
+import bash from "eve/tools/bash";
 
 // Wraps the framework \`bash\` tool: spread the default and replace \`execute\`
 // with a thin pre-hook that delegates to the original. The framework's

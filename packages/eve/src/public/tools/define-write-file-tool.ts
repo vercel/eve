@@ -2,10 +2,7 @@ import {
   executeWriteFileOnSandbox,
   type WriteFileInput,
 } from "#execution/sandbox/write-file-tool.js";
-import {
-  WRITE_FILE_INPUT_SCHEMA,
-  WRITE_FILE_OUTPUT_SCHEMA,
-} from "#runtime/framework-tools/write-file.js";
+import { WRITE_FILE_INPUT_SCHEMA, WRITE_FILE_OUTPUT_SCHEMA } from "#public/tools/write-file.js";
 import type { ToolDefinition } from "#public/definitions/tool.js";
 
 /**

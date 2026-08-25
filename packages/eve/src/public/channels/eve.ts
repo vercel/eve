@@ -34,7 +34,11 @@ import {
 } from "#protocol/message.js";
 import { parseTraceparent } from "#protocol/traceparent.js";
 import {
+  EVE_CALLBACK_ROUTE_PATTERN,
+  EVE_CONNECTION_CALLBACK_ROUTE_PATTERN,
+  EVE_HEALTH_ROUTE_PATH,
   EVE_INFO_ROUTE_PATH,
+  EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN,
   EVE_SESSION_ROUTE_PATH,
   EVE_SESSION_CANCEL_ROUTE_PATTERN,
   EVE_SESSION_CLEAR_ROUTE_PATTERN,
@@ -43,9 +47,17 @@ import {
   EVE_SESSION_RESET_ROUTE_PATTERN,
   EVE_SESSION_STREAM_ROUTE_PATTERN,
   EVE_SUBAGENT_STREAM_ROUTE_PATTERN,
+  EVE_TASK_INPUT_ROUTE_PATTERN,
   createEveSessionStreamRoutePath,
   createEveSubagentStreamRoutePath,
 } from "#protocol/routes.js";
+import {
+  handleConnectionCallbackRequest,
+  handleLegacyConnectionCallbackRequest,
+} from "#runtime/connections/callback-route.js";
+import { handleSessionCallbackRequest } from "#runtime/session-callback-route.js";
+import { handleTaskInputResponseRequest } from "#runtime/task-input-response-route.js";
+import { buildEveHealthResponse } from "#runtime/health.js";
 import { isInputResponse, type ValidatedInputResponse } from "#runtime/input/types.js";
 import { type AuthFn, routeAuth } from "#public/channels/auth.js";
 import {
@@ -57,6 +69,7 @@ import {
 } from "#public/channels/upload-policy.js";
 import {
   defineChannel,
+  HEAD,
   POST,
   GET,
   type Channel,
@@ -223,6 +236,29 @@ export function eveChannel(input: EveChannelInput): EveChannel {
     cors: normalizeEveCors(input.cors),
     turnPolicy: input.turnPolicy,
     routes: [
+      // The health route is intentionally always-public so platform load
+      // balancers and uptime monitors can probe it without credentials.
+      // Replacing this channel replaces the health contract too;
+      // `Client.health()` validates the payload shape client-side.
+      GET(EVE_HEALTH_ROUTE_PATH, async () => buildEveHealthResponse()),
+      HEAD(EVE_HEALTH_ROUTE_PATH, async () => buildEveHealthResponse()),
+
+      // Connection authorization callbacks. Unauthenticated by design: an
+      // OAuth IdP follows these URLs via browser redirects with no eve
+      // credentials attached; the unguessable token authorizes the resume.
+      GET(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
+      POST(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
+      GET(EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN, handleLegacyConnectionCallbackRequest),
+      POST(EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN, handleLegacyConnectionCallbackRequest),
+
+      // Terminal session callback: `:token` is an unguessable workflow hook
+      // capability minted by the framework.
+      POST(EVE_CALLBACK_ROUTE_PATTERN, handleSessionCallbackRequest),
+
+      // Capability route used by a parent task to answer a remote child
+      // HITL batch.
+      POST(EVE_TASK_INPUT_ROUTE_PATTERN, handleTaskInputResponseRequest),
+
       GET(EVE_INFO_ROUTE_PATH, async (req, args) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;

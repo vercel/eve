@@ -22,7 +22,7 @@ function buildSerializedContext(overrides: {
 
 describe("AppHarness pilot", () => {
   it("runs a task-mode turn end-to-end against an in-memory test runtime", async () => {
-    const runtime = createTestRuntime({ agent: { name: "pilot-agent" } });
+    const runtime = await createTestRuntime({ agent: { name: "pilot-agent" } });
 
     const output = await runtime.run(async () => {
       const run = await start(workflowEntry, [
@@ -45,7 +45,7 @@ describe("AppHarness pilot", () => {
   });
 
   it("keeps compiled artifacts scoped to the test runtime session", async () => {
-    const runtime = createTestRuntime({ agent: { name: "scope-probe" } });
+    const runtime = await createTestRuntime({ agent: { name: "scope-probe" } });
 
     // Before `run`, the session has no artifacts installed.
     expect(runtime.session.compiledArtifacts).toBeNull();
@@ -66,8 +66,8 @@ describe("AppHarness pilot", () => {
   });
 
   it("isolates two concurrent test runtimes without cache crosstalk", async () => {
-    const runtimeA = createTestRuntime({ agent: { name: "tenant-a" } });
-    const runtimeB = createTestRuntime({ agent: { name: "tenant-b" } });
+    const runtimeA = await createTestRuntime({ agent: { name: "tenant-a" } });
+    const runtimeB = await createTestRuntime({ agent: { name: "tenant-b" } });
 
     const outputs = await Promise.all([
       runtimeA.run(async () => {

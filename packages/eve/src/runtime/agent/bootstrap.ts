@@ -1,6 +1,6 @@
 import type { ModelMessage } from "ai";
 
-import { AGENT_TOOL_NAME, isImplicitAgentToolAvailable } from "#runtime/framework-tools/agent.js";
+import { isImplicitAgentToolAvailable } from "#runtime/framework-tools/agent.js";
 import { composeRuntimeBasePrompt } from "#runtime/prompt/compose.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import type { ResolvedAgent, ResolvedAgentDefinition } from "#runtime/types.js";
@@ -100,9 +100,8 @@ export function createResolvedRuntimeTurnAgent(input: {
   // authored-tool shadowing leg, so instructions never advertise a tool an
   // authored "agent" tool has replaced.
   const subagentImplicitRootTool = isImplicitAgentToolAvailable({
-    disabledFrameworkTools: agent.disabledFrameworkTools,
-    hasAuthoredAgentTool: input.tools.some((tool) => tool.name === AGENT_TOOL_NAME),
     nodeId: input.nodeId,
+    tools: input.tools,
   });
   const base: RuntimeTurnAgentBase = {
     availableSkills: agent.skills.map((skill) => ({

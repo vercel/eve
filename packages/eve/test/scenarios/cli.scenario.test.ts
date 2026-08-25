@@ -7,7 +7,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { runCli } from "../../src/cli/run.js";
 import { resolveInstalledPackageInfo } from "../../src/internal/application/package.js";
-import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
+import {
+  linkWorkspaceEvePackage,
+  useScenarioApp,
+} from "../../src/internal/testing/scenario-app.js";
 import { WEATHER_AGENT_DESCRIPTOR } from "../../src/internal/testing/scenario-apps/weather-agent.js";
 import { resolveLocalWorkflowWorldDataDirectory } from "../../src/internal/workflow/local-world-data-directory.js";
 import {
@@ -70,6 +73,9 @@ async function createMinimalAppRoot(prefix: string): Promise<string> {
     'export default { model: "openai/gpt-5.4" };\n',
   );
   await writeFile(join(appRoot, "agent", "instructions.md"), "You are a precise assistant.\n");
+  // Build artifacts import bare `eve/*` specifiers that must resolve from
+  // the app root, exactly as in a real installed application.
+  await linkWorkspaceEvePackage(appRoot);
 
   return appRoot;
 }

@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { createCompiledAgentManifest } from "#compiler/manifest.js";
 import {
+  EMPTY_CHANNEL_ROUTE_PLAN,
+  EMPTY_SOURCE_COMPOSITION,
+  testCompiledSandbox,
+} from "#internal/testing/compiled-node-fixtures.js";
+import {
   readBundledCompiledArtifacts,
   withBundledCompiledArtifacts,
 } from "#runtime/loaders/bundled-artifacts.js";
@@ -16,6 +21,8 @@ describe("withBundledCompiledArtifacts", () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/tmp/app/agent",
       appRoot: "/tmp/app",
+      bindings: {},
+      channelRoutes: EMPTY_CHANNEL_ROUTE_PLAN,
       config: {
         model: {
           id: "openai/gpt-5-mini",
@@ -23,6 +30,8 @@ describe("withBundledCompiledArtifacts", () => {
         },
         name: "test-agent",
       },
+      sandbox: testCompiledSandbox(),
+      sourceComposition: EMPTY_SOURCE_COMPOSITION,
     });
 
     await withRuntimeSession(createRuntimeSession("outer"), async () => {

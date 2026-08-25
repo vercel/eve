@@ -4,7 +4,6 @@ import { dirname } from "node:path";
 import type {
   CompiledAgentManifest,
   CompiledChannelDefinition,
-  CompiledChannelEntry,
   CompiledConnectionDefinition,
   CompiledInstructionsDefinition,
   CompiledScheduleDefinition,
@@ -60,13 +59,10 @@ export function buildVercelAgentSummary(input: {
     tools: manifest.tools.map(toToolEntry),
     skills: manifest.skills.map(toSkillEntry),
     connections: manifest.connections.map(toConnectionEntry),
-    channels: manifest.channels.filter(isActiveChannel).map(toChannelEntry),
-    sandbox:
-      manifest.sandbox === null
-        ? null
-        : {
-            logicalPath: manifest.sandbox.logicalPath,
-          },
+    channels: manifest.channels.map(toChannelEntry),
+    sandbox: {
+      logicalPath: manifest.sandbox.logicalPath,
+    },
     subagents: manifest.subagents.map(toSubagentEntry),
     diagnostics: {
       errors: manifest.diagnosticsSummary.errors,
@@ -105,10 +101,6 @@ export async function emitVercelAgentSummary(input: {
   await writeFile(input.outputPath, `${JSON.stringify(summary, null, 2)}\n`);
 
   return input.outputPath;
-}
-
-function isActiveChannel(entry: CompiledChannelEntry): entry is CompiledChannelDefinition {
-  return entry.kind === "channel";
 }
 
 function toInstructionsEntry(

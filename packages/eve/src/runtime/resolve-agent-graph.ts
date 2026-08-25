@@ -10,15 +10,6 @@ import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { HeadersValue } from "#client/types.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
 import { createResolvedRuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
-import {
-  getAllFrameworkChannelNames,
-  getFrameworkChannelDefinitions,
-} from "#runtime/framework-channels/index.js";
-import {
-  getAllFrameworkToolNames,
-  getFrameworkDynamicToolResolvers,
-  getFrameworkToolDefinitions,
-} from "#runtime/framework-tools/index.js";
 import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
@@ -143,82 +134,28 @@ async function resolveRuntimeAgentNode(
     moduleMap: input.moduleMap,
     nodeId: input.nodeId,
   });
-  const frameworkTools = getFrameworkToolDefinitions({
-    authoredSkills: agent.skills,
-  });
-  const frameworkToolNames = new Set(frameworkTools.map((t) => t.name));
-  const allFrameworkToolNames = getAllFrameworkToolNames();
 
-  // Authored tools whose filename slug matches a framework default replace
-  // it. Authored disable sentinels (whose target is also taken from the
-  // file's slug) remove a framework default. Both interactions happen here,
-  // before the registry is built, so the duplicate-name guard inside
-  // `createRuntimeToolRegistry` keeps doing its job for authored-vs-authored
-  // collisions.
-  const authoredToolNames = new Set(agent.tools.map((tool) => tool.name));
-
-  for (const disabledName of agent.disabledFrameworkTools) {
-    if (!allFrameworkToolNames.has(disabledName)) {
-      throw new ResolveRuntimeAgentGraphError(
-        `agent/tools/${disabledName}.ts exports disableTool() but "${disabledName}" is not a framework tool. ` +
-          `Rename the file to one of: ${[...allFrameworkToolNames].sort().join(", ")}.`,
-        {
-          nodeId,
-          sourceId: input.sourceId,
-        },
-      );
-    }
-  }
-
-  const disabledFrameworkTools = new Set(agent.disabledFrameworkTools);
-  const activeFrameworkTools = frameworkTools.filter(
-    (tool) => !authoredToolNames.has(tool.name) && !disabledFrameworkTools.has(tool.name),
-  );
-
+  // Every capability — framework defaults included — arrives through the
+  // compiled manifest: presence, replacement, and disablement were decided
+  // by source composition at compile time. The registry's duplicate-name
+  // guard covers same-name collisions between distinct compiled slots.
   const toolRegistry = await createRuntimeToolRegistry(
     {
-      tools: [...activeFrameworkTools, ...agent.tools],
+      tools: agent.tools,
     },
     {
       reservedToolNames: [
         WORKFLOW_TOOL_NAME,
-        ...(frameworkToolNames.has(LOAD_SKILL_TOOL_NAME) ||
-        authoredToolNames.has(LOAD_SKILL_TOOL_NAME)
+        ...(agent.tools.some((tool) => tool.name === LOAD_SKILL_TOOL_NAME)
           ? []
           : [LOAD_SKILL_TOOL_NAME]),
       ],
     },
   );
-  // Authored channels override framework defaults by matching logical name;
-  // disable sentinels remove framework defaults with the same name.
-  const authoredChannelNames = new Set(agent.channels.map((channel) => channel.name));
-  const allFrameworkChannelNames = getAllFrameworkChannelNames();
-
-  for (const disabledName of agent.disabledFrameworkChannels) {
-    if (!allFrameworkChannelNames.has(disabledName)) {
-      throw new ResolveRuntimeAgentGraphError(
-        `agent/channels/${disabledName}.ts exports disableRoute() but "${disabledName}" is not a framework channel. ` +
-          `Rename the file to one of: ${[...allFrameworkChannelNames].sort().join(", ")}.`,
-        {
-          nodeId,
-          sourceId: input.sourceId,
-        },
-      );
-    }
-  }
-
-  const disabledFrameworkChannels = new Set(agent.disabledFrameworkChannels);
-  const activeFrameworkChannels = getFrameworkChannelDefinitions().filter(
-    (channel) =>
-      !authoredChannelNames.has(channel.name) && !disabledFrameworkChannels.has(channel.name),
-  );
-  const channels: readonly ResolvedChannelDefinition[] = [
-    ...activeFrameworkChannels,
-    ...agent.channels,
-  ];
+  const channels: readonly ResolvedChannelDefinition[] = agent.channels;
 
   const sandboxRegistry = createRuntimeSandboxRegistry({
-    authoredSandbox: agent.sandbox,
+    sandbox: agent.sandbox,
     workspaceResourceRoot: agent.workspaceResourceRoot,
   });
   const subagentRegistry = createRuntimeSubagentRegistry({
@@ -238,10 +175,7 @@ async function resolveRuntimeAgentNode(
       subagentNodesById: input.subagentNodesById,
     }),
   });
-  const resolvedAgent = {
-    ...agent,
-    dynamicToolResolvers: [...agent.dynamicToolResolvers, ...getFrameworkDynamicToolResolvers()],
-  };
+  const resolvedAgent = agent;
 
   const node: ResolvedAgentGraphBundle["root"] = {
     agent: resolvedAgent,

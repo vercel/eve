@@ -5,8 +5,8 @@ import type { H3Event } from "nitro";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { compileAgent } from "../../src/compiler/compile-agent.js";
+import type { AgentInfoResult } from "../../src/client/agent-info-schema.js";
 import { createDevelopmentNitroArtifactsConfig } from "../../src/internal/nitro/host/artifacts-config.js";
-import type { AgentInfoResponse } from "../../src/internal/nitro/routes/agent-info/build-agent-info-response.js";
 import { dispatchChannelRequest } from "../../src/internal/nitro/routes/channel-dispatch.js";
 import { EVE_INFO_ROUTE_PATH, EVE_SESSION_ROUTE_PATH } from "../../src/protocol/routes.js";
 import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-app-roots.js";
@@ -14,8 +14,6 @@ import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-a
 const createAppRoot = useTemporaryAppRoots();
 
 const APP_ROOT_OPTIONS = { packageName: "agent-info-route-test-agent" } as const;
-const EVE_CHANNEL_IMPORT_URL = new URL("../../dist/src/public/channels/eve.js", import.meta.url);
-const EVE_TOOLS_IMPORT_URL = new URL("../../dist/src/public/tools/index.js", import.meta.url);
 const INFO_ROUTE_KEY = `GET ${EVE_INFO_ROUTE_PATH}`;
 
 // A request to the local server. The deployment environment, not this
@@ -36,41 +34,10 @@ type MinimalAgentInfoH3Event = Pick<H3Event, "context" | "waitUntil"> & {
   readonly req: Request;
 };
 
-async function installEveChannelShim(appRoot: string): Promise<void> {
-  const packageRoot = join(appRoot, "node_modules", "eve");
-  await mkdir(join(packageRoot, "channels"), { recursive: true });
-  await writeFile(
-    join(packageRoot, "package.json"),
-    `${JSON.stringify(
-      {
-        name: "eve",
-        type: "module",
-        exports: {
-          "./channels/eve": "./channels/eve.js",
-        },
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  await writeFile(
-    join(packageRoot, "channels", "eve.js"),
-    `export { eveChannel } from ${JSON.stringify(EVE_CHANNEL_IMPORT_URL.href)};\n`,
-  );
-}
-
-async function installEveToolsShim(appRoot: string): Promise<void> {
-  const packageRoot = join(appRoot, "node_modules", "eve");
-  await mkdir(packageRoot, { recursive: true });
-  await writeFile(
-    join(packageRoot, "package.json"),
-    `${JSON.stringify({ name: "eve", type: "module", exports: { "./tools": "./tools.js" } })}\n`,
-  );
-  await writeFile(
-    join(packageRoot, "tools.js"),
-    `export { disableTool } from ${JSON.stringify(EVE_TOOLS_IMPORT_URL.href)};\n`,
-  );
-}
+// Authored fixture imports of `eve/tools` and `eve/channels/eve` resolve
+// through the workspace package that `useTemporaryAppRoots` links into the
+// app's node_modules. Never write into that link: it points at the real
+// workspace package root.
 
 function createInfoEvent(request: Request): H3Event {
   Object.assign(request, { ip: "127.0.0.1" });
@@ -103,7 +70,6 @@ describe("eve agent info route", () => {
     await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
     await mkdir(join(agentRoot, "tools"), { recursive: true });
-    await installEveToolsShim(appRoot);
     await writeFile(
       join(agentRoot, "tools", "get_weather.mjs"),
       'export default { description: "Get the weather.", async execute() { return { temperature: 72 }; } };\n',
@@ -119,31 +85,30 @@ describe("eve agent info route", () => {
     expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
     expect(response.headers.get("cache-control")).toBe("no-store");
 
-    const payload = (await response.json()) as AgentInfoResponse;
+    const payload = (await response.json()) as AgentInfoResult;
 
     expect(payload.kind).toBe("eve-agent-info");
-    expect(payload.version).toBe(2);
+    expect(payload.version).toBe(3);
     expect(payload.mode).toBe("development");
     expect(payload.agent.model.id).toBe("openai/gpt-5.4");
-    expect(payload.instructions.static[0]?.content).toContain("precise assistant");
-    expect(payload.instructions.static[0]?.role).toBe("system");
-    expect(payload.instructions.dynamic).toEqual([]);
-    expect(payload.tools.authored.map((tool) => tool.name)).toEqual(["get_weather"]);
-    expect(payload.tools.available.map((tool) => tool.name)).toContain("bash");
-    expect(payload.tools.available.map((tool) => tool.name)).toContain("agent");
-    expect(payload.tools.available.map((tool) => tool.name)).toContain("get_weather");
-    expect(payload.tools.framework.find((tool) => tool.name === "bash")).toMatchObject({
-      origin: "framework",
-      status: "active",
-    });
-    expect(payload.tools.framework.find((tool) => tool.name === "agent")).toMatchObject({
-      origin: "framework",
-      status: "active",
-    });
-    expect(payload.channels.available.map((channel) => channel.urlPath)).toContain(
-      EVE_SESSION_ROUTE_PATH,
+    expect(payload.instructions.entries[0]?.content).toContain("precise assistant");
+    expect(payload.instructions.entries[0]?.role).toBe("system");
+    expect(payload.instructions.dynamicResolvers).toEqual([]);
+    expect(
+      payload.tools.entries
+        .filter((tool) => tool.source.owner === "application")
+        .map((tool) => tool.name),
+    ).toEqual(["get_weather"]);
+    expect(payload.tools.entries.find((tool) => tool.name === "bash")?.source.owner).toBe(
+      "framework",
     );
-    expect(payload.channels.framework.length).toBeGreaterThan(0);
+    expect(payload.kernel.prepared).toContainEqual(
+      expect.objectContaining({ action: "subagent-call", kind: "dispatch", toolName: "agent" }),
+    );
+    expect(payload.channels.routes.map((route) => route.path)).toContain(EVE_SESSION_ROUTE_PATH);
+    expect(
+      payload.channels.routes.filter((route) => route.source.owner === "framework").length,
+    ).toBeGreaterThan(0);
     expect(payload.diagnostics).toEqual({
       discoveryErrors: 0,
       discoveryWarnings: 0,
@@ -157,13 +122,13 @@ describe("eve agent info route", () => {
 
     const disabledPayload = (await (
       await requestAgentInfo(appRoot, LOOPBACK_REQUEST)
-    ).json()) as AgentInfoResponse;
+    ).json()) as AgentInfoResult;
 
-    expect(disabledPayload.tools.available.map((tool) => tool.name)).not.toContain("agent");
-    expect(disabledPayload.tools.framework.find((tool) => tool.name === "agent")).toMatchObject({
-      disabledByAuthor: true,
-      status: "disabled",
-    });
+    expect(disabledPayload.kernel.prepared.map((entry) => entry.toolName)).not.toContain("agent");
+    expect(disabledPayload.tools.entries.map((tool) => tool.name)).not.toContain("agent");
+    expect(disabledPayload.composition.disabled).toContainEqual(
+      expect.objectContaining({ slot: "tools/agent" }),
+    );
   });
 
   it("returns 401 for a deployment request without a Vercel OIDC bearer token", async () => {
@@ -199,7 +164,6 @@ describe("eve agent info route", () => {
     );
 
     await mkdir(join(agentRoot, "channels"), { recursive: true });
-    await installEveChannelShim(appRoot);
     await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
     await writeFile(
@@ -232,7 +196,7 @@ export default eveChannel({ auth: issue389Auth });
     const accepted = await requestAgentInfo(appRoot, AUTHORIZED_DEPLOYED_REQUEST);
     expect(accepted.status).toBe(200);
 
-    const payload = (await accepted.json()) as AgentInfoResponse;
+    const payload = (await accepted.json()) as AgentInfoResult;
     expect(payload.kind).toBe("eve-agent-info");
     expect(payload.agent.model.id).toBe("openai/gpt-5.4");
   });

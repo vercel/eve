@@ -3,38 +3,36 @@ import { describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { DynamicSkillManifestKey, SandboxKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
+import { SkillCatalogKey } from "#context/providers/skill-catalog-key.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { ConnectionRegistry } from "#runtime/connections/types.js";
-import {
-  createSkillToolDefinition,
-  SKILL_TOOL_DEFINITION,
-} from "#runtime/framework-tools/skill.js";
+import loadSkillTool from "#public/tools/load-skill.js";
 import { createSandboxSkillHandle } from "#runtime/skills/sandbox-access.js";
 import type { ResolvedSkillDefinition } from "#runtime/types.js";
 
-function skillToolExecutor(skills: readonly ResolvedSkillDefinition[] = []) {
-  const execute = createSkillToolDefinition(skills).execute;
+function skillToolExecutor() {
+  const execute = loadSkillTool.execute as (input: unknown, ctx?: unknown) => Promise<unknown>;
   if (execute === undefined) throw new Error("load_skill tool is missing an execute function");
   return execute;
 }
 
-describe("SKILL_TOOL_DEFINITION", () => {
+describe("load_skill definition", () => {
   it("describes when skill loading should be used", () => {
-    expect(SKILL_TOOL_DEFINITION.description).toContain(
+    expect(loadSkillTool.description).toContain(
       "request clearly matches a listed skill description",
     );
-    expect(SKILL_TOOL_DEFINITION.description).toContain(
+    expect(loadSkillTool.description).toContain(
       "Loading adds the skill instructions to the current turn.",
     );
-    expect(SKILL_TOOL_DEFINITION.description).toContain("Available skills block");
-    expect(SKILL_TOOL_DEFINITION.description).not.toContain("connection_search");
+    expect(loadSkillTool.description).toContain("Available skills block");
+    expect(loadSkillTool.description).not.toContain("connection_search");
   });
 });
 
 describe("load_skill executor", () => {
   it("loads an authored markdown skill when no sandbox context is available", async () => {
     const ctx = new ContextContainer();
-    const execute = skillToolExecutor([
+    const skills: readonly ResolvedSkillDefinition[] = [
       {
         description: "Research a topic systematically",
         logicalPath: "skills/research.md",
@@ -51,7 +49,9 @@ describe("load_skill executor", () => {
         sourceId: "skills/summarize.md",
         sourceKind: "markdown",
       },
-    ]);
+    ];
+    ctx.set(SkillCatalogKey, skills);
+    const execute = skillToolExecutor();
 
     await expect(
       contextStorage.run(ctx, () =>
@@ -74,7 +74,7 @@ describe("load_skill executor", () => {
     };
     const ctx = new ContextContainer();
     ctx.set(SandboxKey, access);
-    const execute = skillToolExecutor([
+    ctx.set(SkillCatalogKey, [
       {
         assetsPath: "/authored/skills/incident-response/assets",
         description: "Run the full incident response procedure",
@@ -91,6 +91,7 @@ describe("load_skill executor", () => {
         sourceKind: "skill-package",
       },
     ]);
+    const execute = skillToolExecutor();
 
     await expect(
       contextStorage.run(ctx, () =>
@@ -119,7 +120,7 @@ describe("load_skill executor", () => {
     ctx.set(DynamicSkillManifestKey, {
       policy: [{ description: "Apply the dynamic policy", name: "policy" }],
     });
-    const execute = skillToolExecutor([
+    ctx.set(SkillCatalogKey, [
       {
         description: "Apply the static policy",
         logicalPath: "skills/policy.md",
@@ -129,6 +130,7 @@ describe("load_skill executor", () => {
         sourceKind: "markdown",
       },
     ]);
+    const execute = skillToolExecutor();
 
     await expect(
       contextStorage.run(ctx, () =>

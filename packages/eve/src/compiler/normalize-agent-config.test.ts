@@ -1,47 +1,45 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { createAgentSourceManifest, createModuleSourceRef } from "#discover/manifest.js";
+import { createModuleSourceRef } from "#discover/manifest.js";
 import { defineDynamic } from "#public/definitions/tool.js";
 import { chatgpt } from "#public/models/openai/index.js";
+import { getFrameworkAgentSourceRegistry } from "#internal/agent-sources.js";
 import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import type { ManifestCompileContext } from "#compiler/normalize-helpers.js";
 
-const mocks = vi.hoisted(() => ({
-  loadModuleBackedDefinition: vi.fn(),
-}));
+const CONFIG_SOURCE = createModuleSourceRef({
+  logicalPath: "agent.ts",
+  sourceId: "agent-config",
+});
 
-vi.mock("#compiler/normalize-helpers.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("#compiler/normalize-helpers.js")>()),
-  loadModuleBackedDefinition: mocks.loadModuleBackedDefinition,
-}));
+function createContext(modelCatalog: ManifestCompileContext["modelCatalog"]) {
+  const frameworkRegistry = getFrameworkAgentSourceRegistry();
+  return {
+    frameworkRegistry,
+    modelCatalog,
+    registry: frameworkRegistry,
+  } satisfies ManifestCompileContext;
+}
 
 describe("compileAgentConfig", () => {
-  beforeEach(() => {
-    mocks.loadModuleBackedDefinition.mockReset();
-  });
-
   it("compiles a dynamic model resolver without a model reference", async () => {
-    mocks.loadModuleBackedDefinition.mockResolvedValue({
-      model: defineDynamic({
-        events: {
-          "session.started": () => "openai/gpt-5.5-mini",
-          "step.started": () => "openai/gpt-5.5",
-        },
-      }),
-    });
-
-    const manifest = createAgentSourceManifest({
-      agentId: "app",
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      configModule: createModuleSourceRef({
-        logicalPath: "agent.ts",
-        sourceId: "agent-config",
-      }),
-    });
-
     const modelCatalog = createModelCatalog();
-    const compiled = await compileAgentConfig(manifest, { modelCatalog });
+
+    const compiled = await compileAgentConfig(
+      {
+        agentId: "app",
+        definitionValue: {
+          model: defineDynamic({
+            events: {
+              "session.started": () => "openai/gpt-5.5-mini",
+              "step.started": () => "openai/gpt-5.5",
+            },
+          }),
+        },
+        source: CONFIG_SOURCE,
+      },
+      createContext(modelCatalog),
+    );
 
     expect(compiled.model).toBeUndefined();
     expect(compiled.dynamicModel).toEqual({
@@ -54,16 +52,16 @@ describe("compileAgentConfig", () => {
   });
 
   it("compiles an eve-owned Codex model without AI Gateway metadata", async () => {
-    mocks.loadModuleBackedDefinition.mockResolvedValue({ model: chatgpt("gpt-5.6-sol") });
-    const manifest = createAgentSourceManifest({
-      agentId: "app",
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      configModule: createModuleSourceRef({ logicalPath: "agent.ts", sourceId: "agent-config" }),
-    });
     const modelCatalog = createModelCatalog();
 
-    const compiled = await compileAgentConfig(manifest, { modelCatalog });
+    const compiled = await compileAgentConfig(
+      {
+        agentId: "app",
+        definitionValue: { model: chatgpt("gpt-5.6-sol") },
+        source: CONFIG_SOURCE,
+      },
+      createContext(modelCatalog),
+    );
 
     expect(compiled.model).toEqual(
       expect.objectContaining({
@@ -76,30 +74,29 @@ describe("compileAgentConfig", () => {
     expect(modelCatalog.getModelLimits).not.toHaveBeenCalled();
   });
 
-  it("compiles an injected agent definition without reloading agent.ts", async () => {
-    const manifest = createAgentSourceManifest({
-      agentId: "researcher",
-      agentRoot: "/app/agent/subagents/researcher",
-      appRoot: "/app",
-      configModule: createModuleSourceRef({
-        logicalPath: "agent.ts",
-        sourceId: "agent-config",
-      }),
-    });
+  it("compiles a gateway model with catalog limits and the selected source ref", async () => {
+    const modelCatalog = createModelCatalog();
 
     const compiled = await compileAgentConfig(
-      manifest,
-      { modelCatalog: createModelCatalog() },
       {
-        definition: {
-          model: "openai/gpt-5.5",
-        },
+        agentId: "researcher",
+        definitionValue: { model: "openai/gpt-5.5" },
+        source: CONFIG_SOURCE,
       },
+      createContext(modelCatalog),
     );
 
-    expect(mocks.loadModuleBackedDefinition).not.toHaveBeenCalled();
+    expect(compiled.model).toEqual(
+      expect.objectContaining({
+        contextWindowTokens: 256_000,
+        id: "openai/gpt-5.5",
+        routing: { kind: "gateway", target: "openai" },
+      }),
+    );
+    expect(compiled.name).toBe("researcher");
     expect(compiled.description).toBeUndefined();
     expect(compiled.source?.sourceId).toBe("agent-config");
+    expect(modelCatalog.getModelLimits).toHaveBeenCalledWith("openai/gpt-5.5");
   });
 });
 

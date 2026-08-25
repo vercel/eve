@@ -10,6 +10,7 @@ import {
   resolvePackageRoot,
 } from "../../src/internal/application/package.js";
 import { buildApplication } from "../../src/internal/nitro/host.js";
+import { linkWorkspaceEvePackage } from "../../src/internal/testing/scenario-app.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 vi.mock("../../src/internal/nitro/host/vercel-build-prewarm.js", () => ({
@@ -771,6 +772,10 @@ describe("app runtime dependency tracing", () => {
       join(appRoot, "agent", "skills", "weather.md"),
       ["---", "description: Weather help.", "---", ""].join("\n"),
     );
+    // The generated module map reaches framework tool executors through a
+    // bare `eve/internal/agent-sources` import that must resolve from the
+    // app root, exactly as in a real installed application.
+    await linkWorkspaceEvePackage(appRoot);
 
     const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
     const serverFunctionDirectory = join(outputDir, "functions", "__server.func");
@@ -801,11 +806,18 @@ describe("app runtime dependency tracing", () => {
     );
     expect(serverModuleSource).not.toContain('import("esbuild")');
     expect(serverModuleSource).not.toContain('import("rolldown")');
+    // Framework tool executors enter the hosted bundle through the module
+    // map's programmatic loader import of `eve/internal/agent-sources`; the
+    // superseded standalone executor catalog stays out of the output.
+    expect(serverModuleSource).toContain("loadFrameworkSourceModuleNamespace");
     expect(serverModuleSource).toContain(
-      "This tool requires sandbox access on the runtime context.",
+      "Execute a shell command in the shared workspace environment.",
     );
     expect(serverModuleSource).toContain("The dynamic skill");
     expect(serverModuleSource).toContain("URL must start with https://");
+    expect(serverModuleSource).not.toContain(
+      "This tool requires sandbox access on the runtime context.",
+    );
   }, 30_000);
 
   it("does not bundle local-only runtime infrastructure into hosted Vercel output", async () => {
@@ -884,6 +896,9 @@ describe("app runtime dependency tracing", () => {
       ["export default {", '  model: "openai/gpt-5.4-mini",', "};", ""].join("\n"),
     );
     await writeFile(join(appRoot, "agent", "instructions.md"), "Verify hosted instrumentation.\n");
+    // The generated module map imports bare `eve/internal/agent-sources`,
+    // which must resolve from the app root like in a real installed app.
+    await linkWorkspaceEvePackage(appRoot);
     await writeFile(
       join(appRoot, "agent", "instrumentation.ts"),
       [

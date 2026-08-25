@@ -1,3 +1,4 @@
+import type { AgentSourceOwner } from "#compiler/source-graph.js";
 import type { Node } from "#shared/node.js";
 import type { SourceRef } from "#shared/source-ref.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
@@ -10,6 +11,8 @@ export type PreparedRuntimeAuthoredTool = Readonly<
   InternalToolDefinition &
     SourceRef & {
       kind: "authored-tool";
+      /** Owner recorded on the tool's compiled module binding. */
+      owner?: AgentSourceOwner;
     }
 >;
 

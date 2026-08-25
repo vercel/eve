@@ -1,4 +1,8 @@
-import type { H3Event } from "nitro";
+import {
+  readAgentPresentationMetadata,
+  type AgentPresentationMetadata,
+} from "#internal/nitro/routes/channel-route-context.js";
+import { defineChannel, GET, HEAD } from "#public/definitions/channel.js";
 
 /**
  * Public docs URL surfaced from the barebones home page. Kept in source
@@ -253,14 +257,11 @@ function resolveDeploymentUrl(request: Request): string {
 }
 
 /**
- * Builds the barebones home page response for one request. Exposed
- * for tests so callers can supply a real {@link Request}; production
- * traffic flows through the Nitro {@link H3Event} default export.
+ * Builds the barebones home page response for one request. Exposed for
+ * tests so callers can supply a real {@link Request}.
  */
 export function buildHomePageResponse(
-  input: {
-    readonly agentName: string;
-  },
+  input: AgentPresentationMetadata,
   request: Request,
 ): Response {
   const deploymentUrl = resolveDeploymentUrl(request);
@@ -277,18 +278,20 @@ export function buildHomePageResponse(
 }
 
 /**
- * Nitro route handler for `GET /`. Adapts the Nitro event shape into
- * {@link buildHomePageResponse}.
+ * The framework home channel registered at `channels/home.ts` for the root
+ * node. Serves the barebones public home page at `GET /` and `HEAD /`.
+ * Replace it with an authored `agent/channels/home.ts` or remove it with
+ * `disableRoute()`.
  */
-export function handleHomePageRequest(
-  input: {
-    readonly agentName: string;
-  },
-  request: Request,
-): Response {
-  return buildHomePageResponse(input, request);
-}
+const homeChannel = defineChannel({
+  routes: [
+    GET("/", async (req, args) =>
+      buildHomePageResponse(readAgentPresentationMetadata(args) ?? { agentName: "eve" }, req),
+    ),
+    HEAD("/", async (req, args) =>
+      buildHomePageResponse(readAgentPresentationMetadata(args) ?? { agentName: "eve" }, req),
+    ),
+  ],
+});
 
-export default function handleStaticHomePageRequest(event: H3Event): Response {
-  return buildHomePageResponse({ agentName: "eve" }, event.req);
-}
+export default homeChannel;

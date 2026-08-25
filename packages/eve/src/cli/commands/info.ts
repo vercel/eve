@@ -25,7 +25,7 @@ export interface ApplicationInfoJson {
   tools: string[];
   subagents: string[];
   schedules: string[];
-  channels: { name: string; kind: string | null; method: string | null; urlPath: string | null }[];
+  channels: { name: string; kind: string | null; method: string; urlPath: string }[];
   messaging: { create: string; messages: string; stream: string };
   artifacts: {
     compiledManifest: string;
@@ -69,16 +69,12 @@ export function buildApplicationInfoJson(inspection: ApplicationInspection): App
     tools: (compiledState?.manifest.tools ?? []).map((tool) => tool.name),
     subagents: (compiledState?.manifest.subagents ?? []).map((subagent) => subagent.name),
     schedules: (compiledState?.manifest.schedules ?? []).map((schedule) => schedule.name),
-    channels: (compiledState?.manifest.channels ?? []).map((channel) =>
-      channel.kind === "channel"
-        ? {
-            name: channel.name,
-            kind: channel.adapterKind ?? null,
-            method: channel.method,
-            urlPath: channel.urlPath,
-          }
-        : { name: channel.name, kind: "disabled", method: null, urlPath: null },
-    ),
+    channels: (compiledState?.manifest.channels ?? []).map((channel) => ({
+      name: channel.name,
+      kind: channel.adapterKind ?? null,
+      method: channel.method,
+      urlPath: channel.urlPath,
+    })),
     messaging: {
       create: messaging.createSessionRoutePath,
       messages: messaging.sessionMessagesRoutePattern,

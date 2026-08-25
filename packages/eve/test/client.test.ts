@@ -233,19 +233,19 @@ describe("Client.info", () => {
       agent: {
         agentRoot: "/tmp/weather-agent/agent",
         appRoot: "/tmp/weather-agent",
+        config: {
+          source: { logicalPath: "agent.ts", owner: "application", sourceId: "agent.ts" },
+        },
         model: {
           id: "gpt-5",
-          routing: { kind: "gateway", target: "openai" },
+          routing: { kind: "static" },
         },
         name: "Weather Agent",
+        nodeId: "__root__",
       },
       capabilities: { devRoutes: true },
-      channels: {
-        authored: [],
-        available: [],
-        disabledFramework: [],
-        framework: [],
-      },
+      channels: { routes: [], shadowed: [], total: 0 },
+      composition: { disabled: [], shadowed: [] },
       connections: [],
       diagnostics: {
         discoveryErrors: 0,
@@ -253,62 +253,54 @@ describe("Client.info", () => {
       },
       hooks: [],
       instructions: {
-        dynamic: [],
-        static: [
+        dynamicResolvers: [],
+        entries: [
           {
             content: "You are a weather assistant.",
-            logicalPath: "agent/instructions.md",
             name: "instructions",
             role: "system",
-            sourceKind: "markdown",
+            source: {
+              logicalPath: "agent/instructions.md",
+              owner: "application",
+              sourceId: "agent/instructions.md",
+            },
           },
         ],
       },
+      kernel: { prepared: [] },
       kind: "eve-agent-info",
       mode: "development",
-      sandbox: null,
+      remoteAgents: { entries: [], total: 0 },
+      sandbox: {
+        source: { logicalPath: "sandbox.ts", owner: "framework", sourceId: "sandbox.ts" },
+      },
       schedules: [],
       skills: {
-        dynamic: [],
-        static: [],
+        dynamicResolvers: [],
+        entries: [],
       },
       subagents: {
         local: [],
         total: 0,
       },
       tools: {
-        authored: [
+        dynamicResolvers: [],
+        entries: [
           {
             description: "Get the weather.",
             hasAuth: false,
-            hasExecute: true,
-            hasModelOutputProjection: false,
-            hasOutputSchema: false,
             inputSchema: { type: "object" },
-            logicalPath: "agent/tools/get_weather.ts",
             name: "get_weather",
-            origin: "authored",
-            outputSchema: null,
-            replacesFrameworkTool: false,
-            requiresApproval: false,
-            sourceKind: "module",
+            source: {
+              logicalPath: "agent/tools/get_weather.ts",
+              owner: "application",
+              sourceId: "agent/tools/get_weather.ts",
+            },
           },
         ],
-        available: [],
-        disabledFramework: [],
-        dynamic: [],
-        framework: [],
-        reserved: [],
       },
-      version: 2,
-      workflow: {
-        enabled: false,
-        toolName: "Workflow",
-      },
-      workspace: {
-        resourceRoot: null,
-        rootEntries: [],
-      },
+      version: 3,
+      workspace: { rootEntries: [] },
     } satisfies AgentInfoResult;
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(Response.json(payload));
 

@@ -66,7 +66,17 @@ describe("compiler artifacts", () => {
       },
       name: "test-agent",
     });
-    expect(withoutConfig.manifest.config.source).toBeUndefined();
+    // The framework default config is an ordinary composed source, so the
+    // compiled config carries its programmatic source reference.
+    expect(withoutConfig.manifest.config.source).toMatchObject({
+      logicalPath: "agent.ts",
+      sourceId: "eve:agent.ts",
+      sourceKind: "module",
+    });
+    expect(withoutConfig.manifest.bindings["eve:agent.ts"]).toMatchObject({
+      backing: { kind: "programmatic", moduleId: "agent.ts", registryId: "eve" },
+      owner: { kind: "framework" },
+    });
 
     await writeFile(join(agentRoot, "agent.mjs"), "export default {};\n");
     await expect(compileAgent({ startPath: appRoot })).rejects.toThrow(
@@ -185,7 +195,14 @@ describe("compiler artifacts", () => {
       ],
       version: 13,
     });
-    expect(normalizeArtifactValue(JSON.parse(compiledManifestText), appRoot)).toMatchObject({
+    const compiledManifest = normalizeArtifactValue(
+      JSON.parse(compiledManifestText) as {
+        channels: unknown[];
+        channelRoutes: { effective: unknown[] };
+      },
+      appRoot,
+    );
+    expect(compiledManifest).toMatchObject({
       agentRoot: "<app-root>/agent",
       appRoot: "<app-root>",
       config: {
@@ -200,26 +217,6 @@ describe("compiler artifacts", () => {
         errors: 0,
         warnings: 1,
       },
-      channels: [
-        {
-          kind: "channel",
-          logicalPath: "channels/support.mjs",
-          method: "POST",
-          name: "support",
-          sourceId: "channels/support.mjs",
-          sourceKind: "module",
-          urlPath: "/support",
-        },
-        {
-          kind: "channel",
-          logicalPath: "channels/support.mjs",
-          method: "GET",
-          name: "support",
-          sourceId: "channels/support.mjs",
-          sourceKind: "module",
-          urlPath: "/support/events",
-        },
-      ],
       kind: "eve-agent-compiled-manifest",
       instructions: [
         {
@@ -229,10 +226,48 @@ describe("compiler artifacts", () => {
           role: "system",
           sourceId: "instructions.md",
           sourceKind: "markdown",
+          owner: { kind: "application" },
         },
       ],
       version: COMPILED_AGENT_MANIFEST_VERSION,
     });
+    // Framework channels compose in ahead of the authored channel, and the
+    // compiled route plan carries every effective route.
+    expect(compiledManifest.channels).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "channel",
+          logicalPath: "channels/support.mjs",
+          method: "POST",
+          name: "support",
+          sourceId: "channels/support.mjs",
+          sourceKind: "module",
+          urlPath: "/support",
+        }),
+        expect.objectContaining({
+          method: "GET",
+          name: "support",
+          sourceId: "channels/support.mjs",
+          urlPath: "/support/events",
+        }),
+        expect.objectContaining({ sourceId: "eve-root:channels/eve.ts" }),
+        expect.objectContaining({ sourceId: "eve-root:channels/home.ts", urlPath: "/" }),
+      ]),
+    );
+    expect(compiledManifest.channelRoutes.effective).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          method: "POST",
+          sourceId: "channels/support.mjs",
+          urlPath: "/support",
+        }),
+        expect.objectContaining({
+          method: "GET",
+          sourceId: "eve-root:channels/home.ts",
+          urlPath: "/",
+        }),
+      ]),
+    );
     expect(normalizeArtifactValue(JSON.parse(diagnosticsText), appRoot)).toMatchObject({
       diagnostics: [
         {
@@ -242,12 +277,12 @@ describe("compiler artifacts", () => {
           sourcePath: "<app-root>/agent/drafts",
         },
       ],
-      kind: "eve-discovery-diagnostics",
+      kind: "eve-compiler-diagnostics",
       summary: {
         errors: 0,
         warnings: 1,
       },
-      version: 1,
+      version: 2,
     });
     const compileMetadata = JSON.parse(metadataText) as {
       generator: {
@@ -290,6 +325,10 @@ describe("compiler artifacts", () => {
     expect(moduleMapText).toContain('"nodes": Object.freeze({');
     expect(moduleMapText).toContain(`"${ROOT_COMPILED_AGENT_NODE_ID}": Object.freeze({`);
     expect(moduleMapText).toContain('"agent.mjs": module_0');
+    expect(moduleMapText).toContain(
+      'import { loadFrameworkSourceModuleNamespace as __eveLoadProgrammaticModule } from "eve/internal/agent-sources";',
+    );
+    expect(moduleMapText).toMatch(/"eve:tools\/bash\.ts": module_\d+/);
     expect(moduleMapText).not.toContain('"subagents": Object.freeze({');
   });
 
@@ -412,23 +451,18 @@ describe("compiler artifacts", () => {
     // Authored instructions modules execute once at build time and are baked into the
     // compiled manifest as markdown. They never appear in the module map.
     expect(normalizedModuleMapText).not.toContain("instructions.mjs");
-    expect(normalizedModuleMapText).toContain('import * as module_0 from "../../agent/agent.mjs";');
+    expect(normalizedModuleMapText).toContain('from "../../agent/agent.mjs";');
+    expect(normalizedModuleMapText).toContain('from "../../agent/tools/get_weather.mjs";');
+    expect(normalizedModuleMapText).toContain('from "../../agent/subagents/reviewer/agent.mjs";');
     expect(normalizedModuleMapText).toContain(
-      'import * as module_1 from "../../agent/tools/get_weather.mjs";',
-    );
-    expect(normalizedModuleMapText).toContain(
-      'import * as module_2 from "../../agent/subagents/reviewer/agent.mjs";',
-    );
-    expect(normalizedModuleMapText).toContain(
-      'import * as module_3 from "../../agent/subagents/reviewer/tools/review.mjs";',
+      'from "../../agent/subagents/reviewer/tools/review.mjs";',
     );
     expect(normalizedModuleMapText).toContain('"nodes": Object.freeze({');
     expect(normalizedModuleMapText).toContain(`"${ROOT_COMPILED_AGENT_NODE_ID}": Object.freeze({`);
-    expect(normalizedModuleMapText).toContain('"agent.mjs": module_0');
-    expect(normalizedModuleMapText).toContain('"tools/get_weather.mjs": module_1');
+    expect(normalizedModuleMapText).toMatch(/"agent\.mjs": module_\d+/);
+    expect(normalizedModuleMapText).toMatch(/"tools\/get_weather\.mjs": module_\d+/);
     expect(normalizedModuleMapText).toContain('"subagents/reviewer": Object.freeze({');
-    expect(normalizedModuleMapText).toContain('"agent.mjs": module_2');
-    expect(normalizedModuleMapText).toContain('"tools/review.mjs": module_3');
+    expect(normalizedModuleMapText).toMatch(/"tools\/review\.mjs": module_\d+/);
   });
 
   it("records versioned artifact hashes in compile metadata", () => {
@@ -582,7 +616,10 @@ describe("compileAgent", () => {
 
     expect(result.manifest.tools.map((tool) => tool.name)).toContain("crm__crm_search");
     const composed = result.manifest.tools.find((tool) => tool.name === "crm__crm_search");
-    expect(composed?.sourceId).toBe("ext:crm:tools/crm_search.mjs");
+    // Extension mounts project to consumer-visible logical paths, so the
+    // source id carries the projected `tools/<ns>__<file>` path.
+    expect(composed?.sourceId).toBe("ext:crm:tools/crm__crm_search.mjs");
+    expect(composed?.logicalPath).toBe("tools/crm__crm_search.mjs");
     expect(composed?.description).toBe("Search the CRM.");
     expect(result.manifest.instructions.map((entry) => entry.content).join("\n")).toContain(
       "Prefer the CRM over guessing.",
@@ -590,7 +627,7 @@ describe("compileAgent", () => {
 
     const moduleMapText = await readFile(result.paths.moduleMapPath, "utf8");
     expect(moduleMapText).toContain("@acme/crm/extension/tools/crm_search.mjs");
-    expect(moduleMapText).toContain('"ext:crm:tools/crm_search.mjs"');
+    expect(moduleMapText).toContain('"ext:crm:tools/crm__crm_search.mjs"');
   });
 
   it("compiles extension-variant authored modules from a fixture app", async () => {
@@ -633,17 +670,15 @@ describe("compileAgent", () => {
         sourceKind: "module",
       },
     ]);
-    expect(result.manifest.tools).toEqual([
-      {
-        description:
-          "Get weather details using lib extension imports through mixed extension loading across cjs/js/mts/mjs modules.",
-        inputSchema: null,
-        logicalPath: "tools/get_weather.mts",
-        name: "get_weather",
-        sourceId: "tools/get_weather.mts",
-        sourceKind: "module",
-      },
-    ]);
+    expect(result.manifest.tools).toContainEqual({
+      description:
+        "Get weather details using lib extension imports through mixed extension loading across cjs/js/mts/mjs modules.",
+      inputSchema: null,
+      logicalPath: "tools/get_weather.mts",
+      name: "get_weather",
+      sourceId: "tools/get_weather.mts",
+      sourceKind: "module",
+    });
     expect(result.manifest.sandbox).toEqual({
       description: undefined,
       exportName: undefined,
@@ -653,12 +688,12 @@ describe("compileAgent", () => {
       sourceId: "sandbox/sandbox.cjs",
       sourceKind: "module",
     });
-    expect(normalizeArtifactValue(moduleMapText, app.appRoot)).toContain('"agent.cjs": module_0');
-    expect(normalizeArtifactValue(moduleMapText, app.appRoot)).toContain(
-      '"sandbox/sandbox.cjs": module_1',
+    expect(normalizeArtifactValue(moduleMapText, app.appRoot)).toMatch(/"agent\.cjs": module_\d+/);
+    expect(normalizeArtifactValue(moduleMapText, app.appRoot)).toMatch(
+      /"sandbox\/sandbox\.cjs": module_\d+/,
     );
-    expect(normalizeArtifactValue(moduleMapText, app.appRoot)).toContain(
-      '"tools/get_weather.mts": module_2',
+    expect(normalizeArtifactValue(moduleMapText, app.appRoot)).toMatch(
+      /"tools\/get_weather\.mts": module_\d+/,
     );
   });
 
@@ -672,7 +707,7 @@ describe("compileAgent", () => {
       startPath: app.appRoot,
     });
 
-    expect(result.manifest.tools).toEqual([
+    expect(result.manifest.tools.filter((tool) => !tool.sourceId.includes(":"))).toEqual([
       {
         description: "Return alias path markers from @/ and @/lib/ imports.",
         inputSchema: null,
@@ -691,20 +726,29 @@ describe("compileAgent", () => {
       startPath: app.appRoot,
     });
 
-    // The disable sentinel reaches the compiled manifest as a name in the
-    // dedicated array, not as a tool entry.
-    expect([...result.manifest.disabledFrameworkTools].sort()).toEqual([
-      "agent",
-      "web_fetch",
-      "web_search",
+    // Disable sentinels remove the framework tool from the compiled tool set
+    // and land in the node's persisted source composition.
+    expect(result.manifest.sourceComposition.disabled.map((entry) => entry.slot).sort()).toEqual([
+      "tools/agent",
+      "tools/web_fetch",
+      "tools/web_search",
     ]);
 
-    // Both the wrapped bash and the replacement todo land in `tools` as
-    // ordinary CompiledToolDefinitions. The web_fetch override is intentionally
-    // absent — the disable sentinel is partitioned out before this point.
+    // The wrapped bash and the replacement todo land in `tools` as ordinary
+    // CompiledToolDefinitions alongside the untouched framework defaults; the
+    // disabled slots are absent.
     const toolsByName = new Map(result.manifest.tools.map((tool) => [tool.name, tool]));
 
-    expect([...toolsByName.keys()].sort()).toEqual(["bash", "todo"]);
+    expect([...toolsByName.keys()].sort()).toEqual([
+      "ask_question",
+      "bash",
+      "load_skill",
+      "read_file",
+      "task_cancel",
+      "task_update",
+      "todo",
+      "write_file",
+    ]);
 
     expect(toolsByName.get("bash")).toMatchObject({
       description: "Run a vetted shell command in the project sandbox.",
@@ -720,6 +764,17 @@ describe("compileAgent", () => {
       sourceId: "tools/todo.ts",
       sourceKind: "module",
     });
+    expect(toolsByName.get("read_file")).toMatchObject({
+      sourceId: "eve:tools/read_file.ts",
+    });
+
+    // The replaced framework defaults are retained as shadowed losers.
+    expect(result.manifest.sourceComposition.shadowed).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ slot: "tools/bash", winningSourceId: "tools/bash.ts" }),
+        expect.objectContaining({ slot: "tools/todo", winningSourceId: "tools/todo.ts" }),
+      ]),
+    );
     expect(result.diagnostics).toEqual([]);
   });
 
@@ -855,7 +910,7 @@ describe("compileAgent", () => {
       startPath: appRoot,
     });
 
-    expect(result.manifest.tools).toEqual([
+    expect(result.manifest.tools.filter((tool) => !tool.sourceId.includes(":"))).toEqual([
       {
         description: "Refund a charge.",
         inputSchema: null,
@@ -913,6 +968,7 @@ describe("compileAgent", () => {
         name: "cleanup",
         logicalPath: "schedules/cleanup.md",
         markdown: "Clean up stale data.",
+        owner: { kind: "application" },
         sourceId: "schedules/cleanup.md",
         sourceKind: "markdown",
       },
@@ -1289,15 +1345,13 @@ describe("compileAgent", () => {
       nodeId: "subagents/researcher",
       sourceId: "subagents/researcher",
     });
-    expect(normalizedModuleMapText).toContain('import * as module_0 from "../../agent/agent.mjs";');
+    expect(normalizedModuleMapText).toContain('from "../../agent/agent.mjs";');
+    expect(normalizedModuleMapText).toContain('from "../../agent/subagents/researcher/agent.mjs";');
     expect(normalizedModuleMapText).toContain(
-      'import * as module_1 from "../../agent/subagents/researcher/agent.mjs";',
-    );
-    expect(normalizedModuleMapText).toContain(
-      'import * as module_2 from "../../agent/subagents/researcher/sandbox/sandbox.mjs";',
+      'from "../../agent/subagents/researcher/sandbox/sandbox.mjs";',
     );
     expect(normalizedModuleMapText).toContain('"subagents/researcher": Object.freeze({');
-    expect(normalizedModuleMapText).toContain('"sandbox/sandbox.mjs": module_2');
+    expect(normalizedModuleMapText).toMatch(/"sandbox\/sandbox\.mjs": module_\d+/);
   });
 
   it("fails fast on discovery errors after writing inspectable artifacts", async () => {

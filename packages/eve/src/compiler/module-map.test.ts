@@ -1,17 +1,56 @@
 import { describe, expect, it } from "vitest";
 
-import type { CompiledAgentManifest } from "./manifest.js";
+import type { CompiledAgentManifest, CompiledSandboxDefinition } from "#compiler/manifest.js";
 import {
-  COMPILED_AGENT_MANIFEST_VERSION,
+  createCompiledAgentManifest,
   createCompiledAgentResources,
   ROOT_COMPILED_AGENT_NODE_ID,
-} from "./manifest.js";
-import { collectModuleRefsForManifest, createCompiledModuleMapSource } from "./module-map.js";
+} from "#compiler/manifest.js";
+import type { CompiledModuleBinding } from "#compiler/source-graph.js";
+import {
+  EMPTY_CHANNEL_ROUTE_PLAN,
+  EMPTY_SOURCE_COMPOSITION,
+  testCompiledSandbox,
+} from "#internal/testing/compiled-node-fixtures.js";
+import {
+  collectModuleRefsForManifest,
+  createCompiledModuleMapSource,
+} from "#compiler/module-map.js";
+
+const FRAMEWORK_SANDBOX: CompiledSandboxDefinition = testCompiledSandbox({
+  logicalPath: "sandbox.ts",
+  sourceId: "eve:sandbox.ts",
+});
+
+const FRAMEWORK_SANDBOX_BINDING: CompiledModuleBinding = {
+  backing: {
+    kind: "programmatic",
+    moduleId: "sandbox.ts",
+    registryId: "eve",
+    revision: "1.0.0-test",
+  },
+  logicalPath: "sandbox.ts",
+  owner: { feature: "sandbox", kind: "framework" },
+};
 
 function createManifestWithTool(agentRoot: string): CompiledAgentManifest {
-  return {
+  const separator = agentRoot.includes("\\") ? "\\" : "/";
+  return createCompiledAgentManifest({
     agentRoot,
     appRoot: agentRoot,
+    bindings: {
+      "eve:sandbox.ts": FRAMEWORK_SANDBOX_BINDING,
+      "tools/echo.ts": {
+        backing: {
+          externalDependencies: [],
+          kind: "filesystem",
+          sourcePath: [agentRoot, "tools", "echo.ts"].join(separator),
+        },
+        logicalPath: "tools/echo.ts",
+        owner: { kind: "application" },
+      },
+    },
+    channelRoutes: EMPTY_CHANNEL_ROUTE_PLAN,
     config: {
       compaction: {},
       model: {
@@ -21,27 +60,8 @@ function createManifestWithTool(agentRoot: string): CompiledAgentManifest {
       },
       name: "kitchen-sink-fixture",
     },
-    connections: [],
-    diagnosticsSummary: {
-      errors: 0,
-      warnings: 0,
-    },
-    extensionMounts: [],
-    disabledFrameworkTools: [],
-    dynamicInstructions: [],
-    dynamicSkills: [],
-    dynamicTools: [],
-    hooks: [],
-    instructions: [],
-    kind: "eve-agent-compiled-manifest",
-    remoteAgents: [],
-    schedules: [],
-    sandbox: null,
-    sandboxWorkspaces: [],
-    skills: [],
-    subagentEdges: [],
-    channels: [],
-    subagents: [],
+    sandbox: FRAMEWORK_SANDBOX,
+    sourceComposition: EMPTY_SOURCE_COMPOSITION,
     tools: [
       {
         description: "Echoes input.",
@@ -53,16 +73,11 @@ function createManifestWithTool(agentRoot: string): CompiledAgentManifest {
         sourceKind: "module",
       },
     ],
-    version: COMPILED_AGENT_MANIFEST_VERSION,
-    workspaceResourceRoot: {
-      logicalPath: "",
-      rootEntries: [],
-    },
-  };
+  });
 }
 
 describe("createCompiledModuleMapSource", () => {
-  it("emits ESM-safe file URLs for Windows absolute imports", () => {
+  it("emits ESM-safe file URLs for Windows absolute filesystem bindings", () => {
     const source = createCompiledModuleMapSource({
       importSpecifierStyle: "absolute",
       manifest: createManifestWithTool(
@@ -73,7 +88,7 @@ describe("createCompiledModuleMapSource", () => {
     });
 
     expect(source).toContain(
-      'import * as module_0 from "file:///G:/projects/eve/apps/fixtures/kitchen-sink-fixture/agent/tools/echo.ts";',
+      'import * as module_1 from "file:///G:/projects/eve/apps/fixtures/kitchen-sink-fixture/agent/tools/echo.ts";',
     );
     expect(source).not.toContain(
       '"G:/projects/eve/apps/fixtures/kitchen-sink-fixture/agent/tools/echo.ts"',
@@ -81,7 +96,23 @@ describe("createCompiledModuleMapSource", () => {
     expect(source).toContain(`"${ROOT_COMPILED_AGENT_NODE_ID}"`);
   });
 
-  it("imports a dynamic subagent config resolver relative to the child agent root", () => {
+  it("emits a registry lookup for programmatic bindings", () => {
+    const source = createCompiledModuleMapSource({
+      manifest: createManifestWithTool("/agent"),
+      moduleMapPath: "/agent/.eve/compile/module-map.mjs",
+    });
+
+    expect(source).toMatch(
+      /import \{ loadFrameworkSourceModuleNamespace as __eveLoadProgrammaticModule \} from ".*internal\/agent-sources(\.js)?";/,
+    );
+    expect(source).toContain(
+      'const module_0 = await __eveLoadProgrammaticModule("eve", "sandbox.ts", "1.0.0-test");',
+    );
+    expect(source).toContain('"eve:sandbox.ts": module_0');
+    expect(source).toContain('"tools/echo.ts": module_1');
+  });
+
+  it("imports a dynamic subagent config resolver through its child-scoped binding", () => {
     const manifest: CompiledAgentManifest = {
       ...createManifestWithTool("/agent"),
       subagents: [
@@ -89,6 +120,20 @@ describe("createCompiledModuleMapSource", () => {
           agent: createCompiledAgentResources({
             agentRoot: "/agent/subagents/researcher",
             appRoot: "/agent",
+            bindings: {
+              "agent.ts": {
+                backing: {
+                  externalDependencies: [],
+                  kind: "filesystem",
+                  sourcePath: "/agent/subagents/researcher/agent.ts",
+                },
+                logicalPath: "agent.ts",
+                owner: { kind: "application" },
+              },
+              "eve:sandbox.ts": FRAMEWORK_SANDBOX_BINDING,
+            },
+            sandbox: FRAMEWORK_SANDBOX,
+            sourceComposition: EMPTY_SOURCE_COMPOSITION,
           }),
           configResolver: {
             eventNames: ["turn.started"],
@@ -153,6 +198,7 @@ describe("collectModuleRefsForManifest", () => {
           hasRun: false,
           logicalPath: "schedules/cleanup.md",
           name: "cleanup",
+          owner: { kind: "application" },
           sourceId: "schedules/cleanup.md",
           sourceKind: "markdown",
           markdown: "Clean up stale data.",

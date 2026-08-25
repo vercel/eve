@@ -1,10 +1,8 @@
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { z } from "#compiled/zod/index.js";
 import { REMOTE_AGENT_FAILED } from "#harness/agent-handle-errors.js";
-import { EVE_CALLBACK_ROUTE_PATTERN } from "#protocol/routes.js";
-import type { ChannelMethod, RouteContext } from "#public/definitions/channel.js";
+import type { RouteContext } from "#public/definitions/channel.js";
 import type { SubagentAuthorizationEvent } from "#channel/types.js";
-import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
 import { agentTurnOutcomeSchema } from "#shared/agent-turn-outcome.js";
 import { jsonValueSchema } from "#shared/json-schemas.js";
@@ -20,8 +18,6 @@ import type {
 import { readTaskIdFromInboxToken } from "#tasks/task-id.js";
 
 export const HTTP_SESSION_CALLBACK_CHANNEL_NAME_PREFIX = "eve/v1/callback";
-
-const HANDLED_METHODS: readonly ChannelMethod[] = ["POST"];
 
 const ZERO_TOKEN_USAGE: TokenUsage = {
   cacheReadTokens: 0,
@@ -166,31 +162,6 @@ const sessionResultCallbackSchema = z.discriminatedUnion("kind", [
     subagentName: z.string().min(1),
   }),
 ]);
-
-export function getSessionCallbackChannelDefinitions(): readonly ResolvedChannelDefinition[] {
-  return HANDLED_METHODS.map((method) => buildCallbackChannelDefinition(method));
-}
-
-export function getSessionCallbackChannelNames(): ReadonlySet<string> {
-  return new Set(HANDLED_METHODS.map(channelNameForMethod));
-}
-
-function buildCallbackChannelDefinition(method: ChannelMethod): ResolvedChannelDefinition {
-  const name = channelNameForMethod(method);
-  return {
-    name,
-    method,
-    urlPath: EVE_CALLBACK_ROUTE_PATTERN,
-    fetch: handleSessionCallbackRequest,
-    logicalPath: `framework://channels/${name}`,
-    sourceId: `eve:framework:session-callback-${method.toLowerCase()}`,
-    sourceKind: "module",
-  };
-}
-
-function channelNameForMethod(method: ChannelMethod): string {
-  return `${HTTP_SESSION_CALLBACK_CHANNEL_NAME_PREFIX}/${method.toLowerCase()}`;
-}
 
 export async function handleSessionCallbackRequest(
   request: Request,

@@ -20,6 +20,7 @@ import type {
 } from "#runtime/connections/types.js";
 import type { OpenAPISpecSource } from "#public/definitions/connections/openapi.js";
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
+import type { AgentSourceOwner } from "#compiler/source-graph.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
 import type { JsonObject } from "#shared/json.js";
 import type { Optional } from "#shared/optional.js";
@@ -56,6 +57,8 @@ export type ResolvedInstructionsDefinition = Readonly<
   SourceRef & {
     content: string;
     name: string;
+    /** Owner recorded on the compiled record or its module binding. */
+    owner?: AgentSourceOwner;
     role: "system" | "user";
   } & (Omit<MarkdownSourceRef<undefined>, "definition"> | ModuleSourceRef)
 >;
@@ -150,9 +153,9 @@ export type ResolvedSandboxDefinition = ResolvedModuleSourceRef & {
 };
 
 /**
- * Runtime-owned tool definition resolved from a compiled module map or
- * declared by the framework catalog.
- * A tool without `execute` is surfaced to the client and never executed by eve.
+ * Runtime-owned tool definition resolved from a compiled module map.
+ * A tool without `execute` is surfaced to the client or supplied by the
+ * harness and never executed from its module.
  */
 export type ResolvedToolDefinition = Readonly<
   Omit<
@@ -161,6 +164,11 @@ export type ResolvedToolDefinition = Readonly<
   >
 > &
   ResolvedModuleSourceRef & {
+    /**
+     * Owner recorded on the tool's compiled module binding. Framework
+     * ownership comes from here — never from a source-id prefix.
+     */
+    readonly owner?: AgentSourceOwner;
     /**
      * Validated runtime input schema. Compiled and durable JSON Schemas are
      * rehydrated before entering this runtime-owned definition.
@@ -407,20 +415,6 @@ export interface ResolvedAgent {
   readonly config?: ResolvedAgentDefinition;
   readonly connections: readonly ResolvedConnectionDefinition[];
   /**
-   * Logical names of framework-provided channels the author opted out of by
-   * exporting `disableRoute()` from a file in `agent/channels/`. Each
-   * entry is the slash-joined slug path of one such file. The graph
-   * resolver uses this list to filter the framework default channel set.
-   */
-  readonly disabledFrameworkChannels: readonly string[];
-  /**
-   * Names of framework-provided tools the author opted out of by exporting
-   * `disableTool()` from a file in `agent/tools/`. Each entry is the
-   * filename slug of one such file. The graph resolver uses this list to
-   * filter the framework default tool set.
-   */
-  readonly disabledFrameworkTools: readonly string[];
-  /**
    * Configuration for the experimental framework `Workflow` orchestration
    * tool. Present when an authored tool module exports
    * `experimental_workflow(...)`.
@@ -441,10 +435,11 @@ export interface ResolvedAgent {
    */
   readonly instructions: readonly ResolvedInstructionsDefinition[];
   /**
-   * Authored sandbox override for this agent, when one exists. `null`
-   * means the agent uses the framework default sandbox unchanged.
+   * The node's selected sandbox. Every successfully compiled local node
+   * contains exactly one selected sandbox source — the framework default
+   * composes like any other slot, so no runtime fallback exists.
    */
-  readonly sandbox: ResolvedSandboxDefinition | null;
+  readonly sandbox: ResolvedSandboxDefinition;
   /**
    * Byte-free descriptor for the compiled workspace resource tree owned
    * by this agent's graph node. The prewarm orchestrator resolves the

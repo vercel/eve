@@ -10,6 +10,7 @@ import {
   expectPositiveInteger,
   expectString,
 } from "#internal/authored-module.js";
+import { isHarnessOwnedToolDefinition } from "#shared/harness-owned-tool.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
 import {
   serializeInputSchema,
@@ -28,8 +29,14 @@ import {
  *
  * Identity is path-derived — the compiler stamps the filename slug onto
  * the compiled entry. This shape never carries an authored `name`.
+ * `execute` is absent only for internally constructed harness-owned
+ * definitions (see {@link isHarnessOwnedToolDefinition}).
  */
-type NormalizedAuthoredTool = Readonly<Omit<InternalToolDefinitionWithExecuteFn, "name">>;
+type NormalizedAuthoredTool = Readonly<
+  Omit<InternalToolDefinitionWithExecuteFn, "execute" | "name"> & {
+    execute?: InternalToolDefinitionWithExecuteFn["execute"];
+  }
+>;
 type MutableNormalizedAuthoredTool = {
   -readonly [K in keyof NormalizedAuthoredTool]: NormalizedAuthoredTool[K];
 };
@@ -45,7 +52,7 @@ type NormalizedToolEntry =
   | { readonly kind: "tool"; readonly definition: NormalizedAuthoredTool }
   | { readonly kind: "disabled" }
   | { readonly kind: "workflow-tool"; readonly maxSubagents?: number }
-  | { readonly kind: "web-search-tool"; readonly provider: "exa" | "parallel" }
+  | { readonly kind: "web-search-tool"; readonly provider?: "exa" | "parallel" }
   | {
       readonly kind: "dynamic-tool";
       readonly eventNames: readonly DynamicToolEventName[];
@@ -83,6 +90,11 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   if (isWebSearchToolDefinition(value)) {
     const record = expectObjectRecord(value, message);
     expectOnlyKnownKeys(record, ["kind", "provider"], message);
+    if (record.provider === undefined) {
+      // Provider-managed web search: the model provider materializes the
+      // tool at eligible model calls.
+      return { kind: "web-search-tool" };
+    }
     const provider = expectString(record.provider, message);
     if (provider !== "exa" && provider !== "parallel") {
       throw new Error(`${message} Expected "provider" to be one of: exa, parallel.`);
@@ -112,9 +124,14 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   const outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined);
   const definition: MutableNormalizedAuthoredTool = {
     description: expectString(record.description, message),
-    execute: expectFunction(record.execute, message),
     inputSchema,
   };
+  // Harness-owned framework definitions (`ask_question`, `agent`,
+  // `task_update`, `task_cancel`) carry no module executor — the harness
+  // supplies their behavior. Every authored tool requires `execute`.
+  if (record.execute !== undefined || !isHarnessOwnedToolDefinition(value)) {
+    definition.execute = expectFunction(record.execute, message);
+  }
   if (record.execution !== undefined) {
     const execution = expectString(record.execution, message);
     if (execution !== "background") {

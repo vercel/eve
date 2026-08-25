@@ -7,7 +7,6 @@ import { describe, expect, it } from "vitest";
 import { compileAgent } from "#compiler/compile-agent.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
-import { resolvePackageRoot } from "#internal/application/package.js";
 import {
   discardDevelopmentGeneration,
   stageDevelopmentGeneration,
@@ -75,7 +74,9 @@ describe("development generation artifacts", () => {
       ),
     });
     const subagent = compileResult.manifest.subagents[0];
-    const subagentToolSourceId = subagent?.agent.tools[0]?.sourceId;
+    const subagentToolSourceId = subagent?.agent.tools.find(
+      (tool) => tool.sourceId === "tools/read_shared.mjs",
+    )?.sourceId;
     expect(subagentToolSourceId).toBeDefined();
     const subagentTool = moduleMap.nodes[subagent!.nodeId]?.modules[subagentToolSourceId!] as {
       default: { execute(): string };
@@ -223,9 +224,10 @@ describe("development generation artifacts", () => {
       },
       name: "shared-generation-extension-scope",
     });
+    // `materializeScenarioApp` already links the workspace eve package into
+    // the app's node_modules.
     const packageRoot = join(app.appRoot, "packages", "shared-graph-extension");
     await mkdir(join(app.appRoot, "node_modules", "@acme"), { recursive: true });
-    await symlink(resolvePackageRoot(), join(app.appRoot, "node_modules", "eve"), "junction");
     await symlink(
       packageRoot,
       join(app.appRoot, "node_modules", "@acme", "shared-graph-extension"),
@@ -298,9 +300,6 @@ describe("development generation artifacts", () => {
         "",
       ].join("\n"),
     );
-    await mkdir(join(app.appRoot, "node_modules"), { recursive: true });
-    await symlink(resolvePackageRoot(), join(app.appRoot, "node_modules", "eve"), "junction");
-
     const compileResult = await compileAgent({ startPath: app.appRoot });
     const snapshot = await stageDevelopmentGeneration(compileResult);
     const snapshotPackageRoot = join(
@@ -385,7 +384,9 @@ describe("development generation artifacts", () => {
         snapshot.runtimeAppRoot,
       ),
     });
-    const toolSourceId = compileResult.manifest.tools[0]?.sourceId;
+    const toolSourceId = compileResult.manifest.tools.find(
+      (entry) => entry.sourceId === "tools/read_dynamic.mjs",
+    )?.sourceId;
     expect(toolSourceId).toBeDefined();
     const tool = moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules[toolSourceId!] as {
       default: { execute(): Promise<string> };
@@ -454,7 +455,9 @@ describe("development generation artifacts", () => {
         snapshot.runtimeAppRoot,
       ),
     });
-    const toolSourceId = compileResult.manifest.tools[0]?.sourceId;
+    const toolSourceId = compileResult.manifest.tools.find(
+      (entry) => entry.sourceId === "tools/read_value.mjs",
+    )?.sourceId;
     expect(toolSourceId).toBeDefined();
     const tool = moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules[toolSourceId!] as {
       default: { execute(): string };

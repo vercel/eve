@@ -1057,7 +1057,12 @@ describe("loadAuthoredModuleNamespace", () => {
       const manifest = await compileAgentManifest(discovered.manifest);
 
       expect(manifest.config.build?.externalDependencies).toEqual(["external-only"]);
-      expect(manifest.tools).toHaveLength(1);
+      // Framework-owned default tools are composed into every compiled node;
+      // the authored tool is the only application-owned entry.
+      const applicationTools = manifest.tools.filter(
+        (tool) => manifest.bindings[tool.sourceId]?.owner.kind === "application",
+      );
+      expect(applicationTools.map((tool) => tool.sourceId)).toEqual(["tools/read_external.ts"]);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
@@ -1157,13 +1162,18 @@ describe("loadAuthoredModuleNamespace", () => {
       });
       const manifest = await compileAgentManifest(discovered.manifest);
       const subagent = manifest.subagents[0];
-      if (subagent?.configResolver !== undefined) {
+      if (subagent === undefined || subagent.configResolver !== undefined) {
         throw new Error("expected a static subagent");
       }
 
       expect(manifest.config.build?.externalDependencies).toEqual(["external-only"]);
-      expect(subagent?.agent.config.build?.externalDependencies).toEqual(["external-only"]);
-      expect(subagent?.agent.tools).toHaveLength(1);
+      expect(subagent.agent.config.build?.externalDependencies).toEqual(["external-only"]);
+      // Framework-owned default tools are composed into every compiled node;
+      // the authored tool is the only application-owned entry.
+      const applicationTools = subagent.agent.tools.filter(
+        (tool) => subagent.agent.bindings[tool.sourceId]?.owner.kind === "application",
+      );
+      expect(applicationTools.map((tool) => tool.sourceId)).toEqual(["tools/read_external.ts"]);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }

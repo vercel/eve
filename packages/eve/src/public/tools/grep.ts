@@ -1,17 +1,12 @@
 import { z } from "#compiled/zod/index.js";
 
 import { executeGrepOnSandbox, type GrepInput } from "#execution/sandbox/grep-tool.js";
-import { requireSandboxSession } from "#execution/sandbox/require-sandbox.js";
-import type { ResolvedToolDefinition } from "#runtime/types.js";
-import type { ToolExecuteOptions } from "#shared/tool-definition.js";
+import { defineTool } from "#public/definitions/tool.js";
 
 /**
- * Shared input schema used by the framework `grep` tool and any author tool
- * constructed via {@link defineGrepTool}.
- *
- * Exported so the public `defineGrepTool` factory and the framework
- * `GREP_TOOL_DEFINITION` use the exact same schema object — keeping model
- * input contracts in sync without duplication.
+ * Input schema for the framework `grep` tool and any author tool constructed
+ * via {@link defineGrepTool}. Single source of truth so model input contracts
+ * stay in sync without duplication.
  */
 export const GREP_INPUT_SCHEMA = z.strictObject({
   context: z
@@ -55,8 +50,8 @@ export const GREP_INPUT_SCHEMA = z.strictObject({
 });
 
 /**
- * Shared output schema used by the framework `grep` tool and any author tool
- * constructed via {@link defineGrepTool}.
+ * Output schema for the framework `grep` tool and any author tool constructed
+ * via {@link defineGrepTool}.
  */
 export const GREP_OUTPUT_SCHEMA = z.strictObject({
   content: z.string(),
@@ -66,16 +61,11 @@ export const GREP_OUTPUT_SCHEMA = z.strictObject({
 });
 
 /**
- * Framework-owned executor that delegates to the default sandbox.
+ * Framework `grep` tool: searches file contents by regex pattern in the
+ * agent's sandbox. Import from `eve/tools/grep` to spread, wrap, or
+ * re-export it from `agent/tools/grep.ts`.
  */
-async function executeGrep(input: unknown, options?: ToolExecuteOptions): Promise<unknown> {
-  return executeGrepOnSandbox(
-    await requireSandboxSession(options?.abortSignal),
-    input as GrepInput,
-  );
-}
-
-export const GREP_TOOL_DEFINITION: ResolvedToolDefinition = {
+export default defineTool({
   description: [
     "Fast content search tool that works with any codebase size.",
     "",
@@ -87,11 +77,7 @@ export const GREP_TOOL_DEFINITION: ResolvedToolDefinition = {
     "- Call this tool in parallel when you have multiple independent searches.",
     "- Any line longer than 2000 characters is truncated.",
   ].join("\n"),
-  execute: executeGrep,
   inputSchema: GREP_INPUT_SCHEMA,
-  logicalPath: "eve:framework/grep",
-  name: "grep",
   outputSchema: GREP_OUTPUT_SCHEMA,
-  sourceId: "eve:grep-tool",
-  sourceKind: "module",
-};
+  execute: async (input, ctx) => executeGrepOnSandbox(await ctx.getSandbox(), input as GrepInput),
+});

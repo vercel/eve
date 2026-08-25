@@ -133,12 +133,9 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const taskUpdatesEnabled =
     isTaskOwnedSerializedContext(input.serializedContext) &&
     isTaskToolAvailable({
-      disabledFrameworkTools: bundle.resolvedAgent.disabledFrameworkTools ?? [],
-      hasAuthoredTool: effectiveAgent.turnAgent.tools.some(
-        (tool) => tool.name === TASK_UPDATE_TOOL_NAME,
-      ),
       tasksEnabled,
       toolName: TASK_UPDATE_TOOL_NAME,
+      tools: effectiveAgent.turnAgent.tools,
     });
 
   // Populate the callback base URL so getHookUrl() works during tool

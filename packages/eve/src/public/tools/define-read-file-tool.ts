@@ -1,8 +1,5 @@
 import { executeReadFileOnSandbox, type ReadFileInput } from "#execution/sandbox/read-file-tool.js";
-import {
-  READ_FILE_INPUT_SCHEMA,
-  READ_FILE_OUTPUT_SCHEMA,
-} from "#runtime/framework-tools/read-file.js";
+import { READ_FILE_INPUT_SCHEMA, READ_FILE_OUTPUT_SCHEMA } from "#public/tools/read-file.js";
 import type { ToolDefinition } from "#public/definitions/tool.js";
 
 /**

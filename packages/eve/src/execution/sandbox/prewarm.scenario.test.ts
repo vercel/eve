@@ -8,6 +8,7 @@ import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { publishDevelopmentGeneration } from "#internal/nitro/development-generation.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
+import { linkWorkspaceEvePackage } from "#internal/testing/scenario-app.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import type {
   SandboxBackendPrewarmInput,
@@ -489,6 +490,9 @@ async function createScenarioAppRoot(): Promise<string> {
   const agentRoot = join(appRoot, "agent");
   const subagentRoot = join(agentRoot, "subagents", "researcher");
 
+  // Dev-runtime snapshot module maps import bare `eve/*` specifiers, which
+  // resolve by walking up from the snapshot to the app root's node_modules.
+  await linkWorkspaceEvePackage(appRoot);
   await mkdir(join(agentRoot, "sandbox"), {
     recursive: true,
   });

@@ -1,6 +1,6 @@
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
-import { SUBAGENT_TOOL_INPUT_SCHEMA } from "#runtime/subagents/registry.js";
-import type { ResolvedToolDefinition } from "#runtime/types.js";
+
+export { AGENT_TOOL_DESCRIPTION } from "#public/tools/agent.js";
 
 /**
  * Stable model-visible name for the root-only agent delegation tool.
@@ -8,46 +8,26 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
 export const AGENT_TOOL_NAME = "agent";
 
 /**
- * Model-facing instructions for the root-only agent delegation tool.
- */
-export const AGENT_TOOL_DESCRIPTION = [
-  "Delegate a focused subtask to a fresh copy of yourself.",
-  "Use it to isolate complex work or split a large task into independent pieces.",
-  "Issue multiple `agent` calls in one response to run a small fixed set in parallel.",
-  "Each child has fresh history and state but shares your tools and sandbox, so include essential context in `message` and give parallel writers non-overlapping scopes.",
-].join(" ");
-
-/**
- * Whether one node receives the implicit built-in `agent` tool.
+ * Whether one node's sessions receive the framework `agent` delegation
+ * tool.
  *
  * Single source of truth for the injection predicate: node-step uses it to
- * decide whether to add the tool, and prompt bootstrap uses it to decide
- * whether agent-messaging instructions may reference the tool. The
- * `hasAuthoredAgentTool` leg matters because an authored tool named "agent"
- * shadows the framework tool — instructions must not advertise a tool the
- * model cannot call.
+ * decide whether to supply the delegation behavior, and prompt bootstrap
+ * uses it to decide whether agent-messaging instructions may reference the
+ * tool. The capability prepares only when the canonical `tools/agent.ts`
+ * slot survived composition with framework ownership — an authored
+ * replacement is an ordinary tool, and a disabled slot compiles no row.
  */
 export function isImplicitAgentToolAvailable(input: {
-  readonly disabledFrameworkTools: readonly string[];
-  readonly hasAuthoredAgentTool: boolean;
   /** Undefined when the caller prepares a turn without a graph node (never root). */
   readonly nodeId: string | undefined;
+  readonly tools: readonly {
+    readonly name: string;
+    readonly owner?: { readonly kind: string };
+  }[];
 }): boolean {
   return (
     input.nodeId === ROOT_RUNTIME_AGENT_NODE_ID &&
-    !input.disabledFrameworkTools.includes(AGENT_TOOL_NAME) &&
-    !input.hasAuthoredAgentTool
+    input.tools.some((tool) => tool.name === AGENT_TOOL_NAME && tool.owner?.kind === "framework")
   );
 }
-
-/**
- * Shared metadata for the root-only agent delegation tool.
- */
-export const AGENT_TOOL_DEFINITION: ResolvedToolDefinition = {
-  description: AGENT_TOOL_DESCRIPTION,
-  inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
-  logicalPath: "eve:framework/agent",
-  name: AGENT_TOOL_NAME,
-  sourceId: "eve:agent-tool",
-  sourceKind: "module",
-};

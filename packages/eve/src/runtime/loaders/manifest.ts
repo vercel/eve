@@ -1,4 +1,5 @@
 import { type CompiledAgentManifest, compiledAgentManifestSchema } from "#compiler/manifest.js";
+import { validateCompiledAgentManifest } from "#compiler/validate-manifest.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { formatValidationError } from "#runtime/validation.js";
 import { resolveRuntimeCompilerArtifactPaths } from "#runtime/loaders/artifact-paths.js";
@@ -73,6 +74,17 @@ function parseCompiledManifest(value: unknown, manifestPath: string): CompiledAg
   if (!parsed.success) {
     throw new LoadCompiledManifestError(
       `Expected "${manifestPath}" to contain a valid compiled eve agent manifest. ${formatValidationError(parsed.error)}`,
+      manifestPath,
+    );
+  }
+
+  // The one semantic validator runs after schema parsing in every disk and
+  // bundled artifact loader, before module-map hydration.
+  try {
+    validateCompiledAgentManifest(parsed.data);
+  } catch (error) {
+    throw new LoadCompiledManifestError(
+      `Compiled manifest "${manifestPath}" failed semantic validation: ${error instanceof Error ? error.message : String(error)}`,
       manifestPath,
     );
   }

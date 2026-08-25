@@ -1,13 +1,8 @@
-import { isAbsolute, join, relative, resolve } from "node:path";
-
-import type { AgentSourceManifest } from "#discover/manifest.js";
-import { normalizeLogicalPath } from "#discover/filesystem.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
 import { serializeOutputSchema } from "#shared/tool-schema.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
-import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
@@ -18,42 +13,34 @@ import {
 import type { DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
 import type { CompiledAgentDefinition, CompiledRuntimeModelReference } from "#compiler/manifest.js";
 import type { CompiledRuntimeModelLimits } from "#compiler/model-catalog.js";
-import {
-  loadModuleBackedDefinition,
-  type ManifestCompileContext,
-} from "#compiler/normalize-helpers.js";
+import type { ManifestCompileContext } from "#compiler/normalize-helpers.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
 /**
  * Compiles the agent-level configuration (model, compaction, build,
- * workspace) for one authored agent node.
+ * workspace) for one agent node from its selected config source.
+ *
+ * The composer selects and loads exactly one `agent.ts` winner in phase one;
+ * this normalizer receives that already-evaluated definition value together
+ * with its selected source reference. It never loads modules itself and
+ * never synthesizes a default config — the framework default is an ordinary
+ * composed source.
  */
 export async function compileAgentConfig(
-  manifest: AgentSourceManifest,
+  input: {
+    readonly agentId: string;
+    readonly definitionValue: unknown;
+    readonly displayPath?: string;
+    readonly source: ModuleSourceRef;
+  },
   context: ManifestCompileContext,
-  options: {
-    readonly definition?: unknown;
-  } = {},
 ): Promise<CompiledAgentDefinition> {
-  const configModule = manifest.configModule;
-  const configModulePath =
-    configModule === undefined ? undefined : formatAgentConfigModulePath(manifest, configModule);
-  const hasInjectedDefinition = Object.hasOwn(options, "definition");
+  const configModule = input.source;
+  const configModulePath = input.displayPath ?? configModule.logicalPath;
   const definition = normalizeAgentDefinition(
-    hasInjectedDefinition
-      ? options.definition
-      : configModule === undefined
-        ? { model: DEFAULT_AGENT_MODEL_ID }
-        : await loadModuleBackedDefinition({
-            agentRoot: manifest.agentRoot,
-            displayPath: configModulePath!,
-            kind: "agent config",
-            source: configModule,
-          }),
-    configModule === undefined
-      ? `Expected the default agent config to match the public eve shape.`
-      : `Expected the agent config export "${configModule.exportName ?? "default"}" from "${configModulePath}" to match the public eve shape.`,
+    input.definitionValue,
+    `Expected the agent config export "${configModule.exportName ?? "default"}" from "${configModulePath}" to match the public eve shape.`,
   );
   const dynamicModelDefinition = isDynamicModelDefinition(definition.model)
     ? definition.model
@@ -90,7 +77,7 @@ export async function compileAgentConfig(
     limits?: CompiledAgentDefinition["limits"];
   } = {
     compaction,
-    name: manifest.agentId,
+    name: input.agentId,
   };
 
   if (definition.description !== undefined) {
@@ -99,9 +86,6 @@ export async function compileAgentConfig(
 
   let dynamicModel: CompiledAgentDefinition["dynamicModel"] | undefined;
   if (dynamicModelDefinition !== undefined) {
-    if (configModule === undefined) {
-      throw new Error("Expected dynamic model definitions to be authored in agent.ts.");
-    }
     dynamicModel = {
       eventNames: Object.keys(dynamicModelDefinition.events) as DynamicToolEventName[],
       exportName: configModule.exportName,
@@ -141,14 +125,12 @@ export async function compileAgentConfig(
     };
   }
 
-  if (configModule !== undefined) {
-    compiledConfig.source = {
-      exportName: configModule.exportName,
-      sourceKind: "module",
-      logicalPath: configModule.logicalPath,
-      sourceId: configModule.sourceId,
-    };
-  }
+  compiledConfig.source = {
+    exportName: configModule.exportName,
+    sourceKind: "module",
+    logicalPath: configModule.logicalPath,
+    sourceId: configModule.sourceId,
+  };
 
   if (definition.compaction?.model !== undefined) {
     compaction.model = await normalizeAuthoredModelReference({
@@ -301,32 +283,6 @@ async function normalizeAuthoredModelReference(input: {
   }
 
   return await withCompiledRuntimeModelLimits(sourceBackedModel, input);
-}
-
-function formatAgentConfigModulePath(
-  manifest: AgentSourceManifest,
-  configModule: ModuleSourceRef,
-): string {
-  const configPath = join(manifest.agentRoot, configModule.logicalPath);
-  return normalizeLogicalPath(relative(resolveTopLevelAgentRoot(manifest), configPath));
-}
-
-function resolveTopLevelAgentRoot(manifest: AgentSourceManifest): string {
-  const appRoot = resolve(manifest.appRoot);
-  const nestedAgentRoot = resolve(appRoot, "agent");
-  const agentRoot = resolve(manifest.agentRoot);
-
-  if (isPathInsideOrEqual(nestedAgentRoot, agentRoot)) {
-    return nestedAgentRoot;
-  }
-
-  return appRoot;
-}
-
-function isPathInsideOrEqual(parentPath: string, childPath: string): boolean {
-  const relativePath = relative(parentPath, childPath);
-
-  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
 }
 
 async function withCompiledRuntimeModelLimits(

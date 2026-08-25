@@ -1,6 +1,6 @@
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
 import { hasEnvValue } from "#internal/resolve-model-endpoint-status.js";
-import { buildAgentInfoResponseFromManifest } from "#internal/nitro/routes/agent-info/build-agent-info-response-from-manifest.js";
+import { buildAgentInfoResponse } from "#internal/nitro/routes/agent-info/build-agent-info-response-from-manifest.js";
 import {
   loadAgentInfoManifestData,
   resolveAgentInfoCompiledArtifactsSource,
@@ -12,15 +12,13 @@ import type { ModelRouting } from "#shared/agent-definition.js";
 import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
 
 async function createAgentInfoPayload(input: NitroArtifactsConfig) {
-  const data = await loadAgentInfoManifestData({
+  const { manifest } = await loadAgentInfoManifestData({
     compiledArtifactsSource: resolveAgentInfoCompiledArtifactsSource(input),
   });
 
   const routing =
-    data.manifest.config.dynamicModel === undefined
-      ? data.manifest.config.model.routing
-      : undefined;
-  return buildAgentInfoResponseFromManifest(data, {
+    manifest.config.dynamicModel === undefined ? manifest.config.model.routing : undefined;
+  return buildAgentInfoResponse(manifest, {
     mode: input.kind,
     gatewayCredentials:
       routing === undefined

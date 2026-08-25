@@ -9,7 +9,7 @@ import {
   EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH,
   EVE_INFO_ROUTE_PATH,
 } from "../../src/protocol/routes.js";
-import type { AgentInfoResponse } from "../../src/internal/nitro/routes/agent-info/build-agent-info-response.js";
+import type { AgentInfoResult } from "../../src/client/agent-info-schema.js";
 
 /**
  * Handle to a spawned `eve dev --no-ui` process serving a scenario app.
@@ -343,12 +343,12 @@ export async function fetchText(serverUrl: string, path: string): Promise<string
   return await response.text();
 }
 
-export async function fetchAgentInfo(serverUrl: string): Promise<AgentInfoResponse> {
+export async function fetchAgentInfo(serverUrl: string): Promise<AgentInfoResult> {
   const response = await fetch(new URL(EVE_INFO_ROUTE_PATH, serverUrl));
   if (!response.ok) {
     throw new Error(`Expected agent info to succeed, received ${String(response.status)}.`);
   }
-  return (await response.json()) as AgentInfoResponse;
+  return (await response.json()) as AgentInfoResult;
 }
 
 export async function forceDevelopmentRebuild(serverUrl: string): Promise<void> {

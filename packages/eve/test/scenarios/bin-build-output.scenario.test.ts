@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { linkWorkspaceEvePackage } from "../../src/internal/testing/scenario-app.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 const EVE_BIN_PATH = fileURLToPath(new URL("../../bin/eve.js", import.meta.url));
@@ -89,6 +90,9 @@ async function createTemporaryAppRoot(input: {
     join(appRoot, "agent", "agent.mjs"),
     'export default { model: "openai/gpt-5.4" };\n',
   );
+  // Build artifacts import bare `eve/*` specifiers that must resolve from
+  // the app root, exactly as in a real installed application.
+  await linkWorkspaceEvePackage(appRoot);
 
   if (!input.omitInstructionsSource) {
     await writeFile(join(appRoot, "agent", "instructions.md"), "You are a precise assistant.\n");

@@ -12,32 +12,29 @@ const AGENT_INFO: AgentInfoResult = {
   agent: {
     agentRoot: "/tmp/weather-agent/agent",
     appRoot: "/tmp/weather-agent",
-    model: { id: "openai/gpt-5.5", routing: { kind: "gateway", target: "openai" } },
+    config: { source: { logicalPath: "agent.ts", owner: "application", sourceId: "agent.ts" } },
+    model: { id: "openai/gpt-5.5", routing: { kind: "static" } },
     name: "Weather Agent",
+    nodeId: "__root__",
   },
   capabilities: { devRoutes: true },
-  channels: { authored: [], available: [], disabledFramework: [], framework: [] },
+  channels: { routes: [], shadowed: [], total: 0 },
+  composition: { disabled: [], shadowed: [] },
   connections: [],
   diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
   hooks: [],
-  instructions: { dynamic: [], static: [] },
+  instructions: { dynamicResolvers: [], entries: [] },
+  kernel: { prepared: [] },
   kind: "eve-agent-info",
   mode: "development",
-  sandbox: null,
+  remoteAgents: { entries: [], total: 0 },
+  sandbox: { source: { logicalPath: "sandbox.ts", owner: "framework", sourceId: "sandbox.ts" } },
   schedules: [],
-  skills: { dynamic: [], static: [] },
+  skills: { dynamicResolvers: [], entries: [] },
   subagents: { local: [], total: 0 },
-  tools: {
-    authored: [],
-    available: [],
-    disabledFramework: [],
-    dynamic: [],
-    framework: [],
-    reserved: [],
-  },
-  version: 2,
-  workflow: { enabled: false, toolName: "Workflow" },
-  workspace: { resourceRoot: null, rootEntries: [] },
+  tools: { dynamicResolvers: [], entries: [] },
+  version: 3,
+  workspace: { rootEntries: [] },
 };
 
 afterEach(() => {
@@ -188,25 +185,22 @@ describe("Client request policy", () => {
 
   it("accepts a tool whose undefined output schema was omitted during JSON serialization", async () => {
     const toolWithoutOutputSchema = {
-      description: "Search the web",
+      description: "Get the weather.",
       hasAuth: false,
-      hasExecute: false,
-      hasModelOutputProjection: false,
-      hasOutputSchema: false,
       inputSchema: null,
-      logicalPath: "eve:framework/web-search",
-      name: "web_search",
-      origin: "framework",
-      replacesFrameworkTool: false,
-      requiresApproval: false,
-      sourceKind: "module",
+      name: "get_weather",
+      source: {
+        logicalPath: "tools/get_weather.ts",
+        owner: "application",
+        sourceId: "tools/get_weather.ts",
+      },
     };
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({
         ...AGENT_INFO,
         tools: {
           ...AGENT_INFO.tools,
-          available: [toolWithoutOutputSchema],
+          entries: [toolWithoutOutputSchema],
         },
       }),
     );
@@ -214,11 +208,10 @@ describe("Client request policy", () => {
 
     const info = await client.info();
 
-    expect(info.tools.available[0]).toMatchObject({
-      hasOutputSchema: false,
-      name: "web_search",
+    expect(info.tools.entries[0]).toMatchObject({
+      name: "get_weather",
     });
-    expect(info.tools.available[0]).not.toHaveProperty("outputSchema");
+    expect(info.tools.entries[0]).not.toHaveProperty("outputSchema");
   });
 
   it("returns the parsed agent info payload", async () => {

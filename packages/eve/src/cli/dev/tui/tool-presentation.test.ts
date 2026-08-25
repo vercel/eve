@@ -1,8 +1,27 @@
 import { describe, expect, it } from "vitest";
 
-import { getAllFrameworkToolNames } from "#runtime/framework-tools/index.js";
-
 import { presentPreparingTool, presentTool } from "./tool-presentation.js";
+
+// Framework tool rows compiled into agents by the framework default sources
+// (`eve` at every node, `eve-root` at the root), plus the sandbox file
+// helpers. The runtime no longer exposes a registry of framework tool
+// names, so the semantic-copy table is validated against this explicit
+// inventory.
+const FRAMEWORK_TOOL_NAMES = [
+  "agent",
+  "ask_question",
+  "bash",
+  "glob",
+  "grep",
+  "load_skill",
+  "read_file",
+  "task_cancel",
+  "task_update",
+  "todo",
+  "web_fetch",
+  "web_search",
+  "write_file",
+] as const;
 
 describe("presentPreparingTool", () => {
   it("leads with the activity verb while the input still streams", () => {
@@ -186,7 +205,7 @@ describe("presentTool", () => {
       write_file: { filePath: "/workspace/a.ts", content: "x" },
     };
 
-    for (const name of getAllFrameworkToolNames()) {
+    for (const name of FRAMEWORK_TOOL_NAMES) {
       const input = representativeInputs[name];
       expect(
         input,

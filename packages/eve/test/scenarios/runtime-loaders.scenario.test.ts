@@ -345,8 +345,8 @@ describe("runtime compiled artifact loaders", () => {
         compiledArtifactsSource,
       }),
     ]);
-    const [compiledChannel] = manifest.channels;
-    const [resolvedChannel] = resolvedAgent.channels;
+    const compiledChannel = manifest.channels.find((entry) => entry.name === "slack");
+    const resolvedChannel = resolvedAgent.channels.find((entry) => entry.name === "slack");
 
     expect(manifest.config).toEqual({
       compaction: {},
@@ -412,14 +412,22 @@ describe("runtime compiled artifact loaders", () => {
     expect(resolvedChannel.method).toBe("POST");
     expect(resolvedChannel.urlPath).toBe("/slack");
     expect(typeof resolvedChannel.fetch).toBe("function");
-    expect(resolvedAgent.channels).toHaveLength(1);
-    // Authored instructions modules execute once at build time. They never appear in
-    // the runtime module map.
-    expect(Object.keys(moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules ?? {})).toEqual([
-      "agent.mjs",
-      "channels/slack.mjs",
-      "tools/get_weather.mjs",
-    ]);
+    // Framework defaults compose the "eve" protocol and "home" channels into
+    // every root manifest alongside the authored channel. Resolution expands
+    // each channel into one entry per route.
+    expect(new Set(resolvedAgent.channels.map((entry) => entry.name))).toEqual(
+      new Set(["eve", "home", "slack"]),
+    );
+    // Authored instructions modules execute once at build time. They never
+    // appear in the runtime module map; lib helpers are reachable only
+    // through their importers. Framework-owned modules are keyed by their
+    // registry-prefixed source ids.
+    const rootModuleKeys = Object.keys(moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules ?? {});
+    expect(
+      rootModuleKeys.filter((key) => !key.startsWith("eve:") && !key.startsWith("eve-root:")),
+    ).toEqual(["agent.mjs", "channels/slack.mjs", "tools/get_weather.mjs"]);
+    expect(rootModuleKeys).toContain("eve:sandbox.ts");
+    expect(rootModuleKeys).toContain("eve:tools/bash.ts");
     expect(
       (
         moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules["tools/get_weather.mjs"] as {
@@ -428,15 +436,19 @@ describe("runtime compiled artifact loaders", () => {
       ).default.description,
     ).toBe("Get the weather.");
     await expect(
-      resolvedAgent.tools[0]?.execute?.(
-        { city: "Brooklyn" },
-        { messages: [], toolCallId: "call_1" },
-      ),
+      resolvedAgent.tools
+        .find((tool) => tool.name === "get_weather")
+        ?.execute?.({ city: "Brooklyn" }, { messages: [], toolCallId: "call_1" }),
     ).resolves.toEqual({
       city: "Brooklyn",
       source: "lib",
     });
-    expect(resolvedAgent.instructions).toEqual(manifest.instructions);
+    expect(resolvedAgent.instructions).toEqual(
+      manifest.instructions.map((entry) => ({
+        ...entry,
+        owner: manifest.bindings[entry.sourceId]?.owner,
+      })),
+    );
     expect(resolvedAgent.workspaceSpec).toEqual({
       rootEntries: [],
     });
@@ -501,7 +513,12 @@ describe("runtime compiled artifact loaders", () => {
           }
         ).default.description,
       );
-      expect(resolvedAgent.instructions).toEqual(manifest.instructions);
+      expect(resolvedAgent.instructions).toEqual(
+        manifest.instructions.map((entry) => ({
+          ...entry,
+          owner: manifest.bindings[entry.sourceId]?.owner,
+        })),
+      );
     });
   });
 
@@ -531,16 +548,23 @@ describe("runtime compiled artifact loaders", () => {
       ROOT_COMPILED_AGENT_NODE_ID,
       "subagents/researcher",
     ]);
-    expect(Object.keys(moduleMap.nodes["subagents/researcher"]?.modules ?? {})).toEqual([
+    const researcherModuleKeys = Object.keys(
+      moduleMap.nodes["subagents/researcher"]?.modules ?? {},
+    );
+    expect(researcherModuleKeys.filter((key) => !key.startsWith("eve:"))).toEqual([
       "agent.mjs",
       "sandbox/sandbox.mjs",
       "tools/search.mjs",
     ]);
+    // The authored sandbox shadows the framework default sandbox module.
+    expect(researcherModuleKeys).toContain("eve:tools/bash.ts");
+    expect(researcherModuleKeys).not.toContain("eve:sandbox.ts");
     expect(researcherNode?.agent.instructions).toEqual([
       {
         content: "Investigate research tasks thoroughly.",
         name: "instructions",
         logicalPath: "instructions.md",
+        owner: { kind: "application" },
         role: "system",
         sourceId: "instructions.md",
         sourceKind: "markdown",
@@ -560,10 +584,9 @@ describe("runtime compiled artifact loaders", () => {
       ),
     ).toBe(false);
     await expect(
-      researcherNode?.agent.tools[0]?.execute?.(
-        { query: "climate" },
-        { messages: [], toolCallId: "call_1" },
-      ),
+      researcherNode?.agent.tools
+        .find((tool) => tool.name === "search")
+        ?.execute?.({ query: "climate" }, { messages: [], toolCallId: "call_1" }),
     ).resolves.toEqual({
       query: "climate",
       source: "subagent-lib",
@@ -618,10 +641,10 @@ describe("runtime compiled artifact loaders", () => {
     const firstResolved = await loadResolvedCompiledAgent({
       compiledArtifactsSource,
     });
-    const firstTool = firstResolved.tools[0];
+    const firstTool = firstResolved.tools.find((tool) => tool.name === "get_weather");
 
     if (firstTool === undefined) {
-      throw new Error("Expected one compiled tool before the source update.");
+      throw new Error("Expected the authored tool before the source update.");
     }
 
     await expect(
@@ -646,10 +669,10 @@ describe("runtime compiled artifact loaders", () => {
     const secondResolved = await loadResolvedCompiledAgent({
       compiledArtifactsSource,
     });
-    const secondTool = secondResolved.tools[0];
+    const secondTool = secondResolved.tools.find((tool) => tool.name === "get_weather");
 
     if (secondTool === undefined) {
-      throw new Error("Expected one compiled tool after the source update.");
+      throw new Error("Expected the authored tool after the source update.");
     }
 
     await expect(

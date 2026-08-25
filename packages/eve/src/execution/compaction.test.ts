@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { preserveFrameworkStateOnCompaction } from "#execution/compaction.js";
 import { ReadFileStateKey } from "#runtime/framework-tools/file-state.js";
-import { TodoStateKey } from "#runtime/framework-tools/todo.js";
+import { TodoStateKey } from "#public/tools/todo.js";
 
 function run(setup: (ctx: ContextContainer) => void): {
   ctx: ContextContainer;

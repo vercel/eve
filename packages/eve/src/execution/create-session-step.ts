@@ -57,12 +57,9 @@ export async function createSessionStep(input: {
   const taskUpdatesEnabled =
     input.taskOwned === true &&
     isTaskToolAvailable({
-      disabledFrameworkTools: bundle.resolvedAgent.disabledFrameworkTools ?? [],
-      hasAuthoredTool: effectiveAgent.turnAgent.tools.some(
-        (tool) => tool.name === TASK_UPDATE_TOOL_NAME,
-      ),
       tasksEnabled: bundle.resolvedAgent.config?.experimental?.tasks === true,
       toolName: TASK_UPDATE_TOOL_NAME,
+      tools: effectiveAgent.turnAgent.tools,
     });
 
   // Both token axes resolve tighter-wins against the cap inherited from the

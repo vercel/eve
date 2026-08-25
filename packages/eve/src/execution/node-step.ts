@@ -215,47 +215,13 @@ export function createNodeHarnessTools(input: {
     }
   }
 
-  if (
-    isImplicitAgentToolAvailable({
-      disabledFrameworkTools: input.node.agent.disabledFrameworkTools,
-      hasAuthoredAgentTool: tools.has(AGENT_TOOL_NAME),
-      nodeId: input.node.nodeId,
-    })
-  ) {
-    const implicitAgent = {
-      description: AGENT_TOOL_DESCRIPTION,
-      inputSchema:
-        tasksEnabled || input.node.agent.config?.experimental?.subagentPersistentSessions === true
-          ? PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA
-          : SUBAGENT_TOOL_INPUT_SCHEMA,
-      kind: "subagent" as const,
-      name: AGENT_TOOL_NAME,
-      nodeId: input.node.nodeId,
-      rootOnly: true,
-    };
-    tools.set(
-      AGENT_TOOL_NAME,
-      tasksEnabled
-        ? createBackgroundSubagentHarnessDefinition(implicitAgent)
-        : createHarnessDelegationToolDefinition(implicitAgent),
-    );
-  }
-
-  for (const definition of createTaskToolHarnessDefinitions()) {
-    if (
-      isTaskToolAvailable({
-        disabledFrameworkTools: input.node.agent.disabledFrameworkTools,
-        hasAuthoredTool: tools.has(definition.name),
-        tasksEnabled,
-        toolName: definition.name,
-      })
-    ) {
-      tools.set(definition.name, definition);
-    }
-  }
-
   return tools;
 }
+
+/** Framework dispatch-tool slots whose behavior the harness supplies. */
+const TASK_HARNESS_DEFINITIONS = new Map(
+  createTaskToolHarnessDefinitions().map((definition) => [definition.name, definition]),
+);
 
 function resolveHarnessToolDefinition(input: {
   readonly node: ResolvedRuntimeAgentNode;
@@ -266,6 +232,48 @@ function resolveHarnessToolDefinition(input: {
     return input.tasksEnabled
       ? createBackgroundSubagentHarnessDefinition(input.tool)
       : createHarnessDelegationToolDefinition(input.tool);
+  }
+
+  // Framework dispatch slots that survived composition keep today's harness
+  // behavior: the compiled row records presence and ownership, and the
+  // harness supplies the delegation/task mechanics. An authored replacement
+  // is application-owned and runs as an ordinary tool below.
+  if (input.tool.owner?.kind === "framework") {
+    if (input.tool.name === AGENT_TOOL_NAME) {
+      if (
+        !isImplicitAgentToolAvailable({
+          nodeId: input.node.nodeId,
+          tools: [input.tool],
+        })
+      ) {
+        return null;
+      }
+      const implicitAgent = {
+        description: AGENT_TOOL_DESCRIPTION,
+        inputSchema:
+          input.tasksEnabled ||
+          input.node.agent.config?.experimental?.subagentPersistentSessions === true
+            ? PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA
+            : SUBAGENT_TOOL_INPUT_SCHEMA,
+        kind: "subagent" as const,
+        name: AGENT_TOOL_NAME,
+        nodeId: input.node.nodeId,
+        rootOnly: true,
+      };
+      return input.tasksEnabled
+        ? createBackgroundSubagentHarnessDefinition(implicitAgent)
+        : createHarnessDelegationToolDefinition(implicitAgent);
+    }
+    const taskDefinition = TASK_HARNESS_DEFINITIONS.get(input.tool.name);
+    if (taskDefinition !== undefined) {
+      return isTaskToolAvailable({
+        tasksEnabled: input.tasksEnabled,
+        toolName: input.tool.name,
+        tools: [input.tool],
+      })
+        ? taskDefinition
+        : null;
+    }
   }
 
   const registeredTool = findRegisteredRuntimeTool(input.node.toolRegistry, input.tool.name);
@@ -280,20 +288,19 @@ function resolveHarnessToolDefinition(input: {
   }
 
   const def = registeredTool.definition;
-  const isFrameworkTool = def.sourceId.startsWith("eve:");
-  const rawExecute = def.execute;
 
   return {
     approvalKey: def.approvalKey,
     description: def.description,
     execution: def.execution,
     execute: resolveAuthoredExecute({
-      isFrameworkTool,
-      rawExecute,
+      rawExecute: def.execute,
       scope: def.name,
     }),
     frameworkAction:
-      isFrameworkTool && def.name === LOAD_SKILL_TOOL_NAME ? "load-skill" : undefined,
+      def.owner?.kind === "framework" && def.name === LOAD_SKILL_TOOL_NAME
+        ? "load-skill"
+        : undefined,
     inputSchema: def.inputSchema ?? UNSPECIFIED_INPUT_SCHEMA,
     name: def.name,
     approval: def.approval,
@@ -303,27 +310,21 @@ function resolveHarnessToolDefinition(input: {
 }
 
 /**
- * Selects the harness-facing `execute` for one authored tool.
+ * Selects the harness-facing `execute` for one compiled tool.
  *
- * - Framework tools (`eve:` source) run their `execute` verbatim — they
- *   manage their own context and never receive an authored
- *   {@link ToolContext}.
- * - Authored tools are wrapped by {@link createToolExecuteWithAuth},
- *   which builds a token-aware context. Providers passed to
- *   `ctx.getToken(provider)` use tool-qualified auth scopes.
- * - Tools without `execute` (provider-managed) stay `undefined`.
+ * Every executor — framework defaults included — is an ordinary public
+ * executor wrapped by {@link createToolExecuteWithAuth}, which builds a
+ * token-aware context. Providers passed to `ctx.getToken(provider)` use
+ * tool-qualified auth scopes. Tools without `execute` (client-side or
+ * provider-managed) stay `undefined`.
  */
 function resolveAuthoredExecute(input: {
-  readonly isFrameworkTool: boolean;
   readonly rawExecute: ResolvedToolDefinition["execute"];
   readonly scope: string;
 }): HarnessToolDefinition["execute"] {
-  const { isFrameworkTool, rawExecute, scope } = input;
+  const { rawExecute, scope } = input;
   if (rawExecute === undefined) {
     return undefined;
-  }
-  if (isFrameworkTool) {
-    return rawExecute;
   }
   const authored = rawExecute as (
     toolInput: unknown,

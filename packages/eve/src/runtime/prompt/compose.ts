@@ -64,13 +64,11 @@ function createInstructionsPromptBlocks(
     return [];
   }
 
+  // A single application-owned instructions source keeps its authored name;
+  // extension-owned or merged instructions collapse to the generic label.
+  // Ownership comes from the compiled binding, never from a source-id shape.
   const only = systemInstructions.length === 1 ? systemInstructions[0] : undefined;
-  const name =
-    only !== undefined &&
-    !only.sourceId.startsWith("ext:") &&
-    !only.sourceId.startsWith("ext-override:")
-      ? only.name
-      : "instructions";
+  const name = only !== undefined && only.owner?.kind !== "extension" ? only.name : "instructions";
   const content = systemInstructions
     .map((entry) => entry.content)
     .join("\n\n")

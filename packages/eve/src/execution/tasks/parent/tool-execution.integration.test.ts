@@ -45,7 +45,7 @@ describe("background subagent tool execution", () => {
   });
 
   it("runs concurrent local and remote defineTool calls as independent durable tasks", async () => {
-    const runtime = createTestRuntime({ agent: { name: "background-subagent" } });
+    const runtime = await createTestRuntime({ agent: { name: "background-subagent" } });
 
     await runtime.run(async () => {
       const remoteNode = {
@@ -61,7 +61,26 @@ describe("background subagent tool execution", () => {
         url: "https://remote.example.com",
       } as const;
       runtime.session.compiledArtifacts = {
-        manifest: { ...runtime.manifest, remoteAgents: [remoteNode] },
+        manifest: {
+          ...runtime.manifest,
+          // Manifest validation requires a module binding for every module
+          // reference; the injected namespace below already satisfies the
+          // module map, so the binding is provenance only.
+          bindings: {
+            ...runtime.manifest.bindings,
+            [remoteNode.sourceId]: {
+              backing: {
+                kind: "programmatic",
+                moduleId: remoteNode.logicalPath,
+                registryId: "memory",
+                revision: "test-remote-agent",
+              },
+              logicalPath: remoteNode.logicalPath,
+              owner: { kind: "application" },
+            },
+          },
+          remoteAgents: [remoteNode],
+        },
         moduleMap: {
           nodes: {
             ...runtime.moduleMap.nodes,

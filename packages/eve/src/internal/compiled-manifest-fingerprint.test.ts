@@ -2,16 +2,25 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { createCompiledAgentManifest } from "#compiler/manifest.js";
+import {
+  EMPTY_CHANNEL_ROUTE_PLAN,
+  EMPTY_SOURCE_COMPOSITION,
+  testCompiledSandbox,
+} from "#internal/testing/compiled-node-fixtures.js";
 import { serializeCompiledManifestForFingerprint } from "#internal/compiled-manifest-fingerprint.js";
 
 function manifestWithRoot(runtimeAppRoot: string, agentRoot = join(runtimeAppRoot, "agent")) {
   return createCompiledAgentManifest({
     agentRoot,
     appRoot: runtimeAppRoot,
+    bindings: {},
+    channelRoutes: EMPTY_CHANNEL_ROUTE_PLAN,
     config: {
       model: { id: "openai/gpt-5-mini", routing: { kind: "gateway", target: "openai" } },
       name: "fingerprint-test",
     },
+    sandbox: testCompiledSandbox(),
+    sourceComposition: EMPTY_SOURCE_COMPOSITION,
   });
 }
 

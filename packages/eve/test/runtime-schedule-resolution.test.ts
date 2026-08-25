@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { createCompiledAgentManifest } from "../src/compiler/manifest.js";
 import { TEST_DEFAULT_MODEL_ID } from "../src/internal/testing/app-harness.js";
+import {
+  EMPTY_CHANNEL_ROUTE_PLAN,
+  EMPTY_SOURCE_COMPOSITION,
+  testCompiledSandbox,
+} from "../src/internal/testing/compiled-node-fixtures.js";
 import { resolveSchedules } from "../src/runtime/schedules/resolve-schedule.js";
 
 describe("resolveSchedules", () => {
@@ -9,6 +14,10 @@ describe("resolveSchedules", () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/app/agent",
       appRoot: "/app",
+      bindings: {},
+      channelRoutes: EMPTY_CHANNEL_ROUTE_PLAN,
+      sandbox: testCompiledSandbox(),
+      sourceComposition: EMPTY_SOURCE_COMPOSITION,
       config: {
         model: {
           id: TEST_DEFAULT_MODEL_ID,

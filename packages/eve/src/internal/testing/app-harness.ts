@@ -1,6 +1,6 @@
 import type { JsonObject } from "#shared/json.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
-import { compileFromMemory } from "#compiler/compile-from-memory.js";
+import { compileFromMemory, type CompileFromMemoryInput } from "#compiler/compile-from-memory.js";
 import type { CompiledAgentManifest, CompiledSkillDefinition } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { SessionParent, SessionTurn } from "#context/keys.js";
@@ -11,9 +11,8 @@ import {
   type RuntimeSession,
   withRuntimeSession,
 } from "#runtime/sessions/runtime-session.js";
-import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
+import { resolveToolDefinition } from "#runtime/resolve-tool.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
-import { serializeInputSchema } from "#shared/tool-schema.js";
 import {
   buildActiveSessionContext,
   type ActiveSessionInit,
@@ -133,27 +132,8 @@ const DEFAULT_AGENT_NAME = "test-agent";
  */
 export const TEST_DEFAULT_MODEL_ID = "openai/gpt-5.4";
 
-export function createTestRuntime(descriptor: TestAppDescriptor = {}): TestRuntime {
-  const compileInput: {
-    name: string;
-    model: string;
-    limits?: {
-      readonly maxInputTokensPerSession?: number | false;
-      readonly maxOutputTokensPerSession?: number | false;
-      readonly sessionTimeoutMs?: number | false;
-    };
-    outputSchema?: JsonObject;
-    tools?: readonly {
-      readonly name: string;
-      readonly description?: string;
-      readonly inputSchema?: JsonObject | null;
-    }[];
-    skills?: readonly {
-      readonly name: string;
-      readonly description: string;
-      readonly markdown?: string;
-    }[];
-  } = {
+export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Promise<TestRuntime> {
+  const compileInput: CompileFromMemoryInput & { name: string } = {
     name: descriptor.agent?.name ?? DEFAULT_AGENT_NAME,
     model: descriptor.agent?.model ?? TEST_DEFAULT_MODEL_ID,
     limits: descriptor.agent?.limits,
@@ -161,29 +141,37 @@ export function createTestRuntime(descriptor: TestAppDescriptor = {}): TestRunti
   };
 
   if (descriptor.tools !== undefined && descriptor.tools.length > 0) {
-    compileInput.tools = descriptor.tools.map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: serializeInputSchema(tool.inputSchema),
-    }));
+    (compileInput as { tools?: CompileFromMemoryInput["tools"] }).tools = descriptor.tools.map(
+      (tool) => ({
+        approval: tool.approval as never,
+        description: tool.description,
+        execute: tool.execute as never,
+        inputSchema: tool.inputSchema,
+        name: tool.name,
+        outputSchema: tool.outputSchema,
+        toModelOutput: tool.toModelOutput,
+      }),
+    );
   }
 
   if (descriptor.skills !== undefined && descriptor.skills.length > 0) {
-    compileInput.skills = descriptor.skills.map((skill) => {
-      const entry: { name: string; description: string; markdown?: string } = {
-        name: skill.name,
-        description: skill.description,
-      };
+    (compileInput as { skills?: CompileFromMemoryInput["skills"] }).skills = descriptor.skills.map(
+      (skill) => {
+        const entry: { name: string; description: string; markdown?: string } = {
+          name: skill.name,
+          description: skill.description,
+        };
 
-      if (skill.markdown !== undefined) {
-        entry.markdown = skill.markdown;
-      }
+        if (skill.markdown !== undefined) {
+          entry.markdown = skill.markdown;
+        }
 
-      return entry;
-    });
+        return entry;
+      },
+    );
   }
 
-  const { manifest, moduleMap } = compileFromMemory(compileInput);
+  const { manifest, moduleMap } = await compileFromMemory(compileInput);
   const session = createRuntimeSession(descriptor.agent?.name ?? DEFAULT_AGENT_NAME);
   const tools = descriptor.tools ?? [];
   const skills = descriptor.skills ?? [];
@@ -222,18 +210,27 @@ export function createTestRuntime(descriptor: TestAppDescriptor = {}): TestRunti
     session.bundleCacheKeyBySourceKey.clear();
   }
 
-  async function executeTool(tool: ResolvedToolDefinition, input: unknown): Promise<unknown> {
-    const registry = await createRuntimeToolRegistry({ tools: [tool] });
-    const registered = registry.toolsByName.get(tool.name);
+  async function executeTool(
+    tool: ResolvedToolDefinition | string,
+    input: unknown,
+  ): Promise<unknown> {
+    // Resolves the installed tool from the compiled runtime bundle — never
+    // from a caller-owned definition — so tests execute the exact selected
+    // source the runtime would.
+    const toolName = typeof tool === "string" ? tool : tool.name;
+    const compiled = manifest.tools.find((entry) => entry.name === toolName);
 
-    if (registered === undefined) {
-      throw new Error(`Tool "${tool.name}" is not registered.`);
+    if (compiled === undefined) {
+      throw new Error(`Tool "${toolName}" is not registered.`);
     }
 
-    const execute = registered.definition.execute;
+    const resolved = await resolveToolDefinition(compiled, moduleMap, undefined, {
+      owner: manifest.bindings[compiled.sourceId]?.owner,
+    });
+    const execute = resolved.execute;
 
     if (execute === undefined) {
-      throw new Error(`Tool "${tool.name}" is not executable.`);
+      throw new Error(`Tool "${toolName}" is not executable.`);
     }
 
     return await execute(input, { messages: [], toolCallId: "call_test" });

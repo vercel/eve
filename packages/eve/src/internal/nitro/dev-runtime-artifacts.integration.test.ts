@@ -16,6 +16,11 @@ import { describe, expect, it } from "vitest";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { createCompiledAgentManifest, ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
+import {
+  EMPTY_CHANNEL_ROUTE_PLAN,
+  EMPTY_SOURCE_COMPOSITION,
+  testCompiledSandbox,
+} from "#internal/testing/compiled-node-fixtures.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -100,10 +105,34 @@ async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoo
     join(appRoot, "src", "features", "editor", "eve", "auth-session.ts"),
     'export const authSessionAuth = "session-auth";\n',
   );
+  await writeFile(join(agentRoot, "sandbox.ts"), "export default {};\n");
 
   const manifest = createCompiledAgentManifest({
     agentRoot,
     appRoot,
+    bindings: {
+      "agent.ts": {
+        backing: {
+          externalDependencies: [],
+          kind: "filesystem",
+          sourcePath: join(agentRoot, "agent.ts"),
+        },
+        logicalPath: "agent.ts",
+        owner: { kind: "application" },
+      },
+      "sandbox.ts": {
+        backing: {
+          externalDependencies: [],
+          kind: "filesystem",
+          sourcePath: join(agentRoot, "sandbox.ts"),
+        },
+        logicalPath: "sandbox.ts",
+        owner: { kind: "application" },
+      },
+    },
+    channelRoutes: EMPTY_CHANNEL_ROUTE_PLAN,
+    sandbox: testCompiledSandbox({ logicalPath: "sandbox.ts", sourceId: "sandbox.ts" }),
+    sourceComposition: EMPTY_SOURCE_COMPOSITION,
     config: {
       model: {
         id: "openai/gpt-5.4-mini",
@@ -124,6 +153,7 @@ async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoo
         content: "Use the routed model.",
         logicalPath: "instructions.md",
         name: "instructions",
+        owner: { kind: "application" },
         role: "system",
         sourceId: "instructions.md",
         sourceKind: "markdown",

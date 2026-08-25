@@ -1,86 +1,386 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { z } from "#compiled/zod/index.js";
-import type { AgentSourceManifest } from "#discover/manifest.js";
 import {
   createAgentSourceManifest,
   createLocalSubagentSourceRef,
   createModuleSourceRef,
+  type AgentSourceManifest,
 } from "#discover/manifest.js";
-import { classifyModelRouting } from "#internal/classify-model-routing.js";
-import type { CompiledAgentDefinition } from "#compiler/manifest.js";
+import {
+  createAgentSourceRegistry,
+  defineProgrammaticAgentSource,
+  type AgentSourceRegistry,
+  type ProgrammaticAgentModule,
+} from "#compiler/source-graph.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
-import { collectModuleRefsForManifest } from "#compiler/module-map.js";
-import { defineAgent, defineDynamic } from "#public/definitions/agent.js";
-import { defineInstructions } from "#public/definitions/instructions.js";
-import { defineTool, experimental_workflow } from "#public/definitions/tool.js";
-import { webSearch } from "#public/tools/web-search.js";
+import { testModelCatalogLoader } from "#internal/testing/compiled-node-fixtures.js";
+import { defineAgent } from "#public/definitions/agent.js";
+import { defineChannel, POST } from "#public/definitions/channel.js";
+import { defineTool, disableTool, experimental_workflow } from "#public/definitions/tool.js";
+import { webSearch, WEB_SEARCH_TOOL_DESCRIPTION } from "#public/tools/web-search.js";
 
 const mocks = vi.hoisted(() => ({
-  compileAgentConfig: vi.fn(),
-  loadModuleBackedDefinition: vi.fn(),
+  loadComposedModuleDefinition: vi.fn(),
 }));
 
-vi.mock("#compiler/normalize-agent-config.js", () => ({
-  compileAgentConfig: mocks.compileAgentConfig,
+vi.mock("#compiler/normalize-helpers.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#compiler/normalize-helpers.js")>()),
+  loadComposedModuleDefinition: mocks.loadComposedModuleDefinition,
 }));
 
-vi.mock("#compiler/normalize-helpers.js", () => ({
-  loadModuleBackedDefinition: mocks.loadModuleBackedDefinition,
-}));
+const actualHelpers = await vi.importActual<typeof import("#compiler/normalize-helpers.js")>(
+  "#compiler/normalize-helpers.js",
+);
+
+type LoadInput = Parameters<(typeof actualHelpers)["loadComposedModuleDefinition"]>[0];
+
+/**
+ * Routes filesystem-backed loads (subagent configs discovered on disk) to
+ * the provided definition while programmatic sources — framework defaults
+ * and in-memory application sources — load through the real registry path.
+ */
+function loadFilesystemBackingsAs(definition: unknown): void {
+  mocks.loadComposedModuleDefinition.mockImplementation(async (input: LoadInput) => {
+    if (input.backing?.kind === "programmatic") {
+      return await actualHelpers.loadComposedModuleDefinition(input);
+    }
+    return definition;
+  });
+}
+
+function createApplicationRegistry(
+  modules: readonly ProgrammaticAgentModule[],
+): AgentSourceRegistry {
+  return createAgentSourceRegistry(
+    [
+      {
+        applyTo: "root",
+        source: defineProgrammaticAgentSource({ id: "test-app", modules, revision: "r1" }),
+      },
+    ],
+    { allowFrameworkSlots: true },
+  );
+}
+
+function createRootManifest(
+  overrides: Partial<Parameters<typeof createAgentSourceManifest>[0]> = {},
+): AgentSourceManifest {
+  return createAgentSourceManifest({
+    agentId: "root",
+    agentRoot: "/app/agent",
+    appRoot: "/app",
+    ...overrides,
+  });
+}
+
+async function compile(
+  manifest: AgentSourceManifest,
+  options: { applicationRegistry?: AgentSourceRegistry } = {},
+) {
+  return await compileAgentManifest(manifest, {
+    modelCatalog: testModelCatalogLoader(),
+    ...options,
+  });
+}
 
 describe("compileAgentManifest", () => {
   beforeEach(() => {
-    mocks.compileAgentConfig.mockReset();
-    mocks.loadModuleBackedDefinition.mockReset();
+    mocks.loadComposedModuleDefinition.mockReset();
+    mocks.loadComposedModuleDefinition.mockImplementation(
+      actualHelpers.loadComposedModuleDefinition,
+    );
   });
 
-  it("rejects Workflow runtime configuration on subagents", async () => {
-    const subagentManifest = createAgentSourceManifest({
-      agentId: "research",
-      agentRoot: "/app/agent/subagents/research",
-      appRoot: "/app",
-      configModule: createModuleSourceRef({
-        logicalPath: "agent.ts",
+  it("compiles framework defaults with framework-owned bindings into an empty root node", async () => {
+    const compiled = await compile(createRootManifest());
+
+    expect(compiled.tools.map((tool) => tool.name).sort()).toEqual([
+      "agent",
+      "ask_question",
+      "bash",
+      "load_skill",
+      "read_file",
+      "task_cancel",
+      "task_update",
+      "todo",
+      "web_fetch",
+      "web_search",
+      "write_file",
+    ]);
+    expect(compiled.dynamicTools).toEqual([
+      expect.objectContaining({
+        slug: "connection_search",
+        sourceId: "eve:tools/connection_search.ts",
       }),
+    ]);
+    expect(compiled.sandbox.sourceId).toBe("eve:sandbox.ts");
+    expect(compiled.config.model?.id).toBe("zai/glm-5.2");
+    expect(compiled.config.source?.sourceId).toBe("eve:agent.ts");
+    expect(compiled.bindings["eve:tools/bash.ts"]).toMatchObject({
+      backing: { kind: "programmatic", moduleId: "tools/bash.ts", registryId: "eve" },
+      logicalPath: "tools/bash.ts",
+      owner: { feature: "tools/bash", kind: "framework" },
     });
-    const manifest = createAgentSourceManifest({
-      agentId: "root",
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      subagents: [
-        createLocalSubagentSourceRef({
-          entryPath: "subagents/research/agent.ts",
-          logicalPath: "subagents/research",
-          manifest: subagentManifest,
-          rootPath: "/app/agent/subagents/research",
-          subagentId: "research",
+    expect(compiled.bindings["eve-root:tools/agent.ts"]).toMatchObject({
+      owner: { kind: "framework" },
+    });
+    expect(compiled.sourceComposition).toEqual({ disabled: [], shadowed: [] });
+  });
+
+  it("plans channel routes from the framework eve and home channels plus authored channels", async () => {
+    const applicationRegistry = createApplicationRegistry([
+      {
+        logicalPath: "channels/support.ts",
+        loadNamespace: async () => ({
+          default: defineChannel({
+            routes: [POST("/support", async () => new Response("ok"))],
+          }),
         }),
-      ],
-    });
+      },
+    ]);
 
-    mocks.compileAgentConfig.mockImplementation(async (input: AgentSourceManifest) => {
-      if (input.agentId === "research") {
-        return createConfig({
-          description: "Research subagent",
-          name: "research",
-          experimental: {
-            workflow: {
-              world: "@workflow/world-postgres",
-            },
-          },
-        });
-      }
+    const compiled = await compile(createRootManifest(), { applicationRegistry });
 
-      return createConfig({ name: "root" });
-    });
-    mocks.loadModuleBackedDefinition.mockResolvedValue({
-      description: "Research subagent",
-      model: "openai/gpt-5.5",
-    });
+    expect(compiled.channelRoutes.effective).toContainEqual(
+      expect.objectContaining({
+        method: "GET",
+        sourceId: "eve-root:channels/home.ts",
+        urlPath: "/",
+      }),
+    );
+    expect(compiled.channelRoutes.effective).toContainEqual(
+      expect.objectContaining({
+        method: "HEAD",
+        sourceId: "eve-root:channels/home.ts",
+        urlPath: "/",
+      }),
+    );
+    expect(compiled.channelRoutes.effective).toContainEqual(
+      expect.objectContaining({
+        method: "POST",
+        sourceId: "eve-root:channels/eve.ts",
+        urlPath: "/eve/v1/session",
+      }),
+    );
+    expect(compiled.channelRoutes.effective).toContainEqual(
+      expect.objectContaining({
+        method: "GET",
+        sourceId: "eve-root:channels/eve.ts",
+        urlPath: "/eve/v1/health",
+      }),
+    );
+    expect(compiled.channelRoutes.effective).toContainEqual(
+      expect.objectContaining({
+        method: "POST",
+        name: "support",
+        sourceId: "test-app:channels/support.ts",
+        urlPath: "/support",
+      }),
+    );
+    expect(compiled.channelRoutes.preflight).toEqual([]);
+    expect(compiled.channelRoutes.shadowed).toEqual([]);
+  });
 
-    await expect(compileAgentManifest(manifest)).rejects.toThrow(
-      'Remove "experimental.workflow" from "research"',
+  it("replaces a framework tool with an authored tool and records the shadowed loser", async () => {
+    const applicationRegistry = createApplicationRegistry([
+      {
+        logicalPath: "tools/bash.ts",
+        loadNamespace: async () => ({
+          default: defineTool({
+            description: "Custom bash.",
+            inputSchema: z.object({}),
+            execute: () => ({ ok: true }),
+          }),
+        }),
+      },
+    ]);
+
+    const compiled = await compile(createRootManifest(), { applicationRegistry });
+
+    const bashTools = compiled.tools.filter((tool) => tool.name === "bash");
+    expect(bashTools).toEqual([
+      expect.objectContaining({
+        description: "Custom bash.",
+        logicalPath: "tools/bash.ts",
+        sourceId: "test-app:tools/bash.ts",
+      }),
+    ]);
+    expect(compiled.sourceComposition.shadowed).toContainEqual({
+      loser: expect.objectContaining({
+        layer: "framework-default",
+        owner: { feature: "tools/bash", kind: "framework" },
+        sourceId: "eve:tools/bash.ts",
+      }),
+      slot: "tools/bash",
+      winningSourceId: "test-app:tools/bash.ts",
+    });
+    expect(compiled.bindings["test-app:tools/bash.ts"]).toMatchObject({
+      owner: { kind: "application" },
+    });
+    expect(compiled.bindings["eve:tools/bash.ts"]).toBeUndefined();
+  });
+
+  it("removes a framework tool through disableTool() and records the disabled slot", async () => {
+    const applicationRegistry = createApplicationRegistry([
+      {
+        logicalPath: "tools/web_fetch.ts",
+        loadNamespace: async () => ({ default: disableTool() }),
+      },
+    ]);
+
+    const compiled = await compile(createRootManifest(), { applicationRegistry });
+
+    expect(compiled.tools.map((tool) => tool.name)).not.toContain("web_fetch");
+    expect(compiled.sourceComposition.disabled).toEqual([
+      {
+        disabledBy: expect.objectContaining({
+          layer: "application",
+          sourceId: "test-app:tools/web_fetch.ts",
+        }),
+        slot: "tools/web_fetch",
+      },
+    ]);
+    expect(compiled.sourceComposition.shadowed).toContainEqual(
+      expect.objectContaining({
+        slot: "tools/web_fetch",
+        winningSourceId: "test-app:tools/web_fetch.ts",
+      }),
+    );
+    expect(compiled.bindings["test-app:tools/web_fetch.ts"]).toBeUndefined();
+    expect(compiled.bindings["eve:tools/web_fetch.ts"]).toBeUndefined();
+  });
+
+  it("rejects a disable sentinel whose slot has no lower-precedence candidate", async () => {
+    const applicationRegistry = createApplicationRegistry([
+      {
+        logicalPath: "tools/custom_only.ts",
+        loadNamespace: async () => ({ default: disableTool() }),
+      },
+    ]);
+
+    await expect(compile(createRootManifest(), { applicationRegistry })).rejects.toThrow(
+      '"tools/custom_only.ts" disables "tools/custom_only", but no lower-precedence source provides it.',
+    );
+  });
+
+  it("compiles the experimental Workflow sentinel into workflowTool without a tool row", async () => {
+    const applicationRegistry = createApplicationRegistry([
+      {
+        logicalPath: "tools/workflow.ts",
+        loadNamespace: async () => ({ default: experimental_workflow({ maxSubagents: 6 }) }),
+      },
+    ]);
+
+    const compiled = await compile(createRootManifest(), { applicationRegistry });
+
+    expect(compiled.workflowTool).toEqual({ maxSubagents: 6 });
+    expect(compiled.tools.map((tool) => tool.name)).not.toContain("workflow");
+    expect(compiled.bindings["test-app:tools/workflow.ts"]).toBeUndefined();
+  });
+
+  it("compiles webSearch() into an execute-less web_search row plus the selected provider", async () => {
+    const applicationRegistry = createApplicationRegistry([
+      {
+        logicalPath: "tools/web_search.ts",
+        loadNamespace: async () => ({ default: webSearch({ provider: "exa" }) }),
+      },
+    ]);
+
+    const compiled = await compile(createRootManifest(), { applicationRegistry });
+
+    expect(compiled.webSearchProvider).toBe("exa");
+    expect(compiled.tools.filter((tool) => tool.name === "web_search")).toEqual([
+      expect.objectContaining({
+        description: WEB_SEARCH_TOOL_DESCRIPTION,
+        inputSchema: null,
+        sourceId: "test-app:tools/web_search.ts",
+      }),
+    ]);
+    expect(compiled.sourceComposition.shadowed).toContainEqual(
+      expect.objectContaining({
+        slot: "tools/web_search",
+        winningSourceId: "test-app:tools/web_search.ts",
+      }),
+    );
+  });
+
+  it("leaves the provider unset when only the framework web_search default composes", async () => {
+    const compiled = await compile(createRootManifest());
+
+    expect(compiled.webSearchProvider).toBeUndefined();
+    expect(compiled.tools.filter((tool) => tool.name === "web_search")).toEqual([
+      expect.objectContaining({ inputSchema: null, sourceId: "eve:tools/web_search.ts" }),
+    ]);
+  });
+
+  it("requires experimental.tasks for background tools", async () => {
+    const backgroundTool: ProgrammaticAgentModule = {
+      logicalPath: "tools/export.ts",
+      loadNamespace: async () => ({
+        default: defineTool({
+          description: "Starts an export.",
+          execution: "background",
+          inputSchema: z.object({}),
+          execute: () => ({ ok: true }),
+        }),
+      }),
+    };
+
+    await expect(
+      compile(createRootManifest(), {
+        applicationRegistry: createApplicationRegistry([backgroundTool]),
+      }),
+    ).rejects.toThrow(
+      'Background tool "export" requires experimental.tasks: true in the root agent config.',
+    );
+
+    const withTasks = await compile(createRootManifest(), {
+      applicationRegistry: createApplicationRegistry([
+        backgroundTool,
+        {
+          logicalPath: "agent.ts",
+          loadNamespace: async () => ({
+            default: defineAgent({ model: "openai/gpt-5.5", experimental: { tasks: true } }),
+          }),
+        },
+      ]),
+    });
+    expect(withTasks.tools).toContainEqual(
+      expect.objectContaining({ execution: "background", name: "export" }),
+    );
+    expect(withTasks.config.source?.sourceId).toBe("test-app:agent.ts");
+    expect(withTasks.sourceComposition.shadowed).toContainEqual(
+      expect.objectContaining({ slot: "agent", winningSourceId: "test-app:agent.ts" }),
+    );
+  });
+
+  it("rejects two sources that compile to the same public tool name", async () => {
+    const applicationRegistry = createApplicationRegistry([
+      {
+        logicalPath: "tools/billing/refund.ts",
+        loadNamespace: async () => ({
+          default: defineTool({
+            description: "Refund a charge.",
+            inputSchema: z.object({}),
+            execute: () => ({ ok: true }),
+          }),
+        }),
+      },
+      {
+        logicalPath: "tools/billing-refund.ts",
+        loadNamespace: async () => ({
+          default: defineTool({
+            description: "Refund a charge.",
+            inputSchema: z.object({}),
+            execute: () => ({ ok: true }),
+          }),
+        }),
+      },
+    ]);
+
+    await expect(compile(createRootManifest(), { applicationRegistry })).rejects.toThrow(
+      'Agent "root" compiled more than one tool named "billing-refund".',
     );
   });
 
@@ -90,10 +390,7 @@ describe("compileAgentManifest", () => {
       agentRoot: "/packages/research/dist/extension",
       appRoot: "/packages/research",
     });
-    const manifest = createAgentSourceManifest({
-      agentId: "root",
-      agentRoot: "/app/agent",
-      appRoot: "/app",
+    const manifest = createRootManifest({
       extensions: [createModuleSourceRef({ logicalPath: "extensions/research.ts" })],
       resolvedExtensions: [
         {
@@ -107,14 +404,19 @@ describe("compileAgentManifest", () => {
         },
       ],
     });
-    mocks.compileAgentConfig.mockResolvedValue(
-      createConfig({
-        name: "root",
-        build: { externalDependencies: ["agent-only", "shared"] },
-      }),
-    );
+    const applicationRegistry = createApplicationRegistry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({
+            model: "openai/gpt-5.5",
+            build: { externalDependencies: ["agent-only", "shared"] },
+          }),
+        }),
+      },
+    ]);
 
-    const compiled = await compileAgentManifest(manifest);
+    const compiled = await compile(manifest, { applicationRegistry });
 
     expect(compiled.config.build?.externalDependencies).toEqual([
       "agent-only",
@@ -125,406 +427,102 @@ describe("compileAgentManifest", () => {
       expect.objectContaining({
         namespace: "research",
         externalDependencies: ["extension-only", "shared"],
-      }),
-    ]);
-  });
-
-  it("retains extension mounts on the subagent that owns them", async () => {
-    const extensionManifest = createAgentSourceManifest({
-      agentId: "research-extension",
-      agentRoot: "/packages/research/dist/extension",
-      appRoot: "/packages/research",
-    });
-    const mountRef = createModuleSourceRef({ logicalPath: "extensions/research.ts" });
-    const subagentManifest = createAgentSourceManifest({
-      agentId: "researcher",
-      agentRoot: "/app/agent/subagents/researcher",
-      appRoot: "/app",
-      configModule: createModuleSourceRef({ logicalPath: "agent.ts" }),
-      extensions: [mountRef],
-      resolvedExtensions: [
-        {
-          namespace: "research",
-          specifier: "@acme/research",
-          packageName: "@acme/research",
-          packageRoot: "/packages/research",
-          sourceRoot: "/packages/research/dist/extension",
-          manifest: extensionManifest,
-          externalDependencies: [],
-        },
-      ],
-    });
-    const manifest = createAgentSourceManifest({
-      agentId: "root",
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      subagents: [
-        createLocalSubagentSourceRef({
-          entryPath: "subagents/researcher/agent.ts",
-          logicalPath: "subagents/researcher",
-          manifest: subagentManifest,
-          rootPath: "/app/agent/subagents/researcher",
-          subagentId: "researcher",
-        }),
-      ],
-    });
-    mocks.compileAgentConfig.mockImplementation(async (input: AgentSourceManifest) =>
-      input.agentId === "researcher"
-        ? createConfig({ name: input.agentId, description: "Research the request." })
-        : createConfig({ name: input.agentId }),
-    );
-    mocks.loadModuleBackedDefinition.mockResolvedValue({
-      description: "Research the request.",
-      model: "openai/gpt-5.5",
-    });
-
-    const compiled = await compileAgentManifest(manifest);
-
-    expect(compiled.extensionMounts).toEqual([]);
-    expect(compiled.subagents[0]?.agent.extensionMounts).toEqual([
-      expect.objectContaining({
-        namespace: "research",
         mountLogicalPath: "extensions/research.ts",
-        packageName: "@acme/research",
       }),
     ]);
-    expect(collectModuleRefsForManifest(compiled.subagents[0]!.agent)).toContainEqual({
-      sourceKind: "module",
-      logicalPath: "extensions/research.ts",
-      sourceId: "extensions/research.ts",
+    expect(compiled.bindings["extensions/research.ts"]).toMatchObject({
+      backing: { kind: "filesystem" },
+      owner: { kind: "application" },
     });
   });
 
-  it("rejects background-task configuration on subagents", async () => {
-    const subagentManifest = createAgentSourceManifest({
-      agentId: "research",
-      agentRoot: "/app/agent/subagents/research",
-      appRoot: "/app",
-      configModule: createModuleSourceRef({
-        logicalPath: "agent.ts",
-      }),
-    });
-    const manifest = createAgentSourceManifest({
-      agentId: "root",
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      subagents: [
-        createLocalSubagentSourceRef({
-          entryPath: "subagents/research/agent.ts",
-          logicalPath: "subagents/research",
-          manifest: subagentManifest,
-          rootPath: "/app/agent/subagents/research",
-          subagentId: "research",
-        }),
-      ],
-    });
+  describe("subagents", () => {
+    it("composes framework node defaults into subagents without root-only sources", async () => {
+      loadFilesystemBackingsAs(
+        defineAgent({ description: "Research the request.", model: "openai/gpt-5.5" }),
+      );
 
-    mocks.compileAgentConfig.mockImplementation(async (input: AgentSourceManifest) => {
-      if (input.agentId === "research") {
-        return createConfig({
-          description: "Research subagent",
-          name: "research",
-          experimental: {
-            tasks: true,
-          },
-        });
-      }
-
-      return createConfig({ name: "root" });
-    });
-    mocks.loadModuleBackedDefinition.mockResolvedValue({
-      description: "Research subagent",
-      model: "openai/gpt-5.5",
-    });
-
-    await expect(compileAgentManifest(manifest)).rejects.toThrow(
-      'Remove "experimental.tasks" from "research"',
-    );
-  });
-
-  it("requires experimental.tasks for background tools", async () => {
-    const manifest = createAgentSourceManifest({
-      agentId: "root",
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      tools: [createModuleSourceRef({ logicalPath: "tools/export.ts" })],
-    });
-    mocks.loadModuleBackedDefinition.mockResolvedValue(
-      defineTool({
-        description: "Starts an export.",
-        execution: "background",
-        inputSchema: z.object({}),
-        execute: () => ({ ok: true }),
-      }),
-    );
-    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
-
-    await expect(compileAgentManifest(manifest)).rejects.toThrow(
-      'Background tool "export" requires experimental.tasks: true in the root agent config.',
-    );
-
-    mocks.compileAgentConfig.mockResolvedValue(
-      createConfig({ experimental: { tasks: true }, name: "root" }),
-    );
-    await expect(compileAgentManifest(manifest)).resolves.toMatchObject({
-      tools: [expect.objectContaining({ execution: "background", name: "export" })],
-    });
-  });
-
-  it("compiles experimental Workflow tool configuration", async () => {
-    const manifest = createAgentSourceManifest({
-      agentId: "root",
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      tools: [createModuleSourceRef({ logicalPath: "tools/workflow.ts" })],
-    });
-    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
-    mocks.loadModuleBackedDefinition.mockResolvedValue(experimental_workflow({ maxSubagents: 6 }));
-
-    const compiled = await compileAgentManifest(manifest);
-
-    expect(compiled.workflowTool).toEqual({ maxSubagents: 6 });
-  });
-
-  it("compiles web search provider configuration", async () => {
-    const manifest = createAgentSourceManifest({
-      agentId: "root",
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      tools: [createModuleSourceRef({ logicalPath: "tools/web_search.ts" })],
-    });
-    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
-    mocks.loadModuleBackedDefinition.mockResolvedValue(webSearch({ provider: "exa" }));
-
-    const compiled = await compileAgentManifest(manifest);
-
-    expect(compiled.webSearchProvider).toBe("exa");
-    expect(compiled.tools).toEqual([]);
-  });
-
-  it("preserves ordered static instruction content, roles, and legacy definitions", async () => {
-    const manifest = createAgentSourceManifest({
-      agentId: "root",
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      instructions: [
-        createModuleSourceRef({ logicalPath: "instructions/10-user.ts" }),
-        createModuleSourceRef({ logicalPath: "instructions/20-legacy.ts" }),
-      ],
-    });
-    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
-    mocks.loadModuleBackedDefinition
-      .mockResolvedValueOnce(defineInstructions({ content: "Account context.", role: "user" }))
-      .mockResolvedValueOnce(defineInstructions({ markdown: "Legacy system context." }));
-
-    const compiled = await compileAgentManifest(manifest);
-
-    expect(compiled.instructions).toEqual([
-      expect.objectContaining({
-        content: "Account context.",
-        logicalPath: "instructions/10-user.ts",
-        role: "user",
-      }),
-      expect.objectContaining({
-        content: "Legacy system context.",
-        logicalPath: "instructions/20-legacy.ts",
-        role: "system",
-      }),
-    ]);
-  });
-
-  it("rejects unsupported dynamic instruction event keys", async () => {
-    const manifest = createAgentSourceManifest({
-      agentId: "root",
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      instructions: [createModuleSourceRef({ logicalPath: "instructions/dynamic.ts" })],
-    });
-    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
-    mocks.loadModuleBackedDefinition.mockResolvedValue(
-      defineDynamic({
-        events: {
-          "step.started": () => defineInstructions({ content: "Too late." }),
-        },
-      }),
-    );
-
-    await expect(compileAgentManifest(manifest)).rejects.toThrow(
-      'Unsupported event: "step.started"',
-    );
-  });
-
-  it("requires web search configuration to use the web_search filename", async () => {
-    const manifest = createAgentSourceManifest({
-      agentId: "root",
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      tools: [createModuleSourceRef({ logicalPath: "tools/search.ts" })],
-    });
-    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
-    mocks.loadModuleBackedDefinition.mockResolvedValue(webSearch({ provider: "exa" }));
-
-    await expect(compileAgentManifest(manifest)).rejects.toThrow(
-      'must be exported from "tools/web_search.ts"',
-    );
-  });
-
-  it("compiles a dynamic subagent manifest without resolving an agent config", async () => {
-    const dynamic = defineDynamic({
-      events: {
-        "session.started": () =>
-          defineAgent({
-            description: "Research the request.",
-            model: "openai/gpt-5.5",
-          }),
-        "turn.started": () => null,
-      },
-    });
-    const manifest = createManifestWithSubagent();
-    mocks.compileAgentConfig.mockImplementation(async (input: AgentSourceManifest) =>
-      createConfig({ name: input.agentId }),
-    );
-    mocks.loadModuleBackedDefinition.mockResolvedValue(dynamic);
-
-    const compiled = await compileAgentManifest(manifest);
-
-    expect(compiled.subagents[0]?.configResolver).toMatchObject({
-      eventNames: ["session.started", "turn.started"],
-      logicalPath: "agent.ts",
-      sourceId: "agent.ts",
-      sourceKind: "module",
-    });
-    expect("config" in compiled.subagents[0]!.agent).toBe(false);
-    expect(compiled.subagents[0]?.description).toBeUndefined();
-    expect(mocks.compileAgentConfig).toHaveBeenCalledTimes(1);
-  });
-
-  it("applies dynamic subagent build configuration before resolving events", async () => {
-    const dynamic = defineDynamic({
-      build: { externalDependencies: ["just-bash"] },
-      events: {
-        "session.started": () =>
-          defineAgent({
-            description: "Edit the request.",
-            model: "openai/gpt-5.5",
-          }),
-      },
-    });
-    const manifest = createManifestWithSubagent();
-    mocks.compileAgentConfig.mockImplementation(async (input: AgentSourceManifest) =>
-      createConfig({ name: input.agentId }),
-    );
-    mocks.loadModuleBackedDefinition.mockResolvedValue(dynamic);
-
-    const compiled = await compileAgentManifest(manifest);
-
-    expect(compiled.subagents[0]?.configResolver).toMatchObject({
-      build: { externalDependencies: ["just-bash"] },
-      eventNames: ["session.started"],
-      logicalPath: "agent.ts",
-      sourceId: "agent.ts",
-      sourceKind: "module",
-    });
-    expect("config" in compiled.subagents[0]!.agent).toBe(false);
-    expect(mocks.compileAgentConfig).toHaveBeenCalledTimes(1);
-  });
-
-  it("rejects invalid dynamic subagent build configuration", async () => {
-    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
-    mocks.loadModuleBackedDefinition.mockResolvedValue({
-      build: { externalDependencies: "just-bash" },
-      events: { "session.started": () => null },
-      kind: "eve:dynamic",
-    });
-
-    await expect(compileAgentManifest(createManifestWithSubagent())).rejects.toThrow(
-      "Expected the dynamic subagent config export",
-    );
-  });
-
-  it("rejects fallback on a dynamic subagent", async () => {
-    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
-    mocks.loadModuleBackedDefinition.mockResolvedValue({
-      ...defineDynamic({
-        events: {
-          "session.started": () => null,
-        },
-      }),
-      fallback: defineAgent({
-        description: "Research the request.",
-        model: "openai/gpt-5.5",
-      }),
-    });
-
-    await expect(compileAgentManifest(createManifestWithSubagent())).rejects.toThrow(
-      'Unknown key "fallback"',
-    );
-  });
-
-  it("rejects step-scoped dynamic subagents", async () => {
-    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
-    mocks.loadModuleBackedDefinition.mockResolvedValue(
-      defineDynamic({
-        events: {
-          "step.started": () =>
-            defineAgent({
-              description: "Research the request.",
-              model: "openai/gpt-5.5",
+      const compiled = await compile(createManifestWithSubagent(), {
+        applicationRegistry: createApplicationRegistry([
+          {
+            logicalPath: "tools/root_only.ts",
+            loadNamespace: async () => ({
+              default: defineTool({
+                description: "Root tool.",
+                inputSchema: z.object({}),
+                execute: () => ({ ok: true }),
+              }),
             }),
-        },
-      }),
-    );
+          },
+        ]),
+      });
 
-    await expect(compileAgentManifest(createManifestWithSubagent())).rejects.toThrow(
-      'Dynamic subagents support only "session.started" and "turn.started" handlers',
-    );
+      expect(compiled.subagents).toHaveLength(1);
+      const child = compiled.subagents[0]!;
+      expect(child.description).toBe("Research the request.");
+      const childToolNames = child.agent.tools.map((tool) => tool.name).sort();
+      expect(childToolNames).toEqual([
+        "ask_question",
+        "bash",
+        "load_skill",
+        "read_file",
+        "todo",
+        "web_fetch",
+        "web_search",
+        "write_file",
+      ]);
+      expect(childToolNames).not.toContain("root_only");
+      expect(child.agent.channels).toEqual([]);
+      expect(child.agent.sandbox.sourceId).toBe("eve:sandbox.ts");
+      expect(compiled.tools.map((tool) => tool.name)).toContain("root_only");
+    });
+
+    it("rejects Workflow runtime configuration on subagents", async () => {
+      loadFilesystemBackingsAs(
+        defineAgent({
+          description: "Research subagent",
+          model: "openai/gpt-5.5",
+          experimental: { workflow: { world: "@workflow/world-postgres" } },
+        }),
+      );
+
+      await expect(compile(createManifestWithSubagent())).rejects.toThrow(
+        'Remove "experimental.workflow" from "research"',
+      );
+    });
+
+    it("rejects background-task configuration on subagents", async () => {
+      loadFilesystemBackingsAs(
+        defineAgent({
+          description: "Research subagent",
+          model: "openai/gpt-5.5",
+          experimental: { tasks: true },
+        }),
+      );
+
+      await expect(compile(createManifestWithSubagent())).rejects.toThrow(
+        'Remove "experimental.tasks" from "research"',
+      );
+    });
   });
 });
 
 function createManifestWithSubagent(): AgentSourceManifest {
   const subagentManifest = createAgentSourceManifest({
-    agentId: "researcher",
-    agentRoot: "/app/agent/subagents/researcher",
+    agentId: "research",
+    agentRoot: "/app/agent/subagents/research",
     appRoot: "/app",
     configModule: createModuleSourceRef({ logicalPath: "agent.ts" }),
   });
-  return createAgentSourceManifest({
-    agentId: "root",
-    agentRoot: "/app/agent",
-    appRoot: "/app",
+  return createRootManifest({
     subagents: [
       createLocalSubagentSourceRef({
-        entryPath: "subagents/researcher/agent.ts",
-        logicalPath: "subagents/researcher",
+        entryPath: "subagents/research/agent.ts",
+        logicalPath: "subagents/research",
         manifest: subagentManifest,
-        rootPath: "/app/agent/subagents/researcher",
-        subagentId: "researcher",
+        rootPath: "/app/agent/subagents/research",
+        subagentId: "research",
       }),
     ],
   });
-}
-
-function createConfig(
-  input: Pick<CompiledAgentDefinition, "name"> &
-    Partial<Pick<CompiledAgentDefinition, "build" | "description" | "experimental">>,
-): CompiledAgentDefinition {
-  const config: CompiledAgentDefinition = {
-    model: {
-      id: "openai/gpt-5.5",
-      routing: classifyModelRouting("openai/gpt-5.5"),
-    },
-    name: input.name,
-  };
-
-  if (input.description !== undefined) {
-    config.description = input.description;
-  }
-  if (input.build !== undefined) {
-    config.build = input.build;
-  }
-  if (input.experimental !== undefined) {
-    config.experimental = input.experimental;
-  }
-
-  return config;
 }

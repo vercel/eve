@@ -1,14 +1,22 @@
 import type { JsonObject } from "#shared/json.js";
-import { classifyModelRouting } from "#internal/classify-model-routing.js";
-import {
-  type CompiledAgentDefinition,
-  type CompiledAgentManifest,
-  type CompiledSkillDefinition,
-  type CompiledToolDefinition,
-  createCompiledAgentManifest,
-  ROOT_COMPILED_AGENT_NODE_ID,
-} from "#compiler/manifest.js";
+import { createAgentSourceManifest } from "#discover/manifest.js";
+import { defineAgent } from "#public/definitions/agent.js";
+import { markHarnessOwnedToolDefinition } from "#shared/harness-owned-tool.js";
+import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
+import { compileAgentManifest } from "#compiler/normalize-manifest.js";
+import { createProgrammaticCompiledModuleMap } from "#compiler/programmatic-module-map.js";
+import {
+  createAgentSourceRegistry,
+  defineProgrammaticAgentSource,
+  type AgentSourceRegistry,
+  type ProgrammaticAgentModule,
+} from "#compiler/source-graph.js";
+import type { CompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
+import { getFrameworkAgentSourceRegistry } from "#internal/agent-sources.js";
+import type { Approval } from "#public/definitions/approval.js";
+import type { ToolModelOutput } from "#shared/tool-definition.js";
+import type { ToolSchema } from "#shared/tool-schema.js";
 
 /**
  * Declarative description of an in-memory authored agent used by the test
@@ -36,11 +44,10 @@ export interface CompileFromMemoryInput {
   };
   readonly outputSchema?: JsonObject;
   /**
-   * Authored tools to project into the compiled manifest and module map.
-   *
-   * Each entry corresponds to a single module-backed tool. The harness does
-   * not load the tool module from disk — its runtime behaviour is injected
-   * separately via the AppHarness `mockTool` API.
+   * Authored tools registered as programmatic application sources at
+   * `tools/<name>.ts`. The lazy namespace loaders return the exact
+   * definition values, so executors, approvals, and projections keep their
+   * live closures through the ordinary compile-and-resolve pipeline.
    */
   readonly tools?: readonly CompileFromMemoryToolInput[];
   /**
@@ -53,17 +60,18 @@ export interface CompileFromMemoryInput {
  * Per-tool descriptor entry consumed by {@link compileFromMemory}.
  */
 export interface CompileFromMemoryToolInput {
-  /** Model-facing tool name; must match the slot name in the module map. */
+  /** Model-facing tool name; becomes the `tools/<name>.ts` slot. */
   readonly name: string;
   /** Human-readable description propagated to the compiled manifest. */
   readonly description?: string;
-  /**
-   * JSON-schema-like object describing the tool input. Passed through as-is
-   * (lowered to `null` when omitted).
-   */
-  readonly inputSchema?: JsonObject | null;
-  /** JSON-schema-like object describing the tool output. */
-  readonly outputSchema?: JsonObject;
+  /** Tool input schema (live validator or JSON schema object). */
+  readonly inputSchema?: ToolSchema | JsonObject | null;
+  /** Tool output schema. */
+  readonly outputSchema?: ToolSchema | JsonObject;
+  /** Live executor. Omit for a client-side tool. */
+  readonly execute?: (input: unknown, ctx: unknown, task?: unknown) => unknown;
+  readonly approval?: Approval<never>;
+  readonly toModelOutput?: (output: unknown) => ToolModelOutput | Promise<ToolModelOutput>;
 }
 
 /**
@@ -82,78 +90,137 @@ export interface CompileFromMemorySkillInput {
 export interface CompileFromMemoryResult {
   readonly manifest: CompiledAgentManifest;
   readonly moduleMap: CompiledModuleMap;
+  /** Combined framework + in-memory registry backing the module map. */
+  readonly registry: AgentSourceRegistry;
 }
 
+/** Source id under which in-memory application sources register. */
+export const MEMORY_APPLICATION_SOURCE_ID = "memory";
+
+let memoryGeneration = 0;
+
 /**
- * Builds a compiled manifest and matching module map directly from an
- * in-memory descriptor, bypassing discovery and bundling entirely.
+ * Compiles an in-memory descriptor through the ordinary composer and
+ * normalizers: each descriptor entry registers once as a programmatic
+ * application source, the framework defaults compose beneath them, and the
+ * module map resolves only the selected programmatic loaders.
  *
- * Intended for integration tests that want to exercise runtime behaviour
- * without the cost of real compilation. Production code must continue to
- * use {@link compileAgent}.
+ * The registry revision is a fresh opaque generation per call because
+ * closed-over callback state cannot be derived faithfully from function
+ * source text; reusing a source id after changing callbacks can therefore
+ * never hydrate stale executable code.
  */
-export function compileFromMemory(input: CompileFromMemoryInput): CompileFromMemoryResult {
+export async function compileFromMemory(
+  input: CompileFromMemoryInput,
+): Promise<CompileFromMemoryResult> {
   const appRoot = input.appRoot ?? "/virtual/eve-memory-app";
   const agentRoot = input.agentRoot ?? `${appRoot}/agent`;
   const agentName = input.name ?? "memory-agent";
 
-  const config: CompiledAgentDefinition = {
-    model: { id: input.model, routing: classifyModelRouting(input.model) },
-    name: agentName,
-  };
+  const agentConfig: {
+    limits?: CompileFromMemoryInput["limits"];
+    model: string;
+    outputSchema?: JsonObject;
+  } = { model: input.model };
   if (input.limits !== undefined) {
-    config.limits = input.limits;
+    agentConfig.limits = input.limits;
   }
   if (input.outputSchema !== undefined) {
-    config.outputSchema = input.outputSchema;
+    agentConfig.outputSchema = input.outputSchema;
   }
-
-  const tools: CompiledToolDefinition[] = (input.tools ?? []).map((toolInput) => ({
-    description: toolInput.description ?? `${toolInput.name} test tool.`,
-    inputSchema: toolInput.inputSchema ?? null,
-    logicalPath: `tools/${toolInput.name}.ts`,
-    name: toolInput.name,
-    outputSchema: toolInput.outputSchema,
-    sourceId: createMemorySourceId(`tools/${toolInput.name}.ts`),
-    sourceKind: "module",
-  }));
-
-  const skills: CompiledSkillDefinition[] = (input.skills ?? []).map((skillInput) => ({
-    description: skillInput.description,
-    logicalPath: `skills/${skillInput.name}.md`,
-    markdown: skillInput.markdown ?? `# ${skillInput.name}\n`,
-    name: skillInput.name,
-    sourceId: createMemorySourceId(`skills/${skillInput.name}.md`),
-    sourceKind: "markdown",
-  }));
-
-  const manifest = createCompiledAgentManifest({
-    agentRoot,
-    appRoot,
-    config,
-    skills,
-    tools,
-  });
-
-  const moduleMap: CompiledModuleMap = {
-    nodes: {
-      [ROOT_COMPILED_AGENT_NODE_ID]: {
-        modules: Object.fromEntries(
-          tools.map((tool) => [tool.sourceId, Object.freeze({}) as Record<string, unknown>]),
-        ),
-      },
+  const modules: ProgrammaticAgentModule[] = [
+    {
+      logicalPath: "agent.ts",
+      loadNamespace: async () => ({ default: defineAgent(agentConfig) }),
     },
-  };
+    ...(input.tools ?? []).map((tool): ProgrammaticAgentModule => ({
+      logicalPath: `tools/${tool.name}.ts`,
+      loadNamespace: async () => ({ default: createMemoryToolDefinition(tool) }),
+    })),
+  ];
+
+  const memorySource = defineProgrammaticAgentSource({
+    id: MEMORY_APPLICATION_SOURCE_ID,
+    modules,
+    revision: `memory-generation-${++memoryGeneration}`,
+  });
+  const applicationRegistry = createAgentSourceRegistry(
+    [{ applyTo: "root", source: memorySource }],
+    { allowFrameworkSlots: true },
+  );
+  const frameworkRegistry = getFrameworkAgentSourceRegistry();
+  const loaderRegistry = createAgentSourceRegistry(
+    [...frameworkRegistry.registrations, ...applicationRegistry.registrations],
+    { allowFrameworkSlots: true },
+  );
+
+  const manifest = await compileAgentManifest(
+    createAgentSourceManifest({
+      agentId: agentName,
+      agentRoot,
+      appRoot,
+      skills: (input.skills ?? []).map((skill) => ({
+        definition: {
+          description: skill.description,
+          markdown: skill.markdown ?? `# ${skill.name}\n`,
+        },
+        logicalPath: `skills/${skill.name}.md`,
+        sourceId: `skills/${skill.name}.md`,
+        sourceKind: "markdown" as const,
+      })),
+    }),
+    {
+      applicationRegistry,
+      modelCatalog: createMemoryModelCatalogLoader(),
+      registry: frameworkRegistry,
+    },
+  );
+  const moduleMap = await createProgrammaticCompiledModuleMap({
+    manifest,
+    registry: loaderRegistry,
+  });
 
   return {
     manifest,
     moduleMap,
+    registry: loaderRegistry,
   };
 }
 
-function createMemorySourceId(logicalPath: string): string {
-  // A deterministic, stable id per logical path. The runtime only requires
-  // these to be unique within the module map, so a prefix + the path is
-  // sufficient — no hashing needed.
-  return `memory::${logicalPath}`;
+function createMemoryToolDefinition(tool: CompileFromMemoryToolInput): Record<string, unknown> {
+  const definition: Record<string, unknown> = {
+    description: tool.description ?? `${tool.name} test tool.`,
+  };
+  if (tool.inputSchema !== undefined && tool.inputSchema !== null) {
+    definition.inputSchema = tool.inputSchema;
+  }
+  if (tool.outputSchema !== undefined) {
+    definition.outputSchema = tool.outputSchema;
+  }
+  if (tool.approval !== undefined) {
+    definition.approval = tool.approval;
+  }
+  if (tool.toModelOutput !== undefined) {
+    definition.toModelOutput = tool.toModelOutput;
+  }
+  if (tool.execute === undefined) {
+    return markHarnessOwnedToolDefinition(definition);
+  }
+  definition.execute = tool.execute;
+  return definition;
+}
+
+/**
+ * Hermetic model-limits loader for in-memory compilation: unit and
+ * integration tests never reach the network for AI Gateway metadata.
+ */
+function createMemoryModelCatalogLoader(): CompiledRuntimeModelCatalogLoader {
+  const limits = { contextWindowTokens: 200_000, maxOutputTokens: 64_000 };
+  return {
+    getByProviderModelId: async (provider, providerModelId) => ({
+      limits,
+      slug: `${provider}/${providerModelId}`,
+    }),
+    getModelLimits: async () => limits,
+  };
 }

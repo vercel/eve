@@ -4,6 +4,7 @@ import type { FrameworkContextProvider } from "#context/provider.js";
 import { connectionProvider } from "#context/providers/connection.js";
 import { sandboxProvider } from "#context/providers/sandbox.js";
 import { sessionProvider } from "#context/providers/session.js";
+import { skillCatalogProvider } from "#context/providers/skill-catalog.js";
 
 /**
  * Framework providers in dependency order.
@@ -14,6 +15,7 @@ import { sessionProvider } from "#context/providers/session.js";
 const frameworkProviders: readonly FrameworkContextProvider<any>[] = [
   sessionProvider,
   connectionProvider,
+  skillCatalogProvider,
   sandboxProvider,
 ];
 

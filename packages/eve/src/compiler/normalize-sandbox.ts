@@ -1,32 +1,24 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 
 import type { SandboxSourceRef } from "#discover/manifest.js";
 import { normalizeSandboxDefinition } from "#internal/authored-definition/sandbox.js";
 import type { CompiledSandboxDefinition } from "#compiler/manifest.js";
-import {
-  loadModuleBackedDefinition,
-  type ModuleBackedDefinitionLoadOptions,
-} from "#compiler/normalize-helpers.js";
+import type { AgentModuleBacking } from "#compiler/source-graph.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 /**
  * Compiles one authored sandbox module into the normalized sandbox
  * definition stored on the compiled agent manifest.
  */
-export async function compileSandboxDefinition(
-  agentRoot: string,
-  source: SandboxSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
-): Promise<CompiledSandboxDefinition> {
+export async function compileSandboxDefinition(input: {
+  readonly backing: AgentModuleBacking;
+  readonly exportValue: unknown;
+  readonly source: SandboxSourceRef;
+}): Promise<CompiledSandboxDefinition> {
+  const { source } = input;
+  const loaded = input.exportValue;
   const message = `Expected the sandbox export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`;
-  const loaded = await loadModuleBackedDefinition({
-    agentRoot,
-    externalDependencies: options.externalDependencies,
-    kind: "sandbox",
-    source,
-  });
   const inheritsParent = await resolveParentSandboxSelector(loaded, message);
   const normalized = normalizeSandboxDefinition(inheritsParent ? {} : loaded, message);
   const revalidationKey =
@@ -45,7 +37,7 @@ export async function compileSandboxDefinition(
     exportName: source.exportName,
     logicalPath: source.logicalPath,
     revalidationKey,
-    sourceHash: await resolveSandboxSourceHash(agentRoot, source),
+    sourceHash: await resolveSandboxSourceHash(input.backing),
     sourceId: source.sourceId,
     sourceKind: "module",
   };
@@ -126,10 +118,19 @@ async function resolveSandboxRevalidationKey(input: {
   return resolved;
 }
 
-async function resolveSandboxSourceHash(
-  agentRoot: string,
-  source: SandboxSourceRef,
-): Promise<string> {
-  const content = await readFile(join(agentRoot, source.logicalPath));
+/**
+ * Derives the selected sandbox's backing identity hash. Filesystem
+ * backings hash the exact module file; programmatic backings use the
+ * module's semantic revision (or the source revision) so unrelated
+ * framework releases do not discard durable sandbox state.
+ */
+async function resolveSandboxSourceHash(backing: AgentModuleBacking): Promise<string> {
+  if (backing.kind === "programmatic") {
+    const revision = backing.semanticRevision ?? backing.revision;
+    return createHash("sha256")
+      .update(`programmatic:${backing.registryId}:${backing.moduleId}:${revision}`)
+      .digest("hex");
+  }
+  const content = await readFile(backing.sourcePath);
   return createHash("sha256").update(content).digest("hex");
 }

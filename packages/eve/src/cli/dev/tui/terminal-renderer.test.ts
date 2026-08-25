@@ -89,23 +89,21 @@ function agentInfoWithModel(
     agent: {
       agentRoot: "/tmp/weather-agent/agent",
       appRoot: "/tmp/weather-agent",
+      config: { source: { logicalPath: "agent.ts", owner: "application", sourceId: "agent.ts" } },
       model: {
         id: modelId,
         endpoint,
-        routing: { kind: "gateway" as const, target: modelId.split("/")[0] ?? "openai" },
+        routing: { kind: "static" as const },
         ...extras,
       },
       name: "Weather Agent",
+      nodeId: "__root__",
     },
     capabilities: {
       devRoutes: true,
     },
-    channels: {
-      authored: [],
-      available: [],
-      disabledFramework: [],
-      framework: [],
-    },
+    channels: { routes: [], shadowed: [], total: 0 },
+    composition: { disabled: [], shadowed: [] },
     connections: [],
     diagnostics: {
       discoveryErrors: 0,
@@ -113,38 +111,29 @@ function agentInfoWithModel(
     },
     hooks: [],
     instructions: {
-      dynamic: [],
-      static: [],
+      dynamicResolvers: [],
+      entries: [],
     },
+    kernel: { prepared: [] },
     kind: "eve-agent-info",
     mode: "development",
-    sandbox: null,
+    remoteAgents: { entries: [], total: 0 },
+    sandbox: { source: { logicalPath: "sandbox.ts", owner: "framework", sourceId: "sandbox.ts" } },
     schedules: [],
     skills: {
-      dynamic: [],
-      static: [],
+      dynamicResolvers: [],
+      entries: [],
     },
     subagents: {
       local: [],
       total: 0,
     },
     tools: {
-      authored: [],
-      available: [],
-      disabledFramework: [],
-      dynamic: [],
-      framework: [],
-      reserved: [],
+      dynamicResolvers: [],
+      entries: [],
     },
-    version: 2,
-    workflow: {
-      enabled: false,
-      toolName: "Workflow",
-    },
-    workspace: {
-      resourceRoot: null,
-      rootEntries: [],
-    },
+    version: 3,
+    workspace: { rootEntries: [] },
   };
 }
 

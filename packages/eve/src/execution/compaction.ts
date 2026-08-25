@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 
 import { clearReadFileState } from "#runtime/framework-tools/file-state.js";
-import { getTodoCompactionMessage } from "#runtime/framework-tools/todo.js";
+import { getTodoCompactionMessage } from "#public/tools/todo.js";
 
 /**
  * Re-applies framework-owned state preservation after the harness compacts

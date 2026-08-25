@@ -160,7 +160,9 @@ function reportDiscoverWarnings(diagnostics: readonly DiscoverDiagnostic[]): voi
   }
 
   for (const warning of warnings) {
-    console.warn(`Warning [${warning.code}]: ${warning.message}\n  source: ${warning.sourcePath}`);
+    console.warn(
+      `Warning [${warning.code}]: ${warning.message}\n  source: ${formatDiagnosticSource(warning)}`,
+    );
   }
 }
 
@@ -178,10 +180,14 @@ function formatCompileAgentErrorLines(diagnostics: readonly DiscoverDiagnostic[]
 
   for (const diagnostic of diagnostics) {
     lines.push(`- ${formatDiagnosticSeverity(diagnostic.severity)}: ${diagnostic.message}`);
-    lines.push(`  source: ${diagnostic.sourcePath}`);
+    lines.push(`  source: ${formatDiagnosticSource(diagnostic)}`);
   }
 
   return lines;
+}
+
+function formatDiagnosticSource(diagnostic: DiscoverDiagnostic): string {
+  return diagnostic.sourcePath ?? diagnostic.logicalPath ?? diagnostic.sourceId ?? "(unknown)";
 }
 
 function formatDiagnosticSeverity(severity: DiscoverDiagnostic["severity"]): string {

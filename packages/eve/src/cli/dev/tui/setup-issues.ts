@@ -39,10 +39,7 @@ type ModelProviderAccess =
   | { kind: "external" }
   | {
       kind: "gateway";
-      runtime:
-        | { status: "connected"; credential: "api-key" | "oidc" }
-        | { status: "disconnected" }
-        | { status: "unknown" };
+      runtime: { status: "connected"; credential: "api-key" | "oidc" } | { status: "disconnected" };
     };
 
 /**
@@ -62,29 +59,23 @@ export function normalizeLocalModelEndpoint(
   const { credential } = access.runtime;
 
   const model = info.agent.model;
-  if (model.id === undefined || model.routing.kind !== "gateway") return info;
+  if (model.id === undefined || model.endpoint?.kind !== "gateway") return info;
   const endpoint = model.endpoint;
-  if (endpoint?.kind === "gateway" && endpoint.connected && endpoint.credential === credential) {
+  if (endpoint.connected && endpoint.credential === credential) {
     return info;
   }
-  const connectedEndpoint = {
-    connected: true as const,
-    credential,
-    kind: "gateway" as const,
-  };
 
   return {
     ...info,
     agent: {
       ...info.agent,
       model: {
-        contextWindowTokens: model.contextWindowTokens,
-        endpoint: connectedEndpoint,
-        id: model.id,
-        providerOptions: model.providerOptions,
-        reasoning: model.reasoning,
-        routing: model.routing,
-        source: model.source,
+        ...model,
+        endpoint: {
+          connected: true as const,
+          credential,
+          kind: "gateway" as const,
+        },
       },
     },
   };
@@ -95,10 +86,13 @@ function modelProviderAccess(
   context: Pick<BootDetectionContext, "env" | "info">,
 ): ModelProviderAccess {
   const model = context.info?.agent.model;
-  if (model?.routing?.kind === "external") return { kind: "external" };
-  if (model?.routing?.kind !== "gateway") return { kind: "unknown" };
+  const endpoint = model?.id === undefined ? undefined : model.endpoint;
+  // ChatGPT-backed models reach the model with their own credential, so
+  // gateway linking and credentials don't apply — same as external providers.
+  if (endpoint?.kind === "external" || endpoint?.kind === "chatgpt") return { kind: "external" };
+  if (endpoint?.kind !== "gateway") return { kind: "unknown" };
 
-  // The compiled routing decides whether gateway credentials apply. Local
+  // The compiled endpoint decides whether gateway credentials apply. Local
   // ranking delegates to the one precedence authority; the server-reported
   // endpoint snapshot slots between a freshly loaded key (which outranks a
   // stale snapshot) and a local OIDC token (which the snapshot outranks).
@@ -109,8 +103,7 @@ function modelProviderAccess(
   if (local?.credential === "api-key") {
     return { kind: "gateway", runtime: { status: "connected", credential: "api-key" } };
   }
-  const endpoint = model.endpoint;
-  if (endpoint?.kind === "gateway" && endpoint.connected) {
+  if (endpoint.connected) {
     return {
       kind: "gateway",
       runtime: { status: "connected", credential: endpoint.credential },
@@ -119,8 +112,7 @@ function modelProviderAccess(
   if (local !== undefined) {
     return { kind: "gateway", runtime: { status: "connected", credential: local.credential } };
   }
-  if (endpoint?.kind === "gateway") return { kind: "gateway", runtime: { status: "disconnected" } };
-  return { kind: "gateway", runtime: { status: "unknown" } };
+  return { kind: "gateway", runtime: { status: "disconnected" } };
 }
 
 /**

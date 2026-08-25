@@ -145,7 +145,7 @@ async function completeStreamedTurn(server: RunningEveDev, message: string): Pro
 async function waitForToolMarker(serverUrl: string, marker: string): Promise<void> {
   await waitForCondition(async () => {
     const info = await fetchAgentInfo(serverUrl);
-    return info.tools.authored.some((tool) => tool.description?.includes(marker));
+    return info.tools.entries.some((tool) => tool.description.includes(marker));
   }, `Timed out waiting for the "${marker}" tool revision to publish.`);
 }
 

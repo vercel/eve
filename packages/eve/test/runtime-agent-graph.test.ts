@@ -4,11 +4,17 @@ import {
   createCompiledAgentManifest,
   createCompiledAgentNodeManifest,
   ROOT_COMPILED_AGENT_NODE_ID,
+  type CreateCompiledAgentResourcesInput,
 } from "../src/compiler/manifest.js";
 import type { CompiledModuleMap } from "../src/compiler/module-map.js";
+import {
+  EMPTY_CHANNEL_ROUTE_PLAN,
+  EMPTY_SOURCE_COMPOSITION,
+  testCompiledSandbox,
+  testSandboxModuleNamespace,
+} from "../src/internal/testing/compiled-node-fixtures.js";
 import { defineAgent } from "../src/public/definitions/agent.js";
 import { defineDynamic } from "../src/public/definitions/tool.js";
-import { createNodeHarnessTools } from "../src/execution/node-step.js";
 import { TEST_DEFAULT_MODEL_ID } from "../src/internal/testing/app-harness.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "../src/runtime/graph.js";
 import { resolveRuntimeAgentGraph } from "../src/runtime/resolve-agent-graph.js";
@@ -26,6 +32,24 @@ const SUBAGENT_TOOL_INPUT_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+const TEST_SANDBOX = testCompiledSandbox();
+
+function baseNodeInput(): Pick<
+  CreateCompiledAgentResourcesInput,
+  "bindings" | "sandbox" | "sourceComposition"
+> {
+  return {
+    bindings: {},
+    sandbox: TEST_SANDBOX,
+    sourceComposition: EMPTY_SOURCE_COMPOSITION,
+  };
+}
+
+/** Module namespaces every hand-built node needs: its compiled sandbox. */
+function sandboxModules(): Record<string, Record<string, unknown>> {
+  return { [TEST_SANDBOX.sourceId]: testSandboxModuleNamespace() };
+}
+
 describe("resolveRuntimeAgentGraph", () => {
   beforeEach(() => {
     vi.stubEnv("VERCEL", "1");
@@ -37,8 +61,10 @@ describe("resolveRuntimeAgentGraph", () => {
 
   it("defaults agents to the Vercel sandbox backend on hosted Vercel", async () => {
     const manifest = createCompiledAgentManifest({
+      ...baseNodeInput(),
       agentRoot: "/app/agent",
       appRoot: "/app",
+      channelRoutes: EMPTY_CHANNEL_ROUTE_PLAN,
       config: {
         model: {
           id: TEST_DEFAULT_MODEL_ID,
@@ -65,6 +91,7 @@ describe("resolveRuntimeAgentGraph", () => {
       subagents: [
         {
           agent: createCompiledAgentNodeManifest({
+            ...baseNodeInput(),
             agentRoot: "/app/agent/subagents/researcher",
             appRoot: "/app",
             config: {
@@ -102,18 +129,18 @@ describe("resolveRuntimeAgentGraph", () => {
       moduleMap: {
         nodes: {
           [ROOT_COMPILED_AGENT_NODE_ID]: {
-            modules: {},
+            modules: sandboxModules(),
           },
           "subagents/researcher": {
-            modules: {},
+            modules: sandboxModules(),
           },
         },
       },
     });
 
-    expect(graph.root.sandboxRegistry.sandbox?.definition.backend.name).toBe("vercel");
+    expect(graph.root.sandboxRegistry.sandbox.definition.backend.name).toBe("vercel");
     expect(
-      graph.nodesByNodeId.get("subagents/researcher")?.sandboxRegistry.sandbox?.definition.backend
+      graph.nodesByNodeId.get("subagents/researcher")?.sandboxRegistry.sandbox.definition.backend
         .name,
     ).toBe("vercel");
   });
@@ -129,8 +156,10 @@ describe("resolveRuntimeAgentGraph", () => {
       },
     });
     const manifest = createCompiledAgentManifest({
+      ...baseNodeInput(),
       agentRoot: "/app/agent",
       appRoot: "/app",
+      channelRoutes: EMPTY_CHANNEL_ROUTE_PLAN,
       config: {
         model: {
           id: TEST_DEFAULT_MODEL_ID,
@@ -147,6 +176,7 @@ describe("resolveRuntimeAgentGraph", () => {
       subagents: [
         {
           agent: createCompiledAgentResources({
+            ...baseNodeInput(),
             agentRoot: "/app/agent/subagents/researcher",
             appRoot: "/app",
           }),
@@ -171,9 +201,10 @@ describe("resolveRuntimeAgentGraph", () => {
       manifest,
       moduleMap: {
         nodes: {
-          [ROOT_COMPILED_AGENT_NODE_ID]: { modules: {} },
+          [ROOT_COMPILED_AGENT_NODE_ID]: { modules: sandboxModules() },
           "subagents/researcher": {
             modules: {
+              ...sandboxModules(),
               "agent.ts": { default: dynamic },
             },
           },
@@ -203,6 +234,7 @@ describe("resolveRuntimeAgentGraph", () => {
       model: TEST_DEFAULT_MODEL_ID,
     });
     const reviewerManifest = createCompiledAgentNodeManifest({
+      ...baseNodeInput(),
       agentRoot: reviewerRoot,
       appRoot,
       config: {
@@ -229,6 +261,7 @@ describe("resolveRuntimeAgentGraph", () => {
       model: TEST_DEFAULT_MODEL_ID,
     });
     const researcherManifest = createCompiledAgentNodeManifest({
+      ...baseNodeInput(),
       agentRoot: researcherRoot,
       appRoot,
       config: {
@@ -261,8 +294,10 @@ describe("resolveRuntimeAgentGraph", () => {
       ],
     });
     const manifest = createCompiledAgentManifest({
+      ...baseNodeInput(),
       agentRoot,
       appRoot,
+      channelRoutes: EMPTY_CHANNEL_ROUTE_PLAN,
       config: {
         model: {
           id: TEST_DEFAULT_MODEL_ID,
@@ -329,6 +364,7 @@ describe("resolveRuntimeAgentGraph", () => {
       nodes: {
         [ROOT_COMPILED_AGENT_NODE_ID]: {
           modules: {
+            ...sandboxModules(),
             "tools/get-weather.mjs": {
               default: {
                 description: "Get the weather.",
@@ -342,6 +378,7 @@ describe("resolveRuntimeAgentGraph", () => {
         },
         "subagents/researcher": {
           modules: {
+            ...sandboxModules(),
             "tools/search.mjs": {
               default: {
                 description: "Search the web.",
@@ -354,7 +391,7 @@ describe("resolveRuntimeAgentGraph", () => {
           },
         },
         "subagents/researcher::subagents/reviewer": {
-          modules: {},
+          modules: sandboxModules(),
         },
       },
     };
@@ -369,55 +406,9 @@ describe("resolveRuntimeAgentGraph", () => {
       "subagents/researcher",
       "subagents/researcher::subagents/reviewer",
     ]);
+    // Only compiled rows resolve: framework tools appear at runtime only when
+    // the compiled manifest carries their rows.
     expect(graph.root.turnAgent.tools).toMatchObject([
-      {
-        description:
-          "Ask the user a question and wait for their response before continuing. Use this when you need clarification or a choice from the user.",
-        kind: "authored-tool",
-        name: "ask_question",
-      },
-      {
-        description: "Execute a shell command in the shared workspace environment.",
-        kind: "authored-tool",
-        name: "bash",
-      },
-      {
-        kind: "authored-tool",
-        name: "read_file",
-      },
-      {
-        kind: "authored-tool",
-        name: "write_file",
-      },
-      {
-        kind: "authored-tool",
-        name: "todo",
-      },
-      {
-        description: [
-          "Fetch a webpage and return its content in the requested format. Use this to retrieve and analyze content from URLs.",
-          "",
-          "Usage notes:",
-          "- The URL must be a fully-formed valid URL starting with https://",
-          "- HTML responses are automatically converted to markdown or plain text based on the requested format",
-          '- Format options: "markdown" (default), "text", or "html"',
-          "- Default timeout is 30 seconds (max 120 seconds)",
-          "- Maximum response size is 5 MB; content is further capped at the shared tool-output budget (50 KB / 2000 lines)",
-          "- This tool is read-only and does not modify any files",
-        ].join("\n"),
-        kind: "authored-tool",
-        name: "web_fetch",
-      },
-      {
-        description:
-          "Search the web for real-time information. Use this to find up-to-date information about current events, recent developments, or topics that may have changed since the knowledge cutoff.",
-        kind: "authored-tool",
-        name: "web_search",
-      },
-      {
-        kind: "authored-tool",
-        name: "load_skill",
-      },
       {
         description: "Get the weather.",
         inputSchema: null,
@@ -453,54 +444,6 @@ describe("resolveRuntimeAgentGraph", () => {
     ]);
     expect(researcherNode?.turnAgent.tools).toMatchObject([
       {
-        description:
-          "Ask the user a question and wait for their response before continuing. Use this when you need clarification or a choice from the user.",
-        kind: "authored-tool",
-        name: "ask_question",
-      },
-      {
-        description: "Execute a shell command in the shared workspace environment.",
-        kind: "authored-tool",
-        name: "bash",
-      },
-      {
-        kind: "authored-tool",
-        name: "read_file",
-      },
-      {
-        kind: "authored-tool",
-        name: "write_file",
-      },
-      {
-        kind: "authored-tool",
-        name: "todo",
-      },
-      {
-        description: [
-          "Fetch a webpage and return its content in the requested format. Use this to retrieve and analyze content from URLs.",
-          "",
-          "Usage notes:",
-          "- The URL must be a fully-formed valid URL starting with https://",
-          "- HTML responses are automatically converted to markdown or plain text based on the requested format",
-          '- Format options: "markdown" (default), "text", or "html"',
-          "- Default timeout is 30 seconds (max 120 seconds)",
-          "- Maximum response size is 5 MB; content is further capped at the shared tool-output budget (50 KB / 2000 lines)",
-          "- This tool is read-only and does not modify any files",
-        ].join("\n"),
-        kind: "authored-tool",
-        name: "web_fetch",
-      },
-      {
-        description:
-          "Search the web for real-time information. Use this to find up-to-date information about current events, recent developments, or topics that may have changed since the knowledge cutoff.",
-        kind: "authored-tool",
-        name: "web_search",
-      },
-      {
-        kind: "authored-tool",
-        name: "load_skill",
-      },
-      {
         description: "Search the web.",
         inputSchema: null,
         kind: "authored-tool",
@@ -535,6 +478,7 @@ describe("resolveRuntimeAgentGraph", () => {
     const agentRoot = "/app/agent";
     const researcherRoot = "/app/agent/subagents/researcher";
     const researcherManifest = createCompiledAgentNodeManifest({
+      ...baseNodeInput(),
       agentRoot: researcherRoot,
       appRoot,
       config: {
@@ -561,8 +505,10 @@ describe("resolveRuntimeAgentGraph", () => {
       ],
     });
     const manifest = createCompiledAgentManifest({
+      ...baseNodeInput(),
       agentRoot,
       appRoot,
+      channelRoutes: EMPTY_CHANNEL_ROUTE_PLAN,
       config: {
         model: {
           id: TEST_DEFAULT_MODEL_ID,
@@ -609,6 +555,7 @@ describe("resolveRuntimeAgentGraph", () => {
         nodes: {
           [ROOT_COMPILED_AGENT_NODE_ID]: {
             modules: {
+              ...sandboxModules(),
               "subagents/weather.ts": {
                 default: {
                   description: "Answer weather questions remotely.",
@@ -621,6 +568,7 @@ describe("resolveRuntimeAgentGraph", () => {
           },
           "subagents/researcher": {
             modules: {
+              ...sandboxModules(),
               "subagents/qux.ts": {
                 default: {
                   description: "Answer niche follow-up questions remotely.",
@@ -669,8 +617,10 @@ describe("resolveRuntimeAgentGraph", () => {
     vi.stubEnv("WEATHER_AGENT_URL", "https://weather.internal.vercel.app");
     const agentRoot = "/app/agent";
     const manifest = createCompiledAgentManifest({
+      ...baseNodeInput(),
       agentRoot,
       appRoot: "/app",
+      channelRoutes: EMPTY_CHANNEL_ROUTE_PLAN,
       config: {
         model: {
           id: TEST_DEFAULT_MODEL_ID,
@@ -698,6 +648,7 @@ describe("resolveRuntimeAgentGraph", () => {
         nodes: {
           [ROOT_COMPILED_AGENT_NODE_ID]: {
             modules: {
+              ...sandboxModules(),
               "subagents/weather.ts": {
                 default: {
                   description: "Answer weather questions remotely.",
@@ -718,10 +669,27 @@ describe("resolveRuntimeAgentGraph", () => {
     });
   });
 
-  it("lets an authored tool replace a framework tool by name collision", async () => {
+  // Framework tool merging, disablement, and replacement are decided by
+  // source composition at compile time. The runtime resolves only the rows
+  // the compiled manifest carries — a lone application-owned "bash" row is
+  // an ordinary authored tool, and no framework merge introduces siblings.
+  it("registers only compiled tool rows without merging framework defaults", async () => {
     const manifest = createCompiledAgentManifest({
+      ...baseNodeInput(),
       agentRoot: "/app/agent",
       appRoot: "/app",
+      bindings: {
+        "tools/bash.mjs": {
+          backing: {
+            externalDependencies: [],
+            kind: "filesystem",
+            sourcePath: "/app/agent/tools/bash.mjs",
+          },
+          logicalPath: "tools/bash.mjs",
+          owner: { kind: "application" },
+        },
+      },
+      channelRoutes: EMPTY_CHANNEL_ROUTE_PLAN,
       config: {
         model: {
           id: TEST_DEFAULT_MODEL_ID,
@@ -744,6 +712,7 @@ describe("resolveRuntimeAgentGraph", () => {
       nodes: {
         [ROOT_COMPILED_AGENT_NODE_ID]: {
           modules: {
+            ...sandboxModules(),
             "tools/bash.mjs": {
               default: {
                 description: "Run a vetted shell command in the project sandbox.",
@@ -760,282 +729,14 @@ describe("resolveRuntimeAgentGraph", () => {
 
     const graph = await resolveRuntimeAgentGraph({ manifest, moduleMap });
     const tools = graph.root.turnAgent.tools;
-    const bashEntries = tools.filter((tool) => tool.name === "bash");
 
-    expect(bashEntries).toHaveLength(1);
-    expect(bashEntries[0]).toMatchObject({
+    expect(tools.map((tool) => tool.name)).toEqual(["bash"]);
+    expect(tools[0]).toMatchObject({
       description: "Run a vetted shell command in the project sandbox.",
       kind: "authored-tool",
       logicalPath: "tools/bash.mjs",
       name: "bash",
+      owner: { kind: "application" },
     });
-    expect(tools.map((tool) => tool.name)).toEqual([
-      "ask_question",
-      "read_file",
-      "write_file",
-      "todo",
-      "web_fetch",
-      "web_search",
-      "load_skill",
-      "bash",
-    ]);
-  });
-
-  it("removes a framework tool when listed in disabledFrameworkTools", async () => {
-    const manifest = createCompiledAgentManifest({
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      config: {
-        model: {
-          id: TEST_DEFAULT_MODEL_ID,
-          routing: { kind: "gateway", target: "openai" },
-        },
-        name: "weather-agent",
-      },
-      disabledFrameworkTools: ["web_fetch"],
-    });
-
-    const graph = await resolveRuntimeAgentGraph({
-      manifest,
-      moduleMap: {
-        nodes: {
-          [ROOT_COMPILED_AGENT_NODE_ID]: {
-            modules: {},
-          },
-        },
-      },
-    });
-
-    expect(graph.root.turnAgent.tools.map((tool) => tool.name)).toEqual([
-      "ask_question",
-      "bash",
-      "read_file",
-      "write_file",
-      "todo",
-      "web_search",
-      "load_skill",
-    ]);
-  });
-
-  it("accepts the runtime-owned agent tool in disabledFrameworkTools", async () => {
-    const manifest = createCompiledAgentManifest({
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      config: {
-        model: {
-          id: TEST_DEFAULT_MODEL_ID,
-          routing: { kind: "gateway", target: "openai" },
-        },
-        name: "weather-agent",
-      },
-      disabledFrameworkTools: ["agent"],
-    });
-
-    const graph = await resolveRuntimeAgentGraph({
-      manifest,
-      moduleMap: {
-        nodes: {
-          [ROOT_COMPILED_AGENT_NODE_ID]: {
-            modules: {},
-          },
-        },
-      },
-    });
-
-    expect(graph.root.agent.disabledFrameworkTools).toContain("agent");
-    expect(createNodeHarnessTools({ node: graph.root }).has("agent")).toBe(false);
-  });
-
-  it("combines replacement and disable in one agent", async () => {
-    const manifest = createCompiledAgentManifest({
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      config: {
-        model: {
-          id: TEST_DEFAULT_MODEL_ID,
-          routing: { kind: "gateway", target: "openai" },
-        },
-        name: "weather-agent",
-      },
-      disabledFrameworkTools: ["web_fetch"],
-      tools: [
-        {
-          description: "Sandboxed shell.",
-          inputSchema: null,
-          logicalPath: "tools/bash.mjs",
-          name: "bash",
-          sourceId: "tools/bash.mjs",
-          sourceKind: "module",
-        },
-      ],
-    });
-    const moduleMap: CompiledModuleMap = {
-      nodes: {
-        [ROOT_COMPILED_AGENT_NODE_ID]: {
-          modules: {
-            "tools/bash.mjs": {
-              default: {
-                description: "Sandboxed shell.",
-                execute(input: unknown) {
-                  return input;
-                },
-                name: "bash",
-              },
-            },
-          },
-        },
-      },
-    };
-
-    const graph = await resolveRuntimeAgentGraph({ manifest, moduleMap });
-    const tools = graph.root.turnAgent.tools;
-
-    expect(tools.map((tool) => tool.name)).toEqual([
-      "ask_question",
-      "read_file",
-      "write_file",
-      "todo",
-      "web_search",
-      "load_skill",
-      "bash",
-    ]);
-    expect(tools.find((tool) => tool.name === "bash")).toMatchObject({
-      description: "Sandboxed shell.",
-      logicalPath: "tools/bash.mjs",
-    });
-  });
-
-  it("includes web_search as a default framework tool", async () => {
-    const manifest = createCompiledAgentManifest({
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      config: {
-        model: {
-          id: TEST_DEFAULT_MODEL_ID,
-          routing: { kind: "gateway", target: "openai" },
-        },
-        name: "weather-agent",
-      },
-    });
-
-    const graph = await resolveRuntimeAgentGraph({
-      manifest,
-      moduleMap: {
-        nodes: {
-          [ROOT_COMPILED_AGENT_NODE_ID]: {
-            modules: {},
-          },
-        },
-      },
-    });
-
-    expect(graph.root.turnAgent.tools.map((t) => t.name)).toContain("web_search");
-  });
-
-  it("removes web_search when listed in disabledFrameworkTools", async () => {
-    const manifest = createCompiledAgentManifest({
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      config: {
-        model: {
-          id: TEST_DEFAULT_MODEL_ID,
-          routing: { kind: "gateway", target: "openai" },
-        },
-        name: "weather-agent",
-      },
-      disabledFrameworkTools: ["web_search"],
-    });
-
-    const graph = await resolveRuntimeAgentGraph({
-      manifest,
-      moduleMap: {
-        nodes: {
-          [ROOT_COMPILED_AGENT_NODE_ID]: {
-            modules: {},
-          },
-        },
-      },
-    });
-
-    expect(graph.root.turnAgent.tools.map((t) => t.name)).not.toContain("web_search");
-  });
-
-  it("replaces the framework web_search when an authored tool overrides it", async () => {
-    const manifest = createCompiledAgentManifest({
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      config: {
-        model: {
-          id: TEST_DEFAULT_MODEL_ID,
-          routing: { kind: "gateway", target: "openai" },
-        },
-        name: "weather-agent",
-      },
-      tools: [
-        {
-          description: "Custom web search.",
-          inputSchema: null,
-          logicalPath: "tools/web_search.mjs",
-          name: "web_search",
-          sourceId: "tools/web_search.mjs",
-          sourceKind: "module",
-        },
-      ],
-    });
-    const moduleMap: CompiledModuleMap = {
-      nodes: {
-        [ROOT_COMPILED_AGENT_NODE_ID]: {
-          modules: {
-            "tools/web_search.mjs": {
-              default: {
-                description: "Custom web search.",
-                execute(input: unknown) {
-                  return input;
-                },
-                name: "web_search",
-              },
-            },
-          },
-        },
-      },
-    };
-
-    const graph = await resolveRuntimeAgentGraph({ manifest, moduleMap });
-
-    expect(graph.root.turnAgent.tools.find((t) => t.name === "web_search")).toMatchObject({
-      description: "Custom web search.",
-      kind: "authored-tool",
-      name: "web_search",
-    });
-  });
-
-  it("throws when disabledFrameworkTools references an unknown framework tool", async () => {
-    const manifest = createCompiledAgentManifest({
-      agentRoot: "/app/agent",
-      appRoot: "/app",
-      config: {
-        model: {
-          id: TEST_DEFAULT_MODEL_ID,
-          routing: { kind: "gateway", target: "openai" },
-        },
-        name: "weather-agent",
-      },
-      disabledFrameworkTools: ["nonexistent_tool"],
-    });
-
-    await expect(
-      resolveRuntimeAgentGraph({
-        manifest,
-        moduleMap: {
-          nodes: {
-            [ROOT_COMPILED_AGENT_NODE_ID]: {
-              modules: {},
-            },
-          },
-        },
-      }),
-    ).rejects.toThrow(
-      /agent\/tools\/nonexistent_tool\.ts exports disableTool\(\) but "nonexistent_tool" is not a framework tool/,
-    );
   });
 });

@@ -4,6 +4,8 @@ import { join } from "node:path";
 
 import { afterEach } from "vitest";
 
+import { linkWorkspaceEvePackage } from "#internal/testing/scenario-app.js";
+
 /**
  * Options accepted by the factory returned from
  * {@link useTemporaryAppRoots}.
@@ -77,6 +79,11 @@ export function useTemporaryAppRoots(): (
       `${JSON.stringify(packageJson, null, 2)}\n`,
       "utf8",
     );
+    // Every real eve application has `eve` installed. Compiled artifacts
+    // import framework runtime modules with bare `eve/*` specifiers, so
+    // temporary app roots link the workspace package to keep plain-node
+    // artifact loads realistic.
+    await linkWorkspaceEvePackage(appRoot);
 
     for (const [relativePath, contents] of Object.entries(options.files ?? {})) {
       const destinationPath = join(appRoot, relativePath);

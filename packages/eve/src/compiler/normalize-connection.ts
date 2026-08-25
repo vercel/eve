@@ -4,10 +4,6 @@ import {
   normalizeOpenApiConnectionDefinition,
 } from "#internal/authored-definition/connection.js";
 import type { CompiledConnectionDefinition } from "#compiler/manifest.js";
-import {
-  loadModuleBackedDefinition,
-  type ModuleBackedDefinitionLoadOptions,
-} from "#compiler/normalize-helpers.js";
 import { readConnectionProtocol } from "#public/definitions/connections/protocol.js";
 
 /**
@@ -28,17 +24,10 @@ import { readConnectionProtocol } from "#public/definitions/connections/protocol
  * of the connection pipeline (auth context, tool-result narrowing,
  * runtime resolution) stays protocol-agnostic.
  */
-export async function compileConnectionDefinition(
-  agentRoot: string,
+export function compileConnectionDefinition(
   source: ConnectionSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
-): Promise<CompiledConnectionDefinition> {
-  const loaded = await loadModuleBackedDefinition({
-    agentRoot,
-    externalDependencies: options.externalDependencies,
-    kind: "connection",
-    source,
-  });
+  loaded: unknown,
+): CompiledConnectionDefinition {
   const protocol = readConnectionProtocol(loaded);
   const message = `Expected the connection export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`;
 

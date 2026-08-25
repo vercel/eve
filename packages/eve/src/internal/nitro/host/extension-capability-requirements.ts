@@ -6,6 +6,7 @@ import {
   type ExtensionCapabilityRequirements,
 } from "#compiler/extension-compatibility.js";
 import { compileInstructionsEntry } from "#compiler/normalize-instructions.js";
+import { loadDiscoveredModuleExport } from "#compiler/normalize-helpers.js";
 import { compileSkillSource } from "#compiler/normalize-skill.js";
 import { compileToolEntry } from "#compiler/normalize-tool.js";
 import type { AgentSourceManifest } from "#discover/manifest.js";
@@ -26,20 +27,47 @@ export async function deriveExtensionCapabilityRequirements(input: {
   const [tools, skills, instructions, declaration, usesState] = await Promise.all([
     Promise.all(
       manifests.flatMap((manifest) =>
-        manifest.tools.map((source) => compileToolEntry(manifest.agentRoot, source, loadOptions)),
-      ),
-    ),
-    Promise.all(
-      manifests.flatMap((manifest) =>
-        manifest.skills.map((source) =>
-          compileSkillSource(manifest.agentRoot, source, loadOptions),
+        manifest.tools.map(async (source) =>
+          compileToolEntry(
+            source,
+            await loadDiscoveredModuleExport({
+              agentRoot: manifest.agentRoot,
+              externalDependencies: loadOptions.externalDependencies,
+              source,
+            }),
+          ),
         ),
       ),
     ),
     Promise.all(
       manifests.flatMap((manifest) =>
-        manifest.instructions.map((source) =>
-          compileInstructionsEntry(manifest.agentRoot, source, loadOptions),
+        manifest.skills.map(async (source) =>
+          source.sourceKind === "module"
+            ? compileSkillSource(
+                source,
+                await loadDiscoveredModuleExport({
+                  agentRoot: manifest.agentRoot,
+                  externalDependencies: loadOptions.externalDependencies,
+                  source,
+                }),
+              )
+            : compileSkillSource(source),
+        ),
+      ),
+    ),
+    Promise.all(
+      manifests.flatMap((manifest) =>
+        manifest.instructions.map(async (source) =>
+          source.sourceKind === "module"
+            ? compileInstructionsEntry(
+                source,
+                await loadDiscoveredModuleExport({
+                  agentRoot: manifest.agentRoot,
+                  externalDependencies: loadOptions.externalDependencies,
+                  source,
+                }),
+              )
+            : compileInstructionsEntry(source),
         ),
       ),
     ),

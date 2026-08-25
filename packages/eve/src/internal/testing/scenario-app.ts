@@ -3,6 +3,7 @@ import {
   constants as fsConstants,
   cp,
   mkdir,
+  symlink,
   mkdtemp,
   readdir,
   rm,
@@ -134,6 +135,12 @@ export async function materializeScenarioApp(
         appRoot,
         descriptor,
       });
+    } else {
+      // Every real eve application has `eve` installed. Generated compiled
+      // artifacts import framework runtime modules with bare `eve/*`
+      // specifiers, so non-installed scenario apps link the workspace
+      // package to keep plain-node artifact loads realistic.
+      await linkWorkspaceEvePackage(appRoot);
     }
 
     return {
@@ -252,6 +259,25 @@ async function writeDescriptorFiles(input: {
       await writeFile(destinationPath, contents, "utf8");
     }),
   );
+}
+
+/**
+ * Links the workspace `eve` package into the scenario app's `node_modules`
+ * so bare `eve/*` imports emitted into compiled artifacts resolve without a
+ * package-manager install.
+ */
+export async function linkWorkspaceEvePackage(appRoot: string): Promise<void> {
+  const linkPath = join(appRoot, "node_modules", EVE_PACKAGE_NAME);
+  await mkdir(dirname(linkPath), { recursive: true });
+  try {
+    await symlink(resolvePackageRoot(), linkPath, "dir");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      return;
+    }
+    // Windows may reject plain directory symlinks without elevation.
+    await symlink(resolvePackageRoot(), linkPath, "junction");
+  }
 }
 
 /**

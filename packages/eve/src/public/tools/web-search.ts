@@ -1,8 +1,15 @@
+import { markHarnessOwnedToolDefinition } from "#shared/harness-owned-tool.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
 
 export type { WebSearchProvider };
 
 const WEB_SEARCH_TOOL_KIND = "eve:web-search-tool";
+
+/**
+ * Model-facing description of the framework `web_search` tool.
+ */
+export const WEB_SEARCH_TOOL_DESCRIPTION =
+  "Search the web for real-time information. Use this to find up-to-date information about current events, recent developments, or topics that may have changed since the knowledge cutoff.";
 
 /** Configuration accepted by {@link webSearch}. */
 export interface WebSearchToolInput {
@@ -19,14 +26,14 @@ export interface WebSearchToolInput {
  */
 export interface WebSearchToolDefinition {
   readonly kind: typeof WEB_SEARCH_TOOL_KIND;
-  readonly provider: WebSearchProvider;
+  readonly provider?: WebSearchProvider;
 }
 
 /**
  * Configures the framework-provided `web_search` tool.
  *
- * When no configuration file is present, eve uses Exa for AI Gateway
- * models.
+ * Call with no argument to keep the environment default: eve uses Exa for
+ * AI Gateway models when no provider is selected.
  *
  * @example
  * ```ts
@@ -36,11 +43,17 @@ export interface WebSearchToolDefinition {
  * export default webSearch({ provider: "parallel" });
  * ```
  */
-export function webSearch(input: WebSearchToolInput): WebSearchToolDefinition {
-  return {
+export function webSearch(input?: WebSearchToolInput): WebSearchToolDefinition {
+  // The sentinel is harness-owned: the provider-managed tool materializes at
+  // eligible model calls, so the compiled definition resolves without a
+  // module executor.
+  if (input === undefined) {
+    return markHarnessOwnedToolDefinition({ kind: WEB_SEARCH_TOOL_KIND });
+  }
+  return markHarnessOwnedToolDefinition({
     kind: WEB_SEARCH_TOOL_KIND,
     provider: input.provider,
-  };
+  });
 }
 
 /** Returns whether a value is a provider-managed web search definition. */
