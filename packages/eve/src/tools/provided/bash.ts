@@ -2,7 +2,8 @@ import { z } from "#compiled/zod/index.js";
 
 import type { SessionContext } from "#context/session-context.js";
 import {
-  DEFAULT_BASH_YIELD_TIME_MS,
+  DEFAULT_BASH_RUN_YIELD_TIME_MS,
+  DEFAULT_BASH_WAIT_YIELD_TIME_MS,
   executeBashOnSandbox,
   formatBashOutput,
   getBackgroundBashProcess,
@@ -15,7 +16,7 @@ const YIELD_TIME_SCHEMA = z
   .number()
   .nonnegative()
   .describe(
-    `Maximum time in milliseconds to wait before returning a process id for a still-running command. Defaults to ${DEFAULT_BASH_YIELD_TIME_MS} ms.`,
+    `Maximum time in milliseconds to wait before returning. Run defaults to ${DEFAULT_BASH_RUN_YIELD_TIME_MS} ms; wait defaults to ${DEFAULT_BASH_WAIT_YIELD_TIME_MS} ms.`,
   )
   .nullable()
   .optional();
@@ -125,7 +126,7 @@ export async function executeBashTool(
     await waitForBackgroundBashProcess({
       abortSignal: context.abortSignal,
       process,
-      yieldTimeMs: processInput.yieldTimeMs ?? DEFAULT_BASH_YIELD_TIME_MS,
+      yieldTimeMs: processInput.yieldTimeMs ?? DEFAULT_BASH_WAIT_YIELD_TIME_MS,
     });
   }
   const state = await process.inspect();
@@ -146,8 +147,9 @@ export async function executeBashTool(
 export const bash: ToolDefinition<BashToolInput, BashToolOutput> = defineTool({
   description: [
     "Run shell commands and manage commands that continue in the background.",
-    `Use action run with command for a new command; it waits up to ${DEFAULT_BASH_YIELD_TIME_MS} ms by default, then returns a process id if still running.`,
-    "Pass that process id back with action poll, wait, or kill.",
+    `Use action run with command for a new command; it waits up to ${DEFAULT_BASH_RUN_YIELD_TIME_MS} ms by default, then returns a process id if still running.`,
+    `Pass that process id back with action poll, wait, or kill; wait blocks up to ${DEFAULT_BASH_WAIT_YIELD_TIME_MS} ms by default.`,
+    "When run yields, wait if the user asked for completion; otherwise report that the command is still running.",
   ].join(" "),
   execute: executeBashTool,
   inputSchema: BASH_INPUT_SCHEMA,

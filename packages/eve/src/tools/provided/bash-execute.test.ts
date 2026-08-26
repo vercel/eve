@@ -91,10 +91,7 @@ describe("executeBashTool process actions", () => {
     });
 
     await expect(
-      executeBashTool(
-        { action: "wait", processId: running.commandId, yieldTimeMs: 10_000 },
-        context,
-      ),
+      executeBashTool({ action: "wait", processId: running.commandId }, context),
     ).resolves.toEqual({
       exitCode: 0,
       status: "completed",
@@ -106,7 +103,7 @@ describe("executeBashTool process actions", () => {
     expect(waitForBackgroundBashProcess).toHaveBeenCalledWith({
       abortSignal: context.abortSignal,
       process: running,
-      yieldTimeMs: 10_000,
+      yieldTimeMs: 300_000,
     });
   });
 

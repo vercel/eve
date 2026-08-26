@@ -5,7 +5,8 @@ import type { SandboxProcess, SandboxSession } from "#shared/sandbox-session.js"
 import { MAX_OUTPUT_LINES } from "#execution/sandbox/truncate-output.js";
 
 import {
-  DEFAULT_BASH_YIELD_TIME_MS,
+  DEFAULT_BASH_RUN_YIELD_TIME_MS,
+  DEFAULT_BASH_WAIT_YIELD_TIME_MS,
   executeBashOnSandbox,
   formatBashOutput,
   getBackgroundBashProcess,
@@ -156,8 +157,9 @@ describe("executeBashOnSandbox", () => {
     expect(log).toHaveBeenCalledWith("eve: sandbox command finished (exit 0): pwd");
   });
 
-  it("uses the default foreground wait", () => {
-    expect(DEFAULT_BASH_YIELD_TIME_MS).toBe(300_000);
+  it("uses a short run yield and a longer follow-up wait", () => {
+    expect(DEFAULT_BASH_RUN_YIELD_TIME_MS).toBe(30_000);
+    expect(DEFAULT_BASH_WAIT_YIELD_TIME_MS).toBe(300_000);
   });
 });
 

@@ -12,7 +12,8 @@ import { isEveDevEnvironment } from "#internal/application/optional-package-inst
 const MAX_LOG_COMMAND_LENGTH = 240;
 const POLL_INTERVAL_MS = 250;
 
-export const DEFAULT_BASH_YIELD_TIME_MS = 300_000;
+export const DEFAULT_BASH_RUN_YIELD_TIME_MS = 30_000;
+export const DEFAULT_BASH_WAIT_YIELD_TIME_MS = 300_000;
 export const MAX_BACKGROUND_BASH_PROCESSES = MAX_MANAGED_SANDBOX_COMMANDS;
 
 export interface BashInput {
@@ -69,7 +70,7 @@ export async function executeBashOnSandbox(
       await waitForBackgroundBashProcess({
         abortSignal: options?.abortSignal,
         process,
-        yieldTimeMs: args.yieldTimeMs ?? DEFAULT_BASH_YIELD_TIME_MS,
+        yieldTimeMs: args.yieldTimeMs ?? DEFAULT_BASH_RUN_YIELD_TIME_MS,
       });
     } catch (error) {
       if (!options?.abortSignal?.aborted) throw error;

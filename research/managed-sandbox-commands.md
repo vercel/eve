@@ -22,14 +22,15 @@ public tool API.
 ## Tool API
 
 ```json
-{ "action": "run", "command": "pnpm test", "yieldTimeMs": 300000 }
+{ "action": "run", "command": "pnpm test", "yieldTimeMs": 30000 }
 { "action": "poll", "processId": "..." }
 { "action": "wait", "processId": "...", "yieldTimeMs": 30000 }
 { "action": "kill", "processId": "..." }
 ```
 
-A run that completes during the foreground wait returns its exit code. A run
-that remains active returns an opaque process id. Follow-up actions never
+A run waits for 30 seconds by default and returns its exit code when it
+completes during that interval. A run that remains active returns an opaque
+process id; a follow-up wait uses a five-minute default. Follow-up actions never
 resubmit the command represented by that id.
 
 ## Internal boundary
