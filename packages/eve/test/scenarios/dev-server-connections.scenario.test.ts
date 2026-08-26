@@ -251,7 +251,7 @@ describe("eve dev server live connections", () => {
           join(app.appRoot, "agent", "instrumentation.ts"),
           createInstrumentationSource("keep-alive-two"),
         );
-        await forceDevelopmentRebuild(server.url);
+        await forceDevelopmentRebuild(server.url, agent);
         await waitForCondition(
           async () => (await fetchText(server.url, "/instrumentation-marker")) === "keep-alive-two",
           `Timed out waiting for the structural replacement.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
