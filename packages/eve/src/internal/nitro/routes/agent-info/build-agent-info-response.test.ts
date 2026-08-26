@@ -126,6 +126,7 @@ describe("buildAgentInfoResponse", () => {
       expect.arrayContaining([
         expect.objectContaining({ kind: "request-input" }),
         expect.objectContaining({ action: "subagent-call", kind: "dispatch" }),
+        expect.objectContaining({ action: "task-cancel", audience: [], kind: "dispatch" }),
       ]),
     );
   });

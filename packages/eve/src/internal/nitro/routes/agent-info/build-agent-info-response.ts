@@ -368,7 +368,7 @@ const KERNEL_EFFECT_BY_SLOT = {
     audience: ["requires-request-input"],
     kind: "request-input",
   },
-  "tools/task_cancel": { action: "task-cancel", audience: ["root-session"], kind: "dispatch" },
+  "tools/task_cancel": { action: "task-cancel", audience: [], kind: "dispatch" },
   "tools/task_update": {
     action: "task-update",
     audience: ["delegated-task-child"],
