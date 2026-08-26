@@ -28,7 +28,8 @@ function resolveSlackInboundMrkdwnUnsafe(text: string, raw: Record<string, unkno
     return extracted;
   }
 
-  if (hasSlackMessageUnfurl(raw.attachments)) {
+  if (hasSharedMessageAttachment(raw.attachments)) {
+    if (normalizedTrimmed.includes(normalizedExtracted)) return text;
     return `${text}\n${extracted}`;
   }
 
@@ -160,12 +161,15 @@ function extractLegacyAttachmentLines(legacyAttachments: unknown): string[] {
   return lines;
 }
 
-function hasSlackMessageUnfurl(legacyAttachments: unknown): boolean {
-  return (
-    Array.isArray(legacyAttachments) &&
-    legacyAttachments.some(
-      (attachment) => isObject(attachment) && Array.isArray(attachment.message_blocks),
-    )
+function hasSharedMessageAttachment(legacyAttachments: unknown): boolean {
+  if (!Array.isArray(legacyAttachments)) return false;
+  return legacyAttachments.some(
+    (attachment) =>
+      isObject(attachment) &&
+      (Array.isArray(attachment.message_blocks) ||
+        attachment.is_share === true ||
+        attachment.is_msg_unfurl === true ||
+        attachment.is_reply_unfurl === true),
   );
 }
 

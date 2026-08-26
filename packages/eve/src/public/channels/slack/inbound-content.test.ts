@@ -431,6 +431,31 @@ describe("resolveSlackInboundMrkdwn", () => {
     );
   });
 
+  it.each(["is_share", "is_msg_unfurl", "is_reply_unfurl"])(
+    "keeps short shared-message content alongside a longer human comment for %s attachments",
+    (sharedMessageFlag) => {
+      const result = resolveSlackInboundMrkdwn("<@U123> :eyes:", {
+        attachments: [
+          {
+            [sharedMessageFlag]: true,
+            text: "Ship it",
+            from_url: "https://example.slack.com/archives/C123/p1234567890000100",
+          },
+        ],
+      });
+
+      expect(result).toBe("<@U123> :eyes:\nShip it");
+    },
+  );
+
+  it("does not repeat shared-message content already present in the human comment", () => {
+    const result = resolveSlackInboundMrkdwn("Please review: Ship it", {
+      attachments: [{ is_share: true, text: "Ship it" }],
+    });
+
+    expect(result).toBe("Please review: Ship it");
+  });
+
   it("keeps top-level text when rich_text blocks mirror it", () => {
     const result = resolveSlackInboundMrkdwn("Status update", {
       blocks: [
