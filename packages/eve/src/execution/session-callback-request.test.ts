@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 
-const callbackUrl = "https://agent.example.com/eve/v1/progress/opaque-token";
+const callbackUrl = "https://agent.example.com/eve/v1/activity/opaque-token";
 const requestContextSymbol = Symbol.for("@vercel/request-context");
 const requestContextGlobal = globalThis as typeof globalThis & { [key: symbol]: unknown };
 
@@ -57,7 +57,7 @@ describe("postSessionCallbackRequest", () => {
     [
       "a non-HTTPS callback",
       { VERCEL: "1", VERCEL_URL: "localhost:3000" },
-      "http://localhost:3000/eve/v1/progress/token",
+      "http://localhost:3000/eve/v1/activity/token",
     ],
   ])("does not attach ambient credentials for %s", async (_name, env, url) => {
     vi.stubEnv("VERCEL_OIDC_TOKEN", "ambient-token");

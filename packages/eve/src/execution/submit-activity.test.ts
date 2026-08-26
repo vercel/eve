@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { reportProgress } from "#execution/submit-progress.js";
+import { submitActivity } from "#execution/submit-activity.js";
 
 const event = {
   eventId: "root:session:turn:started",
@@ -14,13 +14,13 @@ const event = {
   },
 };
 
-describe("reportProgress", () => {
+describe("submitActivity", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("does nothing without the callback capability", async () => {
+  it("does nothing without a sink", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    await expect(reportProgress({ callback: undefined, events: [event] })).resolves.toBeUndefined();
+    await expect(submitActivity({ sink: undefined, events: [event] })).resolves.toBeUndefined();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -30,12 +30,12 @@ describe("reportProgress", () => {
       .mockResolvedValueOnce(new Response(null, { status: 202 }))
       .mockRejectedValueOnce(new Error("network failure"));
     vi.stubGlobal("fetch", fetchMock);
-    const callback = {
-      url: "https://agent.example.com/eve/v1/progress/abcdefghijklmnopqrstuvwxyz123456",
+    const sink = {
+      url: "https://agent.example.com/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
       version: 1 as const,
     };
-    await reportProgress({ callback, events: [event] });
-    await expect(reportProgress({ callback, events: [event] })).resolves.toBeUndefined();
+    await submitActivity({ sink, events: [event] });
+    await expect(submitActivity({ sink, events: [event] })).resolves.toBeUndefined();
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
       events: [event],
       version: 1,

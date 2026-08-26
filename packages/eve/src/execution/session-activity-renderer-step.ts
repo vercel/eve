@@ -1,24 +1,24 @@
-import { getChannelProgressPresentation } from "#channel/progress-renderer.js";
+import { getChannelActivityPresentation } from "#channel/activity-renderer.js";
 import { deserializeContext } from "#context/serialize.js";
-import type { ProgressSnapshotV1 } from "#protocol/progress.js";
+import type { ActivitySnapshotV1 } from "#protocol/activity.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
-const log = createLogger("execution.session-progress-renderer");
+const log = createLogger("execution.session-activity-renderer");
 
-export interface SessionProgressRenderState {
+export interface SessionActivityRenderState {
   readonly rendererStates: Readonly<Record<string, unknown>>;
 }
 
-/** Runs channel-owned progress effects from collector-owned immutable context. */
-export async function renderSessionProgressStep(input: {
+/** Runs channel-owned activity effects from collector-owned immutable context. */
+export async function renderSessionActivityStep(input: {
   readonly rendererStates: Readonly<Record<string, unknown>>;
   readonly serializedContext: Record<string, unknown>;
-  readonly snapshot: ProgressSnapshotV1;
-}): Promise<SessionProgressRenderState> {
+  readonly snapshot: ActivitySnapshotV1;
+}): Promise<SessionActivityRenderState> {
   "use step";
 
-  const { adapter, destination, presentation } = await resolveProgressPresentation(
+  const { adapter, destination, presentation } = await resolveActivityPresentation(
     input.serializedContext,
   );
   const rendererStates: Record<string, unknown> = { ...input.rendererStates };
@@ -32,7 +32,7 @@ export async function renderSessionProgressStep(input: {
         });
         break;
       } catch (error) {
-        logError(log, "progress renderer failed", error, {
+        logError(log, "activity renderer failed", error, {
           adapterKind: adapter.kind,
           attempt: attempt + 1,
           rendererId: renderer.id,
@@ -46,13 +46,13 @@ export async function renderSessionProgressStep(input: {
 }
 
 /** Best-effort cleanup of transient provider state when collector ownership expires. */
-export async function disposeSessionProgressStep(input: {
+export async function disposeSessionActivityStep(input: {
   readonly rendererStates: Readonly<Record<string, unknown>>;
   readonly serializedContext: Record<string, unknown>;
 }): Promise<void> {
   "use step";
 
-  const { adapter, destination, presentation } = await resolveProgressPresentation(
+  const { adapter, destination, presentation } = await resolveActivityPresentation(
     input.serializedContext,
   );
   for (const renderer of presentation.renderers) {
@@ -60,7 +60,7 @@ export async function disposeSessionProgressStep(input: {
     try {
       await renderer.dispose({ destination, state: input.rendererStates[renderer.id] });
     } catch (error) {
-      logError(log, "progress renderer disposal failed", error, {
+      logError(log, "activity renderer disposal failed", error, {
         adapterKind: adapter.kind,
         rendererId: renderer.id,
       });
@@ -68,11 +68,11 @@ export async function disposeSessionProgressStep(input: {
   }
 }
 
-async function resolveProgressPresentation(serializedContext: Record<string, unknown>) {
+async function resolveActivityPresentation(serializedContext: Record<string, unknown>) {
   const ctx = await deserializeContext(serializedContext);
   const adapter = ctx.require(ChannelKey);
-  const presentation = getChannelProgressPresentation(adapter);
-  if (presentation === undefined) throw new Error("Channel has no progress presentation.");
+  const presentation = getChannelActivityPresentation(adapter);
+  if (presentation === undefined) throw new Error("Channel has no activity presentation.");
   return {
     adapter,
     destination: presentation.destination(adapter.state),

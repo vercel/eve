@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createChannelAddress } from "#channel/channel-address.js";
 import {
-  attachChannelProgressPresentation,
-  getChannelProgressPresentation,
-} from "#channel/progress-renderer.js";
+  attachChannelActivityPresentation,
+  getChannelActivityPresentation,
+} from "#channel/activity-renderer.js";
 import type { Runtime } from "#channel/types.js";
 
 function createRuntime(): Runtime {
@@ -120,15 +120,15 @@ describe("createChannelAddress", () => {
     );
   });
 
-  it("enables progress only for a newly created session with configured renderers", async () => {
+  it("enables activity only for a newly created session with configured renderers", async () => {
     const runtime = createRuntime();
     vi.mocked(runtime.dispatchContinuation).mockResolvedValue({ status: "session_not_active" });
     vi.mocked(runtime.createSession).mockResolvedValue({
       events: new ReadableStream(),
-      sessionId: "sess_progress",
+      sessionId: "sess_activity",
     });
     const adapter = { kind: "slack" };
-    attachChannelProgressPresentation(adapter, {
+    attachChannelActivityPresentation(adapter, {
       destination: () => ({}),
       renderers: [{ id: "status", render: vi.fn() }],
     });
@@ -152,7 +152,7 @@ describe("createChannelAddress", () => {
     );
     const created = vi.mocked(runtime.createSession).mock.calls[0]?.[0].adapter;
     expect(created).toBeDefined();
-    expect(getChannelProgressPresentation(created!)?.renderers).toEqual([
+    expect(getChannelActivityPresentation(created!)?.renderers).toEqual([
       expect.objectContaining({ id: "status" }),
     ]);
   });

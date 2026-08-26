@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Collect and render progress independently from the root agent session.
+Collect and render activity independently from the root agent session.

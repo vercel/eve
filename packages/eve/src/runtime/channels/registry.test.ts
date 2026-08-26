@@ -3,9 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { HTTP_ADAPTER, HTTP_ADAPTER_KIND } from "#channel/http.js";
 import {
-  attachChannelProgressPresentation,
-  getChannelProgressPresentation,
-} from "#channel/progress-renderer.js";
+  attachChannelActivityPresentation,
+  getChannelActivityPresentation,
+} from "#channel/activity-renderer.js";
 import { SCHEDULE_ADAPTER, SCHEDULE_ADAPTER_KIND } from "#channel/schedule.js";
 import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 import { SUBAGENT_ADAPTER } from "#execution/subagent-adapter.js";
@@ -86,11 +86,11 @@ describe("createRuntimeAdapterRegistry", () => {
     });
   });
 
-  it("rehydrates non-enumerable progress renderer behavior", () => {
+  it("rehydrates non-enumerable activity renderer behavior", () => {
     const adapter: ChannelAdapter = { kind: "slack", state: { channelId: null } };
     const render = vi.fn();
     const destination = vi.fn();
-    attachChannelProgressPresentation(adapter, {
+    attachChannelActivityPresentation(adapter, {
       destination,
       renderers: [{ id: "slack.status.v1", render }],
     });
@@ -101,7 +101,7 @@ describe("createRuntimeAdapterRegistry", () => {
       state: { channelId: "C1", threadTs: "T1" },
     });
 
-    expect(getChannelProgressPresentation(rehydrated)).toEqual({
+    expect(getChannelActivityPresentation(rehydrated)).toEqual({
       destination,
       renderers: [{ id: "slack.status.v1", render }],
     });

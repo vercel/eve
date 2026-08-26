@@ -1,9 +1,9 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { getAdapterKind } from "#channel/adapter.js";
 import {
-  copyChannelProgressPresentation,
-  getChannelProgressPresentation,
-} from "#channel/progress-renderer.js";
+  copyChannelActivityPresentation,
+  getChannelActivityPresentation,
+} from "#channel/activity-renderer.js";
 import { HTTP_ADAPTER } from "#channel/http.js";
 import { SCHEDULE_ADAPTER } from "#channel/schedule.js";
 import { SUBAGENT_ADAPTER } from "#execution/subagent-adapter.js";
@@ -134,7 +134,7 @@ export function deserializeRuntimeAdapter(
   }
 
   const rehydrated: ChannelAdapter = { ...adapterConfig, state: serialized.state };
-  copyChannelProgressPresentation(adapterConfig, rehydrated);
+  copyChannelActivityPresentation(adapterConfig, rehydrated);
   return rehydrated;
 }
 
@@ -160,7 +160,7 @@ function requireAdapterKind(
  * the bare `kind` discriminator (and initial `state`).
  */
 function carriesAdapterBehavior(adapter: ChannelAdapter): boolean {
-  if (getChannelProgressPresentation(adapter) !== undefined) return true;
+  if (getChannelActivityPresentation(adapter) !== undefined) return true;
 
   if (adapter.deliver !== undefined) {
     return true;

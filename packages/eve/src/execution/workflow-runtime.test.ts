@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
-import { attachChannelProgressPresentation } from "#channel/progress-renderer.js";
-import { ChannelRequestIdKey, ProgressKey } from "#context/keys.js";
+import { attachChannelActivityPresentation } from "#channel/activity-renderer.js";
+import { ChannelRequestIdKey, ActivityKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
   LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
-  progressCollectorWorkflowReference,
+  activityCollectorWorkflowReference,
   sessionTimeoutWorkflowReference,
   turnWorkflowReference,
   workflowEntryReference,
@@ -75,8 +75,8 @@ describe("workflowEntryReference", () => {
     );
     expect(sessionTimeoutWorkflowReference.workflowId).not.toContain("/src/execution/");
     expect(sessionTimeoutWorkflowReference.workflowId).not.toContain("@");
-    expect(progressCollectorWorkflowReference.workflowId).toBe(
-      `workflow//${packageInfo.name}//progressCollectorWorkflow`,
+    expect(activityCollectorWorkflowReference.workflowId).toBe(
+      `workflow//${packageInfo.name}//activityCollectorWorkflow`,
     );
   });
 });
@@ -318,9 +318,9 @@ describe("createWorkflowRuntime#createSession", () => {
     return createWorkflowRuntime({ compiledArtifactsSource });
   }
 
-  function progressAdapter(): ChannelAdapter {
+  function activityAdapter(): ChannelAdapter {
     const adapter: ChannelAdapter = { kind: "slack" };
-    attachChannelProgressPresentation(adapter, {
+    attachChannelActivityPresentation(adapter, {
       destination: () => ({}),
       renderers: [{ id: "status", render: vi.fn() }],
     });
@@ -431,7 +431,7 @@ describe("createWorkflowRuntime#createSession", () => {
     });
   });
 
-  it("starts one collector and injects its opaque callback for a root channel with renderers", async () => {
+  it("starts one collector and injects its opaque sink for a root channel with renderers", async () => {
     vi.stubEnv("VERCEL_URL", "agent.example.com");
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource, 60_000);
@@ -440,13 +440,13 @@ describe("createWorkflowRuntime#createSession", () => {
       .mockResolvedValueOnce({ runId: "driver-run" });
 
     await buildRuntime(compiledArtifactsSource).createSession({
-      adapter: progressAdapter(),
+      adapter: activityAdapter(),
       auth: null,
       input: { message: "hello" },
       mode: "conversation",
     });
 
-    expect(startMock.mock.calls[0]?.[0]).toBe(progressCollectorWorkflowReference);
+    expect(startMock.mock.calls[0]?.[0]).toBe(activityCollectorWorkflowReference);
     const collectorInput = startMock.mock.calls[0]?.[1][0];
     expect(collectorInput).toMatchObject({
       serializedContext: expect.any(Object),
@@ -454,15 +454,15 @@ describe("createWorkflowRuntime#createSession", () => {
     });
     expect(collectorInput.token).toHaveLength(43);
     const workflowInput = startMock.mock.calls[1]?.[1][0];
-    expect(workflowInput.serializedContext[ProgressKey.name]).toEqual({
-      callback: {
-        url: `https://agent.example.com/eve/v1/progress/${collectorInput.token}`,
+    expect(workflowInput.serializedContext[ActivityKey.name]).toEqual({
+      sink: {
+        url: `https://agent.example.com/eve/v1/activity/${collectorInput.token}`,
         version: 1,
       },
     });
   });
 
-  it("starts the root without progress when collector launch fails", async () => {
+  it("starts the root without activity when collector launch fails", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
     startMock
@@ -470,14 +470,14 @@ describe("createWorkflowRuntime#createSession", () => {
       .mockResolvedValueOnce({ runId: "driver-run" });
 
     await buildRuntime(compiledArtifactsSource).createSession({
-      adapter: progressAdapter(),
+      adapter: activityAdapter(),
       auth: null,
       input: { message: "hello" },
       mode: "conversation",
     });
 
     const workflowInput = startMock.mock.calls[1]?.[1][0];
-    expect(workflowInput.serializedContext[ProgressKey.name]).toBeUndefined();
+    expect(workflowInput.serializedContext[ActivityKey.name]).toBeUndefined();
   });
 
   it("cancels the collector when root workflow startup fails", async () => {
@@ -488,7 +488,7 @@ describe("createWorkflowRuntime#createSession", () => {
 
     await expect(
       buildRuntime(compiledArtifactsSource).createSession({
-        adapter: progressAdapter(),
+        adapter: activityAdapter(),
         auth: null,
         input: { message: "hello" },
         mode: "conversation",
@@ -510,7 +510,7 @@ describe("createWorkflowRuntime#createSession", () => {
 
     await expect(
       buildRuntime(compiledArtifactsSource).createSession({
-        adapter: progressAdapter(),
+        adapter: activityAdapter(),
         auth: null,
         continuationToken: "slack:thread",
         input: { message: "hello" },

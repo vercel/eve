@@ -7,7 +7,7 @@ import {
   WorkflowRunNotFoundError,
 } from "#compiled/@workflow/errors/index.js";
 
-import { getChannelProgressPresentation } from "#channel/progress-renderer.js";
+import { getChannelActivityPresentation } from "#channel/activity-renderer.js";
 import type {
   CancelTurnInput,
   CancelTurnResult,
@@ -22,7 +22,7 @@ import type {
   SessionTraceContext,
 } from "#channel/types.js";
 import { serializeContext } from "#context/serialize.js";
-import { ProgressKey } from "#context/keys.js";
+import { ActivityKey } from "#context/keys.js";
 import {
   ChannelInstrumentationKey,
   OtelTraceEnabledKey,
@@ -58,8 +58,8 @@ import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
-import type { ProgressCollectorInput } from "#execution/progress-collector.js";
-import { createEveProgressRoutePath } from "#protocol/routes.js";
+import type { ActivityCollectorInput } from "#execution/activity-collector.js";
+import { createEveActivityRoutePath } from "#protocol/routes.js";
 import {
   createWorkflowCallbackUrl,
   resolveWorkflowCallbackBaseUrl,
@@ -81,7 +81,7 @@ const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
 const SESSION_TIMEOUT_WORKFLOW_NAME = "sessionTimeoutWorkflow";
 const TASK_RUN_WORKFLOW_NAME = "taskRunWorkflow";
-const PROGRESS_COLLECTOR_WORKFLOW_NAME = "progressCollectorWorkflow";
+const ACTIVITY_COLLECTOR_WORKFLOW_NAME = "activityCollectorWorkflow";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const COMMAND_HOOK_READY_TIMEOUT_MS = 30_000;
 
@@ -103,7 +103,7 @@ export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
   TURN_WORKFLOW_NAME,
   SESSION_TIMEOUT_WORKFLOW_NAME,
   TASK_RUN_WORKFLOW_NAME,
-  PROGRESS_COLLECTOR_WORKFLOW_NAME,
+  ACTIVITY_COLLECTOR_WORKFLOW_NAME,
 ]);
 
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
@@ -145,9 +145,9 @@ export const taskRunWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${TASK_RUN_WORKFLOW_NAME}`,
 };
 
-/** Stable workflow reference for root-session progress collectors. */
-export const progressCollectorWorkflowReference = {
-  workflowId: `workflow//${STABLE_ID_BASE}//${PROGRESS_COLLECTOR_WORKFLOW_NAME}`,
+/** Stable workflow reference for root-session activity collectors. */
+export const activityCollectorWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${ACTIVITY_COLLECTOR_WORKFLOW_NAME}`,
 };
 
 /**
@@ -171,7 +171,7 @@ export function createWorkflowRuntime(config: {
         run: input,
       });
       const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-const channelInstrumentation = ctx.get(ChannelInstrumentationKey);
+      const channelInstrumentation = ctx.get(ChannelInstrumentationKey);
       const traceSeed = allocateSessionTraceSeed({
         agentName: effectiveAgent.turnAgent.id,
         audience: normalizeChannelAudience(channelInstrumentation?.metadata.audience),
@@ -186,13 +186,13 @@ const channelInstrumentation = ctx.get(ChannelInstrumentationKey);
       let collectorRunId: string | undefined;
       if (
         input.parent === undefined &&
-        input.progress === undefined &&
+        input.activity === undefined &&
         sessionTimeoutMs !== false &&
-        (getChannelProgressPresentation(input.adapter)?.renderers.length ?? 0) > 0
+        (getChannelActivityPresentation(input.adapter)?.renderers.length ?? 0) > 0
       ) {
         const collectorContext = serializeContext(ctx);
         const token = randomBytes(32).toString("base64url");
-        const collectorInput: ProgressCollectorInput = {
+        const collectorInput: ActivityCollectorInput = {
           expiresAt: new Date(
             Date.now() + (sessionTimeoutMs ?? 24 * 60 * 60 * 1_000),
           ).toISOString(),
@@ -200,7 +200,7 @@ const channelInstrumentation = ctx.get(ChannelInstrumentationKey);
           token,
         };
         try {
-          const collector = await startWorkflowPreferLatest(progressCollectorWorkflowReference, [
+          const collector = await startWorkflowPreferLatest(activityCollectorWorkflowReference, [
             collectorInput,
           ]);
           collectorRunId = collector.runId;
@@ -208,16 +208,16 @@ const channelInstrumentation = ctx.get(ChannelInstrumentationKey);
             ? `https://${process.env.VERCEL_URL}`
             : "http://localhost:3000";
           const baseUrl = resolveWorkflowCallbackBaseUrl(fallbackOrigin);
-          ctx.set(ProgressKey, {
-            callback: {
-              url: createWorkflowCallbackUrl(baseUrl, createEveProgressRoutePath(token)),
+          ctx.set(ActivityKey, {
+            sink: {
+              url: createWorkflowCallbackUrl(baseUrl, createEveActivityRoutePath(token)),
               version: 1,
             },
           });
         } catch {
-          await cancelProgressCollector(collectorRunId);
+          await cancelActivityCollector(collectorRunId);
           collectorRunId = undefined;
-          log.warn("failed to start progress collector");
+          log.warn("failed to start activity collector");
         }
       }
       const serializedContext = serializeContext(ctx);
@@ -260,7 +260,7 @@ const channelInstrumentation = ctx.get(ChannelInstrumentationKey);
           attributes: normalizeEveAttributes(attributes),
         });
       } catch (error) {
-        await cancelProgressCollector(collectorRunId);
+        await cancelActivityCollector(collectorRunId);
         logError(log, "failed to start workflow run", error, {
           continuationToken: input.continuationToken,
         });
@@ -280,7 +280,7 @@ const channelInstrumentation = ctx.get(ChannelInstrumentationKey);
         }
         await waitForOwnedCommandHook(sessionCommandHookToken(run.runId), run.runId);
       } catch (error) {
-        await cancelProgressCollector(collectorRunId);
+        await cancelActivityCollector(collectorRunId);
         throw error;
       }
 
@@ -348,14 +348,14 @@ const channelInstrumentation = ctx.get(ChannelInstrumentationKey);
   };
 }
 
-async function cancelProgressCollector(runId: string | undefined): Promise<void> {
+async function cancelActivityCollector(runId: string | undefined): Promise<void> {
   if (runId === undefined) return;
   try {
     await cancelRun(await getWorld(), runId, {
       cancelReason: "Root session creation did not complete",
     });
   } catch {
-    log.warn("failed to cancel unowned progress collector");
+    log.warn("failed to cancel unowned activity collector");
   }
 }
 

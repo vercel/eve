@@ -121,8 +121,8 @@ export const EVE_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/callback/:token`;
 /** Capability route used by a parent task to answer a remote child HITL batch. */
 export const EVE_TASK_INPUT_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/task-input/:token`;
 
-/** Capability route for best-effort progress batches. */
-export const EVE_PROGRESS_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/progress/:token`;
+/** Capability route for best-effort activity batches. */
+export const EVE_ACTIVITY_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/activity/:token`;
 
 /** Builds the ID-addressed message route for one session. */
 export function createEveSessionRoutePath(sessionId: string): string {
@@ -193,7 +193,7 @@ export function createEveTaskInputRoutePath(token: string): string {
   return `${EVE_ROUTE_PREFIX}/task-input/${encodeURIComponent(token)}`;
 }
 
-/** Builds the capability path for one root progress collector. */
-export function createEveProgressRoutePath(token: string): string {
-  return `${EVE_ROUTE_PREFIX}/progress/${encodeURIComponent(token)}`;
+/** Builds the capability path for one root activity collector. */
+export function createEveActivityRoutePath(token: string): string {
+  return `${EVE_ROUTE_PREFIX}/activity/${encodeURIComponent(token)}`;
 }

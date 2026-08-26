@@ -6,31 +6,31 @@ import {
   disposeHook,
   isHookConflictError,
 } from "#execution/hook-ownership.js";
-import { createProgressSnapshot, reduceProgressBatch } from "#execution/session-progress.js";
-import type { ProgressBatchV1 } from "#protocol/progress.js";
+import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
+import type { ActivityBatchV1 } from "#protocol/activity.js";
 import {
-  disposeSessionProgressStep,
-  renderSessionProgressStep,
-} from "#execution/session-progress-renderer-step.js";
+  disposeSessionActivityStep,
+  renderSessionActivityStep,
+} from "#execution/session-activity-renderer-step.js";
 
 const RENDER_DEBOUNCE_MS = 350;
 
-export interface ProgressCollectorInput {
+export interface ActivityCollectorInput {
   readonly expiresAt: string;
   readonly serializedContext: Record<string, unknown>;
   readonly token: string;
 }
 
-/** Independently owns progress reduction and provider presentation for one root session. */
-export async function progressCollectorWorkflow(input: ProgressCollectorInput): Promise<void> {
+/** Independently owns activity reduction and provider presentation for one root session. */
+export async function activityCollectorWorkflow(input: ActivityCollectorInput): Promise<void> {
   "use workflow";
 
-  const batches = createHook<ProgressBatchV1>({ token: input.token });
+  const batches = createHook<ActivityBatchV1>({ token: input.token });
   const iterator = batches[Symbol.asyncIterator]();
   let ownsHook = false;
-  let pendingRead: Promise<IteratorResult<ProgressBatchV1>> | undefined;
+  let pendingRead: Promise<IteratorResult<ActivityBatchV1>> | undefined;
   const expiry = sleep(new Date(input.expiresAt)).then(() => ({ kind: "expired" as const }));
-  let snapshot = createProgressSnapshot();
+  let snapshot = createActivitySnapshot();
   let rendererStates: Readonly<Record<string, unknown>> = {};
 
   try {
@@ -50,7 +50,7 @@ export async function progressCollectorWorkflow(input: ProgressCollectorInput): 
       ]);
       if (next.kind === "expired" || next.value.done === true) break;
       pendingRead = undefined;
-      snapshot = reduceProgressBatch(snapshot, next.value.value);
+      snapshot = reduceActivityBatch(snapshot, next.value.value);
       if (snapshot.revision === 0) continue;
 
       const debounce = sleep(RENDER_DEBOUNCE_MS).then(() => ({ kind: "render" as const }));
@@ -65,10 +65,10 @@ export async function progressCollectorWorkflow(input: ProgressCollectorInput): 
         if (buffered.kind === "render") break;
         if (buffered.value.done === true) return;
         pendingRead = undefined;
-        snapshot = reduceProgressBatch(snapshot, buffered.value.value);
+        snapshot = reduceActivityBatch(snapshot, buffered.value.value);
       }
 
-      const rendered = await renderSessionProgressStep({
+      const rendered = await renderSessionActivityStep({
         rendererStates,
         serializedContext: input.serializedContext,
         snapshot,
@@ -79,7 +79,7 @@ export async function progressCollectorWorkflow(input: ProgressCollectorInput): 
     if (ownsHook) {
       await closeHookIterator(iterator).catch(() => {});
       await disposeHook(batches).catch(() => {});
-      await disposeSessionProgressStep({
+      await disposeSessionActivityStep({
         rendererStates,
         serializedContext: input.serializedContext,
       }).catch(() => {});
