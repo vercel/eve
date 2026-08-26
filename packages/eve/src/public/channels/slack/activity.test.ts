@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { isCompiledChannel } from "#channel/compiled-channel.js";
-import { getChannelProgressPresentation } from "#channel/progress-renderer.js";
-import { createProgressSnapshot, reduceProgressBatch } from "#execution/session-progress.js";
+import { getChannelActivityPresentation } from "#channel/activity-renderer.js";
+import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
 import {
-  buildSlackProgressRenderers,
-  selectSlackProgressStatus,
-  slackStatusProgress,
-} from "#public/channels/slack/progress.js";
+  buildSlackActivityRenderers,
+  selectSlackActivityStatus,
+  slackActivityStatus,
+} from "#public/channels/slack/activity.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
 
 const root = {
@@ -28,21 +28,21 @@ const child = {
   rootTurnId: "turn",
 };
 
-function snapshot(events: Parameters<typeof reduceProgressBatch>[1]["events"]) {
-  return reduceProgressBatch(createProgressSnapshot(), { events, version: 1 });
+function snapshot(events: Parameters<typeof reduceActivityBatch>[1]["events"]) {
+  return reduceActivityBatch(createActivitySnapshot(), { events, version: 1 });
 }
 
-describe("Slack status progress", () => {
+describe("Slack status activity", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
 
   it("installs renderer configuration with a narrow destination", () => {
-    const channel = slackChannel({ progress: { renderers: [slackStatusProgress()] } });
+    const channel = slackChannel({ activity: { renderers: [slackActivityStatus()] } });
     expect(isCompiledChannel(channel)).toBe(true);
     if (!isCompiledChannel(channel)) return;
-    const presentation = getChannelProgressPresentation(channel.adapter);
+    const presentation = getChannelActivityPresentation(channel.adapter);
     expect(presentation?.renderers).toHaveLength(1);
     expect(
       presentation?.destination({ channelId: "C1", secret: "hidden", threadTs: "T1" }),
@@ -51,13 +51,13 @@ describe("Slack status progress", () => {
 
   it("rejects duplicate renderer configuration", () => {
     expect(() =>
-      slackChannel({ progress: { renderers: [slackStatusProgress(), slackStatusProgress()] } }),
-    ).toThrow("Duplicate Slack progress renderer");
+      slackChannel({ activity: { renderers: [slackActivityStatus(), slackActivityStatus()] } }),
+    ).toThrow("Duplicate Slack activity renderer");
   });
 
   it("prioritizes active actions, then falls back to delegated and root work", () => {
     expect(
-      selectSlackProgressStatus(
+      selectSlackActivityStatus(
         snapshot([
           { eventId: "root", kind: "work.started", startedAt: "2026-01-01T00:00:00Z", work: root },
           {
@@ -77,7 +77,7 @@ describe("Slack status progress", () => {
       ),
     ).toBe("search");
     expect(
-      selectSlackProgressStatus(
+      selectSlackActivityStatus(
         snapshot([
           { eventId: "root", kind: "work.started", startedAt: "2026-01-01T00:00:00Z", work: root },
           {
@@ -90,7 +90,7 @@ describe("Slack status progress", () => {
       ),
     ).toBe("research");
     expect(
-      selectSlackProgressStatus(
+      selectSlackActivityStatus(
         snapshot([
           { eventId: "root", kind: "work.started", startedAt: "2026-01-01T00:00:00Z", work: root },
         ]),
@@ -100,7 +100,7 @@ describe("Slack status progress", () => {
 
   it("prioritizes blockers over active actions", () => {
     expect(
-      selectSlackProgressStatus(
+      selectSlackActivityStatus(
         snapshot([
           { eventId: "root", kind: "work.started", startedAt: "2026-01-01T00:00:00Z", work: root },
           {
@@ -134,7 +134,7 @@ describe("Slack status progress", () => {
 
   it("clears when represented work settles", () => {
     expect(
-      selectSlackProgressStatus(
+      selectSlackActivityStatus(
         snapshot([
           { eventId: "root", kind: "work.started", startedAt: "2026-01-01T00:00:00Z", work: root },
           {
@@ -153,9 +153,9 @@ describe("Slack status progress", () => {
     vi.stubEnv("SLACK_BOT_TOKEN", "xoxb-test");
     const fetchMock = vi.fn(async () => Response.json({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
-    const renderer = buildSlackProgressRenderers({
+    const renderer = buildSlackActivityRenderers({
       botToken: undefined,
-      renderers: [slackStatusProgress()],
+      renderers: [slackActivityStatus()],
     })[0]!;
     const active = snapshot([
       { eventId: "root", kind: "work.started", startedAt: "2026-01-01T00:00:00Z", work: root },
@@ -179,9 +179,9 @@ describe("Slack status progress", () => {
       Response.json({ ok: true }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const renderer = buildSlackProgressRenderers({
+    const renderer = buildSlackActivityRenderers({
       botToken: undefined,
-      renderers: [slackStatusProgress()],
+      renderers: [slackActivityStatus()],
     })[0]!;
     await renderer.dispose?.({
       destination: { channelId: "C1", threadTs: "T1" },

@@ -71,9 +71,9 @@ export {
 export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
 
 export {
-  slackStatusProgress,
-  type SlackProgressRenderer,
-} from "#public/channels/slack/progress.js";
+  slackActivityStatus,
+  type SlackActivityRenderer,
+} from "#public/channels/slack/activity.js";
 
 export {
   describeActionRequest,
