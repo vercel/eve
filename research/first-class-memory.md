@@ -18,7 +18,7 @@ prompt.
 Each memory definition binds a provider to an application namespace, a trusted
 scope, and a recall visibility policy. It may also describe the slot's
 purpose to the model through provider tool descriptions. The provider contract
-has three methods:
+has three surfaces:
 
 - `recall` returns messages that eve applies to the slot's recalled context in
   durable history as user-role context. A message with an `id` inserts or
@@ -26,11 +26,11 @@ has three methods:
 - `capture` observes history before compaction and after a completed turn.
 - `tools` contributes model tools bound to the active memory scope.
 
-eve calls each method at fixed boundaries. Recall and capture receive a
-discriminated `phase`, current turn coordinates, a stable operation ID, and the
-locked memory scope resolved for the slot. Tools are resolved once after
-turn-start recall through the same durable dynamic-capability machinery as a
-`turn.started` `defineDynamic` tool resolver.
+eve calls recall and capture handlers at fixed boundaries. Each handler
+receives a boundary-specific context with current turn coordinates, a stable
+operation ID, and the locked memory scope resolved for the slot. Tools are
+resolved once after turn-start recall through the same durable
+dynamic-capability machinery as a `turn.started` `defineDynamic` tool resolver.
 
 Memory definitions and provider tools compile through eve's canonical source
 graph. Each selected memory slot retains its direct binding and induces one
@@ -41,10 +41,10 @@ module-map, dynamic-tool, approval, authorization, and replay paths. Memory
 does not add a runtime tool contribution seam or a second executable registry.
 
 ```text
-turn.started          ---> recall(phase: "turn.started") ---> tools
-compaction.requested  ---> capture(phase: "compaction.requested")
-compaction.completed  ---> recall(phase: "compaction.completed")
-turn.completed        ---> capture(phase: "turn.completed")
+turn.started          ---> recall["turn.started"] ---> tools
+compaction.requested  ---> capture["compaction.requested"]
+compaction.completed  ---> recall["compaction.completed"]
+turn.completed        ---> capture["turn.completed"]
 ```
 
 eve owns namespace and scope resolution, invocation order, recall validation
@@ -576,40 +576,38 @@ interface MemoryOperationContext extends SessionContext {
   };
 }
 
-type MemoryRecallContext = MemoryOperationContext &
-  (
-    | {
-        readonly phase: "turn.started";
-        readonly turn: MemoryTurnContext;
-        readonly compaction?: never;
-      }
-    | {
-        readonly phase: "compaction.completed";
-        /** Null for standalone manual compaction. */
-        readonly turn: MemoryTurnContext | null;
-        readonly compaction: {
-          readonly modelId: string;
-        };
-      }
-  );
+interface MemoryTurnStartedContext extends MemoryOperationContext {
+  readonly turn: MemoryTurnContext;
+}
 
-type MemoryCaptureContext = MemoryOperationContext &
-  (
-    | {
-        readonly phase: "compaction.requested";
-        /** Null for standalone manual compaction. */
-        readonly turn: MemoryTurnContext | null;
-        readonly compaction: {
-          readonly modelId: string;
-          readonly usageInputTokens: number | null;
-        };
-      }
-    | {
-        readonly phase: "turn.completed";
-        readonly turn: MemoryTurnContext;
-        readonly compaction?: never;
-      }
-  );
+interface MemoryCompactionCompletedContext extends MemoryOperationContext {
+  /** Null for standalone manual compaction. */
+  readonly turn: MemoryTurnContext | null;
+  readonly compaction: {
+    readonly modelId: string;
+  };
+}
+
+interface MemoryCompactionRequestedContext extends MemoryOperationContext {
+  /** Null for standalone manual compaction. */
+  readonly turn: MemoryTurnContext | null;
+  readonly compaction: {
+    readonly modelId: string;
+    readonly usageInputTokens: number | null;
+  };
+}
+
+interface MemoryTurnCompletedContext extends MemoryOperationContext {
+  readonly turn: MemoryTurnContext;
+}
+
+type MemoryRecallHandler<TContext extends MemoryOperationContext> = (
+  context: TContext,
+) => MemoryRecallResult | Promise<MemoryRecallResult>;
+
+type MemoryCaptureHandler<TContext extends MemoryOperationContext> = (
+  context: TContext,
+) => void | Promise<void>;
 
 interface MemoryToolsContext extends DynamicResolveContext {
   readonly turn: MemoryTurnContext;
@@ -623,11 +621,17 @@ interface MemoryToolsContext extends DynamicResolveContext {
 type MemoryToolSet = Readonly<Record<string, MemoryToolDefinition>>;
 
 interface MemoryProvider {
-  recall(context: MemoryRecallContext): MemoryRecallResult | Promise<MemoryRecallResult>;
+  readonly recall: {
+    readonly "turn.started": MemoryRecallHandler<MemoryTurnStartedContext>;
+    readonly "compaction.completed"?: MemoryRecallHandler<MemoryCompactionCompletedContext>;
+  };
 
-  capture?(context: MemoryCaptureContext): void | Promise<void>;
+  readonly capture?: {
+    readonly "compaction.requested"?: MemoryCaptureHandler<MemoryCompactionRequestedContext>;
+    readonly "turn.completed"?: MemoryCaptureHandler<MemoryTurnCompletedContext>;
+  };
 
-  tools?(context: MemoryToolsContext): MemoryToolSet | null | Promise<MemoryToolSet | null>;
+  readonly tools?: (context: MemoryToolsContext) => Promise<MemoryToolSet | null>;
 }
 ```
 
@@ -688,10 +692,11 @@ latest state:
 import { defineMemoryProvider } from "eve/memory";
 
 const auditMemory = defineMemoryProvider({
-  async recall(ctx) {
-    if (ctx.phase !== "turn.started") return null;
-    const note = await takeUnreadNote(ctx.memory.scope.key);
-    return note === null ? null : { messages: [{ content: note }] };
+  recall: {
+    async "turn.started"(ctx) {
+      const note = await takeUnreadNote(ctx.memory.scope.key);
+      return note === null ? null : { messages: [{ content: note }] };
+    },
   },
 });
 ```
@@ -708,12 +713,13 @@ previous occupant of each position:
 import { defineMemoryProvider } from "eve/memory";
 
 const retrievalMemory = defineMemoryProvider({
-  async recall(ctx) {
-    if (ctx.phase !== "turn.started") return null;
-    const hits = await search(ctx.memory.scope.key, ctx.turn.input, { limit: 3 });
-    return {
-      messages: hits.map((hit, rank) => ({ id: `rank:${rank}`, content: hit.text })),
-    };
+  recall: {
+    async "turn.started"(ctx) {
+      const hits = await search(ctx.memory.scope.key, ctx.turn.input, { limit: 3 });
+      return {
+        messages: hits.map((hit, rank) => ({ id: `rank:${rank}`, content: hit.text })),
+      };
+    },
   },
 });
 ```
@@ -789,10 +795,10 @@ competence, is the design driver.
 ### Turn-start recall
 
 After eve admits and normalizes a new turn, it resolves each memory scope and,
-for a non-null scope, its namespace. It then calls `recall` with
-`phase: "turn.started"` for every active slot. The context contains the
-zero-based turn sequence, stable turn ID, normalized input, and the projected
-history before the turn, including prior visible recalled context.
+for a non-null scope, its namespace. It then calls the required
+`recall["turn.started"]` handler for every active slot. The context contains
+the zero-based turn sequence, stable turn ID, normalized input, and the
+projected history before the turn, including prior visible recalled context.
 
 Every active slot resolves independently against that same pre-recall view.
 Each result is normalized and validated, and the whole turn-wide batch commits
@@ -810,10 +816,10 @@ or use the current input as a retrieval query on every turn.
 ### Compaction capture, canonicalization, and recall
 
 Before automatic or manual compaction rewrites history, eve calls an
-implemented `capture` method with `phase: "compaction.requested"`. The provider
-receives the projected pre-rewrite history and the compaction model and usage
-metadata. A provider may persist a checkpoint, extract facts the summary could
-omit, or do nothing.
+implemented `capture["compaction.requested"]` handler. The provider receives
+the projected pre-rewrite history and the compaction model and usage metadata.
+A provider may persist a checkpoint, extract facts the summary could omit, or
+do nothing.
 
 Compaction is the canonicalization boundary for memory records. Trusted
 internal code partitions every attributed memory record — across every slot,
@@ -830,12 +836,12 @@ prompt stays constant, eve triggers canonicalization on raw attributed-record
 growth independently of visible prompt size. eve never silently summarizes,
 evicts, or truncates provider items.
 
-After a checkpoint is durably appended, eve calls `recall` with
-`phase: "compaction.completed"`. The provider receives the settled
+After a checkpoint is durably appended, eve calls an implemented
+`recall["compaction.completed"]` handler. The provider receives the settled
 post-compaction projected history and may return fresh messages, applied
-through the same atomic path. Identical retained items are no-ops. The call occurs
-after every successful automatic or manual compaction, even when the provider
-skipped ordinary turn-start recall.
+through the same atomic path. Identical retained items are no-ops. The handler
+runs after every successful automatic or manual compaction when registered,
+even when the provider skipped ordinary turn-start recall.
 
 Provider tools are not resolved during a standalone compaction because no model
 call follows that boundary.
@@ -912,11 +918,11 @@ replaces the parked call's captured scope values with another turn's scope.
 
 ### Completed-turn capture
 
-After a turn reaches `turn.completed`, eve calls an implemented `capture`
-method with `phase: "turn.completed"`. The provider receives the completed turn
+After a turn reaches `turn.completed`, eve calls an implemented
+`capture["turn.completed"]` handler. The provider receives the completed turn
 input and the settled projected history, including the assistant response and
-tool results. The method does not run for failed, cancelled, input-deferred, or
-adapter-consumed turns.
+tool results. The handler does not run for failed, cancelled, input-deferred,
+or adapter-consumed turns.
 
 Completed-turn capture is a semantic memory boundary, not an instrumentation
 export. It does not receive token usage, provider cost, latency, trace
@@ -1109,8 +1115,9 @@ recall visibility. Mounted extensions cannot contribute memory slots.
   or deployment suffixes.
 - One scope lock applies to every provider call, recalled record, model step,
   and durable tool continuation in an operation.
-- Recall and capture phases identify their exact lifecycle boundary. Every
-  provider context includes projected history and a replay-stable operation ID.
+- Nested recall and capture handler keys identify the exact lifecycle boundary.
+  Every provider context includes projected history and a replay-stable
+  operation ID.
 - Raw durable history is storage-only. Every message-bearing consumer receives
   one canonical scope projection with attribution stripped; no authored
   callback or model boundary sees hidden items or eve-owned metadata.
@@ -1223,8 +1230,8 @@ checks remain the merge gate. M2 must not begin on the pre-M1 base.
       Slack privacy
       thread](https://github.com/vercel/eve/pull/1581#discussion_r3807248748).
 
-- [x] **Keep settled-turn telemetry out of memory.** `capture` with
-      `phase: "turn.completed"` receives completed input and projected history,
+- [x] **Keep settled-turn telemetry out of memory.**
+      `capture["turn.completed"]` receives completed input and projected history,
       but not usage, cost, latency, trace identifiers, or unsuccessful
       outcomes. Instrumentation owns that data and can be correlated through
       `session.id` plus `turn.id`. `compaction.requested` retains its input-token

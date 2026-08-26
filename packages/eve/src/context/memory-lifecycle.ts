@@ -98,13 +98,12 @@ export async function dispatchMemoryTurnStarted(input: {
             slot: memory.slot,
             turnId: turn.id,
           });
-          const result = await memory.provider.recall({
+          const result = await memory.provider.recall["turn.started"]({
             ...callbackContext,
             abortSignal: input.abortSignal ?? fallbackAbortSignal,
             memory: { scope: lock.scope, slot: memory.slot },
             messages: preRecallMessages,
             operationId,
-            phase: "turn.started",
             turn,
           });
           return {
@@ -168,8 +167,9 @@ export async function dispatchMemoryCompactionRequested(input: {
       .sort((left, right) => left.logicalPath.localeCompare(right.logicalPath))
       .map(async (memory) => {
         const lock = locks[memory.slot];
-        if (lock === undefined || memory.provider.capture === undefined) return;
-        await memory.provider.capture({
+        const capture = memory.provider.capture?.["compaction.requested"];
+        if (lock === undefined || capture === undefined) return;
+        await capture({
           ...callbackContext,
           abortSignal: input.abortSignal ?? fallbackAbortSignal,
           compaction: {
@@ -185,7 +185,6 @@ export async function dispatchMemoryCompactionRequested(input: {
             slot: memory.slot,
             turnId: turn?.id ?? null,
           }),
-          phase: "compaction.requested",
           turn,
         });
       }),
@@ -214,7 +213,8 @@ export async function dispatchMemoryCompactionCompleted(input: {
         .sort((left, right) => left.logicalPath.localeCompare(right.logicalPath))
         .map(async (memory): Promise<MemoryRecallBatch | null> => {
           const lock = activeLocks[memory.slot];
-          if (lock === undefined) return null;
+          const recall = memory.provider.recall["compaction.completed"];
+          if (lock === undefined || recall === undefined) return null;
           const operationId = memoryOperationId({
             phase: "compaction.completed",
             sequence: input.event.data.sequence,
@@ -222,14 +222,13 @@ export async function dispatchMemoryCompactionCompleted(input: {
             slot: memory.slot,
             turnId: turn?.id ?? null,
           });
-          const result = await memory.provider.recall({
+          const result = await recall({
             ...callbackContext,
             abortSignal: input.abortSignal ?? fallbackAbortSignal,
             compaction: { modelId: input.event.data.modelId },
             memory: { scope: lock.scope, slot: memory.slot },
             messages: projected,
             operationId,
-            phase: "compaction.completed",
             turn,
           });
           return {
@@ -275,8 +274,9 @@ export async function dispatchMemoryTurnCompleted(input: {
       .sort((left, right) => left.logicalPath.localeCompare(right.logicalPath))
       .map(async (memory) => {
         const lock = locks[memory.slot];
-        if (lock === undefined || memory.provider.capture === undefined) return;
-        await memory.provider.capture({
+        const capture = memory.provider.capture?.["turn.completed"];
+        if (lock === undefined || capture === undefined) return;
+        await capture({
           ...callbackContext,
           abortSignal: input.abortSignal ?? fallbackAbortSignal,
           memory: { scope: lock.scope, slot: memory.slot },
@@ -288,7 +288,6 @@ export async function dispatchMemoryTurnCompleted(input: {
             slot: memory.slot,
             turnId: input.event.data.turnId,
           }),
-          phase: "turn.completed",
           turn: lock.turn,
         });
       }),

@@ -72,7 +72,10 @@ describe("buildAgentInfoResponse", () => {
           loadNamespace: async () => ({
             default: defineMemory({
               description: "Caller profile.",
-              provider: { recall: async () => null, tools: async () => ({}) },
+              provider: {
+                recall: { "turn.started": async () => null },
+                tools: async () => ({}),
+              },
               scope: "user_1",
             }),
           }),

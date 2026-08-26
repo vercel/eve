@@ -377,7 +377,11 @@ describe("compileAgentManifest source graph", () => {
       defineMemory({
         description: "Manage the caller profile.",
         provider: {
-          recall: async () => ({ messages: [{ content: "Likes tea", id: "drink" }] }),
+          recall: {
+            "turn.started": async () => ({
+              messages: [{ content: "Likes tea", id: "drink" }],
+            }),
+          },
           tools: async () => ({
             save: defineTool({
               description: "Save a profile field.",
@@ -445,7 +449,10 @@ describe("compileAgentManifest source graph", () => {
       {
         logicalPath: "memory/profile.ts",
         loadNamespace: async () => ({
-          default: defineMemory({ provider: { recall: async () => null }, scope: "user_1" }),
+          default: defineMemory({
+            provider: { recall: { "turn.started": async () => null } },
+            scope: "user_1",
+          }),
         }),
       },
       {
@@ -489,7 +496,10 @@ describe("compileAgentManifest source graph", () => {
       {
         logicalPath: "memory/profile.ts",
         loadNamespace: async () => ({
-          default: defineMemory({ provider: { recall: async () => null }, scope: "user_1" }),
+          default: defineMemory({
+            provider: { recall: { "turn.started": async () => null } },
+            scope: "user_1",
+          }),
         }),
       },
       {

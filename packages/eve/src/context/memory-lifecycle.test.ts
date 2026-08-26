@@ -14,8 +14,8 @@ import {
 import { AuthKey, SessionIdKey, SessionKey, TurnMemoryLocksKey } from "#context/keys.js";
 import {
   defineMemory,
-  type MemoryCaptureContext,
   type MemoryDefinition,
+  type MemoryTurnCompletedContext,
 } from "#public/memory/index.js";
 import type { ResolvedMemoryDefinition } from "#runtime/types.js";
 import {
@@ -70,7 +70,12 @@ describe("memory lifecycle", () => {
           appRoot: "/app",
           ctx,
           event: turnStarted,
-          memories: [memory("profile", { provider: { recall }, scope: "user_1" })],
+          memories: [
+            memory("profile", {
+              provider: { recall: { "turn.started": recall } },
+              scope: "user_1",
+            }),
+          ],
           nodeId: "__root__",
         }),
     );
@@ -91,10 +96,12 @@ describe("memory lifecycle", () => {
           return "app";
         },
         provider: {
-          recall: async (context) => {
-            events.push(`${slot}:recall`);
-            seen.push([...context.messages]);
-            return { messages: [{ content: `${slot} memory`, id: "item" }] };
+          recall: {
+            "turn.started": async (context) => {
+              events.push(`${slot}:recall`);
+              seen.push([...context.messages]);
+              return { messages: [{ content: `${slot} memory`, id: "item" }] };
+            },
           },
         },
         scope: async () => {
@@ -147,8 +154,14 @@ describe("memory lifecycle", () => {
             ctx,
             event: turnStarted,
             memories: [
-              memory("alpha", { provider: { recall: valid }, scope: "user_1" }),
-              memory("bravo", { provider: { recall: invalid }, scope: "user_1" }),
+              memory("alpha", {
+                provider: { recall: { "turn.started": valid } },
+                scope: "user_1",
+              }),
+              memory("bravo", {
+                provider: { recall: { "turn.started": invalid } },
+                scope: "user_1",
+              }),
             ],
             nodeId: "__root__",
           }),
@@ -173,7 +186,13 @@ describe("memory lifecycle", () => {
           appRoot: "/app",
           ctx,
           event: turnStarted,
-          memories: [memory("profile", { namespace, provider: { recall }, scope: null })],
+          memories: [
+            memory("profile", {
+              namespace,
+              provider: { recall: { "turn.started": recall } },
+              scope: null,
+            }),
+          ],
           nodeId: "__root__",
         }),
     );
@@ -185,11 +204,15 @@ describe("memory lifecycle", () => {
 
   it("captures only the settled projected history for a successful turn", async () => {
     const ctx = createContext();
-    const capture = vi.fn(async (_context: MemoryCaptureContext) => {});
+    const capture = vi.fn(async (_context: MemoryTurnCompletedContext) => {});
     const definition = memory("profile", {
       provider: {
-        capture,
-        recall: async () => ({ messages: [{ content: "remembered", id: "profile" }] }),
+        capture: { "turn.completed": capture },
+        recall: {
+          "turn.started": async () => ({
+            messages: [{ content: "remembered", id: "profile" }],
+          }),
+        },
       },
       scope: "user_1",
     });
@@ -231,8 +254,9 @@ describe("memory lifecycle", () => {
         { content: "hi", role: "assistant" },
       ],
       operationId: "eve-memory-operation-v1:session_1:0:turn_0:turn.completed:profile",
-      phase: "turn.completed",
     });
+    expect(capture.mock.calls[0]?.[0]).not.toHaveProperty("phase");
+    expect(capture.mock.calls[0]?.[0]).not.toHaveProperty("compaction");
     expect(JSON.stringify(capture.mock.calls[0]?.[0].messages)).not.toContain("eve.memory");
   });
 
@@ -241,20 +265,29 @@ describe("memory lifecycle", () => {
     const phases: string[] = [];
     const definition = memory("profile", {
       provider: {
-        capture: async (context) => {
-          phases.push(context.phase);
-          expect(JSON.stringify(context.messages)).not.toContain("eve.memory");
+        capture: {
+          "compaction.requested": async (context) => {
+            phases.push("compaction.requested");
+            expect(context).not.toHaveProperty("phase");
+            expect(context.compaction).toEqual({
+              modelId: "openai/test",
+              usageInputTokens: 100,
+            });
+            expect(JSON.stringify(context.messages)).not.toContain("eve.memory");
+          },
         },
-        recall: async (context) => {
-          phases.push(context.phase);
-          return {
-            messages: [
-              {
-                content: context.phase === "compaction.completed" ? "new profile" : "old profile",
-                id: "profile",
-              },
-            ],
-          };
+        recall: {
+          "turn.started": async () => ({
+            messages: [{ content: "old profile", id: "profile" }],
+          }),
+          "compaction.completed": async (context) => {
+            phases.push("compaction.completed");
+            expect(context).not.toHaveProperty("phase");
+            expect(context.compaction).toEqual({ modelId: "openai/test" });
+            return {
+              messages: [{ content: "new profile", id: "profile" }],
+            };
+          },
         },
       },
       scope: "user_1",
