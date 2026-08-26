@@ -119,6 +119,27 @@ describe("TurnControlReceiver", () => {
     await expect(runReceiver([])).rejects.toThrow("boom");
   });
 
+  it("fails instead of ignoring a control kind from a newer deployment", async () => {
+    installControlHook([{ kind: "future-terminal-control" } as never]);
+
+    await expect(runReceiver([])).rejects.toThrow(
+      'unsupported control kind "future-terminal-control"',
+    );
+  });
+
+  it("fails instead of returning a driver action from a newer deployment", async () => {
+    installControlHook([
+      {
+        action: { kind: "future-driver-action" },
+        kind: "turn-result",
+      } as never,
+    ]);
+
+    await expect(runReceiver([])).rejects.toThrow(
+      'unsupported driver action "future-driver-action"',
+    );
+  });
+
   it("buffers current and legacy sends that arrive during a turn", async () => {
     installControlHook([parkResult()], true);
     const bufferedDeliveries: DeliverHookPayload[] = [];
