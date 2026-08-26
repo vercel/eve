@@ -56,10 +56,39 @@ const workflowWorldLocalVersionPlugin = {
   },
 };
 
+const GRACEFUL_AGENT_CLOSE_SOURCE = "await httpAgent?.close();";
+const ABORTING_AGENT_CLOSE_SOURCE = "await httpAgent?.destroy();";
+
+function createAbortingQueueShutdownPlugin() {
+  let patched = false;
+
+  return {
+    name: "eve-workflow-world-local-aborting-queue-shutdown",
+    transform(source, id) {
+      if (!id.replaceAll("\\", "/").endsWith("/@workflow/world-local/dist/queue.js")) {
+        return undefined;
+      }
+      if (!source.includes(GRACEFUL_AGENT_CLOSE_SOURCE)) {
+        throw new Error("@workflow/world-local's queue shutdown contract changed.");
+      }
+      patched = true;
+      return {
+        code: source.replace(GRACEFUL_AGENT_CLOSE_SOURCE, ABORTING_AGENT_CLOSE_SOURCE),
+        map: null,
+      };
+    },
+    buildEnd() {
+      if (!patched) {
+        throw new Error("@workflow/world-local's queue shutdown was not patched.");
+      }
+    },
+  };
+}
+
 export default {
   packageName: "@workflow/world-local",
   compiledPath: "@workflow/world-local",
   chunkGroup: "workflow",
   declaration: await loadDeclaration("workflow-world-local.d.ts"),
-  plugins: [workflowWorldLocalVersionPlugin],
+  plugins: [workflowWorldLocalVersionPlugin, createAbortingQueueShutdownPlugin()],
 };
