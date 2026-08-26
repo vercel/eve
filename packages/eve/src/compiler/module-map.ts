@@ -142,12 +142,15 @@ export async function createProgrammaticCompiledModuleMap(
   return { nodes };
 }
 
-/** Returns every binding owned by one compiled node, including remote config modules. */
-export function collectModuleBindingsForManifest(
+/** Returns one compiled node's finalized runtime entries, including remote config modules. */
+export function collectRuntimeModuleBindingsForManifest(
   manifest: CompiledAgentNodeManifest | CompiledAgentResources,
 ): readonly BoundModule[] {
-  const modules = new Map<string, CompiledModuleBinding>(Object.entries(manifest.bindings));
+  const modules = new Map<string, CompiledModuleBinding>(
+    Object.entries(manifest.bindings).filter(([, binding]) => binding.usage.runtimeEntry),
+  );
   for (const remote of manifest.remoteAgents) {
+    if (!remote.binding.usage.runtimeEntry) continue;
     if (modules.has(remote.sourceId)) {
       throw new Error(`Remote agent binding "${remote.sourceId}" collides with a node binding.`);
     }
@@ -204,13 +207,13 @@ function renderProgrammaticDependencies(
 function collectBoundNodeScopes(manifest: CompiledAgentManifest): readonly BoundNodeScope[] {
   return [
     {
-      modules: collectModuleBindingsForManifest(manifest),
+      modules: collectRuntimeModuleBindingsForManifest(manifest),
       nodeId: ROOT_COMPILED_AGENT_NODE_ID,
     },
     ...[...manifest.subagents]
       .sort((left, right) => left.nodeId.localeCompare(right.nodeId))
       .map((subagent) => ({
-        modules: collectModuleBindingsForManifest(subagent.agent),
+        modules: collectRuntimeModuleBindingsForManifest(subagent.agent),
         nodeId: subagent.nodeId,
       })),
   ];

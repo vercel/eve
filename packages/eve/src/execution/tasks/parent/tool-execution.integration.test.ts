@@ -62,6 +62,7 @@ describe("background subagent tool execution", () => {
           },
           logicalPath: "subagents/reviewer.ts",
           owner: { kind: "application" },
+          usage: { compile: true, runtimeEntry: true },
         },
         description: "Remote reviewer",
         entryPath: "/virtual/eve-memory-app/agent/subagents/reviewer.ts",

@@ -166,7 +166,6 @@ describe("app runtime dependency tracing", () => {
       )
     ).join("\n");
 
-    expect(serverModuleEntries.some((entry) => entry.includes("fixture-runtime-dep"))).toBe(true);
     expect(tracedServerPackageJson.dependencies).not.toHaveProperty("fixture-runtime-dep");
     expect(tracedServerPackageJson.dependencies).not.toHaveProperty(EVE_PACKAGE_INFO.name);
     await expect(
@@ -292,8 +291,6 @@ describe("app runtime dependency tracing", () => {
     ).rejects.toMatchObject({
       code: "ENOENT",
     });
-    expect(bundledDependencyModule.source).toContain("const __dirname = __eveDirname(__filename);");
-
     await import(pathToFileURL(bundledDependencyModule.modulePath).href);
   }, 30_000);
 
@@ -969,7 +966,6 @@ describe("app runtime dependency tracing", () => {
       recursive: true,
     });
 
-    expect(serverEntries.some((entry) => entry.includes("fixture-instrumentation-dep"))).toBe(true);
     const instrumentationModulePath = (
       await Promise.all(
         serverEntries

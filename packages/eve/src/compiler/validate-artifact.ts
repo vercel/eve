@@ -8,7 +8,7 @@ import type {
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { CompiledModuleBinding } from "#compiler/source-graph.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
-import { collectModuleBindingsForManifest } from "#compiler/module-map.js";
+import { collectRuntimeModuleBindingsForManifest } from "#compiler/module-map.js";
 import { HOST_HTTP_INVENTORY } from "#framework/host-inventory.js";
 
 type CompiledNode = CompiledAgentNodeManifest | CompiledAgentResources;
@@ -89,14 +89,16 @@ export function validateCompiledModuleMap(
   const expected = new Map<string, Set<string>>([
     [
       "__root__",
-      new Set(collectModuleBindingsForManifest(manifest).map((binding) => binding.sourceId)),
+      new Set(collectRuntimeModuleBindingsForManifest(manifest).map((binding) => binding.sourceId)),
     ],
     ...manifest.subagents.map(
       (subagent) =>
         [
           subagent.nodeId,
           new Set(
-            collectModuleBindingsForManifest(subagent.agent).map((binding) => binding.sourceId),
+            collectRuntimeModuleBindingsForManifest(subagent.agent).map(
+              (binding) => binding.sourceId,
+            ),
           ),
         ] as const,
     ),
@@ -250,6 +252,9 @@ function validateBinding(
   logicalPath: string,
   binding: CompiledModuleBinding,
 ): void {
+  if (!binding.usage.compile && !binding.usage.runtimeEntry) {
+    fail(`compiled binding "${sourceId}" has no compile or runtime usage`);
+  }
   if (binding.logicalPath !== logicalPath) {
     fail(`compiled binding "${sourceId}" targets "${binding.logicalPath}", not "${logicalPath}"`);
   }
@@ -285,6 +290,14 @@ function validateProgrammaticBindingDependencies(
         if (bindings[dependencySourceId] === undefined) {
           fail(
             `programmatic binding "${sourceId}" depends on missing binding "${dependencySourceId}"`,
+          );
+        }
+        if (
+          binding.usage.runtimeEntry &&
+          bindings[dependencySourceId]?.usage.runtimeEntry !== true
+        ) {
+          fail(
+            `runtime binding "${sourceId}" depends on non-runtime binding "${dependencySourceId}"`,
           );
         }
         visit(dependencySourceId);

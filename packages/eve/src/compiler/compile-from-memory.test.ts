@@ -29,6 +29,14 @@ describe("compileFromMemory", () => {
     expect(manifest.bindings[manifest.config.source.sourceId]?.owner).toEqual({
       kind: "application",
     });
+    expect(manifest.bindings[manifest.config.source.sourceId]?.usage).toEqual({
+      compile: true,
+      runtimeEntry: false,
+    });
+    expect(manifest.bindings[manifest.sandbox.sourceId]?.usage).toEqual({
+      compile: true,
+      runtimeEntry: true,
+    });
     expect(manifest.sourceComposition.entries).toContainEqual(
       expect.objectContaining({
         kind: "shadowed",
@@ -81,7 +89,7 @@ describe("compileFromMemory", () => {
     expect(manifest.bindings[skill!.sourceId]?.owner).toEqual({ kind: "application" });
   });
 
-  it("preserves roots and passes the serialized v43 schema", async () => {
+  it("preserves roots and passes the serialized v44 schema", async () => {
     const { manifest } = await compileFromMemory({
       agentRoot: "/app/agent",
       appRoot: "/app",
@@ -119,6 +127,7 @@ describe("compileFromMemory", () => {
     expect(manifest.bindings[sourceId]).toMatchObject({
       backing: { kind: "programmatic", moduleId: "instrumentation.ts" },
       owner: { kind: "application" },
+      usage: { compile: false, runtimeEntry: true },
     });
     expect(moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules[sourceId]?.default).toBe(
       instrumentation,

@@ -11,7 +11,7 @@ import {
   validateCompiledModuleMap,
 } from "#compiler/validate-artifact.js";
 
-describe("compiled agent manifest v43", () => {
+describe("compiled agent manifest v44", () => {
   it("round-trips a real compiled graph through the serialized schema", async () => {
     const { manifest } = await compileFromMemory({
       model: "openai/gpt-5.4",
@@ -34,6 +34,25 @@ describe("compiled agent manifest v43", () => {
 
     expect(() => validateCompiledAgentManifest({ ...manifest, bindings })).toThrow(
       "has no compiled binding",
+    );
+  });
+
+  it("requires strict lifecycle usage on every serialized binding", async () => {
+    const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+    const serialized = JSON.parse(JSON.stringify(manifest)) as typeof manifest;
+    const sourceId = serialized.config.source.sourceId;
+    const binding = serialized.bindings[sourceId]!;
+
+    const { usage: _usage, ...withoutUsage } = binding;
+    serialized.bindings[sourceId] = withoutUsage as typeof binding;
+    expect(compiledAgentManifestSchema.safeParse(serialized).success).toBe(false);
+
+    serialized.bindings[sourceId] = {
+      ...manifest.bindings[sourceId]!,
+      usage: { compile: false, runtimeEntry: false },
+    };
+    expect(() => validateCompiledAgentManifest(serialized)).toThrow(
+      `compiled binding "${sourceId}" has no compile or runtime usage`,
     );
   });
 
@@ -73,7 +92,7 @@ describe("compiled agent manifest v43", () => {
     ).toThrow("dangling winner");
   });
 
-  it("rejects module maps whose keys diverge from total bindings", async () => {
+  it("rejects module maps whose keys diverge from runtime entries", async () => {
     const { manifest, moduleMap } = await compileFromMemory({ model: "openai/gpt-5.4" });
     const root = moduleMap.nodes.__root__!;
 

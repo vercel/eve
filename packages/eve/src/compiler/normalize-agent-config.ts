@@ -21,7 +21,7 @@ import {
   loadModuleBackedDefinition,
   type ManifestCompileContext,
 } from "#compiler/normalize-helpers.js";
-import type { CompiledModuleBinding } from "#compiler/source-graph.js";
+import type { AgentModuleBinding } from "#compiler/source-graph.js";
 import { createCompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
@@ -34,7 +34,7 @@ export async function compileAgentConfig(
   manifest: AgentSourceManifest,
   context: ManifestCompileContext,
   options: {
-    readonly binding: CompiledModuleBinding;
+    readonly binding: AgentModuleBinding;
     readonly definition?: unknown;
     readonly source: ModuleSourceRef;
   },
@@ -292,7 +292,7 @@ async function normalizeAuthoredModelReference(input: {
 function formatAgentConfigModulePath(
   manifest: AgentSourceManifest,
   configModule: ModuleSourceRef,
-  binding: CompiledModuleBinding,
+  binding: AgentModuleBinding,
 ): string {
   if (binding.backing.kind === "programmatic") return configModule.logicalPath;
   return normalizeLogicalPath(

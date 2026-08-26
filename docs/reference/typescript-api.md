@@ -58,6 +58,31 @@ Tool-wide authoring helpers such as `defineTool`, `defineDynamic`, and `disableT
 
 `defineInstructions` accepts `{ content: string, role?: "system" | "user" }`; omitted `role` means `"system"`. Its `eve/instructions` version of `defineDynamic` accepts only `session.started` and `turn.started` handlers returning `defineInstructions(...)` or `null`. The legacy `{ markdown: string }` definition remains available as a deprecated system-role form.
 
+## Authored module lifecycle
+
+eve evaluates TypeScript definition modules during compilation so it can validate and normalize the agent. Within one agent node, each module namespace loads at most once during that compile. The resolved definition then determines whether the module is also an entry in the runtime bundle:
+
+| Lifecycle           | Authored definitions                                                                                                                                                                                                                            |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Compile only        | Static instructions and skills, prompt-form TypeScript schedules, static Gateway or default agent config, provider-managed web search, `Workflow` configuration, fully shadowed channels, and a child sandbox that selects its parent's sandbox |
+| Compile and runtime | Dynamic instructions, skills, tools, models, and subagents; executable tools; effective channels; connections; hooks; memory; handler schedules; direct-provider models; independent sandboxes; and remote subagents                            |
+| Runtime only        | Instrumentation modules and extension mount initialization                                                                                                                                                                                      |
+
+A compile-only module is not imported when the deployed runtime starts. For example, eve stores the resolved content from a static `instructions.ts` in the compiled manifest. A compile-and-runtime module is evaluated during compilation and imported again when a runtime process loads the module map. Keep module-top-level work deterministic, and put request- or session-specific work in the definition's runtime callbacks.
+
+The runtime bundler follows the normal ESM graph from every runtime entry. A helper remains runtime code when a tool or other runtime entry imports it, even if static instructions also import that helper. Lifecycle selection applies to definition entries, not as tree-shaking permission for their ordinary dependencies.
+
+### Asset imports
+
+Authored modules may import relative non-code assets from anywhere inside their project package, including outside `agent/`:
+
+```ts title="agent/tools/read_template.ts"
+import icon from "../../assets/icon.png";
+import template from "../../prompts/template.txt?raw";
+```
+
+`?raw` embeds the file as UTF-8 text. Other non-code asset imports produce a data URL with an inferred media type. Compilation, local development, and production builds use the same resolution behavior. Imports that escape the project package are rejected; package those files with the application instead.
+
 ## Runtime context (`ctx`)
 
 `ctx` is passed to your tool `execute`, hook handlers, channel event handlers, and connection auth/header resolvers. It is live only while authored code is running, so reaching for it at module top level throws. See [Session context](../guides/session-context) for the full model.

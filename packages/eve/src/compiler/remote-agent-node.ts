@@ -78,6 +78,7 @@ export const compiledRemoteAgentNodeSchema: z.ZodType<CompiledRemoteAgentNode> =
             })
             .strict(),
         ]),
+        usage: z.object({ compile: z.boolean(), runtimeEntry: z.boolean() }).strict(),
       })
       .strict(),
     description: z.string(),
