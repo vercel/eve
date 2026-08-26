@@ -1845,7 +1845,7 @@ import { defineMcpClientConnection } from "eve/connections";
 const SHOPIFY_EXAMPLE_PROFILE =
   "https://shopify.dev/ucp/agent-profiles/examples/2026-04-08/valid-with-capabilities.json";
 
-// Shopify cannot reach localhost. Use its public profile, or expose this route with ngrok.
+// Shopify cannot reach localhost. Use its public profile, or expose this route with a tool like ngrok.
 const agentProfileUrl =
   process.env.EVE_DEV === "1"
     ? SHOPIFY_EXAMPLE_PROFILE

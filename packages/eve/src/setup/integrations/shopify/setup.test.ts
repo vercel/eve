@@ -50,7 +50,10 @@ describe("Shopify setup", () => {
     const context = contexts({ "shopify.store-domain": " shop.example.com " });
     const plan = await prepareShopifySetup(context.prepare);
 
-    await expect(applyShopifySetup(plan, context.apply, effects)).resolves.toEqual({ facts: [] });
+    await expect(applyShopifySetup(plan, context.apply, effects)).resolves.toEqual({
+      deploymentRequired: true,
+      facts: [{ label: "Store domain", value: "shop.example.com", kind: "text" }],
+    });
 
     expect(effects.appendEnv).toHaveBeenCalledWith("/project/.env.local", {
       SHOPIFY_STORE_DOMAIN: "shop.example.com",

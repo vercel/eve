@@ -45,7 +45,9 @@ function validateStoreDomain(value: string): string | null {
   }
 }
 
-export async function prepareShopifySetup(context: SetupPrepareContext): Promise<ShopifySetupPlan> {
+export async function prepareShopifySetup(
+  context: SetupPrepareContext,
+): Promise<ShopifySetupPlan> {
   const storeDomain = await context.asker.ask(
     text({
       key: "shopify.store-domain",
@@ -63,6 +65,9 @@ export async function applyShopifySetup(
   context: SetupApplyContext,
   deps: ShopifySetupDeps = defaultDeps,
 ) {
+  context.presenter.log.message(
+    "Scaffolding Shopify UCP channel and storefront environment...",
+  );
   await deps.appendEnv(join(context.appRoot, ".env.local"), {
     SHOPIFY_STORE_DOMAIN: plan.storeDomain,
   });
@@ -71,7 +76,17 @@ export async function applyShopifySetup(
     SHOPIFY_UCP_CHANNEL_TEMPLATE,
     { force: context.force },
   );
-  return { facts: [] };
+  context.presenter.log.success("Scaffolded channel: ucp");
+  context.presenter.nextSteps([
+    `Set SHOPIFY_STORE_DOMAIN in .env.local.`,
+    "Shopify cannot reach localhost, so `eve dev` uses Shopify's example agent profile automatically. To test your own profile locally, expose the /.well-known/ucp route with a tool like ngrok.",
+  ]);
+  return {
+    deploymentRequired: true as const,
+    facts: [
+      { label: "Store domain", value: plan.storeDomain, kind: "text" as const },
+    ],
+  };
 }
 
 export const SHOPIFY_SETUP = defineSetupIntegration({
