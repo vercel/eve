@@ -1875,7 +1875,9 @@ The generated connection uses Shopify's example UCP agent profile for developmen
 
 \`\`\`bash
 UCP_AGENT_PROFILE_URL=https://your-domain.com/ucp-agent-profile.json
-\`\`\``,
+\`\`\`
+
+See Shopify's [agent profile documentation](https://shopify.dev/docs/agents/profiles) for profile requirements.`,
   },
   stripe: {
     logo: "stripe",
