@@ -269,6 +269,44 @@ generated name, description, route target, and source file. Diagnostics should d
 - an invalid agent name;
 - a workspace-subagent source authored outside a workspace.
 
+### Dynamic subagent maps
+
+Today a dynamic subagent selects one `defineAgent(...)`, one
+`defineRemoteAgent(...)`, or `null`. Extend `defineDynamic()` to also accept a
+record of named remote definitions:
+
+```ts title="agent/subagents/specialists.ts"
+export default defineDynamic({
+  events: {
+    "session.started": () => ({
+      triage: defineRemoteAgent({/* … */}),
+      "company-knowledge": defineRemoteAgent({/* … */}),
+    }),
+  },
+});
+```
+
+The record keys are bare model tool names (`triage`, `company-knowledge`), not
+`specialists__triage`. A single-definition return retains its existing
+path-derived name; an empty record is the map equivalent of no subagents.
+
+Each map entry needs a durable internal identity: resolver node plus record
+key, such as `subagents/specialists#triage`. Session and turn selections persist
+one map per resolver; a turn map replaces that resolver's session map, and an
+empty turn map hides its session entries. Dispatch, continuation, cancellation,
+reset, and inspection resolve this durable identity without rerunning the
+resolver.
+
+Dynamic entries must not collide with authored tools/subagents or entries from
+another dynamic resolver. The initial map form permits only
+`defineRemoteAgent()` entries. Mapping local `defineAgent()` values would make
+several apparent agents share one subagent directory's resources, so local
+agents remain one-per-directory.
+
+`defineWorkspaceSubagents()` remains build-time/static, but can compile to the
+same keyed delegation representation with catalog-derived names, descriptions,
+and targets.
+
 ### Lowering and execution
 
 The compiler expands the selected catalog entries into remote subagent nodes in
@@ -394,18 +432,22 @@ subagents but has no configured target resolver. It must not guess that an
    required description before compiling individual consumer manifests. Keep
    catalog provenance and resolved route targets available to build planning
    and inspection.
-3. **Add `defineWorkspaceSubagents()`.** Permit it only for a workspace
-   member's `subagents/` source; validate selectors against the catalog;
-   expand matches into deterministic remote subagent nodes; and register them
-   through the existing subagent compiler and runtime registry.
-4. **Add deployment target adapters.** Vercel resolves same-deployment member
-   routes from the active origin and uses explicit service authentication.
-   Self-hosting supplies an operator-owned resolver. Keep `defineRemoteAgent()`
-   as the configuration surface for non-workspace calls.
-5. **Expose topology in inspection and diagnostics.** `eve info` and
-   agent-info should show the workspace ID, resolved workspace members,
-   workspace-expanded subagents, and unresolved configuration errors without
-   exposing credential material.
+3. **Add keyed dynamic subagent maps.** Preserve single-entry dynamic
+   subagent behavior, then add durable resolver-node-plus-key identities,
+   record selection snapshots, remote-entry validation, collision handling,
+   and lifecycle lookup for map entries.
+4. **Add `defineWorkspaceSubagents()`.** Permit it only for a workspace
+   member's `subagents/` source; validate selectors against the catalog; and
+   expand matches into deterministic remote entries using the keyed delegation
+   representation.
+5. **Resolve workspace members to remote targets.** Vercel derives each
+   member's same-deployment route and service authentication from the generated
+   workspace deployment. Other hosts must provide an explicit workspace
+   routing/authentication integration; until one exists, use
+   `defineRemoteAgent()` for non-Vercel targets.
+6. **Expose topology in inspection and diagnostics.** `eve info` and
+   agent-info should show workspace members, workspace-expanded subagents, and
+   unresolved configuration errors without exposing credential material.
 
 ## Validation
 
@@ -416,6 +458,10 @@ subagents but has no configured target resolver. It must not guess that an
   route uniqueness, route-prefix preservation, and per-member outputs.
 - Catalog: description required, deterministic order, source provenance, and
   no runtime network lookup.
+- Dynamic subagent maps: single-entry compatibility, key-derived internal
+  identities, session/turn replacement and empty-map hiding, duplicate and
+  authored-name conflicts, durable dispatch and continuation, cancellation,
+  reset, and map-entry inspection.
 - `defineWorkspaceSubagents`: exact and glob selection, exclusion precedence,
   self omission, name and path-glob matching, empty/unmatched selector
   failures, agent-name preservation, stable tool order, and standalone
