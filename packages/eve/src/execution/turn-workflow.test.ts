@@ -23,6 +23,15 @@ const sleepMock = vi.fn(async (_duration: unknown) => {});
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
+  defineHook: () => ({
+    create: (options?: { readonly token?: string }) => ({
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+      dispose: async () => {},
+      getConflict: async () => null,
+      token: options?.token ?? "hook",
+    }),
+    resume: async () => null,
+  }),
   getWorkflowMetadata: vi.fn(() => ({ url: "https://eve.example.com" })),
   sleep: (duration: unknown) => sleepMock(duration),
 }));

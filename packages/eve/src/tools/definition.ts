@@ -141,8 +141,15 @@ export interface ToolInputResponse {
  * context inside its durable body, with two differences: `getSandbox`,
  * `getSkill`, `getToken`, and `requireAuth` are unavailable there and throw
  * when touched — read credentials inside a `"use step"` function instead —
- * and {@link replyTo} becomes available.
+ * and {@link owner} becomes available.
  */
+/** The three hooks a workflow tool run reports to; see {@link ToolContext.owner}. */
+export interface ToolRunOwner {
+  readonly outcome: string;
+  readonly report: string;
+  readonly request: string;
+}
+
 export type ToolContext = SessionContext & {
   /**
    * Aborts when the work this tool is doing is cancelled: the active turn
@@ -157,13 +164,14 @@ export type ToolContext = SessionContext & {
    */
   readonly callId: string;
   /**
-   * The owner's hook token. Everything a workflow body says to the turn or
-   * task that started it — progress, a question, the outcome — is a
-   * `RunMessage` resumed on this token; `tell` and `ask` from `eve/workflow`
-   * do exactly that. Only available in a workflow body; an ordinary tool
-   * throws when it reads this.
+   * The hook tokens of the turn or task that started this run. A workflow
+   * body resumes `report` with progress, `request` with a question carrying
+   * the token of the hook its answer should resume, and `outcome` once with
+   * its result; `yield`, `ask` from `eve/workflow`, and returning do exactly
+   * that. Only available in a workflow body; an ordinary tool throws when it
+   * reads this.
    */
-  readonly replyTo: string;
+  readonly owner: ToolRunOwner;
   /**
    * Final runtime name of the current tool, including any namespace
    * qualification. This is the same `toolName` carried by stream events and

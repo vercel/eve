@@ -1,4 +1,5 @@
 import { buildCallbackContext } from "#context/build-callback-context.js";
+import { deriveRunOwner } from "#execution/tool-run/messages.js";
 import { startToolRun } from "#execution/tool-run/start.js";
 import {
   WORKFLOW_TOOL_EXECUTOR_KIND,
@@ -33,12 +34,7 @@ export function createWorkflowToolBackgroundExecute(input: {
     const started = await startToolRun({
       callId: options.toolCallId,
       input: parseWorkflowToolInput(toolInput, input.toolName),
-      replyTo: {
-        kind: "task",
-        taskId: task.task.taskId,
-        taskInboxToken: task.task.taskInboxToken,
-        taskRunId: task.task.taskRunId,
-      },
+      owner: deriveRunOwner(task.task.taskInboxToken),
       session: buildCallbackContext().session,
       stepIndex: getHarnessEmissionState(task.session.state).stepIndex,
       toolName: input.toolName,

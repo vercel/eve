@@ -12,7 +12,18 @@ import {
 } from "#execution/tasks/child/steps.js";
 import { applyTaskTransition } from "#tasks/transitions.js";
 import { translateTaskInboundPayload } from "#tasks/wire.js";
-import { isRunMessage, runMessageToTaskPayload } from "#execution/tool-run/owner-inbox.js";
+import {
+  deriveRunOwner,
+  outcomeHook,
+  reportHook,
+  requestHook,
+} from "#execution/tool-run/messages.js";
+import { createChannelReader, raceChannelReads } from "#execution/tool-run/owner-channels.js";
+import {
+  runOutcomeToTaskCommand,
+  runReportToTaskUpdate,
+  runRequestToInputRequestPayload,
+} from "#execution/tool-run/owner-inbox.js";
 import {
   isReadyTaskStatus,
   isTerminalTaskStatus,
@@ -74,7 +85,22 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
   // The iterator shares the hook's durable cursor; create it before
   // claiming so conflict replay is consumed by getConflict(), not a
   // later iterator read.
-  const iterator = commands[Symbol.asyncIterator]();
+  const commandReader = createChannelReader("commands", commands);
+  // The run channels exist before the claim: the parent hands the task token
+  // to a background run as soon as the claim lands, and that run may report
+  // at once. Every run addresses them through `deriveRunOwner(taskInboxToken)`.
+  const owner = deriveRunOwner(input.taskInboxToken);
+  const runHooks = {
+    outcome: outcomeHook.create({ token: owner.outcome }),
+    report: reportHook.create({ token: owner.report }),
+    request: requestHook.create({ token: owner.request }),
+  };
+  const readers = [
+    createChannelReader("report", runHooks.report),
+    createChannelReader("request", runHooks.request),
+    createChannelReader("outcome", runHooks.outcome),
+    commandReader,
+  ] as const;
   let ownsHook = false;
 
   try {
@@ -98,11 +124,16 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     await appendTaskViewStep({ view });
 
     while (!isTaskRunFinished(view, dispatchAcknowledged)) {
-      const next = await iterator.next();
-      if (next.done === true) return;
-      const raw = isRunMessage(next.value)
-        ? runMessageToTaskPayload(next.value, view.taskId, () => runUpdateIndex++)
-        : next.value;
+      const read = await raceChannelReads(readers);
+      if (read.next.done === true) return;
+      const raw: TaskRunHookPayload =
+        read.channel === "report"
+          ? runReportToTaskUpdate(read.next.value, view.taskId, runUpdateIndex++)
+          : read.channel === "request"
+            ? runRequestToInputRequestPayload(read.next.value)
+            : read.channel === "outcome"
+              ? { command: runOutcomeToTaskCommand(read.next.value), kind: "task-command" }
+              : read.next.value;
       const payload: TaskRunInboundPayload =
         raw.kind === "subagent-authorization-event" ? { ...raw, kind: "authorization-event" } : raw;
       // Approval lifecycle events (`approval.candidate`/`approval.settled`)
@@ -222,6 +253,11 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     // Dispose-only teardown: `iterator.return()` would await a pending
     // durable read that never settles, leaving this run `running`
     // forever and its hook unswept.
+    if (ownsHook) {
+      await disposeHook(runHooks.report);
+      await disposeHook(runHooks.request);
+      await disposeHook(runHooks.outcome);
+    }
     if (ownsHook) await disposeHook(commands);
   }
 }

@@ -57,6 +57,7 @@ import type {
   RuntimeWorkflowToolCallActionRequest,
 } from "#shared/action-types.js";
 import type { SessionParent } from "#channel/types.js";
+import { deriveRunOwner } from "#execution/tool-run/messages.js";
 import { startToolRun } from "#execution/tool-run/start.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { recordToolRun } from "#harness/tool-runs.js";
@@ -648,7 +649,7 @@ export async function startWorkflowTool(input: {
     const started = await startToolRun({
       callId: action.callId,
       input: action.input,
-      replyTo: { inboxToken: input.parentContinuationToken, kind: "turn" },
+      owner: deriveRunOwner(input.parentContinuationToken),
       session: {
         auth: { current: prepared.auth, initiator: prepared.initiatorAuth },
         id: session.sessionId,

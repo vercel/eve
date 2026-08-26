@@ -1,8 +1,8 @@
-import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
+import { createHook, defineHook, type Hook } from "#compiled/@workflow/core/index.js";
 
-import { tell } from "#execution/tool-run/tell.js";
+import { resumeHook } from "#execution/tool-run/workflow-api.js";
 
-import type { ToolContext, ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
+import type { ToolContext, ToolInputRequest, ToolInputResponse, ToolRunOwner } from "#tools/definition.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 
@@ -15,7 +15,7 @@ import type { JsonObject, JsonValue } from "#shared/json.js";
 export type RunRequest = ToolInputRequest | InputRequest;
 
 /**
- * Who a message is from: enough for an owner sharing one inbox across many
+ * Who a message is from: enough for an owner sharing one channel across many
  * runs to bind an outcome to its call, route a request, and render it.
  */
 export interface RunRef {
@@ -35,20 +35,41 @@ export type RunOutcome =
   | { readonly status: "cancelled"; readonly reason?: string };
 
 /**
- * Everything a run says to its owner, on the owner's hook (`ctx.replyTo`).
- * One shape for every owner: a turn resolves the call, emits a partial, or
- * publishes the request; a task wakes the agent or publishes the request; a
- * run in the middle decides for itself.
+ * The three things a run says to its owner, each on its own hook of the
+ * owner's {@link ToolRunOwner}: progress on `report`, a question on `request`
+ * with the token of the hook its answer resumes, and the end on `outcome`.
  */
-export type RunMessage =
-  | { readonly from: RunRef; readonly kind: "report"; readonly update: JsonValue }
-  | {
-      readonly from: RunRef;
-      readonly kind: "request";
-      readonly replyTo: string;
-      readonly request: RunRequest;
-    }
-  | { readonly from: RunRef; readonly kind: "outcome"; readonly result: RunOutcome };
+export interface RunReport {
+  readonly from: RunRef;
+  readonly update: JsonValue;
+}
+
+export interface RunRequestMessage {
+  readonly from: RunRef;
+  readonly replyTo: string;
+  readonly request: RunRequest;
+}
+
+export interface RunOutcomeMessage {
+  readonly from: RunRef;
+  readonly result: RunOutcome;
+}
+
+export const reportHook = defineHook<RunReport>();
+export const requestHook = defineHook<RunRequestMessage>();
+export const outcomeHook = defineHook<RunOutcomeMessage>();
+
+/**
+ * An owner's three channels derive from its inbox token, so the owner creates
+ * them and a run it starts addresses them from the same string.
+ */
+export function deriveRunOwner(inboxToken: string): ToolRunOwner {
+  return {
+    outcome: `${inboxToken}:outcome`,
+    report: `${inboxToken}:report`,
+    request: `${inboxToken}:request`,
+  };
+}
 
 /** What an owner says to a run, on the run's own hook. */
 export type RunControlMessage = { readonly kind: "cancel"; readonly reason: string };
@@ -108,8 +129,9 @@ function readRunContext(ctx: ToolContext): RunContext {
  * yields every response to the same standing question. Both reject with the
  * abort reason if the run is cancelled first, which withdraws the request.
  *
- * Create a hook, send its token as the request's return address, wait on it —
- * three SDK operations, with no privilege an author's own version would lack.
+ * Create a hook, resume the owner's request channel with its token as the
+ * return address, wait on it — three SDK operations, with no privilege an
+ * author's own version would lack.
  */
 export async function ask(
   ctx: ToolContext,
@@ -120,11 +142,7 @@ export async function ask(
   const answer = createHook<ToolInputResponse>({
     token: `${ANSWER_HOOK_PREFIX}${context.from.runId}:${seq}`,
   });
-  await tell(ctx.replyTo, {
-    from: context.from,
-    kind: "request",
-    replyTo: answer.token,
-    request,
-  });
+  const message: RunRequestMessage = { from: context.from, replyTo: answer.token, request };
+  await resumeHook(ctx.owner.request, message);
   return answer;
 }

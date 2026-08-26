@@ -1,23 +1,21 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
-import type { RunMessage, RunRequest } from "#execution/tool-run/messages.js";
+import type {
+  RunOutcomeMessage,
+  RunRef,
+  RunReport,
+  RunRequest,
+  RunRequestMessage,
+} from "#execution/tool-run/messages.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonValue } from "#shared/json.js";
-import type { TaskRunInboundPayload } from "#tasks/types.js";
+import type { TaskCommand, TaskInboundUpdate } from "#tasks/types.js";
 
 /**
- * A `RunMessage` is what a workflow tool run resumes on its owner's hook. It
- * carries `from` and one of three kinds; every other payload the owner reads
- * comes from the framework wire and has a `kind` outside this set.
+ * Translators from a run's three channels into the payloads its owner already
+ * understands. Pure and type-only in its imports: this runs in the turn and
+ * task driver bodies.
  */
-export function isRunMessage(value: unknown): value is RunMessage {
-  if (typeof value !== "object" || value === null) return false;
-  const candidate = value as { from?: unknown; kind?: unknown };
-  if (typeof candidate.from !== "object" || candidate.from === null) return false;
-  return (
-    candidate.kind === "outcome" || candidate.kind === "report" || candidate.kind === "request"
-  );
-}
 
 /**
  * Binds a run's terminal outcome to its call as a `tool-result`, the same
@@ -25,9 +23,7 @@ export function isRunMessage(value: unknown): value is RunMessage {
  * settles the call as an error so a self-cancelling body never leaves the
  * owner waiting.
  */
-export function runOutcomeToToolResult(
-  message: Extract<RunMessage, { kind: "outcome" }>,
-): RuntimeToolResultActionResult {
+export function runOutcomeToToolResult(message: RunOutcomeMessage): RuntimeToolResultActionResult {
   const { from, result } = message;
   if (result.status === "completed") {
     return {
@@ -66,7 +62,7 @@ function errorMessage(error: unknown): string {
  * id, so one resume of that hook reaches the body's awaited hook directly.
  */
 export function runRequestToInputRequestPayload(
-  message: Extract<RunMessage, { kind: "request" }>,
+  message: RunRequestMessage,
 ): SubagentInputRequestHookPayload {
   const { from, replyTo, request } = message;
   return {
@@ -84,11 +80,7 @@ export function runRequestToInputRequestPayload(
   };
 }
 
-function normalizeInputRequest(
-  request: RunRequest,
-  from: RunMessage["from"],
-  requestId: string,
-): InputRequest {
+function normalizeInputRequest(request: RunRequest, from: RunRef, requestId: string): InputRequest {
   if ("action" in request && "requestId" in request) {
     // A forwarded child request already carries its action and kind; only the
     // answer id changes to the hook the parent awaits.
@@ -109,41 +101,33 @@ function normalizeInputRequest(
   return normalized;
 }
 
-/**
- * Rewrites a run's message into the payloads a durable task run already
- * consumes, so a background workflow tool reports through the same state
- * machine as any other executor: its outcome completes or fails the task, a
- * report wakes the owning agent, and a request is proxied to the parent.
- */
-export function runMessageToTaskPayload(
-  message: RunMessage,
+/** A background run's progress wakes the owning agent as a task update. */
+export function runReportToTaskUpdate(
+  message: RunReport,
   taskId: string,
-  nextUpdateIndex: () => number,
-): TaskRunInboundPayload {
-  if (message.kind === "report") {
-    return {
-      callId: message.from.callId,
-      kind: "task-update",
-      message: typeof message.update === "string" ? message.update : JSON.stringify(message.update),
-      updateEpoch: taskId,
-      updateIndex: nextUpdateIndex(),
-    };
-  }
-  if (message.kind === "request") {
-    return runRequestToInputRequestPayload(message);
-  }
+  updateIndex: number,
+): TaskInboundUpdate {
+  return {
+    callId: message.from.callId,
+    kind: "task-update",
+    message: typeof message.update === "string" ? message.update : JSON.stringify(message.update),
+    updateEpoch: taskId,
+    updateIndex,
+  };
+}
+
+/**
+ * A background run's outcome drives the task's lifecycle: completion and
+ * failure are terminal commands; a cancelled run settles the executor of a
+ * task that is already cancelled.
+ */
+export function runOutcomeToTaskCommand(message: RunOutcomeMessage): TaskCommand {
   const { result } = message;
   if (result.status === "completed") {
-    return {
-      command: { data: result.output, kind: "complete", lifecycle: "terminal" },
-      kind: "task-command",
-    };
+    return { data: result.output, kind: "complete", lifecycle: "terminal" };
   }
   if (result.status === "failed") {
-    return {
-      command: { data: errorMessage(result.error), kind: "fail", lifecycle: "terminal" },
-      kind: "task-command",
-    };
+    return { data: errorMessage(result.error), kind: "fail", lifecycle: "terminal" };
   }
-  return { command: { kind: "settle-executor" }, kind: "task-command" };
+  return { kind: "settle-executor" };
 }
