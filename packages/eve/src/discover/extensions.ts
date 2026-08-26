@@ -71,6 +71,13 @@ export const DISCOVER_EXTENSION_SANDBOX_UNSUPPORTED = "discover/extension-sandbo
 export const DISCOVER_EXTENSION_MEMORY_UNSUPPORTED = "discover/extension-memory-unsupported";
 
 /**
+ * Emitted when an extension declares agent-level instrumentation. Instrumentation
+ * is a singleton owned by the consuming agent and cannot be namespace-scoped.
+ */
+export const DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED =
+  "discover/extension-instrumentation-unsupported";
+
+/**
  * Resolved on-disk location of one mounted extension package.
  */
 export interface ExtensionMountLocation {

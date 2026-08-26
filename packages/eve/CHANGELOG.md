@@ -1,5 +1,14 @@
 # eve
 
+## 0.45.1
+
+### Patch Changes
+
+- a3a5ddd: Show the eve favicon in browser tabs for the default deployed app and generated Web Chat apps. Web Chat scaffolds also include an Apple touch icon.
+- 5664cc0: Add first-class path-authored memory providers with scoped recall, capture, replayable provider tools, and compaction-safe recalled context.
+- b55d036: Agentcard setup now uses the correct MCP discovery and creation identifiers, then writes the selected connector into the installed connection template.
+- fdba4e0: Scope every extension contribution through one mount-namespace policy so multiple extensions can contribute flat `instructions.md` files without collisions. Extension-owned agent singleton slots such as instrumentation are now rejected during discovery.
+
 ## 0.45.0
 
 ### Minor Changes
