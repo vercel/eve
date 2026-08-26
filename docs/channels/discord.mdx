@@ -1,12 +1,12 @@
 ---
 title: "Discord"
-description: "Reach your agent from Discord interactions and opt into experimental ordinary bot messages."
+description: "Reach your agent from Discord interactions, slash commands, or bot messages."
 type: integration
 ---
 
 The Discord channel wires your agent into Discord's HTTP Interactions, including slash and application commands, message components, and modal submissions. Discord enforces a three-second ACK deadline, so the channel acknowledges the command right away and runs the eve work in the background. Credentials and inbound request verification run through [Vercel Connect](../guides/auth-and-route-protection), so Discord's bot token stays out of your environment and Connect verifies Discord's signature before forwarding an interaction to eve.
 
-Ordinary DMs, mentions, replies, and thread messages do not reach Discord's HTTP Interactions endpoint. You can opt into experimental ordinary-message support by running a separate Discord Gateway relay. See [Channels](./overview) for the channel contract.
+Ordinary DMs, mentions, replies, and thread messages arrive over Discord's persistent Gateway WebSocket instead of the HTTP Interactions endpoint. Long-running outbound WebSockets need lifecycle and singleton ownership outside the eve application, so ordinary bot messages require a separately deployed relay. This path is experimental; see [Receive ordinary bot messages](#receive-ordinary-bot-messages-experimental) for the relay contract and limitations. See [Channels](./overview) for the channel contract.
 
 ## Set up Discord
 
@@ -56,9 +56,7 @@ Then configure the public `https://…/eve/v1/discord` route as the application'
 
 ## Receive ordinary bot messages (experimental)
 
-Discord sends ordinary bot messages as `MESSAGE_CREATE` events over its persistent [Gateway WebSocket](https://docs.discord.com/developers/events/gateway), not to the HTTP Interactions endpoint. `discordChannel()` does not open that socket: an eve application can be evaluated during builds and run on several instances, while a Gateway client needs one long-lived owner that maintains heartbeats, Resume state, and reconnects.
-
-Run a separate relay that owns the outbound WebSocket and forwards authenticated events to eve:
+Discord sends ordinary bot messages as `MESSAGE_CREATE` events over its persistent [Gateway WebSocket](https://docs.discord.com/developers/events/gateway), not to the HTTP Interactions endpoint. Handling that long-running connection requires one supervised owner for heartbeats, Resume state, reconnects, and deployment handoffs. `discordChannel()` therefore receives forwarded HTTP events instead of opening the WebSocket itself; deploy a separate relay to own the connection and forward authenticated events to eve:
 
 ```text
 Discord Gateway WebSocket
