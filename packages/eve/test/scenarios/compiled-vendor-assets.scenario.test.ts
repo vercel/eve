@@ -12,6 +12,7 @@ const COMPILED_VENDOR_ROOT = join(EVE_PACKAGE_ROOT, ".generated", "compiled");
 const VENDOR_WARNING_LOG_PATH = join(EVE_PACKAGE_ROOT, "scripts", "vendor-warning-log.mjs");
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
+const VERCEL_BLOB_DIST_ROOT = dirname(require.resolve("@vercel/blob"));
 const VERCEL_SANDBOX_DRIVES_DIST_ROOT = join(
   dirname(require.resolve("@vercel/sandbox-drives/package.json")),
   "dist",
@@ -153,6 +154,28 @@ describe("compiled vendor assets", () => {
 
     expect(sourceMapFiles).toEqual([]);
     expect(javaScriptSources.some(containsSourceMapComment)).toBe(false);
+  });
+
+  it("copies the complete @vercel/blob declaration tree", async () => {
+    const upstreamDeclarations = (await readdir(VERCEL_BLOB_DIST_ROOT, { recursive: true }))
+      .filter((entry) => entry.endsWith(".d.ts"))
+      .sort();
+    const vendoredDeclarations = (
+      await readdir(join(COMPILED_VENDOR_ROOT, "@vercel/blob"), { recursive: true })
+    )
+      .filter((entry) => entry.endsWith(".d.ts"))
+      .sort();
+
+    expect(vendoredDeclarations).toEqual(upstreamDeclarations);
+    await Promise.all(
+      upstreamDeclarations.map(async (declaration) => {
+        const [upstreamSource, vendoredSource] = await Promise.all([
+          readFile(join(VERCEL_BLOB_DIST_ROOT, declaration), "utf8"),
+          readFile(join(COMPILED_VENDOR_ROOT, "@vercel/blob", declaration), "utf8"),
+        ]);
+        expect(vendoredSource).toBe(upstreamSource);
+      }),
+    );
   });
 
   it("suppresses dependency warnings without hiding actionable logs", async () => {

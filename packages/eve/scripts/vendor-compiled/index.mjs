@@ -22,6 +22,7 @@ import modelContextProtocolServer from "./@modelcontextprotocol/server.mjs";
 import opentelemetryApi from "./@opentelemetry/api.mjs";
 import opentelemetryOtlpTransformer from "./@opentelemetry/otlp-transformer.mjs";
 import standardSchemaSpec from "./@standard-schema/spec.mjs";
+import vercelBlob from "./@vercel/blob.mjs";
 import vercelDetectAgent from "./@vercel/detect-agent.mjs";
 import vercelOidc from "./@vercel/oidc.mjs";
 import vercelOtel from "./@vercel/otel.mjs";
@@ -85,6 +86,7 @@ export const MODULES = [
   shadcnRegistry,
   standardSchemaSpec,
   turndown,
+  vercelBlob,
   vercelDetectAgent,
   vercelOidc,
   vercelOtel,
