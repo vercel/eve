@@ -3,6 +3,7 @@ import {
   createAgentSourceRegistry,
   defineProgrammaticAgentSource,
   loadProgrammaticModuleNamespace,
+  memoizeModuleNamespaceFactories,
   type AgentSourceRegistry,
   type AgentModuleBacking,
   type ProgrammaticModuleNamespace,
@@ -86,18 +87,42 @@ const rootDefaults = defineProgrammaticAgentSource({
   ],
 });
 
-export const frameworkAgentSourceRegistry: AgentSourceRegistry = createAgentSourceRegistry([
-  { applyTo: "all-local-nodes", source: localDefaults },
-  { applyTo: "root", source: rootDefaults },
-]);
+const memoryWrapperTemplateSource = defineProgrammaticAgentSource({
+  id: "eve:memory-wrapper",
+  revision,
+  modules: [
+    {
+      logicalPath: "tools/memory-wrapper.ts",
+      loadNamespace: async (context) => {
+        const { loadMemoryWrapperNamespace } =
+          await import("#framework/sources/modules/memory-wrapper.js");
+        return await loadMemoryWrapperNamespace(context);
+      },
+    },
+  ],
+});
+
+export const frameworkAgentSourceRegistry: AgentSourceRegistry = createAgentSourceRegistry(
+  [
+    { applyTo: "all-local-nodes", source: localDefaults },
+    { applyTo: "root", source: rootDefaults },
+  ],
+  { templates: [memoryWrapperTemplateSource] },
+);
+
+export const memoryWrapperTemplate = frameworkAgentSourceRegistry.templates.get(
+  memoryWrapperTemplateSource.id,
+)!;
 
 export async function loadFrameworkProgrammaticModule(
   backing: Extract<AgentModuleBacking, { readonly kind: "programmatic" }>,
   dependencyNamespaces?: Readonly<Record<string, ProgrammaticModuleNamespace>>,
 ): Promise<ProgrammaticModuleNamespace> {
-  return await loadProgrammaticModuleNamespace({
-    backing,
-    dependencyNamespaces,
-    registries: [frameworkAgentSourceRegistry],
-  });
+  return memoizeModuleNamespaceFactories(
+    await loadProgrammaticModuleNamespace({
+      backing,
+      dependencyNamespaces,
+      registries: [frameworkAgentSourceRegistry],
+    }),
+  );
 }

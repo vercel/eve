@@ -28,7 +28,7 @@ function toChatGptEndpoint(state: ChatGptAuthState | undefined) {
   return endpoint;
 }
 
-/** Projects v3 exclusively from the effective compiled graph. */
+/** Projects v4 exclusively from the effective compiled graph. */
 export function buildAgentInfoResponse(
   data: AgentInfoManifestData,
   input: {
@@ -131,6 +131,12 @@ export function buildAgentInfoResponse(
         : toModuleSource(manifest, manifest.instrumentation),
     kernelEffects: projectPreparedKernelEffects(manifest),
     kind: "eve-agent-info",
+    memories: manifest.memories.map((memory) => ({
+      ...toModuleSource(manifest, memory),
+      description: memory.description,
+      slot: memory.slot,
+      visibility: memory.visibility,
+    })),
     mode: input.mode,
     remoteAgents: {
       entries: remoteAgents,
@@ -201,7 +207,7 @@ export function buildAgentInfoResponse(
         requiresApproval: tool.requiresApproval,
       })),
     },
-    version: 3,
+    version: 4,
     workflow:
       manifest.workflowTool === undefined
         ? { enabled: false, toolName: WORKFLOW_TOOL_NAME }
@@ -314,6 +320,7 @@ function summarizeNode(node: CompiledAgentNodeManifest | CompiledAgentResources)
     connections: node.connections.length,
     hooks: node.hooks.length,
     instructions: node.instructions.length,
+    memories: node.memories.length,
     schedules: node.schedules.length,
     skills: node.skills.length,
     tools: node.tools.length,

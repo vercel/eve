@@ -15,6 +15,7 @@ import {
   type ToolSchemaSource,
 } from "#tools/schema.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
+import { shouldRebindDynamicCallbacks } from "#internal/dynamic-tool-rebind.js";
 import {
   assertResolverOnlyDynamicSentinel,
   isDynamicSentinel,
@@ -52,6 +53,7 @@ type NormalizedToolEntry =
   | {
       readonly kind: "dynamic-tool";
       readonly eventNames: readonly DynamicToolEventName[];
+      readonly rebindMissingCallbacks: boolean;
     };
 
 /**
@@ -67,6 +69,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     return {
       kind: "dynamic-tool",
       eventNames: Object.keys(value.events) as DynamicToolEventName[],
+      rebindMissingCallbacks: shouldRebindDynamicCallbacks(value),
     };
   }
   if (isDisabledToolSentinel(value)) {

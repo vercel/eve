@@ -20,6 +20,7 @@ import { resolveDynamicInstructionsDefinition } from "#runtime/resolve-dynamic-i
 import { resolveDynamicSkillDefinition } from "#runtime/resolve-dynamic-skill.js";
 import { resolveDynamicToolDefinition } from "#runtime/resolve-dynamic-tool.js";
 import { resolveToolDefinition } from "#runtime/resolve-tool.js";
+import { resolveMemoryDefinition } from "#runtime/resolve-memory.js";
 import type {
   ResolvedAgent,
   ResolvedChannelDefinition,
@@ -93,6 +94,11 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
       resolveConnectionDefinition(connectionDefinition, input.moduleMap, input.nodeId),
     ),
   );
+  const resolvedMemories = await Promise.all(
+    input.manifest.memories.map((definition) =>
+      resolveMemoryDefinition(definition, input.moduleMap, input.nodeId),
+    ),
+  );
   const authoredSandbox = await resolveSandboxDefinition(
     input.manifest.sandbox,
     input.moduleMap,
@@ -120,6 +126,7 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
       appRoot: input.manifest.appRoot,
       diagnosticsSummary: input.manifest.diagnosticsSummary,
     },
+    memories: resolvedMemories,
     sandbox: authoredSandbox,
     workspaceResourceRoot,
     skills: resolvedSkills,

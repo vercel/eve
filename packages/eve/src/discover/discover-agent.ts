@@ -7,6 +7,8 @@ import {
   DISCOVER_EXTENSION_AGENT_CONFIG_UNSUPPORTED,
   DISCOVER_EXTENSION_MOUNT_AMBIGUOUS,
   DISCOVER_EXTENSION_MOUNT_MISSING_DECLARATION,
+  DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED,
+  DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
   DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
   DISCOVER_EXTENSION_SANDBOX_UNSUPPORTED,
   locateExtensionMount,
@@ -29,6 +31,7 @@ import {
   readSortedDirectoryEntries,
 } from "#discover/grammar.js";
 import { discoverLibSources } from "#discover/lib.js";
+import { discoverMemorySources } from "#discover/memory.js";
 import {
   type AgentSourceManifest,
   type CreateAgentSourceManifestInput,
@@ -156,6 +159,13 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
   });
   diagnostics.push(...connectionsResult.diagnostics);
 
+  const memoryResult = await discoverMemorySources({
+    rootEntries,
+    rootPath: agentRoot,
+    source,
+  });
+  diagnostics.push(...memoryResult.diagnostics);
+
   const sandboxResult = await discoverSandboxSource({
     rootEntries,
     rootPath: agentRoot,
@@ -171,6 +181,27 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
           message:
             "An extension may not declare agent config (agent.ts) — model, limits, and sandbox are the consuming agent's to own.",
           sourcePath: join(agentRoot, configModuleResult.module.logicalPath),
+        }),
+      );
+    }
+    if (instrumentationModuleResult.module !== undefined) {
+      diagnostics.push(
+        createDiscoverErrorDiagnostic({
+          code: DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED,
+          message:
+            "An extension may not declare instrumentation — it is a singleton owned by the consuming agent.",
+          sourcePath: join(agentRoot, instrumentationModuleResult.module.logicalPath),
+        }),
+      );
+    }
+    const [firstMemory] = memoryResult.memories;
+    if (firstMemory !== undefined) {
+      diagnostics.push(
+        createDiscoverErrorDiagnostic({
+          code: DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
+          message:
+            "An extension may not declare memory — scope and lifecycle state belong to the consuming application.",
+          sourcePath: join(agentRoot, firstMemory.logicalPath),
         }),
       );
     }
@@ -274,24 +305,28 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
     connections: connectionsResult.connections,
     packageName,
     diagnostics,
-    extensions: mountCollection.mounts.map((descriptor) => descriptor.mountRef),
+    extensions:
+      role === "extension" ? [] : mountCollection.mounts.map((descriptor) => descriptor.mountRef),
     resolvedExtensions,
     hooks: hooksResult.sources,
+    memories: role === "extension" ? [] : memoryResult.memories,
     lib: libResult.lib,
     instructions: instructionsResult.instructions,
-    sandbox: sandboxResult.sandbox,
+    sandbox: role === "extension" ? null : sandboxResult.sandbox,
     sandboxWorkspaces:
-      sandboxResult.sandboxWorkspace === null ? [] : [sandboxResult.sandboxWorkspace],
+      role === "extension" || sandboxResult.sandboxWorkspace === null
+        ? []
+        : [sandboxResult.sandboxWorkspace],
     schedules: schedulesResult.schedules,
     skills: skillsResult.skills,
     tools: toolsResult.sources,
     subagents: subagentsResult.subagents,
   };
 
-  if (configModuleResult.module !== undefined) {
+  if (role !== "extension" && configModuleResult.module !== undefined) {
     manifestInput.configModule = configModuleResult.module;
   }
-  if (instrumentationModuleResult.module !== undefined) {
+  if (role !== "extension" && instrumentationModuleResult.module !== undefined) {
     manifestInput.instrumentation = instrumentationModuleResult.module;
   }
 

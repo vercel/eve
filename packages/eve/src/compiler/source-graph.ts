@@ -9,6 +9,32 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 export type ProgrammaticModuleNamespace = Readonly<Record<string, unknown>>;
 
+/** Shares zero-argument definition-factory results within one module-map load. */
+export function memoizeModuleNamespaceFactories(
+  namespace: ProgrammaticModuleNamespace,
+): ProgrammaticModuleNamespace {
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(namespace).map(([exportName, exportValue]) => {
+        if (typeof exportValue !== "function") return [exportName, exportValue];
+        let invocation: Promise<unknown> | undefined;
+        const memoized = new Proxy(exportValue, {
+          apply(target, thisArgument, argumentsList) {
+            if (argumentsList.length > 0) {
+              return Reflect.apply(target, thisArgument, argumentsList);
+            }
+            invocation ??= Promise.resolve().then(() =>
+              Reflect.apply(target, thisArgument, argumentsList),
+            );
+            return invocation;
+          },
+        });
+        return [exportName, memoized];
+      }),
+    ),
+  );
+}
+
 export interface ProgrammaticModuleLoadContext {
   readonly dependencies: Readonly<Record<string, ProgrammaticModuleNamespace>>;
   readonly parameters: JsonObject;
@@ -580,13 +606,21 @@ export function validateProgrammaticLogicalPath(input: string): string {
   const root = segments[0];
   const extensionless = stripLogicalPathExtension(logicalPath);
   const supported =
-    (segments.length === 1 && ["agent", "sandbox", "instrumentation"].includes(extensionless)) ||
+    (segments.length === 1 &&
+      ["agent", "memory", "sandbox", "instrumentation"].includes(extensionless)) ||
     (root === "sandbox" &&
       segments.length === 2 &&
       getSupportedModuleBaseName(fileName) === "sandbox") ||
-    (["channels", "connections", "hooks", "instructions", "schedules", "skills", "tools"].includes(
-      root!,
-    ) &&
+    ([
+      "channels",
+      "connections",
+      "hooks",
+      "instructions",
+      "memory",
+      "schedules",
+      "skills",
+      "tools",
+    ].includes(root!) &&
       segments.length >= 2);
   if (!supported) {
     throw new Error(

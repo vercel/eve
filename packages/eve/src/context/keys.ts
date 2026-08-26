@@ -28,6 +28,7 @@ import type { SandboxAccess } from "#sandbox/state.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
+import type { MemoryScope, MemoryTurnContext } from "#public/memory/index.js";
 
 // Re-export so consumers don't need a direct channel/ import.
 export type { SessionAuthContext, SessionParent, SessionTurn } from "#channel/types.js";
@@ -202,6 +203,45 @@ export const SessionDynamicToolRuntimeRevisionKey = new ContextKey<string>(
  */
 export const TurnDynamicToolMetadataKey = new ContextKey<readonly DurableDynamicToolMetadata[]>(
   "eve.turnDynamicToolMetadata",
+);
+
+export interface LockedMemorySlot {
+  readonly scope: MemoryScope;
+  readonly slot: string;
+  readonly turn: MemoryTurnContext;
+  readonly visibility: "scope" | "session";
+}
+
+export const TurnMemoryLocksKey = new ContextKey<Readonly<Record<string, LockedMemorySlot>>>(
+  "eve.memory.turnLocks",
+);
+
+export interface PreparedMemoryPreamble {
+  readonly history: readonly ModelMessage[];
+  readonly input: readonly ModelMessage[];
+  readonly state?: Readonly<Record<string, unknown>>;
+}
+
+export interface PendingMemoryCommit {
+  readonly history: readonly ModelMessage[];
+  readonly projectedMessages: readonly ModelMessage[];
+  readonly state: Readonly<Record<string, unknown>>;
+}
+
+export const PreparedMemoryPreambleKey = new ContextKey<PreparedMemoryPreamble>(
+  "eve.memory.preparedPreamble",
+);
+export const PendingMemoryCommitKey = new ContextKey<PendingMemoryCommit>(
+  "eve.memory.pendingCommit",
+);
+
+export interface PreparedMemoryCompaction {
+  readonly history: readonly ModelMessage[];
+  readonly state?: Readonly<Record<string, unknown>>;
+}
+
+export const PreparedMemoryCompactionKey = new ContextKey<PreparedMemoryCompaction>(
+  "eve.memory.preparedCompaction",
 );
 
 /** Step-scoped dynamic tool metadata, replaced before each model step. */

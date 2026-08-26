@@ -245,6 +245,7 @@ export interface CompiledWorkflowToolDefinition extends ModuleSourceRef {
 export interface CompiledDynamicToolDefinition extends ModuleSourceRef {
   readonly slug: string;
   readonly eventNames: readonly string[];
+  readonly rebindMissingCallbacks?: boolean;
   /**
    * Mount namespace when this resolver comes from an extension. The runtime
    * prefixes the names of tools the resolver produces (`forecast` →
@@ -252,6 +253,12 @@ export interface CompiledDynamicToolDefinition extends ModuleSourceRef {
    * other extension contribution. Absent for consumer-authored resolvers.
    */
   readonly extensionNamespace?: string;
+}
+
+export interface CompiledMemoryDefinition extends ModuleSourceRef {
+  readonly description?: string;
+  readonly slot: string;
+  readonly visibility: "scope" | "session";
 }
 
 /**
@@ -808,9 +815,22 @@ const compiledDynamicToolDefinitionSchema: z.ZodType<CompiledDynamicToolDefiniti
     exportName: z.string().optional(),
     extensionNamespace: z.string().optional(),
     logicalPath: z.string(),
+    rebindMissingCallbacks: z.boolean().optional(),
     slug: z.string(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
+  })
+  .strict();
+
+const compiledMemoryDefinitionSchema: z.ZodType<CompiledMemoryDefinition> = z
+  .object({
+    description: z.string().optional(),
+    exportName: z.string().optional(),
+    logicalPath: z.string(),
+    slot: z.string(),
+    sourceId: z.string(),
+    sourceKind: z.literal("module"),
+    visibility: z.enum(["scope", "session"]),
   })
   .strict();
 
@@ -879,6 +899,7 @@ const compiledAgentResourceFields = {
   dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
   extensionMounts: z.array(compiledExtensionMountSchema).default([]),
   hooks: z.array(compiledHookDefinitionSchema),
+  memories: z.array(compiledMemoryDefinitionSchema).default([]),
   sandbox: compiledSandboxDefinitionSchema,
   sandboxWorkspaces: z.array(compiledSandboxWorkspaceSchema),
   schedules: z.array(compiledScheduleDefinitionSchema),
@@ -986,6 +1007,7 @@ export const compiledAgentManifestSchema = z
     dynamicSkills: z.array(compiledDynamicSkillDefinitionSchema).default([]),
     dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
     hooks: z.array(compiledHookDefinitionSchema),
+    memories: z.array(compiledMemoryDefinitionSchema).default([]),
     kind: z.literal(COMPILED_AGENT_MANIFEST_KIND),
     remoteAgents: z.array(compiledRemoteAgentNodeSchema),
     sandbox: compiledSandboxDefinitionSchema,
@@ -1016,6 +1038,7 @@ export interface CreateCompiledAgentResourcesInput {
   readonly dynamicTools?: readonly CompiledDynamicToolDefinition[];
   readonly extensionMounts?: readonly CompiledExtensionMount[];
   readonly hooks?: readonly CompiledHookDefinition[];
+  readonly memories?: readonly CompiledMemoryDefinition[];
   readonly remoteAgents?: readonly CompiledRemoteAgentNode[];
   readonly sandbox: CompiledSandboxDefinition;
   readonly sandboxWorkspaces?: readonly CompiledSandboxWorkspace[];
@@ -1055,6 +1078,7 @@ export function createCompiledAgentResources(
     dynamicTools: [...(input.dynamicTools ?? [])],
     extensionMounts: [...(input.extensionMounts ?? [])],
     hooks: [...(input.hooks ?? [])],
+    memories: [...(input.memories ?? [])],
     instructions: [...(input.instructions ?? [])],
     instrumentation: input.instrumentation === undefined ? undefined : { ...input.instrumentation },
     remoteAgents: [...(input.remoteAgents ?? [])],

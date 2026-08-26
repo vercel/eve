@@ -36,7 +36,7 @@ describe("Slack model context", () => {
         userId: "U_CURRENT",
       },
       {
-        markdown: "Who owns the deploy?",
+        text: "<@U_BOT> Who owns the deploy?",
         ts: "1700000000.000004",
       },
     );
@@ -51,7 +51,7 @@ describe("Slack model context", () => {
         "message_ts: 1700000000.000004",
         "team_id: T01",
         "<content>",
-        "Who owns the deploy?",
+        "<@U_BOT> Who owns the deploy?",
         "</content>",
         "</slack_message>",
       ].join("\n"),
@@ -115,7 +115,7 @@ describe("Slack model context", () => {
         userId: parsed!.author?.userId ?? "",
       },
       {
-        markdown: parsed!.markdown,
+        text: parsed!.text,
         ts: parsed!.ts,
       },
     );

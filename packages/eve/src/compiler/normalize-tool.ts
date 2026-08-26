@@ -95,6 +95,7 @@ export async function compileToolEntry(
         eventNames: [...entry.eventNames],
         exportName: source.exportName,
         logicalPath: source.logicalPath,
+        rebindMissingCallbacks: entry.rebindMissingCallbacks || undefined,
         slug: toolName,
         sourceId: source.sourceId,
         sourceKind: "module",

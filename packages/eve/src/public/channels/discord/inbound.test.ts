@@ -145,6 +145,7 @@ describe("commandInteractionMessage", () => {
 describe("Discord context rendering", () => {
   it("renders a deterministic context block", () => {
     const block = formatDiscordContextBlock({
+      applicationId: "APP1",
       channelId: "C01",
       commandName: "ask",
       guildId: "G01",
@@ -153,6 +154,7 @@ describe("Discord context rendering", () => {
       username: "ada",
     });
     expect(block).toContain("<discord_context>");
+    expect(block).toContain("application_id: APP1");
     expect(block).toContain("user_id: U01");
     expect(block).toContain("username: ada");
   });

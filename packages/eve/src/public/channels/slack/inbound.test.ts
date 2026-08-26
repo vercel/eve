@@ -6,6 +6,7 @@ import {
   parseDirectMessageEvent,
   parseMessageEvent,
   parseSlackEventEnvelope,
+  slackEventReceivingBotUserId,
   slackEventInstallationTeamId,
   slackMessageFromWebhookPayload,
 } from "#public/channels/slack/inbound.js";
@@ -80,6 +81,25 @@ describe("slackEventInstallationTeamId", () => {
     expect(
       slackEventInstallationTeamId(envelope([{ is_bot: false, team_id: "T_INSTALLATION" }])),
     ).toBe("T_INSTALLATION");
+  });
+});
+
+describe("slackEventReceivingBotUserId", () => {
+  it("accepts an unflagged authorization only when the app mention names the same user", () => {
+    expect(
+      slackEventReceivingBotUserId({
+        authorizations: [{ user_id: "U_BOT" }],
+        event: { text: "<@U_BOT> investigate", type: "app_mention" },
+        type: "event_callback",
+      }),
+    ).toBe("U_BOT");
+    expect(
+      slackEventReceivingBotUserId({
+        authorizations: [{ is_bot: false, user_id: "U_INSTALLER" }],
+        event: { text: "<@U_INSTALLER> and <@U_BOT>", type: "app_mention" },
+        type: "event_callback",
+      }),
+    ).toBeUndefined();
   });
 });
 

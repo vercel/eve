@@ -92,6 +92,7 @@ function signedRequest(payload: Record<string, unknown>): Request {
 function sessionPayload(extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     action: "created",
+    appUserId: "app_user_1",
     agentSession: {
       creator: { displayName: "Ada Lovelace", id: "user_1" },
       id: "agent_session_1",
@@ -172,6 +173,7 @@ describe("linearChannel inbound Agent Session events", () => {
     const [continuationToken, input] = send.mock.calls[0]!;
     expect(input.message).toBe("Please handle this issue.");
     expect(input.context?.[0]).toContain("<linear_context>");
+    expect(input.context?.[0]).toContain("app_user_id: app_user_1");
     expect(input.context?.[0]).toContain("issue_identifier: EVE-123");
     expect(continuationToken).toBe("agent-session:agent_session_1");
     expect(input).toMatchObject({

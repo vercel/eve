@@ -214,12 +214,14 @@ export async function emitTurnEpilogue(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   mode: RunMode,
+  messages?: readonly import("ai").ModelMessage[],
 ): Promise<HarnessEmissionState> {
   await emitFn(
     createTurnCompletedEvent({
       sequence: state.sequence,
       turnId: state.turnId,
     }),
+    messages,
   );
 
   if (mode === "conversation") {

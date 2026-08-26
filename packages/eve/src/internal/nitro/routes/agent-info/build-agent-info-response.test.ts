@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import { compileFromMemory } from "#compiler/compile-from-memory.js";
+import { AgentInfoResultSchema } from "#client/agent-info-schema.js";
 import { buildAgentInfoResponse } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { experimental_workflow } from "#tools/workflow.js";
 import { webSearch } from "#tools/provided/web-search.js";
+import { defineMemory } from "#public/memory/index.js";
 
 describe("buildAgentInfoResponse", () => {
-  it("projects v3 exclusively from the effective compiled graph", async () => {
+  it("projects v4 exclusively from the effective compiled graph", async () => {
     const { manifest } = await compileFromMemory({
       model: "openai/gpt-5.4",
       name: "info-agent",
@@ -34,7 +36,7 @@ describe("buildAgentInfoResponse", () => {
       },
       capabilities: { devRoutes: true },
       kind: "eve-agent-info",
-      version: 3,
+      version: 4,
     });
     expect(response.tools.static).toContainEqual(
       expect.objectContaining({
@@ -60,6 +62,54 @@ describe("buildAgentInfoResponse", () => {
         winnerSourceId: "memory:info-agent:agent.ts",
       }),
     );
+  });
+
+  it("reports selected memory and provider-tool wrapper provenance", async () => {
+    const { manifest } = await compileFromMemory({
+      model: "openai/gpt-5.4",
+      modules: [
+        {
+          loadNamespace: async () => ({
+            default: defineMemory({
+              description: "Caller profile.",
+              provider: {
+                recall: { "turn.started": async () => null },
+                tools: async () => ({}),
+              },
+              scope: "user_1",
+            }),
+          }),
+          logicalPath: "memory/profile.ts",
+        },
+      ],
+    });
+    const response = buildAgentInfoResponse(
+      { manifest, schedules: [] },
+      {
+        gatewayCredentials: { apiKey: false, oidc: false },
+        mode: "production",
+      },
+    );
+
+    expect(response.memories).toContainEqual(
+      expect.objectContaining({
+        description: "Caller profile.",
+        slot: "profile",
+        visibility: "scope",
+      }),
+    );
+    expect(response.tools.dynamic).toContainEqual(
+      expect.objectContaining({
+        binding: expect.objectContaining({
+          backing: expect.objectContaining({
+            dependencies: { memory: response.memories[0]?.sourceId },
+            parameters: expect.objectContaining({ slot: "profile" }),
+          }),
+        }),
+        slug: "profile",
+      }),
+    );
+    expect(() => AgentInfoResultSchema.parse(response)).not.toThrow();
   });
 
   it("derives kernel effects only from active framework-owned canonical slots", async () => {

@@ -98,6 +98,7 @@ export interface TelegramInboundContext {
   readonly chatId: string;
   readonly chatTitle?: string;
   readonly chatType: TelegramChatType;
+  readonly isMentioned?: boolean;
   readonly messageId: string;
   readonly messageThreadId?: number;
   readonly userId?: string;
@@ -137,6 +138,7 @@ export function formatTelegramContextBlock(context: TelegramInboundContext): str
     ...(context.userId ? [`user_id: ${context.userId}`] : []),
     ...(context.username ? [`username: ${context.username}`] : []),
     ...(context.botUsername ? [`bot_username: ${context.botUsername}`] : []),
+    ...(context.isMentioned !== undefined ? [`is_mentioned: ${context.isMentioned}`] : []),
     "</telegram_context>",
   ];
   return lines.join("\n");

@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 
 import { replayDynamicTools } from "#context/build-dynamic-tools.js";
-import type { ContextContainer } from "#context/container.js";
+import { contextStorage, type ContextContainer } from "#context/container.js";
 import type { ContextKey } from "#context/key.js";
 import {
   SessionDynamicToolMetadataKey,
@@ -376,4 +376,32 @@ export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
       : await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages);
   input.ctx.set(SessionDynamicToolMetadataKey, metadata);
   input.ctx.set(SessionDynamicToolRuntimeRevisionKey, input.runtimeRevision);
+}
+
+/** Re-registers callbacks for compiled resolvers that explicitly support cold replay. */
+export async function rebindMissingCompiledDynamicToolCallbacks(input: {
+  readonly ctx: ContextContainer;
+  readonly event: UnstampedMessageStreamEvent;
+  readonly messages: readonly ModelMessage[];
+  readonly resolvers: readonly ResolvedDynamicToolResolver[];
+}): Promise<void> {
+  const persisted = input.ctx.get(TurnDynamicToolMetadataKey) ?? [];
+  const missing = persisted.filter((entry) => hasUnregisteredDurableDynamicCallbacks([entry]));
+  if (missing.length === 0) return;
+  const missingSlugs = new Set(missing.map((entry) => entry.resolverSlug));
+  const matching = input.resolvers.filter(
+    (resolver) => resolver.rebindMissingCallbacks === true && missingSlugs.has(resolver.slug),
+  );
+  if (matching.length === 0) return;
+
+  await contextStorage.run(
+    input.ctx,
+    async () => await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages),
+  );
+  const unresolved = missing.filter((entry) => hasUnregisteredDurableDynamicCallbacks([entry]));
+  if (unresolved.length > 0) {
+    throw new Error(
+      `Dynamic tool callback rebind did not restore: ${unresolved.map((entry) => entry.name).join(", ")}. The tool may have been renamed or removed.`,
+    );
+  }
 }

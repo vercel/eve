@@ -104,6 +104,11 @@ describe("packed package consumption", () => {
     );
     await writeAppFile(
       appRoot,
+      "pnpm-workspace.yaml",
+      `overrides:\n  eve: ${JSON.stringify(`file:${eveTarball}`)}\n`,
+    );
+    await writeAppFile(
+      appRoot,
       "agent/agent.ts",
       'import { defineAgent } from "eve";\n\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
     );

@@ -47,6 +47,7 @@ export function createTestAgentInfoResult(
     instructions: { dynamic: [], static: [] },
     kernelEffects: [],
     kind: "eve-agent-info",
+    memories: [],
     mode: "development",
     remoteAgents: { entries: [], total: 0 },
     sandbox: {
@@ -70,7 +71,7 @@ export function createTestAgentInfoResult(
     skills: { dynamic: [], static: [] },
     subagents: { local: [], total: 0 },
     tools: { dynamic: [], static: [] },
-    version: 3,
+    version: 4,
     workflow: { enabled: false, toolName: "Workflow" },
     workspace: { resourceRoot: null, rootEntries: [] },
   };
