@@ -83,15 +83,25 @@ for (const item of items) {
 
   const slug = item.name.slice("connection/".length);
   if (slug !== "browser-use") {
-    const expectedSetup = {
-      command: "eve",
-      package: "eve",
-      bin: "eve",
-      args: ["integration", "connect", slug, CONNECT_SERVICES[slug] ?? slug, slug],
-    };
+    const expectedSetup =
+      slug === "shopify"
+        ? {
+            command: "eve",
+            package: "eve",
+            bin: "eve",
+            args: ["integration", "setup", "shopify"],
+          }
+        : {
+            command: "eve",
+            package: "eve",
+            bin: "eve",
+            args: ["integration", "connect", slug, CONNECT_SERVICES[slug] ?? slug, slug],
+          };
     if (JSON.stringify(setups) !== JSON.stringify([expectedSetup])) {
       throw new Error(
-        `Registry item "${item.name}" must configure its Vercel Connect connector through eve.`,
+        slug === "shopify"
+          ? 'Registry item "connection/shopify" must run eve integration setup shopify.'
+          : `Registry item "${item.name}" must configure its Vercel Connect connector through eve.`,
       );
     }
   }
@@ -110,6 +120,17 @@ for (const item of items) {
     if (item.dependencies !== undefined || !("BROWSER_USE_API_KEY" in (item.envVars ?? {}))) {
       throw new Error(
         'Registry item "connection/browser-use" must declare its API key without Vercel Connect.',
+      );
+    }
+  } else if (slug === "shopify") {
+    const envVars = item.envVars ?? {};
+    if (
+      item.dependencies !== undefined ||
+      !("SHOPIFY_STORE_DOMAIN" in envVars) ||
+      !("UCP_AGENT_PROFILE_URL" in envVars)
+    ) {
+      throw new Error(
+        'Registry item "connection/shopify" must declare its storefront and agent profile without Vercel Connect.',
       );
     }
   } else if (!item.dependencies?.includes("@vercel/connect")) {

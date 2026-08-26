@@ -1012,6 +1012,34 @@
       ]
     },
     {
+      "name": "connection/shopify",
+      "type": "registry:item",
+      "title": "Shopify",
+      "description": "Search products and manage carts and checkouts on a Shopify storefront.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "shopify"]
+          },
+          "requires": ">=0.45.0"
+        }
+      },
+      "envVars": {
+        "SHOPIFY_STORE_DOMAIN": "",
+        "UCP_AGENT_PROFILE_URL": ""
+      },
+      "files": [
+        {
+          "path": "registry/connections/shopify.ts",
+          "type": "registry:file",
+          "target": "agent/connections/shopify.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/stripe",
       "type": "registry:item",
       "title": "Stripe",
