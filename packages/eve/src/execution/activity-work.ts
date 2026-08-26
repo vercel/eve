@@ -1,9 +1,16 @@
 import type { Session } from "#context/keys.js";
+import {
+  deriveChildActivityWorkId,
+  deriveRootTurnActivityWorkId,
+} from "#execution/activity-work-id.js";
 import type { ActivityWorkIdentityV1, ActivityWorkKind } from "#protocol/activity.js";
 
 export function deriveRootTurnWorkIdentity(session: Session): ActivityWorkIdentityV1 {
   return {
-    id: `root:${session.sessionId}:${session.turn.id}`,
+    id: deriveRootTurnActivityWorkId({
+      sessionId: session.sessionId,
+      turnId: session.turn.id,
+    }),
     kind: "root-turn",
     rootSessionId: session.sessionId,
     rootTurnId: session.turn.id,
@@ -22,7 +29,7 @@ export function deriveChildWorkIdentity(input: {
 }): ActivityWorkIdentityV1 {
   return {
     callId: input.callId,
-    id: `work:${input.parentSessionId}:${input.parentTurnId}:${input.callId}`,
+    id: deriveChildActivityWorkId(input),
     kind: input.kind,
     name: input.name,
     parentId: input.parentWork.id,
