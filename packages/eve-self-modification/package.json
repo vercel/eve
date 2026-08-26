@@ -1,6 +1,6 @@
 {
   "name": "@eve/self-modification",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Development-only source editing subagent for eve applications.",
   "keywords": [
     "agents",

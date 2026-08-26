@@ -1,5 +1,35 @@
 # eve
 
+## 0.45.0
+
+### Minor Changes
+
+- b3cf8ee: eve now compiles framework defaults, authored files, extensions, overrides, and in-memory modules through one authoritative source graph, with replaceable default config, sandbox, home, health, and inspection routes plus agent-info v3. Built-in tool definitions move from `eve/tools/defaults` to individual `eve/tools/<name>` subpaths.
+- 6252784: Move provided tool definitions and capability-specific helpers to dedicated `eve/tools/*` entrypoints. Replace the removed `defineBashTool`, `defineReadFileTool`, `defineWriteFileTool`, `defineGlobTool`, and `defineGrepTool` factories with the corresponding reusable definitions.
+- f439e3d: Persistent subagent sessions are now the default: subagent tools expose `agentId`, completed children remain available for follow-up messages, and eve publishes the `<agents>` listing automatically. Remove `experimental.subagentPersistentSessions` from agent configuration; `false` is no longer an opt-out.
+
+### Patch Changes
+
+- 4a18994: Keep tools available during follow-up turns while an earlier tool approval remains unresolved, allowing unrelated work to continue without resolving the pending call.
+- d2995e1: Stamp Workflow runs with whether eve-managed OTEL tracing is enabled so dashboards can distinguish Workflow-only runs from enabled but unsampled traces. Session titles remain available alongside that metadata.
+- dfe0d18: Expose resumed session catch-up as a distinct `resuming` frontend lifecycle state so hydrated conversations do not show active-turn controls before an in-flight turn is confirmed.
+- 659774f: Refine generated Web Chat with a single Send or Stop composer action, faster question controls, and compact tool calls. Bash commands get a terminal view, while focus states, spacing, typography, and the composer backdrop are polished.
+- fc52796: Allow framework features to derive ordinary source slots from other selected modules through dependency-aware programmatic templates, with consistent composition and module-map hydration.
+- 2be67fa: Agent trace identity is now established before workflow execution begins, allowing workflow runs and OpenTelemetry spans to refer to the same trace from the outset. Delegated agents inherit the parent trace, while already-running sessions retain their current behavior.
+- 7ed4fb1: Workflow session, subagent, and turn rows now include `$eve.trace_id` when a sampled agent trace is available, allowing workflow views to open the corresponding OpenTelemetry trace directly. Rows without an exported agent trace omit the attribute.
+- 0bc8432: Integration setup banners now describe the integration being configured instead of showing eve's generic framework tagline.
+- 3274eee: Send remote-agent Vercel OIDC credentials in both the bearer and trusted-OIDC headers so `vercelOidc()` can reach eve agents behind Vercel Deployment Protection.
+- ae83a08: Update the generated Web Chat starter to close completed reasoning without delay, soften the header-to-content boundary only while content scrolls beneath it, and enable global font antialiasing.
+- 80571ee: Show declared environment variables and an eve setup link after adding a registry integration from the dev TUI. Chat SDK adapter links open the integration page's Configure section.
+- 7c5a69e: Keep durable agent sessions on their persisted OpenTelemetry trace instead of rotating after 200 turns. Agent Trace schema version 2 relies on native trace parentage instead of window, root-session, and duplicated parent-lineage attributes.
+- f38eaf1: Internal cleanup of the experimental background-tasks plumbing: centralized task-view schemas while preserving strict projection and broad tool-output contracts, removed a duplicate task tool-name set, established one task inbox-token import path, and shared serialized-context key-name constants. No behavior change.
+- cfa90d6: Telegram now supports HITL authorization challenges.
+- d79de0b: Expose channel-native receiver identity in model context, plus exact mention state for Slack, Teams, Telegram, and GitHub comments.
+- 687c371: OpenAI and Anthropic model calls now receive privacy-preserving end-user safety identifiers derived from the active session caller when the agent has not provided one, including calls made during context compaction.
+- 8e5d9b2: Add `j` and `k` as down and up shortcuts in non-editing TUI menus and the trace viewer while preserving normal text input in prompts, search fields, and editors.
+- 7eae011: Accept Vercel OIDC tokens issued from the global issuer in `vercelOidc()` and `verifyVercelOidc()`.
+- c6f9c85: Trace capture policies now receive the originating channel's type, letting a policy sample by channel (for example retaining interactive traffic while dropping scheduled runs). Policies that ignore the field are unaffected.
+
 ## 0.44.4
 
 ### Patch Changes
