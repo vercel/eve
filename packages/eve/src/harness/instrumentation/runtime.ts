@@ -94,7 +94,6 @@ function construct(
       harness: {
         forceFlush: input.forceFlush,
         runInContext: (_operation, execute) => input.runWithTracingSuppressed(execute),
-        telemetryIntegrations: [],
       },
       run: input.runWithTracingSuppressed,
     };

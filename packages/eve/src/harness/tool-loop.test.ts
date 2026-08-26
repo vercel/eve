@@ -207,9 +207,9 @@ function createTestConfig(
           authoredConfig:
             overrides.instrumentation.authoredConfig ?? (mockGetInstrumentationConfig() as never),
           otelSettings: overrides.instrumentation.otelSettings ?? declaredOtelSettings,
-          telemetryIntegrations:
-            overrides.instrumentation.telemetryIntegrations ??
-            mockGetRegisteredTelemetryIntegrations(),
+          telemetryIntegrations: Object.hasOwn(overrides.instrumentation, "telemetryIntegrations")
+            ? overrides.instrumentation.telemetryIntegrations
+            : mockGetRegisteredTelemetryIntegrations(),
         };
   return {
     handleEvent: emit,
@@ -10619,6 +10619,32 @@ describe("createToolLoopHarness", () => {
   });
 
   describe("telemetry metadata", () => {
+    it("does not enable AI SDK telemetry without scoped telemetry capabilities", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          instrumentation: {
+            runInContext: (_operation, execute) => execute(),
+            telemetryIntegrations: undefined,
+          },
+        }),
+      );
+
+      await runStep(createTestSession(), { message: "hi" });
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: unknown;
+      };
+      expect(agentCall.telemetry).toBeUndefined();
+      expect(mockCreateAiSdkHookBridge).not.toHaveBeenCalled();
+    });
+
     it("emits the authored turn trace with the session and turn preamble", async () => {
       const authoredTrace = {
         spanId: "0123456789abcdef",

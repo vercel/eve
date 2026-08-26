@@ -63,6 +63,6 @@ describe("prepareDeliveryInstrumentation", () => {
     });
 
     expect(constructed.harness?.hooks).toBeUndefined();
-    expect(constructed.harness?.telemetryIntegrations).toEqual([]);
+    expect(constructed.harness?.telemetryIntegrations).toBeUndefined();
   });
 });
