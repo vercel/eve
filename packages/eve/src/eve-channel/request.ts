@@ -82,6 +82,10 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
 
   const eventRelay = parseEventRelayField(payload.eventRelay);
   if (eventRelay instanceof Response) return eventRelay;
+  if (eventRelay !== undefined) {
+    const relayRejection = validateEventRelayBinding(eventRelay, callback);
+    if (relayRejection !== undefined) return relayRejection;
+  }
 
   const mode = parseModeField(payload.mode);
   if (mode instanceof Response) return mode;
@@ -117,7 +121,12 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   return result;
 }
 
-function parseEventRelayField(value: unknown): SessionEventRelayConfig | Response | undefined {
+function parseEventRelayField(value: unknown):
+  | (SessionEventRelayConfig & {
+      readonly workIdentity: NonNullable<SessionEventRelayConfig["workIdentity"]>;
+    })
+  | Response
+  | undefined {
   if (value === undefined) return undefined;
   if (value === null || typeof value !== "object") {
     return Response.json(
@@ -144,6 +153,39 @@ function parseEventRelayField(value: unknown): SessionEventRelayConfig | Respons
       { status: 400 },
     );
   }
+}
+
+function validateEventRelayBinding(
+  eventRelay: SessionEventRelayConfig & {
+    readonly workIdentity: NonNullable<SessionEventRelayConfig["workIdentity"]>;
+  },
+  callback: SessionCallback | undefined,
+): Response | undefined {
+  if (callback === undefined) {
+    return Response.json(
+      { error: "Event relay configuration requires a delegated session callback.", ok: false },
+      { status: 400 },
+    );
+  }
+  if (eventRelay.workIdentity.callId !== callback.callId) {
+    return Response.json(
+      { error: "Event relay callId must match the delegated session callback.", ok: false },
+      { status: 400 },
+    );
+  }
+  if (eventRelay.workIdentity.name !== callback.subagentName) {
+    return Response.json(
+      { error: "Event relay name must match the delegated session callback.", ok: false },
+      { status: 400 },
+    );
+  }
+  if (new URL(eventRelay.sink.url).origin !== new URL(callback.url).origin) {
+    return Response.json(
+      { error: "Event relay sink must share the delegated callback origin.", ok: false },
+      { status: 400 },
+    );
+  }
+  return undefined;
 }
 
 interface ParsedSessionMessageBody {

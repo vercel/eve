@@ -108,7 +108,7 @@ describe("projectActivityEvents", () => {
     expect(event.blocker.label).toHaveLength(MAX_ACTIVITY_TEXT_LENGTH);
   });
 
-  it("skips delegated actions and projects safe settlement only", () => {
+  it("projects safe tool settlement", () => {
     expect(
       projectActivityEvents({
         at: "2026-01-01T00:00:01Z",
@@ -140,5 +140,89 @@ describe("projectActivityEvents", () => {
         settledAt: "2026-01-01T00:00:01Z",
       },
     ]);
+  });
+
+  it("settles delegated work from its parent action result", () => {
+    const parentLineage = {
+      ...lineage,
+      sessionId: "root",
+      turnId: "turn",
+    };
+    expect(
+      projectActivityEvents({
+        at: "2026-01-01T00:00:02Z",
+        event: {
+          data: {
+            result: {
+              callId: "child-1",
+              kind: "subagent-result",
+              origin: "child",
+              outcome: {
+                kind: "terminal",
+                result: { kind: "succeeded", output: "done" },
+                usageDelta: {
+                  cacheReadTokens: 0,
+                  cacheWriteTokens: 0,
+                  inputTokens: 0,
+                  outputTokens: 0,
+                },
+              },
+              output: "done",
+              subagentName: "researcher",
+            },
+            sequence: 0,
+            status: "completed",
+            stepIndex: 0,
+            turnId: "turn",
+          },
+          type: "action.result",
+        },
+        lineage: parentLineage,
+      }),
+    ).toEqual([
+      {
+        eventId: "work:root:turn:child-1:settled:completed",
+        kind: "work.settled",
+        outcome: "completed",
+        settledAt: "2026-01-01T00:00:02Z",
+        workId: "work:root:turn:child-1",
+      },
+    ]);
+  });
+
+  it("keeps delegated work active for a background receipt", () => {
+    expect(
+      projectActivityEvents({
+        at: "2026-01-01T00:00:02Z",
+        event: {
+          data: {
+            result: {
+              backgroundTask: { status: "working", taskId: "task-1" },
+              callId: "child-1",
+              kind: "subagent-result",
+              origin: "child",
+              outcome: {
+                kind: "parked",
+                result: { kind: "succeeded", output: "working" },
+                usageDelta: {
+                  cacheReadTokens: 0,
+                  cacheWriteTokens: 0,
+                  inputTokens: 0,
+                  outputTokens: 0,
+                },
+              },
+              output: "working",
+              subagentName: "researcher",
+            },
+            sequence: 0,
+            status: "completed",
+            stepIndex: 0,
+            turnId: "turn",
+          },
+          type: "action.result",
+        },
+        lineage: { ...lineage, sessionId: "root", turnId: "turn" },
+      }),
+    ).toEqual([]);
   });
 });

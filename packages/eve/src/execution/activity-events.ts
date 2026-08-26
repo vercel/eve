@@ -34,7 +34,27 @@ export function projectActivityEvents(input: {
   }
   if (event.type === "action.result") {
     const result = event.data.result;
-    if (result.kind === "subagent-result") return [];
+    if (result.kind === "subagent-result") {
+      if ("backgroundTask" in result && result.backgroundTask !== undefined) return [];
+      const workId = childWorkId(lineage, result.callId);
+      const outcome =
+        result.origin === "dispatch"
+          ? "failed"
+          : result.outcome.result.kind === "succeeded"
+            ? "completed"
+            : result.outcome.result.kind === "cancelled"
+              ? "cancelled"
+              : "failed";
+      return [
+        {
+          eventId: `${workId}:settled:${outcome}`,
+          kind: "work.settled",
+          outcome,
+          settledAt: input.at,
+          workId,
+        },
+      ];
+    }
     const id = actionId(lineage.id, result.callId);
     return [
       {
@@ -188,6 +208,10 @@ export function projectActivityEvents(input: {
 function activityLabel(value: string): string | undefined {
   const normalized = normalizeActivityText(value);
   return normalized === "" ? undefined : normalized;
+}
+
+function childWorkId(lineage: ActivityWorkIdentityV1, callId: string): string {
+  return `work:${lineage.sessionId ?? lineage.rootSessionId}:${lineage.turnId ?? lineage.rootTurnId}:${callId}`;
 }
 
 function actionId(parentWorkId: string, callId: string): string {

@@ -54,7 +54,7 @@ describe("createActivityObserver", () => {
     ]);
   });
 
-  it("settles delegated work from the observed terminal event", async () => {
+  it("keeps delegated work active when its turn parks", async () => {
     const observer = createActivityObserver({
       sessionId: "child-session",
       sink,
@@ -72,10 +72,7 @@ describe("createActivityObserver", () => {
     await observer.observe(event("turn.completed", "child-turn"));
 
     expect(submitActivityMock).toHaveBeenCalledWith({
-      events: expect.arrayContaining([
-        expect.objectContaining({ kind: "work.started" }),
-        expect.objectContaining({ kind: "work.settled", outcome: "completed" }),
-      ]),
+      events: [expect.objectContaining({ kind: "work.started" })],
       sink,
     });
   });
