@@ -1,0 +1,13 @@
+{
+  "name": "eve-example-factory",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#agents/*": "./agents/*"
+  },
+  "dependencies": {
+    "eve": "workspace:*",
+    "zod": "catalog:"
+  }
+}

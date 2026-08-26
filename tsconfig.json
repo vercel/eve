@@ -30,6 +30,7 @@
     "**/.next",
     "**/.turbo",
     "**/.vercel",
-    "research"
+    "research",
+    "examples"
   ]
 }

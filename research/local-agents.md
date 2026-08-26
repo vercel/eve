@@ -1,4 +1,5 @@
 ---
+issue: https://github.com/vercel/eve/pull/2612
 status: proposed
 last_updated: "2026-08-26"
 ---
@@ -76,6 +77,11 @@ factory/
 
 Each task agent is independently developable, evaluable, and optionally
 deployable — while Foreman still composes them.
+
+A concrete skeleton of this layout ships alongside this doc at
+[`examples/factory/`](../examples/factory/README.md) (aspirational: it
+illustrates the authoring experience and does not build until
+`defineLocalAgent` exists).
 
 ## Semantics
 
