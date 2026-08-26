@@ -46,7 +46,7 @@ describe("Slack status activity", () => {
     expect(presentation?.renderers).toHaveLength(1);
     expect(
       presentation?.destination({ channelId: "C1", secret: "hidden", threadTs: "T1" }),
-    ).toEqual({ channelId: "C1", threadTs: "T1" });
+    ).toEqual({ channelId: "C1", installationTeamId: null, threadTs: "T1" });
   });
 
   it("rejects duplicate renderer configuration", () => {
@@ -147,6 +147,28 @@ describe("Slack status activity", () => {
         ]),
       ),
     ).toBe("");
+  });
+
+  it("passes the installation team to function bot tokens", async () => {
+    const tokenContext = vi.fn(() => "xoxb-team");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ ok: true })),
+    );
+    const renderer = buildSlackActivityRenderers({
+      botToken: tokenContext,
+      renderers: [slackActivityStatus()],
+    })[0]!;
+
+    await renderer.render({
+      destination: { channelId: "C1", installationTeamId: "T_INSTALL", threadTs: "T1" },
+      snapshot: snapshot([
+        { eventId: "root", kind: "work.started", startedAt: "2026-01-01T00:00:00Z", work: root },
+      ]),
+      state: undefined,
+    });
+
+    expect(tokenContext).toHaveBeenCalledWith({ teamId: "T_INSTALL" });
   });
 
   it("suppresses duplicate provider writes", async () => {

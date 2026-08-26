@@ -902,7 +902,11 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   setChannelActivityRenderers(channel, {
     destination(state) {
       const slack = state as Partial<SlackChannelState> | undefined;
-      return { channelId: slack?.channelId ?? null, threadTs: slack?.threadTs ?? null };
+      return {
+        channelId: slack?.channelId ?? null,
+        installationTeamId: slack?.installationTeamId ?? null,
+        threadTs: slack?.threadTs ?? null,
+      };
     },
     renderers: activityRenderers,
   });
