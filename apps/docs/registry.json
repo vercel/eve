@@ -1482,6 +1482,16 @@
           "target": "app/globals.css"
         },
         {
+          "path": "registry/channel/web/app/icon.svg",
+          "type": "registry:file",
+          "target": "app/icon.svg"
+        },
+        {
+          "path": "registry/channel/web/app/apple-icon.tsx",
+          "type": "registry:file",
+          "target": "app/apple-icon.tsx"
+        },
+        {
           "path": "registry/channel/web/app/layout.tsx",
           "type": "registry:file",
           "target": "app/layout.tsx"
