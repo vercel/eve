@@ -462,6 +462,33 @@ describe("createWorkflowRuntime#createSession", () => {
     });
   });
 
+  it("uses independent collector retention when session timeout is disabled", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    try {
+      const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+      mockBundleAndRun(compiledArtifactsSource, false);
+      startMock
+        .mockResolvedValueOnce({ runId: "collector-run" })
+        .mockResolvedValueOnce({ runId: "driver-run" });
+
+      await buildRuntime(compiledArtifactsSource).createSession({
+        adapter: activityAdapter(),
+        auth: null,
+        input: { message: "hello" },
+        mode: "conversation",
+      });
+
+      expect(startMock.mock.calls[0]?.[0]).toBe(activityCollectorWorkflowReference);
+      expect(startMock.mock.calls[0]?.[1][0]).toMatchObject({
+        expiresAt: "2026-01-02T00:00:00.000Z",
+      });
+      expect(startMock.mock.calls[1]?.[1][0]).toMatchObject({ sessionTimeoutMs: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("starts the root without activity when collector launch fails", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);

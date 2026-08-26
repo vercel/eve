@@ -84,6 +84,7 @@ const TASK_RUN_WORKFLOW_NAME = "taskRunWorkflow";
 const ACTIVITY_COLLECTOR_WORKFLOW_NAME = "activityCollectorWorkflow";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const COMMAND_HOOK_READY_TIMEOUT_MS = 30_000;
+const DEFAULT_ACTIVITY_COLLECTOR_RETENTION_MS = 24 * 60 * 60 * 1_000;
 
 export const LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE =
   "deploymentId 'latest' requires a World that implements resolveLatestDeploymentId()";
@@ -187,14 +188,16 @@ export function createWorkflowRuntime(config: {
       if (
         input.parent === undefined &&
         input.activity === undefined &&
-        sessionTimeoutMs !== false &&
         (getChannelActivityPresentation(input.adapter)?.renderers.length ?? 0) > 0
       ) {
         const collectorContext = serializeContext(ctx);
         const token = randomBytes(32).toString("base64url");
         const collectorInput: ActivityCollectorInput = {
           expiresAt: new Date(
-            Date.now() + (sessionTimeoutMs ?? 24 * 60 * 60 * 1_000),
+            Date.now() +
+              (typeof sessionTimeoutMs === "number"
+                ? sessionTimeoutMs
+                : DEFAULT_ACTIVITY_COLLECTOR_RETENTION_MS),
           ).toISOString(),
           serializedContext: collectorContext,
           token,

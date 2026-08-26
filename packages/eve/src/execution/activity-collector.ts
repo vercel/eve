@@ -7,7 +7,7 @@ import {
   isHookConflictError,
 } from "#execution/hook-ownership.js";
 import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
-import type { ActivityBatchV1 } from "#protocol/activity.js";
+import type { ActivityBatchV1, ActivitySnapshotV1 } from "#protocol/activity.js";
 import {
   disposeSessionActivityStep,
   renderSessionActivityStep,
@@ -50,8 +50,9 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
       ]);
       if (next.kind === "expired" || next.value.done === true) break;
       pendingRead = undefined;
-      snapshot = reduceActivityBatch(snapshot, next.value.value);
-      if (snapshot.revision === 0) continue;
+      const reduced = reduceCollectorActivity(snapshot, next.value.value);
+      snapshot = reduced.snapshot;
+      if (!reduced.presentationChanged) continue;
 
       const debounce = sleep(RENDER_DEBOUNCE_MS).then(() => ({ kind: "render" as const }));
       while (true) {
@@ -85,4 +86,13 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
       }).catch(() => {});
     }
   }
+}
+
+export function reduceCollectorActivity(
+  snapshot: ActivitySnapshotV1,
+  batch: ActivityBatchV1,
+): { readonly presentationChanged: boolean; readonly snapshot: ActivitySnapshotV1 } {
+  const previousRevision = snapshot.revision;
+  const next = reduceActivityBatch(snapshot, batch);
+  return { presentationChanged: next.revision !== previousRevision, snapshot: next };
 }
