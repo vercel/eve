@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { formatTaskNotification } from "#execution/tasks/child/steps.js";
+import {
+  formatTaskNotification,
+  projectTaskActivitySettlement,
+} from "#execution/tasks/child/steps.js";
 import type { TaskView } from "#tasks/types.js";
 
 const metadata = {
@@ -39,6 +42,43 @@ const notificationCases: readonly { readonly expected: string; readonly view: Ta
     },
   },
 ];
+
+describe("projectTaskActivitySettlement", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("projects terminal task settlement", () => {
+    expect(
+      projectTaskActivitySettlement({
+        activityObserver: {
+          sink: {
+            url: "https://parent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+            version: 1,
+          },
+          workIdentity: {
+            id: "work:task",
+            kind: "task",
+            rootSessionId: "root",
+            rootTurnId: "turn",
+          },
+        },
+        settledAt: "2026-01-01T00:00:00.000Z",
+        view: notificationCases[0]!.view,
+      }),
+    ).toEqual([
+      expect.objectContaining({ kind: "work.settled", outcome: "completed", workId: "work:task" }),
+    ]);
+  });
+
+  it("does nothing for nonterminal task views", () => {
+    expect(
+      projectTaskActivitySettlement({
+        activityObserver: undefined,
+        settledAt: "2026-01-01T00:00:00.000Z",
+        view: { metadata, status: "working", taskId: "task-1" },
+      }),
+    ).toEqual([]);
+  });
+});
 
 describe("formatTaskNotification", () => {
   it.each(notificationCases)(

@@ -29,6 +29,7 @@ import {
   startSubagent,
 } from "#execution/dispatch-runtime-actions-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
+import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
 import {
   beginDelegatedTask,
   type DelegatedTask,
@@ -104,14 +105,26 @@ export async function dispatchTaskStep(
         }
       }
 
+      const action = entry.kind === "resume" ? entry.action : entry.target.action;
       const delegated = await beginDelegatedTask({
         ...describeTaskDispatch({
-          action: entry.kind === "resume" ? entry.action : entry.target.action,
+          action,
           agentId: entry.kind === "resume" ? entry.agentId : undefined,
           parentSessionId: session.sessionId,
           parentTurnId: batch.event.turnId,
           session: nextSession,
         }),
+        activityObserver:
+          prepared.activityObserver === undefined
+            ? undefined
+            : deriveChildActivityObserverConfig({
+                activityObserver: prepared.activityObserver,
+                callId: action.callId,
+                kind: "task",
+                name: entry.kind === "resume" ? entry.action.name : entry.target.action.name,
+                parentSessionId: session.sessionId,
+                parentTurnId: batch.event.turnId,
+              }),
         parentSessionId: session.sessionId,
         parentStepIndex: batch.event.stepIndex,
         parentTurnId: batch.event.turnId,

@@ -5,6 +5,7 @@
  * Task-run transport (start/command/view) lives in `run-parent.ts`, which
  * this module composes and which other non-delegation callers share.
  */
+import type { ActivityObserverConfig } from "#channel/types.js";
 import type { RuntimeSession } from "#execution/agent-handle-dispatch.js";
 import {
   readLatestTaskView,
@@ -50,6 +51,7 @@ export interface DelegatedTask extends BackgroundTask {
  * re-derives the same token and the loser exits on the hook claim.
  */
 export async function beginDelegatedTask(input: {
+  readonly activityObserver?: ActivityObserverConfig;
   readonly agentId: string;
   readonly callId: string;
   readonly mode: "local" | "remote";
@@ -60,6 +62,7 @@ export async function beginDelegatedTask(input: {
   readonly session: RuntimeSession;
 }): Promise<DelegatedTask> {
   const task = await beginBackgroundTask({
+    activityObserver: input.activityObserver,
     callId: input.callId,
     metadata: createSubagentTaskMetadata({
       agentId: input.agentId,
@@ -83,6 +86,7 @@ export async function beginDelegatedTask(input: {
 
 /** Creates a replay-stable task run before a background tool starts external work. */
 export async function beginBackgroundTask(input: {
+  readonly activityObserver?: ActivityObserverConfig;
   readonly callId: string;
   readonly metadata: DurableTaskMetadata;
   readonly parentSessionId: string;
@@ -100,6 +104,7 @@ export async function beginBackgroundTask(input: {
     taskId,
   });
   await startTaskRun({
+    activityObserver: input.activityObserver,
     taskInboxToken,
     initialView: {
       metadata: input.metadata,
