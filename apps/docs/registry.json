@@ -347,12 +347,23 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": ["integration", "connect", "agentcard", "agentcard", "agentcard"]
+            "args": [
+              "integration",
+              "connect",
+              "agentcard",
+              "mcp.agentcard.sh/mcp",
+              "agentcard",
+              "--creation-type",
+              "agentcard",
+              "--connection-method",
+              "mcp"
+            ]
           },
           "requires": ">=0.29.0"
         }
       },
       "dependencies": ["@vercel/connect"],
+      "devDependencies": ["vercel@>=58.7.0"],
       "files": [
         {
           "path": "registry/connections/agentcard.ts",
@@ -1480,6 +1491,16 @@
           "path": "registry/channel/web/app/globals.css",
           "type": "registry:file",
           "target": "app/globals.css"
+        },
+        {
+          "path": "registry/channel/web/app/icon.svg",
+          "type": "registry:file",
+          "target": "app/icon.svg"
+        },
+        {
+          "path": "registry/channel/web/app/apple-icon.tsx",
+          "type": "registry:file",
+          "target": "app/apple-icon.tsx"
         },
         {
           "path": "registry/channel/web/app/layout.tsx",

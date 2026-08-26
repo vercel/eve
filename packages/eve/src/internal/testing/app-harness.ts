@@ -3,6 +3,7 @@ import type { ChannelAdapter } from "#channel/adapter.js";
 import { compileFromMemory, type CompileFromMemoryInput } from "#compiler/compile-from-memory.js";
 import type { CompiledAgentManifest, CompiledSkillDefinition } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { ProgrammaticAgentModule } from "#compiler/source-graph.js";
 import type { SessionParent, SessionTurn } from "#context/keys.js";
 import { installBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
 import type { SandboxAccess } from "#sandbox/state.js";
@@ -58,6 +59,8 @@ export interface TestAppDescriptor {
    * forward it on `runAsSession` when the test reads reference files.
    */
   readonly skills?: readonly CompiledSkillDefinition[];
+  /** Additional authored modules compiled into the synthetic application. */
+  readonly modules?: readonly ProgrammaticAgentModule[];
 }
 
 /**
@@ -171,6 +174,7 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
         }),
         logicalPath: "sandbox.ts",
       },
+      ...(descriptor.modules ?? []),
     ],
     outputSchema: descriptor.agent?.outputSchema,
   };

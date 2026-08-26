@@ -135,7 +135,6 @@ export function buildAgentInfoResponse(
       ...toModuleSource(manifest, memory),
       description: memory.description,
       slot: memory.slot,
-      tools: memory.tools,
       visibility: memory.visibility,
     })),
     mode: input.mode,

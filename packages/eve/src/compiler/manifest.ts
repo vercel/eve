@@ -258,7 +258,6 @@ export interface CompiledDynamicToolDefinition extends ModuleSourceRef {
 export interface CompiledMemoryDefinition extends ModuleSourceRef {
   readonly description?: string;
   readonly slot: string;
-  readonly tools?: false;
   readonly visibility: "scope" | "session";
 }
 
@@ -837,7 +836,6 @@ const compiledMemoryDefinitionSchema: z.ZodType<CompiledMemoryDefinition> = z
     slot: z.string(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
-    tools: z.literal(false).optional(),
     visibility: z.enum(["scope", "session"]),
   })
   .strict();

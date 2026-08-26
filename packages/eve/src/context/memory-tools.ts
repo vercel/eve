@@ -15,11 +15,7 @@ export function createMemoryToolDynamicDefinition(definition: MemoryDefinition, 
       events: {
         "turn.started": async (_event, resolveContext) => {
           const lock = loadContext().get(TurnMemoryLocksKey)?.[slot];
-          if (
-            lock === undefined ||
-            definition.tools === false ||
-            definition.provider.tools === undefined
-          ) {
+          if (lock === undefined || definition.provider.tools === undefined) {
             return null;
           }
           const context: MemoryToolsContext = {

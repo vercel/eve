@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1510
 status: proposed
-last_updated: "2026-08-25"
+last_updated: "2026-08-26"
 ---
 
 # First-class memory
@@ -116,25 +116,6 @@ includes the slot identity, so each slot receives a distinct provider scope
 key. Definitions that resolve the same custom namespace and scope intentionally
 share a scope key.
 
-A read-only slot sets `tools: false`. The provider's `tools` method is not
-invoked and the slot exposes no model tools, while recall and capture continue
-to run:
-
-```ts title="agent/memory/policies.ts"
-import { defineMemory } from "eve/memory";
-import { policyMemory } from "../lib/policy-memory";
-
-export default defineMemory({
-  provider: policyMemory,
-  scope: "workspace",
-  tools: false,
-});
-```
-
-`tools: false` is the only memory-specific tool control. Finer policy — per-tool
-approval, overrides, or denial — reuses the ordinary dynamic-tool approval
-surface, because provider tools are ordinary dynamic tools.
-
 ## Compilation and provider tools
 
 Memory is a source-graph primitive, not a post-compile runtime attachment. For
@@ -187,9 +168,9 @@ The wrapper resolves on `turn.started` after recall commits. It reads the
 already locked slot, invokes `provider.tools(context)`, requires a map of
 branded `defineTool()` values, qualifies each key as
 `<slot>__<provider tool key>`, and prepends the slot description. A disabled
-slot, `tools: false`, `null`, or an empty result contributes no tools. Provider
-factories use eve's durable callback helpers when their callbacks cannot be
-stamped by authored-source transformation.
+slot, `null`, or an empty result contributes no tools. Provider factories use
+eve's durable callback helpers when their callbacks cannot be stamped by
+authored-source transformation.
 
 Every module-map load also memoizes zero-argument definition-factory results
 within each module namespace. The direct memory binding and its derived wrapper
@@ -220,7 +201,6 @@ interface MemoryDefinition {
   readonly namespace?: MemoryNamespaceDefinition;
   readonly provider: MemoryProvider;
   readonly scope: MemoryScopeDefinition;
-  readonly tools?: false;
   readonly visibility?: MemoryVisibility;
 }
 ```
@@ -859,13 +839,12 @@ exactly once.
 
 ### Turn tools
 
-After turn-start recall settles, eve resolves `tools` once for the active turn
-unless the definition sets `tools: false`. The function may be synchronous or
-asynchronous. Its context contains the same session, authentication, channel,
-and message fields as a `defineDynamic` resolver, plus the locked memory scope,
-slot, and turn. Its messages include the projected turn-start recall results
-followed by the admitted turn input. Returning `null` or an empty record
-exposes no tools for the slot.
+After turn-start recall settles, eve resolves `tools` once for the active turn.
+The function may be synchronous or asynchronous. Its context contains the same
+session, authentication, channel, and message fields as a `defineDynamic`
+resolver, plus the locked memory scope, slot, and turn. Its messages include the
+projected turn-start recall results followed by the admitted turn input.
+Returning `null` or an empty record exposes no tools for the slot.
 
 The compiler-owned wrapper makes the memory definition implicit
 `defineDynamic` authoring: it adapts each implemented `tools` method to a
@@ -985,7 +964,7 @@ implementation uses exactly the reviewed constants.
 | Raw-record canonicalization | 512 records or 262,144 bytes         | superseded/hidden attributed records between compactions |
 | File entry                  | 2,048 UTF-8 bytes                    | normalized `save_memory` text                            |
 | File document               | 65,536 UTF-8 bytes                   | exact serialized stored document, including header       |
-| File entries                | `maxEntries`, default 100            | live entries per scope key                               |
+| Recalled file memory        | `maxCharacters`, default 4,000       | exact rendered keyed message after `save_memory`         |
 
 ## Built-in file memory
 
@@ -995,8 +974,8 @@ indexed `MEMORY.md`-style document per memory scope key.
 ```ts
 interface FileMemoryOptions {
   readonly backend?: MemoryDocumentBackend;
-  /** Defaults to 100. */
-  readonly maxEntries?: number;
+  /** Defaults to 4,000. */
+  readonly maxCharacters?: number;
 }
 
 function fileMemory(options?: FileMemoryOptions): MemoryProvider;
@@ -1029,10 +1008,10 @@ can supersede per item.
 `tools` exposes `save_memory({ text })` and `remove_memory({ index })`. Each
 tool completes after its conditional write and returns no output; the next
 recall reflects the updated document. `save_memory` normalizes whitespace,
-treats duplicate text as a successful no-op, and fails when the document
-reaches `maxEntries`. `remove_memory` is a no-op when its index is absent. The
-provider omits `capture`: it does not run an extraction model or persist whole
-conversations.
+treats duplicate text as a successful no-op, and fails when adding the entry
+would make the exact rendered recall message exceed `maxCharacters`.
+`remove_memory` is a no-op when its index is absent. The provider omits
+`capture`: it does not run an extraction model or persist whole conversations.
 
 ### Storage format
 
@@ -1040,12 +1019,11 @@ The stored document has a versioned header that persists `lastAllocatedIndex`
 (starting at `-1`) alongside the live indexed lines. Indexes are allocated
 monotonically and never renumbered or reused, including after the highest live
 index is removed, so a model-facing index from earlier context can never alias
-a different, later fact. `maxEntries` counts live entries, so removal frees
-capacity without resetting the high-water mark. When `lastAllocatedIndex`
-reaches `Number.MAX_SAFE_INTEGER`, the next save fails explicitly. Removal
-visibility comes from the changed document superseding the previous copy, so
-the document needs no deletion tombstones. Header bytes count toward the
-document limit.
+a different, later fact. Removing an entry frees character capacity without
+resetting the high-water mark. When `lastAllocatedIndex` reaches
+`Number.MAX_SAFE_INTEGER`, the next save fails explicitly. Removal visibility
+comes from the changed document superseding the previous copy, so the document
+needs no deletion tombstones. Header bytes count toward the document limit.
 
 ### Backend contract and selection
 
@@ -1194,10 +1172,10 @@ Implementation proceeds in two pull requests:
    lifecycle, compaction, agent-info v4, published documentation, and
    deterministic end-to-end coverage. It does not restack or reuse the custom
    runtime lifecycle from [#2142](https://github.com/vercel/eve/pull/2142).
-2. After #2534 merges, the bounded `fileMemory()` provider in
-   [#2144](https://github.com/vercel/eve/pull/2144) will be rebased onto current
-   `main`. It retains only provider storage, document, backend, and concurrency
-   work, and absorbs final file-provider e2e coverage. The separate e2e tail in
+2. The bounded `fileMemory()` provider in
+   [#2580](https://github.com/vercel/eve/pull/2580) is stacked directly on
+   #2534. It retains only provider storage, document, backend, and concurrency
+   work and includes final file-provider e2e coverage. The separate e2e tail in
    [#2145](https://github.com/vercel/eve/pull/2145) is superseded.
 
 #2534 implements the core boundary through one selected source and binding

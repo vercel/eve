@@ -11,6 +11,8 @@ export interface SetupConnectionConnectorOptions {
   projectRoot: string;
   slug: string;
   service: string;
+  creationType?: string;
+  connectionMethod?: "mcp" | "oauth";
   canonicalConnectorName: string;
   project: VercelProjectReference;
   signal?: AbortSignal;
@@ -298,9 +300,12 @@ async function resolveFallbackConnector(
           [
             "connect",
             "create",
-            options.service,
+            options.creationType ?? options.service,
             "--name",
             name,
+            ...(options.connectionMethod === undefined
+              ? []
+              : ["--connection-method", options.connectionMethod]),
             "-F",
             "json",
             "--scope",

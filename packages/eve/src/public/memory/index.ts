@@ -144,7 +144,6 @@ export interface MemoryDefinition {
   readonly namespace?: MemoryNamespaceDefinition;
   readonly provider: MemoryProvider;
   readonly scope: MemoryScopeDefinition;
-  readonly tools?: false;
   readonly visibility?: MemoryVisibility;
 }
 
