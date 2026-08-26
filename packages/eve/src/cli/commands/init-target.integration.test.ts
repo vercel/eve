@@ -30,6 +30,18 @@ describe("resolveInitTarget", () => {
     });
   });
 
+  it("rejects targets that traverse outside the parent directory", async () => {
+    const parentDirectory = await createScratchDirectory("eve-init-target-parent-");
+
+    await expect(resolveTarget(parentDirectory, "../escaped")).rejects.toThrow(
+      "Project name can only contain",
+    );
+    await expect(resolveTarget(parentDirectory, "apps/../escaped")).resolves.toMatchObject({
+      kind: "fresh",
+      projectPath: join(parentDirectory, "escaped"),
+    });
+  });
+
   it("preserves the small environment-only allowlist", async () => {
     const parentDirectory = await createScratchDirectory("eve-init-target-environment-");
     const projectPath = join(parentDirectory, "weather");

@@ -41,12 +41,13 @@ The `eve` key accepts only two options, `eveRoot` and `eveBuildCommand`.
 const { status, send } = useEveAgent();
 
 const isBusy = computed(() => status.value === "submitted" || status.value === "streaming");
+const isInputDisabled = computed(() => isBusy.value || status.value === "resuming");
 
 const message = ref("");
 
 async function handleSubmit() {
   const text = message.value.trim();
-  if (!text || isBusy.value) return;
+  if (!text || isInputDisabled.value) return;
   message.value = "";
   await send(text);
 }
@@ -54,8 +55,8 @@ async function handleSubmit() {
 
 <template>
   <form @submit.prevent="handleSubmit">
-    <input v-model="message" :disabled="isBusy" />
-    <button type="submit" :disabled="isBusy">Send</button>
+    <input v-model="message" :disabled="isInputDisabled" />
+    <button type="submit" :disabled="isInputDisabled">Send</button>
   </form>
 </template>
 ```

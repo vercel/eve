@@ -18,7 +18,8 @@ Fill in the repository template. Write for a reviewer:
 - summarize meaningful behavior and decisions, not files or commits
 - mention breaking changes, preserved behavior, scope boundaries, or stacked
   PRs only when relevant
-- link the prior issue with `Closes #N`, `Related to #N`, or equivalent
+- link a prior issue or discussion with `Closes #N`, `Related to #N`, or
+  equivalent when one exists; never create an issue solely for the PR
 - scale length with risk, not diff size
 
 Append a `### Diff size` section after the template checklist. This must be the

@@ -157,6 +157,7 @@ describe("transactional authored rebuild coordinator", () => {
         outDir: "/tmp/eve-test/packages/crm/dist",
         packageName: "@acme/crm",
         runtimeDependencies: ["eve"],
+        externalDependencies: [],
         shortName: "crm",
       },
     } as const;

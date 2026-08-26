@@ -553,7 +553,7 @@ describe("withEve Vercel config", () => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response(null, { status: 200 })),
+      vi.fn(async () => Response.json({ revision: "rev-1" })),
     );
     await mkdir(join(resolvedAppRoot, ".eve"), {
       recursive: true,
@@ -575,9 +575,10 @@ describe("withEve Vercel config", () => {
     const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
 
-    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:49152/eve/v1/health", {
-      signal: expect.any(AbortSignal),
-    });
+    expect(fetch).toHaveBeenCalledWith(
+      new URL("/eve/v1/dev/runtime-artifacts", "http://127.0.0.1:49152"),
+      { redirect: "error", signal: expect.any(AbortSignal) },
+    );
     expect(getBeforeFiles(rewrites)).toContainEqual({
       destination: "http://127.0.0.1:49152/eve/v1/:path+",
       source: "/eve/v1/:path+",

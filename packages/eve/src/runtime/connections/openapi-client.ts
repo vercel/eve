@@ -28,9 +28,9 @@ import type {
   ConnectionClient,
   ConnectionToolExecuteOptions,
   ConnectionToolMetadata,
-} from "#runtime/connections/types.js";
+} from "#shared/connection-types.js";
 import { isObject } from "#shared/guards.js";
-import { toInputSchema, type ToolSchema } from "#shared/tool-schema.js";
+import { toInputSchema, type ToolSchema } from "#tools/schema.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
 
 const log = createLogger("runtime.connections.openapi-client");

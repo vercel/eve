@@ -35,6 +35,15 @@ function getAdapter(channel: unknown): ChannelAdapter<any> {
 }
 
 describe("defineChannel", () => {
+  it("preserves the configured turn policy", () => {
+    const channel = defineChannel({
+      routes: [POST("/x", async () => new Response("ok"))],
+      turnPolicy: "queue",
+    });
+
+    expect(channel).toMatchObject({ turnPolicy: "queue" });
+  });
+
   it("returns the bare passthrough adapter when nothing is configured", () => {
     const channel = defineChannel({ routes: [POST("/x", async () => new Response("ok"))] });
 

@@ -4,9 +4,16 @@ import { parseExtensionPackageRoots } from "#shared/extension-package-contract.j
 
 describe("parseExtensionPackageRoots", () => {
   it("parses source and dist roots", () => {
-    expect(parseExtensionPackageRoots({ source: "extension", dist: "dist/extension" })).toEqual({
+    expect(
+      parseExtensionPackageRoots({
+        source: "extension",
+        dist: "dist/extension",
+        externalDependencies: ["sharp", "sharp", "@acme/runtime"],
+      }),
+    ).toEqual({
       source: "extension",
       dist: "dist/extension",
+      externalDependencies: ["sharp", "@acme/runtime"],
     });
   });
 
@@ -24,6 +31,18 @@ describe("parseExtensionPackageRoots", () => {
   it("rejects a present but invalid source", () => {
     expect(parseExtensionPackageRoots({ source: "", dist: "dist/extension" })).toBeNull();
     expect(parseExtensionPackageRoots({ source: 7, dist: "dist/extension" })).toBeNull();
+  });
+
+  it("rejects invalid external dependency declarations", () => {
+    expect(
+      parseExtensionPackageRoots({ dist: "dist/extension", externalDependencies: "sharp" }),
+    ).toBeNull();
+    expect(
+      parseExtensionPackageRoots({ dist: "dist/extension", externalDependencies: [""] }),
+    ).toBeNull();
+    expect(
+      parseExtensionPackageRoots({ dist: "dist/extension", externalDependencies: [7] }),
+    ).toBeNull();
   });
 
   it("rejects non-object contracts", () => {

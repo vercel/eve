@@ -73,7 +73,7 @@ export default function Page() {
 }
 ```
 
-`agent.data.messages` and `agent.status` cover most chat UIs. The hook also surfaces HITL prompts (the spend approval from [Step 8](./guard-the-spend)), so the dashboard can render approve/cancel controls. For the full API, see [Frontend](../guides/frontend/overview).
+`agent.data.messages` and `agent.status` cover most chat UIs. The generated Web Chat renders HITL prompts directly in the conversation: approvals get action controls, and `ask_question` gets a visible form with vertical choices, a text field, or both. The spend approval from [Step 8](./guard-the-spend) uses the same response path. For the full API, see [Frontend](../guides/frontend/overview).
 
 ## Replace `placeholderAuth`
 

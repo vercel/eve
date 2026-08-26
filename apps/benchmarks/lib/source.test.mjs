@@ -23,11 +23,22 @@ test("archives the working tree without changing the index", () => {
       assert.equal(existsSync(join(extracted, "ignored.txt")), false);
       assert.equal(existsSync(join(extracted, "deleted.txt")), false);
     });
+    withExtracted(subject.dependencyArchive, (extracted) => {
+      assert.equal(readFileSync(join(extracted, "package.json"), "utf8"), '{"private":true}\n');
+      assert.equal(
+        readFileSync(join(extracted, "pnpm-lock.yaml"), "utf8"),
+        "lockfileVersion: '9.0'\n",
+      );
+      assert.equal(existsSync(join(extracted, "tracked.txt")), false);
+    });
     assert.equal(git(repository, ["status", "--porcelain"]), statusBefore);
     writeFileSync(join(repository, "tracked.txt"), "another source change\n");
     const sourceChange = workingTreeSubject(repository);
     assert.notEqual(sourceChange.digest, subject.digest);
     assert.equal(sourceChange.dependencyDigest, subject.dependencyDigest);
+    assert.deepEqual(sourceChange.dependencyArchive, subject.dependencyArchive);
+    writeFileSync(join(repository, "packages.json"), "not a manifest\n");
+    assert.equal(workingTreeSubject(repository).dependencyDigest, subject.dependencyDigest);
     writeFileSync(join(repository, "pnpm-lock.yaml"), "lockfileVersion: '9.1'\n");
     assert.notEqual(workingTreeSubject(repository).dependencyDigest, subject.dependencyDigest);
   } finally {

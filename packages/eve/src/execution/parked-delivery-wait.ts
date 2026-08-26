@@ -1,8 +1,13 @@
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
-import { sendCommandToDelivery } from "#execution/session-command-wire.js";
 import type { SessionStateCursor } from "#execution/session-state-cursor.js";
+import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
+import {
+  sessionInboxWire,
+  SessionInboxWireError,
+  type DecodedSessionInbox,
+} from "#execution/wire/session-inbox-wire.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 
 type NextSessionAction =
@@ -182,21 +187,35 @@ async function waitForNextSessionAction(input: {
       return { delivery: null, kind: "delivery" };
     }
 
-    if (first.value.kind === "session-timeout") {
+    // Runtime-action results use the active turn's private inbox. A late value
+    // can still surface through an old session alias, where the driver has
+    // always ignored it rather than treating it as a session command.
+    if (first.value.kind === "runtime-action-result") {
+      continue;
+    }
+
+    let decoded: DecodedSessionInbox;
+    try {
+      decoded = sessionInboxWire.decode(first.value);
+    } catch (error) {
+      if (!(error instanceof SessionInboxWireError)) throw error;
+      // A lost delivery with an operator-visible signal is the designed
+      // failure; reinterpreting an unknown payload is the bug. Stay parked.
+      await reportDroppedWirePayloadStep({ detail: error.message, family: "session-inbox" });
+      continue;
+    }
+
+    if (decoded.kind === "session-timeout") {
       return { kind: "expired" };
     }
 
-    if (
-      first.value.kind === "clear" ||
-      first.value.kind === "compact" ||
-      first.value.kind === "reset"
-    ) {
-      return { kind: first.value.kind };
+    if (decoded.kind === "clear" || decoded.kind === "compact" || decoded.kind === "reset") {
+      return { kind: decoded.kind };
     }
 
-    if (first.value.kind === "cancel") {
-      if (first.value.taskId !== undefined) {
-        input.cancelledTaskIds.add(first.value.taskId);
+    if (decoded.kind === "cancel") {
+      if (decoded.taskId !== undefined) {
+        input.cancelledTaskIds.add(decoded.taskId);
         const kept = input.bufferedDeliveries.filter(
           (delivery) => !isCancelledTaskDelivery(delivery, input.cancelledTaskIds),
         );
@@ -205,13 +224,7 @@ async function waitForNextSessionAction(input: {
       continue;
     }
 
-    // Child results also arrive through this inbox, but the runtime-action
-    // collector owns them. They are not channel deliveries.
-    if (first.value.kind === "runtime-action-result") {
-      continue;
-    }
-
-    const deliveryId = first.value.taskDeliveryId ?? first.value.caller?.taskId;
+    const deliveryId = decoded.taskDeliveryId ?? decoded.caller?.taskId;
     if (deliveryId !== undefined && isCancelledTaskDeliveryId(deliveryId, input.cancelledTaskIds)) {
       continue;
     }
@@ -220,20 +233,11 @@ async function waitForNextSessionAction(input: {
       input.seenTaskDeliveries.add(deliveryId);
     }
 
-    if (first.value.kind === "deliver") {
-      if (input.deferDeliveries === true) {
-        input.bufferedDeliveries.push(first.value);
-        continue;
-      }
-      return { delivery: first.value, kind: "delivery" };
-    }
-
-    const delivery = sendCommandToDelivery(first.value);
     if (input.deferDeliveries === true) {
-      input.bufferedDeliveries.push(delivery);
+      input.bufferedDeliveries.push(decoded);
       continue;
     }
-    return { delivery, kind: "delivery" };
+    return { delivery: decoded, kind: "delivery" };
   }
 }
 

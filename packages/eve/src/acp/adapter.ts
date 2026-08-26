@@ -18,8 +18,8 @@ import {
 import { Client, ClientError } from "#client/index.js";
 import type { ClientOptions, SendTurnInput, SendTurnPayload } from "#client/types.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
-import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 
 const ANSWER_FIELD = "answer";
 const ERROR_CODE_BUSY = -32_001;

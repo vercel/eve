@@ -8,7 +8,6 @@ import {
 import type {
   CancelTurnInput,
   CancelTurnResult,
-  DeliverHookPayload,
   DispatchContinuationInput,
   DispatchSessionInput,
   GetEventStreamOptions,
@@ -20,6 +19,12 @@ import type {
 } from "#channel/types.js";
 import { serializeContext } from "#context/serialize.js";
 import {
+  ChannelInstrumentationKey,
+  OtelTraceEnabledKey,
+  SessionTraceSeedKey,
+  type SessionTraceSeed,
+} from "#context/keys.js";
+import {
   buildSessionAttributes,
   buildSubagentRootAttributes,
   readParentLineage,
@@ -27,11 +32,9 @@ import {
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { SpanKind, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
   getHookByToken,
   getRun,
-  resumeHook,
   start,
   type Run,
   type StartOptionsWithoutDeploymentId,
@@ -51,8 +54,11 @@ import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
 import { walkCauseChain } from "#shared/errors.js";
 import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { sendCommandToDelivery } from "#execution/session-command-wire.js";
+import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
+import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
+import { evaluateTracePolicy } from "#tracing/sampled-trace.js";
+import { normalizeChannelAudience } from "#shared/channel-audience.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
@@ -84,7 +90,6 @@ export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
 
 const log = createLogger("execution.workflow-runtime");
-const workflowTracer = trace.getTracer("workflow");
 
 interface WorkflowHookRecord {
   readonly runId: string;
@@ -142,6 +147,17 @@ export function createWorkflowRuntime(config: {
         run: input,
       });
       const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
+      const channelInstrumentation = ctx.get(ChannelInstrumentationKey);
+      const traceSeed = allocateSessionTraceSeed({
+        agentName: effectiveAgent.turnAgent.id,
+        audience: normalizeChannelAudience(channelInstrumentation?.metadata.audience),
+        channelType: channelInstrumentation?.channelType,
+        parentTraceContext: input.parentTraceContext,
+      });
+      if (traceSeed !== undefined) {
+        ctx.set(SessionTraceSeedKey, traceSeed);
+      }
+      ctx.set(OtelTraceEnabledKey, getInstrumentationRuntime()?.prepareSessionTrace !== undefined);
       const serializedContext = serializeContext(ctx);
       const parentLineage = readParentLineage(serializedContext);
       const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
@@ -203,7 +219,7 @@ export function createWorkflowRuntime(config: {
 
       let events: ReadableStream<MessageStreamEvent> | undefined;
       const getEvents = () => {
-        events ??= createLiveEventStream(run.runId);
+        events ??= parseNdjsonStream<MessageStreamEvent>(() => getRun(run.runId).getReadable());
         return events;
       };
 
@@ -271,7 +287,7 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
 ): Promise<SessionCommandResult<TCommand>> {
   let hook: WorkflowHookRecord;
   try {
-    hook = normalizeWorkflowHook(await resumeHook(token, sessionHookPayload(command)));
+    hook = normalizeWorkflowHook(await resumeSessionInbox(token, command));
   } catch (error) {
     if (isInactiveCommandTarget(error)) {
       return inactiveCommandResult(command);
@@ -288,10 +304,6 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   }
 
   return activeCommandResult(command, hook.runId);
-}
-
-function sessionHookPayload(command: SessionCommand): SessionCommand | DeliverHookPayload {
-  return command.kind === "send" ? sendCommandToDelivery(command) : command;
 }
 
 function activeCommandResult<TCommand extends SessionCommand>(
@@ -423,46 +435,6 @@ function shouldRouteToLatestDeployment(): boolean {
   return process.env.VERCEL_ENV === "production" || isEveDevEnvironment();
 }
 
-function createLiveEventStream(sessionId: string): ReadableStream<MessageStreamEvent> {
-  let sequence = 0;
-  return parseNdjsonStream<MessageStreamEvent>(() => getRun(sessionId).getReadable()).pipeThrough(
-    new TransformStream({
-      transform(event, controller) {
-        const eventSequence = sequence;
-        sequence += 1;
-        const readAtMs = Date.now();
-        controller.enqueue(event);
-        recordLiveStreamEventRead({ event, readAtMs, sequence: eventSequence, sessionId });
-      },
-    }),
-  );
-}
-
-function recordLiveStreamEventRead(input: {
-  readonly event: MessageStreamEvent;
-  readonly readAtMs: number;
-  readonly sequence: number;
-  readonly sessionId: string;
-}): void {
-  const writtenAtMs = Date.parse(input.event.meta?.at ?? "");
-  if (!Number.isFinite(writtenAtMs)) return;
-
-  try {
-    workflowTracer
-      .startSpan("workflow.stream.follow.read", {
-        attributes: {
-          "workflow.run.id": input.sessionId,
-          "workflow.stream.sequence": input.sequence,
-        },
-        kind: SpanKind.CLIENT,
-        startTime: writtenAtMs,
-      })
-      .end(input.readAtMs);
-  } catch {
-    // Telemetry must not interrupt event delivery.
-  }
-}
-
 function isLatestDeploymentUnsupportedError(error: unknown): boolean {
   return error instanceof Error && error.message.includes(LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE);
 }
@@ -479,5 +451,37 @@ function normalizeWorkflowHook(value: unknown): WorkflowHookRecord {
 
   return {
     runId,
+  };
+}
+
+function allocateSessionTraceSeed(input: {
+  readonly agentName?: string;
+  readonly audience: ReturnType<typeof normalizeChannelAudience>;
+  readonly channelType?: string;
+  readonly parentTraceContext?: {
+    readonly traceId: string;
+    readonly spanId: string;
+    readonly traceFlags: number;
+  };
+}): SessionTraceSeed | undefined {
+  if (input.parentTraceContext !== undefined) {
+    return {
+      spanId: input.parentTraceContext.spanId,
+      traceFlags: input.parentTraceContext.traceFlags,
+      traceId: input.parentTraceContext.traceId,
+    };
+  }
+  const instrumentation = getInstrumentationRuntime();
+  if (instrumentation?.prepareSessionTrace === undefined) return undefined;
+  if (instrumentation.idGenerator === undefined) return undefined;
+  const sampled = evaluateTracePolicy(instrumentation.otelSettings?.tracePolicy, {
+    agentName: input.agentName,
+    audience: input.audience,
+    channelType: input.channelType,
+  });
+  return {
+    spanId: instrumentation.idGenerator.allocateSpanId(),
+    traceFlags: sampled ? 1 : 0,
+    traceId: instrumentation.idGenerator.generateTraceId(),
   };
 }

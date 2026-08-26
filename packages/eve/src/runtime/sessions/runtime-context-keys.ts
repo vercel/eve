@@ -4,8 +4,11 @@
  */
 
 import type { ChannelAdapter } from "#channel/adapter.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 import { getAdapterKind } from "#channel/adapter.js";
 import { ContextKey } from "#context/key.js";
+import { buildChannelInstrumentationProjection } from "#channel/instrumentation.js";
+import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import { deserializeRuntimeAdapter } from "#runtime/channels/registry.js";
 import {
   type DurableCompiledArtifactsSource,
@@ -21,6 +24,7 @@ import {
 interface SerializedAdapter {
   readonly kind: string;
   readonly state: Record<string, unknown>;
+  readonly audience?: ChannelAudience;
 }
 
 /** Compiled bundle on the durable context — re-exported under a stable name. */
@@ -31,12 +35,14 @@ interface SerializedBundle {
   readonly source: DurableCompiledArtifactsSource;
 }
 
-export const ChannelKey = new ContextKey<ChannelAdapter>("eve.channel", {
+export const ChannelKey = new ContextKey<ChannelAdapter>(CHANNEL_CONTEXT_KEY_NAME, {
   codec: {
     serialize(adapter): SerializedAdapter {
+      const projection = buildChannelInstrumentationProjection({ adapter });
       return {
         kind: getAdapterKind(adapter),
         state: adapter.state ? { ...adapter.state } : {},
+        audience: projection.metadata.audience,
       };
     },
     deserialize(data, ctx): ChannelAdapter {

@@ -5,8 +5,8 @@ import { AuthKey, SessionKey, type SessionAuthContext } from "#context/keys.js";
 import {
   isConnectionAuthorizationFailedError,
   isConnectionAuthorizationRequiredError,
-} from "#public/connections/errors.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
+} from "#connections/errors.js";
+import type { SessionContext } from "#context/session-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { ConnectionAuthorizationTokensKey } from "#runtime/connections/authorization-tokens.js";
 import {

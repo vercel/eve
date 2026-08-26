@@ -1,4 +1,4 @@
-import type { JsonValue } from "#public/types/json.js";
+import type { JsonValue } from "#shared/json.js";
 
 export function normalizeConnectionAuthToolResult(result: unknown): JsonValue {
   if (result === undefined) return null;

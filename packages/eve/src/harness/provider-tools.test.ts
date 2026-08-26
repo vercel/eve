@@ -7,7 +7,7 @@ import {
   WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
   WEB_SEARCH_OPENAI_OUTPUT_SCHEMA,
   WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA,
-} from "#runtime/framework-tools/web-search.js";
+} from "#harness/provider-tool-schemas.js";
 import {
   resolveFrameworkToolFromUpstreamType,
   resolveWebSearchBackend,

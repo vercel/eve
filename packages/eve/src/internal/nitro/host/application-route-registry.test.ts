@@ -1,132 +1,66 @@
 import { describe, expect, it } from "vitest";
 
+import { compileFromMemory } from "#compiler/compile-from-memory.js";
+import { createApplicationRouteRegistry } from "#internal/nitro/host/application-route-registry.js";
 import {
-  createApplicationRouteRegistryFromInput,
-  mergeApplicationChannelRouteRegistrations,
-} from "#internal/nitro/host/application-route-registry.js";
+  EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN,
+  EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH,
+  EVE_HEALTH_ROUTE_PATH,
+  EVE_INFO_ROUTE_PATH,
+} from "#protocol/routes.js";
+import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/eve-service-route-output.js";
 
-describe("mergeApplicationChannelRouteRegistrations", () => {
-  it("applies authored overrides, disabled defaults, and framework-first route dedupe", () => {
-    const registrations = mergeApplicationChannelRouteRegistrations({
-      frameworkChannelNames: new Set(["callback", "eve", "shared"]),
-      frameworkChannels: [
-        { method: "POST", name: "eve", urlPath: "/framework/session" },
-        { method: "POST", name: "callback", urlPath: "/callback" },
-        { method: "GET", name: "shared", urlPath: "/duplicate" },
-      ],
-      manifestChannels: [
-        { kind: "disabled", name: "callback" },
-        { kind: "channel", method: "POST", name: "eve", urlPath: "/authored/session" },
-        { kind: "channel", method: "GET", name: "custom", urlPath: "/duplicate" },
-      ],
-    });
+describe("createApplicationRouteRegistry", () => {
+  it("projects the compiler-owned channel route plan", async () => {
+    const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+    const registry = createApplicationRouteRegistry({ compileResult: { manifest } });
 
-    expect(registrations).toEqual([
-      { cors: undefined, method: "GET", route: "/duplicate" },
-      { cors: undefined, method: "POST", route: "/authored/session" },
-    ]);
-  });
-
-  it("rejects disable files that do not name a framework channel", () => {
-    expect(() =>
-      mergeApplicationChannelRouteRegistrations({
-        frameworkChannelNames: new Set(["eve"]),
-        frameworkChannels: [],
-        manifestChannels: [{ kind: "disabled", name: "unknown" }],
-      }),
-    ).toThrow(
-      'agent/channels/unknown.ts exports disableRoute() but "unknown" is not a framework channel',
+    expect(registry.channelRegistrations).toEqual(
+      manifest.channelRoutes.effective.map((route) => ({
+        cors: route.cors,
+        method: route.method,
+        route: route.urlPath,
+      })),
     );
-  });
-});
-
-describe("createApplicationRouteRegistryFromInput", () => {
-  it("centralizes package, channel, development, and workflow precedence", () => {
-    const cors = { origin: ["https://example.com"] } as const;
-    const registry = createApplicationRouteRegistryFromInput({
-      development: true,
-      frameworkChannelNames: new Set(),
-      frameworkChannels: [],
-      manifestChannels: [
-        { cors, kind: "channel", method: "POST", name: "hooks", urlPath: "/hooks" },
-        { cors, kind: "channel", method: "GET", name: "hooks", urlPath: "/hooks" },
-        { cors, kind: "channel", method: "POST", name: "copy", urlPath: "/hooks" },
-        {
-          cors,
-          kind: "channel",
-          method: "WEBSOCKET",
-          name: "socket",
-          urlPath: "/socket/:room",
-        },
-        {
-          kind: "channel",
-          method: "GET",
-          name: "reserved-health",
-          urlPath: "/eve/v1/health",
-        },
-        {
-          kind: "channel",
-          method: "GET",
-          name: "dev-shadow",
-          urlPath: "/eve/v1/dev/runtime-artifacts",
-        },
-      ],
+    expect(registry.channelRoutes).toContainEqual({
+      cors: undefined,
+      kind: "channel",
+      method: "GET",
+      path: EVE_HEALTH_ROUTE_PATH,
     });
-
-    expect(registry.channelRegistrations).toEqual([
-      { cors, method: "POST", route: "/hooks" },
-      { cors, method: "GET", route: "/hooks" },
-      { cors, method: "WEBSOCKET", route: "/socket/:room" },
-      {
-        cors: undefined,
-        method: "GET",
-        route: "/eve/v1/dev/runtime-artifacts",
-      },
-    ]);
-    expect(registry.routes).toEqual([
-      { kind: "home", method: "GET", path: "/" },
-      { kind: "health", method: "GET", path: "/eve/v1/health" },
-      { kind: "health", method: "HEAD", path: "/eve/v1/health" },
-      { cors, kind: "channel", method: "POST", path: "/hooks" },
-      { cors, kind: "channel-preflight", method: "OPTIONS", path: "/hooks" },
-      { cors, kind: "channel", method: "GET", path: "/hooks" },
-      {
-        cors,
-        kind: "channel",
-        method: "WEBSOCKET",
-        path: "/socket/:room",
-      },
-      {
-        cors: undefined,
-        kind: "channel",
-        method: "GET",
-        path: "/eve/v1/dev/runtime-artifacts",
-      },
-      {
-        kind: "development-schedule",
-        method: "POST",
-        path: "/eve/v1/dev/schedules/:scheduleId",
-      },
-      {
-        kind: "workflow",
-        method: "ALL",
-        path: "/.well-known/workflow/v1/flow",
-      },
-    ]);
+    expect(registry.channelRoutes).toContainEqual({
+      cors: undefined,
+      kind: "channel",
+      method: "HEAD",
+      path: EVE_HEALTH_ROUTE_PATH,
+    });
+    expect(registry.channelRoutes).toContainEqual(
+      expect.objectContaining({ kind: "channel", method: "GET", path: EVE_INFO_ROUTE_PATH }),
+    );
+    expect(registry.routes.at(-1)).toEqual({
+      kind: "workflow",
+      method: "ALL",
+      path: EVE_WORKFLOW_FLOW_ROUTE_PATH,
+    });
   });
 
-  it("omits development routes outside development", () => {
-    const registry = createApplicationRouteRegistryFromInput({
-      frameworkChannelNames: new Set(),
-      frameworkChannels: [],
-      manifestChannels: [],
-    });
+  it("adds only host-owned development routes in development", async () => {
+    const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+    const registry = createApplicationRouteRegistry(
+      { compileResult: { manifest } },
+      { development: true },
+    );
 
-    expect(registry.routes.map((route) => route.kind)).toEqual([
-      "home",
-      "health",
-      "health",
-      "workflow",
-    ]);
+    expect(registry.routes).toContainEqual({
+      kind: "development-artifacts",
+      method: "GET",
+      path: EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH,
+    });
+    expect(registry.routes).toContainEqual({
+      kind: "development-schedule",
+      method: "POST",
+      path: EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN,
+    });
+    expect(registry.routes.filter((route) => route.kind === "workflow")).toHaveLength(1);
   });
 });

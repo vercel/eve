@@ -81,6 +81,45 @@ describe("extension build output", () => {
     );
   });
 
+  it("stamps extension-owned external dependencies into compatibility metadata", async () => {
+    const root = await createExtensionPackage({
+      dependencies: { "layout-sensitive-runtime": "1.0.0" },
+      eve: {
+        extension: {
+          source: "extension",
+          dist: "dist/extension",
+          externalDependencies: ["layout-sensitive-runtime"],
+        },
+      },
+    });
+    const config = await tryReadExtensionBuildConfig(root);
+    const outDir = await buildExtensionPackage(root, config!);
+    const manifestPath = join(outDir, "extension", "_manifest.json");
+
+    expect(
+      parseExtensionCompatibilityManifest(await readFile(manifestPath, "utf8"), manifestPath),
+    ).toMatchObject({
+      formatVersion: 2,
+      build: { externalDependencies: ["layout-sensitive-runtime"] },
+    });
+  });
+
+  it("rejects external dependencies without a runtime package declaration", async () => {
+    const root = await createExtensionPackage({
+      eve: {
+        extension: {
+          source: "extension",
+          dist: "dist/extension",
+          externalDependencies: ["layout-sensitive-runtime"],
+        },
+      },
+    });
+
+    await expect(tryReadExtensionBuildConfig(root)).rejects.toThrow(
+      /Missing runtime declarations: layout-sensitive-runtime/,
+    );
+  });
+
   it("preserves shared module identity across transformed contribution entries", async () => {
     const root = await createExtensionPackage();
     await mkdir(join(root, "extension", "lib"), { recursive: true });

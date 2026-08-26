@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
-import { RegistryFlowFailedError } from "#setup/flows/registry.js";
+import { RegistryFlowFailedError, runRegistryFlow } from "#setup/flows/registry.js";
 
 import {
   runTuiSetupCommand,
@@ -76,6 +76,7 @@ function run(input: {
   flows: TuiSetupFlows;
   renderer?: TuiSetupCommandRenderer;
   initialModelStep?: "provider";
+  initialRegistryAddress?: string;
   upgradeChoice?: "upgrade" | "later";
   withExclusiveTerminal?: TuiSetupCommandInput["withExclusiveTerminal"];
 }) {
@@ -92,6 +93,9 @@ function run(input: {
   };
   if (input.initialModelStep !== undefined) {
     commandInput.initialModelStep = input.initialModelStep;
+  }
+  if (input.initialRegistryAddress !== undefined) {
+    commandInput.initialRegistryAddress = input.initialRegistryAddress;
   }
   if (input.withExclusiveTerminal !== undefined) {
     commandInput.withExclusiveTerminal = input.withExclusiveTerminal;
@@ -302,6 +306,34 @@ describe("runTuiSetupCommand", () => {
     );
   });
 
+  it("prompts to upgrade when an installed registry item's setup needs a newer CLI", async () => {
+    const flows = fakeFlows({
+      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => {
+        throw new RegistryFlowFailedError(
+          new HumanActionRequiredError({
+            kind: "vercel-cli-upgrade",
+            command: "vercel upgrade",
+            reason: "The installed Vercel CLI does not support Linq trigger options.",
+          }),
+          {
+            kind: "done",
+            addedItems: ["channel/linq"],
+            items: [{ address: "channel/linq", title: "Linq", facts: [], output: [] }],
+            facts: [],
+          },
+        );
+      }),
+      runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => ({
+        kind: "installed",
+      })),
+    });
+
+    await expect(run({ command: "add", flows, upgradeChoice: "upgrade" })).resolves.toEqual({
+      message: "Upgraded the Vercel CLI. Retry /add.",
+      preserveFlowDiagnostics: false,
+    });
+  });
+
   it("gives the manual upgrade command when the old-CLI prompt is declined", async () => {
     const flows = fakeFlows({
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => {
@@ -399,6 +431,64 @@ describe("runTuiSetupCommand", () => {
     }
     expect(outcome).toEqual(expected);
     expect(runRegistryFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
+  });
+
+  it("forwards a /add argument as the registry flow's initial address", async () => {
+    const flows = fakeFlows();
+
+    await run({ command: "add", flows, initialRegistryAddress: "channel/slack" });
+
+    expect(flows.runRegistryFlow).toHaveBeenCalledWith(
+      expect.objectContaining({ appRoot: APP_ROOT, initialAddress: "channel/slack" }),
+    );
+  });
+
+  it("omits an initial address for bare /add", async () => {
+    const flows = fakeFlows();
+
+    await run({ command: "add", flows });
+
+    expect(flows.runRegistryFlow).toHaveBeenCalledWith(
+      expect.not.objectContaining({ initialAddress: expect.anything() }),
+    );
+  });
+
+  it.each([
+    ["bare /add browses the catalog", undefined, "Add an integration"],
+    ["/add <item> opens the item", "channel/slack", "Slack"],
+  ])("composes with the real registry flow: %s", async (_case, address, firstPrompt) => {
+    const prompts: string[] = [];
+    const registryDeps = {
+      browseRegistryCatalog: vi.fn(async () => ({
+        items: [{ address: "channel/slack", name: "channel/slack", source: "Vercel" }],
+        total: 1,
+        errors: [],
+      })),
+      getRegistryItemManifest: vi.fn(async () => ({ name: "channel/slack", title: "Slack" })),
+      installRegistryItem: vi.fn(async () => ({ output: [] })),
+      detectDeployment: vi.fn(async () => ({ state: "unlinked" as const })),
+      runDeployFlow: vi.fn(async () => ({ kind: "deployed" as const })),
+    };
+    // The real flow behind the command seam, so the parsed argument is proven
+    // to reach `initialAddress` rather than stopping at a mock.
+    const flows = fakeFlows({
+      runRegistryFlow: (input) => {
+        const fake = createFakePrompter({
+          single: (options) => {
+            prompts.push(options.message);
+            return options.message === "Add an integration" ? "action:done" : "add";
+          },
+        });
+        return runRegistryFlow({ ...input, prompter: fake.prompter, deps: registryDeps });
+      },
+    });
+
+    const commandRun: Parameters<typeof run>[0] = { command: "add", flows };
+    if (address !== undefined) commandRun.initialRegistryAddress = address;
+    await run(commandRun);
+
+    expect(prompts[0]).toBe(firstPrompt);
+    expect(registryDeps.browseRegistryCatalog).toHaveBeenCalledTimes(address === undefined ? 1 : 0);
   });
 
   it("overrides a settled success tone when add is interrupted", async () => {

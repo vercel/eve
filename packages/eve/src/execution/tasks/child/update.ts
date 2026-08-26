@@ -7,16 +7,16 @@ import {
 } from "#execution/subagent-adapter-state.js";
 import { createTaskControlError } from "#execution/tasks/parent/control-shared.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
-import { readTaskIdFromInboxToken } from "#tasks/task-id.js";
+import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#shared/action-types.js";
+import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 import type { TaskInboundUpdate } from "#tasks/types.js";
 
 /** Sends one child-authored progress update over its existing parent transport. */
 export async function executeTaskUpdate(input: {
   readonly action: RuntimeToolCallActionRequest;
   readonly adapter: ChannelAdapter | undefined;
-  readonly childStepIndex: number;
-  readonly childTurnId: string;
+  readonly updateIndex: number;
+  readonly updateEpoch: string;
   readonly serializedContext: Record<string, unknown> | undefined;
 }): Promise<RuntimeActionResult> {
   const message = readUpdateMessage(input.action.input);
@@ -29,8 +29,8 @@ export async function executeTaskUpdate(input: {
     const taskId = await fireTaskUpdateCallbackStep({
       callback,
       callId: input.action.callId,
-      childStepIndex: input.childStepIndex,
-      childTurnId: input.childTurnId,
+      updateIndex: input.updateIndex,
+      updateEpoch: input.updateEpoch,
       message,
     });
     if (taskId === undefined) {
@@ -50,8 +50,8 @@ export async function executeTaskUpdate(input: {
   }
   const update: TaskInboundUpdate = {
     callId: input.action.callId,
-    childStepIndex: input.childStepIndex,
-    childTurnId: input.childTurnId,
+    updateIndex: input.updateIndex,
+    updateEpoch: input.updateEpoch,
     kind: "task-update",
     message,
   };

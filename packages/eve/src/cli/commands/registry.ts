@@ -34,11 +34,13 @@ import {
   type RegistrySearchPresentationSection,
 } from "./registry-presentation.js";
 import type { runRegistrySetupCommand } from "./registry-setup-command.js";
-import { serializeHeadlessSetupEvent } from "./setup-headless.js";
-import { addRegistryMappings, readRegistryConfig } from "./registry-project.js";
-
+import { reportHeadlessSetupCompletion, serializeHeadlessSetupEvent } from "./setup-headless.js";
+import {
+  addRegistryMappings,
+  prepareWebRegistryProject,
+  readRegistryConfig,
+} from "./registry-project.js";
 export type { RegistryCommandLogger } from "./registry-recovery.js";
-
 export interface AddCommandOptions {
   skipInstall?: boolean;
   overwrite?: boolean;
@@ -69,6 +71,7 @@ export interface RegistrySetupDependencies {
 export interface AddCommandDependencies extends RegistrySetupDependencies {
   createPrompter?: () => Prompter;
   hasInteractiveTerminal?: () => boolean;
+  prepareWebRegistryProject?: typeof prepareWebRegistryProject;
 }
 
 type RunAddCommandOptions = AddCommandOptions & {
@@ -99,6 +102,7 @@ const defaultAddCommandDependencies: AddCommandDependencies = {
   hasInteractiveTerminal,
   loadSetupCommandRunner: async () =>
     (await import("./registry-setup-command.js")).runRegistrySetupCommand,
+  prepareWebRegistryProject,
 };
 
 const DEFAULT_OFFICIAL_REGISTRY_URL = "https://eve.dev/r";
@@ -347,34 +351,20 @@ async function searchRegistryCatalog(
   return { config, result, resultsBySource, sources, metadataByAddress };
 }
 
-function registryManifestTitle(manifest: unknown): string | undefined {
-  if (typeof manifest !== "object" || manifest === null || Array.isArray(manifest))
-    return undefined;
-  const title = (manifest as { title?: unknown }).title;
-  return typeof title === "string" ? title : undefined;
-}
-
 /** Browses all configured catalogs, or one namespace or URL source. */
 export async function browseRegistryCatalog(
   appRoot: string,
   options: { query?: string; source?: string } = {},
 ): Promise<RegistryCatalogResult> {
-  const { config, result } = await searchRegistryCatalog(appRoot, options);
-  const manifests = await Promise.all(
-    result.items.map(async (item) => {
-      const [manifest] = await getRegistryItems([item.addCommandArgument], { config });
-      return manifest;
-    }),
-  );
+  const { result } = await searchRegistryCatalog(appRoot, options);
   return {
-    items: result.items.map((item: RegistrySearchItem, index) => {
+    items: result.items.map((item: RegistrySearchItem) => {
       const catalogItem: RegistryCatalogItem = {
         address: item.registry === OFFICIAL_CATALOG ? item.name : item.addCommandArgument,
         name: item.name,
         source: item.registry === OFFICIAL_CATALOG ? "Vercel" : item.registry,
       };
-      const title = registryManifestTitle(manifests[index]);
-      if (title !== undefined) catalogItem.title = title;
+      if (item.title !== undefined) catalogItem.title = item.title;
       if (item.type !== undefined) catalogItem.type = item.type;
       if (item.description !== undefined) catalogItem.description = item.description;
       return catalogItem;
@@ -530,7 +520,7 @@ export async function runAddCommand(
           setupReminder: (packageItem) => setupReminder(packageItem, "skipped"),
         },
       });
-      return completion === false ? undefined : completion;
+      return reportCompletion(logger, item, completion, options);
     }
 
     if (options.skipInstall === true) {
@@ -547,16 +537,20 @@ export async function runAddCommand(
         cancelledReminder: setupReminder(item, "cancelled"),
         resumeCommand: setupResumeCommand(item),
       });
-      return completion === false ? undefined : completion;
+      return reportCompletion(logger, item, completion, options);
     }
 
+    if (address === itemAddress("channel/web")) {
+      await (dependencies.prepareWebRegistryProject ?? prepareWebRegistryProject)(appRoot);
+    }
     await addRegistryItems([address], {
       config,
       cwd: appRoot,
       overwrite: options.overwrite,
       silent: options.silent,
     });
-    if (eveMetadata?.setup === undefined) return;
+    if (eveMetadata?.setup === undefined)
+      return reportCompletion(logger, item, { facts: [] }, options);
 
     const interactive =
       dependencies.hasInteractiveTerminal?.() ??
@@ -570,9 +564,16 @@ export async function runAddCommand(
         }),
       );
     }
+    if (options.skipSetup === true) {
+      if (options.nonInteractive) return reportCompletion(logger, item, { facts: [] }, options);
+      logger.log(setupReminder(item, "skipped"));
+      return;
+    }
     if (
-      options.skipSetup === true ||
-      (!options.nonInteractive && !options.yes && !interactive && options.setupAuthorized !== true)
+      !options.nonInteractive &&
+      !options.yes &&
+      !interactive &&
+      options.setupAuthorized !== true
     ) {
       logger.log(setupReminder(item, "skipped"));
       return;
@@ -613,23 +614,20 @@ export async function runAddCommand(
       cancelledReminder: setupReminder(item, "cancelled"),
       resumeCommand: setupResumeCommand(item),
     });
-    if (completion !== false && options.nonInteractive) {
-      logger.log(
-        serializeHeadlessSetupEvent({
-          version: 1,
-          type: "completed",
-          item,
-          completedItems: [item],
-          ...(completion.deploymentRequired === true
-            ? {
-                deploymentRequired: true as const,
-                next: { command: "eve", args: ["deploy"] },
-              }
-            : {}),
-        }),
-      );
-    }
-    return completion === false ? undefined : completion;
+    return reportCompletion(logger, item, completion, options);
+  });
+}
+function reportCompletion(
+  logger: RegistryCommandLogger,
+  item: string,
+  completion: RegistrySetupCompletion | false,
+  options: AddCommandOptions,
+): RegistrySetupCompletion | undefined {
+  return reportHeadlessSetupCompletion({
+    logger,
+    item,
+    completion,
+    nonInteractive: options.nonInteractive,
   });
 }
 

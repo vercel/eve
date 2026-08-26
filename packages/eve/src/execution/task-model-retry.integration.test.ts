@@ -7,7 +7,7 @@ import { taskModelRetryFixtureWorkflow } from "#internal/testing/task-model-retr
 
 describe("task model retry integration", () => {
   it("retries a recoverable task error from the committed session snapshot", async () => {
-    const runtime = createTestRuntime({ agent: { name: "task-model-retry-fixture" } });
+    const runtime = await createTestRuntime({ agent: { name: "task-model-retry-fixture" } });
 
     await runtime.run(async () => {
       const run = await start(taskModelRetryFixtureWorkflow, [{ failThroughAttempt: 1 }]);
@@ -32,7 +32,9 @@ describe("task model retry integration", () => {
   });
 
   it("notifies the parent once after Workflow exhausts persistent failures", async () => {
-    const runtime = createTestRuntime({ agent: { name: "task-model-retry-exhaustion-fixture" } });
+    const runtime = await createTestRuntime({
+      agent: { name: "task-model-retry-exhaustion-fixture" },
+    });
 
     await runtime.run(async () => {
       const run = await start(taskModelRetryFixtureWorkflow, [

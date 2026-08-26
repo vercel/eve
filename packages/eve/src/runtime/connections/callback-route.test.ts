@@ -1,17 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  EVE_CONNECTION_CALLBACK_ROUTE_PATTERN,
-  EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN,
-  createEveConnectionCallbackRoutePath,
-} from "#protocol/routes.js";
+import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import {
-  getConnectionCallbackChannelDefinitions,
-  getConnectionCallbackChannelNames,
   handleConnectionCallbackRequest,
-  HTTP_CONNECTION_CALLBACK_CHANNEL_NAME_PREFIX,
-} from "#runtime/connections/callback-route.js";
+  handleLegacyConnectionCallbackRequest,
+} from "#execution/connections/callback-route.js";
 
 const resumeHookMock = vi.fn();
 
@@ -26,44 +20,6 @@ function buildRouteContext(params: Readonly<Record<string, string>>): RouteConte
     requestIp: null,
   };
 }
-
-describe("getConnectionCallbackChannelDefinitions", () => {
-  it("registers GET and POST entries at the framework callback route pattern", () => {
-    const definitions = getConnectionCallbackChannelDefinitions();
-    expect(definitions).toHaveLength(4);
-    const methods = definitions.map((d) => d.method);
-    expect(methods).toEqual(expect.arrayContaining(["GET", "POST"]));
-    for (const def of definitions) {
-      expect([
-        EVE_CONNECTION_CALLBACK_ROUTE_PATTERN,
-        EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN,
-      ]).toContain(def.urlPath);
-      expect(def.name.startsWith(HTTP_CONNECTION_CALLBACK_CHANNEL_NAME_PREFIX)).toBe(true);
-      expect(def.name).not.toContain(".well-known");
-      expect(def.sourceKind).toBe("module");
-      if (def.urlPath === EVE_CONNECTION_CALLBACK_ROUTE_PATTERN) {
-        expect(def.fetch).toBe(handleConnectionCallbackRequest);
-      }
-    }
-  });
-
-  it("uses unique logical names per (method, urlPath) pair", () => {
-    const definitions = getConnectionCallbackChannelDefinitions();
-    const names = definitions.map((d) => d.name);
-    expect(new Set(names).size).toBe(names.length);
-  });
-});
-
-describe("getConnectionCallbackChannelNames", () => {
-  it("returns the same names as getConnectionCallbackChannelDefinitions", () => {
-    const definitions = getConnectionCallbackChannelDefinitions();
-    const names = getConnectionCallbackChannelNames();
-    expect(names.size).toBe(definitions.length);
-    for (const def of definitions) {
-      expect(names.has(def.name)).toBe(true);
-    }
-  });
-});
 
 describe("handleConnectionCallbackRequest", () => {
   beforeEach(() => {
@@ -140,14 +96,7 @@ describe("handleConnectionCallbackRequest", () => {
 
   it("keeps pre-attempt callback URLs resumable for pinned workflows", async () => {
     resumeHookMock.mockResolvedValueOnce(undefined);
-    const legacy = getConnectionCallbackChannelDefinitions().find(
-      (definition) =>
-        definition.method === "GET" &&
-        definition.urlPath === EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN,
-    );
-    if (legacy?.fetch === undefined) throw new Error("Missing legacy callback route.");
-
-    const response = await legacy.fetch(
+    const response = await handleLegacyConnectionCallbackRequest(
       new Request("https://app.example.com/eve/v1/connections/linear/callback/tok123?code=abc"),
       buildRouteContext({ name: "linear", token: "tok123" }),
     );

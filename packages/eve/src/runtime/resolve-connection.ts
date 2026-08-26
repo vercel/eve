@@ -2,14 +2,17 @@ import type { CompiledConnectionDefinition } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
-import { registerDefinitionSource, stampDefinitionKey } from "#public/tool-result-narrowing.js";
+import {
+  registerDefinitionSource,
+  stampDefinitionKey,
+} from "#internal/authored-definition/source-identity.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type {
   ConnectionAuthResolver,
   HeadersDefinition,
   ToolFilterDefinition,
-} from "#runtime/connections/types.js";
-import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
+} from "#shared/connection-types.js";
+import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 

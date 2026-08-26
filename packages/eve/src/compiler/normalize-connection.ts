@@ -29,14 +29,14 @@ import { readConnectionProtocol } from "#public/definitions/connections/protocol
  * runtime resolution) stays protocol-agnostic.
  */
 export async function compileConnectionDefinition(
-  agentRoot: string,
+  _agentRoot: string,
   source: ConnectionSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
+  options: ModuleBackedDefinitionLoadOptions,
 ): Promise<CompiledConnectionDefinition> {
   const loaded = await loadModuleBackedDefinition({
-    agentRoot,
-    externalDependencies: options.externalDependencies,
+    binding: options.binding,
     kind: "connection",
+    loadNamespace: options.loadNamespace,
     source,
   });
   const protocol = readConnectionProtocol(loaded);

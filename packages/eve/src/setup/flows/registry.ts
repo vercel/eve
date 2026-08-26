@@ -1,3 +1,4 @@
+import { z } from "#compiled/zod/index.js";
 import type { RegistryCatalogItem } from "#cli/commands/registry.js";
 import type {
   Prompter,
@@ -12,7 +13,7 @@ import type { RegistrySetupFact } from "#setup/registry-setup-protocol.js";
 import { WizardCancelledError } from "#setup/step.js";
 import { withSpinner } from "#setup/with-spinner.js";
 
-import { createRegistrySession } from "./registry-session.js";
+import { createRegistrySession, type RegistrySession } from "./registry-session.js";
 
 const ADDRESS_PREFIX = "address:";
 const BACK = "action:back";
@@ -162,10 +163,31 @@ function manifestRecord(manifest: unknown): Record<string, unknown> {
     : {};
 }
 
+const RegistryDocumentationSchema = z.object({
+  meta: z
+    .object({
+      eve: z.object({ docs: z.string().min(1).optional() }).optional(),
+    })
+    .optional(),
+});
+
+function documentationLink(manifest: Record<string, unknown>): string | undefined {
+  const docs = RegistryDocumentationSchema.safeParse(manifest).data?.meta?.eve?.docs;
+  if (docs === undefined) return undefined;
+  return docs.startsWith("/") ? `https://eve.dev${docs}` : docs;
+}
+
 function summarizeDetails(values: readonly string[], limit = 3): string {
   const visible = values.slice(0, limit);
   const remaining = values.length - visible.length;
   return remaining > 0 ? `${visible.join(", ")} … (+${remaining} more)` : visible.join(", ");
+}
+
+function environmentVariables(manifest: Record<string, unknown>): string[] {
+  const envVars = manifest.envVars;
+  return typeof envVars === "object" && envVars !== null && !Array.isArray(envVars)
+    ? Object.keys(envVars)
+    : [];
 }
 
 function itemDetails(
@@ -180,10 +202,9 @@ function itemDetails(
   ];
   if (dependencies.length > 0)
     details.push({ label: "Packages", value: summarizeDetails(dependencies) });
-  const envVars = manifest.envVars;
-  if (typeof envVars === "object" && envVars !== null && !Array.isArray(envVars)) {
-    const names = Object.keys(envVars);
-    if (names.length > 0) details.push({ label: "Environment", value: summarizeDetails(names) });
+  const environment = environmentVariables(manifest);
+  if (environment.length > 0) {
+    details.push({ label: "Environment", value: summarizeDetails(environment) });
   }
   const files = Array.isArray(manifest.files) ? manifest.files : [];
   const targets = files.flatMap((file) => {
@@ -206,6 +227,8 @@ async function inspectItem(
   | {
       kind: "added";
       output: readonly string[];
+      documentation?: string;
+      environment?: readonly string[];
       setup?: Awaited<ReturnType<RegistryFlowDeps["installRegistryItem"]>>["setup"];
     }
   | { kind: "back" }
@@ -241,7 +264,12 @@ async function inspectItem(
           signal,
         });
       const result = await (prompter.withExclusiveTerminal?.(install) ?? install());
-      return { kind: "added", ...result };
+      return {
+        kind: "added",
+        documentation: documentationLink(manifest),
+        environment: environmentVariables(manifest),
+        ...result,
+      };
     } finally {
       spinner?.stop();
     }
@@ -268,11 +296,53 @@ async function resolveAddressItem(
   return { item, manifest: record };
 }
 
-/** Runs the categorized interactive registry catalog used by the dev TUI's `/add`. */
+/**
+ * Confirms, installs, and settles one resolved item. `undefined` means the flow
+ * keeps browsing — the user backed out of the item, or asked to add more.
+ */
+async function offerItem(
+  input: { appRoot: string; prompter: Prompter; signal?: AbortSignal },
+  deps: RegistryFlowDeps,
+  session: RegistrySession,
+  item: RegistryCatalogItem,
+  manifest?: Record<string, unknown>,
+): Promise<RegistryFlowResult | undefined> {
+  const inspected = await inspectItem(
+    input.prompter,
+    deps,
+    input.appRoot,
+    item,
+    manifest,
+    input.signal,
+  );
+  if (inspected.kind !== "added") return undefined;
+  const output = [...inspected.output];
+  if (inspected.environment !== undefined && inspected.environment.length > 0) {
+    output.push(`Environment: ${inspected.environment.join(", ")}`);
+  }
+  if (inspected.documentation !== undefined) {
+    output.push(`Setup: ${inspected.documentation}`);
+  }
+  session.add(item.address, itemLabel(item), output, inspected.setup);
+  const next = await session.continueAfterInstall({
+    appRoot: input.appRoot,
+    prompter: input.prompter,
+    signal: input.signal,
+  });
+  return next === "add-more" ? undefined : next;
+}
+
+/**
+ * Runs the categorized interactive registry catalog used by the dev TUI's
+ * `/add`. `initialAddress` — `/add channel/slack` — skips the category and
+ * search screens and opens that item's confirmation directly; backing out of it
+ * lands on the same category hub the browser starts from.
+ */
 export async function runRegistryFlow(input: {
   appRoot: string;
   prompter: Prompter;
   signal?: AbortSignal;
+  initialAddress?: string;
   deps?: Partial<RegistryFlowDeps>;
 }): Promise<RegistryFlowResult> {
   let loaded: typeof import("#cli/commands/registry.js") | undefined;
@@ -292,10 +362,20 @@ export async function runRegistryFlow(input: {
   };
   let notices: SelectNotice[] = [];
   const session = createRegistrySession(deps);
+  const initialAddress = input.initialAddress?.trim();
+  let pendingAddress = initialAddress === "" ? undefined : initialAddress;
 
   try {
     while (true) {
       input.signal?.throwIfAborted();
+      if (pendingAddress !== undefined) {
+        const address = pendingAddress;
+        pendingAddress = undefined;
+        const resolved = await resolveAddressItem(input.prompter, deps, input.appRoot, address);
+        const settled = await offerItem(input, deps, session, resolved.item, resolved.manifest);
+        if (settled !== undefined) return settled;
+        continue;
+      }
       const catalog = await withSpinner(input.prompter, "Loading registry…", () =>
         deps.browseRegistryCatalog(input.appRoot),
       );
@@ -341,29 +421,14 @@ export async function runRegistryFlow(input: {
       if (resolved.item === undefined) {
         throw new Error("The selected registry item is no longer available.");
       }
-      const inspected = await inspectItem(
-        input.prompter,
+      const settled = await offerItem(
+        input,
         deps,
-        input.appRoot,
+        session,
         resolved.item,
         "manifest" in resolved ? resolved.manifest : undefined,
-        input.signal,
       );
-      if (inspected.kind !== "added") continue;
-
-      session.add(
-        resolved.item.address,
-        itemLabel(resolved.item),
-        inspected.output,
-        inspected.setup,
-      );
-      const next = await session.continueAfterInstall({
-        appRoot: input.appRoot,
-        prompter: input.prompter,
-        signal: input.signal,
-      });
-      if (next === "add-more") continue;
-      return next;
+      if (settled !== undefined) return settled;
     }
   } catch (error) {
     if (error instanceof WizardCancelledError) return { kind: "cancelled" };

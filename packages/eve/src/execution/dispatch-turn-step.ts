@@ -22,6 +22,7 @@ export async function dispatchTurnStep(
           parentSessionId: input.sessionState.sessionId,
           requestId: input.delivery.kind === "deliver" ? input.delivery.requestId : undefined,
           rootSessionId: readRootSessionId(input.serializedContext) ?? input.sessionState.sessionId,
+          serializedContext: input.serializedContext,
         }),
       ),
     },

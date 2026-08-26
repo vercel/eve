@@ -1,5 +1,5 @@
 import { isCancel, Prompt, type State } from "@clack/core";
-import pc from "picocolors";
+import pc from "#compiled/picocolors/index.js";
 
 import {
   renderMultiselectPrompt,

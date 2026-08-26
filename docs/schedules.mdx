@@ -84,6 +84,10 @@ The agent does not have to deliver a message on every run. When a prompt makes d
 
 A handler-form session runs on the same durable runtime engine as any other session, so it can park (durably suspend), for instance when the channel handoff is waiting for a Slack reply. Only markdown task mode is barred from waiting.
 
+## Session continuity
+
+Markdown schedules start a new session on every fire. Handler schedules do too, unless they send to an existing conversation, such as a Slack thread. Store data that must survive across fires outside session state.
+
 ## Trigger a schedule while iterating
 
 The dev server mounts a one-shot dispatch route that fires a schedule by name, out of band, exactly once. Since `eve dev` never runs schedules on their cron cadence, this is how you trigger one without waiting for the next production tick.

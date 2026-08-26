@@ -42,6 +42,15 @@ function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[
   );
 }
 
+function createBoundedStreamResponse(
+  events: readonly UnstampedMessageStreamEvent[],
+  tailIndex = events.length - 1,
+): Response {
+  const response = createEagerStreamResponse(events);
+  response.headers.set("x-eve-stream-tail-index", String(tailIndex));
+  return response;
+}
+
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
@@ -641,6 +650,66 @@ describe("useEveAgent", () => {
     expect(helpers?.status).toBe("ready");
     expect(helpers?.error).toBeUndefined();
     expect(helpers?.events).toEqual(stampTestEvents(events));
+  });
+
+  it("requires a session when automatic resume is enabled", async () => {
+    function TestComponent() {
+      useEveAgent({ resume: true });
+      return null;
+    }
+
+    await expect(
+      act(async () => {
+        create(createElement(TestComponent));
+      }),
+    ).rejects.toThrow("requires initialSession or session");
+  });
+
+  it("keeps settled hydrated history visible without publishing an active-turn status", async () => {
+    const events = stampTestEvents([
+      createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
+      createMessageCompletedEvent({
+        message: "Hi there.",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createSessionWaitingEvent(),
+    ]);
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(createBoundedStreamResponse([], events.length - 1))
+      .mockResolvedValueOnce(createEagerStreamResponse([]));
+    let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
+    const statuses: string[] = [];
+
+    function TestComponent() {
+      helpers = useEveAgent({
+        initialEvents: events,
+        initialSession: { sessionId: "session_1", streamIndex: events.length },
+        resume: true,
+      });
+      statuses.push(helpers.status);
+      return null;
+    }
+
+    await act(async () => {
+      create(createElement(TestComponent));
+      await vi.waitFor(() => expect(helpers?.status).toBe("ready"));
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(statuses[0]).toBe("resuming");
+    expect(statuses).not.toContain("submitted");
+    expect(statuses).not.toContain("streaming");
+    expect(helpers?.status).toBe("ready");
+    expect(helpers?.data).toEqual(
+      completedTurnData({
+        assistantMessage: "Hi there.",
+        turnId: "turn_1",
+        userMessage: "Hello",
+      }),
+    );
   });
 
   it("projects input responses before the resumed stream returns", async () => {

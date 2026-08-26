@@ -4,7 +4,7 @@ description: "Define typed actions the agent can call, and gate sensitive ones o
 url: /tools
 ---
 
-A tool is a typed action the agent can call, such as hitting an API, running a query, or writing a file. The action stays in code you control. Tools run in your app runtime with full access to `process.env`, not in the [sandbox](/docs/sandbox).
+A tool is a typed action the agent can call, such as hitting an API, running a query, or writing a file. Define a tool when you implement the action in code you control. To give the model tools published by an external MCP or OpenAPI service, use a [connection](/docs/connections) instead. Authored tools run in your app runtime with full access to `process.env`, not in the [sandbox](/docs/sandbox).
 
 ## Define a tool
 
@@ -56,6 +56,26 @@ history or `toModelOutput`; only the final yield does. Treat snapshots as
 last-write-wins by tool call id, not append-only progress. The durable runtime
 can retry a step and replay overlapping snapshots.
 
+### Experimental background execution
+
+`defineTool({ execution: "background" })` receives a third `task` argument. Returning a normal
+value completes the durable task with that value. Returning `task.delegated({ executor, receipt })`
+returns a `working` receipt immediately while an external executor continues the task.
+The root agent must enable `experimental.tasks`; eve rejects background tools at build time otherwise.
+
+This contract currently supports framework-owned task executors, including local and remote
+subagents when `experimental.tasks` is enabled. After delegating, an in-process executor reports
+progress with `task.send({ kind: "update", message })` and the terminal result with
+`task.send({ kind: "complete", data })` (or `fail` / `cancel`). `send` is not restart-safe — an
+in-memory callback dies with the process — so the cross-process executor wire remains
+framework-owned and is not yet a stable authored-tool API.
+
+After the initiating turn accepts background tasks, eve supplies runtime-authored state for that
+cohort and instructs the model to acknowledge that the work started without waiting for results.
+Later task-triggered parent turns receive fresh state for the same cohort. The model is instructed
+to keep related intermediate results silent while any task remains pending. Once every related
+task is terminal, the state includes their outputs so the model can combine the useful results.
+
 ### The `ctx` parameter
 
 `execute` gets a `ctx` carrying the runtime accessors:
@@ -70,6 +90,20 @@ can retry a step and replay overlapping snapshots.
 Running in the app runtime is what lets a tool import shared code from `lib/`, read `process.env`, and take part in eve’s durable pause/resume model.
 
 eve never runs authored tools during discovery. The model sees descriptors first, and only what it actually calls gets executed. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval.
+
+## When a tool throws
+
+If an authored tool's `execute` function throws, eve records a failed `action.result` and gives the error to the model as a tool error. The model can respond, choose another action, or call the tool again. eve does not automatically call the tool again based on the exception type, an upstream HTTP status, or a `retryable` property.
+
+Authored tools have no public terminal-error class or retry policy for thrown exceptions. Handle retry policy inside the tool when the operation is safe to retry, and return or throw an actionable error when it is not. Do not rely on that distinction to protect a write: an interruption before the durable step completes can re-run the step and execute the tool again even if the first request reached the upstream service.
+
+Protect non-idempotent operations with the strongest mechanism the service supports:
+
+1. Pass a stable idempotency key to the upstream API.
+2. Otherwise, record a unique application operation before writing and check it on every attempt.
+3. Use human approval when a person must authorize each execution, not as a substitute for deduplication after an ambiguous network result.
+
+See [Execution model and durability](/docs/concepts/execution-model-and-durability#resuming-after-a-crash) for step replay semantics. For one-way provider notifications, see [Durable cross-channel notifications](/docs/patterns/durable-cross-channel-notifications).
 
 ## Gate a tool on human approval
 

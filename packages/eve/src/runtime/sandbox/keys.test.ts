@@ -6,7 +6,7 @@ import {
   COMPILE_METADATA_VERSION,
   type CompileMetadata,
 } from "#compiler/artifacts.js";
-import { createCompiledAgentManifest } from "#compiler/manifest.js";
+import { compileFromMemory } from "#compiler/compile-from-memory.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createFakeVercelOidcToken } from "#internal/testing/vercel-oidc-token.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -23,6 +23,7 @@ const CONTENT_HASH = "a".repeat(64);
 function createMetadataFixture(generatorVersion: string): CompileMetadata {
   return {
     compile: {
+      manifest: { path: ".eve/compile/agent-manifest.json", sha256: "a".repeat(64) },
       moduleMap: { path: ".eve/compile/module-map.mjs", sha256: "b".repeat(64) },
     },
     discovery: {
@@ -61,20 +62,18 @@ async function deriveTemplateKey(): Promise<string | null> {
   });
 }
 
-function withBundledMetadata<T>(
+async function withBundledMetadata<T>(
   metadata: CompileMetadata | undefined,
   fn: () => Promise<T>,
 ): Promise<T> {
-  const manifest = createCompiledAgentManifest({
+  const { manifest, moduleMap } = await compileFromMemory({
     agentRoot: "/virtual/app/agent",
     appRoot: "/virtual/app",
-    config: {
-      model: { id: "openai/gpt-5-mini", routing: { kind: "gateway", target: "openai" } },
-      name: "keys-test-agent",
-    },
+    model: "openai/gpt-5.4",
+    name: "keys-test-agent",
   });
 
-  return withBundledCompiledArtifacts({ manifest, metadata, moduleMap: { nodes: {} } }, fn);
+  return await withBundledCompiledArtifacts({ manifest, metadata, moduleMap }, fn);
 }
 
 async function deriveSessionKey(input?: {

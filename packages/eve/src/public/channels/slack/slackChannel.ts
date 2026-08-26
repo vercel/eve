@@ -8,14 +8,14 @@ import type {
 } from "#channel/channel-operations.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import type { Session, SessionHandle } from "#channel/session.js";
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { CardElement } from "#compiled/chat/index.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import type { InputResponse, StrictInputResponses, ValidatedInputResponse } from "#shared/input.js";
 import {
   buildSlackBinding,
   buildSlackWorkspaceHandle,
@@ -40,6 +40,8 @@ import {
   parseMessageEvent,
   type SlackEvent,
   slackEventBotUserId,
+  slackEventInstallationTeamId,
+  slackEventReceivingBotUserId,
   type SlackEventEnvelope,
   type SlackInboundContext,
   type SlackMessage,
@@ -70,6 +72,7 @@ import {
 } from "#public/channels/upload-policy.js";
 import { verifySlackRequest, type SlackWebhookVerifier } from "#public/channels/slack/verify.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 import { markEventHandled } from "./utils.js";
 
 export type {
@@ -185,12 +188,16 @@ export interface SlackPendingApprovalCard {
 }
 
 export interface SlackChannelState {
+  /** Audience classification captured before the session is dispatched. */
+  audience?: ChannelAudience;
   /** Slack channel id seeded by the inbound mention. */
   channelId: string | null;
   /** Slack thread root ts. */
   threadTs: string | null;
   /** Slack team id, when the inbound event carried one. */
   teamId: string | null;
+  /** Slack workspace whose app installation supplies this session's credentials. */
+  installationTeamId?: string | null;
   /**
    * Slack user id of the actor that triggered the current session/turn.
    * Captured on every inbound mention so default handlers (e.g.
@@ -234,6 +241,7 @@ export interface SlackChannelState {
  * can attach extra span attributes.
  */
 export interface SlackInstrumentationMetadata extends Record<string, unknown> {
+  readonly audience: ChannelAudience;
   readonly channelId: string | null;
   readonly teamId: string | null;
   readonly threadTs: string | null;
@@ -247,7 +255,8 @@ export interface SlackInstrumentationMetadata extends Record<string, unknown> {
  */
 export interface SlackChannelCredentials {
   /**
-   * Bot token for all outbound Slack Web API calls. Falls back to
+   * Bot token for all outbound Slack Web API calls. Function providers receive
+   * the app installation workspace id when Slack supplies one. Falls back to
    * `process.env.SLACK_BOT_TOKEN` when omitted.
    */
   readonly botToken?: SlackBotToken;
@@ -269,6 +278,8 @@ export interface SlackChannelCredentials {
 export interface SlackReceiveTarget {
   readonly channelId: string;
   readonly threadTs?: string;
+  /** Slack workspace whose app installation supplies credentials for this send. */
+  readonly installationTeamId?: string;
   /**
    * Optional message posted into the Slack channel before the agent runs.
    * The post becomes the thread root and the first turn is threaded under
@@ -314,8 +325,8 @@ export type SlackEventSendFn = (
 ) => Promise<Session>;
 
 /** Answers pending input requests on one Slack thread. */
-export type SlackEventRespondFn = (
-  inputResponses: Parameters<SlackSessionOperations["respond"]>[0],
+export type SlackEventRespondFn = <const TResponses extends readonly InputResponse[]>(
+  inputResponses: StrictInputResponses<TResponses>,
   options: SlackEventRespondOptions,
 ) => ReturnType<SlackSessionOperations["respond"]>;
 
@@ -435,14 +446,14 @@ export interface SlackInteractionUser {
 export type SlackInputResponseSubmission =
   | {
       readonly type: "block_actions";
-      readonly inputResponses: readonly InputResponse[];
+      readonly inputResponses: readonly ValidatedInputResponse[];
       readonly actions: readonly SlackInteractionAction[];
       readonly messageTs?: string;
       readonly user: SlackInteractionUser;
     }
   | {
       readonly type: "view_submission";
-      readonly inputResponses: readonly InputResponse[];
+      readonly inputResponses: readonly ValidatedInputResponse[];
       readonly messageTs: string;
       readonly user: SlackInteractionUser;
     };
@@ -531,6 +542,8 @@ export interface SlackChannelConfig {
 
   /** Override the default webhook route path (`/eve/v1/slack`). */
   readonly route?: string;
+  /** Policy for accepted messages that arrive while a turn is active. */
+  readonly turnPolicy?: TurnPolicy;
 
   /**
    * Inbound upload policy applied to file attachments before they reach
@@ -664,6 +677,7 @@ function rebuildSlackContext(
     botToken: credentials?.botToken,
     channelId: state.channelId ?? "",
     threadTs: state.threadTs ?? "",
+    installationTeamId: state.installationTeamId ?? undefined,
     teamId: state.teamId ?? undefined,
     onThreadTsChanged(ts) {
       state.threadTs = ts;
@@ -747,10 +761,13 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     SlackInstrumentationMetadata
   >({
     kindHint: "slack",
+    turnPolicy: config.turnPolicy,
     state: {
+      audience: "unknown",
       channelId: null as string | null,
       threadTs: null as string | null,
       teamId: null as string | null,
+      installationTeamId: null as string | null,
       triggeringUserId: null,
       pendingToolCallMessage: null,
       lastReasoningTypingAtMs: null,
@@ -763,6 +780,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     fetchFile: slackFetchFile,
     metadata(state): SlackInstrumentationMetadata {
       return {
+        audience: state.audience ?? "unknown",
         channelId: state.channelId,
         teamId: state.teamId,
         threadTs: state.threadTs,
@@ -848,6 +866,8 @@ async function receiveOnSlack(
   deps: {
     readonly from: ChannelFrom<SlackChannelState>;
     readonly credentials: SlackChannelCredentials | undefined;
+    /** Installation workspace inherited from an inbound trigger. */
+    readonly installationTeamId?: string;
     /** Slack team id seeded into session state, when the trigger carried one. */
     readonly teamId?: string;
     /** Slack user id seeded into session state, when the trigger carried one. */
@@ -861,6 +881,10 @@ async function receiveOnSlack(
   }
   const requestedThreadTs =
     typeof receiveTarget.threadTs === "string" ? receiveTarget.threadTs : "";
+  const installationTeamId =
+    typeof receiveTarget.installationTeamId === "string"
+      ? receiveTarget.installationTeamId
+      : deps.installationTeamId;
   const initialMessage = receiveTarget.initialMessage;
   if (initialMessage && requestedThreadTs.length > 0) {
     throw new Error(
@@ -874,6 +898,7 @@ async function receiveOnSlack(
       botToken: deps.credentials?.botToken,
       channelId,
       threadTs: "",
+      installationTeamId,
       teamId: deps.teamId,
     });
     const postInput: { card: CardElement; fallbackText?: string } = {
@@ -894,6 +919,7 @@ async function receiveOnSlack(
     auth: input.auth,
     state: {
       channelId,
+      installationTeamId: installationTeamId ?? null,
       threadTs: threadTs || null,
       teamId: deps.teamId ?? null,
       triggeringUserId: deps.triggeringUserId ?? null,
@@ -966,6 +992,8 @@ async function handleEventPost(input: {
   if (envelope === null) return new Response("ok");
   const appId = typeof envelope.api_app_id === "string" ? envelope.api_app_id : undefined;
   const botUserId = slackEventBotUserId(envelope);
+  const receivingBotUserId = slackEventReceivingBotUserId(envelope);
+  const installationTeamId = slackEventInstallationTeamId(envelope);
 
   // Handler precedence, in fall-through order:
   // 1) an authored mention/DM handler for its own event kind,
@@ -983,10 +1011,12 @@ async function handleEventPost(input: {
           dispatchSlackMessage({
             appId,
             botUserId,
+            receivingBotUserId,
             from: input.from,
             resolveSession: input.resolveSession,
             credentials: config.credentials,
             handler,
+            installationTeamId,
             kind,
             message,
             threadContext: config.threadContext,
@@ -999,10 +1029,12 @@ async function handleEventPost(input: {
           dispatchSlackMessage({
             appId,
             botUserId,
+            receivingBotUserId,
             from: input.from,
             resolveSession: input.resolveSession,
             credentials: config.credentials,
             handler,
+            installationTeamId,
             kind,
             message,
             threadContext: config.threadContext,
@@ -1026,10 +1058,12 @@ async function handleEventPost(input: {
           dispatchSlackMessage({
             appId,
             botUserId,
+            receivingBotUserId,
             from: input.from,
             resolveSession: input.resolveSession,
             credentials: config.credentials,
             handler: config.onMessage!,
+            installationTeamId,
             kind: "channel_message",
             message,
             threadContext: config.threadContext,
@@ -1050,6 +1084,7 @@ async function handleEventPost(input: {
         credentials: config.credentials,
         envelope,
         handler: onEvent,
+        installationTeamId,
       });
   }
 
@@ -1090,10 +1125,12 @@ function isSelfAuthoredSlackMessage(
 async function dispatchSlackMessage(input: {
   readonly appId: string | undefined;
   readonly botUserId: string | undefined;
+  readonly receivingBotUserId: string | undefined;
   readonly from: ChannelFrom<SlackChannelState>;
   readonly resolveSession: ChannelResolveSession;
   readonly credentials: SlackChannelCredentials | undefined;
   readonly handler: NonNullable<SlackChannelConfig["onMessage"]>;
+  readonly installationTeamId: string | undefined;
   readonly kind: "app_mention" | "channel_message" | "direct_message";
   readonly message: SlackMessage;
   readonly threadContext: LoadThreadContextMessagesOptions | undefined;
@@ -1106,9 +1143,18 @@ async function dispatchSlackMessage(input: {
     botUserId: input.botUserId,
     channelId: input.message.channelId,
     threadTs: input.message.threadTs,
+    installationTeamId: input.installationTeamId,
     teamId: input.message.teamId,
   });
   const author = input.message.author;
+  const channelState: SlackChannelState = {
+    audience: "unknown",
+    channelId: input.message.channelId,
+    installationTeamId: input.installationTeamId ?? null,
+    teamId: input.message.teamId ?? null,
+    threadTs: input.message.threadTs,
+    triggeringUserId: author?.userId ?? null,
+  };
   const sessionOperations = bindSlackSessionOperations({
     address: continuationToken,
     defaultAuth:
@@ -1125,12 +1171,7 @@ async function dispatchSlackMessage(input: {
           }),
     from: input.from,
     resolveSession: input.resolveSession,
-    state: {
-      channelId: input.message.channelId,
-      teamId: input.message.teamId ?? null,
-      threadTs: input.message.threadTs,
-      triggeringUserId: author?.userId ?? null,
-    },
+    state: channelState,
   });
   let privateConversation: Promise<boolean> | undefined;
   const isDMOrPrivateChannel = () =>
@@ -1139,11 +1180,12 @@ async function dispatchSlackMessage(input: {
       raw: input.message.raw,
       request: slack.request,
     }));
+  const isBotMentioned =
+    input.kind === "app_mention" ||
+    (input.botUserId !== undefined && input.message.text.includes(`<@${input.botUserId}`));
   const ctx: SlackInboundMessageContext = {
     ...sessionOperations,
-    isBotMentioned: () =>
-      input.kind === "app_mention" ||
-      (input.botUserId !== undefined && input.message.text.includes(`<@${input.botUserId}`)),
+    isBotMentioned: () => isBotMentioned,
     isDMOrPrivateChannel,
     isSubscribed: async () => (await sessionOperations.resolveSession()) !== undefined,
     slack,
@@ -1161,10 +1203,15 @@ async function dispatchSlackMessage(input: {
   }
   if (result === null || result === undefined) return;
 
+  const isPrivateConversation = await isDMOrPrivateChannel();
+  channelState.audience =
+    input.kind === "direct_message" || isPrivateConversation ? "private" : "public";
   await deliverSlackMessage({
+    botUserId: input.receivingBotUserId,
     credentials: input.credentials,
     kind: input.kind,
-    isPrivateConversation: await isDMOrPrivateChannel(),
+    isPrivateConversation,
+    isMentioned: isBotMentioned,
     message: input.message,
     result,
     sessionOperations,
@@ -1181,6 +1228,7 @@ async function dispatchSlackEvent(input: {
   readonly credentials: SlackChannelCredentials | undefined;
   readonly envelope: SlackEventEnvelope;
   readonly handler: NonNullable<SlackChannelConfig["onEvent"]>;
+  readonly installationTeamId: string | undefined;
 }): Promise<void> {
   const eventTeamId = input.envelope.event.team_id;
   const teamId =
@@ -1208,6 +1256,7 @@ async function dispatchSlackEvent(input: {
         {
           from: input.from,
           credentials: input.credentials,
+          installationTeamId: input.installationTeamId,
           teamId,
           ...(typeof input.envelope.event.user === "string"
             ? { triggeringUserId: input.envelope.event.user }
@@ -1216,6 +1265,7 @@ async function dispatchSlackEvent(input: {
       ),
     slack: buildSlackWorkspaceHandle({
       botToken: input.credentials?.botToken,
+      installationTeamId: input.installationTeamId,
       teamId,
     }),
     waitUntil(task) {
@@ -1258,9 +1308,11 @@ async function verifyInbound(
 }
 
 async function deliverSlackMessage(input: {
+  readonly botUserId: string | undefined;
   readonly sessionOperations: SlackSessionOperations;
   readonly credentials: SlackChannelCredentials | undefined;
   readonly isPrivateConversation: boolean;
+  readonly isMentioned: boolean;
   readonly kind: string;
   readonly message: SlackMessage;
   readonly result: Exclude<SlackInboundResult, null>;
@@ -1283,8 +1335,10 @@ async function deliverSlackMessage(input: {
       policy: input.uploadPolicy,
     });
     const inboundContext: SlackInboundContext = {
+      botUserId: input.botUserId,
       channelId: message.channelId,
       fullName: message.author?.fullName,
+      isMentioned: input.isMentioned,
       teamId: message.teamId,
       threadTs: message.threadTs,
       userId: message.author?.userId ?? "",

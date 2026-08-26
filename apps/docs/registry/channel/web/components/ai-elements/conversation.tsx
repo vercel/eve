@@ -5,26 +5,164 @@ import { cn } from "@/lib/utils";
 import type { UIMessage } from "ai";
 import { ArrowDownIcon, DownloadIcon } from "lucide-react";
 import type { ComponentProps } from "react";
-import { useCallback } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 
-export type ConversationProps = ComponentProps<typeof StickToBottom>;
+export type ConversationProps = ComponentProps<typeof StickToBottom> & {
+  scrollRestorationKey?: string;
+};
 
-export const Conversation = ({ className, ...props }: ConversationProps) => (
+export const Conversation = ({
+  children,
+  className,
+  initial,
+  scrollRestorationKey,
+  ...props
+}: ConversationProps) => (
   <StickToBottom
     className={cn("relative flex-1 overflow-y-hidden", className)}
-    initial="smooth"
+    initial={initial ?? (scrollRestorationKey === undefined ? "smooth" : false)}
     resize="smooth"
     role="log"
     {...props}
-  />
+  >
+    {typeof children === "function" ? (
+      (context) => (
+        <>
+          {children(context)}
+          {scrollRestorationKey === undefined ? null : (
+            <ConversationScrollRestoration storageKey={scrollRestorationKey} />
+          )}
+        </>
+      )
+    ) : (
+      <>
+        {children}
+        {scrollRestorationKey === undefined ? null : (
+          <ConversationScrollRestoration storageKey={scrollRestorationKey} />
+        )}
+      </>
+    )}
+  </StickToBottom>
 );
+
+function ConversationScrollRestoration({ storageKey }: { readonly storageKey: string }) {
+  const { scrollRef, scrollToBottom, state } = useStickToBottomContext();
+  const restoredKeyRef = useRef<string | undefined>(undefined);
+
+  useLayoutEffect(() => {
+    const scrollElement = scrollRef.current;
+    if (scrollElement === null) return;
+
+    if (restoredKeyRef.current !== storageKey) {
+      const saved = readScrollPosition(sessionStorage.getItem(storageKey));
+      if (saved?.atBottom === false) {
+        scrollElement.scrollTop = saved.scrollTop;
+        requestAnimationFrame(() => {
+          scrollElement.scrollTop = saved.scrollTop;
+        });
+      } else {
+        scrollElement.scrollTop = scrollElement.scrollHeight;
+        scrollToBottom({ animation: "instant", ignoreEscapes: true });
+      }
+      restoredKeyRef.current = storageKey;
+    }
+
+    const saveNow = () => {
+      sessionStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          atBottom: state.isAtBottom || state.isNearBottom,
+          scrollTop: scrollElement.scrollTop,
+        }),
+      );
+    };
+    let frame: number | undefined;
+    const scheduleSave = () => {
+      if (frame !== undefined) return;
+      frame = requestAnimationFrame(() => {
+        frame = undefined;
+        saveNow();
+      });
+    };
+    scrollElement.addEventListener("scroll", scheduleSave, { passive: true });
+    window.addEventListener("pagehide", saveNow);
+    return () => {
+      scrollElement.removeEventListener("scroll", scheduleSave);
+      window.removeEventListener("pagehide", saveNow);
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      saveNow();
+    };
+  }, [scrollRef, scrollToBottom, state, storageKey]);
+
+  return null;
+}
+
+function readScrollPosition(value: string | null):
+  | {
+      readonly atBottom: boolean;
+      readonly scrollTop: number;
+    }
+  | undefined {
+  if (value === null) return undefined;
+  try {
+    const parsed = JSON.parse(value) as { atBottom?: unknown; scrollTop?: unknown };
+    return typeof parsed.atBottom === "boolean" && typeof parsed.scrollTop === "number"
+      ? { atBottom: parsed.atBottom, scrollTop: parsed.scrollTop }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export type ConversationContentProps = ComponentProps<typeof StickToBottom.Content>;
 
 export const ConversationContent = ({ className, ...props }: ConversationContentProps) => (
   <StickToBottom.Content className={cn("flex flex-col gap-8 p-4", className)} {...props} />
 );
+
+export type ConversationTopFadeProps = ComponentProps<"div">;
+
+export const ConversationTopFade = ({ className, ...props }: ConversationTopFadeProps) => {
+  const { contentRef, scrollRef } = useStickToBottomContext();
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    const scrollElement = scrollRef.current;
+    if (scrollElement === null) return;
+
+    const updateVisibility = () => {
+      setIsVisible(scrollElement.scrollTop > 0);
+    };
+
+    updateVisibility();
+    scrollElement.addEventListener("scroll", updateVisibility, { passive: true });
+
+    const resizeObserver = new ResizeObserver(updateVisibility);
+    resizeObserver.observe(scrollElement);
+    if (contentRef.current !== null) {
+      resizeObserver.observe(contentRef.current);
+    }
+
+    return () => {
+      scrollElement.removeEventListener("scroll", updateVisibility);
+      resizeObserver.disconnect();
+    };
+  }, [contentRef, scrollRef]);
+
+  return (
+    <div
+      {...props}
+      aria-hidden
+      className={cn(
+        "pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-linear-to-b from-background via-background/80 to-transparent transition-opacity duration-150",
+        isVisible ? "opacity-100" : "opacity-0",
+        className,
+      )}
+      data-slot="conversation-top-fade"
+    />
+  );
+};
 
 export type ConversationEmptyStateProps = ComponentProps<"div"> & {
   title?: string;
@@ -66,16 +204,21 @@ export const ConversationScrollButton = ({
   ...props
 }: ConversationScrollButtonProps) => {
   const { isAtBottom, scrollToBottom } = useStickToBottomContext();
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => setIsReady(true), []);
 
   const handleScrollToBottom = useCallback(() => {
     scrollToBottom();
   }, [scrollToBottom]);
 
   return (
+    isReady &&
     !isAtBottom && (
       <Button
+        aria-label="Scroll to bottom"
         className={cn(
-          "absolute bottom-4 left-[50%] translate-x-[-50%] rounded-full dark:bg-background dark:hover:bg-muted",
+          "absolute bottom-32 left-[50%] translate-x-[-50%] rounded-full dark:bg-background dark:hover:bg-muted",
           className,
         )}
         onClick={handleScrollToBottom}

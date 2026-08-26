@@ -1,6 +1,6 @@
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import type { SandboxBackend } from "#shared/sandbox-backend.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
+import type { SessionContext } from "#context/session-context.js";
 
 /**
  * Opens the template session inside a `bootstrap` hook. Optional `options`

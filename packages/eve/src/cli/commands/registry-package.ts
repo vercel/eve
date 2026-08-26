@@ -84,6 +84,7 @@ async function selectComponents(
       throw error;
     const question = (error as import("#setup/ask.js").InteractionRequired).question;
     const { setupQuestionToWire } = await import("#setup/setup-question-wire.js");
+    const wireQuestion = setupQuestionToWire(question);
     logger.error(
       serializeHeadlessSetupEvent({
         version: 1,
@@ -92,8 +93,8 @@ async function selectComponents(
         item,
         installed: false,
         completedItems: [],
-        question: setupQuestionToWire(question),
-        next: headlessSetupContinuation({ item, installed: false }),
+        question: wireQuestion,
+        next: headlessSetupContinuation({ item, installed: false, question: wireQuestion }),
       }),
     );
     process.exitCode = 2;

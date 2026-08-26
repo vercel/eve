@@ -9,8 +9,8 @@ import type {
   ConnectionAuthDefinition,
   HeadersDefinition,
   ToolFilterDefinition,
-} from "#runtime/connections/types.js";
-import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
+} from "#shared/connection-types.js";
+import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
 import { expectObjectRecord, expectOnlyKnownKeys } from "#internal/authored-module.js";
 import { parseJsonValue } from "#shared/json.js";
 

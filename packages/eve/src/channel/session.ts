@@ -21,7 +21,11 @@ import { DEFAULT_TURN_POLICY } from "#channel/types.js";
 import { serializeUrlFilePartsInMessage } from "#channel/send-input.js";
 import type { SessionAuth } from "#context/keys.js";
 import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import {
+  type InputResponse,
+  parseInputResponses,
+  type StrictInputResponses,
+} from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 
@@ -34,8 +38,8 @@ export interface Session {
     options: SessionSendOptions,
   ): Promise<SessionSendCommandResult>;
   /** Answers pending input requests on this exact session ID. */
-  respond(
-    inputResponses: readonly InputResponse[],
+  respond<const TResponses extends readonly InputResponse[]>(
+    inputResponses: StrictInputResponses<TResponses>,
     options: SessionRespondOptions,
   ): Promise<SessionSendCommandResult>;
   /** Requests cancellation of this exact session's active turn or one owned task. */
@@ -114,13 +118,14 @@ export function createSession(
       if (inputResponses.length === 0) {
         throw new Error("respond() requires at least one input response.");
       }
+      const validatedInputResponses = parseInputResponses(inputResponses);
       const caller = sessionCallbackToTurnCaller(options.callback);
       const delivery = createDelivery(metadata);
       const payload: {
         context?: readonly string[];
         inputResponses: readonly InputResponse[];
         outputSchema?: JsonObject;
-      } = { inputResponses };
+      } = { inputResponses: validatedInputResponses };
       if (options.context !== undefined) payload.context = options.context;
       if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
       const commandWithoutCaller = {

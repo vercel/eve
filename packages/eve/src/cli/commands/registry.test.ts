@@ -128,6 +128,20 @@ describe("registry commands", () => {
     expect(logger.errors).toEqual([]);
   });
 
+  it("reports completion after installing an item without setup headlessly", async () => {
+    const logger = createLogger();
+    getRegistryItems.mockResolvedValue([{ name: "extension/browser", type: "registry:item" }]);
+
+    await runAddCommand(logger, "/project", "extension/browser", { nonInteractive: true });
+
+    expect(JSON.parse(logger.logs[0]!)).toEqual({
+      version: 1,
+      type: "completed",
+      item: "extension/browser",
+      completedItems: ["extension/browser"],
+    });
+  });
+
   it("suggests matching registry items when an item is not found", async () => {
     const logger = createLogger();
     getRegistryItems.mockRejectedValue(
@@ -192,6 +206,7 @@ describe("registry commands", () => {
     "installs the official %s item before running its declared setup",
     async (kind) => {
       const logger = createLogger();
+      const prepareWebRegistryProject = vi.fn(async () => {});
       const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
       getRegistryItems.mockResolvedValue([
         {
@@ -212,9 +227,16 @@ describe("registry commands", () => {
         { overwrite: true, yes: true },
         {
           loadSetupCommandRunner: async () => runSetupCommand,
+          prepareWebRegistryProject,
         },
       );
 
+      expect(prepareWebRegistryProject).toHaveBeenCalledTimes(kind === "web" ? 1 : 0);
+      if (kind === "web") {
+        expect(prepareWebRegistryProject.mock.invocationCallOrder[0]).toBeLessThan(
+          addRegistryItems.mock.invocationCallOrder[0]!,
+        );
+      }
       expect(addRegistryItems).toHaveBeenCalledOnce();
       expect(addRegistryItems.mock.invocationCallOrder[0]).toBeLessThan(
         runSetupCommand.mock.invocationCallOrder[0]!,
@@ -261,7 +283,10 @@ describe("registry commands", () => {
       item: "linear",
       installed: false,
       question: { key: "components" },
-      next: { command: "eve", args: ["add", "linear", "--non-interactive"] },
+      next: {
+        command: "eve",
+        args: ["add", "linear", "--non-interactive", "--answer", "components=<JSON value>"],
+      },
     });
     expect(process.exitCode).toBe(2);
   });
@@ -298,6 +323,36 @@ describe("registry commands", () => {
       completedItems: ["channel/web"],
       deploymentRequired: true,
       next: { command: "eve", args: ["deploy"] },
+    });
+  });
+
+  it("completes the resumed setup that a blocked item hands back", async () => {
+    const logger = createLogger();
+    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: {
+          eve: {
+            setup: [{ package: "eve", bin: "eve", args: ["integration", "setup", "web"] }],
+          },
+        },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "channel/web",
+      { nonInteractive: true, skipInstall: true, answers: { phoneNumber: "+15551234567" } },
+      { loadSetupCommandRunner: async () => runSetupCommand },
+    );
+
+    expect(addRegistryItems).not.toHaveBeenCalled();
+    expect(JSON.parse(logger.logs.at(-1)!)).toEqual({
+      version: 1,
+      type: "completed",
+      item: "channel/web",
+      completedItems: ["channel/web"],
     });
   });
 
@@ -658,6 +713,30 @@ describe("registry commands", () => {
     ]);
   });
 
+  it("reports completion when non-interactive setup is skipped", async () => {
+    const logger = createLogger();
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: { eve: { setup: [{ package: "@acme/slack", bin: "eve-slack", args: ["setup"] }] } },
+      },
+    ]);
+
+    await runAddCommand(logger, "/project", "channel/slack", {
+      nonInteractive: true,
+      skipSetup: true,
+    });
+
+    expect(logger.logs.map((entry) => JSON.parse(entry))).toEqual([
+      { version: 1, type: "progress", message: "Installed channel/slack" },
+      {
+        version: 1,
+        type: "completed",
+        item: "channel/slack",
+        completedItems: ["channel/slack"],
+      },
+    ]);
+  });
+
   it("does not ask again after the TUI authorizes installation", async () => {
     const fake = createFakePrompter();
     const runSetup = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
@@ -927,43 +1006,32 @@ describe("registry commands", () => {
     expect(logger.logs).toContain("Added @other to package.json.");
   });
 
-  it("loads real item titles in parallel for a page of search results", async () => {
+  it("uses titles returned with a page of search results", async () => {
     searchRegistries.mockResolvedValue({
       items: [
         {
           registry: "https://eve.dev/r/registry.json",
           name: "channel/photon-imessage",
+          title: "Photon iMessage",
           addCommandArgument: "https://eve.dev/r/channel/photon-imessage.json",
         },
         {
           registry: "@acme",
           name: "extension/ai-sdk-tools",
+          title: "AI SDK Tools",
           addCommandArgument: "@acme/ai-sdk-tools",
         },
       ],
       pagination: { total: 2, offset: 0, limit: 2, hasMore: false },
     });
-    const resolvers = new Map<string, (value: unknown[]) => void>();
-    getRegistryItems.mockImplementation(
-      ([address]: string[]) =>
-        new Promise((resolve) => {
-          resolvers.set(address!, resolve);
-        }),
-    );
 
-    const catalog = browseRegistryCatalog("/project", { query: "sdk" });
-
-    await vi.waitFor(() => expect(getRegistryItems).toHaveBeenCalledTimes(2));
-    resolvers.get("https://eve.dev/r/channel/photon-imessage.json")?.([
-      { title: "Photon iMessage" },
-    ]);
-    resolvers.get("@acme/ai-sdk-tools")?.([{ title: "AI SDK Tools" }]);
-    await expect(catalog).resolves.toMatchObject({
+    await expect(browseRegistryCatalog("/project", { query: "sdk" })).resolves.toMatchObject({
       items: [
         { name: "channel/photon-imessage", title: "Photon iMessage" },
         { name: "extension/ai-sdk-tools", title: "AI SDK Tools" },
       ],
     });
+    expect(getRegistryItems).not.toHaveBeenCalled();
     expect(searchRegistries).toHaveBeenCalledWith(
       ["https://eve.dev/r/registry.json"],
       expect.objectContaining({ limit: 100, query: "sdk" }),

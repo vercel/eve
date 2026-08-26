@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildSessionAttributes,
@@ -6,20 +6,23 @@ import {
   buildTurnAttributes,
   deriveSessionTitle,
   EVE_SESSION_TITLE_MAX_CHARS,
+  isWorkflowTraceContentVisible,
   readChannelKind,
   readChannelRequestId,
   readParentLineage,
   readParentSessionId,
   readRootSessionId,
+  readSessionTraceId,
 } from "#execution/eve-workflow-attributes.js";
 import { ChannelRequestIdKey } from "#context/keys.js";
+import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
 
 const slackChannelCtx = {
-  "eve.channel": { kind: "slack", state: { team: "T1" } },
+  "eve.channel": { kind: "slack", state: { team: "T1" }, audience: "public" },
 } satisfies Record<string, unknown>;
 
 const subagentChainCtx = {
-  "eve.channel": { kind: "slack", state: {} },
+  "eve.channel": { kind: "slack", state: {}, audience: "public" },
   "eve.parentSession": {
     callId: "call_subagent_0",
     sessionId: "wrun_parent_subagent",
@@ -27,6 +30,10 @@ const subagentChainCtx = {
     turn: { id: "turn_0", sequence: 0 },
   },
 } satisfies Record<string, unknown>;
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("readChannelKind", () => {
   it("returns the channel kind when the slot is well-formed", () => {
@@ -37,6 +44,16 @@ describe("readChannelKind", () => {
     expect(readChannelKind({})).toBeUndefined();
     expect(readChannelKind({ "eve.channel": { kind: "" } })).toBeUndefined();
     expect(readChannelKind({ "eve.channel": { kind: 42 } })).toBeUndefined();
+  });
+});
+
+describe("isWorkflowTraceContentVisible", () => {
+  it("reads audience from the shared serialized channel slot", () => {
+    expect(
+      isWorkflowTraceContentVisible({
+        [CHANNEL_CONTEXT_KEY_NAME]: { audience: "public", kind: "slack" },
+      }),
+    ).toBe(true);
   });
 });
 
@@ -146,20 +163,48 @@ describe("buildSessionAttributes", () => {
 
     expect(attrs).toEqual({
       "$eve.channel_request_id": undefined,
+      "$eve.is_otel_trace_enabled": false,
+      "$eve.is_trace_content_visible": true,
+      "$eve.trace_id": undefined,
       "$eve.type": "session",
       "$eve.trigger": "slack",
       "$eve.title": "ship the thing please",
     });
   });
 
-  it("omits the trigger when no channel is on the context", () => {
+  it("marks unknown sessions denied while retaining their stored title", () => {
     const attrs = buildSessionAttributes({
       inputMessage: "hi",
       serializedContext: {},
     });
 
     expect(attrs["$eve.trigger"]).toBeUndefined();
+    expect(attrs["$eve.is_trace_content_visible"]).toBe(false);
+    expect(attrs["$eve.is_otel_trace_enabled"]).toBe(false);
     expect(attrs["$eve.title"]).toBe("hi");
+  });
+
+  it("stamps hosted OTEL enablement without suppressing the stored title", () => {
+    const attrs = buildSessionAttributes({
+      inputMessage: "private prompt",
+      serializedContext: { "eve.otelTraceEnabled": true },
+    });
+
+    expect(attrs["$eve.is_otel_trace_enabled"]).toBe(true);
+    expect(attrs["$eve.is_trace_content_visible"]).toBe(false);
+    expect(attrs["$eve.title"]).toBe("private prompt");
+  });
+
+  it("allows unknown session content during local eve dev", () => {
+    vi.stubEnv("EVE_DEV", "1");
+
+    const attrs = buildSessionAttributes({
+      inputMessage: "local prompt",
+      serializedContext: {},
+    });
+
+    expect(attrs["$eve.is_trace_content_visible"]).toBe(true);
+    expect(attrs["$eve.title"]).toBe("local prompt");
   });
 
   it("emits the channel request id when present", () => {
@@ -172,6 +217,30 @@ describe("buildSessionAttributes", () => {
     });
 
     expect(attrs["$eve.channel_request_id"]).toBe("req_session");
+  });
+
+  it("emits $eve.trace_id from a sampled trace seed", () => {
+    const attrs = buildSessionAttributes({
+      inputMessage: "hi",
+      serializedContext: {
+        ...slackChannelCtx,
+        "eve.sessionTraceSeed": { spanId: "a".repeat(16), traceFlags: 1, traceId: "b".repeat(32) },
+      },
+    });
+
+    expect(attrs["$eve.trace_id"]).toBe("b".repeat(32));
+  });
+
+  it("withholds $eve.trace_id from an unsampled trace seed", () => {
+    const attrs = buildSessionAttributes({
+      inputMessage: "hi",
+      serializedContext: {
+        ...slackChannelCtx,
+        "eve.sessionTraceSeed": { spanId: "a".repeat(16), traceFlags: 0, traceId: "b".repeat(32) },
+      },
+    });
+
+    expect(attrs["$eve.trace_id"]).toBeUndefined();
   });
 });
 
@@ -188,6 +257,9 @@ describe("buildSubagentRootAttributes", () => {
 
     expect(attrs).toEqual({
       "$eve.channel_request_id": undefined,
+      "$eve.is_otel_trace_enabled": false,
+      "$eve.is_trace_content_visible": true,
+      "$eve.trace_id": undefined,
       "$eve.type": "subagent",
       "$eve.parent": "wrun_parent_subagent",
       "$eve.parent_call": "call_subagent_0",
@@ -211,6 +283,22 @@ describe("buildSubagentRootAttributes", () => {
 
     expect(attrs["$eve.channel_request_id"]).toBe("req_subagent");
   });
+
+  it("emits $eve.trace_id from a sampled trace seed", () => {
+    const attrs = buildSubagentRootAttributes({
+      identity: { nodeId: "subagents/linear" },
+      parentCallId: "call_subagent_0",
+      parentSessionId: "wrun_parent_subagent",
+      parentTurnId: "turn_0",
+      rootSessionId: "wrun_top_level_session",
+      serializedContext: {
+        ...subagentChainCtx,
+        "eve.sessionTraceSeed": { spanId: "e".repeat(16), traceFlags: 1, traceId: "f".repeat(32) },
+      },
+    });
+
+    expect(attrs["$eve.trace_id"]).toBe("f".repeat(32));
+  });
 });
 
 describe("buildTurnAttributes", () => {
@@ -218,10 +306,14 @@ describe("buildTurnAttributes", () => {
     const attrs = buildTurnAttributes({
       parentSessionId: "wrun_session_123",
       rootSessionId: "wrun_session_123",
+      serializedContext: slackChannelCtx,
     });
 
     expect(attrs).toEqual({
       "$eve.channel_request_id": undefined,
+      "$eve.is_otel_trace_enabled": false,
+      "$eve.is_trace_content_visible": true,
+      "$eve.trace_id": undefined,
       "$eve.type": "turn",
       "$eve.parent": "wrun_session_123",
       "$eve.root": "wrun_session_123",
@@ -233,8 +325,44 @@ describe("buildTurnAttributes", () => {
       parentSessionId: "wrun_session_123",
       requestId: "req_turn",
       rootSessionId: "wrun_session_123",
+      serializedContext: slackChannelCtx,
     });
 
     expect(attrs["$eve.channel_request_id"]).toBe("req_turn");
+  });
+
+  it("emits $eve.trace_id from a sampled trace seed", () => {
+    const attrs = buildTurnAttributes({
+      parentSessionId: "wrun_session_123",
+      rootSessionId: "wrun_session_123",
+      serializedContext: {
+        ...slackChannelCtx,
+        "eve.sessionTraceSeed": { spanId: "c".repeat(16), traceFlags: 1, traceId: "d".repeat(32) },
+      },
+    });
+
+    expect(attrs["$eve.trace_id"]).toBe("d".repeat(32));
+  });
+});
+
+describe("readSessionTraceId", () => {
+  it("returns the trace id from a sampled seed", () => {
+    expect(
+      readSessionTraceId({
+        "eve.sessionTraceSeed": { spanId: "a".repeat(16), traceFlags: 1, traceId: "b".repeat(32) },
+      }),
+    ).toBe("b".repeat(32));
+  });
+
+  it("returns undefined for an unsampled seed", () => {
+    expect(
+      readSessionTraceId({
+        "eve.sessionTraceSeed": { spanId: "a".repeat(16), traceFlags: 0, traceId: "b".repeat(32) },
+      }),
+    ).toBeUndefined();
+  });
+
+  it("returns undefined when no seed is present", () => {
+    expect(readSessionTraceId({})).toBeUndefined();
   });
 });

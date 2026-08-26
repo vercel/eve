@@ -37,6 +37,8 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
 
 In a private chat, text, captions, photos, and documents all go through. Groups are stricter. Only three things wake the bot: a command (`/ask`, `/ask@my_bot`), an `@my_bot` mention (when `botUsername` is set), or a reply to one of the bot's own messages. Everything else is ignored.
 
+The model-visible `<telegram_context>` includes `bot_username` and `is_mentioned`. `is_mentioned` is `true` only for an exact `@bot_username` token or targeted command such as `/ask@my_bot`; other accepted messages set it to `false`.
+
 Forum topics carry `message_thread_id` in the continuation token, so each topic stays on its own thread.
 
 To customize auth or filtering, override `onMessage`. Return `title` alongside `auth` to set the title when the dispatch starts a run. Group privacy mode itself lives in BotFather, not here.

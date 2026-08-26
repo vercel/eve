@@ -62,6 +62,7 @@ export {
   slackContinuationToken,
   type SlackPostInput,
   type SlackPostedMessage,
+  type SlackBotTokenContext,
   type SlackThreadMessage,
   type SlackUploadFilesOptions,
   type SlackUploadFilesResult,

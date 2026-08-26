@@ -21,7 +21,7 @@ import type {
   RuntimeActionRequest,
   RuntimeSubagentDispatchFailure,
   RuntimeActionResult,
-} from "#runtime/actions/types.js";
+} from "#shared/action-types.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 
 const log = createLogger("execution.dispatch-workflow-runtime-actions");

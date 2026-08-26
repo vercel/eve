@@ -21,7 +21,7 @@ import { WizardCancelledError } from "../step.js";
 import { runInteractive, type AnySetupBox } from "../runner.js";
 import { snapshotSetupState, type SetupState } from "../state.js";
 import { withSpinner } from "../with-spinner.js";
-import pc from "picocolors";
+import pc from "#compiled/picocolors/index.js";
 
 import { inProjectSetupState, prompterSink } from "./in-project.js";
 

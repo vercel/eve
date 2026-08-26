@@ -4,17 +4,18 @@ import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js"
 import type { AlsContext } from "#context/container.js";
 import type { UnstampedMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
-import type { RuntimeActionResult } from "#runtime/actions/types.js";
+import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import type { InputResponse } from "#shared/input.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import type { InternalToolDefinition } from "#shared/tool-definition.js";
+import type { InternalToolDefinition } from "#tools/definition.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessInstrumentation } from "#harness/instrumentation/runtime.js";
+import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
 
 /**
  * Serializable tool definition stored on the session.
@@ -211,6 +212,14 @@ export interface SettledTurn {
  * Result returned by one harness step invocation.
  */
 export interface StepResult {
+  /** Background-tool effects projected onto the session that entered this step. */
+  readonly backgroundTaskSession?: HarnessSession;
+  /** Durable tasks started by background tools and awaiting the parent commit barrier. */
+  readonly backgroundTasks?: readonly {
+    readonly taskInboxToken: string;
+    readonly taskId: string;
+    readonly taskRunId: string;
+  }[];
   readonly next: StepNext;
   readonly session: HarnessSession;
   /**
@@ -293,6 +302,10 @@ export interface ToolLoopHarnessConfig {
   /** AI Gateway provider selected for the framework `web_search` tool. */
   readonly webSearchProvider?: WebSearchProvider;
   readonly handleEvent?: HandleEventFn;
+  /** Projects raw durable history before it crosses a message-bearing boundary. */
+  readonly historyProjector?: HistoryViewProjector;
+  /** Execution-prepared view of the history supplied to the first harness step. */
+  readonly historyView?: PreparedHistoryView;
   /**
    * Internal lifecycle hooks injected into each actual model attempt.
    * Omitted in production until an instrumentation runtime opts in.
@@ -313,12 +326,6 @@ export interface ToolLoopHarnessConfig {
    * compacted history.
    */
   readonly onCompaction?: () => readonly ModelMessage[];
-  /**
-   * Whether the agent opted into `experimental.subagentPersistentSessions`.
-   * Gates delegated-agent handle tracking and the model-visible `<agents>`
-   * listing appended after runtime-action batches resolve.
-   */
-  readonly persistentSubagentSessions?: boolean;
   /** Resolves step-scoped dynamic tools once for approval policy and model work. */
   readonly resolveStepDynamicTools?: (input: {
     readonly ctx: AlsContext;

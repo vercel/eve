@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import {
   detachEveAgentStore,
@@ -29,6 +29,7 @@ export type { PrepareSend };
  * Lifecycle status of an eve agent session.
  *
  * - `"ready"`: idle, accepting a new turn.
+ * - `"resuming"`: checking an attached session for events; submission is disabled.
  * - `"submitted"`: a turn was sent, no stream events received yet.
  * - `"streaming"`: stream events are arriving for the active turn.
  * - `"error"`: the last turn ended in a terminal failure (see `snapshot.error`).
@@ -48,9 +49,11 @@ export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
 export interface UseEveAgentHelpers<TData> extends UseEveAgentSnapshot<TData> {
   /** Requests durable cancellation of the active turn while continuing to receive its events. */
   readonly cancel: () => Promise<CancelSessionResult>;
+  /** Replays the attached durable session and follows its in-flight turn, if any. */
+  readonly resume: () => Promise<void>;
   /** Resets the session: detaches any local stream, recreates the owned session, and clears events and projected data. */
   readonly reset: () => void;
-  /** Sends a message. Rejects if a turn is already in flight. */
+  /** Sends a message. While a turn is active, pass `turnPolicy: "steer"` to replace it. */
   readonly send: <TOutput = unknown>(
     message: string | UserContent,
     options?: SendTurnOptions<TOutput>,
@@ -106,6 +109,13 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    */
   readonly optimistic?: boolean;
   readonly reducer?: EveAgentReducer<TData>;
+  /**
+   * Replay the attached durable session after mount and follow its in-flight
+   * turn, if any. Requires `initialSession` or `session`.
+   *
+   * @default false
+   */
+  readonly resume?: boolean;
   readonly session?: ClientSession;
 }
 
@@ -121,13 +131,13 @@ export function useEveAgent<TData>(
  * React hook that drives an eve session and projects its event stream into UI data.
  *
  * Returns the current snapshot (`data`, `events`, `session`, `status`, `error`)
- * plus the commands `send`, `respond`, `cancel`, and `reset`. With no reducer, `data` is the
+ * plus the commands `send`, `respond`, `resume`, `cancel`, and `reset`. With no reducer, `data` is the
  * built-in `UIMessage` projection from {@link defaultMessageReducer} (`TData`
  * is {@link EveMessageData}); pass a reducer to project into your own shape and
  * infer `TData`.
  *
  * Session-shaping options (`host`, `reducer`, `session`, `initialEvents`,
- * `initialSession`, `auth`, `headers`, `optimistic`) are
+ * `initialSession`, `auth`, `headers`, `optimistic`, `resume`) are
  * read once when the store is created; remount to change them. Lifecycle
  * callbacks (`onError`, `onEvent`, `onFinish`, `onSessionChange`, `prepareSend`)
  * refresh on every render.
@@ -136,8 +146,17 @@ export function useEveAgent<TData>(
   options: UseEveAgentOptions<TData> = {},
 ): UseEveAgentHelpers<TData> {
   const storeRef = useRef<EveAgentStore<TData> | undefined>(undefined);
+  const resumeOnMountRef = useRef(options.resume ?? false);
+  const [autoResumePending, setAutoResumePending] = useState(resumeOnMountRef.current);
 
   if (!storeRef.current) {
+    if (
+      resumeOnMountRef.current &&
+      options.initialSession === undefined &&
+      options.session === undefined
+    ) {
+      throw new Error("useEveAgent({ resume: true }) requires initialSession or session.");
+    }
     const reducer = options.reducer ?? (defaultMessageReducer() as EveAgentReducer<TData>);
     storeRef.current = new EveAgentStore({
       auth: options.auth,
@@ -171,9 +190,22 @@ export function useEveAgent<TData>(
   );
 
   useEffect(() => () => detachEveAgentStore(store), [store]);
+  useEffect(() => {
+    if (!resumeOnMountRef.current) return;
+    let active = true;
+    const finish = () => {
+      if (active) setAutoResumePending(false);
+    };
+    const timeout = setTimeout(() => void store.resume().then(finish, finish), 0);
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+    };
+  }, [store]);
 
   const cancel = useCallback(() => store.cancel(), [store]);
   const reset = useCallback(() => store.reset(), [store]);
+  const resume = useCallback(() => store.resume(), [store]);
   const send = useCallback(
     <TOutput = unknown>(message: string | UserContent, options?: SendTurnOptions<TOutput>) => {
       return store.send({ ...options, message });
@@ -187,14 +219,20 @@ export function useEveAgent<TData>(
     ) => store.send({ ...options, inputResponses }),
     [store],
   );
+  const visibleSnapshot =
+    autoResumePending && snapshot.status === "ready"
+      ? { ...snapshot, status: "resuming" as const }
+      : snapshot;
+
   return useMemo(
     () => ({
-      ...snapshot,
+      ...visibleSnapshot,
       cancel,
       reset,
       respond,
+      resume,
       send,
     }),
-    [cancel, reset, respond, send, snapshot],
+    [cancel, reset, respond, resume, send, visibleSnapshot],
   );
 }

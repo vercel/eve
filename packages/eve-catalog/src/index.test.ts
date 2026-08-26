@@ -75,6 +75,13 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("vercel")!.connection!.mcp!.url).toBe("https://mcp.vercel.com");
   });
 
+  it("uses Agentcard's streamable HTTP MCP endpoint", () => {
+    const agentcard = getIntegrationEntry("agentcard")!;
+
+    expect(agentcard.tagline).toBe("let agents buy online");
+    expect(agentcard.connection!.mcp!.url).toBe("https://mcp.agentcard.sh/mcp");
+  });
+
   it("uses Linear's streamable HTTP MCP endpoint", () => {
     expect(getIntegrationEntry("linear")!.connection!.mcp!.url).toBe("https://mcp.linear.app/mcp");
   });

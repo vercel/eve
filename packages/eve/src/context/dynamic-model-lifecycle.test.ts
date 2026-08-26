@@ -13,7 +13,7 @@ import {
   SessionDynamicModelReferenceKey,
   TurnDynamicModelReferenceKey,
 } from "#context/keys.js";
-import { defineDynamic } from "#public/definitions/tool.js";
+import { defineDynamic } from "#dynamic/definition.js";
 import {
   createSessionStartedEvent,
   createStepStartedEvent,

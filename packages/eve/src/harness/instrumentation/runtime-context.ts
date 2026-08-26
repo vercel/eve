@@ -12,6 +12,7 @@ import {
 import type { HarnessEmissionState } from "#harness/emission.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeContextResolver } from "#tracing/otel-declaration.js";
+import { shouldCaptureInstrumentationContent } from "#harness/instrumentation/content-policy.js";
 import {
   normalizeInstrumentationChannelKind,
   resolveInstrumentationProjection,
@@ -23,6 +24,7 @@ import type {
   InstrumentationRuntimeContext,
   InstrumentationStepStartedEventInput,
 } from "#public/instrumentation/index.js";
+import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { parseJsonObject, parseJsonValue, type JsonObject, type JsonValue } from "#shared/json.js";
 
 const log = createLogger("harness.instrumentation-runtime-context");
@@ -80,16 +82,21 @@ function buildInstrumentationStepStartedInput(
 ): InstrumentationStepStartedEventInput {
   const context = contextStorage.getStore();
   const projection = context?.get(ChannelInstrumentationKey);
+  const capturesContent = shouldCaptureInstrumentationContent(
+    normalizeChannelAudience(projection?.metadata.audience),
+  );
 
   return {
     channel: {
       kind: normalizeInstrumentationChannelKind(projection?.kind),
       metadata: snapshotForInstrumentation(projection?.metadata, "channel.metadata") ?? {},
     } as InstrumentationChannel,
-    modelInput: snapshotForInstrumentation(input.modelInput, "modelInput") ?? {
-      instructions: undefined,
-      messages: [],
-    },
+    modelInput: capturesContent
+      ? (snapshotForInstrumentation(input.modelInput, "modelInput") ?? {
+          instructions: undefined,
+          messages: [],
+        })
+      : { instructions: undefined, messages: [] },
     session: {
       auth: projectSessionAuth(context),
       id: input.session.sessionId,

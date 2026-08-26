@@ -1,16 +1,16 @@
-import { join } from "node:path";
-
 import {
   getAuthoredModuleExport,
   materializeAuthoredModuleExport,
 } from "#internal/authored-module.js";
-import {
-  type AuthoredModuleLoadOptions,
-  loadAuthoredModuleNamespace,
-} from "#internal/authored-module-loader.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { CompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
+import {
+  type AgentSourceRegistry,
+  type CompiledModuleBinding,
+  type AgentSourceOwner,
+} from "#compiler/source-graph.js";
+import type { CompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
 
 const SANDBOX_PARENT_DEFINITION_MARKER = Symbol.for("eve.sandbox-parent-definition");
 
@@ -24,10 +24,28 @@ const SANDBOX_PARENT_DEFINITION_MARKER = Symbol.for("eve.sandbox-parent-definiti
  */
 export interface ManifestCompileContext {
   readonly modelCatalog: CompiledRuntimeModelCatalogLoader;
+  readonly registries: readonly AgentSourceRegistry[];
 }
 
 export interface ModuleBackedDefinitionLoadOptions {
-  readonly externalDependencies?: AuthoredModuleLoadOptions["externalDependencies"];
+  readonly binding: CompiledModuleBinding;
+  readonly loadNamespace: CompiledBindingNamespaceLoader;
+}
+
+export interface SourceDefinitionCompileOptions {
+  readonly binding?: CompiledModuleBinding;
+  readonly loadNamespace?: CompiledBindingNamespaceLoader;
+  readonly owner: AgentSourceOwner;
+}
+
+export function requireModuleBackedDefinitionLoadOptions(
+  options: SourceDefinitionCompileOptions,
+  logicalPath: string,
+): ModuleBackedDefinitionLoadOptions {
+  if (options.binding === undefined || options.loadNamespace === undefined) {
+    throw new Error(`Module-backed source "${logicalPath}" requires a compiled binding.`);
+  }
+  return { binding: options.binding, loadNamespace: options.loadNamespace };
 }
 
 /**
@@ -40,16 +58,18 @@ export interface ModuleBackedDefinitionLoadOptions {
  * authored file failed.
  */
 export async function loadModuleBackedDefinition(input: {
-  readonly agentRoot: string;
+  readonly binding: CompiledModuleBinding;
   readonly displayPath?: string;
-  readonly externalDependencies?: ModuleBackedDefinitionLoadOptions["externalDependencies"];
   readonly kind: string;
+  readonly loadNamespace: CompiledBindingNamespaceLoader;
   readonly source: ModuleSourceRef;
 }): Promise<unknown> {
-  const moduleNamespace = await loadAuthoredModuleNamespace(
-    join(input.agentRoot, input.source.logicalPath),
-    { externalDependencies: input.externalDependencies },
-  );
+  if (input.binding.logicalPath !== input.source.logicalPath) {
+    throw new Error(
+      `Compiled binding "${input.source.sourceId}" targets "${input.binding.logicalPath}", not "${input.source.logicalPath}".`,
+    );
+  }
+  const moduleNamespace = await input.loadNamespace(input.source.sourceId);
   const exportValue = getAuthoredModuleExport(moduleNamespace, input.source);
 
   // defineSandbox marks parent selectors so they remain distinguishable from

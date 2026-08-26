@@ -27,7 +27,7 @@ interface MarkdownProps {
 const components: Partial<Components> = {
   a: ({ href, ...props }) =>
     typeof href === "string" && href.startsWith("/") ? (
-      <Link href={href} {...props} />
+      <Link href={href} {...props} prefetch={true} />
     ) : (
       <a href={href} rel="noreferrer" target="_blank" {...props} />
     ),

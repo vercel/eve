@@ -3,7 +3,7 @@
  * the harness resolution path and protocol clients (e.g. the dev TUI's
  * rendering decisions).
  */
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 
 /** Returns true when the request gates an AI SDK tool call. */
 export function isApprovalRequest(request: InputRequest): boolean {

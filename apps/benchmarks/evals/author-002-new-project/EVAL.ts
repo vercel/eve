@@ -4,8 +4,7 @@ import { expect, test } from "vitest";
 
 import { subjectDefaultAgentModel } from "./grader.js";
 
-test("creates a complete eve project", () => {
-  expect(existsSync("agent/agent.ts")).toBe(true);
+test("creates a complete eve project in place", () => {
   expect(existsSync("agent/channels/eve.ts")).toBe(true);
   expect(existsSync("agent/instructions.md")).toBe(true);
 
@@ -17,10 +16,17 @@ test("creates a complete eve project", () => {
   expect(packageJson.scripts?.build).toBe("eve build");
 });
 
-test("authors the requested identity without replacing the default model", () => {
-  expect(readFileSync("agent/instructions.md", "utf8")).toMatch(/Wayfinder/i);
-  expect(readFileSync("agent/instructions.md", "utf8")).toMatch(/travel/i);
-  expect(readFileSync("agent/agent.ts", "utf8")).toContain(
-    `model: "${subjectDefaultAgentModel()}"`,
-  );
+test("authors the requested identity without pinning a different model", () => {
+  const instructions = readFileSync("agent/instructions.md", "utf8");
+  expect(instructions).toMatch(/Wayfinder/i);
+  expect(instructions).toMatch(/travel/i);
+
+  // `agent/agent.ts` is optional, and omitting it selects the same default the
+  // scaffold pins explicitly. Both shapes satisfy "use the default model"; a
+  // different model id does not.
+  if (existsSync("agent/agent.ts")) {
+    expect(readFileSync("agent/agent.ts", "utf8")).toContain(
+      `model: "${subjectDefaultAgentModel()}"`,
+    );
+  }
 });

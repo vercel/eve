@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 
 import type { SandboxSourceRef } from "#discover/manifest.js";
 import { normalizeSandboxDefinition } from "#internal/authored-definition/sandbox.js";
@@ -16,15 +15,15 @@ import { toErrorMessage } from "#shared/errors.js";
  * definition stored on the compiled agent manifest.
  */
 export async function compileSandboxDefinition(
-  agentRoot: string,
+  _agentRoot: string,
   source: SandboxSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
+  options: ModuleBackedDefinitionLoadOptions,
 ): Promise<CompiledSandboxDefinition> {
   const message = `Expected the sandbox export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`;
   const loaded = await loadModuleBackedDefinition({
-    agentRoot,
-    externalDependencies: options.externalDependencies,
+    binding: options.binding,
     kind: "sandbox",
+    loadNamespace: options.loadNamespace,
     source,
   });
   const inheritsParent = await resolveParentSandboxSelector(loaded, message);
@@ -45,7 +44,7 @@ export async function compileSandboxDefinition(
     exportName: source.exportName,
     logicalPath: source.logicalPath,
     revalidationKey,
-    sourceHash: await resolveSandboxSourceHash(agentRoot, source),
+    sourceHash: await resolveSandboxSourceHash(options.binding),
     sourceId: source.sourceId,
     sourceKind: "module",
   };
@@ -127,9 +126,13 @@ async function resolveSandboxRevalidationKey(input: {
 }
 
 async function resolveSandboxSourceHash(
-  agentRoot: string,
-  source: SandboxSourceRef,
+  binding: ModuleBackedDefinitionLoadOptions["binding"],
 ): Promise<string> {
-  const content = await readFile(join(agentRoot, source.logicalPath));
+  if (binding.backing.kind === "programmatic") {
+    return createHash("sha256")
+      .update(binding.backing.semanticRevision ?? binding.backing.revision)
+      .digest("hex");
+  }
+  const content = await readFile(binding.backing.sourcePath);
   return createHash("sha256").update(content).digest("hex");
 }

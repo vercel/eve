@@ -1,6 +1,7 @@
 import { DISCORD_SETUP } from "./discord/setup.js";
 import { GITHUB_SETUP } from "./github/setup.js";
 import { LINEAR_SETUP } from "./linear/setup.js";
+import { LINQ_SETUP } from "./linq/setup.js";
 import { PHOTON_SETUP } from "./photon/setup.js";
 import { SLACK_SETUP } from "./slack/setup.js";
 import type { SetupIntegration } from "./types.js";
@@ -13,6 +14,7 @@ export const SETUP_INTEGRATIONS: readonly SetupIntegration[] = [
   DISCORD_SETUP,
   GITHUB_SETUP,
   LINEAR_SETUP,
+  LINQ_SETUP,
   PHOTON_SETUP,
 ];
 

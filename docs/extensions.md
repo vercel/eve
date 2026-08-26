@@ -102,6 +102,7 @@ The scaffold's `package.json` declares separate source and distribution roots:
     "extension": {
       "source": "./extension",
       "dist": "./dist/extension",
+      "externalDependencies": ["@acme/runtime-sdk"],
     },
   },
   "files": ["dist"],
@@ -121,6 +122,7 @@ The scaffold's `package.json` declares separate source and distribution roots:
     "typecheck": "tsc",
   },
   "dependencies": {
+    "@acme/runtime-sdk": "^x",
     "zod": "^x",
   },
   "devDependencies": {
@@ -149,7 +151,9 @@ eve extension build
 
 The exact `eve` development pin controls the extension authoring API and build tooling. The wildcard peer lets the consumer provide the runtime copy of eve. At consumption time, eve checks generated metadata, not the npm peer range. Do not add eve to regular `dependencies`.
 
-Put runtime packages such as `zod` or an SDK in `dependencies`. If a dependency cannot be bundled, such as a native addon, tell consumers to add it to `build.externalDependencies` in `agent.ts`.
+Put runtime packages such as `zod` or an SDK in `dependencies`. Most dependencies are bundled into the consuming agent automatically.
+
+When a package must keep normal Node.js package layout at runtime, add it to `eve.extension.externalDependencies`. Common cases include native addons and SDKs that load package-relative assets. `eve extension build` requires each listed package to also appear in `dependencies`, `optionalDependencies`, or `peerDependencies`, and records the requirement in the generated compatibility manifest. The consuming eve keeps the package external and preserves its complete package tree; consumers do not need to edit `agent.ts` or install the transitive package directly.
 
 Consumers can now add the built package to an agent. A workspace-only extension uses the same package contract but does not need to be published; see [Use an extension in a workspace](#use-an-extension-in-a-workspace).
 
@@ -269,7 +273,7 @@ Production `eve build` expects the extension distribution to exist already. Keep
 
 ### Override a contribution
 
-Use a directory mount to replace or remove an extension contribution. Put the mount declaration in `extension.ts` and add overrides beside it:
+Use a directory mount to keep overrides beside the mount declaration. Put the declaration in `extension.ts` and add overrides beside it:
 
 ```
 agent/extensions/crm/
@@ -303,7 +307,7 @@ export default disableTool();
 
 Hooks and instruction fragments are additive, so they cannot be replaced. To replace a dynamic tool, use a dynamic definition in the same slot; dynamic tools win over same-named static tools at runtime. `disableTool()` removes either kind.
 
-The `crm__` prefix is reserved for this directory mount. A consumer cannot override the extension from `agent/tools/`, `agent/connections/`, `agent/subagents/`, or another agent-root slot.
+You can also place an override in the corresponding agent-root slot by using the final qualified name. For example, `agent/tools/crm__search.ts` replaces `tools/search.ts` from the extension package or its directory override. Application sources have the highest precedence, so an agent-root override wins when both forms exist.
 
 ### Use an extension tool result in a hook
 

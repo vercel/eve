@@ -19,7 +19,11 @@ import {
   truncatePlainText,
   truncateSectionText,
 } from "#public/channels/slack/limits.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import {
+  type InputRequest,
+  parseInputResponse,
+  type ValidatedInputResponse,
+} from "#shared/input.js";
 
 /**
  * Wire-format prefix every framework HITL widget mints onto its
@@ -84,13 +88,12 @@ interface SlackHitlAction {
 
 /**
  * Resolved HITL response derived from one Slack interactivity action.
- * Matches the `InputResponse` contract minus `text` — freeform answers
- * come back through a different interaction path.
+ * Slack-local classification stays beside the typed eve input response so
+ * presentation metadata cannot cross the durable session-inbox boundary.
  */
 interface DerivedHitlResponse {
-  readonly requestId: string;
-  readonly optionId: string;
   readonly kind?: "tool-approval";
+  readonly response: ValidatedInputResponse;
 }
 
 /**
@@ -107,8 +110,13 @@ export function deriveHitlResponse(action: SlackHitlAction): DerivedHitlResponse
     const { kind, requestId } = splitEncodedRequest(encodedRequest);
     if (!requestId) return null;
     return kind === "tool-approval"
-      ? { kind, optionId: action.selectedOptionValue, requestId }
-      : { optionId: action.selectedOptionValue, requestId };
+      ? {
+          kind,
+          response: parseInputResponse({ optionId: action.selectedOptionValue, requestId }),
+        }
+      : {
+          response: parseInputResponse({ optionId: action.selectedOptionValue, requestId }),
+        };
   }
 
   if (action.value !== undefined) {
@@ -116,8 +124,11 @@ export function deriveHitlResponse(action: SlackHitlAction): DerivedHitlResponse
     const requestId = match?.groups?.requestId;
     if (!requestId) return null;
     return match.groups?.kind === "tool-approval"
-      ? { kind: "tool-approval", optionId: action.value, requestId }
-      : { optionId: action.value, requestId };
+      ? {
+          kind: "tool-approval",
+          response: parseInputResponse({ optionId: action.value, requestId }),
+        }
+      : { response: parseInputResponse({ optionId: action.value, requestId }) };
   }
 
   return null;
@@ -264,6 +275,8 @@ export function formatInputRequestFallbackText(request: InputRequest): string {
 export interface HitlFreeformModalMetadata {
   readonly continuationToken: string;
   readonly channelId: string;
+  /** Workspace whose app installation supplies credentials for modal follow-up API calls. */
+  readonly installationTeamId?: string;
   readonly threadTs: string;
   readonly messageTs: string;
   readonly requestId: string;

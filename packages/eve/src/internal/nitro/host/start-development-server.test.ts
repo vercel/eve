@@ -73,7 +73,7 @@ const mocks = vi.hoisted(() => {
       return devServer;
     }),
     devServer,
-    fetch: vi.fn(async () => new Response(null, { status: 200 })),
+    fetch: vi.fn(async () => Response.json({ revision: "test" })),
     files,
     fsControl,
     listenerServer,
@@ -314,7 +314,7 @@ describe("isActiveDevelopmentServerForApp", () => {
   it("matches only this app's recorded healthy loopback server", async () => {
     const { isActiveDevelopmentServerForApp } = await import("./start-development-server.js");
     seedStateRecord({ url: "http://127.0.0.1:42123/" });
-    mocks.fetch.mockResolvedValue(new Response(null, { status: 200 }));
+    mocks.fetch.mockImplementation(async () => Response.json({ revision: "test" }));
     vi.stubGlobal("fetch", mocks.fetch);
 
     try {
@@ -330,6 +330,13 @@ describe("isActiveDevelopmentServerForApp", () => {
           serverUrl: "http://127.0.0.1:42124/",
         }),
       ).resolves.toBe(false);
+      mocks.fetch.mockResolvedValueOnce(new Response(null, { status: 200 }));
+      await expect(
+        isActiveDevelopmentServerForApp({
+          appRoot: "/tmp/eve-test",
+          serverUrl: "http://127.0.0.1:42123/",
+        }),
+      ).resolves.toBe(false);
     } finally {
       mocks.files.clear();
       vi.unstubAllGlobals();
@@ -340,7 +347,7 @@ describe("isActiveDevelopmentServerForApp", () => {
 describe("createDevelopmentServer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.fetch.mockResolvedValue(new Response(null, { status: 200 }));
+    mocks.fetch.mockImplementation(async () => Response.json({ revision: "test" }));
     mocks.fsControl.stateReadError = undefined;
     mocks.fsControl.stateWriteError = undefined;
     mocks.authoredSourceWatcher.close.mockResolvedValue(undefined);
@@ -697,7 +704,7 @@ describe("createDevelopmentServer", () => {
     expect(attached.kind).toBe("existing");
     expect(attached.url).toBe(owner.url);
     expect(mocks.createDevelopmentApplicationNitro).toHaveBeenCalledOnce();
-    expect(mocks.fetch).toHaveBeenCalledWith("http://localhost:2000/eve/v1/health", {
+    expect(mocks.fetch).toHaveBeenCalledWith(new URL("/eve/v1/dev/runtime-artifacts", owner.url), {
       redirect: "error",
       signal: expect.any(AbortSignal),
     });
@@ -817,10 +824,13 @@ describe("createDevelopmentServer", () => {
       existing: "attach-if-unconfigured",
     });
 
-    expect(mocks.fetch).toHaveBeenCalledWith("http://localhost:2000/eve/v1/health", {
-      redirect: "error",
-      signal: expect.any(AbortSignal),
-    });
+    expect(mocks.fetch).toHaveBeenCalledWith(
+      new URL("/eve/v1/dev/runtime-artifacts", "http://localhost:2000/"),
+      {
+        redirect: "error",
+        signal: expect.any(AbortSignal),
+      },
+    );
     expect(mocks.fetch).toHaveBeenCalledOnce();
     expect(mocks.createDevelopmentApplicationNitro).toHaveBeenCalledOnce();
     expect(readStateRecord()).toEqual({ url: "http://localhost:2000/" });

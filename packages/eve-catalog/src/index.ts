@@ -214,10 +214,10 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
-    slug: "chat-sdk-linq",
+    slug: "linq",
     name: "Linq",
     kind: "channel",
-    tagline: "iMessage and SMS conversations, media, and tapbacks through Linq.",
+    tagline: "iMessage and SMS conversations through Linq, with guided Connect or portable setup.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
@@ -398,6 +398,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     connection: {
       description: "Honeycomb: explore traces, run queries, and inspect datasets.",
       mcp: { url: "https://mcp.honeycomb.io/mcp" },
+    },
+  },
+  {
+    slug: "agentcard",
+    name: "Agentcard",
+    kind: "connection",
+    tagline: "let agents buy online",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Agentcard: the agent's wallet. Shop and check out at real merchants (DoorDash, Good Eggs, flights) with the conversational `buy` tool (thread conversation_id on follow-ups), issue a single-use virtual card to pay at any checkout, let the user add their own card, and manage the cash that funds it: balance, top-ups, transactions, KYC, human support.",
+      mcp: { url: "https://mcp.agentcard.sh/mcp" },
     },
   },
   {

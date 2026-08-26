@@ -259,6 +259,6 @@ describe("buildRunContext", () => {
     const projection = ctx.get(ChannelInstrumentationKey);
     expect(projection).toBeDefined();
     expect(projection!.kind).toBe("http");
-    expect(projection!.metadata).toEqual({});
+    expect(projection!.metadata).toEqual({ audience: "unknown" });
   });
 });

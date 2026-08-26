@@ -164,6 +164,43 @@ describe("createPromptCommandHandler", () => {
     }
   });
 
+  it("routes a /add argument to the registry flow's initial address", async () => {
+    const runTuiSetupCommand = vi.fn(async () => ({
+      message: "Added Slack",
+      preserveFlowDiagnostics: true,
+    }));
+    vi.doMock("./setup-commands.js", () => ({
+      SETUP_FLOW_CONFIG: { add: { title: "Add to your agent", indicator: "pulse" } },
+      runTuiSetupCommand,
+    }));
+
+    try {
+      const setupFlow = setupFlowRenderer();
+      const handler = createPromptCommandHandler({ target: LOCAL_TARGET });
+
+      await handler.handle(
+        { type: "extension", name: "add", argument: "channel/slack" },
+        context({ setupFlow }),
+      );
+      await handler.handle(
+        { type: "extension", name: "add", argument: "" },
+        context({ setupFlow }),
+      );
+
+      expect(runTuiSetupCommand).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ command: "add", initialRegistryAddress: "channel/slack" }),
+      );
+      expect(runTuiSetupCommand).toHaveBeenNthCalledWith(
+        2,
+        expect.not.objectContaining({ initialRegistryAddress: expect.anything() }),
+      );
+    } finally {
+      vi.doUnmock("./setup-commands.js");
+      vi.resetModules();
+    }
+  });
+
   it("keeps the setup panel open for an immediate onboarding handoff", async () => {
     const runTuiSetupCommand = vi.fn(async () => ({
       message: "Vercel CLI installed.",

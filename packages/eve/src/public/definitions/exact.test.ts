@@ -24,9 +24,11 @@ import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
 import {
   defineTool,
-  experimental_workflow,
+  type TaskReceipt,
+  type TaskExec,
   type ToolDefinition,
-} from "#public/definitions/tool.js";
+} from "#public/tools/index.js";
+import { experimental_workflow } from "#public/tools/workflow.js";
 
 describe("definition helper exact inputs", () => {
   it("preserves literal inference for valid definitions", () => {
@@ -85,6 +87,28 @@ describe("definition helper exact inputs", () => {
     >();
   });
 
+  it("types background tools in terms of the durable task capability", () => {
+    const backgroundTool = defineTool({
+      description: "Start a durable export.",
+      execution: "background",
+      inputSchema: z.object({ jobId: z.string() }),
+      execute(input, _ctx, task) {
+        expectTypeOf(task).toEqualTypeOf<TaskExec>();
+        expectTypeOf(task.binding.taskId).toEqualTypeOf<string>();
+        return task.delegated({
+          executor: { data: { jobId: input.jobId }, kind: "export" },
+          receipt: { jobId: input.jobId },
+        });
+      },
+    });
+
+    expectTypeOf(backgroundTool.execution).toEqualTypeOf<"background">();
+    expectTypeOf<Parameters<NonNullable<typeof backgroundTool.toModelOutput>>[0]>().toEqualTypeOf<
+      TaskReceipt<{ jobId: string }>
+    >();
+    expect(backgroundTool.execution).toBe("background");
+  });
+
   it("infers tool input from Zod 3 schemas", () => {
     const tool = defineTool({
       description: "Fetch current weather for a city.",
@@ -104,6 +128,16 @@ describe("definition helper exact inputs", () => {
 });
 
 function typeOnlyFixtures(): void {
+  defineTool({
+    description: "Invalid streaming background tool.",
+    // @ts-expect-error Background executors settle once; streamed output is unsupported.
+    execution: "background",
+    inputSchema: { type: "object" },
+    async *execute() {
+      yield { status: "working" };
+    },
+  });
+
   defineDynamic({
     // @ts-expect-error defineDynamic is resolver-only.
     fallback: "anthropic/claude-sonnet-5",

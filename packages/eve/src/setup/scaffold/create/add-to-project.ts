@@ -165,7 +165,6 @@ export async function addAgentToProject(
     packageManager,
     options.projectRoot,
     {
-      aiPackageVersion: aiVersion,
       nodeEngineRequirement: evePackage.nodeEngine,
     },
   );

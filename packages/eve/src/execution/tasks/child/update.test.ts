@@ -35,15 +35,15 @@ describe("executeTaskUpdate", () => {
           subagentName: "agent",
         },
       } as never,
-      childStepIndex: 2,
-      childTurnId: "turn-child",
+      updateIndex: 2,
+      updateEpoch: "turn-child",
       serializedContext: {},
     });
 
     expect(resumeHookMock).toHaveBeenCalledWith(token, {
       callId: "update-call",
-      childStepIndex: 2,
-      childTurnId: "turn-child",
+      updateIndex: 2,
+      updateEpoch: "turn-child",
       kind: "task-update",
       message: "Found three matching records.",
     });
@@ -62,16 +62,16 @@ describe("executeTaskUpdate", () => {
     const result = await executeTaskUpdate({
       action,
       adapter: undefined,
-      childStepIndex: 2,
-      childTurnId: "turn-child",
+      updateIndex: 2,
+      updateEpoch: "turn-child",
       serializedContext: { "eve.sessionCallback": callback },
     });
 
     expect(fireTaskUpdateCallbackStep).toHaveBeenCalledWith({
       callback,
       callId: "update-call",
-      childStepIndex: 2,
-      childTurnId: "turn-child",
+      updateIndex: 2,
+      updateEpoch: "turn-child",
       message: "Found three matching records.",
     });
     expect(result).toMatchObject({ output: { status: "sent", taskId: "task_abc" } });

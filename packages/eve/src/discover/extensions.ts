@@ -39,14 +39,6 @@ export const DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED =
   "discover/extension-nested-mount-unsupported";
 
 /**
- * Emitted when a consumer's agent-root contribution (e.g. `agent/tools/crm__x.ts`)
- * uses a mounted extension's `<ns>__` prefix. That prefix is reserved for the
- * extension and its co-located overrides, not the agent root.
- */
-export const DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT =
-  "discover/extension-override-outside-mount";
-
-/**
  * Emitted when a resolved package is not a valid eve extension.
  */
 export const DISCOVER_EXTENSION_PACKAGE_INVALID = "discover/extension-package-invalid";
@@ -91,6 +83,8 @@ export interface ExtensionMountLocation {
   readonly packageRoot: string;
   /** Absolute path to the extension's agent-shaped distribution root. */
   readonly sourceRoot: string;
+  /** Runtime packages this extension requires the consuming application to externalize. */
+  readonly externalDependencies: readonly string[];
 }
 
 /**
@@ -217,6 +211,7 @@ export async function locateExtensionMount(input: {
       packageName: location.packageName,
       packageRoot: location.packageRoot,
       sourceRoot: location.distRoot,
+      externalDependencies: compatibility.build?.externalDependencies ?? [],
     },
     diagnostics: [],
   };

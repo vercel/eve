@@ -65,6 +65,27 @@ describe("parsePromptCommand", () => {
     });
   });
 
+  it("parses /add with a trimmed registry address", () => {
+    expect(parsePromptCommand("/add channel/slack")).toEqual({
+      type: "extension",
+      name: "add",
+      argument: "channel/slack",
+    });
+    expect(parsePromptCommand("/add  extension/agent-browser ")).toEqual({
+      type: "extension",
+      name: "add",
+      argument: "extension/agent-browser",
+    });
+  });
+
+  it("parses the typeahead's completed /add, which carries a trailing space", () => {
+    expect(parsePromptCommand("/add ")).toEqual({
+      type: "extension",
+      name: "add",
+      argument: "",
+    });
+  });
+
   it("parses bare /loglevel and /loglevel with a mode argument", () => {
     expect(parsePromptCommand("/loglevel")).toEqual({ type: "loglevel", argument: "" });
     expect(parsePromptCommand("/loglevel none")).toEqual({ type: "loglevel", argument: "none" });
@@ -154,9 +175,9 @@ describe("PROMPT_COMMANDS registry", () => {
     }
   });
 
-  it("pairs an argument hint with takesArgument", () => {
+  it("only gives argument hints to commands that accept arguments", () => {
     for (const spec of PROMPT_COMMANDS) {
-      expect(spec.argumentHint !== undefined).toBe(spec.takesArgument);
+      if (spec.argumentHint !== undefined) expect(spec.takesArgument).toBe(true);
     }
   });
 

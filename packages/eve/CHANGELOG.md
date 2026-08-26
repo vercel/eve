@@ -1,5 +1,183 @@
 # eve
 
+## 0.45.0
+
+### Minor Changes
+
+- b3cf8ee: eve now compiles framework defaults, authored files, extensions, overrides, and in-memory modules through one authoritative source graph, with replaceable default config, sandbox, home, health, and inspection routes plus agent-info v3. Built-in tool definitions move from `eve/tools/defaults` to individual `eve/tools/<name>` subpaths.
+- 6252784: Move provided tool definitions and capability-specific helpers to dedicated `eve/tools/*` entrypoints. Replace the removed `defineBashTool`, `defineReadFileTool`, `defineWriteFileTool`, `defineGlobTool`, and `defineGrepTool` factories with the corresponding reusable definitions.
+- f439e3d: Persistent subagent sessions are now the default: subagent tools expose `agentId`, completed children remain available for follow-up messages, and eve publishes the `<agents>` listing automatically. Remove `experimental.subagentPersistentSessions` from agent configuration; `false` is no longer an opt-out.
+
+### Patch Changes
+
+- 4a18994: Keep tools available during follow-up turns while an earlier tool approval remains unresolved, allowing unrelated work to continue without resolving the pending call.
+- d2995e1: Stamp Workflow runs with whether eve-managed OTEL tracing is enabled so dashboards can distinguish Workflow-only runs from enabled but unsampled traces. Session titles remain available alongside that metadata.
+- dfe0d18: Expose resumed session catch-up as a distinct `resuming` frontend lifecycle state so hydrated conversations do not show active-turn controls before an in-flight turn is confirmed.
+- 659774f: Refine generated Web Chat with a single Send or Stop composer action, faster question controls, and compact tool calls. Bash commands get a terminal view, while focus states, spacing, typography, and the composer backdrop are polished.
+- fc52796: Allow framework features to derive ordinary source slots from other selected modules through dependency-aware programmatic templates, with consistent composition and module-map hydration.
+- 2be67fa: Agent trace identity is now established before workflow execution begins, allowing workflow runs and OpenTelemetry spans to refer to the same trace from the outset. Delegated agents inherit the parent trace, while already-running sessions retain their current behavior.
+- 7ed4fb1: Workflow session, subagent, and turn rows now include `$eve.trace_id` when a sampled agent trace is available, allowing workflow views to open the corresponding OpenTelemetry trace directly. Rows without an exported agent trace omit the attribute.
+- 0bc8432: Integration setup banners now describe the integration being configured instead of showing eve's generic framework tagline.
+- 3274eee: Send remote-agent Vercel OIDC credentials in both the bearer and trusted-OIDC headers so `vercelOidc()` can reach eve agents behind Vercel Deployment Protection.
+- ae83a08: Update the generated Web Chat starter to close completed reasoning without delay, soften the header-to-content boundary only while content scrolls beneath it, and enable global font antialiasing.
+- 80571ee: Show declared environment variables and an eve setup link after adding a registry integration from the dev TUI. Chat SDK adapter links open the integration page's Configure section.
+- 7c5a69e: Keep durable agent sessions on their persisted OpenTelemetry trace instead of rotating after 200 turns. Agent Trace schema version 2 relies on native trace parentage instead of window, root-session, and duplicated parent-lineage attributes.
+- f38eaf1: Internal cleanup of the experimental background-tasks plumbing: centralized task-view schemas while preserving strict projection and broad tool-output contracts, removed a duplicate task tool-name set, established one task inbox-token import path, and shared serialized-context key-name constants. No behavior change.
+- cfa90d6: Telegram now supports HITL authorization challenges.
+- d79de0b: Expose channel-native receiver identity in model context, plus exact mention state for Slack, Teams, Telegram, and GitHub comments.
+- 687c371: OpenAI and Anthropic model calls now receive privacy-preserving end-user safety identifiers derived from the active session caller when the agent has not provided one, including calls made during context compaction.
+- 8e5d9b2: Add `j` and `k` as down and up shortcuts in non-editing TUI menus and the trace viewer while preserving normal text input in prompts, search fields, and editors.
+- 7eae011: Accept Vercel OIDC tokens issued from the global issuer in `vercelOidc()` and `verifyVercelOidc()`.
+- c6f9c85: Trace capture policies now receive the originating channel's type, letting a policy sample by channel (for example retaining interactive traffic while dropping scheduled runs). Policies that ignore the field are unaffected.
+
+## 0.44.4
+
+### Patch Changes
+
+- dbfa01c: New standalone projects created by `eve init` now include a `README.md` with templated project and development instructions.
+- 5a029d9: Allow `justbash({ customCommands })` to register trusted host application commands in live just-bash sandbox sessions.
+- 2bbb775: Pass the app installation workspace id to function-form Slack bot token providers across events, interactions, proactive sends, and private file downloads.
+- 2a34f75: Chat SDK direct-message channels now support HITL authorization challenges.
+- 1b1f2dd: Resume an existing Web Chat session's active response even when its durable history still ends at the previous turn boundary.
+- 8f2bf7a: Add `eval` and `deploy` scripts to newly scaffolded eve projects.
+- bca1304: Linq and Photon inbound messages now derive user auth from their message authors, allowing user-scoped connections to request authorization by default.
+- 50488a1: `/add` in the dev terminal UI now accepts a registry item address. `/add channel/slack` skips the category and search screens and opens that item's details and confirmation directly, then runs the same installation, setup, add-more, and deployment flow as bare `/add`, which still opens the registry browser.
+- 94a0952: Follow up to ten `web_fetch` redirects while rechecking each destination for SSRF safety. Non-success HTTP responses now return a plain-text failure result with the response body when available instead of failing the tool call.
+- 4464e4d: Slack inbound messages now derive their text from Block Kit blocks and legacy attachments when the top-level `text` field is empty or a short fallback. Alert-style bot posts (sections, fields, headers, markdown blocks, tables, cards, carousels, containers, rich text, legacy attachments) previously reached the model as an empty message body; they now carry the visible message content, and fetched thread replies get the same treatment.
+
+## 0.44.3
+
+### Patch Changes
+
+- ebf94fa: Session stream requests that ask for a durable tail index now close after replaying that tail, preventing Web Chat restoration through framework proxies from leaving local workflow listeners attached. Generated Web Chat apps also pin Shiki 3.23 to match the current Streamdown code plugin and pass type checking.
+
+## 0.44.2
+
+### Patch Changes
+
+- e79dd2f: Generated Web Chat apps now include their new-session and resumable-session routes. Abandoned browser session streams also release their local workflow listeners instead of accumulating them across navigation.
+
+## 0.44.1
+
+### Patch Changes
+
+- 7c99773: Linq setup now recognizes Vercel CLI versions that lack required trigger options and offers to upgrade the CLI from the `/add` flow instead of reporting a generic connector failure.
+- 02403b9: Dynamic tool callbacks are now identified by tool name and phase instead of byte offsets in the authored source. Editing an agent file no longer risks a parked approval replaying the wrong tool: after a redeploy or crash, parked calls run the latest deployed callback code under the same name, and a tool that no longer exists fails closed with an explicit error. Session-scoped resolvers may run once more on resume to rebind callbacks, so keep them idempotent.
+- 84ddb09: Apply release-age policies during project and extension setup instead of bypassing them. New standalone pnpm projects use strict enforcement, while projects inside an existing workspace retain that workspace's policy.
+- 85b2dc8: Redact model, tool, approval, and delivery content from hosted instrumentation for private and unknown channel audiences. Content-denied Workflow runs now carry a metadata marker and omit their content-derived title so dashboards can exclude them without reading the event stream. Local `eve dev` tracing continues to retain content for unknown TUI and HTTP sessions.
+- a4fd288: Add declarative `resume: true` and imperative `resume()` support for replaying durable frontend sessions and following in-flight turns. Generated Web Chat apps now keep session IDs in `/s/{sessionId}` URLs, restore conversations on reload, and provide a sessionless `/s` route for starting a new chat.
+- 923921c: Give models runtime-authored task state after background work starts so initiating turns acknowledge launch, partial task wakes stay silent, and settled cohorts produce one combined report.
+- 673def2: Allow `useEveAgent` message sends with `turnPolicy: "steer"` while a turn is active, keeping the local projection attached to the durable replacement stream. Generated web chats now keep the composer enabled during responses and steer by default when a follow-up is submitted. Cancelled turns preserve their accepted user input in durable history, so replacement turns retain the interrupted request as context.
+
+## 0.44.0
+
+### Minor Changes
+
+- 47e8b64: Make traces public-only by default while retaining unclassified HTTP/TUI sessions in zero-config local tracing, and add composable input/output redaction, span filtering, and attribute filtering to the export pipeline.
+
+### Patch Changes
+
+- beba1a2: Prepare the TypeScript path alias and Next.js compiler settings before `eve add channel/web` installs the Web Chat registry item, so fresh agent projects build without manual `tsconfig.json` changes.
+- 830dd40: Classify built-in messaging channel metadata by conversation audience.
+- 4da95bb: Fix dynamic tool builds when callback parameters use destructuring defaults by forwarding the original arguments through the durable callback wrapper.
+- 4ed62a7: Render `ask_question` prompts as visible, vendored AI Elements forms in generated Web Chat apps, with vertical single-choice options and freeform answers submitted through eve's structured input response API.
+- e43d9cb: Add an optional audience classification to channel instrumentation metadata.
+
+## 0.43.0
+
+### Minor Changes
+
+- 1390675: Background tools can now report a delegated task's terminal result in-process via `task.send({ kind: "complete" | "fail" | "cancel", ... })`, without minting a callback URL.
+
+### Patch Changes
+
+- 1c2684a: Add the native Agentcard MCP connection to the registry through Vercel Connect.
+- f3f4f4a: Allow in-process background tool executors to report progress and terminal results through `task.send`. Progress updates now use executor-neutral coordinates internally, and background task types are exported from `eve/tools`.
+- 7de783e: Existing Linq account setup now fetches the phone numbers assigned to the partner API token, then lets you select the numbers for your agent.
+- 3ec0e5b: Route model-facing session history through one prepared view so dynamic resolvers, compaction, instrumentation, and model calls receive a consistent conversation without changing durable history.
+- b57c965: Forward the active caller on persistent local and remote subagent continuations so user-scoped connections resolve for the current turn without inheriting the previous caller's authority. Upgrade both remote-agent deployments before resuming existing persistent sessions; create-only receivers reject forwarded continuations rather than falling back to service authority.
+- 3811d81: Update the project scripts after `eve add channel/web` so `pnpm dev` starts the generated Next.js app.
+- be9be27: Make dynamic tool approval, execution, and output callbacks durable across cold starts. Non-serializable callback captures now fail with an actionable error instead of losing values during replay.
+- 1390675: Add generic background `defineTool` execution so authored tools can return `task.delegated()` receipts and run through the durable task lifecycle without subagent-specific harness branches.
+- 99de091: Run local and remote subagents through generic background `defineTool` execution when `experimental.tasks` is enabled, preserving durable task receipts, HITL, cancellation, and child stream events.
+- f3f4f4a: Give the parent model runtime-authored task state on background wakes so related intermediate results can stay silent and settle into one consolidated report.
+- 3811d81: New npm, Yarn, and Bun agents no longer receive an obsolete AI SDK package-manager pin. Web Chat installation now preserves the AI SDK version already declared by the agent, avoiding npm `EOVERRIDE` failures.
+
+## 0.42.0
+
+### Minor Changes
+
+- a43e14f: Prevent channel HITL responses from carrying channel-local metadata into strict session-inbox payloads. Channel and session `respond()` calls now accept exact response literals or values proven by `parseInputResponses()`, rejecting imprecise `InputResponse[]` values that could have erased extra keys.
+
+### Patch Changes
+
+- f2169fa: Remove the `task_sleep` framework tool. Task-mode parents now rely on lifecycle notifications instead of model-paced waits.
+
+## 0.41.0
+
+### Minor Changes
+
+- 0569638: Add a first-class Linq iMessage and SMS channel with managed Vercel Connect and portable credential setup paths. Connect setup can provision a new Linq account and line or connect an existing account with its partner API token.
+
+### Patch Changes
+
+- bdf5f63: Improve the generated web chat experience with immediate thinking feedback, a disabled composer while responses stream, clearer cancellation controls, and visible turn failures.
+- c47350f: Rebuild untransformed session-scoped dynamic tool executors and approval policies on durable continuations so dependency-created tools remain available after replay.
+- c47350f: Update Teams tool-approval cards only after approval settlement, with the outcome and the Teams responder who acted.
+- 9e19fa4: Keep active client streams attached across authorization parking boundaries so connection callbacks resume browser chats automatically.
+
+## 0.40.0
+
+### Minor Changes
+
+- 2838bb3: Remove `task_peek` from experimental background tasks and include completed results and failures directly in task notifications. Conditionally delivered task wakes can remain silent when that result was already covered by an earlier response.
+
+### Patch Changes
+
+- e843b4d: Registry browsing now uses titles returned by the catalog, avoiding a separate request for every displayed item.
+- 899e079: Keep `eve info --json` output valid JSON by omitting the CLI banner.
+- cda9539: Redact brokered credential transforms when sandbox network policies are written to bootstrap logs.
+- 87c61a1: Update eve's bundled Workflow SDK packages to the latest 5.0.0 beta releases, picking up a replay-determinism fix for branch wake order under concurrent replays.
+
+## 0.39.3
+
+### Patch Changes
+
+- c2bfee1: Keep top-level sessions in an independent `agent.session` trace while preserving shared trace context for local and remote subagents.
+- 9a7964b: Add a configurable, development-only `@eve/self-modification` source-editing subagent that mounts authored agent source read-write, exposes its instructions through an extension, and uses structured file tools to inspect and safely update source.
+- 542c380: Preserve the configured `turnPolicy` on built-in and custom channels, and restore the option for Slack channels.
+- 75bd9c8: Allow extension-owned external dependencies to use ESM-only packages that do not expose a CommonJS entry.
+- 6fc904d: Session inbox hook payloads are now a validated, versioned wire format following eve's existing durable-format idioms. Producers inspect the target hook's wire capability and encode the shape its pinned consumer understands, including sessions created by eve 0.30.8; readers migrate legacy shapes forward and reject unknown versions instead of reinterpreting them.
+
+## 0.39.2
+
+### Patch Changes
+
+- 33db9a4: Improve non-interactive setup recovery: `eve add` now reports terminal outcomes on every path and includes non-secret answer placeholders in blocked continuation commands. `eve link` and `eve deploy` also point non-interactive callers to eve's own project commands.
+- 6e87b13: Allow extension packages to declare runtime dependencies that eve must keep external and preserve with their complete package files. Consumers receive these packaging requirements automatically without editing their agent config.
+- 2c01eab: Rebuild untransformed session-scoped dynamic tool executors and approval policies on durable continuations so dependency-created tools remain available after replay.
+- 5e5d91b: Fix `vercel.json` services detection when a Vercel Root Directory is configured. The framework integrations now read `vercel.json` from the framework app root first, so a `services` declaration next to the app wins over the linked repository root's `vercel.json` — matching where Vercel itself reads the file from.
+
+## 0.39.1
+
+### Patch Changes
+
+- 9965cfc: Use `@vercel/otel`'s automatic context propagators when no custom propagators are configured.
+- 1d857ca: Report agent files, dependencies, and configuration files changed when `eve init` adds an agent to an existing project, including when dependency installation later fails.
+- c9d3e25: Wait for tool approval settlement before marking Slack approval cards as answered, so rejected approval responses leave the shared card open.
+- 075dc1f: Tell coding agents that content-only instruction edits do not require reading the framework docs, while preserving docs-first guidance for eve framework changes.
+- c6d6b3e: Add non-interactive `eve link` and `eve deploy` options for linking a named Vercel project and deploying from CI or coding agents without terminal prompts.
+- e739c28: Coding-agent `eve init` runs now report the selected model and generated instructions file without changing the interactive human flow.
+- 8a3288d: Parent `agent.action` OpenTelemetry spans to their replay-stable `agent.step` boundary instead of directly to the turn.
+- 69c6f12: Let parent agents process background-task notifications without requiring a user-visible channel message. Human messages and input responses remain required delivery.
+- 7995d57: Add `ctx.isDMOrPrivateChannel()` to Slack message handlers so agents can detect DMs, group DMs, and private channels without parsing raw events or implementing their own Slack API fallback.
+- 8180633: Use `Private message` as the Slack run title for DMs and private channels so sensitive message text never appears in run titles.
+- 822dbff: Dev runtime generations now retain the compiled authored module graph instead of recursively copying the app and workspace source trees. Local rebuilds keep immutable runtime behavior while using substantially less disk space.
+- 1473e2a: Capture package-manager command identity, termination, bounded in-memory output, and workspace probes as structured process results for consistent setup diagnostics.
+- 97d166a: New eve projects now give coding agents direct documentation routes and a bounded authoring loop, including a local recipe for routine typed tools. This reduces redundant project and package discovery while preserving deeper guidance for approvals and other advanced behavior.
+- e1ebb53: Emit durable `input.resolved` stream events with server-accepted human-input outcomes and responses so clients can persist and replay HITL state.
+- f02bc3d: Keep pending tool approvals visible across follow-up turns and prevent those turns from issuing duplicate tool calls.
+
 ## 0.39.0
 
 ### Minor Changes
@@ -210,7 +388,7 @@
 
 ### Patch Changes
 
-- 2a141f0: Keep sessions resumable across eve deployment upgrades: sends now cross durable session hooks as the established `deliver` envelope (with a transitional single-payload mirror for sessions pinned to 0.30.3–0.30.8), and consumers keep accepting payloads persisted by those versions.
+- 2a141f0: Keep sessions resumable across eve deployment upgrades: sends now cross durable session hooks as the established `deliver` envelope (with a transitional single-payload mirror for sessions pinned to 0.30.5–0.30.8), and consumers keep accepting payloads persisted by those versions.
 - 99982f7: Treat AI SDK `.devtools` like other generated directories: ignore it in `eve dev` watching, agent discovery, and source snapshots so generation writes do not recompile or warn.
 - a497e8d: Preserve each tool executor's concrete return type through `defineTool`, so non-streaming tools no longer appear to return an async iterable. Allow `ctx.to()` to infer closed receive-target interfaces such as Slack's without requiring an index signature.
 - fe9e7ef: Consume interactive authorization callback results once and keep targeted connection searches from replaying callbacks for unrelated connections.

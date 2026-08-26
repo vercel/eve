@@ -33,8 +33,9 @@ before pushing.
 
 PR descriptions are reviewer-oriented explanations of the problem, solution,
 meaningful behavior changes, and validation—not file lists or commit logs. Keep
-them proportional to the change, link the prior issue, call out important scope
-boundaries or preserved behavior, and report only checks actually run. Use the
+them proportional to the change, link a prior issue or discussion when one
+exists, call out important scope boundaries or preserved behavior, and report
+only checks actually run. Never create an issue solely to accompany a PR. Use the
 [`gh-pr-description`](./.agents/skills/gh-pr-description/SKILL.md) skill when
 drafting or updating one.
 
@@ -217,6 +218,10 @@ live under `packages/eve/test/tui-client` and run with `pnpm test:tui`. See
 - When moving a published route, update authored links to the new URL and add a
   permanent redirect from every old HTML and supported Markdown URL.
 - Sidebar order lives in `docs/meta.json`.
+- Use Title Case for page `title` frontmatter and `meta.json` section titles
+  (Fumadocs renders `title` as both the sidebar entry and the `<h1>`), and
+  sentence case for in-page headings — capitalize only the first word plus
+  proper nouns and acronyms, e.g. `Next.js`, `CLI`, `agent.ts`.
 - Keep markdown framework-agnostic — no MDX-only constructs unless the page is
   `.mdx`.
 

@@ -2,7 +2,7 @@ import { mkdtemp, readdir, rename, rm, stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 
-import pc from "picocolors";
+import pc from "#compiled/picocolors/index.js";
 
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import { EVE_WORDMARK } from "#cli/banner.js";
@@ -285,7 +285,6 @@ export async function runExtensionInitCommand(
     const installFailureOutput: string[] = [];
     const recentInstallOutput: string[] = [];
     const installResult = await dependencies.runPackageManagerInstall(packageManager, projectPath, {
-      bypassMinimumReleaseAge: true,
       progressDetails: process.stdout.isTTY === true && !debug,
       onOutput: (line) => {
         if (line.text.trim() !== "") {

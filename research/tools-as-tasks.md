@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
 status: draft
-last_updated: "2026-08-01"
+last_updated: "2026-08-20"
 ---
 
 # Subagents as tasks
@@ -11,10 +11,12 @@ last_updated: "2026-08-01"
 Under an opt-in `experimental.tasks` mode, eve should represent long-running work as durable,
 addressable tasks. This plan applies that model only to local and remote subagents. A subagent call
 returns a task receipt after dispatch instead of keeping the parent turn blocked until the child
-finishes. The parent can inspect, message, or cancel the task with framework-owned tools,
-and the child can intentionally report progress to its parent with one framework-owned tool.
+finishes. The parent receives result-bearing lifecycle notifications and can cancel the task with
+a framework-owned tool. The child can intentionally report progress to its parent with one
+framework-owned tool.
 
-Without the flag, current tool and subagent behavior must remain unchanged.
+Without the flag, current subagent behavior must remain unchanged. The implementation uses a
+generic background `defineTool` execution contract so the harness does not classify subagents.
 
 This draft is based on the [Tools as Tasks proposal], the earlier background-task plan in
 [PR #1085], and the storage-boundary findings from the closed [PR #1190] implementation spike.
@@ -52,7 +54,7 @@ cancel paths.
 ## Goals
 
 - Let a parent continue its turn while delegated work runs.
-- Give the model explicit task controls instead of making every wait implicit.
+- Wake the parent through lifecycle notifications instead of model-paced task checks.
 - Let a child intentionally report progress to its parent instead of leaving progress to
   channel-layer guesswork.
 - Carry progress, input requests, authorization events, results, failures, and cancellation over
@@ -66,8 +68,8 @@ cancel paths.
 ## Non-goals
 
 - Exposing an MCP Tasks server or client endpoint in this work.
-- Changing authored tools, built-in tools, connections, skills, or dynamic workflows.
-- Replacing `runtimeAction` lowering with a new public `defineTool` API.
+- Stabilizing the experimental background `defineTool` contract for general authored tools.
+- Changing connections, skills, or dynamic workflows.
 - Rolling back external side effects after cancellation.
 - Retrying failed subagent work automatically.
 - Streaming every progress event into model context.
@@ -97,9 +99,9 @@ Tasks own execution lifecycle and availability; agent addresses do not duplicate
 `input_required`. At most one nonterminal task may target one child session. The model-visible
 `<agents>` projection keeps an occupied agent visible as busy and names its active task.
 
-**Delegated execution** is a runtime execution mode, not a tool-authoring surface. A delegated
-dispatch returns once the executor acknowledges the work; the task stays `working`, and every
-later transition arrives over the task wire.
+**Delegated execution** is the outcome of a background tool handing lifecycle ownership to an
+external executor. The tool's `execute` returns once that executor acknowledges the work; the task
+stays `working`, and every later transition arrives over the task wire.
 
 `completed`, `failed`, and `cancelled` are terminal statuses. `input_required` is not terminal,
 but it is ready for parent action. Entering either condition wakes the parent so it never
@@ -117,17 +119,35 @@ export default defineAgent({
 });
 ```
 
-The flag changes only local and remote subagent calls. Every such call runs in background mode.
-All other tools keep their current behavior.
+The flag changes only local and remote subagent calls. Every such call is registered as a
+background `defineTool` definition and runs in the AI SDK tool loop. Without the flag, the same
+subagent tools retain their existing `runtimeAction` path.
+
+The generic execution contract is:
+
+```ts
+defineTool({
+  execution: "background",
+  async execute(input, ctx, task) {
+    const executor = await startExternalWork(input, task.binding);
+    return task.delegated({
+      executor: executor.binding,
+      receipt: executor.receipt,
+    });
+  },
+});
+```
+
+An ordinary `execute` return completes the task with that value. `task.delegated(...)` ends the
+tool call with a `working` receipt while the external executor retains lifecycle ownership. The
+task runtime adds `taskId` and `status` to the tool-owned receipt.
 
 The parent receives these framework-owned tools:
 
 ```ts
 interface TaskParentTools {
   task_cancel(input: { taskIds: string[] }): Promise<TaskToolResult<boolean>>;
-  task_peek(input: { taskIds: string[] }): Promise<TaskToolResult<TaskView[]>>;
   task_update(input: { message: string }): Promise<{ status: "sent"; taskId: string }>;
-  task_sleep(input: { seconds: number }): Promise<TaskToolResult<boolean>>;
 }
 ```
 
@@ -136,13 +156,10 @@ on the parent session, and eve routes matching responses directly to the blocked
 
 The controls have distinct behavior:
 
-- `task_peek` reads current state without blocking and does not return credentials or routing
-  handles.
 - Passing `agentId` to the original subagent tool sends a follow-up after the prior task became terminal, creating a new task
   bound to the same child session. It never reopens a terminal task or answers HITL.
 - `task_cancel` requests cooperative cancellation. A committed terminal state is final, so a late
   child result cannot revive a cancelled task.
-- `task_sleep` durably pauses the current turn for paced checks. It does not poll or mutate a task.
 
 There is no child-facing task tool in the first implementation. Child-to-parent lifecycle and
 HITL communication is framework-owned; progress reporting remains a separate follow-up.
@@ -161,9 +178,7 @@ interface TaskView {
 }
 
 interface TaskMetadata {
-  readonly agentId: string;
-  readonly kind: "subagent";
-  readonly mode: "local" | "remote";
+  readonly kind: string;
   readonly name: string;
 }
 
@@ -194,8 +209,9 @@ gets one receipt:
 ```
 
 The eventual child result must not become a second result for that call. A framework-authored
-task notification starts or nudges a parent turn, and the model reads any additional current state
-with `task_peek`. This keeps history append-only and leaves no dangling provider tool call.
+task notification starts or nudges a parent turn and carries the ready state's result or error
+directly. The notification is separate append-only conversation input, so history remains
+provider-valid without a second read racing the queued notification.
 
 ## Task state and ownership
 
@@ -240,10 +256,10 @@ completed, failed, and cancelled are final
 
 ## Delegated execution
 
-Today the runtime parks subagent tool calls, dispatches them serially as a batch after the
-synchronous calls, and holds the turn until every action in the batch resolves (the
-[runtime-action park path], [serial dispatch loop], and [turn-level wait]). Delegated execution
-replaces the park-and-wait mechanism in the same dispatch codepath:
+Today, without `experimental.tasks`, the runtime parks subagent tool calls, dispatches them as a
+batch after synchronous calls, and holds the turn until every action in the batch resolves (the
+[runtime-action park path], [serial dispatch loop], and [turn-level wait]). With the experiment,
+the AI SDK executes subagent definitions through the generic background-tool path:
 
 1. The harness creates a durable `working` task for the subagent call.
 2. It dispatches the child with the task binding.
@@ -251,10 +267,24 @@ replaces the park-and-wait mechanism in the same dispatch codepath:
 4. The originating call receives its receipt and the turn continues.
 
 Everything after acknowledgement — progress, input requests, authorization, terminal outcome —
-arrives over the task wire instead of resolving the dispatch. Delegated execution is an agent
-runtime change, not a `defineTool` change: authored tool contracts and the `runtimeAction`
-lowering stay as they are, and the mode lands inert until the experiment selects the two subagent
-kinds into it. A later phase can expose delegation to authored tools on top of the same mode.
+arrives over the task wire instead of resolving the dispatch. Task creation, parent indexing, the
+commit barrier, readiness delivery, and compensation are generic background-tool mechanisms.
+Local and remote definitions own only child dispatch, agent-handle effects, and mapping the task
+wire onto their executor.
+
+### Workflow host
+
+The dynamic-workflow sandbox drives subagent calls through the same harness tool definitions,
+but its host (`createWorkflowHostTools`) still executes only `runtimeAction` tools. With
+`experimental.tasks` enabled, the background subagent definitions pass the `workflowCallable`
+advertising filter and are then dropped by the host, so no host tools remain and the workflow
+tool is not advertised. This is an accepted scope cut: workflows are unavailable under the
+experiment.
+
+Graduating the experiment removes the `runtimeAction` dispatch path rather than extending it.
+The workflow host then executes background `defineTool` definitions through the same
+task-creating `execute` path the model loop uses, and `execution: "background"` becomes the
+workflow-callable contract, retiring the manual `workflowCallable` flag.
 
 ## Parent and executor wire contract
 
@@ -295,7 +325,9 @@ local and remote children alike:
 
 The proposed routing policy makes terminal updates and `input_required` wake a parked parent
 session. During an active turn, inbound task events wait for the next safe step boundary. They
-never interrupt an active model call.
+never interrupt an active model call. A task notification starts a conditionally delivered parent
+turn: the model sees the notification and may act on it, but eve does not require a user-visible
+channel message. A human message or input response remains required delivery.
 
 ```mermaid
 sequenceDiagram
@@ -314,7 +346,7 @@ sequenceDiagram
     C->>T: task.update or authorization
     T->>H: full task snapshot
     H->>H: queue until safe boundary
-    H-->>M: task notification; task_peek if needed
+    H-->>M: task notification with result or error
 ```
 
 ### Agent-to-agent dependency
@@ -344,8 +376,10 @@ The current [MCP Tasks extension] provides the closest standard vocabulary:
 - full task snapshots in `notifications/tasks`;
 - terminal states that do not change.
 
-eve's `task_peek` and `task_cancel` map to those operations. `task_sleep` is an eve
-control, not an MCP method. eve is not implementing the MCP wire protocol in this work.
+eve's `task_cancel` maps to cancellation. Result-bearing notifications replace a model-facing
+`tasks/get` operation: the model receives ready state at the transition that wakes it instead of
+performing a second read that can race the queued notification. eve is not implementing the MCP
+wire protocol in this work.
 
 One semantic difference is decided. MCP treats a tool-level `isError: true` result as
 `completed`; `failed` is reserved for JSON-RPC execution failure. eve diverges: child failure
@@ -377,12 +411,13 @@ than MCP compatibility.
   subagent blocking behavior do not change.
 - With it enabled, a slow subagent returns a task receipt and the parent can take another model
   step before the child completes.
+- With it enabled, the workflow tool is not advertised to the root session until graduation adds
+  background-tool execution to the workflow host.
 - The original tool call has exactly one result in durable history. Later task output cannot be
   attached to that call a second time.
 - Local and remote subagents support the same five parent-child flows.
-- Terminal and `input_required` transitions wake the parent; the model can inspect all relevant
-  task views with `task_peek` and decide whether the available state is sufficient.
-- `task_peek` observes current state without waking or mutating the executor.
+- Terminal and `input_required` transitions wake the parent. Terminal notifications carry the
+  task result or error directly, and input requests use the parent session's ordinary HITL events.
 - Parent-session responses route directly to the intended local task child without a parent model
   turn and cannot cross task or session ownership. Follow-up messages use the original subagent tool with `agentId`.
 - One child session owns at most one nonterminal task; repeated sends return `AGENT_BUSY` and do
@@ -404,9 +439,15 @@ than MCP compatibility.
    run's stream index remain internal?
 2. What retention and TTL apply to terminal records and unanswered `input_required` tasks?
 3. What is the cross-deployment version negotiation for task callbacks during rolling deploys?
-4. Which task events enter model context, and how are repeated progress messages coalesced?
+4. How are repeated progress messages coalesced before they start parent model turns?
 5. How are child token usage and remaining parent budgets accounted after a background child
    completes on a later turn?
+6. Should background tool inputs be constrained to `JsonValue`? Today they cross the
+   harness ↔ executor boundary as `unknown`: schema parsing can transform (a standard schema
+   may emit e.g. a `Date`), so JSON-ness is not guaranteed by construction, and annotating the
+   boundary alone would verify nothing. An honest constraint must land at the authoring layer
+   (`TInput extends JsonValue` for background-capable tools) or as per-call runtime validation;
+   deferred until background tools need durable/serializable inputs.
 
 Two former open questions are settled and recorded in the [delivery plan]: failure taxonomy
 (`failed` carries the error output) and wake policy (terminal and `input_required` wake a

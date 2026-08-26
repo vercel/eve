@@ -12,6 +12,7 @@ function buildChannelStub(state: Partial<TeamsChannelState> = {}) {
   const update = vi.fn().mockResolvedValue(undefined);
   const channel = {
     adaptiveCardVersion: "1.5",
+    teams: { replyToActivityId: undefined } as Partial<TeamsEventContext["teams"]>,
     thread: { post, startTyping, update } as Partial<TeamsEventContext["thread"]>,
     state: {
       bot: null,
@@ -39,6 +40,68 @@ function authRequiredEvent(overrides: { displayName?: string } = {}) {
     turnId: "turn_0",
   };
 }
+
+describe("defaultEvents approval lifecycle", () => {
+  it("records a posted tool approval card for settlement", async () => {
+    const { channel, post } = buildChannelStub();
+
+    await defaultEvents["input.requested"]!(
+      {
+        requests: [
+          {
+            action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "deploy" },
+            kind: "tool-approval",
+            options: [
+              { id: "approve", label: "Approve" },
+              { id: "cancel", label: "Cancel" },
+            ],
+            prompt: "Approve deployment?",
+            requestId: "approval_1",
+          },
+        ],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      },
+      channel,
+      sessionCtx,
+    );
+
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(channel.state.pendingApprovalCards).toEqual({
+      approval_1: { activityId: "act1", prompt: "Approve deployment?" },
+    });
+  });
+
+  it("replaces the settled approval card with the responder's identity", async () => {
+    const { channel, update } = buildChannelStub({
+      approvalResponderAccounts: { "teams:TENANT:USER": { id: "USER", name: "Ada" } },
+      pendingApprovalCards: {
+        approval_1: { activityId: "approval-card", prompt: "Approve deployment?" },
+      },
+    });
+
+    await defaultEvents["approval.settled"]!(
+      {
+        outcome: "approved",
+        requestId: "approval_1",
+        responderPrincipalId: "teams:TENANT:USER",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      },
+      channel,
+      sessionCtx,
+    );
+
+    expect(update).toHaveBeenCalledWith(
+      "approval-card",
+      expect.objectContaining({ attachments: expect.any(Array) }),
+    );
+    expect(JSON.stringify(update.mock.calls[0]?.[1])).toContain("Answered: Approved by Ada");
+    expect(channel.state.pendingApprovalCards).toEqual({});
+  });
+});
 
 describe("defaultEvents authorization.required", () => {
   it("renders the title-cased connection name when the challenge has no displayName", async () => {

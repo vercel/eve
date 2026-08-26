@@ -8,16 +8,11 @@ import {
   DISCOVER_EXTENSION_MOUNT_AMBIGUOUS,
   DISCOVER_EXTENSION_MOUNT_MISSING_DECLARATION,
   DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
-  DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT,
   DISCOVER_EXTENSION_SANDBOX_UNSUPPORTED,
   locateExtensionMount,
   mountNamespace,
 } from "#discover/extensions.js";
-import {
-  classifyAgentRootEntry,
-  normalizeLogicalPath,
-  SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS,
-} from "#discover/filesystem.js";
+import { classifyAgentRootEntry, normalizeLogicalPath } from "#discover/filesystem.js";
 import {
   createChannelNameDiagnostic,
   createExtensionNameDiagnostic,
@@ -120,6 +115,13 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
     slotName: "agent",
   });
   diagnostics.push(...configModuleResult.diagnostics);
+
+  const instrumentationModuleResult = discoverFlatModuleSource({
+    rootEntries,
+    rootPath: agentRoot,
+    slotName: "instrumentation",
+  });
+  diagnostics.push(...instrumentationModuleResult.diagnostics);
 
   const channelsResult = await discoverNamedSourceDirectory({
     directoryName: "channels",
@@ -240,23 +242,6 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
   });
   diagnostics.push(...mountCollection.diagnostics);
 
-  // Overrides must be co-located in the mount directory. An agent-root
-  // contribution using a mounted extension's `<ns>__` composed-name prefix would
-  // shadow that extension from outside its mount directory, so reject it.
-  diagnostics.push(
-    ...detectRootNamespaceCollisions({
-      agentRoot,
-      namespaces: mountCollection.mounts.map((descriptor) => descriptor.namespace),
-      sources: [
-        ...toolsResult.sources,
-        ...connectionsResult.connections,
-        ...skillsResult.skills,
-        ...schedulesResult.schedules,
-        ...subagentsResult.subagents,
-      ],
-    }),
-  );
-
   let resolvedExtensions: readonly ResolvedExtensionMount[] = [];
   if (role !== "agent") {
     // Extensions cannot mount other extensions yet. Fail loudly instead of
@@ -305,6 +290,9 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
 
   if (configModuleResult.module !== undefined) {
     manifestInput.configModule = configModuleResult.module;
+  }
+  if (instrumentationModuleResult.module !== undefined) {
+    manifestInput.instrumentation = instrumentationModuleResult.module;
   }
 
   const manifest = createAgentSourceManifest(manifestInput);
@@ -371,6 +359,7 @@ export async function resolveExtensionMounts(input: {
       packageRoot: located.location.packageRoot,
       sourceRoot: located.location.sourceRoot,
       manifest: extensionResult.manifest,
+      externalDependencies: located.location.externalDependencies,
       overrides,
     });
   }
@@ -523,54 +512,6 @@ async function collectExtensionMounts(input: {
   );
 
   return { diagnostics, mounts };
-}
-
-/**
- * Flags agent-root contributions whose composed name uses a mounted extension's
- * `<ns>__` prefix. That prefix is reserved for the extension and its co-located
- * overrides, so a root-level `<ns>__…` file would override the extension from
- * outside its mount directory — rejected here.
- */
-export function detectRootNamespaceCollisions(input: {
-  readonly agentRoot: string;
-  readonly namespaces: readonly string[];
-  readonly sources: ReadonlyArray<{ readonly logicalPath: string }>;
-}): DiscoverDiagnostic[] {
-  if (input.namespaces.length === 0) {
-    return [];
-  }
-
-  const diagnostics: DiscoverDiagnostic[] = [];
-  for (const source of input.sources) {
-    const name = rootContributionName(source.logicalPath);
-    const namespace = input.namespaces.find((candidate) => name.startsWith(`${candidate}__`));
-    if (namespace !== undefined) {
-      diagnostics.push(
-        createDiscoverErrorDiagnostic({
-          code: DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT,
-          message: `"${source.logicalPath}" uses the "${namespace}__" prefix reserved for the mounted extension "${namespace}". Override an extension's contributions inside its mount directory ("extensions/${namespace}/…"), not at the agent root.`,
-          sourcePath: join(input.agentRoot, source.logicalPath),
-        }),
-      );
-    }
-  }
-  return diagnostics;
-}
-
-/**
- * Derives a contribution's composed name from its slot-relative logical path:
- * the first path segment below the slot directory, minus any module extension
- * (`tools/crm__x.ts` → `crm__x`; `skills/crm__x/SKILL.md` → `crm__x`).
- */
-function rootContributionName(logicalPath: string): string {
-  const afterSlot = logicalPath.slice(logicalPath.indexOf("/") + 1);
-  const firstSegment = afterSlot.split("/")[0] ?? afterSlot;
-  for (const extension of SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS) {
-    if (firstSegment.toLowerCase().endsWith(extension)) {
-      return firstSegment.slice(0, firstSegment.length - extension.length);
-    }
-  }
-  return firstSegment;
 }
 
 /**

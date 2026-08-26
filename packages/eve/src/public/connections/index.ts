@@ -14,8 +14,8 @@ export type {
   NonInteractiveAuthorizationDefinition,
   TokenResult,
   ToolFilterDefinition,
-} from "#runtime/connections/types.js";
-export { defineInteractiveAuthorization } from "#runtime/connections/types.js";
+} from "#shared/connection-types.js";
+export { defineInteractiveAuthorization } from "#shared/connection-types.js";
 export type { JsonValue } from "#public/types/json.js";
 export {
   defineMcpClientConnection,

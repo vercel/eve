@@ -4,6 +4,15 @@
 
 All user-facing UI changes must be mobile-responsive. Before completing a UI change, verify it at a narrow mobile viewport and a desktop viewport. Check for page-level horizontal overflow, clipped content, unreadably narrow columns, overlapping controls, and whether dense navigation should wrap or scroll horizontally.
 
+## Geistdocs
+
+- Read `node_modules/@vercel/geistdocs/docs/agents.md` and the focused pages under `node_modules/@vercel/geistdocs/docs/pages/` before changing package-backed behavior.
+- Keep `cacheComponents: true` and `partialPrefetching: true` in `next.config.ts`.
+- Do not export `dynamic`, `dynamicParams`, `revalidate`, or `fetchCache` from App Router pages or route handlers.
+- Generate every supported root language. Read `[lang]` through `next/root-params` only in Server Components; retain route context `params` in Route Handlers and Server Actions.
+- Set `prefetch={true}` on app-owned links to statically generated docs, integrations, and templates so navigation reveals the complete destination immediately.
+- Keep package adapters thin. Do not deep-import package internals or edit generated `.source`, `.next`, or `node_modules` files.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know

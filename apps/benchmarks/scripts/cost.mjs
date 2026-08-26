@@ -25,6 +25,14 @@ export const modelPricing = {
     cacheRead: 1,
     cacheWrite: 12.5,
   },
+  "xai/grok-4.6": {
+    effectiveDate: "2026-08-17",
+    source: "https://docs.x.ai/developers/models",
+    input: 2,
+    output: 6,
+    cacheRead: 0.5,
+    cacheWrite: 0,
+  },
   "openai/gpt-5.6-sol": {
     effectiveDate: "2026-08-17",
     source: "https://openai.com/api/pricing/",
@@ -40,6 +48,22 @@ export const modelPricing = {
     output: 12,
     cacheRead: 0.2,
     cacheWrite: 2.5,
+  },
+  "anthropic/claude-sonnet-5": {
+    effectiveDate: "2026-08-17",
+    source: "https://docs.anthropic.com/en/docs/about-claude/pricing",
+    input: 2,
+    output: 10,
+    cacheRead: 0.2,
+    cacheWrite: 2.5,
+  },
+  "zai/glm-5.2": {
+    effectiveDate: "2026-08-17",
+    source: "https://docs.z.ai/guides/overview/pricing",
+    input: 1.4,
+    output: 4.4,
+    cacheRead: 0.26,
+    cacheWrite: 0,
   },
   "google/gemini-3.1-pro-preview": {
     effectiveDate: "2026-08-17",

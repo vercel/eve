@@ -43,8 +43,8 @@ describe("registerOtelPipeline", () => {
 
     const configuration = registerOTel.mock.calls.at(-1)?.[0] as Record<string, unknown>;
     expect("traceSampler" in configuration).toBe(false);
-    // Absent propagators keep `"none"`; eve's private ownership marker follows it.
-    expect(configuration["propagators"]).toEqual(["none", expect.any(Object)]);
+    // Absent propagators keep @vercel/otel's automatic defaults; eve's marker follows them.
+    expect(configuration["propagators"]).toEqual(["auto", expect.any(Object)]);
   });
 
   it("filters the private registration span from authored processors", () => {

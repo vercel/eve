@@ -788,9 +788,9 @@ describe("app runtime dependency tracing", () => {
       )
     ).join("\n");
 
-    expect(serverModuleSource).not.toContain("../execution/sandbox/bash-tool.js");
+    expect(serverModuleSource).not.toContain("../execution/sandbox/bash.js");
     expect(serverModuleSource).not.toContain("../execution/skills/activate.js");
-    expect(serverModuleSource).not.toContain("../execution/web-fetch/tool.js");
+    expect(serverModuleSource).not.toContain("../execution/web-fetch/execute.js");
     expect(functionEntries.some((entry) => entry.includes("node_modules/esbuild"))).toBe(false);
     expect(functionEntries.some((entry) => entry.includes("node_modules/.nf3/esbuild"))).toBe(
       false,
@@ -802,7 +802,7 @@ describe("app runtime dependency tracing", () => {
     expect(serverModuleSource).not.toContain('import("esbuild")');
     expect(serverModuleSource).not.toContain('import("rolldown")');
     expect(serverModuleSource).toContain(
-      "This tool requires sandbox access on the runtime context.",
+      "Execute a shell command in the shared workspace environment.",
     );
     expect(serverModuleSource).toContain("The dynamic skill");
     expect(serverModuleSource).toContain("URL must start with https://");

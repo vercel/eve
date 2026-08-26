@@ -34,6 +34,12 @@ function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[
   );
 }
 
+function createBoundedStreamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
+  const response = createEagerStreamResponse(events);
+  response.headers.set("x-eve-stream-tail-index", String(events.length - 1));
+  return response;
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -79,6 +85,30 @@ describe("useEveAgent (Svelte rune binding)", () => {
 
     expect(agent.data).toBe(dataBeforeSend);
     expect(agent.status).toBe("ready");
+  });
+
+  it("automatically replays an initial session when resume is enabled", async () => {
+    vi.stubGlobal("window", {});
+    const events = [
+      createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
+      createSessionWaitingEvent(),
+    ];
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(createBoundedStreamResponse(events))
+      .mockResolvedValueOnce(createEagerStreamResponse([]));
+    const seenEvents: UnstampedMessageStreamEvent[] = [];
+
+    useEveAgent({
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      resume: true,
+      onEvent(event) {
+        seenEvents.push(event);
+      },
+    });
+
+    await vi.waitFor(() => expect(seenEvents).toEqual(stampTestEvents(events)));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
   it("sends messages and notifies lifecycle callbacks from the shared store", async () => {

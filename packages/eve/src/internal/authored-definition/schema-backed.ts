@@ -1,8 +1,6 @@
-import {
-  isDisabledToolSentinel,
-  isExperimentalWorkflowToolDefinition,
-} from "#public/definitions/tool.js";
-import { isWebSearchToolDefinition } from "#public/tools/web-search.js";
+import { isDisabledToolSentinel } from "#tools/definition.js";
+import { isExperimentalWorkflowToolDefinition } from "#tools/workflow.js";
+import { isWebSearchToolDefinition } from "#tools/provided/web-search.js";
 import {
   expectFunction,
   expectObjectRecord,
@@ -10,18 +8,18 @@ import {
   expectPositiveInteger,
   expectString,
 } from "#internal/authored-module.js";
-import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
+import type { InternalToolDefinitionWithExecuteFn } from "#tools/definition.js";
 import {
   serializeInputSchema,
   serializeOutputSchema,
   type ToolSchemaSource,
-} from "#shared/tool-schema.js";
+} from "#tools/schema.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
 import {
   assertResolverOnlyDynamicSentinel,
   isDynamicSentinel,
   type DynamicToolEventName,
-} from "#shared/dynamic-tool-definition.js";
+} from "#dynamic/definition.js";
 
 /**
  * Canonical normalized shape of one authored tool default export.
@@ -29,7 +27,12 @@ import {
  * Identity is path-derived — the compiler stamps the filename slug onto
  * the compiled entry. This shape never carries an authored `name`.
  */
-type NormalizedAuthoredTool = Readonly<Omit<InternalToolDefinitionWithExecuteFn, "name">>;
+type NormalizedAuthoredTool = Readonly<
+  Omit<InternalToolDefinitionWithExecuteFn, "name"> & {
+    readonly hasApproval: boolean;
+    readonly hasModelOutputProjection: boolean;
+  }
+>;
 type MutableNormalizedAuthoredTool = {
   -readonly [K in keyof NormalizedAuthoredTool]: NormalizedAuthoredTool[K];
 };
@@ -93,7 +96,16 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
     record,
-    ["auth", "description", "execute", "inputSchema", "approval", "outputSchema", "toModelOutput"],
+    [
+      "auth",
+      "description",
+      "execute",
+      "execution",
+      "inputSchema",
+      "approval",
+      "outputSchema",
+      "toModelOutput",
+    ],
     message,
   );
   const inputSchema =
@@ -104,8 +116,17 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   const definition: MutableNormalizedAuthoredTool = {
     description: expectString(record.description, message),
     execute: expectFunction(record.execute, message),
+    hasApproval: record.approval !== undefined,
+    hasModelOutputProjection: record.toModelOutput !== undefined,
     inputSchema,
   };
+  if (record.execution !== undefined) {
+    const execution = expectString(record.execution, message);
+    if (execution !== "background") {
+      throw new Error(`${message} Expected "execution" to be "background".`);
+    }
+    definition.execution = execution;
+  }
   if (outputSchema !== undefined) {
     definition.outputSchema = outputSchema;
   }

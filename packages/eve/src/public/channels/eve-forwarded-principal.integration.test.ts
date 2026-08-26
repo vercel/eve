@@ -48,6 +48,23 @@ const FORWARDED_INITIATOR: SessionAuthContext = {
   subject: "U999",
 };
 
+function createEmptySkillBundle(): CompiledBundle {
+  return {
+    adapterRegistry: undefined as never,
+    compiledArtifactsSource: undefined as never,
+    graph: undefined as never,
+    hookRegistry: undefined as never,
+    moduleMap: undefined as never,
+    nodeId: undefined,
+    resolvedAgent: { skills: [] } as never,
+    subagentRegistry: undefined as never,
+    toolRegistry: undefined as never,
+    turnAgent: undefined as never,
+  };
+}
+
+const EMPTY_SKILL_BUNDLE = createEmptySkillBundle();
+
 function createEveCreateHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
   const createRoute = channel.routes.find(
@@ -112,7 +129,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
       channelName: "eve",
       ...options,
     };
-    const ctx = buildRunContext({ bundle: {} as CompiledBundle, run });
+    const ctx = buildRunContext({ bundle: EMPTY_SKILL_BUNDLE, run });
 
     const current = ctx.get(AuthKey);
     const initiator = ctx.get(InitiatorAuthKey);
@@ -163,7 +180,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
       "adapter" | "channelName" | "requestId"
     >;
     const ctx = buildRunContext({
-      bundle: {} as CompiledBundle,
+      bundle: EMPTY_SKILL_BUNDLE,
       run: {
         adapter: { kind: "eve" },
         channelName: "eve",

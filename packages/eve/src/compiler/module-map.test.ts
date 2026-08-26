@@ -1,216 +1,170 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import type { CompiledAgentManifest } from "./manifest.js";
+import { compileFromMemory } from "#compiler/compile-from-memory.js";
 import {
-  COMPILED_AGENT_MANIFEST_VERSION,
-  createCompiledAgentResources,
-  ROOT_COMPILED_AGENT_NODE_ID,
-} from "./manifest.js";
-import { collectModuleRefsForManifest, createCompiledModuleMapSource } from "./module-map.js";
+  collectModuleBindingsForManifest,
+  createCompiledModuleMapSource,
+  createProgrammaticCompiledModuleMap,
+} from "#compiler/module-map.js";
+import { validateCompiledAgentManifest } from "#compiler/validate-artifact.js";
 
-function createManifestWithTool(agentRoot: string): CompiledAgentManifest {
-  return {
-    agentRoot,
-    appRoot: agentRoot,
-    config: {
-      compaction: {},
-      model: {
-        contextWindowTokens: 128_000,
-        id: "openai/gpt-5.4-mini",
-        routing: { kind: "gateway", target: "openai" },
+const mocks = vi.hoisted(() => ({
+  loadAuthoredModuleNamespace: vi.fn(
+    async (
+      _sourcePath: string,
+      _options: {
+        readonly externalDependencies: readonly string[];
+        readonly extensionScopeNamespace?: string;
       },
-      name: "kitchen-sink-fixture",
-    },
-    connections: [],
-    diagnosticsSummary: {
-      errors: 0,
-      warnings: 0,
-    },
-    extensionMounts: [],
-    disabledFrameworkTools: [],
-    dynamicInstructions: [],
-    dynamicSkills: [],
-    dynamicTools: [],
-    hooks: [],
-    instructions: [],
-    kind: "eve-agent-compiled-manifest",
-    remoteAgents: [],
-    schedules: [],
-    sandbox: null,
-    sandboxWorkspaces: [],
-    skills: [],
-    subagentEdges: [],
-    channels: [],
-    subagents: [],
-    tools: [
-      {
-        description: "Echoes input.",
-        exportName: "default",
-        inputSchema: {},
-        logicalPath: "tools/echo.ts",
-        name: "echo",
-        sourceId: "tools/echo.ts",
-        sourceKind: "module",
-      },
-    ],
-    version: COMPILED_AGENT_MANIFEST_VERSION,
-    workspaceResourceRoot: {
-      logicalPath: "",
-      rootEntries: [],
-    },
-  };
-}
+    ) => ({}),
+  ),
+}));
 
-describe("createCompiledModuleMapSource", () => {
-  it("emits ESM-safe file URLs for Windows absolute imports", () => {
-    const source = createCompiledModuleMapSource({
-      importSpecifierStyle: "absolute",
-      manifest: createManifestWithTool(
-        "G:\\projects\\eve\\apps\\fixtures\\kitchen-sink-fixture\\agent",
-      ),
-      moduleMapPath:
-        "G:\\projects\\eve\\apps\\fixtures\\kitchen-sink-fixture\\.eve\\compile\\module-map.mjs",
+vi.mock("#internal/authored-module-loader.js", () => ({
+  loadAuthoredModuleNamespace: mocks.loadAuthoredModuleNamespace,
+}));
+
+describe("compiled module maps", () => {
+  it("renders every selected binding and no shadowed source", async () => {
+    const { manifest } = await compileFromMemory({
+      model: "openai/gpt-5.4",
+      tools: [{ name: "weather" }],
     });
-
-    expect(source).toContain(
-      'import * as module_0 from "file:///G:/projects/eve/apps/fixtures/kitchen-sink-fixture/agent/tools/echo.ts";',
-    );
-    expect(source).not.toContain(
-      '"G:/projects/eve/apps/fixtures/kitchen-sink-fixture/agent/tools/echo.ts"',
-    );
-    expect(source).toContain(`"${ROOT_COMPILED_AGENT_NODE_ID}"`);
-  });
-
-  it("imports a dynamic subagent config resolver relative to the child agent root", () => {
-    const manifest: CompiledAgentManifest = {
-      ...createManifestWithTool("/agent"),
-      subagents: [
-        {
-          agent: createCompiledAgentResources({
-            agentRoot: "/agent/subagents/researcher",
-            appRoot: "/agent",
-          }),
-          configResolver: {
-            eventNames: ["turn.started"],
-            logicalPath: "agent.ts",
-            sourceId: "agent.ts",
-            sourceKind: "module",
-          },
-          entryPath: "/agent/subagents/researcher/agent.ts",
-          logicalPath: "subagents/researcher",
-          name: "researcher",
-          nodeId: "subagents/researcher",
-          rootPath: "/agent/subagents/researcher",
-          sourceId: "subagents/researcher",
-          sourceKind: "module",
-        },
-      ],
-    };
-
     const source = createCompiledModuleMapSource({
       manifest,
-      moduleMapPath: "/agent/.eve/compile/module-map.mjs",
+      moduleMapPath: "/app/.eve/compile/module-map.mjs",
     });
 
-    expect(source).toContain('from "../../subagents/researcher/agent.ts";');
-    expect(source).not.toContain("subagents/researcher/subagents/researcher");
+    for (const sourceId of Object.keys(manifest.bindings)) {
+      expect(source).toContain(JSON.stringify(sourceId));
+    }
+    for (const entry of manifest.sourceComposition.entries) {
+      if (entry.kind === "shadowed") {
+        expect(source).not.toContain(JSON.stringify(entry.source.sourceId));
+      }
+    }
+    expect(source).toContain("loadFrameworkProgrammaticModule");
   });
-});
 
-describe("collectModuleRefsForManifest", () => {
-  it("includes module-sourced schedules with run() so the dispatcher can load the handler", () => {
-    const manifest = createManifestWithTool("/agent");
-    const manifestWithSchedule: CompiledAgentManifest = {
-      ...manifest,
-      schedules: [
-        {
-          cron: "0 9 * * 1-5",
-          hasRun: true,
-          logicalPath: "schedules/daily-digest.ts",
-          name: "daily-digest",
-          sourceId: "schedules/daily-digest.ts",
-          sourceKind: "module",
+  it("collects exactly the node binding table plus explicit remote bindings", async () => {
+    const { manifest } = await compileFromMemory({
+      model: "openai/gpt-5.4",
+      tools: [{ name: "weather" }, { name: "echo" }],
+    });
+
+    expect(collectModuleBindingsForManifest(manifest).map((entry) => entry.sourceId)).toEqual(
+      Object.keys(manifest.bindings).sort(),
+    );
+  });
+
+  it("uses the selected semantic revision in generated programmatic loads", async () => {
+    const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+    const sandboxBinding = manifest.bindings[manifest.sandbox.sourceId]!;
+    const source = createCompiledModuleMapSource({
+      manifest,
+      moduleMapPath: "/app/.eve/compile/module-map.mjs",
+    });
+
+    expect(sandboxBinding.backing).toMatchObject({
+      kind: "programmatic",
+      semanticRevision: "eve:default-sandbox:v1",
+    });
+    expect(source).toContain("eve:default-sandbox:v1");
+  });
+
+  it("loads extension bindings with their stable package namespace", async () => {
+    const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+    const [extensionSourceId, ...applicationSourceIds] = Object.keys(manifest.bindings).sort();
+    if (extensionSourceId === undefined) throw new Error("Expected at least one module binding.");
+    manifest.bindings[extensionSourceId] = {
+      backing: {
+        externalDependencies: [],
+        extensionScope: { namespace: "renamed-mount", sourceRoot: "/extension" },
+        kind: "filesystem",
+        sourcePath: "/extension/tool.ts",
+      },
+      logicalPath: "tools/renamed-mount__tool.ts",
+      owner: { kind: "extension", namespace: "renamed-mount", packageName: "@acme/crm" },
+    };
+    for (const sourceId of applicationSourceIds) {
+      manifest.bindings[sourceId] = {
+        backing: {
+          externalDependencies: [],
+          kind: "filesystem",
+          sourcePath: `/application/${sourceId}.ts`,
         },
-      ],
+        logicalPath: manifest.bindings[sourceId]!.logicalPath,
+        owner: { kind: "application" },
+      };
+    }
+    mocks.loadAuthoredModuleNamespace.mockClear();
+
+    await createProgrammaticCompiledModuleMap(manifest, []);
+
+    expect(mocks.loadAuthoredModuleNamespace).toHaveBeenCalledWith("/extension/tool.ts", {
+      externalDependencies: [],
+      extensionScopeNamespace: "acme-crm",
+    });
+    expect(
+      mocks.loadAuthoredModuleNamespace.mock.calls
+        .filter(([sourcePath]) => sourcePath.startsWith("/application/"))
+        .every(([, options]) => options.extensionScopeNamespace === undefined),
+    ).toBe(true);
+  });
+
+  it("orders and renders programmatic dependencies in generated maps", async () => {
+    const { manifest } = await compileFromMemory({
+      model: "openai/gpt-5.4",
+      tools: [{ name: "weather" }],
+    });
+    const tool = manifest.tools.find((candidate) => candidate.name === "weather")!;
+    const configSourceId = manifest.config.source.sourceId;
+    const binding = manifest.bindings[tool.sourceId]!;
+    if (binding.backing.kind !== "programmatic") {
+      throw new Error("Expected a programmatic tool binding.");
+    }
+    manifest.bindings[tool.sourceId] = {
+      ...binding,
+      backing: {
+        ...binding.backing,
+        dependencies: { config: configSourceId },
+        parameters: { role: "derived" },
+      },
     };
 
-    const refs = collectModuleRefsForManifest(manifestWithSchedule);
-
-    expect(refs).toContainEqual({
-      sourceKind: "module",
-      logicalPath: "schedules/daily-digest.ts",
-      sourceId: "schedules/daily-digest.ts",
+    const ordered = collectModuleBindingsForManifest(manifest).map((entry) => entry.sourceId);
+    const source = createCompiledModuleMapSource({
+      manifest,
+      moduleMapPath: "/app/.eve/compile/module-map.mjs",
     });
+
+    expect(ordered.indexOf(configSourceId)).toBeLessThan(ordered.indexOf(tool.sourceId));
+    expect(source).toContain('"parameters":{"role":"derived"}');
+    expect(source).toMatch(/Object\.freeze\(\{ "config": module_\d+ \}\)/);
   });
 
-  it("omits markdown schedules from the module map", () => {
-    const manifest = createManifestWithTool("/agent");
-    const manifestWithSchedule: CompiledAgentManifest = {
-      ...manifest,
-      schedules: [
-        {
-          cron: "0 0 * * 0",
-          hasRun: false,
-          logicalPath: "schedules/cleanup.md",
-          name: "cleanup",
-          sourceId: "schedules/cleanup.md",
-          sourceKind: "markdown",
-          markdown: "Clean up stale data.",
-        },
-      ],
+  it("rejects missing and cyclic programmatic binding dependencies", async () => {
+    const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+    const sourceId = manifest.config.source.sourceId;
+    const binding = manifest.bindings[sourceId]!;
+    if (binding.backing.kind !== "programmatic") {
+      throw new Error("Expected a programmatic config binding.");
+    }
+
+    manifest.bindings[sourceId] = {
+      ...binding,
+      backing: { ...binding.backing, dependencies: { missing: "missing-source" } },
     };
+    expect(() => validateCompiledAgentManifest(manifest)).toThrow(
+      `programmatic binding "${sourceId}" depends on missing binding "missing-source"`,
+    );
 
-    const refs = collectModuleRefsForManifest(manifestWithSchedule);
-
-    expect(refs.some((ref) => ref.sourceId === "schedules/cleanup.md")).toBe(false);
-  });
-
-  it("omits module-sourced schedules that only carry markdown (no run handler)", () => {
-    const manifest = createManifestWithTool("/agent");
-    const manifestWithSchedule: CompiledAgentManifest = {
-      ...manifest,
-      schedules: [
-        {
-          cron: "0 8 * * *",
-          hasRun: false,
-          logicalPath: "schedules/daily-digest.mjs",
-          name: "daily-digest",
-          markdown: "Send a weather digest.",
-          sourceId: "schedules/daily-digest.mjs",
-          sourceKind: "module",
-        },
-      ],
+    manifest.bindings[sourceId] = {
+      ...binding,
+      backing: { ...binding.backing, dependencies: { self: sourceId } },
     };
-
-    const refs = collectModuleRefsForManifest(manifestWithSchedule);
-
-    expect(refs.some((ref) => ref.sourceId === "schedules/daily-digest.mjs")).toBe(false);
-  });
-
-  it("includes remote agents from the node manifest without an extra module-ref side channel", () => {
-    const manifest = createManifestWithTool("/agent");
-    const refs = collectModuleRefsForManifest({
-      ...manifest,
-      remoteAgents: [
-        {
-          description: "Answer weather questions remotely.",
-          entryPath: "/agent/subagents/weather.ts",
-          logicalPath: "subagents/weather.ts",
-          name: "weather",
-          nodeId: "subagents/weather.ts",
-          path: "/eve/v1/session",
-          rootPath: "/agent",
-          sourceId: "subagents/weather.ts",
-          sourceKind: "module",
-          url: "https://weather.example.com",
-        },
-      ],
-    });
-
-    expect(refs).toContainEqual({
-      sourceKind: "module",
-      logicalPath: "subagents/weather.ts",
-      sourceId: "subagents/weather.ts",
-    });
+    expect(() => validateCompiledAgentManifest(manifest)).toThrow(
+      `programmatic binding dependency cycle includes "${sourceId}"`,
+    );
   });
 });

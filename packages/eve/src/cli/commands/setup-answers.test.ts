@@ -15,10 +15,43 @@ describe("setup answers", () => {
     expect(() => parseSetupAnswer("mode=portable")).toThrow("must be JSON");
   });
 
-  it("builds a minimal resume command", () => {
-    expect(headlessSetupContinuation({ item: "channel/github", installed: true })).toEqual({
+  it("builds a resume command with a non-secret answer placeholder", () => {
+    expect(
+      headlessSetupContinuation({
+        item: "channel/github",
+        installed: true,
+        question: { key: "phoneNumber", kind: "text", message: "Phone number?", required: true },
+      }),
+    ).toEqual({
       command: "eve",
-      args: ["add", "channel/github", "--non-interactive", "--skip-install"],
+      args: [
+        "add",
+        "channel/github",
+        "--non-interactive",
+        "--skip-install",
+        "--answer",
+        "phoneNumber=<JSON value>",
+      ],
+    });
+  });
+
+  it("does not put a secret answer placeholder on the command line", () => {
+    expect(
+      headlessSetupContinuation({
+        item: "connection/linear",
+        installed: true,
+        question: {
+          key: "apiKey",
+          kind: "environment",
+          message: "API key?",
+          required: true,
+          variable: "LINEAR_API_KEY",
+          sensitive: true,
+        },
+      }),
+    ).toEqual({
+      command: "eve",
+      args: ["add", "connection/linear", "--non-interactive", "--skip-install"],
     });
   });
 });

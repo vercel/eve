@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { AgentInfoResult } from "#client/index.js";
 import type { LogRecord } from "#internal/logging.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 import type { DevDiagnostics } from "../diagnostics.js";
 import { searchActionValue } from "#setup/cli/select-state.js";
 import {
@@ -85,65 +86,17 @@ function agentInfoWithModel(
   endpoint?: StaticAgentInfoModel["endpoint"],
   extras?: Partial<StaticAgentInfoModel>,
 ): AgentInfoResult {
+  const info = createTestAgentInfoResult({ modelId, name: "Weather Agent" });
   return {
+    ...info,
     agent: {
-      agentRoot: "/tmp/weather-agent/agent",
-      appRoot: "/tmp/weather-agent",
+      ...info.agent,
       model: {
         id: modelId,
         endpoint,
         routing: { kind: "gateway" as const, target: modelId.split("/")[0] ?? "openai" },
         ...extras,
       },
-      name: "Weather Agent",
-    },
-    capabilities: {
-      devRoutes: true,
-    },
-    channels: {
-      authored: [],
-      available: [],
-      disabledFramework: [],
-      framework: [],
-    },
-    connections: [],
-    diagnostics: {
-      discoveryErrors: 0,
-      discoveryWarnings: 0,
-    },
-    hooks: [],
-    instructions: {
-      dynamic: [],
-      static: [],
-    },
-    kind: "eve-agent-info",
-    mode: "development",
-    sandbox: null,
-    schedules: [],
-    skills: {
-      dynamic: [],
-      static: [],
-    },
-    subagents: {
-      local: [],
-      total: 0,
-    },
-    tools: {
-      authored: [],
-      available: [],
-      disabledFramework: [],
-      dynamic: [],
-      framework: [],
-      reserved: [],
-    },
-    version: 2,
-    workflow: {
-      enabled: false,
-      toolName: "Workflow",
-    },
-    workspace: {
-      resourceRoot: null,
-      rootEntries: [],
     },
   };
 }
@@ -1572,13 +1525,13 @@ describe("TerminalRenderer (inline scrollback)", () => {
         {
           type: "tool-call",
           input: { taskIds: ["task_123"] },
-          toolCallId: "peek-1",
-          toolName: "task_peek",
+          toolCallId: "cancel-1",
+          toolName: "task_cancel",
         },
         {
           type: "tool-result",
-          output: { tasks: [{ status: "completed", taskId: "task_123" }] },
-          toolCallId: "peek-1",
+          output: { tasks: [{ status: "cancelled", taskId: "task_123" }] },
+          toolCallId: "cancel-1",
         },
         { type: "assistant-delta", id: "wake-1", delta: "Research finished." },
         { type: "assistant-complete", id: "wake-1" },
@@ -2486,14 +2439,14 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).not.toContain("Enter to select");
     expect(countOccurrences(snapshot, "Esc to")).toBe(1);
 
-    input.down();
+    input.send("j");
     const unselected = screen
       .snapshot()
       .split("\n")
       .find((line) => line.includes("AI Gateway"));
     expect(unselected).toContain("1. AI Gateway");
     expect(unselected).not.toContain("▶");
-    input.up();
+    input.send("k");
 
     input.enter();
     await expect(answer).resolves.toEqual({ optionId: "gateway" });

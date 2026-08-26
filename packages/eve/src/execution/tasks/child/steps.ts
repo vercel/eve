@@ -6,8 +6,9 @@ import type {
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import { createLogger } from "#internal/logging.js";
+import type { JsonValue } from "#shared/json.js";
 import {
   isTerminalTaskStatus,
   taskAuthorizationRequestId,
@@ -72,7 +73,7 @@ export async function wakeTaskAuthorizationParentStep(input: {
     taskDeliveryId: `${input.taskId}:authorization:${input.request.event.type}:${data.turnId}:${data.stepIndex}:${data.sequence}:${taskAuthorizationRequestId(input.request.event)}`,
   };
   try {
-    await resumeHook(input.token, command);
+    await resumeSessionInbox(input.token, command);
   } catch (error) {
     if (isTaskWorkflowTargetGone(error)) return;
     throw error;
@@ -103,7 +104,7 @@ export async function wakeTaskParentStep(input: {
     taskDeliveryId: `${input.view.taskId}:ready:${input.view.status}`,
   };
   try {
-    await resumeHook(input.token, command);
+    await resumeSessionInbox(input.token, command);
   } catch (error) {
     if (isTaskWorkflowTargetGone(error)) {
       log.warn("task wake target is gone; the parent session already ended", {
@@ -129,10 +130,10 @@ export async function wakeTaskUpdateParentStep(input: {
     payload: {
       message: `Background task ${input.view.taskId} (${input.view.metadata.name}) update: ${input.update.message}`,
     },
-    taskDeliveryId: `${input.view.taskId}:update:${input.update.childTurnId}:${input.update.childStepIndex}:${input.update.callId}`,
+    taskDeliveryId: `${input.view.taskId}:update:${input.update.updateEpoch}:${input.update.updateIndex}:${input.update.callId}`,
   };
   try {
-    await resumeHook(input.token, command);
+    await resumeSessionInbox(input.token, command);
   } catch (error) {
     if (isTaskWorkflowTargetGone(error)) return;
     throw error;
@@ -162,7 +163,7 @@ export async function wakeTaskInputRequestParentStep(input: {
     taskDeliveryId: `${input.taskId}:input:${input.request.event.turnId}:${input.request.event.stepIndex}:${input.request.event.sequence}`,
   };
   try {
-    await resumeHook(input.token, command);
+    await resumeSessionInbox(input.token, command);
   } catch (error) {
     if (isTaskWorkflowTargetGone(error)) return;
     throw error;
@@ -207,7 +208,7 @@ export async function deliverTaskInputResponsesStep(input: {
       if (!response.ok)
         throw new Error(`Remote task input delivery failed with HTTP ${response.status}.`);
     } else {
-      await resumeHook(input.answer.childContinuationToken, command);
+      await resumeSessionInbox(input.answer.childContinuationToken, command);
     }
     return "delivered";
   } catch (error) {
@@ -221,10 +222,20 @@ export async function deliverTaskInputResponsesStep(input: {
   }
 }
 
-function formatTaskNotification(view: TaskView): string {
+export function formatTaskNotification(view: TaskView): string {
   const subject = `Background task ${view.taskId} (${view.metadata.name})`;
   if (view.status === "input_required") {
-    return `${subject} needs input. Use task_peek to inspect the outstanding requests.`;
+    return `${subject} needs input.`;
   }
-  return `${subject} is ${view.status}. Use task_peek to read its output.`;
+  if (view.status === "completed") {
+    return `${subject} is completed.\n\nResult:\n${formatTaskOutput(view.lastOutput.data)}`;
+  }
+  if (view.status === "failed") {
+    return `${subject} failed.\n\nError:\n${formatTaskOutput(view.lastOutput.data)}`;
+  }
+  return `${subject} is cancelled.`;
+}
+
+function formatTaskOutput(output: JsonValue): string {
+  return typeof output === "string" ? output : (JSON.stringify(output) ?? "null");
 }

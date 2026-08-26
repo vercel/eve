@@ -10,9 +10,9 @@ import {
   compactClientSession,
   resetClientSession,
 } from "#client/session-controls.js";
-import { serializeOutputSchema } from "#shared/tool-schema.js";
+import { serializeOutputSchema } from "#tools/schema.js";
 import { createClientUrl } from "#client/url.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import type { InputResponse } from "#shared/input.js";
 import type {
   CancelSessionResult,
   ClearResult,
@@ -181,6 +181,7 @@ export class ClientSession {
     input: SendTurnPayload,
   ): AsyncGenerator<MessageStreamEvent> {
     let eventCount = 0;
+    const pendingAuthorizations = new Set<string>();
     try {
       for await (const event of this.#readStream({
         headers: input.headers,
@@ -190,8 +191,18 @@ export class ClientSession {
         streamReconnectPolicy: input.streamReconnectPolicy,
       })) {
         eventCount += 1;
+        if (event.type === "authorization.required" && event.data.webhookUrl !== undefined) {
+          pendingAuthorizations.add(event.data.name);
+        } else if (event.type === "authorization.completed") {
+          pendingAuthorizations.delete(event.data.name);
+        }
         yield event;
-        if (isCurrentTurnBoundaryEvent(event)) break;
+        if (
+          isCurrentTurnBoundaryEvent(event) &&
+          (event.type !== "session.waiting" || pendingAuthorizations.size === 0)
+        ) {
+          break;
+        }
       }
     } finally {
       this.#state = {

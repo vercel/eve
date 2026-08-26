@@ -17,11 +17,13 @@ import type { JsonValue } from "#shared/json.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
 import type { AgentActionContext } from "#tracing/agent-action-instrumentation.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
+import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 
 interface AgentApprovalSpanState {
   readonly actionCallId: string;
   readonly actionName: string;
   readonly attemptIndex: number;
+  readonly channelAudience: ChannelAudience;
   readonly parent: SpanContext;
   readonly requestAttribute?: string;
   readonly requestId: string;
@@ -63,6 +65,7 @@ export function createAgentApprovalInstrumentation(input: {
       actionCallId: event.action.callId,
       actionName: event.action.name,
       attemptIndex: event.scope.attemptIndex,
+      channelAudience: normalizeChannelAudience(event.scope.channelAudience),
       parent: {
         spanId: parent.spanContext.spanId,
         traceFlags: parent.spanContext.traceFlags,
@@ -102,7 +105,6 @@ export function createAgentApprovalInstrumentation(input: {
               "agent.approval.request_id": state.requestId,
               "agent.framework.name": "eve",
               "agent.framework.version": input.frameworkVersion,
-              "agent.root.session.id": state.rootSessionId,
               "agent.session.id": state.sessionId,
               "agent.step.attempt": state.attemptIndex,
               "agent.step.index": state.stepIndex,
@@ -158,6 +160,7 @@ function readState(value: unknown): AgentApprovalSpanState | undefined {
     actionCallId: state["actionCallId"],
     actionName: state["actionName"],
     attemptIndex: state["attemptIndex"],
+    channelAudience: normalizeChannelAudience(state["channelAudience"]),
     parent: {
       isRemote: false,
       spanId: parentRecord["spanId"],

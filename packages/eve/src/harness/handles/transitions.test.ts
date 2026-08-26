@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
 import {
+  AGENT_HANDLES_STATE_KEY,
   deriveAgentId,
   getAgentHandleStore,
   type AgentAddress,
@@ -16,6 +17,8 @@ import {
   confirmTaskAgentAddress,
   prepareAgentContinuation,
   prepareAgentStart,
+  rebaseAgentHandles,
+  recordTaskAgentAddress,
   rejectAgentEffect,
   removeTaskAgentAddress,
   settleAgentTurn,
@@ -165,6 +168,28 @@ describe("task agent addresses", () => {
   });
 });
 
+describe("recordTaskAgentAddress", () => {
+  it("appends an addressed handle from a delegated task's executor binding", () => {
+    const recorded = recordTaskAgentAddress(createSession(), { address, identity });
+    expect(handlesOf(recorded)).toEqual([{ address, identity, phase: "addressed" }]);
+  });
+
+  it("is a replay no-op when the identical handle is already stored", () => {
+    const recorded = recordTaskAgentAddress(createSession(), { address, identity });
+    expect(recordTaskAgentAddress(recorded, { address, identity })).toBe(recorded);
+  });
+
+  it("throws when the id already exists with different content", () => {
+    const recorded = recordTaskAgentAddress(createSession(), { address, identity });
+    expect(() =>
+      recordTaskAgentAddress(recorded, {
+        address: { ...address, continuationToken: "continuation_divergent" },
+        identity,
+      }),
+    ).toThrow(identity.id);
+  });
+});
+
 describe("prepareAgentContinuation", () => {
   const continueOperation: ContinueOperation = {
     callId: "call_2",
@@ -307,6 +332,104 @@ describe("abandonRunningAgentTurns", () => {
 
     const empty = createSession();
     expect(abandonRunningAgentTurns(empty)).toBe(empty);
+  });
+});
+
+describe("rebaseAgentHandles", () => {
+  const otherHandle: AgentHandle = {
+    address: {
+      continuationToken: "continuation_other",
+      kind: "agent/local",
+      sessionId: "session_other",
+    },
+    identity: { id: "ag_writer:aaaaaaaaaaaa", name: "writer", nodeId: "node_writer" },
+    lastStatus: "",
+    phase: "parked",
+  };
+  const continueOperation: ContinueOperation = {
+    callId: "call_2",
+    id: "op_continue",
+    kind: "continue",
+    parentTurnId: "turn_2",
+    previousStatus: "",
+  };
+
+  function withHandles(handles: readonly AgentHandle[]): HarnessSession {
+    return createSession({ [AGENT_HANDLES_STATE_KEY]: { handles } });
+  }
+
+  function inPlaceChange(): { base: HarnessSession; next: HarnessSession } {
+    const base = parkedSession();
+    const prepared = prepareAgentContinuation(base, {
+      agentId: identity.id,
+      invokedName: "research",
+      operation: continueOperation,
+    });
+    if (prepared.kind !== "ready") {
+      throw new Error("expected ready");
+    }
+    return { base, next: prepared.session };
+  }
+
+  it("appends a handle the dispatch added onto a diverged working session", () => {
+    const next = preparedSession();
+    const current = withHandles([otherHandle]);
+    const rebased = rebaseAgentHandles(current, {
+      base: createSession().state,
+      next: next.state,
+    });
+    expect(handlesOf(rebased)).toEqual([otherHandle, ...handlesOf(next)]);
+  });
+
+  it("applies a removal the dispatch made", () => {
+    const base = confirmTaskAgentAddress(preparedSession(), {
+      address,
+      operationId: startOperation.id,
+    });
+    const current = withHandles([...handlesOf(base), otherHandle]);
+    const rebased = rebaseAgentHandles(current, {
+      base: base.state,
+      next: removeTaskAgentAddress(base, identity.id).state,
+    });
+    expect(handlesOf(rebased)).toEqual([otherHandle]);
+  });
+
+  it("applies an in-place change the dispatch made", () => {
+    const { base, next } = inPlaceChange();
+    const current = withHandles([...handlesOf(base), otherHandle]);
+    const rebased = rebaseAgentHandles(current, { base: base.state, next: next.state });
+    expect(handlesOf(rebased)).toEqual([...handlesOf(next), otherHandle]);
+  });
+
+  it("throws when the dispatch and another effect changed the same handle differently", () => {
+    const { base, next } = inPlaceChange();
+    const current = withHandles([{ address, identity, lastStatus: "diverged", phase: "parked" }]);
+    expect(() => rebaseAgentHandles(current, { base: base.state, next: next.state })).toThrow(
+      identity.id,
+    );
+  });
+
+  it("throws when an added id already exists with different content", () => {
+    const current = withHandles([
+      {
+        identity,
+        operation: startOperation,
+        phase: "starting",
+        target: { continuationToken: "continuation_divergent", kind: "agent/local" },
+      },
+    ]);
+    expect(() =>
+      rebaseAgentHandles(current, {
+        base: createSession().state,
+        next: preparedSession().state,
+      }),
+    ).toThrow(identity.id);
+  });
+
+  it("returns the working session unchanged when it already contains the delta", () => {
+    const { base, next } = inPlaceChange();
+    const current = withHandles(handlesOf(next));
+    expect(rebaseAgentHandles(current, { base: base.state, next: next.state })).toBe(current);
   });
 });
 

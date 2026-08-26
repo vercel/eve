@@ -8,6 +8,7 @@ import {
   createActionsRequestedEvent,
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
+  createInputResolvedEvent,
   createInputRequestedEvent,
   createMessageAppendedEvent,
   createMessageCompletedEvent,
@@ -567,6 +568,116 @@ describe("defaultMessageReducer", () => {
     });
 
     expect(findToolPart(data, "call_1")).toMatchObject({ state: "approval-responded" });
+  });
+
+  it("projects authoritative input resolutions from replayed server events", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createInputRequestedEvent({
+        requests: [
+          {
+            action: {
+              callId: "call_1",
+              input: { command: "pwd" },
+              kind: "tool-call",
+              toolName: "bash",
+            },
+            display: "confirmation",
+            kind: "tool-approval",
+            options: [
+              { id: "approve", label: "Yes", style: "primary" },
+              { id: "cancel", label: "No", style: "danger" },
+            ],
+            prompt: "Approve tool call: bash",
+            requestId: "approval_1",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createInputResolvedEvent({
+        resolutions: [
+          {
+            kind: "tool-approval",
+            outcome: "approved",
+            requestId: "approval_1",
+            response: { optionId: "approve", requestId: "approval_1" },
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(findToolPart(data, "call_1")).toMatchObject({
+      state: "approval-responded",
+      toolMetadata: {
+        eve: {
+          inputResponse: { optionId: "approve", requestId: "approval_1" },
+        },
+      },
+    });
+  });
+
+  it("closes replayed input requests that resolve without a response", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createInputRequestedEvent({
+        requests: [
+          {
+            action: {
+              callId: "question_1",
+              input: { prompt: "Which environment?" },
+              kind: "tool-call",
+              toolName: "ask_question",
+            },
+            allowFreeform: true,
+            display: "text",
+            kind: "question",
+            prompt: "Which environment?",
+            requestId: "question_1",
+          },
+          {
+            action: {
+              callId: "question_2",
+              input: { prompt: "Which region?" },
+              kind: "tool-call",
+              toolName: "ask_question",
+            },
+            allowFreeform: true,
+            display: "text",
+            kind: "question",
+            prompt: "Which region?",
+            requestId: "question_2",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createInputResolvedEvent({
+        resolutions: [
+          {
+            kind: "question",
+            outcome: "ignored",
+            requestId: "question_1",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(findToolPart(data, "question_1")).toMatchObject({
+      output: { status: "ignored" },
+      state: "output-available",
+    });
+    expect(findToolPart(data, "question_2")).toMatchObject({
+      state: "approval-requested",
+    });
   });
 
   it("marks input requests as responded when the client submits a response", () => {

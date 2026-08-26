@@ -8,8 +8,17 @@ import {
 } from "eve/evals";
 
 const TASK_ID_PATTERN = /task_[a-z0-9]+/iu;
+const EMPTY_DELIVERY_SENTINEL = "<eve-empty-delivery/>";
+const REDUNDANT_REVIEW_SCENARIO = "TASK-WAKE-REDUNDANT-REVIEW";
+const REDUNDANT_REVIEW_FINDING = "blocker: task admission can discard deferred user input.";
+const TASK_STATE_LABEL = "[Task state]\n";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
+  if (request.userMessages.includes(REDUNDANT_REVIEW_SCENARIO)) {
+    const taskState = latestTaskState(request.userMessages);
+    if (taskState !== undefined) return handleRedundantReviewWake(taskState);
+  }
+
   // Framework agent-list notes are model context, not scenario turns.
   const message = [...request.userMessages].reverse().find(isScenarioMessage) ?? "";
   if (request.userMessages.some((entry) => entry.includes("TASK-UPDATE-PROGRESS"))) {
@@ -23,22 +32,51 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     return laterBusyWorker(request, message);
   }
   if (message.startsWith("TASK-A2-CHILD-FAILURE-VERIFY ")) {
-    return peekTask(request, "task-a2-child-failure-verify", "TASK-A2-FAILED", message);
+    return inspectTerminalTask(
+      request,
+      "task-a2-child-failure-verify",
+      "TASK-A2-FAILED",
+      message,
+      "failed",
+    );
   }
   if (message.startsWith("TASK-A3-UNKNOWN-VERIFY ")) {
-    return peekTask(request, "task-a3-unknown-verify", "TASK-A3-UNKNOWN", message);
+    return inspectTerminalTask(request, "task-a3-unknown-verify", "TASK-A3-UNKNOWN", message);
   }
   if (message.startsWith("TASK-D6-PARTIAL-FANOUT-VERIFY ")) {
-    return peekTask(request, "task-d6-partial-fanout-verify", "TASK-D6-STATUS", message);
+    return inspectTerminalTask(
+      request,
+      "task-d6-partial-fanout-verify",
+      "TASK-D6-STATUS",
+      message,
+      "completed",
+    );
   }
   if (message.startsWith("TASK-D6-PARTIAL-FANOUT-UNKNOWN ")) {
-    return peekTask(request, "task-d6-partial-fanout-unknown", "TASK-D6-UNKNOWN", message);
+    return inspectTerminalTask(
+      request,
+      "task-d6-partial-fanout-unknown",
+      "TASK-D6-UNKNOWN",
+      message,
+    );
   }
   if (message.startsWith("TASK-C7-AUTHORIZATION-VERIFY ")) {
-    return peekTask(request, "task-c7-authorization-verify", "TASK-C7-STATUS", message);
+    return inspectTerminalTask(
+      request,
+      "task-c7-authorization-verify",
+      "TASK-C7-STATUS",
+      message,
+      "completed",
+    );
   }
   if (message.startsWith("TASK-C8-REMOTE-VERIFY ")) {
-    return peekTask(request, "task-c8-remote-verify", "TASK-C8-STATUS", message);
+    return inspectTerminalTask(
+      request,
+      "task-c8-remote-verify",
+      "TASK-C8-STATUS",
+      message,
+      "completed",
+    );
   }
   if (message.includes("TASK-C8-REMOTE-CHILD")) return runRemoteGate(request);
   if (message.startsWith("Background task ")) {
@@ -55,25 +93,45 @@ function respond(request: MockModelRequest): MockModelResponse | string {
 
   if (message === "TASK-FANOUT-PARENT-UPDATES") return fanoutTasks(request, 10);
   if (message === "TASK-PARENT-WAKE-UPDATES") return fanoutTasks(request, 3);
+  if (message === REDUNDANT_REVIEW_SCENARIO) return startRedundantReviewers(request);
   if (message === "TASK-FAN-IN") return fanInTasks(request);
   if (message === "TASK-UPDATE-SETUP") return startTaskUpdateChild(request);
   if (message === "TASK-CANCEL-SETUP") return setupCancelWorker(request);
   if (message.startsWith("TASK-CANCEL-VERIFY ")) {
-    return peekTask(request, "task-cancel-verify", "TASK-CANCEL-STATUS", message);
+    return inspectTerminalTask(
+      request,
+      "task-cancel-verify",
+      "TASK-CANCEL-STATUS",
+      message,
+      "cancelled",
+    );
   }
 
   if (message.startsWith("TASK-HITL-VERIFY ")) {
-    return peekTask(request, "task-hitl-verify", "TASK-HITL-STATUS", message);
+    return inspectTerminalTask(
+      request,
+      "task-hitl-verify",
+      "TASK-HITL-STATUS",
+      message,
+      "completed",
+    );
   }
   if (message.startsWith("TASK-INPUT-BATCH-VERIFY ")) {
-    return peekTask(request, "task-input-batch-verify", "TASK-INPUT-BATCH-STATUS", message);
+    return inspectTerminalTask(
+      request,
+      "task-input-batch-verify",
+      "TASK-INPUT-BATCH-STATUS",
+      message,
+      "completed",
+    );
   }
   if (message.startsWith("CHILD-TASK-EXCLUSIVITY-VERIFY ")) {
-    return peekTask(
+    return inspectTerminalTask(
       request,
       "child-task-exclusivity-verify",
       "CHILD-TASK-EXCLUSIVITY-STATUS",
       message,
+      "completed",
     );
   }
   if (message === "TASK-HITL-ROUTING") {
@@ -117,6 +175,69 @@ function startTaskUpdateChild(request: MockModelRequest): MockModelResponse | st
     };
   }
   return "TASK-UPDATE-STARTED";
+}
+
+function startRedundantReviewers(request: MockModelRequest): MockModelResponse | string {
+  const reviewers = [
+    {
+      id: "task-redundant-review-fast",
+      message: `Review PR #2277. Return this finding: ${REDUNDANT_REVIEW_FINDING}`,
+    },
+    {
+      id: "task-redundant-review-late",
+      message: `BUSY-WORKER-A Review PR #2277. Return this finding: ${REDUNDANT_REVIEW_FINDING}`,
+    },
+  ] as const;
+  const pending = reviewers.filter(({ id }) => resultById(request, id) === undefined);
+  if (pending.length > 0) {
+    return {
+      toolCalls: pending.map(({ id, message }) => ({
+        id,
+        input: { message },
+        name: "busy-worker",
+      })),
+    };
+  }
+  return "TASK-REDUNDANT-REVIEWERS-STARTED";
+}
+
+function handleRedundantReviewWake(taskState: TaskState): string {
+  if (taskState.tasks.some((task) => task.status === "pending")) {
+    return EMPTY_DELIVERY_SENTINEL;
+  }
+  const outputs = taskState.tasks.flatMap((task) =>
+    task.output?.type === "result" && typeof task.output.data === "string"
+      ? [task.output.data]
+      : [],
+  );
+  if (
+    outputs.length !== taskState.tasks.length ||
+    !outputs.every((output) => output.includes(REDUNDANT_REVIEW_FINDING))
+  ) {
+    throw new Error("The settled reviewer cohort did not contain every expected finding.");
+  }
+  return `request changes on PR #2277.\n\n- ${REDUNDANT_REVIEW_FINDING}`;
+}
+
+interface TaskState {
+  readonly tasks: readonly {
+    readonly output?: { readonly data: unknown; readonly type: string };
+    readonly status: string;
+  }[];
+}
+
+function latestTaskState(messages: readonly string[]): TaskState | undefined {
+  const message = [...messages].reverse().find((entry) => entry.startsWith(TASK_STATE_LABEL));
+  if (message === undefined) return undefined;
+  const parsed: unknown = JSON.parse(message.slice(TASK_STATE_LABEL.length));
+  if (
+    parsed === null ||
+    typeof parsed !== "object" ||
+    !Array.isArray(Reflect.get(parsed, "tasks"))
+  ) {
+    throw new Error("Invalid task state supplied to the model.");
+  }
+  return parsed as TaskState;
 }
 
 function sendTaskUpdate(request: MockModelRequest): MockModelResponse | string {
@@ -174,41 +295,17 @@ function fanInTasks(request: MockModelRequest): MockModelResponse | string {
   return "TASK-FAN-IN-STARTED";
 }
 
-/**
- * The deterministic join predicate: on every wake, peek every fan-in task
- * and answer only when all of them are completed. This is the model-side
- * join contract — the framework delivers one wake
- * per ready transition and the model decides whether the state suffices.
- */
+/** The model-side join derives completion from the result-bearing notifications already in history. */
 function fanInNotification(request: MockModelRequest): MockModelResponse | string {
-  const callId = `task-fan-in-check-${scenarioUserMessageCount(request)}`;
-  const checked = resultById(request, callId);
   const taskIds = FAN_IN_CALL_IDS.map((id) => findTaskId(resultById(request, id)?.output)).filter(
     (taskId): taskId is string => taskId !== undefined,
   );
   if (taskIds.length !== FAN_IN_CALL_IDS.length) {
     throw new Error("Fan-in notification arrived before both task receipts.");
   }
-  if (checked === undefined) {
-    return { toolCalls: [{ id: callId, input: { taskIds }, name: "task_peek" }] };
-  }
-  return allTasksCompleted(checked.output, taskIds)
+  return taskIds.every((taskId) => hasTaskNotification(request, taskId, "completed"))
     ? "TASK-FAN-IN-COMPLETE"
     : "TASK-FAN-IN-WAITING";
-}
-
-function allTasksCompleted(output: unknown, expectedTaskIds: readonly string[]): boolean {
-  if (output === null || typeof output !== "object") return false;
-  const tasks = Reflect.get(output, "tasks");
-  if (!Array.isArray(tasks) || tasks.length !== expectedTaskIds.length) return false;
-  const byId = new Map(
-    tasks
-      .filter((task) => task !== null && typeof task === "object")
-      .map((task) => [Reflect.get(task, "taskId"), task] as const),
-  );
-  return expectedTaskIds.every(
-    (taskId) => Reflect.get(byId.get(taskId) ?? {}, "status") === "completed",
-  );
 }
 
 function setupCancelWorker(request: MockModelRequest): MockModelResponse | string {
@@ -300,19 +397,34 @@ function runRemoteGate(request: MockModelRequest): MockModelResponse | string {
   return `C8-REMOTE-COMPLETE ${marker}`;
 }
 
-function peekTask(
+function inspectTerminalTask(
   request: MockModelRequest,
   callIdPrefix: string,
   completedText: string,
   message: string,
+  status?: "cancelled" | "completed" | "failed",
 ): MockModelResponse | string {
+  const taskId = TASK_ID_PATTERN.exec(message)?.[0];
+  if (taskId === undefined) throw new Error(`Verification message has no task id: ${message}`);
+  if (status !== undefined && !hasTaskNotification(request, taskId, status)) {
+    return `${completedText}-WAITING`;
+  }
   const callId = `${callIdPrefix}-${scenarioUserMessageCount(request)}`;
   if (resultById(request, callId) === undefined) {
-    const taskId = TASK_ID_PATTERN.exec(message)?.[0];
-    if (taskId === undefined) throw new Error(`Verification message has no task id: ${message}`);
-    return { toolCalls: [{ id: callId, input: { taskIds: [taskId] }, name: "task_peek" }] };
+    return { toolCalls: [{ id: callId, input: { taskIds: [taskId] }, name: "task_cancel" }] };
   }
   return completedText;
+}
+
+function hasTaskNotification(
+  request: MockModelRequest,
+  taskId: string,
+  status: "cancelled" | "completed" | "failed",
+): boolean {
+  const statusText = status === "failed" ? " failed." : ` is ${status}.`;
+  return request.userMessages.some(
+    (entry) => entry.includes(`Background task ${taskId} (`) && entry.includes(statusText),
+  );
 }
 
 function isScenarioMessage(message: string): boolean {

@@ -9,6 +9,7 @@ import {
   type MessageStreamEvent,
 } from "#client/index.js";
 import { stampTestEvent } from "#internal/testing/events.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
@@ -98,89 +99,12 @@ function isStamped(event: unknown): event is MessageStreamEvent {
   return typeof (event as MessageStreamEvent).meta?.id === "string";
 }
 
-const AGENT_INFO: AgentInfoResult = {
-  agent: {
-    agentRoot: "/tmp/weather-agent/agent",
-    appRoot: "/tmp/weather-agent",
-    model: {
-      id: "gpt-5",
-      routing: { kind: "gateway", target: "openai" },
-    },
-    name: "Weather Agent",
-  },
-  capabilities: {
-    devRoutes: true,
-  },
-  channels: {
-    authored: [],
-    available: [],
-    disabledFramework: [],
-    framework: [],
-  },
-  connections: [],
-  diagnostics: {
-    discoveryErrors: 0,
-    discoveryWarnings: 0,
-  },
-  hooks: [],
-  instructions: {
-    dynamic: [],
-    static: [
-      {
-        content: "You are a weather assistant.",
-        logicalPath: "agent/instructions.md",
-        name: "instructions",
-        role: "system",
-        sourceKind: "markdown",
-      },
-    ],
-  },
-  kind: "eve-agent-info",
-  mode: "development",
-  sandbox: null,
-  schedules: [],
-  skills: {
-    dynamic: [],
-    static: [],
-  },
-  subagents: {
-    local: [],
-    total: 0,
-  },
-  tools: {
-    authored: [
-      {
-        description: "Get the weather.",
-        hasAuth: false,
-        hasExecute: true,
-        hasModelOutputProjection: false,
-        hasOutputSchema: false,
-        inputSchema: { type: "object" },
-        logicalPath: "agent/tools/get_weather.ts",
-        name: "get_weather",
-        origin: "authored",
-        outputSchema: null,
-        replacesFrameworkTool: false,
-        requiresApproval: false,
-        sourceKind: "module",
-      },
-    ],
-    available: [],
-    disabledFramework: [],
-    dynamic: [],
-    framework: [],
-    reserved: [],
-  },
-  version: 2,
-  workflow: {
-    enabled: false,
-    toolName: "Workflow",
-  },
-  workspace: {
-    resourceRoot: null,
-    rootEntries: [],
-  },
-};
+const AGENT_INFO: AgentInfoResult = createTestAgentInfoResult({
+  agentRoot: "/tmp/weather-agent/agent",
+  appRoot: "/tmp/weather-agent",
+  modelId: "gpt-5",
+  name: "Weather Agent",
+});
 
 beforeEach(() => {
   // The runner normalizes header endpoints from the real process.env; a
@@ -607,10 +531,10 @@ describe("EveTUIRunner idle session follow", () => {
         data: {
           actions: [
             {
-              callId: "peek-1",
+              callId: "cancel-1",
               input: { taskIds: ["task_123"] },
               kind: "tool-call",
-              toolName: "task_peek",
+              toolName: "task_cancel",
             },
           ],
           sequence: 1,
@@ -622,10 +546,10 @@ describe("EveTUIRunner idle session follow", () => {
         type: "action.result",
         data: {
           result: {
-            callId: "peek-1",
+            callId: "cancel-1",
             kind: "tool-result",
-            output: { tasks: [{ status: "completed", taskId: "task_123" }] },
-            toolName: "task_peek",
+            output: { tasks: [{ status: "cancelled", taskId: "task_123" }] },
+            toolName: "task_cancel",
           },
           sequence: 1,
           status: "completed",

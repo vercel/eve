@@ -1,8 +1,8 @@
 import { readdir, stat } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 
 import { classifyAgentRootEntry, getDirectoryEntryType } from "#discover/filesystem.js";
-import { parseProjectName } from "#setup/project-name.js";
+import { parseProjectName, PROJECT_NAME_ERROR } from "#setup/project-name.js";
 
 import type { InitFailurePolicy } from "./init-recovery.js";
 
@@ -73,11 +73,23 @@ function listEntries(entries: readonly string[]): string {
   return entries.map((entry) => `  - ${entry}`).join("\n");
 }
 
+function assertTargetStaysWithinParent(
+  parentPath: string,
+  target: string | undefined,
+  projectPath: string,
+): void {
+  if (target === undefined || isAbsolute(target)) return;
+  const relativeTarget = relative(parentPath, projectPath);
+  if (relativeTarget === ".." || relativeTarget.startsWith(`..${sep}`))
+    throw new Error(PROJECT_NAME_ERROR);
+}
+
 /** Classifies the target itself without walking ancestor projects. */
 export async function resolveInitTarget(input: ResolveInitTargetInput): Promise<InitTarget> {
   const parentPath = resolve(input.parentDirectory);
   const targetProvided = input.target !== undefined;
   const projectPath = resolve(parentPath, input.target ?? ".");
+  assertTargetStaysWithinParent(parentPath, input.target, projectPath);
   const createInPlace = projectPath === parentPath;
   const kind = await pathKind(projectPath);
 

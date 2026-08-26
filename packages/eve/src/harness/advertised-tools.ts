@@ -1,8 +1,8 @@
 import type { ToolSet } from "ai";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
-import { AGENT_TOOL_NAME } from "#runtime/framework-tools/agent.js";
-import { TASK_TOOL_NAMES, TASK_UPDATE_TOOL_NAME } from "#runtime/framework-tools/tasks.js";
+import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
+import { TASK_TOOL_NAMES, TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import {
   ensureWorkflowContinuationSecurity,
@@ -160,16 +160,11 @@ function filterWorkflowHostToolsForRootSession(
   }
 
   for (const [name, tool] of tools) {
-    if (isDelegatedRuntimeActionTool(tool)) {
+    if (tool.workflowCallable === true) {
       filteredTools.set(name, tool);
     }
   }
   return filteredTools;
-}
-
-function isDelegatedRuntimeActionTool(definition: HarnessToolDefinition): boolean {
-  const runtimeAction = definition.runtimeAction;
-  return runtimeAction?.kind === "subagent-call" || runtimeAction?.kind === "remote-agent-call";
 }
 
 function shouldHideDelegationTool(
@@ -178,7 +173,7 @@ function shouldHideDelegationTool(
   delegatedCaller: boolean | undefined,
 ): boolean {
   if (definition.name === TASK_UPDATE_TOOL_NAME) return delegatedCaller !== true;
-  if (isRootOnlyFrameworkTool(definition)) {
+  if (isRootOnlyTransitionalTool(definition)) {
     return session.rootSessionId !== undefined || resolveSubagentDepth(session).currentDepth > 0;
   }
 
@@ -191,7 +186,8 @@ function shouldHideDelegationTool(
  * node's config, which self-delegated children share — session shape is
  * the only signal that separates the root from its children.
  */
-function isRootOnlyFrameworkTool(definition: HarnessToolDefinition): boolean {
+function isRootOnlyTransitionalTool(definition: HarnessToolDefinition): boolean {
+  if (definition.rootOnly === true) return true;
   if (
     definition.name === AGENT_TOOL_NAME &&
     definition.runtimeAction?.kind === "subagent-call" &&

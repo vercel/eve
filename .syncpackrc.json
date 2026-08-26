@@ -18,9 +18,9 @@
       "isIgnored": true
     },
     {
-      "label": "The Buzz adapter accepts compatible eve patch releases",
+      "label": "Separately published eve packages accept compatible eve patch releases",
       "dependencies": ["eve"],
-      "packages": ["@eve/buzz-acp-adapter"],
+      "packages": ["@eve/buzz-acp-adapter", "@eve/self-modification"],
       "dependencyTypes": ["prod"],
       "pinVersion": "workspace:^"
     },

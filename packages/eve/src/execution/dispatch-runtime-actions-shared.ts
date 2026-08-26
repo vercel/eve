@@ -20,6 +20,7 @@ import {
   InitiatorAuthKey,
   SandboxKey,
 } from "#context/keys.js";
+import { type AlsContext, ContextContainer } from "#context/container.js";
 import { withContextScope } from "#context/run-step.js";
 import {
   BundleKey,
@@ -51,7 +52,7 @@ import type {
   RuntimeSubagentCallActionRequest,
   RuntimeSubagentDispatchFailure,
   RuntimeToolCallActionRequest,
-} from "#runtime/actions/types.js";
+} from "#shared/action-types.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import {
   createRecursiveAgentRootOnlyResult,
@@ -181,9 +182,57 @@ export async function prepareRuntimeActionDispatch(input: {
   const batch = getPendingRuntimeActionBatch(durableSession.state);
 
   if (batch === undefined || batch.actions.length === 0) return undefined;
+  const ctx = await deserializeContext(input.serializedContext);
+  return await prepareActionDispatch({
+    batch,
+    ctx,
+    durableSession,
+    serializedContext: input.serializedContext,
+    taskControls: input.taskControls,
+  });
+}
+
+export async function prepareAgentActionDispatch(input: {
+  readonly action: RuntimeActionRequest;
+  readonly ctx: AlsContext;
+  readonly event: {
+    readonly sequence: number;
+    readonly stepIndex: number;
+    readonly turnId: string;
+  };
+  readonly localFanoutSize: number;
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}): Promise<PreparedRuntimeActionDispatch> {
+  const durableSession = await readDurableSession(input.sessionState);
+  return await prepareActionDispatch({
+    batch: { actions: [input.action], event: input.event, responseMessages: [] },
+    ctx: copyDurableContext(input.ctx),
+    durableSession,
+    fanoutSize: input.localFanoutSize,
+    serializedContext: input.serializedContext,
+    taskControls: false,
+  });
+}
+
+function copyDurableContext(ctx: AlsContext): ContextContainer {
+  const copy = new ContextContainer();
+  for (const [key, value] of ctx.entries()) copy.set(key, value);
+  return copy;
+}
+
+async function prepareActionDispatch(input: {
+  readonly batch: NonNullable<ReturnType<typeof getPendingRuntimeActionBatch>>;
+  readonly ctx: ContextContainer;
+  readonly durableSession: Awaited<ReturnType<typeof readDurableSession>>;
+  readonly fanoutSize?: number;
+  readonly serializedContext: Record<string, unknown>;
+  readonly taskControls: boolean;
+}): Promise<PreparedRuntimeActionDispatch> {
+  const { batch, durableSession } = input;
   assertUniqueRuntimeActionCallIds(batch.actions);
 
-  const ctx = await deserializeContext(input.serializedContext);
+  const ctx = input.ctx;
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
   let session = hydrateDurableSession({
@@ -227,8 +276,9 @@ export async function prepareRuntimeActionDispatch(input: {
     bundle,
     capabilities: ctx.get(CapabilitiesKey),
     channelMetadata: ctx.get(ChannelInstrumentationKey),
-    fanoutSize: plan.filter((entry) => entry.kind === "start" && entry.target.kind === "local")
-      .length,
+    fanoutSize:
+      input.fanoutSize ??
+      plan.filter((entry) => entry.kind === "start" && entry.target.kind === "local").length,
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     parentTraceContext: readSessionTraceContext(input.serializedContext, session.sessionId),
     plan,
@@ -453,7 +503,15 @@ function classifyFreshStart(input: {
           ? registered.definition.description
           : undefined);
       const source: SubagentInputSource =
-        description !== undefined ? { description, type: "local" } : { type: "runtime" };
+        description !== undefined
+          ? {
+              description,
+              outputSchema:
+                dynamicAgentConfig?.outputSchema ??
+                input.bundle.graph?.nodesByNodeId.get(action.nodeId)?.turnAgent?.outputSchema,
+              type: "local",
+            }
+          : { outputSchema: input.bundle.turnAgent.outputSchema, type: "runtime" };
       return {
         kind: "start",
         target: {
@@ -494,7 +552,6 @@ export async function startSubagent(input: {
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
-  readonly persistentSessions: boolean;
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly session: RuntimeSession;
@@ -524,7 +581,6 @@ export async function startSubagent(input: {
         initiatorAuth: input.initiatorAuth,
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext,
-        persistentSessions: input.persistentSessions,
         sandboxSessionId: input.sandboxSessionId,
         session: input.session,
         source: input.target.source,
@@ -542,7 +598,6 @@ export async function startSubagent(input: {
         initiatorAuth: input.initiatorAuth,
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext,
-        persistentSessions: input.persistentSessions,
         session: input.session,
         taskOwned: input.taskOwned,
       });
