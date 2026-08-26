@@ -142,8 +142,15 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
     );
     trackActiveSandboxHandle({
       backendName: backend.name,
-      handle,
-      sandboxId: handle.session.id,
+      handle: {
+        async shutdown() {
+          try {
+            await handle.shutdown();
+          } finally {
+            clearManagedSandboxCommands(handle.session.id);
+          }
+        },
+      },
       sessionKey: keys.sessionKey,
     });
 

@@ -110,12 +110,12 @@ export async function executeBashTool(
   const startedAt = Date.now();
   const process = await getBackgroundBashProcess(sandbox, processInput.processId);
   if (processInput.action === "kill") {
-    const before = await process.read();
+    const before = await process.inspect();
     if (before.exitCode !== undefined) {
       const output = formatBashOutput(before.stdout, before.stderr, startedAt, before.truncated);
       return { ...output, exitCode: before.exitCode, status: "completed" };
     }
-    await process.kill();
+    await process.terminate();
     return {
       ...formatBashOutput(before.stdout, before.stderr, startedAt, before.truncated),
       status: "killed",
@@ -128,11 +128,11 @@ export async function executeBashTool(
       yieldTimeMs: processInput.yieldTimeMs ?? DEFAULT_BASH_YIELD_TIME_MS,
     });
   }
-  const state = await process.read();
+  const state = await process.inspect();
   if (state.exitCode === undefined) {
     return {
       ...formatBashOutput(state.stdout, state.stderr, startedAt, state.truncated),
-      processId: process.processId,
+      processId: process.commandId,
       status: "running",
     };
   }

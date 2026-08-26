@@ -178,7 +178,7 @@ describe("background bash processes", () => {
     const session = sandbox();
     const process = await startBackgroundBashProcess(session, "exit 7");
 
-    expect(process.processId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(process.commandId).toMatch(/^[0-9a-f-]{36}$/);
     expect(session.spawn).toHaveBeenCalledWith({ command: "exit 7" });
     expect(session.run).not.toHaveBeenCalled();
   });
@@ -191,7 +191,7 @@ describe("background bash processes", () => {
       startBackgroundBashProcess(session, "sleep 10", "call-1"),
     ]);
 
-    expect(retried.processId).toBe(first.processId);
+    expect(retried.commandId).toBe(first.commandId);
     expect(session.spawn).toHaveBeenCalledOnce();
   });
 
@@ -212,11 +212,11 @@ describe("background bash processes", () => {
     const session = sandbox(() => sandboxProcess({ exitCode: 7, stderr: "err", stdout: "out" }));
     const started = await startBackgroundBashProcess(session, "build");
     await vi.waitFor(async () => {
-      await expect(started.readStatus()).resolves.toEqual({ exitCode: 7 });
+      await expect(started.inspectStatus()).resolves.toEqual({ exitCode: 7 });
     });
 
     await expect(
-      (await getBackgroundBashProcess(session, started.processId)).read(),
+      (await getBackgroundBashProcess(session, started.commandId)).inspect(),
     ).resolves.toEqual({
       exitCode: 7,
       stderr: "err",
@@ -230,10 +230,10 @@ describe("background bash processes", () => {
     const session = sandbox(() => handle);
     const process = await startBackgroundBashProcess(session, "sleep 10");
 
-    await process.kill();
+    await process.terminate();
 
     expect(handle.kill).toHaveBeenCalledOnce();
-    await expect(getBackgroundBashProcess(session, process.processId)).rejects.toThrow(
+    await expect(getBackgroundBashProcess(session, process.commandId)).rejects.toThrow(
       "unavailable",
     );
   });
@@ -247,16 +247,21 @@ describe("background bash processes", () => {
   });
 
   it("polls status without reading output", async () => {
-    const read = vi.fn();
-    const readStatus = vi.fn(async () => ({}));
+    const inspect = vi.fn();
+    const inspectStatus = vi.fn(async () => ({}));
 
     await expect(
       waitForBackgroundBashProcess({
-        process: { kill: vi.fn(), processId: "process", read, readStatus },
+        process: {
+          commandId: "process",
+          inspect,
+          inspectStatus,
+          terminate: vi.fn(),
+        },
         yieldTimeMs: 0,
       }),
     ).resolves.toBeNull();
-    expect(readStatus).toHaveBeenCalledOnce();
-    expect(read).not.toHaveBeenCalled();
+    expect(inspectStatus).toHaveBeenCalledOnce();
+    expect(inspect).not.toHaveBeenCalled();
   });
 });

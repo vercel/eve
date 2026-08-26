@@ -5,7 +5,6 @@ import {
   getManagedSandboxCommands,
   MAX_MANAGED_SANDBOX_COMMANDS,
   type ManagedSandboxCommand,
-  type ManagedSandboxCommandObservation,
 } from "#execution/sandbox/managed-command.js";
 import { truncateTail } from "#execution/sandbox/truncate-output.js";
 import { isEveDevEnvironment } from "#internal/application/optional-package-install.js";
@@ -26,17 +25,11 @@ export interface BashExecuteOptions {
   readonly idempotencyKey?: string;
 }
 
-export type BashResult = BashCompletedResult | BashRunningResult;
-
-export interface BashCompletedResult extends BashOutput {
-  readonly exitCode: number;
-  readonly status: "completed";
-}
-
-export interface BashRunningResult extends BashOutput {
-  readonly processId: string;
-  readonly status: "running";
-}
+export type BashResult = BashOutput &
+  (
+    | { readonly exitCode: number; readonly status: "completed" }
+    | { readonly processId: string; readonly status: "running" }
+  );
 
 export interface BashOutput {
   readonly stderr: string;
@@ -44,23 +37,6 @@ export interface BashOutput {
   readonly truncated: boolean;
   /** Elapsed wall time this call spent before returning, in seconds. */
   readonly wallTimeSeconds: number;
-}
-
-export interface BackgroundBashProcess {
-  readonly processId: string;
-  read(): Promise<BackgroundBashProcessState>;
-  readStatus(): Promise<BackgroundBashProcessStatus>;
-  kill(): Promise<void>;
-}
-
-export interface BackgroundBashProcessStatus {
-  readonly exitCode?: number;
-}
-
-export interface BackgroundBashProcessState extends BackgroundBashProcessStatus {
-  readonly stderr: string;
-  readonly stdout: string;
-  readonly truncated?: boolean;
 }
 
 /**
@@ -98,7 +74,7 @@ export async function executeBashOnSandbox(
     } catch (error) {
       if (!options?.abortSignal?.aborted) throw error;
       try {
-        await process.kill();
+        await process.terminate();
       } catch (killError) {
         throw new AggregateError(
           [error, killError],
@@ -109,7 +85,7 @@ export async function executeBashOnSandbox(
       throw error;
     }
 
-    const observed = await process.read();
+    const observed = await process.inspect();
     const output = formatBashOutput(
       observed.stdout,
       observed.stderr,
@@ -118,7 +94,7 @@ export async function executeBashOnSandbox(
     );
     const result: BashResult =
       observed.exitCode === undefined
-        ? { ...output, processId: process.processId, status: "running" }
+        ? { ...output, processId: process.commandId, status: "running" }
         : { ...output, exitCode: observed.exitCode, status: "completed" };
     logDevelopmentSandboxCommand(
       result.status === "completed"
@@ -138,54 +114,31 @@ export async function startBackgroundBashProcess(
   sandbox: SandboxSession,
   command: string,
   idempotencyKey: string = randomUUID(),
-): Promise<BackgroundBashProcess> {
-  return adaptManagedCommand(
-    await getManagedSandboxCommands(sandbox).start({ command, idempotencyKey }),
-  );
+): Promise<ManagedSandboxCommand> {
+  return await getManagedSandboxCommands(sandbox).start({ command, idempotencyKey });
 }
 
 export async function getBackgroundBashProcess(
   sandbox: SandboxSession,
   processId: string,
-): Promise<BackgroundBashProcess> {
-  return adaptManagedCommand(await getManagedSandboxCommands(sandbox).get(processId));
+): Promise<ManagedSandboxCommand> {
+  return await getManagedSandboxCommands(sandbox).get(processId);
 }
 
 export async function waitForBackgroundBashProcess(input: {
   readonly abortSignal?: AbortSignal;
-  readonly process: BackgroundBashProcess;
+  readonly process: ManagedSandboxCommand;
   readonly yieldTimeMs: number;
-}): Promise<BackgroundBashProcessStatus | null> {
+}): Promise<{ readonly exitCode?: number } | null> {
   const deadline = Date.now() + input.yieldTimeMs;
   while (true) {
     input.abortSignal?.throwIfAborted();
-    const state = await input.process.readStatus();
+    const state = await input.process.inspectStatus();
     if (state.exitCode !== undefined) return state;
     const remaining = deadline - Date.now();
     if (remaining <= 0) return null;
     await abortableDelay(Math.min(POLL_INTERVAL_MS, remaining), input.abortSignal);
   }
-}
-
-function adaptManagedCommand(command: ManagedSandboxCommand): BackgroundBashProcess {
-  return {
-    processId: command.commandId,
-    async read() {
-      return toBackgroundState(await command.inspect());
-    },
-    async readStatus() {
-      return await command.inspectStatus();
-    },
-    async kill() {
-      await command.terminate();
-    },
-  };
-}
-
-function toBackgroundState(
-  observation: ManagedSandboxCommandObservation,
-): BackgroundBashProcessState {
-  return observation;
 }
 
 function abortableDelay(ms: number, abortSignal?: AbortSignal): Promise<void> {

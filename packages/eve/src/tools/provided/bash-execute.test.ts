@@ -29,11 +29,12 @@ function process(state: {
   stdout: string;
   truncated?: boolean;
 }) {
+  const observation = { truncated: false, ...state };
   return {
-    kill: vi.fn(async () => {}),
-    processId: "11111111-1111-4111-8111-111111111111",
-    read: vi.fn(async () => state),
-    readStatus: vi.fn(async () => ({ exitCode: state.exitCode })),
+    commandId: "11111111-1111-4111-8111-111111111111",
+    inspect: vi.fn(async () => observation),
+    inspectStatus: vi.fn(async () => ({ exitCode: state.exitCode })),
+    terminate: vi.fn(async () => {}),
   };
 }
 
@@ -67,9 +68,9 @@ describe("executeBashTool process actions", () => {
     vi.mocked(getBackgroundBashProcess).mockResolvedValue(running);
 
     await expect(
-      executeBashTool({ action: "poll", processId: running.processId }, context),
+      executeBashTool({ action: "poll", processId: running.commandId }, context),
     ).resolves.toEqual({
-      processId: running.processId,
+      processId: running.commandId,
       status: "running",
       stderr: "",
       stdout: "partial",
@@ -82,11 +83,16 @@ describe("executeBashTool process actions", () => {
     const running = process({ stderr: "", stdout: "partial" });
     vi.mocked(getBackgroundBashProcess).mockResolvedValue(running);
     vi.mocked(waitForBackgroundBashProcess).mockResolvedValue({ exitCode: 0 });
-    running.read.mockResolvedValue({ exitCode: 0, stderr: "", stdout: "done" });
+    running.inspect.mockResolvedValue({
+      exitCode: 0,
+      stderr: "",
+      stdout: "done",
+      truncated: false,
+    });
 
     await expect(
       executeBashTool(
-        { action: "wait", processId: running.processId, yieldTimeMs: 10_000 },
+        { action: "wait", processId: running.commandId, yieldTimeMs: 10_000 },
         context,
       ),
     ).resolves.toEqual({
@@ -109,15 +115,15 @@ describe("executeBashTool process actions", () => {
     vi.mocked(getBackgroundBashProcess).mockResolvedValueOnce(running);
 
     await expect(
-      executeBashTool({ action: "kill", processId: running.processId }, context),
+      executeBashTool({ action: "kill", processId: running.commandId }, context),
     ).resolves.toMatchObject({ status: "killed" });
-    expect(running.kill).toHaveBeenCalledOnce();
+    expect(running.terminate).toHaveBeenCalledOnce();
 
     const completed = process({ exitCode: 7, stderr: "failed", stdout: "" });
     vi.mocked(getBackgroundBashProcess).mockResolvedValueOnce(completed);
     await expect(
-      executeBashTool({ action: "kill", processId: completed.processId }, context),
+      executeBashTool({ action: "kill", processId: completed.commandId }, context),
     ).resolves.toMatchObject({ exitCode: 7, status: "completed" });
-    expect(completed.kill).not.toHaveBeenCalled();
+    expect(completed.terminate).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,4 @@
 import { toErrorMessage } from "#shared/errors.js";
-import { clearManagedSandboxCommands } from "#execution/sandbox/managed-command.js";
 
 /**
  * The slice of `SandboxBackendHandle` the shutdown registry needs.
@@ -19,10 +18,7 @@ export interface ShutdownCapableSandboxHandle {
  * shutdown path drains the registry so no sandbox compute outlives the
  * eve server process.
  */
-const activeSandboxHandles = new Map<
-  string,
-  { readonly handle: ShutdownCapableSandboxHandle; readonly sandboxId: string }
->();
+const activeSandboxHandles = new Map<string, ShutdownCapableSandboxHandle>();
 
 function createActiveSandboxHandleKey(backendName: string, sessionKey: string): string {
   return `${backendName}\0${sessionKey}`;
@@ -36,13 +32,12 @@ function createActiveSandboxHandleKey(backendName: string, sessionKey: string): 
 export function trackActiveSandboxHandle(input: {
   readonly backendName: string;
   readonly handle: ShutdownCapableSandboxHandle;
-  readonly sandboxId?: string;
   readonly sessionKey: string;
 }): void {
-  activeSandboxHandles.set(createActiveSandboxHandleKey(input.backendName, input.sessionKey), {
-    handle: input.handle,
-    sandboxId: input.sandboxId ?? input.sessionKey,
-  });
+  activeSandboxHandles.set(
+    createActiveSandboxHandleKey(input.backendName, input.sessionKey),
+    input.handle,
+  );
 }
 
 /**
@@ -56,15 +51,7 @@ export async function shutdownActiveSandboxHandles(input?: {
   const entries = [...activeSandboxHandles.entries()];
   activeSandboxHandles.clear();
 
-  const results = await Promise.allSettled(
-    entries.map(async ([, entry]) => {
-      try {
-        await entry.handle.shutdown();
-      } finally {
-        clearManagedSandboxCommands(entry.sandboxId);
-      }
-    }),
-  );
+  const results = await Promise.allSettled(entries.map(([, handle]) => handle.shutdown()));
 
   for (const [index, result] of results.entries()) {
     if (result.status === "rejected") {
