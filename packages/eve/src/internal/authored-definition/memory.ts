@@ -32,11 +32,44 @@ export function normalizeMemoryDefinition(value: unknown, message: string): Memo
     throw new Error(`${message} "scope" must be a string, null, or resolver.`);
   }
   const provider = expectObjectRecord(record.provider, `${message} "provider" must be an object.`);
-  if (typeof provider.recall !== "function") {
-    throw new Error(`${message} "provider.recall" must be a function.`);
+  expectOnlyKnownKeys(provider, ["recall", "capture", "tools"], `${message} "provider"`);
+  const recall = expectObjectRecord(
+    provider.recall,
+    `${message} "provider.recall" must be an object.`,
+  );
+  expectOnlyKnownKeys(
+    recall,
+    ["turn.started", "compaction.completed"],
+    `${message} "provider.recall"`,
+  );
+  if (typeof recall["turn.started"] !== "function") {
+    throw new Error(`${message} provider.recall["turn.started"] must be a function.`);
   }
-  if (provider.capture !== undefined && typeof provider.capture !== "function") {
-    throw new Error(`${message} "provider.capture" must be a function when provided.`);
+  if (
+    recall["compaction.completed"] !== undefined &&
+    typeof recall["compaction.completed"] !== "function"
+  ) {
+    throw new Error(
+      `${message} provider.recall["compaction.completed"] must be a function when provided.`,
+    );
+  }
+  if (provider.capture !== undefined) {
+    const capture = expectObjectRecord(
+      provider.capture,
+      `${message} "provider.capture" must be an object when provided.`,
+    );
+    expectOnlyKnownKeys(
+      capture,
+      ["compaction.requested", "turn.completed"],
+      `${message} "provider.capture"`,
+    );
+    for (const event of ["compaction.requested", "turn.completed"] as const) {
+      if (capture[event] !== undefined && typeof capture[event] !== "function") {
+        throw new Error(
+          `${message} provider.capture[${JSON.stringify(event)}] must be a function when provided.`,
+        );
+      }
+    }
   }
   if (provider.tools !== undefined && typeof provider.tools !== "function") {
     throw new Error(`${message} "provider.tools" must be a function when provided.`);

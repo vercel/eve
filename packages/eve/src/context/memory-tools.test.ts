@@ -49,7 +49,7 @@ function resolver(version: () => number): ResolvedDynamicToolResolver {
   const definition = defineMemory({
     description: "Manage the profile.",
     provider: {
-      recall: async () => null,
+      recall: { "turn.started": async () => null },
       tools: async (context) => ({
         save: defineTool({
           approval: always(),
@@ -136,7 +136,7 @@ describe("memory provider tools", () => {
     const ctx = createContext("user_1");
     const definition = defineMemory({
       provider: {
-        recall: async () => null,
+        recall: { "turn.started": async () => null },
         tools: async () => ({
           save: defineTool({ description: "Save.", execute: async () => null, inputSchema: {} }),
         }),

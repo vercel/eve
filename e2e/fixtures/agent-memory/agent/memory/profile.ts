@@ -8,9 +8,11 @@ const profiles = new Map<string, string>();
 export default defineMemory({
   description: "Update the durable profile value for this caller.",
   provider: {
-    async recall(ctx) {
-      const value = profiles.get(ctx.memory.scope.key) ?? "OLD_PROFILE_VALUE";
-      return { messages: [{ content: `PROFILE_VALUE=${value}`, id: "profile" }] };
+    recall: {
+      async "turn.started"(ctx) {
+        const value = profiles.get(ctx.memory.scope.key) ?? "OLD_PROFILE_VALUE";
+        return { messages: [{ content: `PROFILE_VALUE=${value}`, id: "profile" }] };
+      },
     },
     async tools(ctx) {
       return {

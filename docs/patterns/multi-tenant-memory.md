@@ -24,11 +24,21 @@ Never accept the tenant or user ID from the model. Resolve both from verified
 session authentication and return a tuple:
 
 ```ts title="agent/memory/profile.ts"
-import { defineMemory } from "eve/memory";
+import { defineMemory, type MemoryOperationContext } from "eve/memory";
 import { defineTool } from "eve/tools";
 import { always } from "eve/tools/approval";
 import { z } from "zod";
 import { memoryStore } from "../lib/memory-store";
+
+async function recall(ctx: MemoryOperationContext) {
+  const memories = await memoryStore.list(ctx.memory.scope.key, { limit: 50 });
+  return {
+    messages: memories.map((memory) => ({
+      id: memory.key,
+      content: JSON.stringify({ key: memory.key, value: memory.value }),
+    })),
+  };
+}
 
 export default defineMemory({
   description: "Manage long-term memory for the current tenant user.",
@@ -45,19 +55,15 @@ export default defineMemory({
   },
 
   provider: {
-    async recall(ctx) {
-      const memories = await memoryStore.list(ctx.memory.scope.key, { limit: 50 });
-      return {
-        messages: memories.map((memory) => ({
-          id: memory.key,
-          content: JSON.stringify({ key: memory.key, value: memory.value }),
-        })),
-      };
+    recall: {
+      "turn.started": recall,
+      "compaction.completed": recall,
     },
 
-    async capture(ctx) {
-      if (ctx.phase !== "turn.completed") return;
-      await memoryStore.observe(ctx.memory.scope.key, ctx.messages, ctx.operationId);
+    capture: {
+      async "turn.completed"(ctx) {
+        await memoryStore.observe(ctx.memory.scope.key, ctx.messages, ctx.operationId);
+      },
     },
 
     async tools(ctx) {
@@ -94,7 +100,7 @@ export default defineMemory({
 
 Returning `null` disables memory for unauthenticated or incorrectly scoped
 traffic. eve does not call the provider and never substitutes a shared scope.
-Every provider method and generated tool receives the same locked
+Every provider handler and generated tool receives the same locked
 `memory.scope.key`, so the model cannot redirect an operation to another user.
 
 Use `auth.current` for the caller of the active turn. If a conversation is

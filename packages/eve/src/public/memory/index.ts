@@ -76,36 +76,34 @@ export interface MemoryOperationContext extends SessionContext {
   };
 }
 
-export type MemoryRecallContext = MemoryOperationContext &
-  (
-    | {
-        readonly phase: "turn.started";
-        readonly turn: MemoryTurnContext;
-        readonly compaction?: never;
-      }
-    | {
-        readonly phase: "compaction.completed";
-        readonly turn: MemoryTurnContext | null;
-        readonly compaction: { readonly modelId: string };
-      }
-  );
+export interface MemoryTurnStartedContext extends MemoryOperationContext {
+  readonly turn: MemoryTurnContext;
+}
 
-export type MemoryCaptureContext = MemoryOperationContext &
-  (
-    | {
-        readonly phase: "compaction.requested";
-        readonly turn: MemoryTurnContext | null;
-        readonly compaction: {
-          readonly modelId: string;
-          readonly usageInputTokens: number | null;
-        };
-      }
-    | {
-        readonly phase: "turn.completed";
-        readonly turn: MemoryTurnContext;
-        readonly compaction?: never;
-      }
-  );
+export interface MemoryCompactionCompletedContext extends MemoryOperationContext {
+  readonly turn: MemoryTurnContext | null;
+  readonly compaction: { readonly modelId: string };
+}
+
+export interface MemoryCompactionRequestedContext extends MemoryOperationContext {
+  readonly turn: MemoryTurnContext | null;
+  readonly compaction: {
+    readonly modelId: string;
+    readonly usageInputTokens: number | null;
+  };
+}
+
+export interface MemoryTurnCompletedContext extends MemoryOperationContext {
+  readonly turn: MemoryTurnContext;
+}
+
+export type MemoryRecallHandler<TContext extends MemoryOperationContext> = (
+  context: TContext,
+) => MemoryRecallResult | Promise<MemoryRecallResult>;
+
+export type MemoryCaptureHandler<TContext extends MemoryOperationContext> = (
+  context: TContext,
+) => void | Promise<void>;
 
 export interface MemoryToolsContext extends DynamicResolveContext {
   readonly memory: {
@@ -128,9 +126,15 @@ export interface MemoryToolDefinition {
 export type MemoryToolSet = Readonly<Record<string, MemoryToolDefinition>>;
 
 export interface MemoryProvider {
-  recall(context: MemoryRecallContext): MemoryRecallResult | Promise<MemoryRecallResult>;
-  capture?(context: MemoryCaptureContext): void | Promise<void>;
-  tools?(context: MemoryToolsContext): MemoryToolSet | null | Promise<MemoryToolSet | null>;
+  readonly recall: {
+    readonly "turn.started": MemoryRecallHandler<MemoryTurnStartedContext>;
+    readonly "compaction.completed"?: MemoryRecallHandler<MemoryCompactionCompletedContext>;
+  };
+  readonly capture?: {
+    readonly "compaction.requested"?: MemoryCaptureHandler<MemoryCompactionRequestedContext>;
+    readonly "turn.completed"?: MemoryCaptureHandler<MemoryTurnCompletedContext>;
+  };
+  readonly tools?: (context: MemoryToolsContext) => Promise<MemoryToolSet | null>;
 }
 
 export type MemoryVisibility = "scope" | "session";

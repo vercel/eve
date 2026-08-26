@@ -18,30 +18,36 @@ Create `agent/memory.ts` for one slot named `memory`, or use
 `agent/memory/<slot>.ts` for named slots. These forms are mutually exclusive.
 
 ```ts title="agent/memory/profile.ts"
-import { defineMemory } from "eve/memory";
+import { defineMemory, type MemoryOperationContext } from "eve/memory";
 import { byPrincipal } from "eve/memory/scope";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { profileStore } from "../lib/profile-store";
 
+async function recallProfile(ctx: MemoryOperationContext) {
+  const profile = await profileStore.get(ctx.memory.scope.key);
+  if (profile === null) return null;
+
+  return {
+    messages: [{ id: "profile", content: JSON.stringify(profile) }],
+  };
+}
+
 export default defineMemory({
   description: "Manage durable facts and preferences for the current caller.",
   scope: byPrincipal,
   provider: {
-    async recall(ctx) {
-      const profile = await profileStore.get(ctx.memory.scope.key);
-      if (profile === null) return null;
-
-      return {
-        messages: [{ id: "profile", content: JSON.stringify(profile) }],
-      };
+    recall: {
+      "turn.started": recallProfile,
+      "compaction.completed": recallProfile,
     },
 
-    async capture(ctx) {
-      if (ctx.phase !== "turn.completed") return;
-      await profileStore.observe(ctx.memory.scope.key, ctx.messages, {
-        operationId: ctx.operationId,
-      });
+    capture: {
+      async "turn.completed"(ctx) {
+        await profileStore.observe(ctx.memory.scope.key, ctx.messages, {
+          operationId: ctx.operationId,
+        });
+      },
     },
 
     async tools(ctx) {
@@ -70,11 +76,16 @@ Use `defineMemoryProvider()` when several slots share one provider or when you
 want its contract checked separately:
 
 ```ts
-import { defineMemoryProvider } from "eve/memory";
+import { defineMemoryProvider, type MemoryOperationContext } from "eve/memory";
+
+async function recall(ctx: MemoryOperationContext) {
+  return await recallFromStore(ctx.memory.scope.key, ctx.messages);
+}
 
 export const provider = defineMemoryProvider({
-  async recall(ctx) {
-    return await recallFromStore(ctx.memory.scope.key, ctx.messages);
+  recall: {
+    "turn.started": recall,
+    "compaction.completed": recall,
   },
 });
 ```
@@ -152,9 +163,11 @@ namespace resolver.
 
 ## Recall behavior
 
-`recall()` runs before the model and after a compaction checkpoint. It returns
-`{ messages }`, `null`, or `undefined`. Each recalled item becomes an untrusted
-user-role message; provider content is never promoted to system instructions.
+Register recall handlers under their lifecycle keys. `"turn.started"` is
+required and runs before the model. `"compaction.completed"` is optional and
+runs after a compaction checkpoint. A recall handler returns `{ messages }`,
+`null`, or `undefined`. Each recalled item becomes an untrusted user-role
+message; provider content is never promoted to system instructions.
 
 ```ts
 return {
@@ -173,7 +186,7 @@ identical. Omitting an earlier item from a later result does not delete it.
 All active slots lock their scopes before any recall runs. They see the same
 pre-recall history, and eve commits their validated results atomically. Each
 call receives a stable `operationId`; use it as an idempotency key for writes
-performed by `capture()`.
+performed by capture handlers.
 
 The default `visibility: "scope"` hides a slot's prior recalled records when
 its scope changes. Set `visibility: "session"` only when those records are
@@ -182,12 +195,12 @@ and slot boundaries still apply.
 
 ## Lifecycle and compaction
 
-| Phase                  | Provider call | Context                                                    |
-| ---------------------- | ------------- | ---------------------------------------------------------- |
-| `turn.started`         | `recall`      | History before recall; current delivery is in `turn.input` |
-| `turn.completed`       | `capture`     | Settled, projected history after a successful turn         |
-| `compaction.requested` | `capture`     | Projected history before the checkpoint changes            |
-| `compaction.completed` | `recall`      | The checkpoint plus canonical recalled records             |
+| Phase                  | Provider handler                  | Context                                                    |
+| ---------------------- | --------------------------------- | ---------------------------------------------------------- |
+| `turn.started`         | `recall["turn.started"]`          | History before recall; current delivery is in `turn.input` |
+| `turn.completed`       | `capture["turn.completed"]`       | Settled, projected history after a successful turn         |
+| `compaction.requested` | `capture["compaction.requested"]` | Projected history before the checkpoint changes            |
+| `compaction.completed` | `recall["compaction.completed"]`  | The checkpoint plus canonical recalled records             |
 
 Compaction excludes recalled records from the summarizer, preserves only the
 latest keyed values plus unkeyed values, then recalls again against the new
