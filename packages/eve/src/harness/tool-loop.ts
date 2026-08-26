@@ -136,7 +136,10 @@ import {
   extractQuestionInputRequests,
   extractToolApprovalInputRequests,
 } from "#harness/input-extraction.js";
-import { renderPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
+import {
+  renderPendingApprovalsInstruction,
+  renderPendingApprovalsSnippet,
+} from "#harness/hitl/approval-prompt.js";
 import { createToolResultMessagePartFromToolError } from "#harness/action-result-helpers.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import {
@@ -176,7 +179,7 @@ import {
   resolvePendingInput,
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
-import { queueDeferredStepInput } from "#harness/pending-input-batches.js";
+import { getPendingInputBatches, queueDeferredStepInput } from "#harness/pending-input-batches.js";
 import {
   convertStaleResponsesToUserMessage,
   dropStaleSessionLimitContinuationResponses,
@@ -1395,6 +1398,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         role: "system",
         content: deliveryInstruction,
       });
+    }
+    const pendingApprovals = renderPendingApprovalsInstruction(
+      getPendingInputBatches(session.state).flatMap((batch) => batch.requests),
+    );
+    if (pendingApprovals !== undefined) {
+      systemMessages.push({ role: "system", content: pendingApprovals });
     }
 
     const modelMessages = nonSystemMessages;
