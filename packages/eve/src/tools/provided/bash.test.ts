@@ -6,7 +6,10 @@ import { BASH_INPUT_SCHEMA, BASH_OUTPUT_SCHEMA } from "./bash.js";
 
 describe("bash schemas", () => {
   it("emits a provider-compatible object schema", () => {
-    expect(z.toJSONSchema(BASH_INPUT_SCHEMA, { io: "input" })).toMatchObject({ type: "object" });
+    expect(z.toJSONSchema(BASH_INPUT_SCHEMA, { io: "input" })).toMatchObject({
+      anyOf: expect.any(Array),
+      type: "object",
+    });
   });
 
   it("accepts an optional nonnegative foreground yield time in milliseconds", () => {
