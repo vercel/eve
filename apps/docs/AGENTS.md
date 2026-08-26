@@ -7,7 +7,9 @@ All user-facing UI changes must be mobile-responsive. Before completing a UI cha
 ## Geistdocs
 
 - Read `node_modules/@vercel/geistdocs/docs/agents.md` and the focused pages under `node_modules/@vercel/geistdocs/docs/pages/` before changing package-backed behavior.
+- Keep `createGeistdocs` from `@vercel/geistdocs/next` as the `next.config.ts` wrapper. It composes Fumadocs MDX and generates the app-route manifest used by `createProxy`; do not replace it with `createMDX` directly.
 - Keep `cacheComponents: true` and `partialPrefetching: true` in `next.config.ts`.
+- Restart `next dev` after adding, deleting, or renaming an App Router page or route so `createGeistdocs` regenerates its route manifest.
 - Do not export `dynamic`, `dynamicParams`, `revalidate`, or `fetchCache` from App Router pages or route handlers.
 - Generate every supported root language. Read `[lang]` through `next/root-params` only in Server Components; retain route context `params` in Route Handlers and Server Actions.
 - Set `prefetch={true}` on app-owned links to statically generated docs, integrations, and templates so navigation reveals the complete destination immediately.
