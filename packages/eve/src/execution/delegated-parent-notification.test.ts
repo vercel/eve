@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
 import { serializeContext } from "#context/serialize.js";
-import { SessionCallbackKey, SessionIdKey } from "#context/keys.js";
+import { ActivityObserverKey, SessionCallbackKey, SessionIdKey } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
@@ -474,6 +474,17 @@ describe("turn caller binding", () => {
     await expect(
       bindTurnCallerContextStep({
         caller: {
+          activityObserver: {
+            sink: { url: "https://parent.example/eve/v1/activity/opaque-token", version: 1 },
+            workIdentity: {
+              callId: "call-new",
+              id: "work:new",
+              kind: "subagent",
+              name: "research",
+              rootSessionId: "root",
+              rootTurnId: "root-turn",
+            },
+          },
           callId: "call-new",
           replyTo: { kind: "hook", token: "turn-new" },
           subagentName: "research",
@@ -491,6 +502,9 @@ describe("turn caller binding", () => {
         },
       }),
     ).resolves.toMatchObject({
+      [ActivityObserverKey.name]: {
+        workIdentity: { id: "work:new" },
+      },
       [ChannelKey.name]: {
         state: { callId: "call-new", parentContinuationToken: "turn-new" },
       },

@@ -675,6 +675,20 @@ describe("continueRemoteAgentSession", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await continueRemoteAgentSession({
+      activityObserver: {
+        sink: {
+          url: "https://caller.example.com/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+          version: 1,
+        },
+        workIdentity: {
+          callId: "call-next",
+          id: "work:next",
+          kind: "remote-agent",
+          name: "research",
+          rootSessionId: "root",
+          rootTurnId: "turn",
+        },
+      },
       auth: null,
       callback: {
         callId: "call-next",
@@ -692,6 +706,20 @@ describe("continueRemoteAgentSession", () => {
       "https://remote.example.com/eve/v1/session/remote-session",
       {
         body: JSON.stringify({
+          activityObserver: {
+            sink: {
+              url: "https://caller.example.com/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+              version: 1,
+            },
+            workIdentity: {
+              callId: "call-next",
+              id: "work:next",
+              kind: "remote-agent",
+              name: "research",
+              rootSessionId: "root",
+              rootTurnId: "turn",
+            },
+          },
           callback: {
             callId: "call-next",
             subagentName: "research",

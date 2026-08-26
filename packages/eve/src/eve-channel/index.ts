@@ -283,6 +283,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         try {
           const session = attachSession(sessionId);
           const options = {
+            activityObserver: body.activityObserver,
             auth: dispatchAuth,
             callback: body.callback,
             context,

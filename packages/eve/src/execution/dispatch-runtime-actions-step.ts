@@ -25,6 +25,7 @@ import {
   startSubagent,
 } from "#execution/dispatch-runtime-actions-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
+import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
 export async function dispatchRuntimeActionsStep(
@@ -65,6 +66,20 @@ export async function dispatchRuntimeActionsStep(
         case "resume":
           outcome = await dispatchToAgentHandle({
             action: entry.action,
+            activityObserver:
+              prepared.activityObserver === undefined
+                ? undefined
+                : deriveChildActivityObserverConfig({
+                    activityObserver: prepared.activityObserver,
+                    callId: entry.action.callId,
+                    kind: entry.action.kind === "remote-agent-call" ? "remote-agent" : "subagent",
+                    name:
+                      entry.action.kind === "remote-agent-call"
+                        ? entry.action.remoteAgentName
+                        : entry.action.subagentName,
+                    parentSessionId: session.sessionId,
+                    parentTurnId: batch.event.turnId,
+                  }),
             agentId: entry.agentId,
             auth: prepared.auth,
             bundle: createAgentContinuationBundle({

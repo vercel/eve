@@ -86,6 +86,43 @@ describe("projectSessionActivity", () => {
     expect(snapshot.pendingSettlements).toEqual({});
   });
 
+  it("maps session and later turn starts to the active delegated work", () => {
+    const first: ActivityWorkIdentityV1 = {
+      callId: "call-1",
+      id: "work:first",
+      kind: "subagent",
+      name: "researcher",
+      rootSessionId: "parent",
+      rootTurnId: "root-turn",
+    };
+    const second = { ...first, callId: "call-2", id: "work:second" };
+
+    expect(
+      projectSessionActivity({
+        event: { data: {}, meta: { at, id: "session-started" }, type: "session.started" },
+        sessionId: "child",
+        workIdentity: first,
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        kind: "work.started",
+        work: expect.objectContaining({ id: first.id }),
+      }),
+    ]);
+    expect(
+      projectSessionActivity({
+        event: turnEvent("turn.started", "child-turn-2"),
+        sessionId: "child",
+        workIdentity: second,
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        kind: "work.started",
+        work: expect.objectContaining({ id: second.id }),
+      }),
+    ]);
+  });
+
   it("maps session.started to delegated work start and keeps HITL active while parked", () => {
     const workIdentity: ActivityWorkIdentityV1 = {
       callId: "call-1",

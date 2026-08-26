@@ -192,6 +192,7 @@ function validateActivityObserverBinding(
 }
 
 interface ParsedSessionMessageBody {
+  activityObserver?: ActivityObserverConfig;
   callback?: SessionCallback;
   message?: string | UserContent;
   inputResponses?: readonly ValidatedInputResponse[];
@@ -210,6 +211,12 @@ export function parseSessionMessageBody(
   if (message instanceof Response) return message;
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
+  const activityObserver = parseActivityObserverField(payload.activityObserver);
+  if (activityObserver instanceof Response) return activityObserver;
+  if (activityObserver !== undefined) {
+    const observerRejection = validateActivityObserverBinding(activityObserver, callback);
+    if (observerRejection !== undefined) return observerRejection;
+  }
   const inputResponses = parseInputResponses(payload.inputResponses);
   if (inputResponses instanceof Response) return inputResponses;
   const context = parseClientContextField(payload.clientContext);
@@ -236,7 +243,15 @@ export function parseSessionMessageBody(
     );
   }
 
-  return { callback, message, inputResponses, context, outputSchema, turnPolicy };
+  return {
+    activityObserver,
+    callback,
+    message,
+    inputResponses,
+    context,
+    outputSchema,
+    turnPolicy,
+  };
 }
 
 interface ParsedCancelTurnBody {

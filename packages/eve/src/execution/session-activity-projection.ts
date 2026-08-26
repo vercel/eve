@@ -35,7 +35,8 @@ export function projectSessionActivity(input: {
   const events: ActivityEventV1[] = [];
   if (
     (work.kind === "root-turn" && input.event.type === "turn.started") ||
-    (work.kind !== "root-turn" && input.event.type === "session.started")
+    (work.kind !== "root-turn" &&
+      (input.event.type === "session.started" || input.event.type === "turn.started"))
   ) {
     events.push({
       eventId: `${work.id}:started`,

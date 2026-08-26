@@ -138,6 +138,7 @@ export type EventEmitFn = (event: UnstampedMessageStreamEvent) => Promise<void>;
 
 /** Framework-internal caller waiting for one delegated conversation turn. */
 export interface TurnCaller {
+  readonly activityObserver?: ActivityObserverConfig;
   readonly callId: string;
   readonly subagentName: string;
   /** Present when this turn is the executor for a durable background task. */

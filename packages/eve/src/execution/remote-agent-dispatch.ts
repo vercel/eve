@@ -168,6 +168,7 @@ export async function startRemoteAgentSession(input: {
 
 /** Continues one remote-agent session by its immutable session ID. */
 export async function continueRemoteAgentSession(input: {
+  readonly activityObserver?: ActivityObserverConfig;
   /** The dispatching turn's session principal, forwarded when `remote.forwardPrincipal` is set. */
   readonly auth: SessionAuthContext | null;
   readonly callback: {
@@ -184,11 +185,13 @@ export async function continueRemoteAgentSession(input: {
 }): Promise<void> {
   const forwardedPrincipal = buildForwardedPrincipalField(input);
   const requestBody: {
+    activityObserver?: ActivityObserverConfig;
     callback: typeof input.callback;
     forwardedPrincipal?: ForwardedPrincipal;
     message: string;
     outputSchema?: JsonObject;
   } = {
+    activityObserver: input.activityObserver,
     callback: input.callback,
     message: input.message,
     outputSchema: input.outputSchema,

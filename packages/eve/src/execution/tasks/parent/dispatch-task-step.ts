@@ -146,6 +146,17 @@ export async function dispatchTaskStep(
         case "resume":
           outcome = await dispatchToTaskAgentAddress({
             action: entry.action,
+            activityObserver:
+              prepared.activityObserver === undefined
+                ? undefined
+                : deriveChildActivityObserverConfig({
+                    activityObserver: prepared.activityObserver,
+                    callId: entry.action.callId,
+                    kind: "task",
+                    name: entry.action.name,
+                    parentSessionId: session.sessionId,
+                    parentTurnId: batch.event.turnId,
+                  }),
             agentId: entry.agentId,
             auth: prepared.auth,
             bundle: createAgentContinuationBundle({
