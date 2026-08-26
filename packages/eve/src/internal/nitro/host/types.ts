@@ -62,6 +62,15 @@ export interface DevelopmentServer<H extends DevelopmentServerHandle = Developme
 export interface DevelopmentServerOptions {
   readonly existing?: "attach-if-unconfigured" | "reject";
   readonly host?: string;
+  /**
+   * Whether the caller runs the dev TUI on the terminal it owns.
+   *
+   * Only the terminal's owner can know: the server child is forked over pipes,
+   * so neither it nor the runtime observes a TTY. Runtime code reads it through
+   * {@link import("#runtime/local-dev-capability.js").getLocalDevCapability}
+   * to decide whether a flow that asks questions has anywhere to be asked.
+   */
+  readonly interactiveClient?: boolean;
   readonly onBootProgress?: DevBootProgressReporter;
   /** Parent stream that receives a supervised development child's stdout. */
   readonly output?: "stderr" | "stdout";

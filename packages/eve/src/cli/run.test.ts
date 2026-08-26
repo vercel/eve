@@ -289,6 +289,7 @@ describe("bare eve command", () => {
     expect(startHost).toHaveBeenCalledWith("/resolved/app", {
       existing: "attach-if-unconfigured",
       host: undefined,
+      interactiveClient: true,
       onBootProgress: expect.any(Function),
       output: undefined,
       port: undefined,
@@ -910,6 +911,7 @@ describe("eve dev local server ownership", () => {
     expect(startHost).toHaveBeenCalledWith(expect.any(String), {
       existing: "attach-if-unconfigured",
       host: undefined,
+      interactiveClient: true,
       onBootProgress: expect.any(Function),
       output: undefined,
       port: undefined,

@@ -44,6 +44,7 @@ import {
   DEFAULT_DEVELOPMENT_SERVER_PORT,
   MAX_DEVELOPMENT_SERVER_PORT_ATTEMPTS,
 } from "#internal/nitro/host/ports.js";
+import { installLocalDevCapabilityEnvironment } from "#runtime/local-dev-capability.js";
 import { detectPackageManager, type PackageManagerKind } from "#setup/package-manager.js";
 import { eveDevArguments } from "#setup/primitives/index.js";
 import { devBootPhase } from "#internal/dev-boot-progress.js";
@@ -408,6 +409,7 @@ async function startNitroDevelopmentServer(
   process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV] = developmentSandboxRunId;
   let nitro: Nitro | undefined;
   let devServer: NitroDevelopmentServer | undefined;
+  let restoreLocalDevCapabilityEnvironment: (() => void) | undefined;
   let restoreWorkflowLocalQueueEnvironment: (() => void) | undefined;
   let restoreWorkflowTransportEnvironment: (() => void) | undefined;
   let workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
@@ -479,6 +481,12 @@ async function startNitroDevelopmentServer(
 
     const serverUrl = normalizeDevelopmentServerClientUrl(server.url);
     restoreWorkflowLocalQueueEnvironment = installWorkflowLocalQueueEnvironment(serverUrl);
+    // Published before the first worker is created, so every runtime generation
+    // inherits it: workers copy `process.env` at construction.
+    restoreLocalDevCapabilityEnvironment = installLocalDevCapabilityEnvironment({
+      appRoot: project.appRoot,
+      serverUrl,
+    });
     await devBootPhase(
       "building dev bundle",
       async () => {
@@ -535,6 +543,7 @@ async function startNitroDevelopmentServer(
     const devServerOnClose = devServer;
     const workflowWorldOnClose = workflowWorld;
     const restoreWorkflowTransportEnvironmentOnClose = restoreWorkflowTransportEnvironment;
+    const restoreLocalDevCapabilityEnvironmentOnClose = restoreLocalDevCapabilityEnvironment;
     let closePromise: Promise<void> | undefined;
     const close = (): Promise<void> => {
       closePromise ??= (async () => {
@@ -558,6 +567,7 @@ async function startNitroDevelopmentServer(
         } finally {
           restoreWorkflowLocalQueueEnvironmentOnClose();
           restoreWorkflowTransportEnvironmentOnClose?.();
+          restoreLocalDevCapabilityEnvironmentOnClose?.();
           restoreDevelopmentSandboxRunId(previousDevelopmentSandboxRunId);
         }
       })();
@@ -593,6 +603,7 @@ async function startNitroDevelopmentServer(
     }
     restoreWorkflowLocalQueueEnvironment?.();
     restoreWorkflowTransportEnvironment?.();
+    restoreLocalDevCapabilityEnvironment?.();
     if (cleanup.listenerClosed) {
       await state.remove().catch(() => {});
     }
