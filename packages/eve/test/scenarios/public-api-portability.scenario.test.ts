@@ -110,7 +110,7 @@ const backend: MemoryDocumentBackend = process.env.VERCEL
   : inMemory();
 
 export default defineMemory({
-  provider: fileMemory({ backend, maxEntries: 25 }),
+  provider: fileMemory({ backend, maxCharacters: 8_000 }),
   scope: "shared",
 });
 `,

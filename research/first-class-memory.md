@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1510
 status: proposed
-last_updated: "2026-08-25"
+last_updated: "2026-08-26"
 ---
 
 # First-class memory
@@ -964,7 +964,7 @@ implementation uses exactly the reviewed constants.
 | Raw-record canonicalization | 512 records or 262,144 bytes         | superseded/hidden attributed records between compactions |
 | File entry                  | 2,048 UTF-8 bytes                    | normalized `save_memory` text                            |
 | File document               | 65,536 UTF-8 bytes                   | exact serialized stored document, including header       |
-| File entries                | `maxEntries`, default 100            | live entries per scope key                               |
+| Recalled file memory        | `maxCharacters`, default 4,000       | exact rendered keyed message after `save_memory`         |
 
 ## Built-in file memory
 
@@ -974,8 +974,8 @@ indexed `MEMORY.md`-style document per memory scope key.
 ```ts
 interface FileMemoryOptions {
   readonly backend?: MemoryDocumentBackend;
-  /** Defaults to 100. */
-  readonly maxEntries?: number;
+  /** Defaults to 4,000. */
+  readonly maxCharacters?: number;
 }
 
 function fileMemory(options?: FileMemoryOptions): MemoryProvider;
@@ -1008,10 +1008,10 @@ can supersede per item.
 `tools` exposes `save_memory({ text })` and `remove_memory({ index })`. Each
 tool completes after its conditional write and returns no output; the next
 recall reflects the updated document. `save_memory` normalizes whitespace,
-treats duplicate text as a successful no-op, and fails when the document
-reaches `maxEntries`. `remove_memory` is a no-op when its index is absent. The
-provider omits `capture`: it does not run an extraction model or persist whole
-conversations.
+treats duplicate text as a successful no-op, and fails when adding the entry
+would make the exact rendered recall message exceed `maxCharacters`.
+`remove_memory` is a no-op when its index is absent. The provider omits
+`capture`: it does not run an extraction model or persist whole conversations.
 
 ### Storage format
 
@@ -1019,12 +1019,11 @@ The stored document has a versioned header that persists `lastAllocatedIndex`
 (starting at `-1`) alongside the live indexed lines. Indexes are allocated
 monotonically and never renumbered or reused, including after the highest live
 index is removed, so a model-facing index from earlier context can never alias
-a different, later fact. `maxEntries` counts live entries, so removal frees
-capacity without resetting the high-water mark. When `lastAllocatedIndex`
-reaches `Number.MAX_SAFE_INTEGER`, the next save fails explicitly. Removal
-visibility comes from the changed document superseding the previous copy, so
-the document needs no deletion tombstones. Header bytes count toward the
-document limit.
+a different, later fact. Removing an entry frees character capacity without
+resetting the high-water mark. When `lastAllocatedIndex` reaches
+`Number.MAX_SAFE_INTEGER`, the next save fails explicitly. Removal visibility
+comes from the changed document superseding the previous copy, so the document
+needs no deletion tombstones. Header bytes count toward the document limit.
 
 ### Backend contract and selection
 

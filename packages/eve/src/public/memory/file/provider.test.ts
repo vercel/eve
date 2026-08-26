@@ -147,7 +147,7 @@ describe("fileMemory", () => {
     });
   });
 
-  it("limits live entries while removal frees capacity", async () => {
+  it("limits recalled characters while removal frees capacity", async () => {
     const backend = inMemory();
     await backend.write({
       content: storedDocument(1, ["0: First.", "1: Second."]),
@@ -155,11 +155,16 @@ describe("fileMemory", () => {
       key: "mem_scope",
       signal,
     });
-    const provider = fileMemory({ backend, maxEntries: 2 });
+    const recalled = await recallAtTurnStart(fileMemory({ backend }));
+    const maxCharacters = recalled?.messages[0]?.content.length;
+    expect(maxCharacters).toBeDefined();
+    if (maxCharacters === undefined) throw new Error("memory was not recalled");
+
+    const provider = fileMemory({ backend, maxCharacters });
     const tools = await resolveTools(provider);
 
     await expect(tools.save_memory.execute({ text: "Third." }, toolContext)).rejects.toThrow(
-      "configured limit of 2 memories",
+      `configured ${maxCharacters}-character limit`,
     );
     await expect(tools.remove_memory.execute({ index: 0 }, toolContext)).resolves.toBeUndefined();
     await expect(
@@ -170,25 +175,49 @@ describe("fileMemory", () => {
     });
   });
 
-  it("defaults to 100 live entries", async () => {
+  it("defaults to a 4,000-character recalled message", async () => {
     const backend = inMemory();
-    const entries = Array.from({ length: 100 }, (_, index) => `${index}: Memory ${index}.`);
     await backend.write({
-      content: storedDocument(99, entries),
+      content: storedDocument(1, [`0: ${"x".repeat(1_800)}`, `1: ${"y".repeat(1_800)}`]),
       expectedVersion: null,
       key: "mem_scope",
       signal,
     });
-    const tools = await resolveTools(fileMemory({ backend }));
+    const provider = fileMemory({ backend });
+    const recalled = await recallAtTurnStart(provider);
+    expect(recalled?.messages[0]?.content.length).toBeLessThan(4_000);
+    const tools = await resolveTools(provider);
 
-    await expect(tools.save_memory.execute({ text: "One too many." }, toolContext)).rejects.toThrow(
-      "configured limit of 100 memories",
+    await expect(tools.save_memory.execute({ text: "z".repeat(400) }, toolContext)).rejects.toThrow(
+      "configured 4,000-character limit",
     );
+  });
+
+  it("counts characters instead of UTF-8 bytes", async () => {
+    const backend = inMemory();
+    await backend.write({
+      content: storedDocument(0, [`0: ${"é".repeat(1_000)}`]),
+      expectedVersion: null,
+      key: "mem_scope",
+      signal,
+    });
+    const recalled = await recallAtTurnStart(fileMemory({ backend }));
+    const maxCharacters = recalled?.messages[0]?.content.length;
+    expect(maxCharacters).toBeDefined();
+    if (maxCharacters === undefined) throw new Error("memory was not recalled");
+
+    const tools = await resolveTools(fileMemory({ backend, maxCharacters }));
+    await expect(tools.remove_memory.execute({ index: 0 }, toolContext)).resolves.toBeUndefined();
+    await expect(
+      tools.save_memory.execute({ text: "é".repeat(1_000) }, toolContext),
+    ).resolves.toBeUndefined();
   });
 
   it("enforces UTF-8 entry and document byte limits", async () => {
     const backend = inMemory();
-    const tools = await resolveTools(fileMemory({ backend }));
+    const tools = await resolveTools(
+      fileMemory({ backend, maxCharacters: Number.MAX_SAFE_INTEGER }),
+    );
     await expect(
       tools.save_memory.execute({ text: "é".repeat(1_025) }, toolContext),
     ).rejects.toThrow("2,048-byte limit");
@@ -207,8 +236,8 @@ describe("fileMemory", () => {
   });
 
   it("rejects invalid options, text, and stored document formats", async () => {
-    expect(() => fileMemory({ maxEntries: 0 })).toThrow("positive safe integer");
-    expect(() => fileMemory({ maxEntries: 1.5 })).toThrow("positive safe integer");
+    expect(() => fileMemory({ maxCharacters: 0 })).toThrow("positive safe integer");
+    expect(() => fileMemory({ maxCharacters: 1.5 })).toThrow("positive safe integer");
 
     const backend = inMemory();
     const provider = fileMemory({ backend });

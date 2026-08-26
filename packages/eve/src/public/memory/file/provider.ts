@@ -14,7 +14,7 @@ import {
   type MemoryRecallResult,
 } from "#public/memory/index.js";
 
-const DEFAULT_MAX_ENTRIES = 100;
+const DEFAULT_MAX_CHARACTERS = 4_000;
 const FILE_MEMORY_ITEM_ID = "file-memory-document";
 const MAX_DOCUMENT_BYTES = 65_536;
 const MAX_ENTRY_BYTES = 2_048;
@@ -27,8 +27,8 @@ const MEMORY_DOCUMENT_HEADER_PATTERN =
 export interface FileMemoryOptions {
   /** Storage implementation. Defaults by runtime environment. */
   readonly backend?: MemoryDocumentBackend;
-  /** Maximum number of stored memories. Defaults to 100. */
-  readonly maxEntries?: number;
+  /** Maximum characters in the recalled memory message. Defaults to 4,000. */
+  readonly maxCharacters?: number;
 }
 
 interface FileMemoryEntry {
@@ -47,7 +47,7 @@ interface FileMemoryDocument {
  */
 export function fileMemory(options: FileMemoryOptions = {}): MemoryProvider {
   const backend = options.backend ?? defaultFileMemoryBackend();
-  const maxEntries = normalizeMaxEntries(options.maxEntries);
+  const maxCharacters = normalizeMaxCharacters(options.maxCharacters);
   const recall = (context: MemoryOperationContext) => recallMemory(backend, context);
 
   return defineMemoryProvider({
@@ -59,7 +59,8 @@ export function fileMemory(options: FileMemoryOptions = {}): MemoryProvider {
       return createFileMemoryTools({
         backend,
         key: context.memory.scope.key,
-        maxEntries,
+        maxCharacters,
+        slot: context.memory.slot,
       });
     },
   });
@@ -68,7 +69,8 @@ export function fileMemory(options: FileMemoryOptions = {}): MemoryProvider {
 function createFileMemoryTools(input: {
   readonly backend: MemoryDocumentBackend;
   readonly key: string;
-  readonly maxEntries: number;
+  readonly maxCharacters: number;
+  readonly slot: string;
 }) {
   return {
     remove_memory: defineTool({
@@ -93,8 +95,9 @@ function createFileMemoryTools(input: {
         await saveMemory({
           backend: input.backend,
           key: input.key,
-          maxEntries: input.maxEntries,
+          maxCharacters: input.maxCharacters,
           signal: toolContext.abortSignal,
+          slot: input.slot,
           text: toolInput.text,
         });
       },
@@ -129,8 +132,9 @@ async function recallMemory(
 async function saveMemory(input: {
   readonly backend: MemoryDocumentBackend;
   readonly key: string;
-  readonly maxEntries: number;
+  readonly maxCharacters: number;
   readonly signal: AbortSignal;
+  readonly slot: string;
   readonly text: string;
 }): Promise<void> {
   const text = normalizeMemoryText(input.text);
@@ -141,15 +145,17 @@ async function saveMemory(input: {
     const parsed = parseMemoryDocumentOrEmpty(document);
     // Duplicate text is a successful no-op.
     if (parsed.entries.some((entry) => entry.text === text)) return;
-    if (parsed.entries.length >= input.maxEntries) {
+
+    const index = nextMemoryIndex(parsed.lastAllocatedIndex);
+    const entries = [...parsed.entries, { index, text }];
+    if (formatRecallContext(entries, input.slot).length > input.maxCharacters) {
       throw new RangeError(
-        `Memory has reached the configured limit of ${input.maxEntries} memories. Remove an outdated memory by index, then retry this save.`,
+        `Memory would exceed the configured ${input.maxCharacters.toLocaleString("en-US")}-character limit. Remove an outdated memory by index, then retry this save.`,
       );
     }
 
-    const index = nextMemoryIndex(parsed.lastAllocatedIndex);
     const content = formatMemoryDocument({
-      entries: [...parsed.entries, { index, text }],
+      entries,
       lastAllocatedIndex: index,
     });
     if (utf8Bytes(content) > MAX_DOCUMENT_BYTES) {
@@ -312,12 +318,12 @@ function normalizeStoredMemoryText(value: string): string {
   }
 }
 
-function normalizeMaxEntries(value: number | undefined): number {
-  const maxEntries = value ?? DEFAULT_MAX_ENTRIES;
-  if (!Number.isSafeInteger(maxEntries) || maxEntries < 1) {
-    throw new TypeError("fileMemory() maxEntries must be a positive safe integer.");
+function normalizeMaxCharacters(value: number | undefined): number {
+  const maxCharacters = value ?? DEFAULT_MAX_CHARACTERS;
+  if (!Number.isSafeInteger(maxCharacters) || maxCharacters < 1) {
+    throw new TypeError("fileMemory() maxCharacters must be a positive safe integer.");
   }
-  return maxEntries;
+  return maxCharacters;
 }
 
 function formatRecallContext(entries: readonly FileMemoryEntry[], slot: string): string {

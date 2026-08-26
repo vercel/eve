@@ -38,12 +38,15 @@ numeric indexes, and recalled as one stable keyed message. Removing an entry
 replaces the previous recalled document at the next boundary, including when
 the final entry is removed, so stale content does not remain in model context.
 
-The provider rejects rather than truncates or evicts data. Each normalized
-entry can contain up to 2,048 UTF-8 bytes; the stored document can contain up
-to 65,536 bytes; and `maxEntries` defaults to 100 live entries:
+The provider rejects rather than truncates or evicts data. `maxCharacters`
+defaults to 4,000 characters and caps the exact recalled message, including
+its heading, removal guidance, indexes, separators, and saved text.
+`save_memory` rejects an entry when the resulting message would exceed that
+limit. Each normalized entry can contain up to 2,048 UTF-8 bytes, and the
+stored document can contain up to 65,536 bytes:
 
 ```ts
-provider: fileMemory({ maxEntries: 25 });
+provider: fileMemory({ maxCharacters: 8_000 });
 ```
 
 ### Choose a file backend
