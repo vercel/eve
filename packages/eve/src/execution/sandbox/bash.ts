@@ -99,27 +99,65 @@ export async function startBackgroundBashProcess(
 ): Promise<BackgroundBashProcess> {
   const processId = randomUUID();
   const directory = `${PROCESS_ROOT}/${processId}`;
-  const quotedRoot = shellQuote(PROCESS_ROOT);
-  const launch = [
-    `mkdir -p ${quotedRoot}`,
-    `if [ "$(ls ${quotedRoot} | wc -l)" -ge ${MAX_BACKGROUND_BASH_PROCESSES} ]; then for d in ${quotedRoot}/*/; do [ -f "$d/exit-code" ] && rm -rf "$d"; done; fi`,
-    `if [ "$(ls ${quotedRoot} | wc -l)" -ge ${MAX_BACKGROUND_BASH_PROCESSES} ]; then echo ${PROCESS_LIMIT_MARKER} >&2; exit 75; fi`,
-    `mkdir -p ${shellQuote(directory)}`,
-    `set -m 2>/dev/null || true`,
-    `( ( eval ${shellQuote(command)} ); code=$?; printf '%s' "$code" > ${shellQuote(`${directory}/exit-code.tmp`)} && mv ${shellQuote(`${directory}/exit-code.tmp`)} ${shellQuote(`${directory}/exit-code`)} ) > ${shellQuote(`${directory}/stdout`)} 2> ${shellQuote(`${directory}/stderr`)} &`,
-    `printf '%s' "$!" > ${shellQuote(`${directory}/pid`)}`,
-  ].join("\n");
-  const result = await sandbox.run({ command: launch });
+  await reserveBackgroundProcessDirectory(sandbox, directory);
+
+  const result = await sandbox.run({
+    command: buildBackgroundLaunchCommand(command, directory),
+  });
   if (result.exitCode !== 0) {
-    if (result.stderr.includes(PROCESS_LIMIT_MARKER)) {
-      throw new Error(
-        `This sandbox already tracks ${MAX_BACKGROUND_BASH_PROCESSES} running background commands. Kill or wait for existing processes before starting another.`,
-      );
-    }
+    await sandbox.removePath({ force: true, path: directory, recursive: true });
     throw new Error(`Failed to start background command: ${result.stderr || result.stdout}`);
   }
 
   return backgroundBashProcess(sandbox, processId);
+}
+
+function buildBackgroundLaunchCommand(command: string, directory: string): string {
+  const exitCode = shellQuote(`${directory}/exit-code`);
+  const exitCodeTemp = shellQuote(`${directory}/exit-code.tmp`);
+  const stderr = shellQuote(`${directory}/stderr`);
+  const stdout = shellQuote(`${directory}/stdout`);
+  const pid = shellQuote(`${directory}/pid`);
+  return [
+    `set -m 2>/dev/null || true`,
+    `(`,
+    `  ( eval ${shellQuote(command)} )`,
+    `  code=$?`,
+    `  printf '%s' "$code" > ${exitCodeTemp}`,
+    `  mv ${exitCodeTemp} ${exitCode}`,
+    `) > ${stdout} 2> ${stderr} &`,
+    `printf '%s' "$!" > ${pid}`,
+  ].join("\n");
+}
+
+async function reserveBackgroundProcessDirectory(
+  sandbox: SandboxSession,
+  directory: string,
+): Promise<void> {
+  const quotedRoot = shellQuote(PROCESS_ROOT);
+  const result = await sandbox.run({
+    command: [
+      `mkdir -p ${quotedRoot}`,
+      `count=0`,
+      `for directory in ${quotedRoot}/*/; do`,
+      `  [ -d "$directory" ] || continue`,
+      `  if [ -f "$directory/exit-code" ]; then`,
+      `    rm -rf "$directory"`,
+      `  else`,
+      `    count=$((count + 1))`,
+      `  fi`,
+      `done`,
+      `[ "$count" -lt ${MAX_BACKGROUND_BASH_PROCESSES} ] || { echo ${PROCESS_LIMIT_MARKER} >&2; exit 75; }`,
+      `mkdir ${shellQuote(directory)}`,
+    ].join("\n"),
+  });
+  if (result.exitCode === 0) return;
+  if (result.stderr.includes(PROCESS_LIMIT_MARKER)) {
+    throw new Error(
+      `This sandbox already tracks ${MAX_BACKGROUND_BASH_PROCESSES} running background commands. Kill or wait for existing processes before starting another.`,
+    );
+  }
+  throw new Error(`Failed to inspect background commands: ${result.stderr || result.stdout}`);
 }
 
 export function getBackgroundBashProcess(

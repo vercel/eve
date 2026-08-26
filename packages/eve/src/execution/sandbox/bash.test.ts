@@ -79,7 +79,7 @@ describe("executeBashOnSandbox", () => {
     await expect(executeBashOnSandbox(session, { command: "build" })).rejects.toThrow(
       "read failed",
     );
-    expect(session.run).toHaveBeenCalledOnce();
+    expect(session.run).toHaveBeenCalledTimes(2);
   });
 
   it("kills when cancelled", async () => {
@@ -109,12 +109,13 @@ describe("background bash processes", () => {
   it("launches an isolated command behind the process cap", async () => {
     const session = sandbox();
     const process = await startBackgroundBashProcess(session, "exit 7");
-    const command = vi.mocked(session.run).mock.calls[0]?.[0].command;
+    const capacityCommand = vi.mocked(session.run).mock.calls[0]?.[0].command;
+    const launchCommand = vi.mocked(session.run).mock.calls[1]?.[0].command;
 
     expect(process.processId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(command).toContain("set -m 2>/dev/null || true");
-    expect(command).toContain(`-ge ${MAX_BACKGROUND_BASH_PROCESSES}`);
-    expect(command).toContain("( ( eval 'exit 7' ); code=$?");
+    expect(capacityCommand).toContain(`-lt ${MAX_BACKGROUND_BASH_PROCESSES}`);
+    expect(launchCommand).toContain("set -m 2>/dev/null || true");
+    expect(launchCommand).toContain("  ( eval 'exit 7' )\n  code=$?");
   });
 
   it("rejects when the process cap is reached", async () => {
