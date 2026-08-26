@@ -10,7 +10,7 @@ import { getIntegration } from "./data";
 describe("Browser Use connection setup", () => {
   it("generates server-side header authentication without Connect", () => {
     const integration = getIntegration("browser-use")!;
-    const setup = buildConnectionSetup(integration);
+    const setup = buildConnectionSetup(integration)!;
     const quickStart = setup.variants["mcp:apiKey"];
 
     expect(quickStart).toContain('"x-browser-use-api-key": process.env.BROWSER_USE_API_KEY!');
@@ -21,7 +21,7 @@ describe("Browser Use connection setup", () => {
 
   it("keeps Connect setup for OAuth connections", () => {
     const integration = getIntegration("linear")!;
-    const quickStart = buildConnectionSetup(integration).variants["mcp:user"];
+    const quickStart = buildConnectionSetup(integration)!.variants["mcp:user"];
 
     expect(quickStart).toContain("@vercel/connect/eve");
     expect(buildConnectionInstall(integration)).toContain("eve add connection/linear");
@@ -31,13 +31,28 @@ describe("Browser Use connection setup", () => {
 describe("Agentcard connection setup", () => {
   it("uses the standard connector name for the native Vercel Connect service", () => {
     const integration = getIntegration("agentcard")!;
-    const setup = buildConnectionSetup(integration);
+    const setup = buildConnectionSetup(integration)!;
     const quickStart = setup.variants["mcp:user"];
 
     expect(quickStart).toContain("Agentcard: the agent's wallet.");
     expect(quickStart).toContain('auth: connect("agentcard")');
     expect(setup.configureVariants["mcp:user"]).toContain("vercel connect create agentcard");
     expect(setup.configureVariants["mcp:user"]).not.toContain("--name");
+  });
+});
+
+describe("Shopify connection setup", () => {
+  it("uses generic hand-authored overrides without authentication", () => {
+    const integration = getIntegration("shopify")!;
+    const setup = buildConnectionSetup(integration);
+
+    expect(setup.protocols).toEqual(["mcp"]);
+    expect(setup.authModes).toEqual(["none"]);
+    expect(setup.variants["mcp:none"]).toContain("defineMcpClientConnection");
+    expect(setup.variants["mcp:none"]).toBe(integration.quickStart);
+    expect(setup.configureVariants["mcp:none"]).toContain("SHOPIFY_STORE_DOMAIN");
+    expect(setup.configureVariants["mcp:none"]).toContain("UCP_AGENT_PROFILE_URL");
+    expect(setup.configureVariants["mcp:none"]).toBe(integration.configure);
   });
 });
 
@@ -57,7 +72,7 @@ describe("Kernel extension setup", () => {
 describe("Vercel MCP connection setup", () => {
   it("offers user OAuth and shared app credential setup", () => {
     const integration = getIntegration("vercel")!;
-    const setup = buildConnectionSetup(integration);
+    const setup = buildConnectionSetup(integration)!;
     const userQuickStart = setup.variants["mcp:user"];
     const appQuickStart = setup.variants["mcp:app"];
 

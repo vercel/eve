@@ -26,9 +26,9 @@ import type { ConnectionProtocol } from "@eve/catalog";
 
 /**
  * How a connection authenticates. A mode uses either Vercel Connect (`user`,
- * `app`, or `jwtBearer`) or a server-side API key.
+ * `app`, or `jwtBearer`), a server-side API key, or no authentication.
  */
-export type AuthMode = "user" | "app" | "jwtBearer" | "apiKey";
+export type AuthMode = "user" | "app" | "jwtBearer" | "apiKey" | "none";
 
 export interface ApiKeySpec {
   /** Server-side environment variable containing the API key. */
@@ -84,8 +84,8 @@ export interface Integration {
   /** Searchable keywords beyond the name. */
   keywords?: string[];
   /**
-   * Channels and extensions author their setup as markdown. Connections leave
-   * these unset and supply a `connection` spec, from which content is generated.
+   * Channels and extensions author their setup as markdown. Connections normally
+   * generate it from `connection`, but may override Quick start and Configure.
    */
   install?: string;
   quickStart?: string;
@@ -120,6 +120,8 @@ interface ExtensionPresentation extends Presentation {
 /** Connection overlay: presentation plus Connect auth/config details. */
 interface ConnectionPresentation extends Presentation {
   authModes: AuthMode[];
+  quickStart?: string;
+  configure?: string;
   apiKey?: ApiKeySpec;
   connector?: string;
   connectors?: Partial<Record<AuthMode, string>>;
@@ -1829,6 +1831,52 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     keywords: ["mcp", "traffic", "market data", "competitive intelligence", "oauth", "connect"],
     authModes: ["user"],
   },
+  shopify: {
+    logo: "shopify",
+    docsHref: "https://shopify.dev/docs/apps/build/storefront-mcp",
+    keywords: ["mcp", "ucp", "commerce", "products", "carts", "checkouts"],
+    authModes: ["none"],
+    quickStart: `Create \`agent/connections/shopify.ts\`:
+
+\`\`\`ts
+import { randomUUID } from "node:crypto";
+import { defineMcpClientConnection } from "eve/connections";
+
+// Replace Shopify's example with your hosted UCP agent profile before production.
+const agentProfileUrl =
+  process.env.UCP_AGENT_PROFILE_URL ||
+  "https://shopify.dev/ucp/agent-profiles/examples/2026-04-08/valid-with-capabilities.json";
+
+export default defineMcpClientConnection({
+  url: \`https://\${process.env.SHOPIFY_STORE_DOMAIN!}/api/ucp/mcp\`,
+  description: "Search products and build carts and checkouts on a Shopify storefront.",
+  toolCall: {
+    providedArguments: {
+      meta: ({ toolName }) => ({
+        "ucp-agent": {
+          profile: agentProfileUrl,
+        },
+        // Shopify requires a unique idempotency key for destructive and finalizing calls.
+        ...(["cancel_cart", "complete_checkout", "cancel_checkout"].includes(toolName)
+          ? { "idempotency-key": randomUUID() }
+          : {}),
+      }),
+    },
+  },
+});
+\`\`\``,
+    configure: `Set your Shopify storefront domain:
+
+\`\`\`bash
+SHOPIFY_STORE_DOMAIN=your-store.myshopify.com
+\`\`\`
+
+The generated connection uses Shopify's example UCP agent profile for development. Before production, host your own profile and set its URL:
+
+\`\`\`bash
+UCP_AGENT_PROFILE_URL=https://your-domain.com/ucp-agent-profile.json
+\`\`\``,
+  },
   stripe: {
     logo: "stripe",
     docsHref: "/docs/connections/mcp",
@@ -2248,6 +2296,8 @@ function buildConnection(entry: IntegrationEntry): Integration {
     logo: presentation.logo,
     docsHref: presentation.docsHref,
     keywords: presentation.keywords,
+    quickStart: presentation.quickStart,
+    configure: presentation.configure,
     connection: spec,
   };
 }
@@ -2328,6 +2378,7 @@ export const authModeLabel: Record<AuthMode, string> = {
   app: "App",
   jwtBearer: "JWT bearer",
   apiKey: "API key",
+  none: "None",
 };
 
 export const integrations: Integration[] = [
