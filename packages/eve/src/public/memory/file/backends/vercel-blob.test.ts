@@ -1,4 +1,5 @@
 import { BlobPreconditionFailedError, get, put } from "#compiled/@vercel/blob/index.js";
+import { Headers } from "undici";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MemoryDocumentConflictError } from "#public/memory/file/backend.js";
@@ -12,15 +13,43 @@ vi.mock("#compiled/@vercel/blob/index.js", () => ({
 
 const signal = new AbortController().signal;
 
+function getBlobResult(content: string, etag: string) {
+  const pathname = "eve/memory/file/mem_a/MEMORY.md";
+  const url = `https://example.public.blob.vercel-storage.com/${pathname}`;
+  return {
+    blob: {
+      cacheControl: "max-age=0",
+      contentDisposition: 'attachment; filename="MEMORY.md"',
+      contentType: "text/markdown; charset=utf-8",
+      downloadUrl: `${url}?download=1`,
+      etag,
+      pathname,
+      size: content.length,
+      uploadedAt: new Date(0),
+      url,
+    },
+    headers: new Headers(),
+    statusCode: 200 as const,
+    stream: new Response(content).body!,
+  };
+}
+
+function putBlobResult(etag: string) {
+  return {
+    contentDisposition: 'attachment; filename="MEMORY.md"',
+    contentType: "text/markdown; charset=utf-8",
+    downloadUrl: "https://example.public.blob.vercel-storage.com/MEMORY.md?download=1",
+    etag,
+    pathname: "eve/memory/file/mem_a/MEMORY.md",
+    url: "https://example.public.blob.vercel-storage.com/MEMORY.md",
+  };
+}
+
 describe("Vercel Blob file-memory backend", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("reads private uncached Markdown by stable pathname", async () => {
-    vi.mocked(get).mockResolvedValue({
-      blob: { etag: "etag-1" },
-      statusCode: 200,
-      stream: new Response("# Memory").body!,
-    });
+    vi.mocked(get).mockResolvedValue(getBlobResult("# Memory", "etag-1"));
     const backend = vercelBlob({
       oidcToken: "oidc",
       prefix: "/custom/memory/",
@@ -43,7 +72,7 @@ describe("Vercel Blob file-memory backend", () => {
   });
 
   it("creates and conditionally replaces deterministic private objects", async () => {
-    vi.mocked(put).mockResolvedValue({ etag: "etag-next" });
+    vi.mocked(put).mockResolvedValue(putBlobResult("etag-next"));
     const backend = vercelBlob();
 
     await expect(
@@ -54,7 +83,7 @@ describe("Vercel Blob file-memory backend", () => {
       access: "private",
       addRandomSuffix: false,
       allowOverwrite: false,
-      cacheControlMaxAge: 60,
+      cacheControlMaxAge: 0,
       contentType: "text/markdown; charset=utf-8",
       ifMatch: undefined,
       oidcToken: undefined,
@@ -68,7 +97,7 @@ describe("Vercel Blob file-memory backend", () => {
       access: "private",
       addRandomSuffix: false,
       allowOverwrite: true,
-      cacheControlMaxAge: 60,
+      cacheControlMaxAge: 0,
       contentType: "text/markdown; charset=utf-8",
       ifMatch: "etag-old",
       oidcToken: undefined,
@@ -86,11 +115,7 @@ describe("Vercel Blob file-memory backend", () => {
     ).rejects.toSatisfy(MemoryDocumentConflictError.is);
 
     vi.mocked(put).mockRejectedValueOnce(new Error("already exists"));
-    vi.mocked(get).mockResolvedValueOnce({
-      blob: { etag: "etag-current" },
-      statusCode: 200,
-      stream: new Response("current").body!,
-    });
+    vi.mocked(get).mockResolvedValueOnce(getBlobResult("current", "etag-current"));
     await expect(
       backend.write({ content: "new", expectedVersion: null, key: "mem_a", signal }),
     ).rejects.toSatisfy(MemoryDocumentConflictError.is);

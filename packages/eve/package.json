@@ -424,7 +424,7 @@
     "@types/json-schema": "7.0.15",
     "@types/react": "catalog:",
     "@types/react-test-renderer": "19.1.0",
-    "@vercel/blob": "2.4.0",
+    "@vercel/blob": "2.8.0",
     "@vercel/detect-agent": "1.2.3",
     "@vercel/oidc": "3.8.0",
     "@vercel/otel": "catalog:",
