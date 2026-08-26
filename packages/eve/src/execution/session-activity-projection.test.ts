@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ActivityObserverKey } from "#context/keys.js";
+import { ActivityObserverKey, TurnTaskDeliveryKey } from "#context/keys.js";
 import { ContextContainer } from "#context/container.js";
 import {
   observeSessionActivity,
@@ -174,7 +174,7 @@ describe("projectSessionActivity", () => {
 describe("observeSessionActivity", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  function context(): ContextContainer {
+  function context(taskDelivery?: "none" | "initiating" | "pending" | "settled"): ContextContainer {
     const ctx = new ContextContainer();
     ctx.set(ActivityObserverKey, {
       sink: {
@@ -182,6 +182,7 @@ describe("observeSessionActivity", () => {
         version: 1,
       },
     });
+    if (taskDelivery !== undefined) ctx.set(TurnTaskDeliveryKey, taskDelivery);
     return ctx;
   }
 
@@ -203,6 +204,34 @@ describe("observeSessionActivity", () => {
     await observeSessionActivity({ ctx: context(), event, sessionId: "session-1" });
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not project internal background-task delivery turns as new root work", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const taskDelivery of ["pending", "settled"] as const) {
+      await observeSessionActivity({
+        ctx: context(taskDelivery),
+        event: turnEvent("turn.started", `turn-${taskDelivery}`),
+        sessionId: "session-1",
+      });
+    }
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps projecting the turn that initiates background tasks", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await observeSessionActivity({
+      ctx: context("initiating"),
+      event: turnEvent("turn.started"),
+      sessionId: "session-1",
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("submits projected activity and swallows transport failure", async () => {

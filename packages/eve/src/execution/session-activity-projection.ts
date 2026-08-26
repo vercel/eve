@@ -1,5 +1,5 @@
 import type { ContextContainer } from "#context/container.js";
-import { ActivityObserverKey } from "#context/keys.js";
+import { ActivityObserverKey, TurnTaskDeliveryKey } from "#context/keys.js";
 import { projectActivityEvents } from "#execution/activity-events.js";
 import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 import { submitActivity } from "#execution/submit-activity.js";
@@ -14,6 +14,12 @@ export async function observeSessionActivity(input: {
 }): Promise<void> {
   const observer = input.ctx.get(ActivityObserverKey);
   if (observer === undefined) return;
+  const taskDelivery = input.ctx.get(TurnTaskDeliveryKey);
+  if (
+    observer.workIdentity === undefined &&
+    (taskDelivery === "pending" || taskDelivery === "settled")
+  )
+    return;
   await submitActivity({
     events: projectSessionActivity({
       event: input.event,

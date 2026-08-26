@@ -44,7 +44,7 @@ export async function appendTaskViewStep(input: {
     writer.releaseLock();
   }
 
-  const events = projectTaskActivitySettlement({
+  const events = projectTaskActivity({
     activityObserver: input.activityObserver,
     settledAt: new Date().toISOString(),
     view: input.view,
@@ -52,18 +52,25 @@ export async function appendTaskViewStep(input: {
   void submitActivity({ events, sink: input.activityObserver?.sink });
 }
 
-export function projectTaskActivitySettlement(input: {
+export function projectTaskActivity(input: {
   readonly activityObserver: ActivityObserverConfig | undefined;
   readonly settledAt: string;
   readonly view: TaskView;
 }): readonly ActivityEventV1[] {
   const work = input.activityObserver?.workIdentity;
+  if (work === undefined) return [];
   const status = input.view.status;
-  if (
-    work === undefined ||
-    (status !== "completed" && status !== "failed" && status !== "cancelled")
-  )
-    return [];
+  if (status === "working") {
+    return [
+      {
+        eventId: `${work.id}:started`,
+        kind: "work.started",
+        startedAt: input.settledAt,
+        work,
+      },
+    ];
+  }
+  if (status !== "completed" && status !== "failed" && status !== "cancelled") return [];
   return [
     {
       eventId: `${work.id}:settled:${status}`,

@@ -1,5 +1,6 @@
 import type { ContextContainer } from "#context/container.js";
 import { loadContext } from "#context/container.js";
+import { ActivityObserverKey } from "#context/keys.js";
 import type { FrameworkContextProvider } from "#context/provider.js";
 import { runStep } from "#context/run-step.js";
 import { CallbackBaseUrlKey } from "#harness/authorization.js";
@@ -14,6 +15,8 @@ import {
   type BackgroundToolCallBatch,
   type BackgroundToolExecutor,
 } from "#harness/background-tools.js";
+import { deriveChildWorkIdentity } from "#execution/activity-work.js";
+import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { parseJsonValue } from "#shared/json.js";
@@ -219,12 +222,38 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     const record: BackgroundToolExecutionRecord = { settled: false };
     this.records.push(record);
     const emission = getHarnessEmissionState(this.initialSession.state);
+    const parentTurnId = activeTurnId(emission);
+    const observer = loadContext().get(ActivityObserverKey);
     const task = await beginBackgroundTask({
+      activityObserver:
+        observer === undefined
+          ? undefined
+          : {
+              sink: observer.sink,
+              workIdentity: deriveChildWorkIdentity({
+                callId: input.options.toolCallId,
+                kind: "task",
+                name: input.definition.name,
+                parentSessionId: this.initialSession.sessionId,
+                parentTurnId,
+                parentWork: observer.workIdentity ?? {
+                  id: deriveRootTurnActivityWorkId({
+                    sessionId: this.initialSession.sessionId,
+                    turnId: parentTurnId,
+                  }),
+                  kind: "root-turn",
+                  rootSessionId: this.initialSession.rootSessionId ?? this.initialSession.sessionId,
+                  rootTurnId: parentTurnId,
+                  sessionId: this.initialSession.sessionId,
+                  turnId: parentTurnId,
+                },
+              }),
+            },
       callId: input.options.toolCallId,
       metadata: { kind: "tool", name: input.definition.name },
       parentSessionId: this.initialSession.sessionId,
       parentStepIndex: emission.stepIndex,
-      parentTurnId: activeTurnId(emission),
+      parentTurnId,
       session: this.initialSession,
     });
     record.task = task;

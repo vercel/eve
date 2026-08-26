@@ -83,7 +83,11 @@ function startWork(
   const parent = event.work.parentId === undefined ? undefined : snapshot.work[event.work.parentId];
   const phase =
     pending?.outcome ??
-    (parent !== undefined && parent.phase !== "running" ? "cancelled" : "running");
+    (!isBackgroundWorkBoundary(snapshot, event.work) &&
+    parent !== undefined &&
+    parent.phase !== "running"
+      ? "cancelled"
+      : "running");
   const work: ActivityWorkStateV1 = {
     ...event.work,
     name: event.work.name === undefined ? undefined : normalizeActivityText(event.work.name),
@@ -250,7 +254,12 @@ function settleWorkTree(
   while (discovered) {
     discovered = false;
     for (const work of Object.values(snapshot.work)) {
-      if (work.parentId === undefined || !subtree.has(work.parentId) || subtree.has(work.id))
+      if (
+        work.parentId === undefined ||
+        !subtree.has(work.parentId) ||
+        subtree.has(work.id) ||
+        isBackgroundWorkBoundary(snapshot, work)
+      )
         continue;
       subtree.add(work.id);
       discovered = true;
@@ -278,6 +287,15 @@ function settleWorkTree(
         : work;
     }),
   };
+}
+
+function isBackgroundWorkBoundary(
+  snapshot: ActivitySnapshotV1,
+  work: ActivityWorkStateV1 | Extract<ActivityEventV1, { readonly kind: "work.started" }>["work"],
+): boolean {
+  if (work.kind === "task") return true;
+  if (work.callId === undefined || work.parentId === undefined) return false;
+  return snapshot.actions[`action:${work.parentId}:${work.callId}`] !== undefined;
 }
 
 function mapActivityStates<T>(

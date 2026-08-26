@@ -297,8 +297,16 @@ function renderWorkTree(
     children.push(item);
     byParent.set(parentId, children);
   }
+  const backgroundActionIds = new Set(
+    work.flatMap((item) =>
+      item.parentId !== undefined && item.callId !== undefined
+        ? [`action:${item.parentId}:${item.callId}`]
+        : [],
+    ),
+  );
   const actionsByParent = new Map<string, ActivityActionStateV1[]>();
   for (const action of actions) {
+    if (action.kind === "tool" && backgroundActionIds.has(action.id)) continue;
     const siblings = actionsByParent.get(action.parentWorkId) ?? [];
     siblings.push(action);
     actionsByParent.set(action.parentWorkId, siblings);
