@@ -23,18 +23,18 @@ const workIdentity = {
 };
 
 describe("parseCreateBody activity relay", () => {
-  it("accepts relay configuration bound to a delegated callback", () => {
+  it("accepts activity observer configuration bound to a delegated callback", () => {
     expect(
       parseCreateBody({
         callback,
-        eventRelay: { sink, workIdentity },
+        activityObserver: { sink, workIdentity },
         message: "research this",
       }),
-    ).toMatchObject({ callback, eventRelay: { sink, workIdentity } });
+    ).toMatchObject({ callback, activityObserver: { sink, workIdentity } });
   });
 
-  it("rejects relay configuration without a delegated callback", () => {
-    const response = parseCreateBody({ eventRelay: { sink, workIdentity }, message: "hi" });
+  it("rejects activity observer configuration without a delegated callback", () => {
+    const response = parseCreateBody({ activityObserver: { sink, workIdentity }, message: "hi" });
     expect(response).toBeInstanceOf(Response);
     expect((response as Response).status).toBe(400);
   });
@@ -45,7 +45,7 @@ describe("parseCreateBody activity relay", () => {
   ])("rejects a mismatched %s", (_field, identity) => {
     const response = parseCreateBody({
       callback,
-      eventRelay: { sink, workIdentity: identity },
+      activityObserver: { sink, workIdentity: identity },
       message: "hi",
     });
     expect(response).toBeInstanceOf(Response);
@@ -55,7 +55,7 @@ describe("parseCreateBody activity relay", () => {
   it("rejects a sink on a different callback origin", () => {
     const response = parseCreateBody({
       callback,
-      eventRelay: {
+      activityObserver: {
         sink: { ...sink, url: sink.url.replace("parent.example.com", "other.example.com") },
         workIdentity,
       },

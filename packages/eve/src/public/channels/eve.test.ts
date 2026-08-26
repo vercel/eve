@@ -53,7 +53,7 @@ type MockSendOptions = Pick<
   | "callback"
   | "capabilities"
   | "continuationToken"
-  | "eventRelay"
+  | "activityObserver"
   | "initiatorAuth"
   | "mode"
   | "title"
@@ -133,7 +133,7 @@ function createEveCreateHandler(
       callback: runInput.callback,
       capabilities: runInput.capabilities,
       continuationToken: runInput.continuationToken,
-      eventRelay: runInput.eventRelay,
+      activityObserver: runInput.activityObserver,
       initiatorAuth: runInput.initiatorAuth,
       mode: runInput.mode,
       title: runInput.title,

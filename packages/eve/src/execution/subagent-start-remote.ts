@@ -1,5 +1,5 @@
 import type { DispatchOutcome, RuntimeSession } from "#execution/agent-handle-dispatch.js";
-import { deriveChildEventRelayConfig } from "#execution/activity-work.js";
+import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
 import { createRemoteAgentStartFailureResult } from "#execution/dispatch-action-failures.js";
 import { mintStartOperation } from "#execution/dispatch-start-operation.js";
 import {
@@ -32,13 +32,13 @@ export async function startRemoteSubagent(input: {
   readonly initiatorAuth: Parameters<typeof startRemoteAgentSession>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof startRemoteAgentSession>[0]["parentTraceContext"];
-  readonly eventRelay?: Parameters<typeof startRemoteAgentSession>[0]["eventRelay"];
+  readonly activityObserver?: Parameters<typeof startRemoteAgentSession>[0]["activityObserver"];
   readonly session: RuntimeSession;
   readonly taskOwned: boolean;
 }): Promise<DispatchOutcome> {
   const { action } = input;
-  const eventRelay = deriveChildEventRelayConfig({
-    eventRelay: input.eventRelay,
+  const activityObserver = deriveChildActivityObserverConfig({
+    activityObserver: input.activityObserver,
     callId: action.callId,
     kind: "remote-agent",
     name: action.remoteAgentName,
@@ -102,7 +102,7 @@ export async function startRemoteSubagent(input: {
       initiatorAuth: input.initiatorAuth,
       operationId: operation.id,
       parentTraceContext: input.parentTraceContext,
-      eventRelay,
+      activityObserver,
       remote: resolvedRemote,
       session: input.session,
     });

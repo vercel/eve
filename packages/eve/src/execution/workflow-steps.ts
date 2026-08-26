@@ -52,6 +52,7 @@ import { matchAuthorizationCallbacks } from "#execution/authorization-callback-m
 import { readTurnSleepDurationMs } from "#harness/turn-sleep.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
+import { observeSessionActivity } from "#execution/session-activity-projection.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { coalesceTurnInputs, normalizeUserContent } from "#harness/messages.js";
@@ -377,6 +378,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
     const stamped = stampMessageStreamEvent(toEmit);
     await writer.write(encodeMessageStreamEvent(stamped));
+    await observeSessionActivity({ ctx, event: stamped, sessionId: initialSession.sessionId });
     return stamped;
   };
 

@@ -13,8 +13,8 @@ import {
   ModeKey,
   ParentSessionKey,
   ParentTraceContextKey,
+  ActivityObserverKey,
   ScheduleIdKey,
-  SessionEventRelayKey,
   SessionCallbackKey,
   SubagentDepthKey,
 } from "#context/keys.js";
@@ -76,8 +76,8 @@ export function buildRunContext(input: {
   if (run.callback !== undefined) {
     ctx.set(SessionCallbackKey, run.callback);
   }
-  if (run.eventRelay !== undefined) {
-    ctx.set(SessionEventRelayKey, run.eventRelay);
+  if (run.activityObserver !== undefined) {
+    ctx.set(ActivityObserverKey, run.activityObserver);
   }
 
   if (run.parent !== undefined) {

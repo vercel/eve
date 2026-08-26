@@ -4,7 +4,7 @@ import {
   normalizeRequestedOutputSchema,
 } from "#execution/subagent-invocation.js";
 import type {
-  SessionEventRelayConfig,
+  ActivityObserverConfig,
   ChannelInstrumentationProjection,
   RunInput,
   RunSessionLimits,
@@ -99,7 +99,7 @@ export function buildSubagentRunInput(input: {
   /** Hook token owned by the workflow currently waiting for this child. */
   readonly parentContinuationToken?: string;
   readonly parentTraceContext?: SessionTraceContext;
-  readonly eventRelay?: SessionEventRelayConfig;
+  readonly activityObserver?: ActivityObserverConfig;
   readonly session: HarnessSession;
   readonly source: SubagentInputSource;
 }): SubagentRunInputBuild {
@@ -178,7 +178,7 @@ export function buildSubagentRunInput(input: {
       },
     },
     parentTraceContext: input.parentTraceContext,
-    eventRelay: input.eventRelay,
+    activityObserver: input.activityObserver,
     subagentDepth: subagentDepth.nextChildDepth,
   };
 

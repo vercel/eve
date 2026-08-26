@@ -1,7 +1,28 @@
+import type { ContextContainer } from "#context/container.js";
+import { ActivityObserverKey } from "#context/keys.js";
 import { projectActivityEvents } from "#execution/activity-events.js";
 import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
+import { submitActivity } from "#execution/submit-activity.js";
 import type { ActivityEventV1, ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
+
+/** Projects one canonical session event into best-effort activity presentation. */
+export async function observeSessionActivity(input: {
+  readonly ctx: ContextContainer;
+  readonly event: MessageStreamEvent;
+  readonly sessionId: string;
+}): Promise<void> {
+  const observer = input.ctx.get(ActivityObserverKey);
+  if (observer === undefined) return;
+  await submitActivity({
+    events: projectSessionActivity({
+      event: input.event,
+      sessionId: input.sessionId,
+      workIdentity: observer.workIdentity,
+    }),
+    sink: observer.sink,
+  });
+}
 
 export function projectSessionActivity(input: {
   readonly event: MessageStreamEvent;

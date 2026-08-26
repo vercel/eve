@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { projectSessionActivity } from "#execution/session-activity-projection.js";
+import { ActivityObserverKey } from "#context/keys.js";
+import { ContextContainer } from "#context/container.js";
+import {
+  observeSessionActivity,
+  projectSessionActivity,
+} from "#execution/session-activity-projection.js";
 import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
 import type { ActivitySnapshotV1, ActivityWorkIdentityV1 } from "#protocol/activity.js";
@@ -126,5 +131,54 @@ describe("projectSessionActivity", () => {
     expect(snapshot.blockers[`input:${workIdentity.id}:request-1`]).toMatchObject({
       phase: "blocked",
     });
+  });
+});
+
+describe("observeSessionActivity", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function context(): ContextContainer {
+    const ctx = new ContextContainer();
+    ctx.set(ActivityObserverKey, {
+      sink: {
+        url: "https://agent.example.com/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+        version: 1,
+      },
+    });
+    return ctx;
+  }
+
+  it("does not submit events with no activity projection", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const event: MessageStreamEvent = {
+      data: {
+        messageDelta: "hello",
+        messageSoFar: "hello",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn-1",
+      },
+      meta: { at, id: "message" },
+      type: "message.appended",
+    };
+
+    await observeSessionActivity({ ctx: context(), event, sessionId: "session-1" });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("submits projected activity and swallows transport failure", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("network down"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      observeSessionActivity({
+        ctx: context(),
+        event: turnEvent("turn.started"),
+        sessionId: "session-1",
+      }),
+    ).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });

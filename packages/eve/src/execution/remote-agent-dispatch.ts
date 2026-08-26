@@ -54,7 +54,7 @@ export async function startRemoteAgentSession(input: {
   readonly auth?: SessionAuthContext | null;
   readonly callbackBaseUrl: string | undefined;
   readonly callbackToken?: string;
-  readonly eventRelay?: import("#channel/types.js").SessionEventRelayConfig;
+  readonly activityObserver?: import("#channel/types.js").ActivityObserverConfig;
   /** The root initiator's principal, forwarded alongside {@link auth}. */
   readonly initiatorAuth?: SessionAuthContext | null;
   /**
@@ -85,7 +85,7 @@ export async function startRemoteAgentSession(input: {
       token: string;
       url: string;
     };
-    eventRelay?: import("#channel/types.js").SessionEventRelayConfig;
+    activityObserver?: import("#channel/types.js").ActivityObserverConfig;
     forwardedPrincipal?: ForwardedPrincipal;
     message: string;
     mode: "conversation" | "task";
@@ -111,7 +111,7 @@ export async function startRemoteAgentSession(input: {
     outputSchema:
       normalizeRequestedOutputSchema(input.action.input.outputSchema) ?? input.remote.outputSchema,
   };
-  if (input.eventRelay !== undefined) requestBody.eventRelay = input.eventRelay;
+  if (input.activityObserver !== undefined) requestBody.activityObserver = input.activityObserver;
   if (forwardedPrincipal !== undefined) {
     requestBody.forwardedPrincipal = forwardedPrincipal;
   }

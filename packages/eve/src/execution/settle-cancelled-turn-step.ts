@@ -5,6 +5,7 @@ import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { ChannelInstrumentationKey } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
+import { observeSessionActivity } from "#execution/session-activity-projection.js";
 import {
   createDurableSessionState,
   type DurableSessionState,
@@ -98,6 +99,7 @@ export async function settleCancelledTurnStep(input: {
           // Stamp once: the persisted chunk and the hooks must agree on the id.
           const stamped = stampMessageStreamEvent(transformed);
           await writer.write(encodeMessageStreamEvent(stamped));
+          await observeSessionActivity({ ctx, event: stamped, sessionId: session.sessionId });
           await dispatchStreamEventHooks({
             ctx,
             event: stamped,

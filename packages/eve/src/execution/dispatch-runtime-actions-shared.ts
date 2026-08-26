@@ -8,14 +8,14 @@
  */
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import type { SessionEventRelayConfig } from "#channel/types.js";
+import type { ActivityObserverConfig } from "#channel/types.js";
 import {
   callAdapterEventHandler,
   type ChannelAdapter,
   type ChannelAdapterContext,
 } from "#channel/adapter.js";
 import {
-  SessionEventRelayKey,
+  ActivityObserverKey,
   AuthKey,
   CapabilitiesKey,
   ChannelInstrumentationKey,
@@ -158,7 +158,9 @@ export interface PreparedRuntimeActionDispatch {
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
-  readonly eventRelay?: SessionEventRelayConfig & { readonly workIdentity: ActivityWorkIdentityV1 };
+  readonly activityObserver?: ActivityObserverConfig & {
+    readonly workIdentity: ActivityWorkIdentityV1;
+  };
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly plan: readonly DispatchPlanEntry[];
@@ -286,7 +288,11 @@ async function prepareActionDispatch(input: {
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     parentTraceContext: readSessionTraceContext(input.serializedContext, session.sessionId),
     plan,
-    eventRelay: resolvePreparedActivity(ctx.get(SessionEventRelayKey), session, batch.event.turnId),
+    activityObserver: resolvePreparedActivity(
+      ctx.get(ActivityObserverKey),
+      session,
+      batch.event.turnId,
+    ),
     sandboxSessionId,
     serializedContext: input.serializedContext,
     session,
@@ -294,14 +300,14 @@ async function prepareActionDispatch(input: {
 }
 
 function resolvePreparedActivity(
-  eventRelay: SessionEventRelayConfig | undefined,
+  activityObserver: ActivityObserverConfig | undefined,
   session: RuntimeSession,
   turnId: string,
-): (SessionEventRelayConfig & { readonly workIdentity: ActivityWorkIdentityV1 }) | undefined {
-  if (eventRelay === undefined) return undefined;
+): (ActivityObserverConfig & { readonly workIdentity: ActivityWorkIdentityV1 }) | undefined {
+  if (activityObserver === undefined) return undefined;
   return {
-    sink: eventRelay.sink,
-    workIdentity: eventRelay.workIdentity ?? {
+    sink: activityObserver.sink,
+    workIdentity: activityObserver.workIdentity ?? {
       id: `root:${session.sessionId}:${turnId}`,
       kind: "root-turn",
       rootSessionId: session.rootSessionId ?? session.sessionId,
@@ -576,7 +582,9 @@ export async function startSubagent(input: {
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
-  readonly eventRelay?: SessionEventRelayConfig & { readonly workIdentity: ActivityWorkIdentityV1 };
+  readonly activityObserver?: ActivityObserverConfig & {
+    readonly workIdentity: ActivityWorkIdentityV1;
+  };
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly session: RuntimeSession;
@@ -606,7 +614,7 @@ export async function startSubagent(input: {
         initiatorAuth: input.initiatorAuth,
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext,
-        eventRelay: input.eventRelay,
+        activityObserver: input.activityObserver,
         sandboxSessionId: input.sandboxSessionId,
         session: input.session,
         source: input.target.source,
@@ -624,7 +632,7 @@ export async function startSubagent(input: {
         initiatorAuth: input.initiatorAuth,
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext,
-        eventRelay: input.eventRelay,
+        activityObserver: input.activityObserver,
         session: input.session,
         taskOwned: input.taskOwned,
       });

@@ -6,7 +6,7 @@ import {
   ContinuationTokenKey,
   type Session,
   type SessionAuthContext,
-  SessionEventRelayKey,
+  ActivityObserverKey,
   SessionIdKey,
   SessionKey,
   ScheduleIdKey,
@@ -244,7 +244,7 @@ describe("buildRunContext", () => {
     expect(ctx.get(SessionIdKey)).toBeUndefined();
   });
 
-  it("seeds inherited private event relay configuration", () => {
+  it("seeds inherited private activity observer configuration", () => {
     const sink = {
       url: "https://root.example.com/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
       version: 1 as const,
@@ -263,11 +263,11 @@ describe("buildRunContext", () => {
         adapter: { kind: "subagent" },
         input: { message: "hi" },
         mode: "task",
-        eventRelay: { sink, workIdentity },
+        activityObserver: { sink, workIdentity },
       },
     });
 
-    expect(ctx.get(SessionEventRelayKey)).toEqual({ sink, workIdentity });
+    expect(ctx.get(ActivityObserverKey)).toEqual({ sink, workIdentity });
   });
 
   it("grafts parent metadata onto the child's own kind", () => {

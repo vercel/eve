@@ -194,7 +194,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         let handle: Awaited<ReturnType<typeof createSession>>;
         try {
           handle = await createSession({
-            eventRelay: body.eventRelay,
+            activityObserver: body.activityObserver,
             auth: messageResult.auth,
             capabilities:
               body.capabilities ?? (body.mode === "task" ? undefined : { requestInput: true }),

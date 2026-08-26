@@ -157,7 +157,7 @@ export async function dispatchTaskStep(
             initiatorAuth: prepared.initiatorAuth,
             parentContinuationToken: delegated.taskInboxToken,
             parentTraceContext: prepared.parentTraceContext,
-            eventRelay: prepared.eventRelay,
+            activityObserver: prepared.activityObserver,
             sandboxSessionId: prepared.sandboxSessionId,
             serializedContext: prepared.serializedContext,
             session,

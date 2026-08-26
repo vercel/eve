@@ -1,4 +1,4 @@
-import type { SessionEventRelayConfig } from "#channel/types.js";
+import type { ActivityObserverConfig } from "#channel/types.js";
 import type { Session } from "#context/keys.js";
 import {
   deriveChildActivityWorkId,
@@ -20,18 +20,21 @@ export function deriveRootTurnWorkIdentity(session: Session): ActivityWorkIdenti
   };
 }
 
-export function deriveChildEventRelayConfig(input: {
+export function deriveChildActivityObserverConfig(input: {
   readonly callId: string;
   readonly kind: Exclude<ActivityWorkKind, "root-turn">;
   readonly name: string;
   readonly parentSessionId: string;
   readonly parentTurnId: string;
-  readonly eventRelay: SessionEventRelayConfig | undefined;
-}): SessionEventRelayConfig | undefined {
-  if (input.eventRelay?.workIdentity === undefined) return undefined;
+  readonly activityObserver: ActivityObserverConfig | undefined;
+}): ActivityObserverConfig | undefined {
+  if (input.activityObserver?.workIdentity === undefined) return undefined;
   return {
-    sink: input.eventRelay.sink,
-    workIdentity: deriveChildWorkIdentity({ ...input, parentWork: input.eventRelay.workIdentity }),
+    sink: input.activityObserver.sink,
+    workIdentity: deriveChildWorkIdentity({
+      ...input,
+      parentWork: input.activityObserver.workIdentity,
+    }),
   };
 }
 
