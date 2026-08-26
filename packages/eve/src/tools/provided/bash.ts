@@ -17,6 +17,7 @@ const YIELD_TIME_SCHEMA = z
   .describe(
     `Maximum time in milliseconds to wait before returning a process id for a still-running command. Defaults to ${DEFAULT_BASH_YIELD_TIME_MS} ms.`,
   )
+  .nullable()
   .optional();
 
 type BashProcessToolInput = {
@@ -38,16 +39,18 @@ export const BASH_INPUT_SCHEMA = z
     command: z
       .string()
       .describe("Required with action run: the shell command to execute.")
+      .nullable()
       .optional(),
     processId: z
       .string()
       .describe("Required with action poll, wait, or kill: the id returned by an earlier call.")
+      .nullable()
       .optional(),
     yieldTimeMs: YIELD_TIME_SCHEMA,
   })
   .superRefine((input, context) => {
-    const hasCommand = input.command !== undefined && input.command !== "";
-    const hasProcessId = input.processId !== undefined && input.processId !== "";
+    const hasCommand = typeof input.command === "string" && input.command !== "";
+    const hasProcessId = typeof input.processId === "string" && input.processId !== "";
     const invalid =
       input.action === "run" ? !hasCommand || hasProcessId : hasCommand || !hasProcessId;
     if (invalid) {
@@ -58,7 +61,9 @@ export const BASH_INPUT_SCHEMA = z
     }
   })
   .describe("Choose an action, then provide its command or processId.")
-  .meta({ required: ["action"] }) as z.ZodType<BashToolInput>;
+  .meta({
+    required: ["action", "command", "processId", "yieldTimeMs"],
+  }) as z.ZodType<BashToolInput>;
 
 const BASH_OUTPUT_FIELDS = {
   stderr: z.string(),

@@ -7,7 +7,10 @@ import { BASH_INPUT_SCHEMA, BASH_OUTPUT_SCHEMA } from "./bash.js";
 describe("bash schemas", () => {
   it("emits a provider-compatible object schema", () => {
     const schema = z.toJSONSchema(BASH_INPUT_SCHEMA, { io: "input" });
-    expect(schema).toMatchObject({ required: ["action"], type: "object" });
+    expect(schema).toMatchObject({
+      required: ["action", "command", "processId", "yieldTimeMs"],
+      type: "object",
+    });
     expect(schema).not.toHaveProperty("anyOf");
   });
 
@@ -35,7 +38,12 @@ describe("bash schemas", () => {
     expect(BASH_INPUT_SCHEMA.safeParse({ action: "poll" }).success).toBe(false);
     expect(BASH_INPUT_SCHEMA.safeParse({ command: "pwd", action: "poll" }).success).toBe(false);
     expect(
-      BASH_INPUT_SCHEMA.safeParse({ action: "run", command: "pwd", processId: "" }).success,
+      BASH_INPUT_SCHEMA.safeParse({
+        action: "run",
+        command: "pwd",
+        processId: "",
+        yieldTimeMs: null,
+      }).success,
     ).toBe(true);
   });
 
