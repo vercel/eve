@@ -185,6 +185,10 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   start: (...args: unknown[]) => startMock(...args),
 }));
 
+vi.mock("#compiled/@workflow/core/runtime/resume-hook.js", () => ({
+  resumeHookDurable: (...args: unknown[]) => resumeHookMock(...args),
+}));
+
 const ThreadKey = new ContextKey<string>("test.workflow.thread");
 const TestTurnAgent = {
   id: "test-agent",

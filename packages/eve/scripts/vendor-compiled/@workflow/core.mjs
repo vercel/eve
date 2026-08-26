@@ -87,6 +87,10 @@ const copyDeclarations = createDeclarationCopier({
       kind: "vendored",
       compiledPath: "@workflow/world",
     },
+    "@workflow/world/attributes-validation": {
+      kind: "vendored",
+      compiledPath: "@workflow/world",
+    },
     devalue: {
       kind: "stub",
       stubBaseName: "_devalue",
@@ -180,6 +184,10 @@ export default {
     {
       input: "@workflow/core/runtime",
       outputPath: "runtime",
+    },
+    {
+      input: "@workflow/core/runtime/resume-hook",
+      outputPath: "runtime/resume-hook",
     },
     {
       entry: "dist/private.js",

@@ -16,10 +16,10 @@ import {
   type SessionInboxWireTarget,
 } from "#execution/wire/session-inbox-contract.js";
 import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
-import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
+import { getHookByToken, resumeHookDurable } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 
-type ResumedSessionInboxHook = Awaited<ReturnType<typeof resumeHook>>;
+type ResumedSessionInboxHook = Awaited<ReturnType<typeof resumeHookDurable>>;
 
 /** Resolves the consumer contract, encodes for it, and resumes that exact hook. */
 export async function resumeSessionInbox(
@@ -35,7 +35,7 @@ export async function resumeSessionInbox(
 
   const hook = await getHookByToken(token);
   const target = await resolveSessionInboxWireTarget(hook);
-  return await resumeHook(hook, sessionInboxWire.encode(command, target));
+  return await resumeHookDurable(hook, sessionInboxWire.encode(command, target));
 }
 
 function isStableInboxFastPathCompatible(

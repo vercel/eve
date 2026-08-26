@@ -13,7 +13,10 @@ const resumeHookMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   getHookByToken: (...args: unknown[]) => getHookByTokenMock(...args),
-  resumeHook: (...args: unknown[]) => resumeHookMock(...args),
+}));
+
+vi.mock("#compiled/@workflow/core/runtime/resume-hook.js", () => ({
+  resumeHookDurable: (...args: unknown[]) => resumeHookMock(...args),
 }));
 
 afterEach(() => {

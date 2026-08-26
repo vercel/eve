@@ -5,7 +5,13 @@ import { sessionCommandInboxWorkflow } from "#internal/testing/session-command-i
 import { legacySessionDeliveryWorkflow } from "#internal/testing/legacy-session-delivery-workflow.js";
 import { midCohortSessionDeliveryWorkflow } from "#internal/testing/mid-cohort-session-delivery-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
-import { getHookByToken, getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import {
+  getHookByToken,
+  getWorld,
+  resumeHook,
+  resumeHookDurable,
+  start,
+} from "#internal/workflow/runtime.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -143,7 +149,10 @@ describe("session command inbox integration", () => {
 
       const tokens = { old: oldToken, replacement: replacementToken };
       for (const owner of order) {
-        await resumeHook(tokens[owner], { kind: "send", payload: { message: owner } });
+        await resumeHookDurable(tokens[owner], {
+          kind: "send",
+          payload: { message: owner },
+        });
       }
 
       disposal.release();
