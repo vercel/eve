@@ -363,6 +363,7 @@
         }
       },
       "dependencies": ["@vercel/connect"],
+      "devDependencies": ["vercel@>=58.7.0"],
       "files": [
         {
           "path": "registry/connections/agentcard.ts",
