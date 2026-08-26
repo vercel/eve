@@ -100,6 +100,43 @@ describe("parseRegistryIndex", () => {
     expect(parseRegistryIndex(null)).toEqual([]);
     expect(parseRegistryIndex({ items: "nope" })).toEqual([]);
   });
+
+  it("reads whether an item declares a setup flow, used by selfmod__registry_add's split rule", () => {
+    const entries = parseRegistryIndex({
+      items: [
+        {
+          name: "channel/slack",
+          meta: {
+            eve: { setup: { package: "eve", bin: "eve", args: ["integration", "setup", "slack"] } },
+          },
+        },
+        { name: "extension/browserbase" },
+      ],
+    });
+
+    expect(entries.find((entry) => entry.address === "channel/slack")?.declaresSetup).toBe(true);
+    expect(
+      entries.find((entry) => entry.address === "extension/browserbase")?.declaresSetup,
+    ).toBeUndefined();
+  });
+
+  it("reads an item's declared environment variable names", () => {
+    const entries = parseRegistryIndex({
+      items: [
+        {
+          name: "extension/browserbase",
+          envVars: { BROWSERBASE_API_KEY: "", BROWSERBASE_PROJECT_ID: "" },
+        },
+        { name: "channel/discord", envVars: {} },
+      ],
+    });
+
+    expect(entries.find((entry) => entry.address === "extension/browserbase")?.envVars).toEqual([
+      "BROWSERBASE_API_KEY",
+      "BROWSERBASE_PROJECT_ID",
+    ]);
+    expect(entries.find((entry) => entry.address === "channel/discord")?.envVars).toBeUndefined();
+  });
 });
 
 describe("selectIntegrations", () => {
