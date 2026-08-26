@@ -45,9 +45,7 @@ function validateStoreDomain(value: string): string | null {
   }
 }
 
-export async function prepareShopifySetup(
-  context: SetupPrepareContext,
-): Promise<ShopifySetupPlan> {
+export async function prepareShopifySetup(context: SetupPrepareContext): Promise<ShopifySetupPlan> {
   const storeDomain = await context.asker.ask(
     text({
       key: "shopify.store-domain",
@@ -65,9 +63,7 @@ export async function applyShopifySetup(
   context: SetupApplyContext,
   deps: ShopifySetupDeps = defaultDeps,
 ) {
-  context.presenter.log.message(
-    "Scaffolding Shopify UCP channel and storefront environment...",
-  );
+  context.presenter.log.message("Scaffolding Shopify UCP channel and storefront environment...");
   await deps.appendEnv(join(context.appRoot, ".env.local"), {
     SHOPIFY_STORE_DOMAIN: plan.storeDomain,
   });
@@ -83,9 +79,7 @@ export async function applyShopifySetup(
   ]);
   return {
     deploymentRequired: true as const,
-    facts: [
-      { label: "Store domain", value: plan.storeDomain, kind: "text" as const },
-    ],
+    facts: [{ label: "Store domain", value: plan.storeDomain, kind: "text" as const }],
   };
 }
 

@@ -1839,7 +1839,6 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     quickStart: `Create \`agent/connections/shopify.ts\`:
 
 \`\`\`ts
-import { randomUUID } from "node:crypto";
 import { defineMcpClientConnection } from "eve/connections";
 
 const SHOPIFY_EXAMPLE_PROFILE =
@@ -1856,13 +1855,16 @@ export default defineMcpClientConnection({
   description: "Search products and build carts and checkouts on a Shopify storefront.",
   toolCall: {
     providedArguments: {
-      meta: ({ toolName }) => ({
+      meta: ({ session, toolName }) => ({
         "ucp-agent": {
           profile: agentProfileUrl,
         },
+
         // These calls require a unique idempotency key.
         ...(["cancel_cart", "complete_checkout", "cancel_checkout"].includes(toolName)
-          ? { "idempotency-key": randomUUID() }
+          ? {
+              "idempotency-key": \`\${session.id}:\${session.turn.id}:\${toolName}\`,
+            }
           : {}),
       }),
     },
