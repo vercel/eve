@@ -7,10 +7,12 @@ import type {
   SessionCapabilities,
   TurnPolicy,
 } from "#channel/types.js";
-import { parseActivitySink } from "#channel/activity-sink.js";
-import { parseActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { Session } from "#channel/session.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
+import {
+  parseActivityObserverField,
+  validateActivityObserverBinding,
+} from "#eve-channel/activity-observer-request.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import {
   EVE_MESSAGE_STREAM_CONTENT_TYPE,
@@ -119,76 +121,6 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   };
   if (typeof rawOperationId === "string") result.operationId = rawOperationId;
   return result;
-}
-
-function parseActivityObserverField(value: unknown):
-  | (ActivityObserverConfig & {
-      readonly workIdentity: NonNullable<ActivityObserverConfig["workIdentity"]>;
-    })
-  | Response
-  | undefined {
-  if (value === undefined) return undefined;
-  if (value === null || typeof value !== "object") {
-    return Response.json(
-      { error: "Invalid activity observer configuration.", ok: false },
-      { status: 400 },
-    );
-  }
-  try {
-    const sink = parseActivitySink(Reflect.get(value, "sink"));
-    const workIdentity = parseActivityWorkIdentityV1(Reflect.get(value, "workIdentity"));
-    if (sink === undefined || workIdentity === undefined) {
-      return Response.json(
-        { error: "Invalid activity observer configuration.", ok: false },
-        { status: 400 },
-      );
-    }
-    return { sink, workIdentity };
-  } catch (error) {
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : "Invalid activity observer configuration.",
-        ok: false,
-      },
-      { status: 400 },
-    );
-  }
-}
-
-function validateActivityObserverBinding(
-  activityObserver: ActivityObserverConfig & {
-    readonly workIdentity: NonNullable<ActivityObserverConfig["workIdentity"]>;
-  },
-  callback: SessionCallback | undefined,
-): Response | undefined {
-  if (callback === undefined) {
-    return Response.json(
-      {
-        error: "Activity observer configuration requires a delegated session callback.",
-        ok: false,
-      },
-      { status: 400 },
-    );
-  }
-  if (activityObserver.workIdentity.callId !== callback.callId) {
-    return Response.json(
-      { error: "Activity observer callId must match the delegated session callback.", ok: false },
-      { status: 400 },
-    );
-  }
-  if (activityObserver.workIdentity.name !== callback.subagentName) {
-    return Response.json(
-      { error: "Activity observer name must match the delegated session callback.", ok: false },
-      { status: 400 },
-    );
-  }
-  if (new URL(activityObserver.sink.url).origin !== new URL(callback.url).origin) {
-    return Response.json(
-      { error: "Activity observer sink must share the delegated callback origin.", ok: false },
-      { status: 400 },
-    );
-  }
-  return undefined;
 }
 
 interface ParsedSessionMessageBody {
