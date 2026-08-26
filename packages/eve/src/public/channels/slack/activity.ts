@@ -113,6 +113,7 @@ function createSlackActivityRenderer(botToken: SlackBotToken | undefined): Chann
     async dispose() {},
     async render({ destination, snapshot, state }) {
       const channelId = destination["channelId"];
+      const installationTeamId = destination["installationTeamId"];
       const threadTs = destination["threadTs"];
       if (typeof channelId !== "string" || typeof threadTs !== "string" || threadTs === "") {
         return state;
@@ -126,7 +127,13 @@ function createSlackActivityRenderer(botToken: SlackBotToken | undefined): Chann
       for (const [rootTurnId, text] of desired) {
         const current =
           previous[rootTurnId] ??
-          (await recoverActivityMessage({ botToken, channelId, rootTurnId, threadTs }));
+          (await recoverActivityMessage({
+            botToken,
+            channelId,
+            installationTeamId,
+            rootTurnId,
+            threadTs,
+          }));
         if (current?.text === text) {
           messages[rootTurnId] = current;
           continue;
@@ -135,6 +142,7 @@ function createSlackActivityRenderer(botToken: SlackBotToken | undefined): Chann
           botToken,
           channelId,
           current,
+          installationTeamId,
           rootTurnId,
           text,
           threadTs,
@@ -147,6 +155,7 @@ function createSlackActivityRenderer(botToken: SlackBotToken | undefined): Chann
           response = await writeActivityMessage({
             botToken,
             channelId,
+            installationTeamId,
             rootTurnId,
             text,
             threadTs,
@@ -170,6 +179,7 @@ async function writeActivityMessage(input: {
   readonly botToken: SlackBotToken | undefined;
   readonly channelId: string;
   readonly current?: { readonly ts: string };
+  readonly installationTeamId: unknown;
   readonly rootTurnId: string;
   readonly text: string;
   readonly threadTs: string;
@@ -188,6 +198,9 @@ async function writeActivityMessage(input: {
           }
         : { channel: input.channelId, text: input.text, ts: input.current.ts },
     botToken: input.botToken,
+    context: {
+      teamId: typeof input.installationTeamId === "string" ? input.installationTeamId : undefined,
+    },
     operation: input.current === undefined ? "chat.postMessage" : "chat.update",
   });
 }
@@ -195,6 +208,7 @@ async function writeActivityMessage(input: {
 async function recoverActivityMessage(input: {
   readonly botToken: SlackBotToken | undefined;
   readonly channelId: string;
+  readonly installationTeamId: unknown;
   readonly rootTurnId: string;
   readonly threadTs: string;
 }): Promise<{ readonly text: string; readonly ts: string } | undefined> {
@@ -211,6 +225,9 @@ async function recoverActivityMessage(input: {
     const response = await callSlackApi({
       body,
       botToken: input.botToken,
+      context: {
+        teamId: typeof input.installationTeamId === "string" ? input.installationTeamId : undefined,
+      },
       operation: "conversations.replies",
     });
     if (response.ok !== true || !Array.isArray(response.messages)) return undefined;

@@ -168,6 +168,26 @@ describe("Slack activity activity", () => {
     expect(state).toMatchObject({ messages: { turn: { ts: "1700.2" } } });
   });
 
+  it("passes the installation team to activity message token resolution", async () => {
+    const tokenContext = vi.fn(() => "xoxb-team");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ ok: true, ts: "1700.1" })),
+    );
+    const renderer = buildSlackActivityRenderers({
+      botToken: tokenContext,
+      renderers: [slackActivityMessage()],
+    })[0]!;
+
+    await renderer.render({
+      destination: { channelId: "C1", installationTeamId: "T_INSTALL", threadTs: "T1" },
+      snapshot: snapshot(),
+      state: undefined,
+    });
+
+    expect(tokenContext).toHaveBeenCalledWith({ teamId: "T_INSTALL" });
+  });
+
   it("recovers provider identity from message metadata", async () => {
     const operations: string[] = [];
     vi.stubGlobal(
