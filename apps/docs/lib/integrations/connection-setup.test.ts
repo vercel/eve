@@ -50,9 +50,11 @@ describe("Shopify connection setup", () => {
     expect(setup.protocols).toEqual(["mcp"]);
     expect(setup.authModes).toEqual(["none"]);
     expect(setup.variants["mcp:none"]).toContain("defineMcpClientConnection");
+    expect(setup.variants["mcp:none"]).toContain('process.env.EVE_DEV === "1"');
+    expect(setup.variants["mcp:none"]).not.toContain("process.env.NODE_ENV");
     expect(setup.variants["mcp:none"]).toBe(integration.quickStart);
     expect(setup.configureVariants["mcp:none"]).toContain("SHOPIFY_STORE_DOMAIN");
-    expect(setup.configureVariants["mcp:none"]).toContain("UCP_AGENT_PROFILE_URL");
+    expect(setup.configureVariants["mcp:none"]).not.toContain("UCP_AGENT_PROFILE_URL");
     expect(setup.configureVariants["mcp:none"]).toBe(integration.configure);
   });
 });

@@ -1842,10 +1842,14 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
 import { randomUUID } from "node:crypto";
 import { defineMcpClientConnection } from "eve/connections";
 
-// Replace Shopify's example with your hosted UCP agent profile before production.
-const agentProfileUrl =
-  process.env.UCP_AGENT_PROFILE_URL ||
+const SHOPIFY_EXAMPLE_PROFILE =
   "https://shopify.dev/ucp/agent-profiles/examples/2026-04-08/valid-with-capabilities.json";
+
+// Shopify cannot reach localhost. Use its public profile, or expose this route with ngrok.
+const agentProfileUrl =
+  process.env.EVE_DEV === "1"
+    ? SHOPIFY_EXAMPLE_PROFILE
+    : \`https://\${process.env.VERCEL_PROJECT_PRODUCTION_URL!}/.well-known/ucp\`;
 
 export default defineMcpClientConnection({
   url: \`https://\${process.env.SHOPIFY_STORE_DOMAIN!}/api/ucp/mcp\`,
@@ -1856,7 +1860,7 @@ export default defineMcpClientConnection({
         "ucp-agent": {
           profile: agentProfileUrl,
         },
-        // Shopify requires a unique idempotency key for destructive and finalizing calls.
+        // These calls require a unique idempotency key.
         ...(["cancel_cart", "complete_checkout", "cancel_checkout"].includes(toolName)
           ? { "idempotency-key": randomUUID() }
           : {}),
@@ -1871,11 +1875,7 @@ export default defineMcpClientConnection({
 SHOPIFY_STORE_DOMAIN=your-store.myshopify.com
 \`\`\`
 
-The generated connection uses Shopify's example UCP agent profile for development. Before production, host your own profile and set its URL:
-
-\`\`\`bash
-UCP_AGENT_PROFILE_URL=https://your-domain.com/ucp-agent-profile.json
-\`\`\`
+During local development, the connection uses Shopify's public example because Shopify cannot reach localhost. To test your profile locally, expose \`/.well-known/ucp\` with [ngrok](https://ngrok.com/). In production, the connection uses the anonymous profile at \`/.well-known/ucp\`.
 
 See Shopify's [agent profile documentation](https://shopify.dev/docs/agents/profiles) for profile requirements.`,
   },

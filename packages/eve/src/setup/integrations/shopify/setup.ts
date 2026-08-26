@@ -1,20 +1,25 @@
 import { join } from "node:path";
 
 import { appendEnv } from "#setup/append-env.js";
-import { SkippedSignal, text } from "#setup/ask.js";
+import { text } from "#setup/ask.js";
+import { writeTextFile } from "#setup/scaffold/files.js";
 
 import {
   defineSetupIntegration,
   type SetupApplyContext,
   type SetupPrepareContext,
 } from "../types.js";
+import { SHOPIFY_UCP_CHANNEL_TEMPLATE } from "./templates.js";
 
-export const SHOPIFY_EXAMPLE_AGENT_PROFILE_URL =
-  "https://shopify.dev/ucp/agent-profiles/examples/2026-04-08/valid-with-capabilities.json";
+export interface ShopifySetupDeps {
+  appendEnv: typeof appendEnv;
+  writeTextFile: typeof writeTextFile;
+}
+
+const defaultDeps: ShopifySetupDeps = { appendEnv, writeTextFile };
 
 export interface ShopifySetupPlan {
   storeDomain: string;
-  agentProfileUrl: string;
 }
 
 function normalizeStoreDomain(value: string): string {
@@ -40,15 +45,6 @@ function validateStoreDomain(value: string): string | null {
   }
 }
 
-function validateProfileUrl(value: string): string | null {
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" ? null : "Agent profile URL must use HTTPS.";
-  } catch {
-    return "Enter a valid HTTPS agent profile URL.";
-  }
-}
-
 export async function prepareShopifySetup(context: SetupPrepareContext): Promise<ShopifySetupPlan> {
   const storeDomain = await context.asker.ask(
     text({
@@ -59,31 +55,22 @@ export async function prepareShopifySetup(context: SetupPrepareContext): Promise
       validate: validateStoreDomain,
     }),
   );
-  let agentProfileUrl = SHOPIFY_EXAMPLE_AGENT_PROFILE_URL;
-  try {
-    agentProfileUrl = await context.asker.ask(
-      text({
-        key: "shopify.agent-profile-url",
-        message: "UCP agent profile URL (optional)",
-        recommended: SHOPIFY_EXAMPLE_AGENT_PROFILE_URL,
-        validate: validateProfileUrl,
-      }),
-    );
-  } catch (error) {
-    if (!(error instanceof SkippedSignal)) throw error;
-  }
-
-  return {
-    storeDomain: normalizeStoreDomain(storeDomain),
-    agentProfileUrl: agentProfileUrl.trim(),
-  };
+  return { storeDomain: normalizeStoreDomain(storeDomain) };
 }
 
-export async function applyShopifySetup(plan: ShopifySetupPlan, context: SetupApplyContext) {
-  await appendEnv(join(context.appRoot, ".env.local"), {
+export async function applyShopifySetup(
+  plan: ShopifySetupPlan,
+  context: SetupApplyContext,
+  deps: ShopifySetupDeps = defaultDeps,
+) {
+  await deps.appendEnv(join(context.appRoot, ".env.local"), {
     SHOPIFY_STORE_DOMAIN: plan.storeDomain,
-    UCP_AGENT_PROFILE_URL: plan.agentProfileUrl,
   });
+  await deps.writeTextFile(
+    join(context.appRoot, "agent/channels/ucp.ts"),
+    SHOPIFY_UCP_CHANNEL_TEMPLATE,
+    { force: context.force },
+  );
   return { facts: [] };
 }
 

@@ -5,17 +5,7 @@ import { headlessAsker, InteractionRequired, withAnswers } from "#setup/ask.js";
 
 import { integrationSetupEnvironment } from "../shared/environment.js";
 import { createSetupContexts } from "../shared/ui.js";
-import {
-  applyShopifySetup,
-  prepareShopifySetup,
-  SHOPIFY_EXAMPLE_AGENT_PROFILE_URL,
-} from "./setup.js";
-
-vi.mock("#setup/append-env.js", () => ({
-  appendEnv: vi.fn(async () => ({ written: [], skipped: [] })),
-}));
-
-import { appendEnv } from "#setup/append-env.js";
+import { applyShopifySetup, prepareShopifySetup, type ShopifySetupDeps } from "./setup.js";
 
 function contexts(answers: Record<string, unknown>) {
   return createSetupContexts({
@@ -25,6 +15,13 @@ function contexts(answers: Record<string, unknown>) {
     prompter: createFakePrompter().prompter,
     resolveVercelProject: vi.fn(async () => ({ orgId: "team", projectId: "project" })),
   });
+}
+
+function deps(): ShopifySetupDeps {
+  return {
+    appendEnv: vi.fn(async () => ({ written: [], skipped: [] })),
+    writeTextFile: vi.fn(async () => {}),
+  };
 }
 
 describe("Shopify setup", () => {
@@ -48,41 +45,44 @@ describe("Shopify setup", () => {
     ).rejects.toThrow("Enter a valid Shopify storefront domain.");
   });
 
-  it("uses Shopify's example UCP agent profile when the optional question is skipped", async () => {
+  it("writes the storefront environment and a UCP channel containing the anonymous profile", async () => {
+    const effects = deps();
+    const context = contexts({ "shopify.store-domain": " shop.example.com " });
+    const plan = await prepareShopifySetup(context.prepare);
+
+    await expect(applyShopifySetup(plan, context.apply, effects)).resolves.toEqual({ facts: [] });
+
+    expect(effects.appendEnv).toHaveBeenCalledWith("/project/.env.local", {
+      SHOPIFY_STORE_DOMAIN: "shop.example.com",
+    });
+    expect(effects.writeTextFile).toHaveBeenCalledOnce();
+    expect(effects.writeTextFile).toHaveBeenCalledWith(
+      "/project/agent/channels/ucp.ts",
+      expect.stringContaining('"dev.ucp.shopping.cart"'),
+      { force: undefined },
+    );
+    expect(effects.writeTextFile).toHaveBeenCalledWith(
+      "/project/agent/channels/ucp.ts",
+      expect.stringContaining('GET("/.well-known/ucp"'),
+      { force: undefined },
+    );
+    expect(effects.writeTextFile).toHaveBeenCalledWith(
+      "/project/agent/channels/ucp.ts",
+      expect.stringContaining('"cache-control": "public, max-age=300"'),
+      { force: undefined },
+    );
+  });
+
+  it("does not advertise order support for anonymous traffic", async () => {
+    const effects = deps();
     const context = contexts({ "shopify.store-domain": "shop.example.com" });
-    const plan = await prepareShopifySetup(context.prepare);
 
-    await applyShopifySetup(plan, context.apply);
+    await applyShopifySetup(await prepareShopifySetup(context.prepare), context.apply, effects);
 
-    expect(appendEnv).toHaveBeenCalledWith("/project/.env.local", {
-      SHOPIFY_STORE_DOMAIN: "shop.example.com",
-      UCP_AGENT_PROFILE_URL: SHOPIFY_EXAMPLE_AGENT_PROFILE_URL,
-    });
-  });
-
-  it("rejects an agent profile URL that Shopify cannot fetch securely", async () => {
-    await expect(
-      prepareShopifySetup(
-        contexts({
-          "shopify.store-domain": "shop.example.com",
-          "shopify.agent-profile-url": "http://agent.example.com/.well-known/ucp",
-        }).prepare,
-      ),
-    ).rejects.toThrow("Agent profile URL must use HTTPS.");
-  });
-
-  it("writes a custom UCP agent profile URL to .env.local", async () => {
-    const context = contexts({
-      "shopify.store-domain": " shop.example.com ",
-      "shopify.agent-profile-url": " https://agent.example.com/.well-known/ucp ",
-    });
-    const plan = await prepareShopifySetup(context.prepare);
-
-    await applyShopifySetup(plan, context.apply);
-
-    expect(appendEnv).toHaveBeenCalledWith("/project/.env.local", {
-      SHOPIFY_STORE_DOMAIN: "shop.example.com",
-      UCP_AGENT_PROFILE_URL: "https://agent.example.com/.well-known/ucp",
-    });
+    expect(effects.writeTextFile).toHaveBeenCalledWith(
+      "/project/agent/channels/ucp.ts",
+      expect.not.stringContaining("dev.ucp.shopping.order"),
+      { force: undefined },
+    );
   });
 });
