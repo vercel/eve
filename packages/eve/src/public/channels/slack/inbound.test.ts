@@ -434,6 +434,39 @@ describe("parseDirectMessageEvent", () => {
       },
     ]);
   });
+
+  it.each(["is_share", "is_msg_unfurl", "is_reply_unfurl"])(
+    "includes an app mention's %s attachment",
+    (sharedMessageFlag) => {
+      const payload = parseSlackWebhookBody(
+        JSON.stringify({
+          type: "event_callback",
+          team_id: "T01",
+          event: {
+            type: "app_mention",
+            user: "U01",
+            text: "<@U123> :eyes:",
+            channel: "C01",
+            ts: "1700000000.000200",
+            attachments: [
+              {
+                [sharedMessageFlag]: true,
+                text: "Ship it",
+                from_url: "https://example.slack.com/archives/C02/p1700000000000100",
+              },
+            ],
+          },
+        }),
+      );
+      expect(payload.kind).toBe("app_mention");
+      if (payload.kind !== "app_mention") throw new Error("expected app_mention");
+
+      const message = slackMessageFromWebhookPayload(payload);
+
+      expect(message?.text).toBe("<@U123> :eyes:\nShip it");
+      expect(message?.markdown).toContain("Ship it");
+    },
+  );
 });
 
 describe("Block Kit inbound markdown", () => {

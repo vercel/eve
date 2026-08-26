@@ -11,7 +11,24 @@ export function resolveSlackInboundMrkdwn(text: string, raw: Record<string, unkn
 }
 
 function resolveSlackInboundMrkdwnUnsafe(text: string, raw: Record<string, unknown>): string {
-  const extracted = extractSlackStructuredMrkdwn(raw.blocks, raw.attachments);
+  const sharedMessageAttachments = extractSharedMessageAttachments(raw.attachments);
+  const ordinaryAttachments =
+    sharedMessageAttachments.length === 0
+      ? raw.attachments
+      : (raw.attachments as unknown[]).filter(
+          (attachment) => !isSharedMessageAttachment(attachment),
+        );
+  const extracted = extractSlackStructuredMrkdwn(raw.blocks, ordinaryAttachments);
+  const resolved = resolveSlackInboundMrkdwnBaseline(text, extracted, ordinaryAttachments);
+  const sharedMessageLines = extractLegacyAttachmentLines(sharedMessageAttachments);
+  return appendMissingSharedMessageLines(resolved, sharedMessageLines);
+}
+
+function resolveSlackInboundMrkdwnBaseline(
+  text: string,
+  extracted: string,
+  legacyAttachments: unknown,
+): string {
   const trimmedText = text.trim();
 
   if (!trimmedText) return extracted;
@@ -29,7 +46,7 @@ function resolveSlackInboundMrkdwnUnsafe(text: string, raw: Record<string, unkno
   }
 
   if (extracted.length >= trimmedText.length * 2) {
-    const hasLegacyAttachments = Array.isArray(raw.attachments) && raw.attachments.length > 0;
+    const hasLegacyAttachments = Array.isArray(legacyAttachments) && legacyAttachments.length > 0;
     if (hasLegacyAttachments && !normalizedExtracted.includes(normalizedTrimmed)) {
       return `${text}\n${extracted}`;
     }
@@ -37,6 +54,46 @@ function resolveSlackInboundMrkdwnUnsafe(text: string, raw: Record<string, unkno
   }
 
   return text;
+}
+
+function extractSharedMessageAttachments(legacyAttachments: unknown): unknown[] {
+  if (!Array.isArray(legacyAttachments)) return [];
+  return legacyAttachments.filter(isSharedMessageAttachment);
+}
+
+function isSharedMessageAttachment(attachment: unknown): boolean {
+  return (
+    isObject(attachment) &&
+    (attachment.is_share === true ||
+      attachment.is_msg_unfurl === true ||
+      attachment.is_reply_unfurl === true)
+  );
+}
+
+function appendMissingSharedMessageLines(base: string, extractedLines: string[]): string {
+  let result = base;
+  for (const extractedLine of extractedLines) {
+    for (const line of extractedLine.split("\n")) {
+      const normalizedLine = normalizeComparableText(line);
+      if (
+        !normalizedLine ||
+        containsComparableText(normalizeComparableText(result), normalizedLine)
+      ) {
+        continue;
+      }
+      result = result ? `${result}\n${line}` : line;
+    }
+  }
+  return result;
+}
+
+function containsComparableText(input: string, candidate: string): boolean {
+  const escapedCandidate = candidate.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const startsWithWord = /^[\p{L}\p{N}_]/u.test(candidate);
+  const endsWithWord = /[\p{L}\p{N}_]$/u.test(candidate);
+  const prefix = startsWithWord ? "(?<![\\p{L}\\p{N}_])" : "";
+  const suffix = endsWithWord ? "(?![\\p{L}\\p{N}_])" : "";
+  return new RegExp(`${prefix}${escapedCandidate}${suffix}`, "u").test(input);
 }
 
 function extractSlackStructuredMrkdwn(blocks: unknown, legacyAttachments: unknown): string {
