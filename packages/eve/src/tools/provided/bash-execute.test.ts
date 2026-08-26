@@ -42,6 +42,7 @@ describe("executeBashTool process actions", () => {
       stderr: "",
       stdout: "partial",
       truncated: false,
+      wallTimeSeconds: expect.any(Number),
     });
   });
 
@@ -55,13 +56,22 @@ describe("executeBashTool process actions", () => {
     });
 
     await expect(
-      executeBashTool({ action: "wait", processId: running.processId, yieldAfter: 10 }, context),
+      executeBashTool(
+        { action: "wait", processId: running.processId, yieldTimeMs: 10_000 },
+        context,
+      ),
     ).resolves.toEqual({
       exitCode: 0,
       status: "completed",
       stderr: "",
       stdout: "done",
       truncated: false,
+      wallTimeSeconds: expect.any(Number),
+    });
+    expect(waitForBackgroundBashProcess).toHaveBeenCalledWith({
+      abortSignal: context.abortSignal,
+      process: running,
+      yieldTimeMs: 10_000,
     });
   });
 

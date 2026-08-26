@@ -6,7 +6,7 @@ import {
   waitForBackgroundBashProcess,
 } from "#execution/sandbox/bash-background.js";
 
-import { DEFAULT_BASH_YIELD_AFTER_SECONDS, executeBashOnSandbox } from "./bash.js";
+import { DEFAULT_BASH_YIELD_TIME_MS, executeBashOnSandbox } from "./bash.js";
 
 vi.mock("#execution/sandbox/bash-background.js", () => ({
   startBackgroundBashProcess: vi.fn(),
@@ -41,27 +41,34 @@ describe("executeBashOnSandbox", () => {
       stderr: "",
       stdout: "done\n",
       truncated: false,
+      wallTimeSeconds: expect.any(Number),
     });
     expect(waitForBackgroundBashProcess).toHaveBeenCalledWith({
       abortSignal: undefined,
       process: running,
-      yieldAfterMs: DEFAULT_BASH_YIELD_AFTER_SECONDS * 1_000,
+      yieldTimeMs: DEFAULT_BASH_YIELD_TIME_MS,
     });
   });
 
-  it("returns a process receipt instead of killing a command after yieldAfter", async () => {
+  it("returns a process receipt instead of killing a command after yieldTimeMs", async () => {
     const running = process();
     vi.mocked(startBackgroundBashProcess).mockResolvedValue(running);
     vi.mocked(waitForBackgroundBashProcess).mockResolvedValue(null);
 
     await expect(
-      executeBashOnSandbox(sandbox, { command: "build", yieldAfter: 10 }),
+      executeBashOnSandbox(sandbox, { command: "build", yieldTimeMs: 10_000 }),
     ).resolves.toEqual({
       processId: "process-123",
       status: "running",
       stderr: "partial err",
       stdout: "partial out",
       truncated: false,
+      wallTimeSeconds: expect.any(Number),
+    });
+    expect(waitForBackgroundBashProcess).toHaveBeenCalledWith({
+      abortSignal: undefined,
+      process: running,
+      yieldTimeMs: 10_000,
     });
     expect(running.kill).not.toHaveBeenCalled();
   });

@@ -3,18 +3,18 @@ import {
   startBackgroundBashProcess,
   waitForBackgroundBashProcess,
 } from "#execution/sandbox/bash-background.js";
-import { truncateTail } from "#execution/sandbox/truncate-output.js";
+import { truncateHeadTail } from "#execution/sandbox/truncate-output.js";
 
 export interface BashInput {
   readonly command: string;
-  readonly yieldAfter?: number;
+  readonly yieldTimeMs?: number;
 }
 
 export interface BashExecuteOptions {
   readonly abortSignal?: AbortSignal;
 }
 
-export const DEFAULT_BASH_YIELD_AFTER_SECONDS = 300;
+export const DEFAULT_BASH_YIELD_TIME_MS = 300_000;
 
 export type BashResult = BashCompletedResult | BashRunningResult;
 
@@ -32,6 +32,8 @@ export interface BashOutput {
   readonly stderr: string;
   readonly stdout: string;
   readonly truncated: boolean;
+  /** Elapsed wall time this call spent before returning, in seconds. */
+  readonly wallTimeSeconds: number;
 }
 
 /** Starts one shell command and yields it to the background after the foreground wait. */
@@ -40,13 +42,14 @@ export async function executeBashOnSandbox(
   args: BashInput,
   options?: BashExecuteOptions,
 ): Promise<BashResult> {
+  const startedAt = Date.now();
   const process = await startBackgroundBashProcess(sandbox, args.command);
   let state;
   try {
     state = await waitForBackgroundBashProcess({
       abortSignal: options?.abortSignal,
       process,
-      yieldAfterMs: (args.yieldAfter ?? DEFAULT_BASH_YIELD_AFTER_SECONDS) * 1_000,
+      yieldTimeMs: args.yieldTimeMs ?? DEFAULT_BASH_YIELD_TIME_MS,
     });
   } catch (error) {
     try {
@@ -55,39 +58,34 @@ export async function executeBashOnSandbox(
       throw new AggregateError(
         [error, killError],
         "The bash command was cancelled but could not be killed.",
-        {
-          cause: error,
-        },
+        { cause: error },
       );
     }
     throw error;
   }
 
   const observed = state ?? (await process.read());
-  const output = formatBashOutput(observed.stdout, observed.stderr);
+  const output = formatBashOutput(observed.stdout, observed.stderr, startedAt);
   return state === null
     ? { ...output, processId: process.processId, status: "running" }
     : { ...output, exitCode: state.exitCode!, status: "completed" };
 }
 
-export function formatBashOutput(stdoutValue: string, stderrValue: string): BashOutput {
-  const stdoutResult = truncateTail(stdoutValue);
-  const stderrResult = truncateTail(stderrValue);
-  let stdout = stdoutResult.output;
-  let stderr = stderrResult.output;
-  if (stdoutResult.truncated) {
-    stdout =
-      `[stdout truncated: showing last ${stdoutResult.outputLines} of ${stdoutResult.totalLines} lines]\n` +
-      stdout;
-  }
-  if (stderrResult.truncated) {
-    stderr =
-      `[stderr truncated: showing last ${stderrResult.outputLines} of ${stderrResult.totalLines} lines]\n` +
-      stderr;
-  }
+export function formatBashOutput(
+  stdoutValue: string,
+  stderrValue: string,
+  startedAt: number,
+): BashOutput {
+  const stdoutResult = truncateHeadTail(stdoutValue);
+  const stderrResult = truncateHeadTail(stderrValue);
   return {
-    stderr,
-    stdout,
+    stderr: stderrResult.output,
+    stdout: stdoutResult.output,
     truncated: stdoutResult.truncated || stderrResult.truncated,
+    wallTimeSeconds: wallTimeSeconds(startedAt),
   };
+}
+
+export function wallTimeSeconds(startedAt: number): number {
+  return Math.round(Date.now() - startedAt) / 1_000;
 }

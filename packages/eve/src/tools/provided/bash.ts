@@ -2,7 +2,7 @@ import { z } from "#compiled/zod/index.js";
 
 import type { SessionContext } from "#context/session-context.js";
 import {
-  DEFAULT_BASH_YIELD_AFTER_SECONDS,
+  DEFAULT_BASH_YIELD_TIME_MS,
   executeBashOnSandbox,
   formatBashOutput,
   type BashInput,
@@ -13,23 +13,23 @@ import {
 } from "#execution/sandbox/bash-background.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 
-const YIELD_AFTER_SCHEMA = z
+const YIELD_TIME_SCHEMA = z
   .number()
   .nonnegative()
-  .describe(`Optional foreground wait in seconds. Defaults to ${DEFAULT_BASH_YIELD_AFTER_SECONDS}.`)
+  .describe(
+    `Maximum time in milliseconds to wait before returning a process id for a still-running command. Defaults to ${DEFAULT_BASH_YIELD_TIME_MS} ms.`,
+  )
   .optional();
 
 export const BASH_INPUT_SCHEMA = z.union([
   z.strictObject({
     command: z.string().describe("The shell command to execute."),
-    yieldAfter: YIELD_AFTER_SCHEMA.describe(
-      `Optional foreground wait in seconds. Defaults to ${DEFAULT_BASH_YIELD_AFTER_SECONDS}. If the command is still running, bash returns a process id instead of stopping it.`,
-    ),
+    yieldTimeMs: YIELD_TIME_SCHEMA,
   }),
   z.strictObject({
     action: z.enum(["poll", "wait", "kill"]),
     processId: z.string().describe("The process id returned by an earlier bash call."),
-    yieldAfter: YIELD_AFTER_SCHEMA,
+    yieldTimeMs: YIELD_TIME_SCHEMA,
   }),
 ]);
 
@@ -37,6 +37,9 @@ const BASH_OUTPUT_FIELDS = {
   stderr: z.string(),
   stdout: z.string(),
   truncated: z.boolean(),
+  wallTimeSeconds: z
+    .number()
+    .describe("Elapsed wall time this call spent before returning, in seconds."),
 };
 
 export const BASH_OUTPUT_SCHEMA = z.discriminatedUnion("status", [
@@ -67,15 +70,16 @@ export async function executeBashTool(
     });
   }
 
+  const startedAt = Date.now();
   const process = getBackgroundBashProcess(sandbox, input.processId);
   if (input.action === "kill") {
     const before = await process.read();
     if (before.exitCode !== undefined) {
-      const output = formatBashOutput(before.stdout, before.stderr);
+      const output = formatBashOutput(before.stdout, before.stderr, startedAt);
       return { ...output, exitCode: before.exitCode, status: "completed" };
     }
     await process.kill();
-    return { ...formatBashOutput(before.stdout, before.stderr), status: "killed" };
+    return { ...formatBashOutput(before.stdout, before.stderr, startedAt), status: "killed" };
   }
   const state =
     input.action === "poll"
@@ -83,18 +87,18 @@ export async function executeBashTool(
       : await waitForBackgroundBashProcess({
           abortSignal: context.abortSignal,
           process,
-          yieldAfterMs: (input.yieldAfter ?? DEFAULT_BASH_YIELD_AFTER_SECONDS) * 1_000,
+          yieldTimeMs: input.yieldTimeMs ?? DEFAULT_BASH_YIELD_TIME_MS,
         });
   if (state === null || state.exitCode === undefined) {
     const latest = state ?? (await process.read());
     return {
-      ...formatBashOutput(latest.stdout, latest.stderr),
+      ...formatBashOutput(latest.stdout, latest.stderr, startedAt),
       processId: process.processId,
       status: "running",
     };
   }
   return {
-    ...formatBashOutput(state.stdout, state.stderr),
+    ...formatBashOutput(state.stdout, state.stderr, startedAt),
     exitCode: state.exitCode,
     status: "completed",
   };
@@ -103,7 +107,7 @@ export async function executeBashTool(
 export const bash: ToolDefinition<BashToolInput, BashToolOutput> = defineTool({
   description: [
     "Run shell commands and manage commands that continue in the background.",
-    `A new command waits up to ${DEFAULT_BASH_YIELD_AFTER_SECONDS} seconds by default, then returns a process id if still running.`,
+    `A new command waits up to ${DEFAULT_BASH_YIELD_TIME_MS} ms by default, then returns a process id if still running.`,
     "Pass that process id back with action poll, wait, or kill.",
   ].join(" "),
   execute: executeBashTool,

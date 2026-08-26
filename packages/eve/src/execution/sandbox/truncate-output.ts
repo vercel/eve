@@ -73,6 +73,65 @@ export function truncateTail(text: string): TruncationResult {
 }
 
 /**
+ * Keeps the **first and last** lines of `text` within the shared
+ * budgets, dropping the middle. Long command output is informative at
+ * both ends — startup banners and configuration at the head, errors
+ * and summaries at the tail — so each end receives half of the line
+ * and byte budgets. An omission marker line replaces the dropped
+ * middle.
+ */
+export function truncateHeadTail(text: string): TruncationResult {
+  const full = truncateHead(text);
+  if (!full.truncated) {
+    return full;
+  }
+
+  const rawLines = text.split("\n");
+  const totalLines = countLogicalLines(rawLines);
+  const head = collectLines(rawLines, "head", MAX_OUTPUT_LINES / 2, MAX_OUTPUT_BYTES / 2);
+  const tail = collectLines(rawLines, "tail", MAX_OUTPUT_LINES / 2, MAX_OUTPUT_BYTES / 2);
+  const omitted = totalLines - head.length - tail.length;
+  if (omitted <= 0) {
+    return full;
+  }
+
+  return {
+    output: [...head, `[... ${omitted} lines omitted ...]`, ...tail].join("\n"),
+    outputLines: head.length + tail.length,
+    totalLines,
+    truncated: true,
+  };
+}
+
+function collectLines(
+  rawLines: readonly string[],
+  direction: "head" | "tail",
+  maxLines: number,
+  maxBytes: number,
+): string[] {
+  const fromStart = direction === "head";
+  const kept: string[] = [];
+  let bytes = 0;
+
+  const start = fromStart ? 0 : rawLines.length - 1;
+  const step = fromStart ? 1 : -1;
+  for (let i = start; i >= 0 && i < rawLines.length && kept.length < maxLines; i += step) {
+    const line = capLineLength(rawLines[i] ?? "");
+    const lineBytes = Buffer.byteLength(line, "utf8") + 1;
+    if (bytes + lineBytes > maxBytes && kept.length > 0) {
+      break;
+    }
+    kept.push(line);
+    bytes += lineBytes;
+  }
+
+  if (!fromStart) {
+    kept.reverse();
+  }
+  return kept;
+}
+
+/**
  * Shared truncation loop used by {@link truncateHead} and
  * {@link truncateTail}. The only difference between the two is the
  * iteration direction; all other budgeting logic is identical.
