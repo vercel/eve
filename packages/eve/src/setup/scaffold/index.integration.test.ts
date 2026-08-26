@@ -228,6 +228,9 @@ describe("ensureChannel", () => {
     await expect(readFile(join(projectRoot, "app/page.tsx"), "utf8")).resolves.toContain(
       "AgentChat",
     );
+    await expect(readFile(join(projectRoot, "app/icon.svg"), "utf8")).resolves.toContain(
+      'viewBox="0 0 102 102"',
+    );
     await expect(readFile(join(projectRoot, "app/s/page.tsx"), "utf8")).resolves.toContain(
       "<AgentChat sessionless />",
     );

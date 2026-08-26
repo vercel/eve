@@ -1487,6 +1487,11 @@
           "target": "app/layout.tsx"
         },
         {
+          "path": "registry/channel/web/app/icon.svg",
+          "type": "registry:file",
+          "target": "app/icon.svg"
+        },
+        {
           "path": "registry/channel/web/app/page.tsx",
           "type": "registry:file",
           "target": "app/page.tsx"
