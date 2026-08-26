@@ -21,6 +21,7 @@ import {
   LiveStepDynamicModelSelectionKey,
   ParentSessionKey,
   SandboxKey,
+  SessionTraceSeedKey,
   SessionKey,
   SessionIdKey,
   SessionDynamicInstructionsKey,
@@ -10767,7 +10768,7 @@ describe("createToolLoopHarness", () => {
         toolResults: [{ toolCallId: "call-1", toolName: "add", output: "42" }],
       });
 
-      declareTelemetry({});
+      declareTelemetry({ tracePolicy: () => true });
       const config = createTestConfig("conversation");
       const runStep = createToolLoopHarness(config);
       const result = await runStep(createTestSession(), { message: "add stuff" });
@@ -10884,6 +10885,57 @@ describe("createToolLoopHarness", () => {
   });
 
   describe("telemetry metadata", () => {
+    it("does not enable AI SDK telemetry when the trace policy rejects the trace", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      declareTelemetry({
+        recordInputs: true,
+        recordOutputs: true,
+        tracePolicy: () => false,
+      });
+      const runStep = createToolLoopHarness(createTestConfig());
+
+      await runStep(createTestSession(), { message: "private" });
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: unknown;
+      };
+      expect(agentCall.telemetry).toBeUndefined();
+      expect(mockCreateAiSdkHookBridge).not.toHaveBeenCalled();
+    });
+
+    it("reuses the persisted rejected trace decision", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const tracePolicy = vi.fn(() => true);
+      declareTelemetry({ recordInputs: true, recordOutputs: true, tracePolicy });
+      const runStep = createToolLoopHarness(createTestConfig());
+      const ctx = new ContextContainer();
+      ctx.set(SessionTraceSeedKey, {
+        spanId: "1".repeat(16),
+        traceFlags: 0,
+        traceId: "2".repeat(32),
+      });
+
+      await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "private" }));
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: unknown;
+      };
+      expect(agentCall.telemetry).toBeUndefined();
+      expect(tracePolicy).not.toHaveBeenCalled();
+    });
+
     it("emits the authored turn trace with the session and turn preamble", async () => {
       const authoredTrace = {
         spanId: "0123456789abcdef",
@@ -10932,7 +10984,7 @@ describe("createToolLoopHarness", () => {
         toolResults: [],
       });
 
-      declareTelemetry({});
+      declareTelemetry({ tracePolicy: () => true });
       const config = createTestConfig("conversation");
       const runStep = createToolLoopHarness(config);
       await runStep(createTestSession(), { message: "hi" });
@@ -11105,7 +11157,7 @@ describe("createToolLoopHarness", () => {
       });
     });
 
-    it("forces hosted unknown model telemetry to metadata only", async () => {
+    it("does not emit hosted unknown model telemetry", async () => {
       setupMockAgent({
         finishReason: "stop",
         response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -11121,10 +11173,7 @@ describe("createToolLoopHarness", () => {
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
         telemetry?: { recordInputs?: boolean; recordOutputs?: boolean };
       };
-      expect(agentCall.telemetry).toMatchObject({
-        recordInputs: false,
-        recordOutputs: false,
-      });
+      expect(agentCall.telemetry).toBeUndefined();
     });
 
     it("keeps unknown model telemetry content in a local development worker", async () => {
@@ -11136,7 +11185,11 @@ describe("createToolLoopHarness", () => {
         toolCalls: [],
         toolResults: [],
       });
-      declareTelemetry({ recordInputs: true, recordOutputs: true });
+      declareTelemetry({
+        recordInputs: true,
+        recordOutputs: true,
+        tracePolicy: () => true,
+      });
 
       const runStep = createToolLoopHarness(createTestConfig("conversation"));
       await runStep(createTestSession(), { message: "hi" });

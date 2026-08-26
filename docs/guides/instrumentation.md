@@ -60,6 +60,8 @@ The third configurable surface, [runtime context events](#runtime-context), atta
 
 Built-in messaging channels classify their instrumentation metadata with an `audience`: `public`, `private`, or `unknown`. Slack public channels and Chat SDK workspace-visible threads are public; direct and private conversations are private; platform surfaces without enough visibility evidence remain unknown.
 
+When an instrumentation-provider `tracePolicy` rejects a trace, eve does not enable AI SDK telemetry for that execution. Rejection prevents model and tool spans from being created rather than exporting metadata-only versions of them.
+
 ## Channel delivery traces
 
 Instrumentation providers receive `channel.delivery.started` followed by
