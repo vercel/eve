@@ -83,7 +83,7 @@ describe("executeBashOnSandbox", () => {
   });
 
   it("kills when cancelled", async () => {
-    const session = sandbox();
+    const session = sandbox(processFiles({}));
     const cancelled = new DOMException("cancelled", "AbortError");
 
     await expect(
@@ -93,7 +93,11 @@ describe("executeBashOnSandbox", () => {
         { abortSignal: AbortSignal.abort(cancelled) },
       ),
     ).rejects.toBe(cancelled);
-    expect(session.run).toHaveBeenCalledTimes(2);
+    expect(session.removePath).toHaveBeenCalledWith({
+      force: true,
+      path: expect.stringContaining("/.eve/processes/"),
+      recursive: true,
+    });
   });
 
   it("uses the default foreground wait", () => {
@@ -135,13 +139,16 @@ describe("background bash processes", () => {
   });
 
   it("removes process state even when the process already exited", async () => {
-    const session = sandbox();
+    const session = sandbox(processFiles({}));
+    vi.mocked(session.run).mockResolvedValue({ exitCode: 1, stderr: "", stdout: "" });
 
     await getBackgroundBashProcess(session, "11111111-1111-4111-8111-111111111111").kill();
 
-    const command = vi.mocked(session.run).mock.calls[0]?.[0].command;
-    expect(command).toContain('if kill -0 -- -"$pid"');
-    expect(command).toContain("\nrm -rf");
+    expect(session.removePath).toHaveBeenCalledWith({
+      force: true,
+      path: "/workspace/.eve/processes/11111111-1111-4111-8111-111111111111",
+      recursive: true,
+    });
   });
 
   it("rejects missing process state", async () => {

@@ -164,23 +164,43 @@ function backgroundBashProcess(sandbox: SandboxSession, processId: string): Back
       return await readBackgroundBashProcessStatus(sandbox, processId, directory);
     },
     async kill() {
-      const quotedDirectory = shellQuote(directory);
-      const result = await sandbox.run({
-        command: [
-          `pid=$(cat ${shellQuote(`${directory}/pid`)}) && [ "$pid" -gt 0 ] || exit 1`,
-          `if kill -0 -- -"$pid" 2>/dev/null || kill -0 "$pid" 2>/dev/null; then`,
-          `  kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true`,
-          `  sleep 0.1`,
-          `  kill -KILL -- -"$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true`,
-          `fi`,
-          `rm -rf ${quotedDirectory}`,
-        ].join("\n"),
-      });
-      if (result.exitCode !== 0) {
+      const pidValue = await sandbox.readTextFile({ path: `${directory}/pid` });
+      const pid = pidValue?.trim();
+      if (!pid || !/^[1-9]\d*$/.test(pid)) {
         throw new Error(`Bash process "${processId}" could not be killed by this sandbox backend.`);
       }
+
+      if (await isProcessAlive(sandbox, pid)) {
+        await signalProcess(sandbox, pid);
+        await abortableDelay(100);
+        if (await isProcessAlive(sandbox, pid)) {
+          await signalProcess(sandbox, pid, "-KILL");
+        }
+      }
+      await sandbox.removePath({ force: true, path: directory, recursive: true });
     },
   };
+}
+
+async function isProcessAlive(sandbox: SandboxSession, pid: string): Promise<boolean> {
+  const result = await sandbox.run({
+    command: `kill -0 -- -${pid} 2>/dev/null || kill -0 ${pid} 2>/dev/null`,
+  });
+  return result.exitCode === 0;
+}
+
+async function signalProcess(
+  sandbox: SandboxSession,
+  pid: string,
+  signal?: "-KILL",
+): Promise<void> {
+  const option = signal ? `${signal} ` : "";
+  const result = await sandbox.run({
+    command: `kill ${option}-- -${pid} 2>/dev/null || kill ${option}${pid} 2>/dev/null`,
+  });
+  if (result.exitCode !== 0 && (await isProcessAlive(sandbox, pid))) {
+    throw new Error(`Bash process ${pid} could not be signalled by this sandbox backend.`);
+  }
 }
 
 async function readBackgroundBashProcessStatus(
