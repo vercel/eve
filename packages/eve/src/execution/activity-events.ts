@@ -1,4 +1,5 @@
 import { normalizeActivityText } from "#execution/activity-text.js";
+import { deriveChildActivityWorkId } from "#execution/activity-work-id.js";
 import type { ActivityEventV1, ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
@@ -36,7 +37,11 @@ export function projectActivityEvents(input: {
     const result = event.data.result;
     if (result.kind === "subagent-result") {
       if ("backgroundTask" in result && result.backgroundTask !== undefined) return [];
-      const workId = childWorkId(lineage, result.callId);
+      const workId = deriveChildActivityWorkId({
+        callId: result.callId,
+        parentSessionId: lineage.sessionId ?? lineage.rootSessionId,
+        parentTurnId: lineage.turnId ?? lineage.rootTurnId,
+      });
       const outcome =
         result.origin === "dispatch"
           ? "failed"
@@ -208,10 +213,6 @@ export function projectActivityEvents(input: {
 function activityLabel(value: string): string | undefined {
   const normalized = normalizeActivityText(value);
   return normalized === "" ? undefined : normalized;
-}
-
-function childWorkId(lineage: ActivityWorkIdentityV1, callId: string): string {
-  return `work:${lineage.sessionId ?? lineage.rootSessionId}:${lineage.turnId ?? lineage.rootTurnId}:${callId}`;
 }
 
 function actionId(parentWorkId: string, callId: string): string {

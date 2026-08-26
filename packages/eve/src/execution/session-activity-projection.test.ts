@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { projectSessionActivity } from "#execution/session-activity-projection.js";
+import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
 import type { ActivitySnapshotV1, ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
@@ -37,17 +38,18 @@ function reduceProjection(input: {
 describe("projectSessionActivity", () => {
   it("maps turn.started and turn.completed to root work lifecycle", () => {
     const sessionId = "session-1";
+    const workId = deriveRootTurnActivityWorkId({ sessionId, turnId: "turn-1" });
     expect(
       [turnEvent("turn.started"), turnEvent("turn.completed")].flatMap((event) =>
         projectSessionActivity({ event, sessionId }),
       ),
     ).toEqual([
       {
-        eventId: "root:session-1:turn-1:started",
+        eventId: `${workId}:started`,
         kind: "work.started",
         startedAt: at,
         work: {
-          id: "root:session-1:turn-1",
+          id: workId,
           kind: "root-turn",
           rootSessionId: "session-1",
           rootTurnId: "turn-1",
@@ -56,11 +58,11 @@ describe("projectSessionActivity", () => {
         },
       },
       {
-        eventId: "root:session-1:turn-1:settled:completed",
+        eventId: `${workId}:settled:completed`,
         kind: "work.settled",
         outcome: "completed",
         settledAt: at,
-        workId: "root:session-1:turn-1",
+        workId,
       },
     ]);
   });
@@ -72,11 +74,9 @@ describe("projectSessionActivity", () => {
       sessionId: "session-1",
     });
 
+    const workId = deriveRootTurnActivityWorkId({ sessionId: "session-1", turnId: "turn-1" });
     expect(snapshot.work).toEqual({
-      "root:session-1:turn-1": expect.objectContaining({
-        id: "root:session-1:turn-1",
-        phase: "completed",
-      }),
+      [workId]: expect.objectContaining({ id: workId, phase: "completed" }),
     });
     expect(snapshot.pendingSettlements).toEqual({});
   });

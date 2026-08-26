@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { projectActivityEvents } from "#execution/activity-events.js";
+import { deriveChildActivityWorkId } from "#execution/activity-work-id.js";
 import { MAX_ACTIVITY_TEXT_LENGTH } from "#execution/activity-text.js";
 
 const lineage = {
@@ -143,6 +144,11 @@ describe("projectActivityEvents", () => {
   });
 
   it("settles delegated work from its parent action result", () => {
+    const workId = deriveChildActivityWorkId({
+      callId: "child-1",
+      parentSessionId: "root",
+      parentTurnId: "turn",
+    });
     const parentLineage = {
       ...lineage,
       sessionId: "root",
@@ -181,11 +187,11 @@ describe("projectActivityEvents", () => {
       }),
     ).toEqual([
       {
-        eventId: "work:root:turn:child-1:settled:completed",
+        eventId: `${workId}:settled:completed`,
         kind: "work.settled",
         outcome: "completed",
         settledAt: "2026-01-01T00:00:02Z",
-        workId: "work:root:turn:child-1",
+        workId,
       },
     ]);
   });

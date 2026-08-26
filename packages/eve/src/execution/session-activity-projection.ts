@@ -1,4 +1,5 @@
 import { projectActivityEvents } from "#execution/activity-events.js";
+import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 import type { ActivityEventV1, ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 
@@ -43,7 +44,7 @@ function workFor(input: {
   }
   if (turnId === undefined) return undefined;
   return {
-    id: `root:${input.sessionId}:${turnId}`,
+    id: deriveRootTurnActivityWorkId({ sessionId: input.sessionId, turnId }),
     kind: "root-turn",
     rootSessionId: input.sessionId,
     rootTurnId: turnId,
