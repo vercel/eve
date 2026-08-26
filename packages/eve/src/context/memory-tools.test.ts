@@ -132,17 +132,13 @@ describe("memory provider tools", () => {
     expect(output).toBe("2:user_1");
   });
 
-  it("omits tools for a disabled slot or tools:false", async () => {
+  it("omits tools when the provider has no tool factory", async () => {
     const ctx = createContext("user_1");
     const definition = defineMemory({
       provider: {
         recall: { "turn.started": async () => null },
-        tools: async () => ({
-          save: defineTool({ description: "Save.", execute: async () => null, inputSchema: {} }),
-        }),
       },
       scope: "unused",
-      tools: false,
     });
     const dynamic = createMemoryToolDynamicDefinition(definition, "profile");
     const result = await contextStorage.run(

@@ -205,7 +205,6 @@ const memory = source
   .extend({
     description: z.string().optional(),
     slot: z.string(),
-    tools: z.literal(false).optional(),
     visibility: z.enum(["scope", "session"]),
   })
   .strict();

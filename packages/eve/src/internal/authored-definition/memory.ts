@@ -7,7 +7,7 @@ export function normalizeMemoryDefinition(value: unknown, message: string): Memo
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
     record,
-    ["description", "namespace", "provider", "scope", "tools", "visibility"],
+    ["description", "namespace", "provider", "scope", "visibility"],
     message,
   );
   if (
@@ -73,9 +73,6 @@ export function normalizeMemoryDefinition(value: unknown, message: string): Memo
   }
   if (provider.tools !== undefined && typeof provider.tools !== "function") {
     throw new Error(`${message} "provider.tools" must be a function when provided.`);
-  }
-  if (record.tools !== undefined && record.tools !== false) {
-    throw new Error(`${message} "tools" may only be false when provided.`);
   }
   if (
     record.visibility !== undefined &&
