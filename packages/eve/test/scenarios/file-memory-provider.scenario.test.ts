@@ -21,7 +21,8 @@ const blob = vercelBlob({ token: "unused" });
 
 console.log(JSON.stringify({
   blob: typeof blob.read === "function" && typeof blob.write === "function",
-  provider: typeof provider.recall === "function" &&
+  provider: typeof provider.recall?.["turn.started"] === "function" &&
+    typeof provider.recall?.["compaction.completed"] === "function" &&
     typeof provider.tools === "function" &&
     provider.capture === undefined,
 }));

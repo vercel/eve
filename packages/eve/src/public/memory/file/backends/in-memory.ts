@@ -6,17 +6,12 @@ import {
   type MemoryDocumentBackend,
 } from "#public/memory/file/backend.js";
 
-/** Optional shared storage for {@link inMemory}. */
-interface InMemoryBackendOptions {
-  readonly store?: Map<string, MemoryDocument>;
-}
-
 /**
  * Creates a process-local document backend for development and tests.
  * Contents disappear when the process or backend instance is replaced.
  */
-export function inMemory(options: InMemoryBackendOptions = {}): MemoryDocumentBackend {
-  const store = options.store ?? new Map<string, MemoryDocument>();
+export function inMemory(): MemoryDocumentBackend {
+  const store = new Map<string, MemoryDocument>();
   const instanceId = randomUUID();
   let revision = 0;
 

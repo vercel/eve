@@ -1,6 +1,6 @@
 ---
 title: "Memory"
-description: "Recall and capture scoped, cross-session context with a custom eve memory provider."
+description: "Recall and capture scoped, cross-session context with built-in or custom eve memory providers."
 ---
 
 Memory connects an agent to application-owned storage that can outlive one
@@ -8,9 +8,71 @@ session. A provider recalls relevant context before a turn, can capture the
 settled conversation afterward, and can expose tools that operate on the same
 locked scope.
 
-eve owns the lifecycle and model-facing history. Your provider owns storage,
-retrieval, retention, and deletion. eve does not include a built-in filesystem
-provider.
+eve owns the lifecycle and model-facing history. A provider owns storage,
+retrieval, retention, and deletion. Use the built-in bounded file provider for
+model-maintained facts, or implement a provider for application-specific
+retrieval and capture.
+
+## Use file memory
+
+`fileMemory()` keeps one indexed document for each resolved scope and gives the
+model `save_memory` and `remove_memory` tools. It recalls the document before
+each turn and after compaction, but does not automatically extract facts from
+the conversation.
+
+```ts title="agent/memory/profile.ts"
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+import { fileMemory } from "eve/memory/file";
+
+export default defineMemory({
+  description: "Remember stable facts and preferences about the caller.",
+  provider: fileMemory(),
+  scope: byPrincipal,
+});
+```
+
+The `profile` slot exposes `profile__save_memory` and
+`profile__remove_memory`. Saved entries are normalized, assigned permanent
+numeric indexes, and recalled as one stable keyed message. Removing an entry
+replaces the previous recalled document at the next boundary, including when
+the final entry is removed, so stale content does not remain in model context.
+
+The provider rejects rather than truncates or evicts data. Each normalized
+entry can contain up to 2,048 UTF-8 bytes; the stored document can contain up
+to 65,536 bytes; and `maxEntries` defaults to 100 live entries:
+
+```ts
+provider: fileMemory({ maxEntries: 25 });
+```
+
+### Choose a file backend
+
+With no `backend`, `fileMemory()` selects storage lazily:
+
+| Environment                                                       | Backend                                  |
+| ----------------------------------------------------------------- | ---------------------------------------- |
+| Vercel with Blob credentials (token, or attached store with OIDC) | Private Vercel Blob                      |
+| Vercel without Blob configuration                                 | Error asking you to attach a Blob store  |
+| `eve dev`                                                         | Shared process-local in-memory storage   |
+| Every other environment                                           | Error asking you for an explicit backend |
+
+`NODE_ENV=development` alone does not select in-memory storage, and a Blob
+token outside Vercel does not select Blob. For tests, pass a fresh in-memory
+backend explicitly:
+
+```ts
+import { fileMemory, inMemory } from "eve/memory/file";
+
+provider: fileMemory({ backend: inMemory() });
+```
+
+`inMemory()` loses its contents when its backend instance or process is
+replaced. For another durable store, implement `MemoryDocumentBackend` from
+`eve/memory/file`. Its `write()` method conditionally replaces the complete
+document and must throw `MemoryDocumentConflictError` when `expectedVersion`
+is stale. Use `vercelBlob()` from `eve/memory/file/vercel` when you want to
+configure Vercel Blob credentials or an object prefix explicitly.
 
 ## Add a memory slot
 
