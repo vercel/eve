@@ -8,7 +8,7 @@ Each memory slot binds a provider to an eve-managed scope and visibility
 policy. The provider decides how to retrieve relevant context, whether to
 capture conversation history, and which model-facing operations to offer.
 
-The boundary is deliberate:
+Breaking down the boundary between eve and the provider:
 
 | eve owns                                                         | The provider owns                                       |
 | ---------------------------------------------------------------- | ------------------------------------------------------- |
