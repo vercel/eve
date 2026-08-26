@@ -7,7 +7,7 @@ export default defineMcpClientConnection({
   url: "https://mcp.agentcard.sh/mcp",
   description:
     "Agentcard: the agent's wallet. Shop and check out at real merchants (DoorDash, Good Eggs, flights) with the conversational `buy` tool (thread conversation_id on follow-ups), issue a single-use virtual card to pay at any checkout, let the user add their own card, and manage the cash that funds it: balance, top-ups, transactions, KYC, human support.",
-  auth: connect(process.env.AGENTCARD_CONNECTOR ?? "agentcard"),
+  auth: connect("agentcard"),
   tools: {
     allow: [
       // Shopping
