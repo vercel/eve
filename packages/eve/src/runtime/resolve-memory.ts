@@ -29,7 +29,6 @@ export async function resolveMemoryDefinition(
       slot: compiled.slot,
       sourceId: compiled.sourceId,
       sourceKind: "module",
-      tools: compiled.tools,
       visibility: compiled.visibility,
     };
   } catch (error) {

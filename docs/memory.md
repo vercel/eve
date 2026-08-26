@@ -239,11 +239,10 @@ canonical namespace and scope input is limited to 4,096 bytes. Provider tool
 names must satisfy the normal tool-name grammar after the `<slot>__` prefix is
 added.
 
-Set `tools: false` to disable a provider's tool factory while keeping recall
-and capture. An application-owned `agent/tools/<slot>.ts` also replaces the
-generated provider-tool wrapper; export `disableTool()` there to remove it.
-Extensions cannot contribute memory slots because scope and lifecycle
-ownership remain with the consuming agent or subagent.
+An application-owned `agent/tools/<slot>.ts` replaces the generated
+provider-tool wrapper; export `disableTool()` there to remove it. Extensions
+cannot contribute memory slots because scope and lifecycle ownership remain
+with the consuming agent or subagent.
 
 ## What to read next
 

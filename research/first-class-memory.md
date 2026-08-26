@@ -116,25 +116,6 @@ includes the slot identity, so each slot receives a distinct provider scope
 key. Definitions that resolve the same custom namespace and scope intentionally
 share a scope key.
 
-A read-only slot sets `tools: false`. The provider's `tools` method is not
-invoked and the slot exposes no model tools, while recall and capture continue
-to run:
-
-```ts title="agent/memory/policies.ts"
-import { defineMemory } from "eve/memory";
-import { policyMemory } from "../lib/policy-memory";
-
-export default defineMemory({
-  provider: policyMemory,
-  scope: "workspace",
-  tools: false,
-});
-```
-
-`tools: false` is the only memory-specific tool control. Finer policy — per-tool
-approval, overrides, or denial — reuses the ordinary dynamic-tool approval
-surface, because provider tools are ordinary dynamic tools.
-
 ## Compilation and provider tools
 
 Memory is a source-graph primitive, not a post-compile runtime attachment. For
@@ -187,9 +168,9 @@ The wrapper resolves on `turn.started` after recall commits. It reads the
 already locked slot, invokes `provider.tools(context)`, requires a map of
 branded `defineTool()` values, qualifies each key as
 `<slot>__<provider tool key>`, and prepends the slot description. A disabled
-slot, `tools: false`, `null`, or an empty result contributes no tools. Provider
-factories use eve's durable callback helpers when their callbacks cannot be
-stamped by authored-source transformation.
+slot, `null`, or an empty result contributes no tools. Provider factories use
+eve's durable callback helpers when their callbacks cannot be stamped by
+authored-source transformation.
 
 Every module-map load also memoizes zero-argument definition-factory results
 within each module namespace. The direct memory binding and its derived wrapper
@@ -220,7 +201,6 @@ interface MemoryDefinition {
   readonly namespace?: MemoryNamespaceDefinition;
   readonly provider: MemoryProvider;
   readonly scope: MemoryScopeDefinition;
-  readonly tools?: false;
   readonly visibility?: MemoryVisibility;
 }
 ```
@@ -859,13 +839,12 @@ exactly once.
 
 ### Turn tools
 
-After turn-start recall settles, eve resolves `tools` once for the active turn
-unless the definition sets `tools: false`. The function may be synchronous or
-asynchronous. Its context contains the same session, authentication, channel,
-and message fields as a `defineDynamic` resolver, plus the locked memory scope,
-slot, and turn. Its messages include the projected turn-start recall results
-followed by the admitted turn input. Returning `null` or an empty record
-exposes no tools for the slot.
+After turn-start recall settles, eve resolves `tools` once for the active turn.
+The function may be synchronous or asynchronous. Its context contains the same
+session, authentication, channel, and message fields as a `defineDynamic`
+resolver, plus the locked memory scope, slot, and turn. Its messages include the
+projected turn-start recall results followed by the admitted turn input.
+Returning `null` or an empty record exposes no tools for the slot.
 
 The compiler-owned wrapper makes the memory definition implicit
 `defineDynamic` authoring: it adapts each implemented `tools` method to a
