@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto";
 
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
-import { truncateHeadTail } from "#execution/sandbox/truncate-output.js";
+import { truncateTail } from "#execution/sandbox/truncate-output.js";
+import { isEveDevEnvironment } from "#internal/application/optional-package-install.js";
 
+const MAX_LOG_COMMAND_LENGTH = 240;
 const PROCESS_ROOT = "/workspace/.eve/processes";
 const POLL_INTERVAL_MS = 250;
 const PROCESS_LIMIT_MARKER = "EVE_BASH_PROCESS_LIMIT";
@@ -56,41 +58,68 @@ export interface BackgroundBashProcessState extends BackgroundBashProcessStatus 
   readonly stdout: string;
 }
 
-/** Starts one shell command and yields it to the background after the foreground wait. */
+/**
+ * Executes one shell command inside the agent's sandbox.
+ *
+ * The command waits in the foreground for a bounded interval, then continues
+ * in the background when still running. Both stdout and stderr remain
+ * tail-truncated because errors and final results typically appear at the end.
+ *
+ * Used by the framework `bash` tool and authored wrappers around its exported
+ * definition so all bash-style tools share one result shape and lifecycle.
+ */
 export async function executeBashOnSandbox(
   sandbox: SandboxSession,
   args: BashInput,
   options?: BashExecuteOptions,
 ): Promise<BashResult> {
   const startedAt = Date.now();
-  const process = await startBackgroundBashProcess(sandbox, args.command);
+  const commandLabel = formatCommand(args.command);
+  logDevelopmentSandboxCommand(`eve: starting sandbox command: ${commandLabel}`);
+  const progressTimer = startDevelopmentProgressTimer(commandLabel, startedAt);
+
   try {
-    await waitForBackgroundBashProcess({
-      abortSignal: options?.abortSignal,
-      process,
-      yieldTimeMs: args.yieldTimeMs ?? DEFAULT_BASH_YIELD_TIME_MS,
-    });
-  } catch (error) {
-    if (!options?.abortSignal?.aborted) {
+    const process = await startBackgroundBashProcess(sandbox, args.command);
+    try {
+      await waitForBackgroundBashProcess({
+        abortSignal: options?.abortSignal,
+        process,
+        yieldTimeMs: args.yieldTimeMs ?? DEFAULT_BASH_YIELD_TIME_MS,
+      });
+    } catch (error) {
+      if (!options?.abortSignal?.aborted) {
+        throw error;
+      }
+      try {
+        await process.kill();
+      } catch (killError) {
+        throw new AggregateError(
+          [error, killError],
+          "The bash command was cancelled but could not be killed.",
+          { cause: error },
+        );
+      }
       throw error;
     }
-    try {
-      await process.kill();
-    } catch (killError) {
-      throw new AggregateError(
-        [error, killError],
-        "The bash command was cancelled but could not be killed.",
-        { cause: error },
-      );
-    }
-    throw error;
-  }
 
-  const observed = await process.read();
-  const output = formatBashOutput(observed.stdout, observed.stderr, startedAt);
-  return observed.exitCode === undefined
-    ? { ...output, processId: process.processId, status: "running" }
-    : { ...output, exitCode: observed.exitCode, status: "completed" };
+    const observed = await process.read();
+    const output = formatBashOutput(observed.stdout, observed.stderr, startedAt);
+    const result: BashResult =
+      observed.exitCode === undefined
+        ? { ...output, processId: process.processId, status: "running" }
+        : { ...output, exitCode: observed.exitCode, status: "completed" };
+    logDevelopmentSandboxCommand(
+      result.status === "completed"
+        ? `eve: sandbox command finished (exit ${result.exitCode}): ${commandLabel}`
+        : `eve: sandbox command yielded: ${commandLabel}`,
+    );
+    return result;
+  } catch (error) {
+    logDevelopmentSandboxCommand(`eve: sandbox command failed: ${commandLabel}`);
+    throw error;
+  } finally {
+    if (progressTimer !== undefined) clearInterval(progressTimer);
+  }
 }
 
 export async function startBackgroundBashProcess(
@@ -275,8 +304,8 @@ export function formatBashOutput(
   stderrValue: string,
   startedAt: number,
 ): BashOutput {
-  const stdoutResult = truncateHeadTail(stdoutValue);
-  const stderrResult = truncateHeadTail(stderrValue);
+  const stdoutResult = truncateTail(stdoutValue);
+  const stderrResult = truncateTail(stderrValue);
   return {
     stderr: stderrResult.output,
     stdout: stdoutResult.output,
@@ -287,4 +316,29 @@ export function formatBashOutput(
 
 export function wallTimeSeconds(startedAt: number): number {
   return Math.round(Date.now() - startedAt) / 1_000;
+}
+
+function startDevelopmentProgressTimer(
+  command: string,
+  startedAt: number,
+): NodeJS.Timeout | undefined {
+  if (!isEveDevEnvironment()) return undefined;
+  const timer = setInterval(() => {
+    const elapsedSeconds = Math.round((Date.now() - startedAt) / 1_000);
+    logDevelopmentSandboxCommand(
+      `eve: waiting for sandbox command (${elapsedSeconds}s elapsed): ${command}`,
+    );
+  }, 5_000);
+  timer.unref?.();
+  return timer;
+}
+
+function logDevelopmentSandboxCommand(message: string): void {
+  if (isEveDevEnvironment()) console.log(message);
+}
+
+function formatCommand(command: string): string {
+  const singleLine = command.replaceAll(/\s+/g, " ").trim();
+  if (singleLine.length <= MAX_LOG_COMMAND_LENGTH) return singleLine;
+  return `${singleLine.slice(0, MAX_LOG_COMMAND_LENGTH - 1)}…`;
 }

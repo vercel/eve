@@ -5,7 +5,6 @@ import {
   MAX_OUTPUT_BYTES,
   MAX_OUTPUT_LINES,
   truncateHead,
-  truncateHeadTail,
   truncateTail,
 } from "#execution/sandbox/truncate-output.js";
 
@@ -88,29 +87,5 @@ describe("truncateHead", () => {
     const lines = result.output.split("\n");
     expect(lines[0]?.length).toBeLessThanOrEqual(MAX_LINE_LENGTH + 20);
     expect(lines[0]).toContain("[truncated]");
-  });
-});
-
-describe("truncateHeadTail", () => {
-  it("returns small text unchanged", () => {
-    const result = truncateHeadTail("start\nend");
-    expect(result).toEqual({
-      output: "start\nend",
-      outputLines: 2,
-      totalLines: 2,
-      truncated: false,
-    });
-  });
-
-  it("keeps both ends of long output and marks the omitted middle", () => {
-    const lines = Array.from({ length: MAX_OUTPUT_LINES * 2 }, (_, i) => `line ${i}`);
-    const result = truncateHeadTail(lines.join("\n"));
-
-    expect(result.truncated).toBe(true);
-    expect(result.output).toContain("line 0");
-    expect(result.output).toContain(`line ${MAX_OUTPUT_LINES * 2 - 1}`);
-    expect(result.output).toMatch(/\[\.\.\. \d+ lines omitted \.\.\.\]/);
-    expect(result.output.split("\n")).toHaveLength(MAX_OUTPUT_LINES);
-    expect(Buffer.byteLength(result.output, "utf8")).toBeLessThanOrEqual(MAX_OUTPUT_BYTES);
   });
 });

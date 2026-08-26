@@ -1,15 +1,29 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
+import { MAX_OUTPUT_LINES } from "#execution/sandbox/truncate-output.js";
 
 import {
   DEFAULT_BASH_YIELD_TIME_MS,
   executeBashOnSandbox,
+  formatBashOutput,
   getBackgroundBashProcess,
   MAX_BACKGROUND_BASH_PROCESSES,
   startBackgroundBashProcess,
   waitForBackgroundBashProcess,
 } from "./bash.js";
+
+const previousDevFlag = process.env[EVE_DEV_ENV_FLAG];
+
+afterEach(() => {
+  if (previousDevFlag === undefined) {
+    delete process.env[EVE_DEV_ENV_FLAG];
+  } else {
+    process.env[EVE_DEV_ENV_FLAG] = previousDevFlag;
+  }
+  vi.restoreAllMocks();
+});
 
 function sandbox(files: Record<string, string | null> = {}): SandboxSession {
   return {
@@ -100,8 +114,31 @@ describe("executeBashOnSandbox", () => {
     });
   });
 
+  it("logs command progress in development", async () => {
+    process.env[EVE_DEV_ENV_FLAG] = "1";
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const session = sandbox(processFiles({ exitCode: 0 }));
+
+    await executeBashOnSandbox(session, { command: "pwd" });
+
+    expect(log).toHaveBeenCalledWith("eve: starting sandbox command: pwd");
+    expect(log).toHaveBeenCalledWith("eve: sandbox command finished (exit 0): pwd");
+  });
+
   it("uses the default foreground wait", () => {
     expect(DEFAULT_BASH_YIELD_TIME_MS).toBe(300_000);
+  });
+});
+
+describe("formatBashOutput", () => {
+  it("preserves the end of long command output", () => {
+    const lines = Array.from({ length: MAX_OUTPUT_LINES + 1 }, (_, index) => `line ${index}`);
+
+    const result = formatBashOutput(lines.join("\n"), "", Date.now());
+
+    expect(result.truncated).toBe(true);
+    expect(result.stdout).not.toContain("line 0\n");
+    expect(result.stdout).toContain(`line ${MAX_OUTPUT_LINES}`);
   });
 });
 
