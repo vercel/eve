@@ -1195,7 +1195,7 @@ Implementation proceeds in two pull requests:
    deterministic end-to-end coverage. It does not restack or reuse the custom
    runtime lifecycle from [#2142](https://github.com/vercel/eve/pull/2142).
 2. The bounded `fileMemory()` provider in
-   [#2144](https://github.com/vercel/eve/pull/2144) is stacked directly on
+   [#2580](https://github.com/vercel/eve/pull/2580) is stacked directly on
    #2534. It retains only provider storage, document, backend, and concurrency
    work and includes final file-provider e2e coverage. The separate e2e tail in
    [#2145](https://github.com/vercel/eve/pull/2145) is superseded.
