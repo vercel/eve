@@ -20,6 +20,7 @@ customer-operations/
 ├── pnpm-workspace.yaml
 └── agents/
     ├── foreman/
+    │   ├── package.json (optional)
     │   └── agent/
     │       ├── agent.ts
     │       └── subagents/
@@ -46,37 +47,34 @@ customer-operations/
 }
 ```
 
-A member's root `defineAgent` description is its workspace delegation
-description. The workspace compiler records the ID, description, and deployment
-locator for each member in a build-time catalog. It never asks a running agent
-for this information.
+When deploying an eve workspace to vercel using `eve deploy`, services config
+is automatically generated to allow each agent to be deployed behind separate
+routes.
 
-A member opts in to model-visible delegation candidates by authoring a normal
-subagent source that expands its workspace selection:
+Agents within are able to easily declare other members of the workspace as
+subagents. A member opts in by adding a file underneath their `subagents/`
+directory containing a `defineWorkspaceSubagents()`.
+
+Without arguments, this adds all other members of the workspace as subagents.
+Users can filter which agents are included using path filtering.
 
 ```ts title="agents/foreman/agent/subagents/workspace.ts"
 import { defineWorkspaceSubagents } from "eve";
 
 export default defineWorkspaceSubagents({
   include: ["agents/tasks/*", "agents/utilities/*"],
-  exclude: ["triage"],
+  exclude: ["agents/triage"],
 });
 ```
 
-`defineWorkspaceSubagents()` compiles the selected members into ordinary remote
-subagent entries. To the calling model they are named subagent tools; at runtime
+`defineWorkspaceSubagents()` functions by compiling the selected members into
+remote subagent entries. To the calling model, they are named subagent tools; at runtime
 they use the existing `defineRemoteAgent` execution protocol, including isolated
 child sessions, durable callbacks, cancellation and reset, output schemas,
-trace propagation, and optional forwarded caller identity. The workspace
-feature owns topology discovery and target resolution; it does not introduce a
-second subagent execution path.
+trace propagation, and optional forwarded caller identity.
 
-This plan builds on the agent-workspace deployment stack beginning with
-[PR #2043](https://github.com/vercel/eve/pull/2043). That stack establishes
-explicit workspace membership, optional member packages, workspace-root builds,
-and independently deployed member services. Workspace subagents extend that
-foundation; they do not replace independent `defineRemoteAgent()` declarations
-or make every multi-package repository an eve workspace.
+The description of the agent is sourced from the original agent's description field --
+it does not need to be duplicated in the consumer's code.
 
 ## Goals
 
@@ -145,8 +143,9 @@ monorepo marker.
 ### Names and paths
 
 A workspace member's final directory name is its **agent name**. Names must be
-unique across the entire workspace, including nested groups. The existing
-workspace deployment stack already uses this name for its public route and
+unique across the entire workspace, including nested groups.
+
+The existing workspace deployment stack already uses this name for its public route and
 service identity, so this proposal preserves that model:
 
 ```text
@@ -160,7 +159,7 @@ products/escalation                     escalation       /eve/agents/escalation/
 
 If two members would otherwise be named `review`, authors must choose distinct
 names such as `security-review` and `content-review`. This is an intentional
-workspace constraint, not an authored `name` field.
+workspace constraint, as it simplifies routing and identity logic considerably.
 
 The agent name is the shared identity in catalog entries, routes, generated
 tool names, diagnostics, and trace attributes. The member's workspace-relative
@@ -169,7 +168,7 @@ does not change its name, public route, or model-facing tool name.
 
 ### Descriptions and the catalog
 
-Every workspace member must author a non-empty root description:
+Every workspace member that is declared as a subagent must author a non-empty root description:
 
 ```ts title="agents/utilities/company-knowledge/agent/agent.ts"
 import { defineAgent } from "eve";
@@ -225,38 +224,27 @@ export default defineWorkspaceSubagents({
 });
 ```
 
-This follows the existing dynamic-tool precedent: one authored source can
-produce multiple named capabilities. Workspace selection is static rather than
-session-dependent, so the compiler can validate the complete tool set,
-descriptions, and targets before deployment.
+Workspace selection is static rather than session-dependent, so the compiler
+can validate the complete tool set, descriptions, and targets before deployment.
 
 The initial input is:
 
 ```ts
 type WorkspaceSubagentsDefinition = {
-  readonly include: readonly string[];
+  readonly include?: readonly string[];
   readonly exclude?: readonly string[];
 };
 ```
 
-- `include` is required. A bare value matches a unique agent name; a value
-  containing `/` or glob syntax matches workspace-relative member paths.
-- `exclude` is optional and wins over `include`.
+- `include` and `exclude` accept glob patterns, e.g. `agents/utilities/*`
+- `exclude` wins over `include`.
 - A member never selects itself, even when a selector matches it.
 - An unmatched name or path is a build error. A glob that matches no members
   also fails by default: silently deploying an expected delegation surface with
-  no tools is difficult to diagnose. A future explicit optional-selector form
-  can address intentionally empty groups.
+  no tools is difficult to diagnose.
 - Results are sorted by agent name and frozen into the deployment artifact.
   Adding a matching agent changes the tool surface only after a new build and
   deployment.
-
-`include` and `exclude` describe composition, not access control. A broad
-selector such as `agents/utilities/*` intentionally makes future matching
-utility agents available as delegation tools after deployment. It does not
-authorize their HTTP requests; a direct `defineRemoteAgent()` could also target
-the same endpoint. Use receiving-channel authentication and separate projects
-when a true security or deployment boundary is required.
 
 ### Generated subagent names
 
@@ -300,19 +288,7 @@ compiled remote subagent entries
 subagent tool registry → remote session dispatch → callback / continuation
 ```
 
-The resulting tools have the normal remote-agent contract:
-
-- The child has a separate session, state, prompt, tools, connections, sandbox,
-  and conversation history.
-- The parent supplies a complete task message; child history is not implicitly
-  shared.
-- The parent parks durably for remote completion and receives normal subagent
-  lifecycle events and results.
-- Cancellation and session finalization request remote cancel and reset.
-- Each call has existing structured-output, task-mode, trace, token-usage, and
-  callback behavior.
-- A workspace member can itself expose local or remote subagents, subject to
-  the ordinary delegation rules.
+The resulting tools have the normal remote-agent contract.
 
 `defineWorkspaceSubagents()` does not itself need to expose a URL, `auth`, or
 `headers` field. It describes a same-workspace target. Direct
@@ -337,11 +313,6 @@ build. The existing remote-agent callback mechanism continues to use the
 parent's active deployment origin and callback route, so callbacks route back
 to the calling service even when parent and child have different route
 prefixes.
-
-The generated Vercel graph must route both inbound member traffic and internal
-workspace calls correctly. Coverage should exercise parent-to-child creation,
-callback delivery, continuation, cancellation, and reset through distinct
-member prefixes rather than treating this as an in-process call.
 
 ### Authentication and forwarded identity
 
@@ -398,10 +369,6 @@ self-hosted workspace build should fail clearly when it contains workspace
 subagents but has no configured target resolver. It must not guess that an
 `/eve/agents/...` route exists.
 
-An optional future workspace host could start member processes, provide stable
-internal routing, and issue service credentials. That is a hosting integration,
-not a prerequisite or hidden responsibility of the core authoring API.
-
 ## Compatibility and boundaries
 
 - A standalone agent cannot author `defineWorkspaceSubagents()`.
@@ -416,10 +383,6 @@ not a prerequisite or hidden responsibility of the core authoring API.
 - Moving a member preserves its agent name, route, and generated tool name,
   but can change path-based selectors. This is intentional: paths organize a
   workspace, while names identify its agents.
-- A workspace deploy is atomic as an artifact, but long-lived child sessions
-  can still encounter rolling-version or deployment-retention concerns. The
-  existing remote-agent compatibility guidance applies when persistent remote
-  sessions are resumed across versions.
 
 ## Implementation plan
 
@@ -427,23 +390,19 @@ not a prerequisite or hidden responsibility of the core authoring API.
    parent deployment stack: explicit `eve.agents` discovery, member package
    membership checks, workspace-root build/deploy ownership, and Vercel service
    assembly.
-2. **Preserve workspace-unique member names.** Carry the existing final-
-   directory name through discovery, service naming, public routing, project
-   context, build results, diagnostics, and tests; retain the member path only
-   for organization and selector matching.
-3. **Compile a workspace catalog.** Resolve every member's root config and
+2. **Compile a workspace catalog.** Resolve every member's root config and
    required description before compiling individual consumer manifests. Keep
    catalog provenance and resolved route targets available to build planning
    and inspection.
-4. **Add `defineWorkspaceSubagents()`.** Permit it only for a workspace
+3. **Add `defineWorkspaceSubagents()`.** Permit it only for a workspace
    member's `subagents/` source; validate selectors against the catalog;
    expand matches into deterministic remote subagent nodes; and register them
    through the existing subagent compiler and runtime registry.
-5. **Add deployment target adapters.** Vercel resolves same-deployment member
+4. **Add deployment target adapters.** Vercel resolves same-deployment member
    routes from the active origin and uses explicit service authentication.
    Self-hosting supplies an operator-owned resolver. Keep `defineRemoteAgent()`
    as the configuration surface for non-workspace calls.
-6. **Expose topology in inspection and diagnostics.** `eve info` and
+5. **Expose topology in inspection and diagnostics.** `eve info` and
    agent-info should show the workspace ID, resolved workspace members,
    workspace-expanded subagents, and unresolved configuration errors without
    exposing credential material.
