@@ -3,7 +3,7 @@ title: "Discord Gateway relay"
 description: "Forward ordinary Discord bot messages from a Gateway WebSocket to an eve agent."
 ---
 
-Discord sends ordinary bot messages as `MESSAGE_CREATE` events over its persistent [Gateway WebSocket](https://docs.discord.com/developers/events/gateway), not to the HTTP Interactions endpoint. Handling that long-running connection requires one supervised owner for heartbeats, Resume state, reconnects, and deployment handoffs. `discordChannel()` therefore receives forwarded HTTP events instead of opening the WebSocket itself; deploy a separate relay to own the connection and forward authenticated events to eve:
+Discord sends ordinary bot messages as `MESSAGE_CREATE` events over its persistent [Gateway WebSocket](https://docs.discord.com/developers/events/gateway), not to the HTTP Interactions endpoint. Handling that connection requires one supervised owner for heartbeats, Resume state, and reconnects. `discordChannel()` therefore receives signed HTTP events instead of opening the WebSocket itself; run a separate relay between Discord and eve:
 
 ```text
 Discord Gateway WebSocket
@@ -19,7 +19,7 @@ POST /eve/v1/discord/gateway
 discordChannel() -> durable eve session -> Discord REST reply
 ```
 
-Gateway support is experimental. The relay lifecycle, deployment, retry behavior, and duplicate suppression remain your responsibility. A persistent process is the most direct deployment. A relay built from bounded Vercel Functions or Workflow steps must deliberately close and Resume its socket before the function duration limit, and cannot provide permanent-daemon or strict singleton guarantees.
+Gateway support is experimental. The relay's ownership, checkpointing, retry behavior, and duplicate suppression remain your responsibility. Its implementation must keep one logical Discord Gateway session active, recover that session when the socket disconnects, and forward accepted events to eve using the contract below.
 
 ## Configure the Discord channel
 
@@ -44,7 +44,7 @@ This mounts `POST /eve/v1/discord/gateway` in addition to the interaction route.
 
 ## Run the relay
 
-A relay needs the same Discord application's bot token. It may resolve that token from the Vercel Connect connector or use a directly configured bot token. Connect still owns and forwards HTTP interactions; the relay owns only ordinary Gateway events.
+A relay needs the same Discord application's bot token that backs `discordChannel()`. How the relay obtains that credential is up to your application. The relay uses it only for the Discord Gateway connection; HTTP interactions continue to arrive through the channel's interaction route.
 
 For one small bot, the relay must:
 
@@ -55,7 +55,7 @@ For one small bot, the relay must:
 5. Resume (`op 6`) after a reconnect when the saved session is still valid; otherwise identify again.
 6. Forward only `MESSAGE_CREATE` dispatches to eve using the contract below.
 7. When `channel_id` is a Discord thread or forum-post channel, add `thread: { id: channel_id }` to the forwarded `data` object. Use the Gateway channel cache or `GET /channels/{channel.id}` to determine the channel type.
-8. Keep one logical Gateway owner for the bot token and stop it on token rotation or deployment shutdown.
+8. Keep one logical Gateway owner for the bot token and replace the connection cleanly when the token or relay owner changes.
 
 Larger bots also need Discord's sharding and Identify concurrency rules. The experimental eve contract does not manage either one.
 
@@ -157,7 +157,7 @@ Use the response status to decide whether to retry:
 | `429`     | Rate limited. Retry with backoff.                                                         |
 | `5xx`     | Delivery failed. Retry with bounded backoff.                                              |
 
-Gateway delivery is at least once. Suppress common replays in the relay with a recent-message set keyed by connector and Discord message ID, and persist that set with Gateway checkpoints when your deployment allows it. The relay should record completion only after eve returns `202` or a terminal `200` response.
+Gateway delivery is at least once. Suppress common replays in the relay with a recent-message set keyed by connector and Discord message ID, and retain that set alongside Gateway checkpoints when possible. The relay should record completion only after eve returns `202` or a terminal `200` response.
 
 This is best-effort deduplication: if eve accepts a message but the relay crashes or loses the HTTP response before recording completion, forwarding it again can start another turn. eve does not durably claim `deliveryId` values today.
 
