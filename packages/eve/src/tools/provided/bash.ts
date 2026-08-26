@@ -19,19 +19,39 @@ const YIELD_TIME_SCHEMA = z
   )
   .optional();
 
+export type BashToolInput =
+  | { readonly command: string; readonly yieldTimeMs?: number }
+  | {
+      readonly action: "poll" | "wait" | "kill";
+      readonly processId: string;
+      readonly yieldTimeMs?: number;
+    };
+
 export const BASH_INPUT_SCHEMA = z
-  .union([
-    z.strictObject({
-      command: z.string().describe("The shell command to execute."),
-      yieldTimeMs: YIELD_TIME_SCHEMA,
-    }),
-    z.strictObject({
-      action: z.enum(["poll", "wait", "kill"]),
-      processId: z.string().describe("The process id returned by an earlier bash call."),
-      yieldTimeMs: YIELD_TIME_SCHEMA,
-    }),
-  ])
-  .meta({ type: "object" });
+  .strictObject({
+    action: z
+      .enum(["poll", "wait", "kill"])
+      .describe("Follow up on a process id: read output, wait longer, or terminate it.")
+      .optional(),
+    command: z.string().describe("A new shell command to execute.").optional(),
+    processId: z.string().describe("Required with action; returned by an earlier call.").optional(),
+    yieldTimeMs: YIELD_TIME_SCHEMA,
+  })
+  .superRefine((input, context) => {
+    const invalid =
+      input.command === undefined
+        ? input.action === undefined || input.processId === undefined
+        : input.action !== undefined || input.processId !== undefined;
+    if (invalid) {
+      context.addIssue({
+        code: "custom",
+        message: "Provide either command or both action and processId.",
+      });
+    }
+  })
+  .describe(
+    "Provide command for a new process, or action and processId for a follow-up.",
+  ) as z.ZodType<BashToolInput>;
 
 const BASH_OUTPUT_FIELDS = {
   stderr: z.string(),
@@ -56,7 +76,6 @@ export const BASH_OUTPUT_SCHEMA = z.discriminatedUnion("status", [
   }),
 ]);
 
-export type BashToolInput = z.infer<typeof BASH_INPUT_SCHEMA>;
 export type BashToolOutput = z.infer<typeof BASH_OUTPUT_SCHEMA>;
 
 export async function executeBashTool(
