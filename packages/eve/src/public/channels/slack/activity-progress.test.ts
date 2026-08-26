@@ -79,6 +79,40 @@ describe("Slack activity activity", () => {
     );
   });
 
+  it("renders a background task instead of its duplicate initiating tool action", () => {
+    const task = {
+      callId: "call-background",
+      id: "work:background",
+      kind: "subagent" as const,
+      name: "researcher",
+      parentId: root.id,
+      rootSessionId: "root",
+      rootTurnId: "turn",
+    };
+    const background = reduceActivityBatch(createActivitySnapshot(), {
+      events: [
+        { eventId: "root", kind: "work.started", startedAt: "1", work: root },
+        {
+          action: {
+            id: `action:${root.id}:call-background`,
+            kind: "tool",
+            name: "researcher",
+            parentWorkId: root.id,
+            rootTurnId: "turn",
+            stepIndex: 0,
+          },
+          eventId: "action",
+          kind: "action.started",
+          startedAt: "2",
+        },
+        { eventId: "task", kind: "work.started", startedAt: "3", work: task },
+      ],
+      version: 1,
+    });
+
+    expect(activityMessages(background).get("turn")).toBe("• Working\n  • researcher");
+  });
+
   it("keeps temporarily orphaned nested work renderable", () => {
     const orphan = reduceActivityBatch(createActivitySnapshot(), {
       events: [

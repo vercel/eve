@@ -1,5 +1,6 @@
 import type { ContextContainer } from "#context/container.js";
 import { loadContext } from "#context/container.js";
+import { ActivityObserverKey } from "#context/keys.js";
 import type { FrameworkContextProvider } from "#context/provider.js";
 import { runStep } from "#context/run-step.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
@@ -16,6 +17,8 @@ import {
   type BackgroundToolCallBatch,
   type BackgroundToolExecutor,
 } from "#harness/background-tools.js";
+import { deriveChildWorkIdentity } from "#execution/activity-work.js";
+import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { parseJsonValue } from "#shared/json.js";
@@ -400,9 +403,36 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         },
       });
     }
+    const metadata =
+      subagentProjection?.metadata ?? { kind: "tool" as const, name: input.input.definition.name };
+    const observer = input.ctx.get(ActivityObserverKey);
     const taskInput = {
+      activityObserver:
+        observer === undefined
+          ? undefined
+          : {
+              sink: observer.sink,
+              workIdentity: deriveChildWorkIdentity({
+                callId: input.input.options.toolCallId,
+                kind: "task",
+                name: metadata.name,
+                parentSessionId: this.initialSession.sessionId,
+                parentTurnId,
+                parentWork: observer.workIdentity ?? {
+                  id: deriveRootTurnActivityWorkId({
+                    sessionId: this.initialSession.sessionId,
+                    turnId: parentTurnId,
+                  }),
+                  kind: "root-turn",
+                  rootSessionId: this.initialSession.rootSessionId ?? this.initialSession.sessionId,
+                  rootTurnId: parentTurnId,
+                  sessionId: this.initialSession.sessionId,
+                  turnId: parentTurnId,
+                },
+              }),
+            },
       callId: input.input.options.toolCallId,
-      metadata: subagentProjection?.metadata ?? { kind: "tool", name: input.input.definition.name },
+      metadata,
       parentSessionId: this.initialSession.sessionId,
       parentStepIndex: input.emission.stepIndex,
       parentTurnId,
@@ -411,6 +441,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     if (workflow === undefined) {
       return {
         task: await beginBackgroundTask({
+          activityObserver: taskInput.activityObserver,
           callId: taskInput.callId,
           metadata: taskInput.metadata,
           parentSessionId: taskInput.parentSessionId,
@@ -475,6 +506,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       }
     }
     await startTaskRun({
+      activityObserver: taskInput.activityObserver,
       initialView: { metadata: task.metadata, status: "working", taskId: task.taskId },
       parentContinuationToken: sessionCommandHookToken(this.initialSession.sessionId),
       taskInboxToken: task.taskInboxToken,
