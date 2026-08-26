@@ -43,9 +43,9 @@ Each listed slot accepts the same authored forms as its agent counterpart. Stati
 
 Names come from paths, so call the tool `search`, not `crm_search`; the consumer's mount adds the `crm__` prefix. The same prefix applies to channel, schedule, and parent-visible subagent IDs, while channel route paths and schedule cron expressions stay unchanged. Keep shared code in `extension/lib/`.
 
-The extension root cannot declare agent configuration, [memory](./memory), a
-sandbox, or nested extensions. Memory scope and lifecycle state belong to the
-consuming application. A subagent contributed under
+The extension root cannot declare agent configuration, instrumentation,
+[memory](./memory), a sandbox, or nested extensions. Those agent-level concerns
+belong to the consuming application. A subagent contributed under
 `extension/subagents/` owns its own agent configuration, memory, and sandbox
 like any other [declared subagent](./subagents).
 

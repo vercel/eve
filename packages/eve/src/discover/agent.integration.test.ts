@@ -13,6 +13,7 @@ import { discoverAgent } from "#discover/discover-agent.js";
 import {
   DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
   DISCOVER_EXTENSION_COMPATIBILITY_INVALID,
+  DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED,
   DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
   DISCOVER_EXTENSION_MOUNT_AMBIGUOUS,
   DISCOVER_EXTENSION_MOUNT_MISSING_DECLARATION,
@@ -796,6 +797,58 @@ describe("discoverAgent (memory)", () => {
     ]);
   });
 
+  it("scopes flat instructions from multiple extensions by mount namespace", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: { source: "source", dist: "extension" } },
+        }),
+        "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
+        "node_modules/@acme/crm/extension/instructions.md": "Use the CRM before guessing.",
+        "node_modules/@acme/gizmo/package.json": JSON.stringify({
+          name: "@acme/gizmo",
+          eve: { extension: { source: "source", dist: "extension" } },
+        }),
+        "node_modules/@acme/gizmo/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
+        "node_modules/@acme/gizmo/extension/instructions.md": "Use gizmo data before guessing.",
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "extensions/gizmo.ts": 'export { default } from "@acme/gizmo";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    const projected = projectAgentSources({
+      externalDependencies: [],
+      manifest: result.manifest,
+      nodeId: "root",
+    });
+    const composed = composeAgentModuleCandidates(projected.candidates);
+
+    expect([...composed.selected.keys()].filter((slot) => slot.startsWith("instructions"))).toEqual(
+      ["instructions", "instructions/crm", "instructions/gizmo"],
+    );
+    expect(composed.selected.get("instructions/crm")).toMatchObject({
+      layer: "extension-package",
+      logicalPath: "instructions/crm.md",
+      owner: { kind: "extension", namespace: "crm", packageName: "@acme/crm" },
+    });
+    expect(composed.selected.get("instructions/gizmo")).toMatchObject({
+      layer: "extension-package",
+      logicalPath: "instructions/gizmo.md",
+      owner: { kind: "extension", namespace: "gizmo", packageName: "@acme/gizmo" },
+    });
+  });
+
   it("rejects extension mount filenames that violate the namespace charset", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {
@@ -910,6 +963,34 @@ describe("discoverAgent (memory)", () => {
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
       "discover/extension-agent-config-unsupported",
     );
+  });
+
+  it("rejects instrumentation declared by a mounted extension", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: { source: "source", dist: "extension" } },
+        }),
+        "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
+        "node_modules/@acme/crm/extension/instrumentation.ts": "export default {};",
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED,
+    );
+    expect(result.manifest.resolvedExtensions[0]?.manifest.instrumentation).toBeUndefined();
   });
 
   it("rejects memory declared by a mounted extension", async () => {
@@ -1317,6 +1398,14 @@ describe("discoverAgent (memory)", () => {
     );
     expect(nested).toBeDefined();
     expect(nested?.message).toContain("extensions/inner");
+    expect(result.manifest.resolvedExtensions[0]?.manifest.extensions).toEqual([]);
+    expect(() =>
+      projectAgentSources({
+        externalDependencies: [],
+        manifest: result.manifest,
+        nodeId: "root",
+      }),
+    ).not.toThrow();
   });
 
   it("allows an agent-root tool whose name does not use a mounted namespace prefix", async () => {
