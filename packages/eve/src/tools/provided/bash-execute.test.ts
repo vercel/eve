@@ -1,12 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeSandboxSession } from "#shared/sandbox-session.js";
-import { getBackgroundBashProcess, waitForBackgroundBashProcess } from "#execution/sandbox/bash.js";
+import {
+  executeBashOnSandbox,
+  getBackgroundBashProcess,
+  waitForBackgroundBashProcess,
+} from "#execution/sandbox/bash.js";
 
 import { executeBashTool } from "./bash.js";
 
 vi.mock("#execution/sandbox/bash.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#execution/sandbox/bash.js")>()),
+  executeBashOnSandbox: vi.fn(),
   getBackgroundBashProcess: vi.fn(),
   waitForBackgroundBashProcess: vi.fn(),
 }));
@@ -15,9 +20,15 @@ const context = {
   abortSignal: new AbortController().signal,
   callId: "call-1",
   getSandbox: vi.fn(async () => ({}) as RuntimeSandboxSession),
+  session: { id: "session-1" },
 };
 
-function process(state: { exitCode?: number; stderr: string; stdout: string }) {
+function process(state: {
+  exitCode?: number;
+  stderr: string;
+  stdout: string;
+  truncated?: boolean;
+}) {
   return {
     kill: vi.fn(async () => {}),
     processId: "11111111-1111-4111-8111-111111111111",
@@ -29,8 +40,30 @@ function process(state: { exitCode?: number; stderr: string; stdout: string }) {
 describe("executeBashTool process actions", () => {
   afterEach(() => vi.resetAllMocks());
 
+  it("scopes start idempotency to the durable session", async () => {
+    vi.mocked(executeBashOnSandbox).mockResolvedValue({
+      exitCode: 0,
+      status: "completed",
+      stderr: "",
+      stdout: "",
+      truncated: false,
+      wallTimeSeconds: 0,
+    });
+
+    await executeBashTool({ action: "run", command: "true" }, context);
+
+    expect(executeBashOnSandbox).toHaveBeenCalledWith(
+      expect.anything(),
+      { action: "run", command: "true" },
+      {
+        abortSignal: context.abortSignal,
+        idempotencyKey: "session-1:call-1",
+      },
+    );
+  });
+
   it("polls a running process through bash", async () => {
-    const running = process({ stderr: "", stdout: "partial" });
+    const running = process({ stderr: "", stdout: "partial", truncated: true });
     vi.mocked(getBackgroundBashProcess).mockResolvedValue(running);
 
     await expect(
@@ -40,7 +73,7 @@ describe("executeBashTool process actions", () => {
       status: "running",
       stderr: "",
       stdout: "partial",
-      truncated: false,
+      truncated: true,
       wallTimeSeconds: expect.any(Number),
     });
   });

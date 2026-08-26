@@ -97,6 +97,21 @@ describe("executeBashOnSandbox", () => {
     });
   });
 
+  it("attaches output readers before waiting for completion", async () => {
+    const stdout = outputStream("captured");
+    const commandProcess = sandboxProcess();
+    Object.defineProperty(commandProcess, "stdout", { value: stdout });
+    vi.mocked(commandProcess.wait).mockImplementation(async () => {
+      expect(stdout.locked).toBe(true);
+      return { exitCode: 0 };
+    });
+    const session = sandbox(() => commandProcess);
+
+    await expect(executeBashOnSandbox(session, { command: "build" })).resolves.toMatchObject({
+      stdout: "captured",
+    });
+  });
+
   it("yields a running command", async () => {
     const session = sandbox(() => sandboxProcess({ running: true, stdout: "partial" }));
 

@@ -94,6 +94,7 @@ export async function executeBashTool(
   input: BashToolInput,
   context: Pick<SessionContext, "getSandbox"> & {
     readonly abortSignal: AbortSignal;
+    readonly session: Pick<SessionContext["session"], "id">;
     readonly callId: string;
   },
 ): Promise<BashToolOutput> {
@@ -101,7 +102,7 @@ export async function executeBashTool(
   if (input.action === undefined || input.action === "run") {
     return await executeBashOnSandbox(sandbox, input as BashInput, {
       abortSignal: context.abortSignal,
-      idempotencyKey: context.callId,
+      idempotencyKey: `${context.session.id}:${context.callId}`,
     });
   }
 
@@ -111,11 +112,14 @@ export async function executeBashTool(
   if (processInput.action === "kill") {
     const before = await process.read();
     if (before.exitCode !== undefined) {
-      const output = formatBashOutput(before.stdout, before.stderr, startedAt);
+      const output = formatBashOutput(before.stdout, before.stderr, startedAt, before.truncated);
       return { ...output, exitCode: before.exitCode, status: "completed" };
     }
     await process.kill();
-    return { ...formatBashOutput(before.stdout, before.stderr, startedAt), status: "killed" };
+    return {
+      ...formatBashOutput(before.stdout, before.stderr, startedAt, before.truncated),
+      status: "killed",
+    };
   }
   if (processInput.action === "wait") {
     await waitForBackgroundBashProcess({
@@ -127,13 +131,13 @@ export async function executeBashTool(
   const state = await process.read();
   if (state.exitCode === undefined) {
     return {
-      ...formatBashOutput(state.stdout, state.stderr, startedAt),
+      ...formatBashOutput(state.stdout, state.stderr, startedAt, state.truncated),
       processId: process.processId,
       status: "running",
     };
   }
   return {
-    ...formatBashOutput(state.stdout, state.stderr, startedAt),
+    ...formatBashOutput(state.stdout, state.stderr, startedAt, state.truncated),
     exitCode: state.exitCode,
     status: "completed",
   };

@@ -56,8 +56,9 @@ handle reports the command as unavailable.
 
 ## Semantics
 
-- The Bash tool call id is the start idempotency key within a live command
-  registry, so a retried submission in that runtime returns the same command.
+- The durable session id and Bash tool call id form the start idempotency key
+  within a live command registry, so a retried submission in that session and
+  runtime returns the same command without colliding with shared-sandbox calls.
 - Output remains tail-truncated within eve's shared line and byte budgets.
 - A runtime tracks at most 64 commands per sandbox and reclaims completed
   entries before rejecting a new start.

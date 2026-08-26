@@ -207,11 +207,9 @@ class SpawnedSandboxCommand implements ManagedSandboxCommand {
     this.commandId = commandId;
     this.#handle = handle;
     this.#remove = remove;
-    this.#completion = Promise.all([
-      handle.wait(),
-      captureOutput(handle.stdout, this.#stdout),
-      captureOutput(handle.stderr, this.#stderr),
-    ]).then(
+    const stdoutCompletion = captureOutput(handle.stdout, this.#stdout);
+    const stderrCompletion = captureOutput(handle.stderr, this.#stderr);
+    this.#completion = Promise.all([handle.wait(), stdoutCompletion, stderrCompletion]).then(
       ([result]) => {
         this.#exitCode = result.exitCode;
       },
