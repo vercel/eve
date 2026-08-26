@@ -1,7 +1,8 @@
 import { createHook } from "#compiled/@workflow/core/index.js";
 
 import type { ActivitySinkV1 } from "#channel/types.js";
-import { createActivityObserver } from "#execution/activity-observer.js";
+import { projectSessionActivity } from "#execution/session-activity-projection.js";
+import { submitActivity } from "#execution/submit-activity.js";
 import {
   claimHookOwnership,
   closeHookIterator,
@@ -19,7 +20,7 @@ export interface SessionEventRelayerInput {
   readonly workIdentity?: ActivityWorkIdentityV1;
 }
 
-/** Relays one co-located session event stream into an activity observer. */
+/** Relays one co-located session event stream into the activity sink. */
 export async function sessionEventRelayerWorkflow(input: SessionEventRelayerInput): Promise<void> {
   "use workflow";
 
@@ -46,12 +47,18 @@ export async function sessionEventRelayerWorkflow(input: SessionEventRelayerInpu
 export async function relaySessionEventsStep(input: SessionEventRelayerInput): Promise<void> {
   "use step";
 
-  const observer = createActivityObserver(input);
   const events = parseNdjsonStream<MessageStreamEvent>(() =>
     getRun(input.sessionId).getReadable({ startIndex: 0 }),
   );
   for await (const event of events) {
-    await observer.observe(event);
+    await submitActivity({
+      events: projectSessionActivity({
+        event,
+        sessionId: input.sessionId,
+        workIdentity: input.workIdentity,
+      }),
+      sink: input.sink,
+    });
   }
 }
 
