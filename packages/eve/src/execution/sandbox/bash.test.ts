@@ -1,41 +1,56 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { SandboxSession } from "#shared/sandbox-session.js";
+
 import {
+  DEFAULT_BASH_YIELD_TIME_MS,
+  executeBashOnSandbox,
+  getBackgroundBashProcess,
+  MAX_BACKGROUND_BASH_PROCESSES,
   startBackgroundBashProcess,
   waitForBackgroundBashProcess,
-} from "#execution/sandbox/bash-background.js";
+} from "./bash.js";
 
-import { DEFAULT_BASH_YIELD_TIME_MS, executeBashOnSandbox } from "./bash.js";
-
-vi.mock("#execution/sandbox/bash-background.js", () => ({
-  startBackgroundBashProcess: vi.fn(),
-  waitForBackgroundBashProcess: vi.fn(),
-}));
-
-const sandbox = {} as SandboxSession;
-
-function process() {
+function sandbox(files: Record<string, string | null> = {}): SandboxSession {
   return {
-    kill: vi.fn(async () => {}),
-    processId: "process-123",
-    read: vi.fn(async () => ({ stderr: "partial err", stdout: "partial out" })),
+    id: "sandbox",
+    readBinaryFile: vi.fn(async () => null),
+    readFile: vi.fn(async () => null),
+    readTextFile: vi.fn(async ({ path }) => files[path] ?? null),
+    removePath: vi.fn(async () => {}),
+    resolvePath: (path) => path,
+    run: vi.fn(async () => ({ exitCode: 0, stderr: "", stdout: "" })),
+    setNetworkPolicy: vi.fn(async () => {}),
+    spawn: vi.fn(async () => {
+      throw new Error("not used");
+    }),
+    writeBinaryFile: vi.fn(async () => {}),
+    writeFile: vi.fn(async () => {}),
+    writeTextFile: vi.fn(async () => {}),
   };
 }
 
+function processFiles(values: { exitCode?: number; stderr?: string; stdout?: string }) {
+  return new Proxy<Record<string, string | null>>(
+    {},
+    {
+      get: (_target, path) => {
+        if (typeof path !== "string") return null;
+        if (path.endsWith("/pid")) return "123";
+        if (path.endsWith("/exit-code")) return values.exitCode?.toString() ?? null;
+        if (path.endsWith("/stderr")) return values.stderr ?? "";
+        if (path.endsWith("/stdout")) return values.stdout ?? "";
+        return null;
+      },
+    },
+  );
+}
+
 describe("executeBashOnSandbox", () => {
-  afterEach(() => vi.resetAllMocks());
+  it("returns completed output", async () => {
+    const session = sandbox(processFiles({ exitCode: 0, stdout: "done\n" }));
 
-  it("returns completed output when the command finishes during the foreground wait", async () => {
-    const running = process();
-    vi.mocked(startBackgroundBashProcess).mockResolvedValue(running);
-    vi.mocked(waitForBackgroundBashProcess).mockResolvedValue({
-      exitCode: 0,
-      stderr: "",
-      stdout: "done\n",
-    });
-
-    await expect(executeBashOnSandbox(sandbox, { command: "build" })).resolves.toEqual({
+    await expect(executeBashOnSandbox(session, { command: "build" })).resolves.toEqual({
       exitCode: 0,
       status: "completed",
       stderr: "",
@@ -43,49 +58,108 @@ describe("executeBashOnSandbox", () => {
       truncated: false,
       wallTimeSeconds: expect.any(Number),
     });
-    expect(waitForBackgroundBashProcess).toHaveBeenCalledWith({
-      abortSignal: undefined,
-      process: running,
-      yieldTimeMs: DEFAULT_BASH_YIELD_TIME_MS,
-    });
   });
 
-  it("returns a process receipt instead of killing a command after yieldTimeMs", async () => {
-    const running = process();
-    vi.mocked(startBackgroundBashProcess).mockResolvedValue(running);
-    vi.mocked(waitForBackgroundBashProcess).mockResolvedValue(null);
+  it("yields a running command", async () => {
+    const session = sandbox(processFiles({ stderr: "partial err", stdout: "partial out" }));
 
     await expect(
-      executeBashOnSandbox(sandbox, { command: "build", yieldTimeMs: 10_000 }),
-    ).resolves.toEqual({
-      processId: "process-123",
+      executeBashOnSandbox(session, { command: "build", yieldTimeMs: 0 }),
+    ).resolves.toMatchObject({
       status: "running",
       stderr: "partial err",
       stdout: "partial out",
-      truncated: false,
-      wallTimeSeconds: expect.any(Number),
     });
-    expect(waitForBackgroundBashProcess).toHaveBeenCalledWith({
-      abortSignal: undefined,
-      process: running,
-      yieldTimeMs: 10_000,
-    });
-    expect(running.kill).not.toHaveBeenCalled();
   });
 
-  it("kills a background command when the turn is cancelled", async () => {
-    const running = process();
+  it("does not kill after an observation failure", async () => {
+    const session = sandbox();
+    vi.mocked(session.readTextFile).mockRejectedValue(new Error("read failed"));
+
+    await expect(executeBashOnSandbox(session, { command: "build" })).rejects.toThrow(
+      "read failed",
+    );
+    expect(session.run).toHaveBeenCalledOnce();
+  });
+
+  it("kills when cancelled", async () => {
+    const session = sandbox();
     const cancelled = new DOMException("cancelled", "AbortError");
-    vi.mocked(startBackgroundBashProcess).mockResolvedValue(running);
-    vi.mocked(waitForBackgroundBashProcess).mockRejectedValue(cancelled);
 
     await expect(
       executeBashOnSandbox(
-        sandbox,
+        session,
         { command: "build" },
         { abortSignal: AbortSignal.abort(cancelled) },
       ),
     ).rejects.toBe(cancelled);
-    expect(running.kill).toHaveBeenCalledOnce();
+    expect(session.run).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses the default foreground wait", () => {
+    expect(DEFAULT_BASH_YIELD_TIME_MS).toBe(300_000);
+  });
+});
+
+describe("background bash processes", () => {
+  it("launches a process group behind the process cap", async () => {
+    const session = sandbox();
+    const process = await startBackgroundBashProcess(session, "pnpm test");
+    const command = vi.mocked(session.run).mock.calls[0]?.[0].command;
+
+    expect(process.processId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(command).toContain("set -m 2>/dev/null || true");
+    expect(command).toContain(`-ge ${MAX_BACKGROUND_BASH_PROCESSES}`);
+  });
+
+  it("rejects when the process cap is reached", async () => {
+    const session = sandbox();
+    vi.mocked(session.run).mockResolvedValue({
+      exitCode: 75,
+      stderr: "EVE_BASH_PROCESS_LIMIT\n",
+      stdout: "",
+    });
+
+    await expect(startBackgroundBashProcess(session, "pnpm test")).rejects.toThrow(
+      `This sandbox already tracks ${MAX_BACKGROUND_BASH_PROCESSES} running background commands.`,
+    );
+  });
+
+  it("reads completed process state", async () => {
+    const session = sandbox(processFiles({ exitCode: 7, stderr: "err", stdout: "out" }));
+
+    await expect(
+      getBackgroundBashProcess(session, "11111111-1111-4111-8111-111111111111").read(),
+    ).resolves.toEqual({ exitCode: 7, stderr: "err", stdout: "out" });
+  });
+
+  it("removes process state after killing", async () => {
+    const session = sandbox();
+
+    await getBackgroundBashProcess(session, "11111111-1111-4111-8111-111111111111").kill();
+
+    expect(vi.mocked(session.run).mock.calls[0]?.[0].command).toContain("&& rm -rf");
+  });
+
+  it("rejects missing process state", async () => {
+    const session = sandbox();
+
+    await expect(
+      getBackgroundBashProcess(session, "11111111-1111-4111-8111-111111111111").read(),
+    ).rejects.toThrow("does not exist");
+  });
+
+  it("polls status without reading output", async () => {
+    const read = vi.fn();
+    const readStatus = vi.fn(async () => ({}));
+
+    await expect(
+      waitForBackgroundBashProcess({
+        process: { kill: vi.fn(), processId: "process", read, readStatus },
+        yieldTimeMs: 0,
+      }),
+    ).resolves.toBeNull();
+    expect(readStatus).toHaveBeenCalledOnce();
+    expect(read).not.toHaveBeenCalled();
   });
 });

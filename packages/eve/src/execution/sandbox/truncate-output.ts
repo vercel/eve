@@ -87,9 +87,18 @@ export function truncateHeadTail(text: string): TruncationResult {
   }
 
   const rawLines = text.split("\n");
-  const totalLines = countLogicalLines(rawLines);
-  const head = collectLines(rawLines, "head", MAX_OUTPUT_LINES / 2, MAX_OUTPUT_BYTES / 2);
-  const tail = collectLines(rawLines, "tail", MAX_OUTPUT_LINES / 2, MAX_OUTPUT_BYTES / 2);
+  if (rawLines.at(-1) === "") rawLines.pop();
+  const totalLines = rawLines.length;
+  const markerBudget = Buffer.byteLength(`[... ${totalLines} lines omitted ...]`, "utf8");
+  const lineBudget = MAX_OUTPUT_LINES - 1;
+  const byteBudget = MAX_OUTPUT_BYTES - markerBudget;
+  const head = collectLines(rawLines, "head", Math.ceil(lineBudget / 2), Math.ceil(byteBudget / 2));
+  const tail = collectLines(
+    rawLines,
+    "tail",
+    Math.floor(lineBudget / 2),
+    Math.floor(byteBudget / 2),
+  );
   const omitted = totalLines - head.length - tail.length;
   if (omitted <= 0) {
     return full;

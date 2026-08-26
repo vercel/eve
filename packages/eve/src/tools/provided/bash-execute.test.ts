@@ -1,16 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeSandboxSession } from "#shared/sandbox-session.js";
-import {
-  getBackgroundBashProcess,
-  waitForBackgroundBashProcess,
-} from "#execution/sandbox/bash-background.js";
+import { getBackgroundBashProcess, waitForBackgroundBashProcess } from "#execution/sandbox/bash.js";
 
 import { executeBashTool } from "./bash.js";
 
-vi.mock("#execution/sandbox/bash-background.js", () => ({
+vi.mock("#execution/sandbox/bash.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#execution/sandbox/bash.js")>()),
   getBackgroundBashProcess: vi.fn(),
-  startBackgroundBashProcess: vi.fn(),
   waitForBackgroundBashProcess: vi.fn(),
 }));
 
@@ -24,6 +21,7 @@ function process(state: { exitCode?: number; stderr: string; stdout: string }) {
     kill: vi.fn(async () => {}),
     processId: "11111111-1111-4111-8111-111111111111",
     read: vi.fn(async () => state),
+    readStatus: vi.fn(async () => ({ exitCode: state.exitCode })),
   };
 }
 
@@ -49,11 +47,8 @@ describe("executeBashTool process actions", () => {
   it("waits for a process through bash", async () => {
     const running = process({ stderr: "", stdout: "partial" });
     vi.mocked(getBackgroundBashProcess).mockReturnValue(running);
-    vi.mocked(waitForBackgroundBashProcess).mockResolvedValue({
-      exitCode: 0,
-      stderr: "",
-      stdout: "done",
-    });
+    vi.mocked(waitForBackgroundBashProcess).mockResolvedValue({ exitCode: 0 });
+    running.read.mockResolvedValue({ exitCode: 0, stderr: "", stdout: "done" });
 
     await expect(
       executeBashTool(

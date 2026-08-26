@@ -5,12 +5,10 @@ import {
   DEFAULT_BASH_YIELD_TIME_MS,
   executeBashOnSandbox,
   formatBashOutput,
-  type BashInput,
-} from "#execution/sandbox/bash.js";
-import {
   getBackgroundBashProcess,
   waitForBackgroundBashProcess,
-} from "#execution/sandbox/bash-background.js";
+  type BashInput,
+} from "#execution/sandbox/bash.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 
 const YIELD_TIME_SCHEMA = z
@@ -81,18 +79,17 @@ export async function executeBashTool(
     await process.kill();
     return { ...formatBashOutput(before.stdout, before.stderr, startedAt), status: "killed" };
   }
-  const state =
-    input.action === "poll"
-      ? await process.read()
-      : await waitForBackgroundBashProcess({
-          abortSignal: context.abortSignal,
-          process,
-          yieldTimeMs: input.yieldTimeMs ?? DEFAULT_BASH_YIELD_TIME_MS,
-        });
-  if (state === null || state.exitCode === undefined) {
-    const latest = state ?? (await process.read());
+  if (input.action === "wait") {
+    await waitForBackgroundBashProcess({
+      abortSignal: context.abortSignal,
+      process,
+      yieldTimeMs: input.yieldTimeMs ?? DEFAULT_BASH_YIELD_TIME_MS,
+    });
+  }
+  const state = await process.read();
+  if (state.exitCode === undefined) {
     return {
-      ...formatBashOutput(latest.stdout, latest.stderr, startedAt),
+      ...formatBashOutput(state.stdout, state.stderr, startedAt),
       processId: process.processId,
       status: "running",
     };

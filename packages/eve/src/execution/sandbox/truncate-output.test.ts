@@ -110,6 +110,7 @@ describe("truncateHeadTail", () => {
     expect(result.output).toContain("line 0");
     expect(result.output).toContain(`line ${MAX_OUTPUT_LINES * 2 - 1}`);
     expect(result.output).toMatch(/\[\.\.\. \d+ lines omitted \.\.\.\]/);
-    expect(Buffer.byteLength(result.output, "utf8")).toBeLessThanOrEqual(MAX_OUTPUT_BYTES + 100);
+    expect(result.output.split("\n")).toHaveLength(MAX_OUTPUT_LINES);
+    expect(Buffer.byteLength(result.output, "utf8")).toBeLessThanOrEqual(MAX_OUTPUT_BYTES);
   });
 });
