@@ -102,7 +102,6 @@ import { prepareWorkflowPreambleTrace } from "#execution/workflow-trace-context.
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
-import { createProgressEventObserver } from "#execution/progress-event-observer.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { createExecutionHistoryView } from "#execution/history-view.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
@@ -371,7 +370,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   }
 
   const writer = input.parentWritable.getWriter();
-  const progressObserver = createProgressEventObserver(ctx, initialEmissionState, initialSession);
 
   // Persisted chunks and hooks must agree on the stamped id.
   const emit = async (event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent> => {
@@ -576,8 +574,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       ),
       sessionState: createDurableSessionState({ session: cancelledSession }),
     };
-  } finally {
-    await progressObserver?.flush();
   }
 
   // Re-stamp if a handler called `session.continuation.rekey(...)` (eg. Slack auto-anchor).

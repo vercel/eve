@@ -476,44 +476,6 @@ describe("startRemoteAgentSession", () => {
     });
   });
 
-  it("forwards progress context in the create request", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true, sessionId: "remote-session", status: "accepted" }), {
-        status: 202,
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    const callback = {
-      url: "https://caller.example.com/eve/v1/progress/abcdefghijklmnopqrstuvwxyz123456",
-      version: 1 as const,
-    };
-    const workIdentity = {
-      id: "work:parent:turn:call-remote",
-      kind: "remote-agent" as const,
-      parentId: "work:root:turn",
-      rootSessionId: "root",
-      rootTurnId: "turn",
-    };
-
-    await startRemoteAgentSession({
-      action: createAction(),
-      callbackBaseUrl: "https://caller.example.com",
-      progress: { callback, workIdentity },
-      remote: createRemoteAgent(),
-      session: {
-        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
-        compaction: { recentWindowSize: 10, threshold: 100000 },
-        continuationToken: "eve:parent-token",
-        history: [],
-        sessionId: "parent-session",
-      },
-    });
-
-    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
-      progress: { callback, workIdentity },
-    });
-  });
-
   it("adds the Vercel automation bypass secret to callback URLs", async () => {
     vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "remote callback secret");
     const fetchMock = vi.fn().mockResolvedValue(

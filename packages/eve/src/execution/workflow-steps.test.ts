@@ -14,7 +14,6 @@ import {
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
   ModeKey,
-  ProgressKey,
   SessionCallbackKey,
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicSubagentSelectionsKey,
@@ -58,7 +57,6 @@ import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-s
 import { appendTaskAgentAnnouncement } from "#execution/tasks/parent/agent-views.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
-import { createProgressEventObserver } from "#execution/progress-event-observer.js";
 import { turnStep } from "#execution/workflow-steps.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import {
@@ -82,7 +80,6 @@ vi.mock("./tasks/parent/run-parent.js", () => ({
 vi.mock("./tasks/parent/agent-views.js", () => ({
   appendTaskAgentAnnouncement: vi.fn(async (session) => session),
 }));
-vi.mock("#execution/progress-event-observer.js", () => ({ createProgressEventObserver: vi.fn() }));
 
 const mockIdentityHistoryViewProjector = vi.hoisted(() =>
   vi.fn(({ messages }: { readonly messages: readonly ModelMessage[] }) => messages),
@@ -208,7 +205,6 @@ function createStubSession(overrides: Partial<HarnessSession> = {}): HarnessSess
 
 function createSerializedContext(
   mode: "conversation" | "task" = "conversation",
-  progress = false,
 ): Record<string, unknown> {
   const ctx = new ContextContainer();
   ctx.set(AuthKey, null);
@@ -231,13 +227,6 @@ function createSerializedContext(
     turnAgent: TestTurnAgent,
   } as never);
   ctx.set(ChannelKey, threadContextAdapter);
-  if (progress)
-    ctx.set(ProgressKey, {
-      callback: {
-        url: "https://example.com/eve/v1/progress/abcdefghijklmnopqrstuvwxyz123456",
-        version: 1,
-      },
-    });
   ctx.set(ContinuationTokenKey, "http:thread-context");
   ctx.set(ModeKey, mode);
   ctx.set(SessionIdKey, "session-1");
@@ -259,7 +248,6 @@ afterEach(() => {
   vi.mocked(appendTaskAgentAnnouncement).mockImplementation(async (session) => session);
   mockIdentityHistoryViewProjector.mockReset();
   mockIdentityHistoryViewProjector.mockImplementation(({ messages }) => messages);
-  vi.mocked(createProgressEventObserver).mockReset();
 });
 
 describe("routeProxiedDeliverStep", () => {
@@ -1671,82 +1659,6 @@ describe("turnStep", () => {
     });
 
     expect(observed).toEqual(expected);
-  });
-
-  it("observes action lifecycle through the progress lane", async () => {
-    const observe = vi.fn().mockResolvedValue(undefined);
-    const flush = vi.fn().mockResolvedValue(undefined);
-    vi.mocked(createProgressEventObserver).mockReturnValue({ flush, observe });
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      adapterRegistry: {
-        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
-      },
-      compiledArtifactsSource: {} as never,
-      graph: {
-        nodesByNodeId: new Map(),
-        root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
-      },
-      moduleMap: { nodes: {} },
-      hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
-      subagentRegistry: {},
-      toolRegistry: {},
-      turnAgent: TestTurnAgent,
-    } as never);
-    const session = createStubSession();
-    installSessionStoreMocks([session]);
-    vi.mocked(createExecutionNodeStep).mockImplementation((input) => {
-      return async (stepSession): Promise<StepResult> => {
-        await input.handleEvent?.({
-          data: {
-            actions: [
-              {
-                callId: "call-search",
-                input: { query: "private" },
-                kind: "tool-call",
-                toolName: "search",
-              },
-            ],
-            sequence: 0,
-            stepIndex: 0,
-            turnId: "turn_0",
-          },
-          type: "actions.requested",
-        });
-        await input.handleEvent?.({
-          data: {
-            result: {
-              callId: "call-search",
-              kind: "tool-result",
-              output: { secret: "hidden" },
-              toolName: "search",
-            },
-            sequence: 0,
-            status: "completed",
-            stepIndex: 0,
-            turnId: "turn_0",
-          },
-          type: "action.result",
-        });
-        return { next: null, session: stepSession };
-      };
-    });
-
-    await turnStep({
-      input: { kind: "deliver", payloads: [{ message: "search" }] },
-      parentWritable: createTestWritable(),
-      serializedContext: createSerializedContext("conversation", true),
-      sessionState: createStubSessionState({
-        emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "turn_0" },
-      }),
-    });
-
-    expect(observe).toHaveBeenCalledTimes(2);
-    expect(observe.mock.calls.map((call) => call[0].type)).toEqual([
-      "actions.requested",
-      "action.result",
-    ]);
-    expect(flush).toHaveBeenCalledOnce();
   });
 
   it("routes remote task HITL only to the parent callback", async () => {

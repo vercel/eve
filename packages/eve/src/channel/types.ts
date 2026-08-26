@@ -378,7 +378,7 @@ export interface ActivitySinkV1 {
   readonly version: 1;
 }
 
-export interface ActivityContextV1 {
+export interface SessionEventRelayConfig {
   readonly sink: ActivitySinkV1;
   readonly workIdentity?: import("#protocol/activity.js").ActivityWorkIdentityV1;
 }
@@ -467,7 +467,7 @@ export interface RunInput {
    */
   readonly callback?: SessionCallback;
   /** Private collector capability and current work lineage. */
-  readonly activity?: ActivityContextV1;
+  readonly eventRelay?: SessionEventRelayConfig;
   /**
    * Session continuation token for delivery and hook creation. Channels can
    * re-key the session during the first turn via

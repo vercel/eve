@@ -1,19 +1,19 @@
-import { normalizeProgressText } from "#execution/progress-text.js";
-import type { ProgressEventV1, ProgressWorkIdentityV1 } from "#protocol/progress.js";
+import { normalizeActivityText } from "#execution/activity-text.js";
+import type { ActivityEventV1, ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
-export function projectActionProgressEvents(input: {
+export function projectActivityEvents(input: {
   readonly at: string;
   readonly event: UnstampedMessageStreamEvent;
-  readonly lineage: ProgressWorkIdentityV1;
-}): readonly ProgressEventV1[] {
+  readonly lineage: ActivityWorkIdentityV1;
+}): readonly ActivityEventV1[] {
   const { event, lineage } = input;
   if (event.type === "actions.requested") {
     return event.data.actions.flatMap((action) => {
       if (action.kind === "subagent-call" || action.kind === "remote-agent-call") return [];
       const kind = action.kind === "load-skill" ? ("skill" as const) : ("tool" as const);
       const rawName = action.kind === "load-skill" ? "load_skill" : action.toolName;
-      const name = normalizeProgressText(rawName) || (kind === "skill" ? "Skill" : "Tool");
+      const name = normalizeActivityText(rawName) || (kind === "skill" ? "Skill" : "Tool");
       const id = actionId(lineage.id, action.callId);
       return [
         {
@@ -59,7 +59,7 @@ export function projectActionProgressEvents(input: {
         blocker: {
           id,
           kind: "authorization",
-          label: progressLabel(event.data.authorization?.displayName ?? event.data.name),
+          label: activityLabel(event.data.authorization?.displayName ?? event.data.name),
           parentWorkId: lineage.id,
           rootTurnId: lineage.rootTurnId,
         },
@@ -130,7 +130,7 @@ export function projectActionProgressEvents(input: {
         blocker: {
           id,
           kind,
-          label: progressLabel(request.prompt),
+          label: activityLabel(request.prompt),
           parentActionId: actionId(lineage.id, request.action.callId),
           parentWorkId: lineage.id,
           rootTurnId: lineage.rootTurnId,
@@ -185,8 +185,8 @@ export function projectActionProgressEvents(input: {
   return [];
 }
 
-function progressLabel(value: string): string | undefined {
-  const normalized = normalizeProgressText(value);
+function activityLabel(value: string): string | undefined {
+  const normalized = normalizeActivityText(value);
   return normalized === "" ? undefined : normalized;
 }
 

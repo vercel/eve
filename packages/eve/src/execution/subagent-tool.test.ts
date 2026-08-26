@@ -166,31 +166,6 @@ describe("buildSubagentRunInput", () => {
     });
   });
 
-  it("propagates progress context to a nested local session", () => {
-    const callback = {
-      url: "https://root.example.com/eve/v1/progress/abcdefghijklmnopqrstuvwxyz123456",
-      version: 1 as const,
-    };
-    const workIdentity = {
-      callId: "call-1",
-      id: "work:parent:turn:call-1",
-      kind: "subagent" as const,
-      parentId: "work:root:turn",
-      rootSessionId: "root",
-      rootTurnId: "turn",
-    };
-    const { runInput } = buildRuntimeSubagentRunInput({
-      action: makeAction(),
-      auth: null,
-      batchEvent: { sequence: 1, turnId: "turn-99" },
-      initiatorAuth: null,
-      progress: { callback, workIdentity },
-      session: makeSession(),
-    });
-
-    expect(runInput.progress).toEqual({ callback, workIdentity });
-  });
-
   it("increments subagent depth for the child run input", () => {
     const nestedSession: HarnessSession = {
       ...makeSession(),

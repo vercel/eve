@@ -54,7 +54,7 @@ export async function startRemoteAgentSession(input: {
   readonly auth?: SessionAuthContext | null;
   readonly callbackBaseUrl: string | undefined;
   readonly callbackToken?: string;
-  readonly progress?: import("#channel/types.js").ProgressContextV1;
+  readonly eventRelay?: import("#channel/types.js").SessionEventRelayConfig;
   /** The root initiator's principal, forwarded alongside {@link auth}. */
   readonly initiatorAuth?: SessionAuthContext | null;
   /**
@@ -85,8 +85,8 @@ export async function startRemoteAgentSession(input: {
       token: string;
       url: string;
     };
+    eventRelay?: import("#channel/types.js").SessionEventRelayConfig;
     forwardedPrincipal?: ForwardedPrincipal;
-    progress?: import("#channel/types.js").ProgressContextV1;
     message: string;
     mode: "conversation" | "task";
     operationId?: string;
@@ -111,7 +111,7 @@ export async function startRemoteAgentSession(input: {
     outputSchema:
       normalizeRequestedOutputSchema(input.action.input.outputSchema) ?? input.remote.outputSchema,
   };
-  if (input.progress !== undefined) requestBody.progress = input.progress;
+  if (input.eventRelay !== undefined) requestBody.eventRelay = input.eventRelay;
   if (forwardedPrincipal !== undefined) {
     requestBody.forwardedPrincipal = forwardedPrincipal;
   }

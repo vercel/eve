@@ -21,8 +21,8 @@ import type {
   SessionCommandResult,
   SessionTraceContext,
 } from "#channel/types.js";
+import { SessionEventRelayKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
-import { ActivityKey } from "#context/keys.js";
 import {
   ChannelInstrumentationKey,
   OtelTraceEnabledKey,
@@ -59,6 +59,7 @@ import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
 import type { ActivityCollectorInput } from "#execution/activity-collector.js";
+import type { SessionEventRelayerInput } from "#execution/session-event-relayer.js";
 import { createEveActivityRoutePath } from "#protocol/routes.js";
 import {
   createWorkflowCallbackUrl,
@@ -82,6 +83,7 @@ const TURN_WORKFLOW_NAME = "turnWorkflow";
 const SESSION_TIMEOUT_WORKFLOW_NAME = "sessionTimeoutWorkflow";
 const TASK_RUN_WORKFLOW_NAME = "taskRunWorkflow";
 const ACTIVITY_COLLECTOR_WORKFLOW_NAME = "activityCollectorWorkflow";
+const SESSION_EVENT_RELAYER_WORKFLOW_NAME = "sessionEventRelayerWorkflow";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const COMMAND_HOOK_READY_TIMEOUT_MS = 30_000;
 const DEFAULT_ACTIVITY_COLLECTOR_RETENTION_MS = 24 * 60 * 60 * 1_000;
@@ -105,6 +107,7 @@ export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
   SESSION_TIMEOUT_WORKFLOW_NAME,
   TASK_RUN_WORKFLOW_NAME,
   ACTIVITY_COLLECTOR_WORKFLOW_NAME,
+  SESSION_EVENT_RELAYER_WORKFLOW_NAME,
 ]);
 
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
@@ -151,6 +154,11 @@ export const activityCollectorWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${ACTIVITY_COLLECTOR_WORKFLOW_NAME}`,
 };
 
+/** Stable workflow reference for co-located session event relayers. */
+export const sessionEventRelayerWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${SESSION_EVENT_RELAYER_WORKFLOW_NAME}`,
+};
+
 /**
  * Creates a workflow-backed runtime whose long-lived driver owns the
  * event stream and dispatches each turn as a child workflow run.
@@ -185,9 +193,10 @@ export function createWorkflowRuntime(config: {
       ctx.set(OtelTraceEnabledKey, getInstrumentationRuntime()?.prepareSessionTrace !== undefined);
       const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
       let collectorRunId: string | undefined;
+      let eventRelay = input.eventRelay;
       if (
         input.parent === undefined &&
-        input.activity === undefined &&
+        eventRelay === undefined &&
         (getChannelActivityPresentation(input.adapter)?.renderers.length ?? 0) > 0
       ) {
         const collectorContext = serializeContext(ctx);
@@ -211,12 +220,13 @@ export function createWorkflowRuntime(config: {
             ? `https://${process.env.VERCEL_URL}`
             : "http://localhost:3000";
           const baseUrl = resolveWorkflowCallbackBaseUrl(fallbackOrigin);
-          ctx.set(ActivityKey, {
+          eventRelay = {
             sink: {
               url: createWorkflowCallbackUrl(baseUrl, createEveActivityRoutePath(token)),
               version: 1,
             },
-          });
+          };
+          ctx.set(SessionEventRelayKey, eventRelay);
         } catch {
           await cancelActivityCollector(collectorRunId);
           collectorRunId = undefined;
@@ -285,6 +295,19 @@ export function createWorkflowRuntime(config: {
       } catch (error) {
         await cancelActivityCollector(collectorRunId);
         throw error;
+      }
+
+      if (eventRelay !== undefined) {
+        const relayerInput: SessionEventRelayerInput = {
+          sessionId: run.runId,
+          sink: eventRelay.sink,
+          workIdentity: eventRelay.workIdentity,
+        };
+        try {
+          await startWorkflowPreferLatest(sessionEventRelayerWorkflowReference, [relayerInput]);
+        } catch {
+          log.warn("failed to start session event relayer");
+        }
       }
 
       let events: ReadableStream<MessageStreamEvent> | undefined;

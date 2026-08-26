@@ -1,11 +1,14 @@
 import type { FilePart, TextPart, UserContent } from "ai";
 
 import type {
+  SessionEventRelayConfig,
   SessionAuthContext,
   SessionCallback,
   SessionCapabilities,
   TurnPolicy,
 } from "#channel/types.js";
+import { parseActivitySink } from "#channel/activity-sink.js";
+import { parseActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { Session } from "#channel/session.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
@@ -28,6 +31,7 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
 
 interface ParsedCreateBody {
+  eventRelay?: SessionEventRelayConfig;
   callback?: SessionCallback;
   capabilities?: SessionCapabilities;
   message: string | UserContent;
@@ -76,6 +80,9 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   const capabilities = parseCapabilitiesField(payload.capabilities);
   if (capabilities instanceof Response) return capabilities;
 
+  const eventRelay = parseEventRelayField(payload.eventRelay);
+  if (eventRelay instanceof Response) return eventRelay;
+
   const mode = parseModeField(payload.mode);
   if (mode instanceof Response) return mode;
 
@@ -98,6 +105,7 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   }
 
   const result: ParsedCreateBody = {
+    eventRelay,
     callback,
     capabilities,
     message,
@@ -107,6 +115,35 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   };
   if (typeof rawOperationId === "string") result.operationId = rawOperationId;
   return result;
+}
+
+function parseEventRelayField(value: unknown): SessionEventRelayConfig | Response | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== "object") {
+    return Response.json(
+      { error: "Invalid event relay configuration.", ok: false },
+      { status: 400 },
+    );
+  }
+  try {
+    const sink = parseActivitySink(Reflect.get(value, "sink"));
+    const workIdentity = parseActivityWorkIdentityV1(Reflect.get(value, "workIdentity"));
+    if (sink === undefined || workIdentity === undefined) {
+      return Response.json(
+        { error: "Invalid event relay configuration.", ok: false },
+        { status: 400 },
+      );
+    }
+    return { sink, workIdentity };
+  } catch (error) {
+    return Response.json(
+      {
+        error: error instanceof Error ? error.message : "Invalid event relay configuration.",
+        ok: false,
+      },
+      { status: 400 },
+    );
+  }
 }
 
 interface ParsedSessionMessageBody {

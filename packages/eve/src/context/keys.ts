@@ -9,7 +9,7 @@ import type { LanguageModel, ModelMessage, SystemModelMessage } from "ai";
 import type { JsonObject } from "#shared/json.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type {
-  ActivityContextV1,
+  SessionEventRelayConfig,
   ChannelDeliveryMetadata,
   ChannelInstrumentationProjection,
   SessionAuthContext,
@@ -119,7 +119,7 @@ export const SubagentDepthKey = new ContextKey<number>("eve.subagentDepth");
  * dispatch so HITL readiness flows through a conversation chain.
  */
 export const CapabilitiesKey = new ContextKey<SessionCapabilities>("eve.capabilities");
-export const ActivityKey = new ContextKey<ActivityContextV1>("eve.activity");
+export const SessionEventRelayKey = new ContextKey<SessionEventRelayConfig>("eve.eventRelay");
 
 /**
  * Optional framework-owned caller callback captured when the session is created.

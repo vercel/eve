@@ -1,4 +1,5 @@
 import type { DispatchOutcome, RuntimeSession } from "#execution/agent-handle-dispatch.js";
+import { deriveChildEventRelayConfig } from "#execution/activity-work.js";
 import { createRemoteAgentStartFailureResult } from "#execution/dispatch-action-failures.js";
 import { mintStartOperation } from "#execution/dispatch-start-operation.js";
 import {
@@ -12,10 +13,8 @@ import {
   rejectAgentEffect,
 } from "#harness/handles/transitions.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeRemoteAgentCallActionRequest } from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-import { childProgressContext } from "#execution/progress-work.js";
-import { reportProgress } from "#execution/submit-progress.js";
 
 const log = createLogger("execution.subagent-start-remote");
 
@@ -33,19 +32,18 @@ export async function startRemoteSubagent(input: {
   readonly initiatorAuth: Parameters<typeof startRemoteAgentSession>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof startRemoteAgentSession>[0]["parentTraceContext"];
-  readonly persistentSessions: boolean;
-  readonly progress?: Parameters<typeof startRemoteAgentSession>[0]["progress"];
+  readonly eventRelay?: Parameters<typeof startRemoteAgentSession>[0]["eventRelay"];
   readonly session: RuntimeSession;
   readonly taskOwned: boolean;
 }): Promise<DispatchOutcome> {
   const { action } = input;
-  const progress = childProgressContext({
+  const eventRelay = deriveChildEventRelayConfig({
+    eventRelay: input.eventRelay,
     callId: action.callId,
     kind: "remote-agent",
     name: action.remoteAgentName,
     parentSessionId: input.session.sessionId,
     parentTurnId: input.batchEvent.turnId,
-    progress: input.progress,
   });
 
   // Preflight resolution failures happen before ownership exists, so they
@@ -83,10 +81,16 @@ export async function startRemoteSubagent(input: {
     parentSessionId: input.session.sessionId,
     parentTurnId: input.batchEvent.turnId,
   });
+  const credentialResolver = {
+    resolverId:
+      input.dynamicRemoteAgent === undefined
+        ? action.nodeId
+        : input.dynamicRemoteAgent.credentialsStepId,
+  };
   const preparedSession = prepareAgentStart(input.currentSession, {
     identity,
     operation,
-    target: { callbackBaseUrl, kind: "agent/remote", url: resolvedRemote.url },
+    target: { callbackBaseUrl, credentialResolver, kind: "agent/remote", url: resolvedRemote.url },
   });
 
   try {
@@ -98,27 +102,13 @@ export async function startRemoteSubagent(input: {
       initiatorAuth: input.initiatorAuth,
       operationId: operation.id,
       parentTraceContext: input.parentTraceContext,
-      persistentSessions: input.persistentSessions,
-      progress,
+      eventRelay,
       remote: resolvedRemote,
       session: input.session,
     });
-    if (progress?.workIdentity !== undefined) {
-      await reportProgress({
-        callback: progress.callback,
-        events: [
-          {
-            eventId: `${progress.workIdentity.id}:started`,
-            kind: "work.started",
-            startedAt: new Date().toISOString(),
-            work: { ...progress.workIdentity, sessionId: child.sessionId },
-          },
-        ],
-      });
-    }
-
     const address = {
       callbackBaseUrl,
+      credentialResolver,
       kind: "agent/remote",
       sessionId: child.sessionId,
       url: resolvedRemote.url,

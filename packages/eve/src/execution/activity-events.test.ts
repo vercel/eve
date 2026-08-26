@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { projectActionProgressEvents } from "#execution/progress-action-events.js";
-import { MAX_PROGRESS_TEXT_LENGTH } from "#execution/progress-text.js";
+import { projectActivityEvents } from "#execution/activity-events.js";
+import { MAX_ACTIVITY_TEXT_LENGTH } from "#execution/activity-text.js";
 
 const lineage = {
   id: "work:root:turn",
@@ -10,10 +10,10 @@ const lineage = {
   rootTurnId: "turn",
 };
 
-describe("projectActionProgressEvents", () => {
+describe("projectActivityEvents", () => {
   it("projects tools and skills without inputs", () => {
     expect(
-      projectActionProgressEvents({
+      projectActivityEvents({
         at: "2026-01-01T00:00:00Z",
         event: {
           data: {
@@ -57,7 +57,7 @@ describe("projectActionProgressEvents", () => {
   });
 
   it("normalizes and bounds authorization blocker labels", () => {
-    const [event] = projectActionProgressEvents({
+    const [event] = projectActivityEvents({
       at: "2026-01-01T00:00:00Z",
       event: {
         data: {
@@ -77,11 +77,11 @@ describe("projectActionProgressEvents", () => {
     expect(event?.kind).toBe("blocker.started");
     if (event?.kind !== "blocker.started") return;
     expect(event.blocker.label).not.toContain("\u0000");
-    expect(event.blocker.label).toHaveLength(MAX_PROGRESS_TEXT_LENGTH);
+    expect(event.blocker.label).toHaveLength(MAX_ACTIVITY_TEXT_LENGTH);
   });
 
   it("normalizes and bounds input blocker labels", () => {
-    const [event] = projectActionProgressEvents({
+    const [event] = projectActivityEvents({
       at: "2026-01-01T00:00:00Z",
       event: {
         data: {
@@ -105,12 +105,12 @@ describe("projectActionProgressEvents", () => {
     expect(event?.kind).toBe("blocker.started");
     if (event?.kind !== "blocker.started") return;
     expect(event.blocker.label).not.toContain("\u0007");
-    expect(event.blocker.label).toHaveLength(MAX_PROGRESS_TEXT_LENGTH);
+    expect(event.blocker.label).toHaveLength(MAX_ACTIVITY_TEXT_LENGTH);
   });
 
   it("skips delegated actions and projects safe settlement only", () => {
     expect(
-      projectActionProgressEvents({
+      projectActivityEvents({
         at: "2026-01-01T00:00:01Z",
         event: {
           data: {
