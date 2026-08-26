@@ -28,6 +28,7 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
 
 interface ParsedCreateBody {
+  agent?: string;
   callback?: SessionCallback;
   capabilities?: SessionCapabilities;
   message: string | UserContent;
@@ -39,17 +40,29 @@ interface ParsedCreateBody {
 
 /** Replay-stable identity for one authenticated create operation. */
 export async function deriveOperationContinuationToken(input: {
+  readonly agent?: string;
   readonly auth: SessionAuthContext;
   readonly operationId: string;
 }): Promise<string> {
-  const identity = JSON.stringify([
-    "eve:create-session:v1",
-    input.auth.authenticator,
-    input.auth.issuer ?? null,
-    input.auth.principalType,
-    input.auth.principalId,
-    input.operationId,
-  ]);
+  const identity =
+    input.agent === undefined
+      ? JSON.stringify([
+          "eve:create-session:v1",
+          input.auth.authenticator,
+          input.auth.issuer ?? null,
+          input.auth.principalType,
+          input.auth.principalId,
+          input.operationId,
+        ])
+      : JSON.stringify([
+          "eve:create-agent-session:v1",
+          input.auth.authenticator,
+          input.auth.issuer ?? null,
+          input.auth.principalType,
+          input.auth.principalId,
+          input.agent,
+          input.operationId,
+        ]);
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(identity));
   const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(
     "",
@@ -66,6 +79,9 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   }
   const message = parseMessageField(payload.message);
   if (message instanceof Response) return message;
+
+  const agent = parseAgentField(payload.agent);
+  if (agent instanceof Response) return agent;
 
   const context = parseClientContextField(payload.clientContext);
   if (context instanceof Response) return context;
@@ -98,6 +114,7 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   }
 
   const result: ParsedCreateBody = {
+    agent,
     callback,
     capabilities,
     message,
@@ -110,6 +127,7 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
 }
 
 interface ParsedSessionMessageBody {
+  agent?: string;
   callback?: SessionCallback;
   message?: string | UserContent;
   inputResponses?: readonly ValidatedInputResponse[];
@@ -126,6 +144,8 @@ export function parseSessionMessageBody(
 
   const message = parseMessageField(payload.message);
   if (message instanceof Response) return message;
+  const agent = parseAgentField(payload.agent);
+  if (agent instanceof Response) return agent;
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
   const inputResponses = parseInputResponses(payload.inputResponses);
@@ -154,7 +174,14 @@ export function parseSessionMessageBody(
     );
   }
 
-  return { callback, message, inputResponses, context, outputSchema, turnPolicy };
+  if (agent !== undefined && inputResponses !== undefined) {
+    return Response.json(
+      { error: "'agent' cannot be sent alongside 'inputResponses'.", ok: false },
+      { status: 400 },
+    );
+  }
+
+  return { agent, callback, message, inputResponses, context, outputSchema, turnPolicy };
 }
 
 interface ParsedCancelTurnBody {
@@ -342,6 +369,15 @@ function parseModeField(value: unknown): RunMode | Response | undefined {
   if (value === "conversation" || value === "task") return value;
   return Response.json(
     { error: "Expected 'mode' to be either 'conversation' or 'task'.", ok: false },
+    { status: 400 },
+  );
+}
+
+function parseAgentField(value: unknown): string | Response | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "string" && value.length > 0) return value;
+  return Response.json(
+    { error: "Expected 'agent' to be a non-empty string.", ok: false },
     { status: 400 },
   );
 }

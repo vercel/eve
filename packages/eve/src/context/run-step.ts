@@ -59,7 +59,7 @@ export async function withContextScope<T>(
     let committed = scopeResult.session;
     for (const provider of createdProviders) {
       if (provider.commit !== undefined) {
-        committed = await provider.commit(ctx.require(provider.key), committed);
+        committed = await provider.commit(ctx.require(provider.key), committed, ctx);
       }
     }
 

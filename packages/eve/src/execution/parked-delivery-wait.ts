@@ -270,6 +270,7 @@ function takeBufferedTurnDelivery(bufferedDeliveries: DeliverHookPayload[]): Del
     const next = bufferedDeliveries[0];
     if (
       next === undefined ||
+      next.agentNodeId !== first.agentNodeId ||
       first.taskDeliveryId !== undefined ||
       next.taskDeliveryId !== undefined ||
       (caller !== undefined && next.caller !== undefined)

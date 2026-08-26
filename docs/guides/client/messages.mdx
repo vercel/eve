@@ -55,6 +55,34 @@ await response.result();
 
 `clientContext` is one-turn context for the next model call. Strings become user-role context messages, arrays of strings become multiple context messages, and objects are JSON-serialized into one context message. It isn't persisted to durable session history and doesn't dispatch a turn by itself.
 
+## Send a turn to a declared subagent
+
+Set `agent` on `create()` when a statically declared local descendant should own the session. Later unqualified messages keep that default:
+
+```ts
+const { session, response } = await client.sessions.create({
+  agent: "researcher",
+  message: "Investigate this report.",
+});
+
+await response.result();
+await session.send("Check another source."); // runs as researcher
+```
+
+Set `agent` on `send()` for a one-turn override. The next unqualified message returns to the session default while retaining the selected turn's assistant and tool history:
+
+```ts
+await session.send("Audit the evidence.", {
+  agent: "researcher/critic",
+});
+
+await session.send("Summarize the result."); // runs as researcher
+```
+
+Paths are root-relative runtime names. Nested descendants use `/`, and mounted extension names keep their namespace, such as `crm__reviewer/auditor`. Only entirely static local paths are supported; malformed, dynamic, remote, and missing targets reject the request before the turn starts.
+
+Do not pass `agent` with `inputResponses`. `session.respond()` automatically resumes the agent that requested the input.
+
 ## Send attachments
 
 `send()` accepts AI SDK `UserContent`, so a message can mix text and file parts:

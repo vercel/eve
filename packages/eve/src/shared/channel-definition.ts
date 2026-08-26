@@ -37,6 +37,8 @@ export type FetchFileFunction = (
  * schedule proactively routes a message to it.
  */
 export interface GenericReceiveInput<TReceiveTarget = Record<string, unknown>> {
+  /** Root-relative static local descendant selected by the sender. */
+  readonly agent?: string;
   readonly message: string | UserContent;
   readonly target: Readonly<TReceiveTarget>;
   readonly auth: SessionAuthContext | null;

@@ -26,6 +26,7 @@ import {
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/parked-delivery-wait.js";
+import { inheritPendingTurnAgent } from "#execution/pending-turn-agent.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
@@ -430,6 +431,7 @@ async function runDriverLoop(input: {
       caller,
       serializedContext: stateCursor.serializedContext,
     });
+    const routedDelivery = inheritPendingTurnAgent(delivery, serializedContext);
     const turn = await dispatchAndAwaitTurn({
       bufferedDeliveries,
       bufferedSessionControls,
@@ -437,7 +439,7 @@ async function runDriverLoop(input: {
       capabilities: input.capabilities,
       commandInbox,
       controlToken: nextTurnControlToken(),
-      delivery,
+      delivery: routedDelivery,
       mode: input.mode,
       parentWritable: input.driverWritable,
       serializedContext,

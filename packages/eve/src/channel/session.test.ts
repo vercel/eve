@@ -84,6 +84,23 @@ describe("createSession#cancel", () => {
 });
 
 describe("fixed session operations", () => {
+  it("resolves an agent selector before dispatching a fixed-session turn", async () => {
+    const runtime = createRuntime();
+    const resolveAgentTarget = vi.fn().mockReturnValue({
+      nodeId: "node:researcher",
+      path: "researcher",
+    });
+    const session = createSession("sess_1", runtime, { resolveAgentTarget });
+
+    await session.send("investigate", { agent: " researcher ", auth: null });
+
+    expect(resolveAgentTarget).toHaveBeenCalledWith(" researcher ");
+    expect(runtime.dispatchSession).toHaveBeenCalledWith({
+      command: expect.objectContaining({ agentNodeId: "node:researcher", kind: "send" }),
+      sessionId: "sess_1",
+    });
+  });
+
   it("keeps the session turn policy out of channel delivery metadata", async () => {
     const runtime = createRuntime();
     const session = createSession("sess_1", runtime, {

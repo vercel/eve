@@ -21,8 +21,9 @@ import type { RunMode } from "#shared/run-mode.js";
 
 import { runMigrationChain, type VersionMigration } from "./chain.js";
 import { turnWorkflowInputV0ToV1 } from "./turn-workflow-v0-to-v1.js";
+import { turnWorkflowInputV1ToV2 } from "./turn-workflow-v1-to-v2.js";
 
-export const TURN_WORKFLOW_INPUT_VERSION = 1;
+export const TURN_WORKFLOW_INPUT_VERSION = 2;
 
 /** Trusted runtime-action results collected by the parent turn driver. */
 interface RuntimeActionResultStepInput {
@@ -36,8 +37,12 @@ export type TurnStepPayload =
   | RuntimeActionResultStepInput;
 
 export interface TurnStepInput {
+  /** Resolved runtime node selected for this logical turn. */
+  readonly agentNodeId?: string;
   /** Cancellation signal forwarded into the turn step. */
   readonly abortSignal?: AbortSignal;
+  /** Serialized session-default bundle restored when the turn returns to the driver. */
+  readonly defaultBundle?: unknown;
   readonly input: TurnStepPayload | undefined;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
@@ -70,7 +75,10 @@ export interface TurnWorkflowDispatchInput {
   readonly sessionState: DurableSessionState;
 }
 
-const turnWorkflowInputMigrations: readonly VersionMigration[] = [turnWorkflowInputV0ToV1];
+const turnWorkflowInputMigrations: readonly VersionMigration[] = [
+  turnWorkflowInputV0ToV1,
+  turnWorkflowInputV1ToV2,
+];
 
 export function createTurnWorkflowInput(input: TurnWorkflowDispatchInput): TurnWorkflowInput {
   return {
@@ -79,6 +87,8 @@ export function createTurnWorkflowInput(input: TurnWorkflowDispatchInput): TurnW
     driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
     mode: input.mode,
     stepInput: {
+      agentNodeId: input.delivery.kind === "deliver" ? input.delivery.agentNodeId : undefined,
+      defaultBundle: input.serializedContext["eve.bundle"],
       input: input.delivery,
       parentWritable: input.parentWritable,
       serializedContext: input.serializedContext,

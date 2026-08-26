@@ -194,7 +194,7 @@ describe("session inbox wire v1", () => {
   });
 
   it.each([
-    ["a future wire version", { kind: "deliver", payloads: [], version: 2 }],
+    ["a future wire version", { kind: "deliver", payloads: [], version: 3 }],
     ["a non-numeric version", { kind: "deliver", payloads: [], version: "1" }],
     ["an unrecognized kind", { kind: "mystery", version: 1 }],
   ])("rejects %s instead of reinterpreting it", (_name, payload) => {

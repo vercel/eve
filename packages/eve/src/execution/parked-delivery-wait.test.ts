@@ -150,6 +150,44 @@ describe("nextTurnDelivery", () => {
     expect(bufferedDeliveries).toHaveLength(1);
   });
 
+  it("partitions buffered turns by target agent while retaining same-target batching", async () => {
+    const inbox = createMockInbox([]);
+    vi.mocked(routeDeliverToChildren).mockImplementation(async (input) => ({
+      kind: "continue",
+      remainder: input.delivery,
+      serializedContext: {},
+      sessionState,
+    }));
+    const bufferedDeliveries: DeliverHookPayload[] = [
+      { kind: "deliver", payloads: [{ message: "root" }] },
+      {
+        agentNodeId: "node:researcher",
+        kind: "deliver",
+        payloads: [{ message: "research one" }],
+      },
+      {
+        agentNodeId: "node:researcher",
+        kind: "deliver",
+        payloads: [{ message: "research two" }],
+      },
+    ];
+
+    const root = await nextTurnDelivery({ ...waitInput(inbox), bufferedDeliveries });
+    const researcher = await nextTurnDelivery({ ...waitInput(inbox), bufferedDeliveries });
+
+    expect(root).toMatchObject({
+      delivery: { payloads: [{ message: "root" }] },
+      kind: "turn",
+    });
+    expect(researcher).toMatchObject({
+      delivery: {
+        agentNodeId: "node:researcher",
+        payloads: [{ message: "research one" }, { message: "research two" }],
+      },
+      kind: "turn",
+    });
+  });
+
   it("buffers task deliveries until the authorization callback arrives", async () => {
     const inbox = createMockInbox([messageRead("deferred"), authorizationRead()]);
     const bufferedDeliveries: DeliverHookPayload[] = [];

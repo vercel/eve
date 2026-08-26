@@ -53,6 +53,8 @@ describe("turn workflow wire migrations", () => {
       driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
       mode: "conversation",
       stepInput: {
+        agentNodeId: undefined,
+        defaultBundle: undefined,
         input: delivery,
         parentWritable,
         serializedContext: { state: "driver" },
@@ -85,6 +87,8 @@ describe("turn workflow wire migrations", () => {
       completionToken: "turn-token",
       mode: "conversation",
       stepInput: {
+        agentNodeId: undefined,
+        defaultBundle: undefined,
         input: delivery,
         parentWritable,
         serializedContext: { state: "pre-version" },

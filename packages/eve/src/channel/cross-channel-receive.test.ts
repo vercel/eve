@@ -117,6 +117,38 @@ describe("createCrossChannelToFn", () => {
     expect(typeof ctx.from).toBe("function");
   });
 
+  it("propagates agent selection through receive and its channel operations", async () => {
+    const runtime = makeRuntime();
+    vi.mocked(runtime.dispatchContinuation).mockResolvedValue({
+      sessionId: "sess_1",
+      status: "accepted",
+    });
+    const target = makeChannel("slack");
+    target.receive.mockImplementation(async (input, ctx) =>
+      ctx.from("C1").send(input.message, { auth: input.auth }),
+    );
+    const resolveAgentTarget = vi.fn().mockReturnValue({
+      nodeId: "node:researcher",
+      path: "researcher",
+    });
+    const to = createCrossChannelToFn(runtime, [target.target], resolveAgentTarget);
+
+    await to(target.definition, { channelId: "C1" }).send("investigate", {
+      agent: "researcher",
+      auth: null,
+    });
+
+    expect(target.receive).toHaveBeenCalledWith(
+      expect.objectContaining({ agent: "researcher", message: "investigate" }),
+      expect.any(Object),
+    );
+    expect(runtime.dispatchContinuation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: expect.objectContaining({ agentNodeId: "node:researcher" }),
+      }),
+    );
+  });
+
   it("resolves the target by reference identity even when multiple channels are registered", async () => {
     const slack = makeChannel("slack");
     const twilio = makeChannel("twilio");

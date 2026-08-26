@@ -49,6 +49,8 @@ export type EveChannelCors = boolean | EveChannelCorsOptions;
 
 /** Low-level eve HTTP handle exposed to `eveChannel({ onMessage })`. */
 export interface EveHandle {
+  /** Normalized root-relative descendant selected for this request. */
+  readonly agent?: string;
   /** Route-auth result for the request; `onMessage` chooses session auth by returning `{ auth }`. */
   readonly caller: SessionAuthContext | null;
   readonly request: Request;

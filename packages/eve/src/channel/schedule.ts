@@ -10,6 +10,7 @@ import type {
   ScheduleRunHandler,
 } from "#public/definitions/schedule.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
+import type { AgentTargetResolver } from "#runtime/agent-target.js";
 
 export { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 
@@ -62,19 +63,26 @@ export interface ScheduleDispatchResult {
 export class ScheduleDispatcher {
   private readonly runtime: Runtime;
   private readonly channels: readonly ResolvedChannelDefinition[];
+  private readonly resolveAgentTarget?: AgentTargetResolver;
 
   constructor(config: {
     readonly runtime: Runtime;
     readonly channels: readonly ResolvedChannelDefinition[];
+    readonly resolveAgentTarget?: AgentTargetResolver;
   }) {
     this.runtime = config.runtime;
     this.channels = config.channels;
+    this.resolveAgentTarget = config.resolveAgentTarget;
   }
 
   async trigger(input: ScheduleDispatchInput): Promise<ScheduleDispatchResult> {
     const sessions: Session[] = [];
     const waitUntilTasks: Promise<unknown>[] = [];
-    const toChannel = createCrossChannelToFn(this.runtime, toCrossChannelTargets(this.channels));
+    const toChannel = createCrossChannelToFn(
+      this.runtime,
+      toCrossChannelTargets(this.channels),
+      this.resolveAgentTarget,
+    );
 
     const args: ScheduleHandlerArgs = {
       appAuth: SCHEDULE_APP_AUTH,

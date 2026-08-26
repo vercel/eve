@@ -34,6 +34,23 @@ describe("Client.sessions", () => {
     expect(session.state).toEqual({ sessionId: "wrun_A", streamIndex: 1 });
   });
 
+  it("serializes the same agent selector on create and one-turn sends", async () => {
+    const bodies: unknown[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return Response.json({ ok: true, sessionId: "wrun_A", status: "accepted" }, { status: 202 });
+    });
+    const client = new Client({ host: "https://eve.test" });
+
+    const { session } = await client.sessions.create({ agent: "researcher", message: "hello" });
+    await session.send("review", { agent: "researcher/critic" });
+
+    expect(bodies).toEqual([
+      { agent: "researcher", message: "hello" },
+      { agent: "researcher/critic", message: "review" },
+    ]);
+  });
+
   it("attaches without I/O and sends every operation through ID-only routes", async () => {
     const requests: Array<{ readonly body?: string; readonly url: string }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {

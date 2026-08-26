@@ -127,6 +127,7 @@ interface OnMessageOutcome {
 }
 
 export async function resolveOnMessage(input: {
+  readonly agent?: string;
   readonly auth: SessionAuthContext | null;
   readonly config: EveChannelInput;
   readonly message: string | UserContent;
@@ -137,10 +138,15 @@ export async function resolveOnMessage(input: {
 
   let result: EveMessageResult;
   try {
-    const eve: EveHandle =
-      input.sessionId === undefined
-        ? { caller: input.auth, request: input.request }
-        : { caller: input.auth, request: input.request, sessionId: input.sessionId };
+    const eve: Omit<EveHandle, "agent" | "sessionId"> & {
+      agent?: string;
+      sessionId?: string;
+    } = {
+      caller: input.auth,
+      request: input.request,
+    };
+    if (input.agent !== undefined) eve.agent = input.agent;
+    if (input.sessionId !== undefined) eve.sessionId = input.sessionId;
     const ctx: EveMessageContext = { eve };
     result = await handler(ctx, input.message);
     if (result === null || result === undefined) {

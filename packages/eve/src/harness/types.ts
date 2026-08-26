@@ -90,6 +90,8 @@ export interface HarnessSession {
   readonly rootSessionId?: string;
   readonly sessionId: string;
   readonly sandboxState?: SandboxState;
+  /** Sandbox snapshots partitioned by the compiled node that owns each sandbox. */
+  readonly sandboxStates?: Readonly<Record<string, SandboxState>>;
   readonly state?: SessionStateMap;
   /**
    * Number of local delegated subagent hops from the root session to this

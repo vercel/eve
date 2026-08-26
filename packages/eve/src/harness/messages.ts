@@ -236,6 +236,7 @@ function toUserContentArray(value: string | UserContent): UserContentArray {
  * runtime type.
  */
 interface DeliverLike {
+  readonly agentNodeId?: string;
   readonly auth?: SessionAuthContext | null;
   readonly caller?: TurnCaller;
   readonly deliveryMetadata?: readonly ChannelDeliveryMetadataEntry[];
@@ -266,6 +267,9 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
   const deliveryMetadata = [...(first.deliveryMetadata ?? [])];
 
   for (const item of rest) {
+    if (item.agentNodeId !== first.agentNodeId) {
+      throw new Error("Cannot coalesce deliveries targeting different agents.");
+    }
     const payloadOffset = payloads.length;
     if (item.auth !== undefined) {
       auth = item.auth;

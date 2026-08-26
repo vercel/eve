@@ -85,6 +85,7 @@ export interface DurableSession {
   readonly outputSchema?: JsonObject;
   readonly state?: SessionStateMap;
   readonly sandboxState?: SandboxState;
+  readonly sandboxStates?: Readonly<Record<string, SandboxState>>;
   readonly subagentDepth?: number;
   readonly workflowMaxSubagents?: number;
   readonly agent: {

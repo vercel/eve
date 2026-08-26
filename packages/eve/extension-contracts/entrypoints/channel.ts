@@ -1,4 +1,5 @@
 export {
+  AgentTargetError,
   DELETE,
   GET,
   HEAD,

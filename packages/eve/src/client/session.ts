@@ -312,6 +312,12 @@ function createMessageBody(
 ): Record<string, unknown> | null {
   const body: Record<string, unknown> = {};
   if (input.message !== undefined) body.message = input.message;
+  if ("agent" in input && input.agent !== undefined) {
+    if (input.inputResponses !== undefined) {
+      throw new Error("agent cannot be sent alongside inputResponses.");
+    }
+    body.agent = input.agent;
+  }
   if (input.inputResponses !== undefined && input.inputResponses.length > 0) {
     body.inputResponses = input.inputResponses;
   }

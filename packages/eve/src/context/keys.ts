@@ -72,12 +72,16 @@ export const SessionIdKey = new ContextKey<string>("eve.sessionId");
 export const ContinuationTokenKey = new ContextKey<string>("eve.continuationToken");
 export const ChannelRequestIdKey = new ContextKey<string>("eve.channelRequestId");
 export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.channelDelivery");
+/** Sandbox owner for the session's durable default agent bundle. */
+export const DefaultSandboxOwnerNodeIdKey = new ContextKey<string>("eve.defaultSandboxOwnerNodeId");
 /** Task-reporting phase for the active root turn. */
 export const TurnTaskDeliveryKey = new ContextKey<"none" | "initiating" | "pending" | "settled">(
   "eve.turnTaskDelivery",
 );
 /** Framework-authored task state supplied to the model without altering user-message history. */
 export const TurnTaskStateKey = new ContextKey<string>("eve.turnTaskState");
+/** Direct-agent override retained only while that turn is waiting for HITL or authorization. */
+export const PendingTurnAgentNodeIdKey = new ContextKey<string>("eve.pendingTurnAgentNodeId");
 export interface ActiveChannelDelivery {
   readonly agentName?: string;
   readonly delivery: InstrumentationChannelDeliveryRef;

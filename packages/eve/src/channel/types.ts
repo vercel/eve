@@ -189,6 +189,8 @@ export const DEFAULT_TURN_POLICY: TurnPolicy = "steer";
 /** One command accepted by a durable session inbox. */
 export type SessionCommand =
   | {
+      /** Resolved runtime node for a one-turn direct agent override. */
+      readonly agentNodeId?: string;
       readonly auth?: SessionAuthContext | null;
       readonly caller?: TurnCaller;
       readonly kind: "send";
@@ -249,6 +251,8 @@ export interface DispatchSessionInput<TCommand extends SessionCommand = SessionC
  * metadata so both cross the durable hook boundary outside adapter-owned data.
  */
 export interface DeliverHookPayload {
+  /** Resolved runtime node for this delivery's direct agent override. */
+  readonly agentNodeId?: string;
   readonly auth?: SessionAuthContext | null;
   /** Delegated caller waiting for this turn's settled result. */
   readonly caller?: TurnCaller;
@@ -554,7 +558,7 @@ export interface Runtime {
    * time), builds the seeded {@link AlsContext}, and drives the step loop to
    * completion.
    */
-  createSession(input: RunInput): Promise<RunHandle>;
+  createSession(input: RunInput, options?: { readonly agentNodeId?: string }): Promise<RunHandle>;
 
   dispatchContinuation<TCommand extends SessionCommand>(
     input: DispatchContinuationInput<TCommand>,
