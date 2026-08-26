@@ -36,6 +36,7 @@ describe("Agentcard connection setup", () => {
 
     expect(quickStart).toContain("Agentcard: the agent's wallet.");
     expect(quickStart).toContain('auth: connect("agentcard")');
+    expect(quickStart).not.toContain("AGENTCARD_CONNECTOR");
     expect(setup.configureVariants["mcp:user"]).toContain("vercel connect create agentcard");
     expect(setup.configureVariants["mcp:user"]).not.toContain("--name");
   });

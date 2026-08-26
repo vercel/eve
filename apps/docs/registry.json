@@ -347,7 +347,17 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": ["integration", "connect", "agentcard", "agentcard", "agentcard"]
+            "args": [
+              "integration",
+              "connect",
+              "agentcard",
+              "mcp.agentcard.sh/mcp",
+              "agentcard",
+              "--creation-type",
+              "agentcard",
+              "--connection-method",
+              "mcp"
+            ]
           },
           "requires": ">=0.29.0"
         }

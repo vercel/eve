@@ -44,6 +44,7 @@ const expectedSlugs = connectionEntries()
   .map((entry) => entry.slug);
 const actualSlugs = items.map((item) => item.name.slice("connection/".length));
 const CONNECT_SERVICES: Readonly<Record<string, string>> = {
+  agentcard: "mcp.agentcard.sh/mcp",
   vercel: "vercel",
   linear: "mcp.linear.app",
   notion: "mcp.notion.com",
@@ -51,6 +52,12 @@ const CONNECT_SERVICES: Readonly<Record<string, string>> = {
   honeycomb: "mcp.honeycomb.io",
   context: "mcp.context.dev",
   natural: "mcp.natural.com",
+};
+const CONNECT_CREATION_TYPES: Readonly<Record<string, string>> = {
+  agentcard: "agentcard",
+};
+const CONNECT_METHODS: Readonly<Record<string, "mcp" | "oauth">> = {
+  agentcard: "mcp",
 };
 
 if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {
@@ -83,6 +90,8 @@ for (const item of items) {
 
   const slug = item.name.slice("connection/".length);
   if (slug !== "browser-use") {
+    const creationType = CONNECT_CREATION_TYPES[slug];
+    const connectionMethod = CONNECT_METHODS[slug];
     const expectedSetup =
       slug === "shopify"
         ? {
@@ -95,7 +104,15 @@ for (const item of items) {
             command: "eve",
             package: "eve",
             bin: "eve",
-            args: ["integration", "connect", slug, CONNECT_SERVICES[slug] ?? slug, slug],
+            args: [
+              "integration",
+              "connect",
+              slug,
+              CONNECT_SERVICES[slug] ?? slug,
+              slug,
+              ...(creationType === undefined ? [] : ["--creation-type", creationType]),
+              ...(connectionMethod === undefined ? [] : ["--connection-method", connectionMethod]),
+            ],
           };
     if (JSON.stringify(setups) !== JSON.stringify([expectedSetup])) {
       throw new Error(
