@@ -171,24 +171,24 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(process.listeners("exit")).toEqual(before);
   });
 
-  it("renders the brand line with the agent name and a tip", () => {
+  it("commits the startup card before the prompt", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({
       name: "Weather Agent",
       serverUrl: "http://localhost:3000",
-      info: agentInfoWithModel("gpt-5"),
-      tip: "Use eve add to install integrations from the registry.",
+      info: agentInfoWithModel("gpt-5", {
+        kind: "gateway",
+        connected: true,
+        credential: "api-key",
+      }),
+      tip: "Use the /deploy command to deploy your agent.",
     });
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("eve Weather Agent");
-    expect(snapshot).toContain("Use eve add to install integrations from the registry.");
-    // The model lives on the status line, not the header; the old config
-    // rows and key hints are gone.
-    expect(snapshot).not.toContain("gpt-5");
+    expect(snapshot).toMatch(/☰eve \(v\d+\.\d+\.\d+\).*Weather Agent/u);
+    expect(snapshot).toContain("Tip: Use the /deploy command to deploy your agent.");
     expect(snapshot).not.toContain("http://localhost:3000");
-    expect(snapshot).not.toContain("Type to chat");
   });
 
   it("refreshes the committed agent header with the latest model", async () => {
@@ -215,7 +215,9 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("new-model");
-    expect(snapshot).not.toContain("old-model");
+    // Header refreshes append to scrollback, preserving the prior startup card.
+    expect(snapshot).toContain("old-model");
+    expect(snapshot.lastIndexOf("new-model")).toBeGreaterThan(snapshot.lastIndexOf("old-model"));
     expect(snapshot).toContain("hello");
     expect(snapshot).toContain("still here");
     renderer.shutdown();
@@ -3586,25 +3588,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("Session ended — started a new session.");
   });
 
-  it("refreshing the agent header preserves committed transcript and scrollback", () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.renderNotice("previous transcript");
-
-    // Dev HMR refresh: a fresh header is committed beneath the transcript —
-    // nothing is cleared or replayed.
-    renderer.renderAgentHeader({ name: "Weather Agent v2", serverUrl: "http://localhost:3000" });
-    renderer.shutdown();
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("previous transcript");
-    expect(snapshot).toContain("Weather Agent v2");
-    // The refreshed header lands after the prior transcript, not on a wiped screen.
-    expect(snapshot.indexOf("Weather Agent v2")).toBeGreaterThan(
-      snapshot.indexOf("previous transcript"),
-    );
-  });
-
   it("does not repeat the banner when a source reload re-sends an unchanged header", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
@@ -3615,7 +3598,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
     renderer.shutdown();
 
-    expect(countOccurrences(screen.snapshot(), "Weather Agent")).toBe(1);
+    expect(countOccurrences(screen.snapshot(), "☰eve (v")).toBe(1);
   });
 
   it("reset clears committed transcript rows", () => {
