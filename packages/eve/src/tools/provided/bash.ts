@@ -20,7 +20,7 @@ const YIELD_TIME_SCHEMA = z
   .optional();
 
 export type BashToolInput =
-  | { readonly command: string; readonly yieldTimeMs?: number }
+  | { readonly action?: "run"; readonly command: string; readonly yieldTimeMs?: number }
   | {
       readonly action: "poll" | "wait" | "kill";
       readonly processId: string;
@@ -30,28 +30,33 @@ export type BashToolInput =
 export const BASH_INPUT_SCHEMA = z
   .strictObject({
     action: z
-      .enum(["poll", "wait", "kill"])
-      .describe("Follow up on a process id: read output, wait longer, or terminate it.")
+      .enum(["run", "poll", "wait", "kill"])
+      .describe("Run a new command, read process output, wait longer, or terminate a process.")
+      .default("run"),
+    command: z
+      .string()
+      .describe("Required with action run: the shell command to execute.")
       .optional(),
-    command: z.string().describe("A new shell command to execute.").optional(),
-    processId: z.string().describe("Required with action; returned by an earlier call.").optional(),
+    processId: z
+      .string()
+      .describe("Required with action poll, wait, or kill: the id returned by an earlier call.")
+      .optional(),
     yieldTimeMs: YIELD_TIME_SCHEMA,
   })
   .superRefine((input, context) => {
     const invalid =
-      input.command === undefined
-        ? input.action === undefined || input.processId === undefined
-        : input.action !== undefined || input.processId !== undefined;
+      input.action === "run"
+        ? input.command === undefined || input.processId !== undefined
+        : input.command !== undefined || input.processId === undefined;
     if (invalid) {
       context.addIssue({
         code: "custom",
-        message: "Provide either command or both action and processId.",
+        message: "Action run requires command; other actions require processId.",
       });
     }
   })
-  .describe(
-    "Provide command for a new process, or action and processId for a follow-up.",
-  ) as z.ZodType<BashToolInput>;
+  .describe("Choose an action, then provide its command or processId.")
+  .meta({ required: ["action"] }) as z.ZodType<BashToolInput>;
 
 const BASH_OUTPUT_FIELDS = {
   stderr: z.string(),
@@ -125,7 +130,7 @@ export async function executeBashTool(
 export const bash: ToolDefinition<BashToolInput, BashToolOutput> = defineTool({
   description: [
     "Run shell commands and manage commands that continue in the background.",
-    `A new command waits up to ${DEFAULT_BASH_YIELD_TIME_MS} ms by default, then returns a process id if still running.`,
+    `Use action run with command for a new command; it waits up to ${DEFAULT_BASH_YIELD_TIME_MS} ms by default, then returns a process id if still running.`,
     "Pass that process id back with action poll, wait, or kill.",
   ].join(" "),
   execute: executeBashTool,

@@ -7,7 +7,7 @@ import { BASH_INPUT_SCHEMA, BASH_OUTPUT_SCHEMA } from "./bash.js";
 describe("bash schemas", () => {
   it("emits a provider-compatible object schema", () => {
     const schema = z.toJSONSchema(BASH_INPUT_SCHEMA, { io: "input" });
-    expect(schema).toMatchObject({ type: "object" });
+    expect(schema).toMatchObject({ required: ["action"], type: "object" });
     expect(schema).not.toHaveProperty("anyOf");
   });
 
