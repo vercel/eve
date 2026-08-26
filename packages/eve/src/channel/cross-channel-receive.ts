@@ -10,12 +10,15 @@ import {
 import type { InferReceiveTarget } from "#channel/receive-target.js";
 import type { Session } from "#channel/session.js";
 import type { Runtime, SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { AgentTargetResolver } from "#runtime/agent-target.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
 /**
  * Options for sending a message to a channel selected with `ctx.to(...)`.
  */
 export interface CrossChannelSendOptions {
+  /** Root-relative static local descendant to receive this message. */
+  readonly agent?: string;
   readonly auth: SessionAuthContext | null;
   readonly turnPolicy?: TurnPolicy;
 }
@@ -75,15 +78,18 @@ export function toCrossChannelTargets(
 export function createCrossChannelToFn(
   runtime: Runtime,
   channels: readonly CrossChannelTarget[],
+  resolveAgentTarget?: AgentTargetResolver,
 ): CrossChannelToFn {
   return (channel, target) => {
     const targetChannel = resolveTargetByReference(channel, channels);
     return {
       async send(message, options) {
         return await invokeChannelReceive({
+          resolveAgentTarget,
           runtime,
           target: targetChannel,
           input: {
+            agent: options.agent,
             message,
             target: target as Readonly<Record<string, unknown>>,
             auth: options.auth,
@@ -101,9 +107,11 @@ export function createCrossChannelToFn(
 }
 
 interface InvokeChannelReceiveInput {
+  readonly resolveAgentTarget?: AgentTargetResolver;
   readonly runtime: Runtime;
   readonly target: Pick<CrossChannelTarget, "name" | "receive" | "adapter" | "turnPolicy">;
   readonly input: {
+    readonly agent?: string;
     readonly message: string | UserContent;
     readonly target: Readonly<Record<string, unknown>>;
     readonly auth: SessionAuthContext | null;
@@ -124,9 +132,11 @@ export async function invokeChannelReceive(args: InvokeChannelReceiveInput): Pro
     throw new Error(args.describeMissingAdapter());
   }
   const channelOperations = createChannelOperations({
+    agent: args.input.agent,
     adapter: args.target.adapter,
     channelName: args.target.name,
     runtime: args.runtime,
+    resolveAgentTarget: args.resolveAgentTarget,
     turnPolicy: args.turnPolicy ?? args.target.turnPolicy,
   });
   return await args.target.receive(args.input, channelOperations);

@@ -24,8 +24,10 @@ import { DEFAULT_TURN_POLICY } from "#channel/types.js";
 import { isRuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import { isReservedSessionCommandToken } from "#execution/session-command-token.js";
 import type { RunMode } from "#shared/run-mode.js";
+import type { AgentTargetResolver } from "#runtime/agent-target.js";
 
 interface BaseChannelAddressDeliveryOptions {
+  readonly agent?: string;
   readonly auth: SessionAuthContext | null;
   readonly callback?: SessionCallback;
   readonly initiatorAuth?: SessionAuthContext | null;
@@ -68,11 +70,13 @@ export type ChannelAddressFn<TState = undefined> = (
 
 /** Creates one channel address backed by the runtime's continuation dispatch primitive. */
 export function createChannelAddress<TState = undefined>(input: {
+  readonly agent?: string;
   readonly adapter: ChannelAdapter<any>;
   readonly channelName: string;
   readonly continuationToken: string;
   readonly metadata?: ChannelDeliverySource;
   readonly runtime: Runtime;
+  readonly resolveAgentTarget?: AgentTargetResolver;
   readonly turnPolicy?: TurnPolicy;
 }): ChannelAddress<TState> {
   const metadata: Partial<ChannelDeliverySource> = input.metadata ?? {};
@@ -89,8 +93,17 @@ export function createChannelAddress<TState = undefined>(input: {
           ? createChannelDeliveryMetadata(metadata as ChannelDeliverySource)
           : undefined;
       const payload = normalizeSendInput(sendInput);
+      const configuredAgent = options.agent ?? input.agent;
+      if (configuredAgent !== undefined && payload.inputResponses !== undefined) {
+        throw new Error(
+          "Cannot select an agent when delivering inputResponses. Input responses resume the agent that requested them.",
+        );
+      }
+      const requestedAgent = payload.message === undefined ? undefined : configuredAgent;
+      const agentTarget = resolveRequestedAgent(input.resolveAgentTarget, requestedAgent);
       const caller = sessionCallbackToTurnCaller(options.callback);
       const commandWithoutCaller = {
+        agentNodeId: agentTarget?.nodeId,
         auth: options.auth,
         delivery,
         kind: "send" as const,
@@ -114,6 +127,7 @@ export function createChannelAddress<TState = undefined>(input: {
         return result.status === "accepted"
           ? createSession(result.sessionId, input.runtime, {
               ...metadata,
+              resolveAgentTarget: input.resolveAgentTarget,
               turnPolicy: input.turnPolicy,
             })
           : undefined;
@@ -154,9 +168,12 @@ export function createChannelAddress<TState = undefined>(input: {
         title: options.title,
       };
       try {
-        const handle = await input.runtime.createSession(runInput);
+        const handle = await input.runtime.createSession(runInput, {
+          agentNodeId: agentTarget?.nodeId,
+        });
         return createSession(handle.sessionId, input.runtime, {
           ...metadata,
+          resolveAgentTarget: input.resolveAgentTarget,
           turnPolicy: input.turnPolicy,
         });
       } catch (error) {
@@ -205,6 +222,7 @@ export function createChannelAddress<TState = undefined>(input: {
         ? undefined
         : createSession(owner.sessionId, input.runtime, {
             ...metadata,
+            resolveAgentTarget: input.resolveAgentTarget,
             turnPolicy: input.turnPolicy,
           });
     },
@@ -213,11 +231,24 @@ export function createChannelAddress<TState = undefined>(input: {
 
 /** Builds a request-scoped factory for channel addresses on one authored channel. */
 export function createChannelAddressFn<TState = undefined>(input: {
+  readonly agent?: string;
   readonly adapter: ChannelAdapter<any>;
   readonly channelName: string;
   readonly metadata?: ChannelDeliverySource;
   readonly runtime: Runtime;
+  readonly resolveAgentTarget?: AgentTargetResolver;
   readonly turnPolicy?: TurnPolicy;
 }): ChannelAddressFn<TState> {
   return (continuationToken) => createChannelAddress({ ...input, continuationToken });
+}
+
+function resolveRequestedAgent(
+  resolver: AgentTargetResolver | undefined,
+  agent: string | undefined,
+) {
+  if (agent === undefined) return undefined;
+  if (resolver === undefined) {
+    throw new Error("Agent selection is unavailable in this channel runtime.");
+  }
+  return resolver(agent);
 }

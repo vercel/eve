@@ -3,6 +3,7 @@ import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { resolveRemoteAgentStreamHeaders } from "#execution/remote-agent-dispatch.js";
 import type { RemoteAgentStreamHeadersResolver } from "#internal/nitro/routes/channel-route-context.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import { resolveAgentTarget, type AgentTargetResolver } from "#runtime/agent-target.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import {
   type NitroArtifactsConfig,
@@ -22,6 +23,7 @@ export interface NitroChannelRuntimeBundle {
   readonly agentName: string;
   readonly channels: readonly ResolvedChannelDefinition[];
   readonly resolveRemoteAgentStreamHeaders?: RemoteAgentStreamHeadersResolver;
+  readonly resolveAgentTarget?: AgentTargetResolver;
   readonly runtime: Runtime;
 }
 
@@ -46,6 +48,7 @@ export async function resolveNitroChannelRuntimeBundle(
     channels: bundle.graph.root.channels,
     resolveRemoteAgentStreamHeaders: async (input) =>
       await resolveRemoteAgentStreamHeaders({ bundle, ...input }),
+    resolveAgentTarget: (agent) => resolveAgentTarget(bundle.graph, agent),
     runtime,
   };
 }

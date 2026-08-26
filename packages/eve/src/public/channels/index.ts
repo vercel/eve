@@ -10,6 +10,8 @@ export {
   DELETE,
   WS,
   type AttachSessionFn,
+  AgentTargetError,
+  type AgentTargetErrorCode,
   type CancelTurnResult,
   type ClearSessionResult,
   type CompactSessionResult,

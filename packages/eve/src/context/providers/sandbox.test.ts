@@ -4,7 +4,7 @@ import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
-import { SessionIdKey } from "#context/keys.js";
+import { DefaultSandboxOwnerNodeIdKey, SessionIdKey } from "#context/keys.js";
 import {
   BundleKey,
   ChannelKey,
@@ -37,6 +37,7 @@ function createHarnessSession(): HarnessSession {
 
 function createBundle(input: {
   readonly agentName: string;
+  readonly nodeId?: string;
   readonly registry: RuntimeSandboxRegistry;
 }): CompiledBundle {
   return {
@@ -48,7 +49,7 @@ function createBundle(input: {
             name: input.agentName,
           },
         },
-        nodeId: "__root__",
+        nodeId: input.nodeId ?? "__root__",
         sandboxRegistry: input.registry,
       },
     },
@@ -105,5 +106,43 @@ describe("sandboxProvider", () => {
         },
       }),
     );
+  });
+
+  it("preserves sandbox snapshots by resolved owner while alternating agents", async () => {
+    const ctx = new ContextContainer();
+    const registry: RuntimeSandboxRegistry = createStubSandboxRegistry();
+    const rootState = { initialized: true, session: null };
+    const researcherState = { initialized: false, session: null };
+    const nextResearcherState = { initialized: true, session: null };
+    const access = {
+      captureState: vi.fn().mockResolvedValue(nextResearcherState),
+      get: vi.fn().mockResolvedValue(null),
+      stop: vi.fn().mockResolvedValue(undefined),
+    };
+    vi.mocked(ensureSandboxAccess).mockResolvedValue(access);
+    ctx.set(
+      BundleKey,
+      createBundle({ agentName: "researcher", nodeId: "node:researcher", registry }),
+    );
+    ctx.set(DefaultSandboxOwnerNodeIdKey, "__root__");
+    ctx.set(ChannelKey, { kind: "slack" });
+    ctx.set(SessionIdKey, "session_1");
+    const session = {
+      ...createHarnessSession(),
+      sandboxState: rootState,
+      sandboxStates: { __root__: rootState, "node:researcher": researcherState },
+    };
+
+    const created = await sandboxProvider.create(ctx, session);
+    const committed = await sandboxProvider.commit!(created!.value, created!.session!, ctx);
+
+    expect(ensureSandboxAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ state: researcherState }),
+    );
+    expect(committed.sandboxStates).toEqual({
+      __root__: rootState,
+      "node:researcher": nextResearcherState,
+    });
+    expect(committed.sandboxState).toBe(nextResearcherState);
   });
 });

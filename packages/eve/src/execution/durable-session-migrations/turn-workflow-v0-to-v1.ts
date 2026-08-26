@@ -9,11 +9,11 @@
  * constructor evolves.
  */
 import type { VersionMigration } from "./chain.js";
-import type { TurnWorkflowDispatchInput, TurnWorkflowInput } from "./turn-workflow.js";
+import type { TurnWorkflowDispatchInput } from "./turn-workflow.js";
 
 export const turnWorkflowInputV0ToV1: VersionMigration = {
   from: 0,
-  migrate(prior: unknown): TurnWorkflowInput {
+  migrate(prior: unknown) {
     if (!isPreVersionTurnWorkflowInput(prior)) {
       throw new Error(
         "turn workflow input: version 0 value is not a recognized pre-version shape.",

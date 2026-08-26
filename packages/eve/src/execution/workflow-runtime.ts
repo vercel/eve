@@ -136,10 +136,13 @@ export function createWorkflowRuntime(config: {
   readonly nodeId?: string;
 }): Runtime {
   return {
-    async createSession(input: RunInput): Promise<RunHandle> {
+    async createSession(
+      input: RunInput,
+      options?: { readonly agentNodeId?: string },
+    ): Promise<RunHandle> {
       const bundle = await getCompiledRuntimeAgentBundle({
         compiledArtifactsSource: config.compiledArtifactsSource,
-        nodeId: config.nodeId,
+        nodeId: options?.agentNodeId ?? config.nodeId,
       });
       const ctx = buildRunContext({
         bundle,

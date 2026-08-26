@@ -33,19 +33,25 @@ type TurnTerminalAction =
 
 /** Owns the mutable durable state cursor for one active turn workflow. */
 export class TurnExecutionCursor extends SessionStateCursor {
+  readonly agentNodeId?: string;
   readonly controlToken: string;
+  readonly defaultBundle?: unknown;
   readonly parentWritable: WritableStream<Uint8Array>;
 
   private lastReportedContinuationToken: string;
 
   constructor(input: {
+    readonly agentNodeId?: string;
     readonly controlToken: string;
+    readonly defaultBundle?: unknown;
     readonly parentWritable: WritableStream<Uint8Array>;
     readonly serializedContext: Record<string, unknown>;
     readonly sessionState: DurableSessionState;
   }) {
     super({ serializedContext: input.serializedContext, sessionState: input.sessionState });
+    this.agentNodeId = input.agentNodeId;
     this.controlToken = input.controlToken;
+    this.defaultBundle = input.defaultBundle;
     this.lastReportedContinuationToken = input.sessionState.continuationToken;
     this.parentWritable = input.parentWritable;
   }
@@ -64,6 +70,8 @@ export class TurnExecutionCursor extends SessionStateCursor {
   /** Builds the next atomic turn-step input from the cursor's current state. */
   createStepInput(input: TurnStepPayload | undefined, abortSignal?: AbortSignal): TurnStepInput {
     return {
+      agentNodeId: this.agentNodeId,
+      defaultBundle: this.defaultBundle,
       abortSignal,
       input,
       parentWritable: this.parentWritable,
@@ -82,7 +90,13 @@ export class TurnExecutionCursor extends SessionStateCursor {
     action: TurnTerminalAction,
     bufferedDeliveries: readonly DeliverHookPayload[],
   ): Promise<void> {
-    this.adoptState(transition);
+    this.adoptState({
+      ...transition,
+      serializedContext:
+        transition.serializedContext === undefined || this.defaultBundle === undefined
+          ? transition.serializedContext
+          : { ...transition.serializedContext, "eve.bundle": this.defaultBundle },
+    });
     await this.send({
       action: {
         ...action,

@@ -50,6 +50,39 @@ export default defineAgent({
 
 A mounted extension can also contribute declared subagents from `extension/subagents/`. The mount namespace prefixes the subagent visible to the consuming agent node: mounting an extension as `crm` exposes its `reviewer` subagent as `crm__reviewer`. The contributed subagent keeps its own isolated tools, connections, skills, hooks, instructions, sandbox, and nested subagents, and its modules can read configuration from the extension handle. See [Extensions](./extensions#add-a-subagent) for the authoring and override behavior.
 
+### Invoke a declared subagent directly
+
+Use the root-relative `agent` selector when an application or channel already knows which declared specialist should handle a message. A targeted session starts with that subagent as its default:
+
+```ts
+import { Client } from "eve/client";
+
+const client = new Client({ host: "https://<deployment>" });
+const { session, response } = await client.sessions.create({
+  agent: "researcher",
+  message: "Investigate this report.",
+});
+
+await response.result();
+await session.send("Check one more source."); // researcher remains the default
+```
+
+Set `agent` on one `session.send()` call to override only that turn. The selected subagent sees the session's existing model history, and its assistant and tool history remains available when the next unqualified message returns to the session default:
+
+```ts
+await session.send("Audit the evidence.", {
+  agent: "researcher/critic",
+});
+
+await session.send("Summarize the result."); // returns to researcher
+```
+
+The path follows the static subagent directory tree. Nested descendants use `/`, and extension mounts keep their runtime-visible namespace, such as `crm__reviewer/auditor`. Every segment must resolve to a statically declared local subagent. Dynamic, remote, malformed, and missing targets fail before eve accepts the turn.
+
+Direct invocation runs the selected subagent's model, instructions, tools, skills, hooks, connections, sandbox, and nested subagents inside the existing session. It does not create a delegated child session or emit synthetic `subagent.called` and `subagent.completed` events. A one-turn override also does not replay the target's `initialMessages`; those apply when the targeted subagent owns a newly created session.
+
+Route or channel authentication remains the access boundary for the full static descendant tree. Put approvals on sensitive tools and connections; direct invocation does not add a separate subagent allowlist. See the [eve HTTP channel](./channels/eve#start-and-continue-a-session) and [custom channel direct dispatch](./channels/custom#dispatch-to-a-declared-subagent) for the other public surfaces.
+
 ### Conditional availability
 
 To expose a declared subagent only for certain sessions or turns, export

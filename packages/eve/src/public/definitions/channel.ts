@@ -37,6 +37,8 @@ export type {
 export type { Session, SessionHandle } from "#channel/session.js";
 export type { ChannelAudience, ChannelAudienceMetadata } from "#shared/channel-audience.js";
 export type { SessionRespondOptions, SessionSendOptions } from "#channel/session.js";
+export { AgentTargetError } from "#runtime/agent-target.js";
+export type { AgentTargetErrorCode } from "#runtime/agent-target.js";
 export type {
   ChannelFrom,
   ChannelReceiveContext,

@@ -31,7 +31,11 @@ export interface FrameworkContextProvider<T> {
     session: HarnessSession,
   ): ProviderResult<T> | undefined | Promise<ProviderResult<T> | undefined>;
 
-  commit?(value: T, session: HarnessSession): HarnessSession | Promise<HarnessSession>;
+  commit?(
+    value: T,
+    session: HarnessSession,
+    ctx: ContextContainer,
+  ): HarnessSession | Promise<HarnessSession>;
 
   /** Rolls back provider-owned effects when the callback or a later commit fails. */
   rollback?(value: T, cause: unknown): void | Promise<void>;

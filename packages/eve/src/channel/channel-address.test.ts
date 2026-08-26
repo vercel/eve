@@ -15,6 +15,45 @@ function createRuntime(): Runtime {
 }
 
 describe("createChannelAddress", () => {
+  it("routes an existing address delivery to the resolved agent node", async () => {
+    const runtime = createRuntime();
+    const resolveAgentTarget = vi.fn().mockReturnValue({
+      nodeId: "node:researcher",
+      path: "researcher",
+    });
+    const address = createChannelAddress({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      resolveAgentTarget,
+      runtime,
+    });
+
+    await address.send("investigate", { agent: "researcher", auth: null });
+
+    expect(runtime.dispatchContinuation).toHaveBeenCalledWith({
+      command: expect.objectContaining({ agentNodeId: "node:researcher", kind: "send" }),
+      continuationToken: "slack:C1:T1",
+    });
+  });
+
+  it("rejects an agent selector on input responses", async () => {
+    const runtime = createRuntime();
+    const address = createChannelAddress({
+      agent: "researcher",
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      resolveAgentTarget: vi.fn(),
+      runtime,
+    });
+
+    await expect(
+      address.respond([{ optionId: "yes", requestId: "input-1" }], { auth: null }),
+    ).rejects.toThrow("Input responses resume the agent that requested them");
+    expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+  });
+
   it("rejects channel addresses in the framework-reserved session namespace", () => {
     expect(() =>
       createChannelAddress({

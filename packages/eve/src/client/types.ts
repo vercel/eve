@@ -108,7 +108,7 @@ export interface SendTurnInput<TOutput = unknown> extends SendTurnOptions<TOutpu
 }
 
 /** Options shared by message sends and HITL responses on a client session. */
-export interface SendTurnOptions<TOutput = unknown> {
+interface BaseTurnOptions<TOutput = unknown> {
   /** Policy for a message sent while the fixed session has an active turn. */
   readonly turnPolicy?: TurnPolicy;
 
@@ -150,8 +150,19 @@ export interface SendTurnOptions<TOutput = unknown> {
   readonly headers?: Readonly<Record<string, string>>;
 }
 
+/** Options for sending one message turn on a client session. */
+export interface SendTurnOptions<TOutput = unknown> extends BaseTurnOptions<TOutput> {
+  /**
+   * Root-relative static local descendant to run for this turn.
+   *
+   * On session creation this becomes the session default. On an existing
+   * session it applies only to this turn.
+   */
+  readonly agent?: string;
+}
+
 /** Options for answering pending HITL input requests on a client session. */
-export type RespondTurnOptions<TOutput = unknown> = SendTurnOptions<TOutput>;
+export type RespondTurnOptions<TOutput = unknown> = BaseTurnOptions<TOutput>;
 
 /** @internal Transport envelope used by stores and command adapters. */
 export type SendTurnPayload<TOutput = unknown> =

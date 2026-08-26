@@ -219,13 +219,20 @@ function spawnEveDev(
 ): ChildProcessByStdio<null, Readable, Readable> {
   const eveBinPath = join(appRoot, "node_modules", "eve", "bin", "eve.js");
   const command = options.runtime === "bun" ? "bun" : process.execPath;
+  const requestedNodeEnv = options.env?.NODE_ENV;
+  const nodeEnv =
+    requestedNodeEnv === "development" ||
+    requestedNodeEnv === "production" ||
+    requestedNodeEnv === "test"
+      ? requestedNodeEnv
+      : "test";
 
   return spawn(command, [eveBinPath, "dev", "--no-ui", "--host", "127.0.0.1", "--port", "0"], {
     cwd: appRoot,
     env: {
       ...process.env,
       ...options.env,
-      NODE_ENV: "test",
+      NODE_ENV: nodeEnv,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

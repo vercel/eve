@@ -39,6 +39,7 @@ export interface CompiledChannel<
   readonly __metadata?: TMetadata;
   readonly receive?: (
     input: {
+      readonly agent?: string;
       readonly message: string | UserContent;
       readonly target: Readonly<TReceiveTarget>;
       readonly auth: SessionAuthContext | null;

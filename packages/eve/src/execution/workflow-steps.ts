@@ -24,13 +24,14 @@ import {
   CapabilitiesKey,
   HandleEventKey,
   ModeKey,
+  PendingTurnAgentNodeIdKey,
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicToolRuntimeRevisionKey,
   TasksEnabledKey,
   TurnTaskDeliveryKey,
   TurnTaskStateKey,
 } from "#context/keys.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
   emitTurnPreamble,
@@ -105,6 +106,7 @@ import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
 import { stageAttachmentsToSandbox } from "#harness/attachment-staging.js";
+import { resolveTurnAgentBundles, updatePendingTurnAgent } from "#execution/turn-agent-routing.js";
 
 const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
   "Task mode cannot complete while input requests remain pending.";
@@ -126,7 +128,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     ctx.delete(TurnTaskStateKey);
   }
   const adapter = ctx.require(ChannelKey);
-  const bundle = ctx.require(BundleKey);
+  const { bundle, defaultBundle } = await resolveTurnAgentBundles(ctx, input);
   const tasksEnabled = bundle.resolvedAgent.config?.experimental?.tasks === true;
   ctx.set(TasksEnabledKey, tasksEnabled);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
@@ -301,6 +303,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     );
     await instrumentation?.forceFlush();
     const rekeyed = reconcileSessionContinuationToken(ctx, initialSession);
+    updatePendingTurnAgent(ctx, input.agentNodeId, defaultBundle, rekeyed);
     const nextSerializedContext = serializeContext(ctx);
     const nextState =
       rekeyed === initialSession
@@ -532,6 +535,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     // epilogue to close the operation the discarded step opened.
     // The session model is also kept because `session.started` is not emitted
     // again after this cancellation settles.
+    ctx.delete(PendingTurnAgentNodeIdKey);
     const interrupted = serializeContext(ctx);
     const retained = readRetainedBackgroundToolResult(ctx);
     const cancelledSession = await preserveCancelledTurnMessage(
@@ -559,6 +563,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
 
   // Re-stamp if a handler called `session.continuation.rekey(...)` (eg. Slack auto-anchor).
   const rekeyed = reconcileSessionContinuationToken(ctx, stepResult.session);
+  updatePendingTurnAgent(ctx, input.agentNodeId, defaultBundle, rekeyed);
   const nextSerializedContext = serializeContext(ctx);
   stepResult = { ...stepResult, session: rekeyed };
 

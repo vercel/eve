@@ -147,6 +147,51 @@ Attaching does no lookup. The first operation reports whether the ID is active.
 Call `resolveSession(address)` only when you explicitly need to snapshot an
 address's current owner as a fixed handle.
 
+## Dispatch to a declared subagent
+
+Set `agent` on a channel message when the platform already identifies the declared specialist that should handle it. This supports slash commands without creating a delegated child session:
+
+```ts title="agent/channels/support.ts"
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  routes: [
+    POST("/threads/:threadId/commands", async (request, { from, params }) => {
+      const body = await request.json();
+      const [, agent, message] = body.text.match(/^\/(\S+)\s+(.+)$/) ?? [];
+
+      if (!agent || !message) {
+        return new Response("Expected /<agent> <message>", { status: 400 });
+      }
+
+      const session = await from(params.threadId).send(message, {
+        agent,
+        auth: null,
+      });
+      return Response.json({ sessionId: session.id }, { status: 202 });
+    }),
+  ],
+});
+```
+
+For an unowned channel address, the selected descendant becomes the new session's default. For an existing address, `agent` overrides only that turn; the next unqualified message returns to the session default. The same option is available on fixed `Session.send(...)` and cross-channel sends:
+
+```ts
+await attachSession(sessionId).send("Investigate this turn.", {
+  agent: "researcher",
+  auth,
+});
+
+await ctx.to(slack, { channelId }).send("Investigate this incident.", {
+  agent: "researcher/critic",
+  auth,
+});
+```
+
+Cross-channel `receive(input, { from })` hooks inherit `input.agent` when they call `from(...).send(...)`, so a receive adapter does not need to forward the selector manually. The selected turn's ordinary events reach the channel's existing event handlers with the same session and continuation context. Direct selection does not emit synthetic `subagent.called` or `subagent.completed` events; nested delegation still emits its normal lifecycle events.
+
+Agent paths are root-relative and must resolve entirely through statically declared local descendants. Resolution failures throw `AgentTargetError` with an actionable `code`; dynamic, remote, malformed, and missing targets are not accepted. Do not set `agent` on an input-response delivery because HITL and authorization callbacks automatically resume the requesting agent.
+
 ## Operation semantics
 
 - `cancel` cooperatively stops the active turn. Confirm it with `turn.cancelled`

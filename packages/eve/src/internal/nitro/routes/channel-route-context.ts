@@ -1,5 +1,6 @@
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { RunHandle, RunInput } from "#channel/types.js";
+import type { AgentTargetResolver } from "#runtime/agent-target.js";
 
 type AgentInfoRouteResponse = () => Promise<Response>;
 export interface HomeRouteMetadata {
@@ -11,7 +12,9 @@ export interface HomeRouteMetadata {
  * established here is visible to `resolveSession` on the same channel.
  */
 export type RouteSessionCreator = (
-  input: Omit<RunInput, "adapter" | "channelName" | "requestId">,
+  input: Omit<RunInput, "adapter" | "channelName" | "requestId"> & {
+    readonly agentNodeId?: string;
+  },
 ) => Promise<RunHandle>;
 
 export type RemoteAgentStreamHeadersResolver = (input: {
@@ -21,6 +24,7 @@ export type RemoteAgentStreamHeadersResolver = (input: {
 }) => Promise<Record<string, string>>;
 
 const agentInfoRouteResponseKey = "__eveAgentInfoRouteResponse";
+const agentTargetResolverKey = "__eveAgentTargetResolver";
 const homeRouteMetadataKey = "__eveHomeRouteMetadata";
 const routeChannelNameKey = "__eveRouteChannelName";
 const remoteAgentStreamHeadersResolverKey = "__eveRemoteAgentStreamHeadersResolver";
@@ -28,11 +32,26 @@ const routeSessionCreatorKey = "__eveRouteSessionCreator";
 
 type InternalRouteArgs = RouteHandlerArgs & {
   [agentInfoRouteResponseKey]?: AgentInfoRouteResponse;
+  [agentTargetResolverKey]?: AgentTargetResolver;
   [homeRouteMetadataKey]?: HomeRouteMetadata;
   [routeChannelNameKey]?: string;
   [remoteAgentStreamHeadersResolverKey]?: RemoteAgentStreamHeadersResolver;
   [routeSessionCreatorKey]?: RouteSessionCreator;
 };
+
+export function attachAgentTargetResolver<TArgs extends RouteHandlerArgs>(
+  args: TArgs,
+  resolve: AgentTargetResolver,
+): TArgs {
+  const routeArgs: InternalRouteArgs = args;
+  routeArgs[agentTargetResolverKey] = resolve;
+  return args;
+}
+
+export function readAgentTargetResolver(args: RouteHandlerArgs): AgentTargetResolver | undefined {
+  const routeArgs: InternalRouteArgs = args;
+  return routeArgs[agentTargetResolverKey];
+}
 
 export function attachRouteChannelName<TArgs extends RouteHandlerArgs>(
   args: TArgs,

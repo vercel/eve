@@ -11,9 +11,11 @@ import { handleTaskInputResponseRequest } from "#execution/task-input-response-r
 import { createLogger, logError } from "#internal/logging.js";
 import {
   readAgentInfoRouteResponse,
+  readAgentTargetResolver,
   readRemoteAgentStreamHeadersResolver,
   readRouteSessionCreator,
 } from "#internal/nitro/routes/channel-route-context.js";
+import { AgentTargetError, type ResolvedAgentTarget } from "#runtime/agent-target.js";
 import {
   EVE_SESSION_ID_HEADER,
   EVE_STREAM_FORMAT_HEADER,
@@ -134,6 +136,8 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         const body = parseCreateBody(payload);
         if (body instanceof Response) return body;
+        const agentTarget = resolveRouteAgentTarget(args, body.agent);
+        if (agentTarget instanceof Response) return agentTarget;
         // Top-level sessions own their trace. Callback sessions are delegated
         // remote agents and intentionally continue the dispatching agent trace.
         const parentTraceContext =
@@ -154,6 +158,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           body.operationId === undefined
             ? undefined
             : await deriveOperationContinuationToken({
+                agent: agentTarget?.path,
                 auth: forwarded.auth,
                 operationId: body.operationId,
               });
@@ -174,6 +179,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         }
 
         const messageResult = await resolveOnMessage({
+          agent: agentTarget?.path,
           auth: forwarded.auth,
           config: input,
           message: body.message,
@@ -191,6 +197,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         let handle: Awaited<ReturnType<typeof createSession>>;
         try {
           handle = await createSession({
+            agentNodeId: agentTarget?.nodeId,
             auth: messageResult.auth,
             capabilities:
               body.capabilities ?? (body.mode === "task" ? undefined : { requestInput: true }),
@@ -240,11 +247,11 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         );
       }),
 
-      POST(EVE_SESSION_ROUTE_PATTERN, async (req, { attachSession, params }) => {
+      POST(EVE_SESSION_ROUTE_PATTERN, async (req, args) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
 
-        const sessionId = requireSessionId(params);
+        const sessionId = requireSessionId(args.params);
         if (sessionId instanceof Response) return sessionId;
         const payload = await parseJsonRequest(req);
         if (payload instanceof Response) return payload;
@@ -256,6 +263,8 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (forwarded instanceof Response) return forwarded;
         const body = parseSessionMessageBody(payload);
         if (body instanceof Response) return body;
+        const agentTarget = resolveRouteAgentTarget(args, body.agent);
+        if (agentTarget instanceof Response) return agentTarget;
 
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
@@ -264,6 +273,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         let dispatchAuth: SessionAuthContext | null = forwarded.auth;
         if (body.message !== undefined) {
           const messageResult = await resolveOnMessage({
+            agent: agentTarget?.path,
             auth: forwarded.auth,
             config: input,
             message: body.message,
@@ -277,8 +287,9 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         let result: Awaited<ReturnType<Session["send"]>>;
         try {
-          const session = attachSession(sessionId);
+          const session = args.attachSession(sessionId);
           const options = {
+            agent: agentTarget?.path,
             auth: dispatchAuth,
             callback: body.callback,
             context,
@@ -557,4 +568,29 @@ export function eveChannel(input: EveChannelInput): EveChannel {
     ],
     events: input.events,
   });
+}
+
+function resolveRouteAgentTarget(
+  args: Parameters<NonNullable<EveChannel["routes"][number]["handler"]>>[1],
+  agent: string | undefined,
+): ResolvedAgentTarget | Response | undefined {
+  if (agent === undefined) return undefined;
+  const resolve = readAgentTargetResolver(args);
+  if (resolve === undefined) {
+    return Response.json(
+      { error: "Agent selection requires internal channel dispatch context.", ok: false },
+      { status: 500 },
+    );
+  }
+  try {
+    return resolve(agent);
+  } catch (error) {
+    if (error instanceof AgentTargetError) {
+      return Response.json(
+        { code: error.code, error: error.message, ok: false },
+        { status: error.status },
+      );
+    }
+    throw error;
+  }
 }

@@ -66,7 +66,9 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   // claiming so conflict replay is consumed by getConflict(), not a later iterator read.
   const iterator = inbox[Symbol.asyncIterator]();
   const cursor = new TurnExecutionCursor({
+    agentNodeId: input.stepInput.agentNodeId,
     controlToken: input.completionToken,
+    defaultBundle: input.stepInput.defaultBundle,
     parentWritable: input.stepInput.parentWritable,
     serializedContext: input.stepInput.serializedContext,
     sessionState: input.stepInput.sessionState,
@@ -531,6 +533,8 @@ async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
       }
 
       currentStepInput = {
+        agentNodeId: currentStepInput.agentNodeId,
+        defaultBundle: currentStepInput.defaultBundle,
         input: undefined,
         parentWritable: currentStepInput.parentWritable,
         serializedContext: result.serializedContext,

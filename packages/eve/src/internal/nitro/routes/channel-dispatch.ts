@@ -16,6 +16,7 @@ import {
   attachRouteChannelName,
   attachRemoteAgentStreamHeadersResolver,
   attachRouteSessionCreator,
+  attachAgentTargetResolver,
 } from "#internal/nitro/routes/channel-route-context.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { traceChannelRequest } from "#internal/nitro/routes/channel-request-instrumentation.js";
@@ -242,13 +243,19 @@ function buildRouteArgs(
     channelName,
     metadata: deliverySource,
     runtime: bundle.runtime,
+    resolveAgentTarget: bundle.resolveAgentTarget,
     turnPolicy: channel?.turnPolicy,
   });
   const attachSession = createAttachSessionFn(bundle.runtime, {
     ...deliverySource,
+    resolveAgentTarget: bundle.resolveAgentTarget,
     turnPolicy: channel?.turnPolicy,
   });
-  const to = createCrossChannelToFn(bundle.runtime, toCrossChannelTargets(bundle.channels));
+  const to = createCrossChannelToFn(
+    bundle.runtime,
+    toCrossChannelTargets(bundle.channels),
+    bundle.resolveAgentTarget,
+  );
 
   const args = attachRouteSessionCreator(
     attachHomeRouteMetadata(
@@ -271,19 +278,25 @@ function buildRouteArgs(
       ),
       { agentName: bundle.agentName },
     ),
-    async (input) =>
-      await bundle.runtime.createSession({
-        ...input,
-        adapter,
-        channelName,
-        continuationToken:
-          input.continuationToken === undefined
-            ? undefined
-            : `${channelName}:${input.continuationToken}`,
-        delivery: createChannelDeliveryMetadata(deliverySource),
-        requestId,
-      }),
+    async ({ agentNodeId, ...input }) =>
+      await bundle.runtime.createSession(
+        {
+          ...input,
+          adapter,
+          channelName,
+          continuationToken:
+            input.continuationToken === undefined
+              ? undefined
+              : `${channelName}:${input.continuationToken}`,
+          delivery: createChannelDeliveryMetadata(deliverySource),
+          requestId,
+        },
+        { agentNodeId },
+      ),
   );
+  if (bundle.resolveAgentTarget !== undefined) {
+    attachAgentTargetResolver(args, bundle.resolveAgentTarget);
+  }
   if (bundle.resolveRemoteAgentStreamHeaders !== undefined) {
     attachRemoteAgentStreamHeadersResolver(args, bundle.resolveRemoteAgentStreamHeaders);
   }

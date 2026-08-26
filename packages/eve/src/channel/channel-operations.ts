@@ -25,8 +25,11 @@ import {
 } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
+import type { AgentTargetResolver } from "#runtime/agent-target.js";
 
 interface BaseChannelSendOptions {
+  /** Root-relative static local descendant to receive this message. */
+  readonly agent?: string;
   readonly auth: SessionAuthContext | null;
   readonly callback?: SessionCallback;
   readonly context?: readonly string[];
@@ -95,10 +98,12 @@ export interface InternalChannelSource<TState = undefined> extends ChannelSource
 
 /** Creates request-scoped channel operations backed by continuation dispatch. */
 export function createChannelOperations<TState = undefined>(input: {
+  readonly agent?: string;
   readonly adapter: ChannelAdapter<any>;
   readonly channelName: string;
   readonly metadata?: ChannelDeliverySource;
   readonly runtime: Runtime;
+  readonly resolveAgentTarget?: AgentTargetResolver;
   readonly turnPolicy?: TurnPolicy;
 }): ChannelReceiveContext<TState> {
   const channelAddress = createChannelAddressFn<TState>(input);

@@ -47,11 +47,33 @@ curl -X POST https://<deployment>/eve/v1/session \
 # {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
 
+Set `agent` to start the session with a statically declared local descendant as its default agent. Paths are root-relative and may address nested descendants:
+
+```bash
+curl -X POST https://<deployment>/eve/v1/session \
+  -H "Content-Type: application/json" \
+  -d '{"agent":"researcher/critic","message":"Review this evidence."}'
+```
+
+Every later message without `agent` continues as `researcher/critic`. To select a descendant for only one turn in an existing session, include `agent` on that message:
+
+```bash
+curl -X POST https://<deployment>/eve/v1/session/wrun_A \
+  -H "Content-Type: application/json" \
+  -d '{"agent":"researcher","message":"Investigate this turn."}'
+```
+
+The override keeps the same session ID, continuation address, auth, channel state, and model history. The descendant sees prior history, and the session default sees the descendant's assistant and tool history on the next unqualified turn. The selected turn uses the descendant's own model, instructions, tools, skills, hooks, connections, sandbox, and nested subagents.
+
+Only entirely static paths through local descendants are directly invocable. Malformed paths and dynamic or remote targets return `400`; missing targets return `404`. Extension namespaces remain part of the path, such as `crm__reviewer/auditor`. The route's existing auth policy covers every target.
+
 Authenticated callers that may retry a create request can pass their own `operationId` for
 create-once semantics. The same operation under the same authenticated principal returns the
 active session it already created instead of dispatching the input again. The first accepted
 payload wins; retries with different input still return that first session. Anonymous callers
 cannot use `operationId`, and operation ownership expires when the session is no longer resumable.
+
+For targeted creates, the normalized `agent` path is part of the operation identity. Reusing one `operationId` for the root and for `researcher` creates distinct sessions.
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session \
@@ -62,7 +84,7 @@ curl -X POST https://<deployment>/eve/v1/session \
 ```
 
 The first request requires `message`. A follow-up request accepts exactly one of
-`message` or `inputResponses`; use the latter to answer a pending HITL request:
+`message` or `inputResponses`; use the latter to answer a pending HITL request. Do not send `agent` with `inputResponses`: eve automatically resumes the agent that requested the input.
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session/wrun_A \
@@ -163,7 +185,7 @@ export default eveChannel({
     const callerId = ctx.eve.caller?.principalId ?? "anonymous";
     return {
       auth: defaultEveAuth(ctx),
-      context: [`HTTP caller ${callerId} sent: ${message}`],
+      context: [`HTTP caller ${callerId} sent to ${ctx.eve.agent ?? "root"}: ${message}`],
     };
   },
   events: {
@@ -176,7 +198,7 @@ export default eveChannel({
 });
 ```
 
-`onMessage` must return an auth result. Return `title` alongside `auth` to set the title when the dispatch starts a run. A successful canonical eve HTTP message always dispatches and therefore always produces or continues a session.
+`ctx.eve.agent` is the normalized requested path for targeted creates and existing-session messages, and is `undefined` for unqualified messages. `onMessage` must return an auth result. Return `title` alongside `auth` to set the title when the dispatch starts a run. A successful canonical eve HTTP message always dispatches and therefore always produces or continues a session.
 
 ## Clients
 

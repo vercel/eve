@@ -210,6 +210,7 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
     outputSchema?: HarnessSession["outputSchema"];
     rootSessionId?: string;
     sandboxState?: HarnessSession["sandboxState"];
+    sandboxStates?: HarnessSession["sandboxStates"];
     sessionId: string;
     state?: HarnessSession["state"];
     subagentDepth?: number;
@@ -241,6 +242,9 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
   }
   if (session.sandboxState !== undefined) {
     durable.sandboxState = session.sandboxState;
+  }
+  if (session.sandboxStates !== undefined) {
+    durable.sandboxStates = session.sandboxStates;
   }
   if (session.state !== undefined) {
     durable.state = session.state;
@@ -298,6 +302,9 @@ export function hydrateDurableSession(input: {
   }
   if (durable.sandboxState !== undefined) {
     session.sandboxState = durable.sandboxState;
+  }
+  if (durable.sandboxStates !== undefined) {
+    session.sandboxStates = durable.sandboxStates;
   }
   if (durable.state !== undefined) {
     session.state = durable.state;

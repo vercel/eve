@@ -14,6 +14,7 @@ import {
 } from "#execution/wire/session-inbox-contract.js";
 import type { SessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
 import { sessionInboxWireV0Migration } from "#execution/wire/session-inbox-wire.v0.js";
+import { sessionInboxWireV1ToV2 } from "#execution/wire/session-inbox-wire-v1-to-v2.js";
 
 /**
  * The session inbox wire family: every payload persisted to a session's
@@ -38,7 +39,10 @@ export { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js
 /** Prefixes chain and schema failures alike, so messages read as one voice. */
 const WIRE_LABEL = "session inbox payload";
 
-const sessionInboxMigrations: readonly VersionMigration[] = [sessionInboxWireV0Migration];
+const sessionInboxMigrations: readonly VersionMigration[] = [
+  sessionInboxWireV0Migration,
+  sessionInboxWireV1ToV2,
+];
 
 /**
  * Decodes a persisted inbox payload or throws {@link SessionInboxWireError}.
@@ -78,6 +82,7 @@ function normalizeWire(wire: SessionInboxWire): DecodedSessionInbox {
   switch (wire.kind) {
     case "deliver":
       return {
+        agentNodeId: wire.agentNodeId,
         auth: wire.auth,
         caller: wire.caller,
         deliveryMetadata: wire.deliveryMetadata,

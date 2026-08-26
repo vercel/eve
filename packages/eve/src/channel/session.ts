@@ -28,6 +28,7 @@ import {
 } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
+import type { AgentTargetResolver } from "#runtime/agent-target.js";
 
 /** Immutable-ID handle for one exact durable session. */
 export interface Session {
@@ -63,7 +64,11 @@ interface SessionDeliveryOptions {
 }
 
 /** Options for sending a message through a fixed session handle. */
-export type SessionSendOptions = SessionDeliveryOptions & { readonly turnPolicy?: TurnPolicy };
+export type SessionSendOptions = SessionDeliveryOptions & {
+  /** Root-relative static local descendant to run for this turn. */
+  readonly agent?: string;
+  readonly turnPolicy?: TurnPolicy;
+};
 
 /** Options for answering pending input requests through a fixed session handle. */
 export type SessionRespondOptions = SessionDeliveryOptions;
@@ -87,11 +92,15 @@ export interface SessionHandle {
 export function createSession(
   id: string,
   runtime: Runtime,
-  metadata: Partial<ChannelDeliverySource> & { readonly turnPolicy?: TurnPolicy } = {},
+  metadata: Partial<ChannelDeliverySource> & {
+    readonly resolveAgentTarget?: AgentTargetResolver;
+    readonly turnPolicy?: TurnPolicy;
+  } = {},
 ): Session {
   return {
     id,
     async send(message, options) {
+      const agentTarget = resolveRequestedAgent(metadata.resolveAgentTarget, options.agent);
       const delivery = createDelivery(metadata);
       const caller = sessionCallbackToTurnCaller(options.callback);
       const payload: {
@@ -102,6 +111,7 @@ export function createSession(
       if (options.context !== undefined) payload.context = options.context;
       if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
       const commandWithoutCaller = {
+        agentNodeId: agentTarget?.nodeId,
         auth: options.auth,
         delivery,
         kind: "send" as const,
@@ -170,9 +180,23 @@ export function createSession(
 /** Builds an I/O-free factory for fixed session-ID handles. */
 export function createAttachSessionFn(
   runtime: Runtime,
-  metadata: Partial<ChannelDeliverySource> & { readonly turnPolicy?: TurnPolicy } = {},
+  metadata: Partial<ChannelDeliverySource> & {
+    readonly resolveAgentTarget?: AgentTargetResolver;
+    readonly turnPolicy?: TurnPolicy;
+  } = {},
 ): (sessionId: string) => Session {
   return (sessionId) => createSession(sessionId, runtime, metadata);
+}
+
+function resolveRequestedAgent(
+  resolver: AgentTargetResolver | undefined,
+  agent: string | undefined,
+) {
+  if (agent === undefined) return undefined;
+  if (resolver === undefined) {
+    throw new Error("Agent selection is unavailable on this session handle.");
+  }
+  return resolver(agent);
 }
 
 function createDelivery(
