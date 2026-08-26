@@ -1,0 +1,147 @@
+---
+title: "Discord"
+description: "Reach your agent from Discord interactions, slash commands, or bot messages."
+type: integration
+---
+
+The Discord channel wires your agent into Discord's HTTP Interactions, including slash and application commands, message components, and modal submissions. Discord enforces a three-second ACK deadline, so the channel acknowledges the command right away and runs the eve work in the background. Credentials and inbound request verification run through [Vercel Connect](../guides/auth-and-route-protection), so Discord's bot token stays out of your environment and Connect verifies Discord's signature before forwarding an interaction to eve.
+
+Ordinary DMs, mentions, replies, and thread messages arrive over Discord's persistent Gateway WebSocket instead of the HTTP Interactions endpoint. Long-running outbound WebSockets need lifecycle and singleton ownership outside the eve application, so ordinary bot messages require a separately deployed relay. This path is experimental; see [Receive ordinary bot messages](#receive-ordinary-bot-messages-experimental) for the relay contract and limitations. See [Channels](./overview) for the channel contract.
+
+## Set up Discord
+
+Run the guided setup from your eve project:
+
+```bash
+pnpm eve add channel/discord
+```
+
+The setup guides you through creating a Discord application and bot, then:
+
+- signs you in to Vercel and creates or links a project when needed;
+- validates the bot token;
+- creates a Vercel Connect client and attaches `/eve/v1/discord` as its trigger destination;
+- registers an application command with a required `message` option;
+- configures the Discord application's Interactions Endpoint URL;
+- scaffolds the channel with Connect-managed credentials; and
+- prints the bot installation URL.
+
+The command defaults to `/ask` with the description **Ask the eve agent**. You can edit both during setup. Discord global commands can take up to an hour to appear after registration.
+
+The generated channel looks like this:
+
+```ts title="agent/channels/discord.ts"
+import { connectDiscordCredentials } from "@vercel/connect/eve";
+import { discordChannel } from "eve/channels/discord";
+
+export default discordChannel({
+  credentials: connectDiscordCredentials("discord/my-agent"),
+});
+```
+
+The route is `POST /eve/v1/discord` by default. Connect resolves the application ID and bot token lazily and verifies forwarded interactions with same-project Vercel OIDC.
+
+### Configure Discord manually
+
+If you do not use the guided Connect setup, register a command with Discord's API or the Developer Portal. A string option named `message` lines up with eve's default prompt extraction:
+
+```bash
+curl -X PUT "https://discord.com/api/v10/applications/$DISCORD_APPLICATION_ID/commands" \
+  -H "Authorization: Bot $DISCORD_BOT_TOKEN" -H "Content-Type: application/json" \
+  -d '[{"name":"ask","description":"Ask the eve agent","type":1,
+    "options":[{"name":"message","description":"What should the agent do?","type":3,"required":true}]}]'
+```
+
+Then configure the public `https://…/eve/v1/discord` route as the application's Interactions Endpoint URL. Pass `credentials: { applicationId, botToken, publicKey }` to `discordChannel`, or set the corresponding `DISCORD_APPLICATION_ID`, `DISCORD_BOT_TOKEN`, and `DISCORD_PUBLIC_KEY` environment variables.
+
+## Receive ordinary bot messages (experimental)
+
+Discord sends ordinary DMs, mentions, replies, and thread messages over a persistent Gateway WebSocket instead of the HTTP Interactions endpoint. Handling that long-running connection requires a supervised relay outside the eve application.
+
+Add `gateway` to the same channel that handles Discord interactions:
+
+```ts title="agent/channels/discord.ts"
+import { connectDiscordCredentials } from "@vercel/connect/eve";
+import { discordChannel } from "eve/channels/discord";
+
+export default discordChannel({
+  credentials: connectDiscordCredentials("discord/my-agent"),
+  gateway: {
+    connectorId: "discord/my-agent",
+    secret: () => process.env.RELAY_FORWARD_SECRET!,
+  },
+});
+```
+
+This mounts `POST /eve/v1/discord/gateway` in addition to the interaction route. Omitting `gateway` leaves the route unmounted and preserves interaction-only routing.
+
+### Native bot behavior
+
+With `gateway` enabled, the built-in policy behaves as follows:
+
+- Every non-bot DM is accepted and resumes by DM channel ID.
+- An explicit bot mention in an unthreaded guild channel starts a new session.
+- A reply in an unthreaded guild channel continues only when its referenced message is the current eve response anchor.
+- An unknown or old reply anchor returns `409 anchor_not_ready` instead of creating another session.
+- Ambient guild messages and bot-authored messages are ignored.
+- Slash commands in guild channels start new message-chain sessions; their first response becomes the current reply anchor.
+
+Only the current bot response anchors an unthreaded guild conversation. Replying to an older response does not recover that session. Discord threads remain the preferred surface for a shared group conversation, but the default policy still requires an explicit mention or a reply that resolves to the active response.
+
+Supplying `gateway.onMessage(ctx, message)` replaces the built-in acceptance policy. Return `{ auth }` to dispatch, optional `context` or `title` with it, or `null` to ignore the message. `DiscordMessage` is an eve-owned normalized shape with message, channel, guild/thread, author, mention, reply-reference, and attachment metadata plus `raw` for the original dispatch object.
+
+See [Discord Gateway relay](./discord/gateway) to build and operate the WebSocket relay, sign forwarded events, and handle retries.
+
+## How the channel handles messages
+
+### Dispatch
+
+`onCommand(ctx, interaction)` decides whether to dispatch and under what `auth`. Return `{ auth }` to proceed, `null` to drop the interaction, or `title` alongside `auth` to set the title when the dispatch starts a run. By default, auth comes from the invoking user.
+
+The model-visible `<discord_context>` includes `user_id` and the receiving application's `application_id`.
+
+Event handlers receive `(eventData, channel, ctx)`, with Discord platform handles on `channel.discord`:
+
+```ts
+import { discordChannel } from "eve/channels/discord";
+
+export default discordChannel({
+  onCommand: (ctx, interaction) => ({
+    auth: {
+      principalId: interaction.user.id,
+      principalType: "user",
+      authenticator: "discord",
+      attributes: { channel_id: interaction.channelId, guild_id: interaction.guildId ?? "" },
+    },
+  }),
+  events: {
+    "message.completed"(eventData, channel, ctx) {
+      if (eventData.finishReason === "tool-calls") return;
+      if (eventData.message) channel.discord.post(eventData.message);
+    },
+  },
+});
+```
+
+### Delivery
+
+The default `message.completed` handler edits the deferred response for the first reply and sends followups after that. If the interaction token is rejected, it falls back to a bot-authenticated channel message. Long text is split to Discord's 2000-char limit, and generated messages default to `allowed_mentions: { parse: [] }`.
+
+Typing fires on `turn.started` and `actions.requested`, but only when a bot token is present. In custom hooks, call `channel.discord.startTyping()` yourself.
+
+### Human-in-the-loop (HITL)
+
+HITL renders as Discord components. Confirmations and options become buttons, `display: "select"` becomes a string select, and freeform input becomes a button that opens a modal. When the user responds, the parked session (paused awaiting input) resumes.
+
+### Proactive sessions
+
+Start a session without an inbound interaction through `to(discord, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(discord, target).send(message, { auth })` from another channel. The proactive target shape is `{ channelId, conversationId?, initialMessage? }`. Either path needs a bot token, supplied by Connect or `DISCORD_BOT_TOKEN`.
+
+### Attachments
+
+Inbound file attachments are not supported on this channel today.
+
+## What to read next
+
+- [Channels overview](./overview): the channel contract and every built-in channel
+- [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic
