@@ -91,11 +91,18 @@ function startWork(
     settledAt: pending?.settledAt ?? (phase === "cancelled" ? parent?.settledAt : undefined),
     startedAt: event.startedAt,
   };
-  return {
+  const started = {
     ...snapshot,
     pendingSettlements: removeKey(snapshot.pendingSettlements, pendingKey("work", work.id)),
     work: replaceBounded(snapshot.work, work.id, work),
   };
+  return work.phase === "running"
+    ? started
+    : settleWorkTree(started, {
+        outcome: work.phase,
+        settledAt: work.settledAt ?? event.startedAt,
+        workId: work.id,
+      });
 }
 
 function settleWork(

@@ -68,6 +68,78 @@ describe("activity protocol and reducer", () => {
     expect(duplicateStart.work[work.id]).toBe(started.work[work.id]);
   });
 
+  it.each([
+    ["child before parent", ["child", "root-settled", "root"]],
+    ["parent before child", ["root-settled", "root", "child"]],
+    ["ordered", ["root", "child", "root-settled"]],
+  ] as const)("converges work settlement for %s delivery", (_name, order) => {
+    const child = {
+      id: "work:child",
+      kind: "subagent" as const,
+      parentId: work.id,
+      rootSessionId: "session",
+      rootTurnId: "turn",
+    };
+    const events: Record<string, ActivityEventV1> = {
+      root: { eventId: "root", kind: "work.started", startedAt: "1", work },
+      child: { eventId: "child", kind: "work.started", startedAt: "2", work: child },
+      "root-settled": {
+        eventId: "root-settled",
+        kind: "work.settled",
+        outcome: "failed",
+        settledAt: "3",
+        workId: work.id,
+      },
+    };
+
+    const snapshot = reduce(order.map((key) => events[key]!));
+
+    expect(snapshot.work[work.id]?.phase).toBe("failed");
+    expect(snapshot.work[child.id]?.phase).toBe("cancelled");
+    expect(snapshot.pendingSettlements).toEqual({});
+  });
+
+  it("cancels early actions and blockers when their parent starts terminal", () => {
+    const snapshot = reduce([
+      {
+        action: {
+          id: "action",
+          kind: "tool",
+          name: "search",
+          parentWorkId: work.id,
+          rootTurnId: "turn",
+          stepIndex: 0,
+        },
+        eventId: "action",
+        kind: "action.started",
+        startedAt: "1",
+      },
+      {
+        blocker: {
+          id: "input",
+          kind: "input",
+          parentWorkId: work.id,
+          rootTurnId: "turn",
+        },
+        eventId: "input",
+        kind: "blocker.started",
+        startedAt: "1",
+      },
+      {
+        eventId: "settled",
+        kind: "work.settled",
+        outcome: "completed",
+        settledAt: "2",
+        workId: work.id,
+      },
+      { eventId: "root", kind: "work.started", startedAt: "0", work },
+    ]);
+
+    expect(snapshot.work[work.id]?.phase).toBe("completed");
+    expect(snapshot.actions.action?.phase).toBe("cancelled");
+    expect(snapshot.blockers.input?.phase).toBe("cancelled");
+  });
+
   it("retains unmatched settlement without changing revision", () => {
     const initial = createActivitySnapshot();
     const next = reduceActivityBatch(initial, {
