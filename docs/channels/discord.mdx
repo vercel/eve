@@ -220,7 +220,7 @@ Use the response status to decide whether to retry:
 | Status    | Meaning                                                                                   |
 | --------- | ----------------------------------------------------------------------------------------- |
 | `202`     | Accepted. Stop retrying.                                                                  |
-| `200`     | Valid but ignored, stale, or unsupported by policy. Stop retrying.                        |
+| `200`     | Valid but ignored by policy. Stop retrying.                                                |
 | `400–403` | Invalid envelope, signature, timestamp, connector, or configuration. Fix before retrying. |
 | `409`     | `anchor_not_ready`. Retry briefly with bounded backoff, then treat the reply as stale.    |
 | `413`     | Body exceeds 1 MB. Do not retry unchanged.                                                |
