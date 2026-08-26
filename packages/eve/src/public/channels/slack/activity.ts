@@ -53,11 +53,15 @@ function createSlackStatusRenderer(botToken: SlackBotToken | undefined): Channel
     async dispose({ destination, state }) {
       if (!isSlackStatusState(state) || state.status === "") return;
       const channelId = destination["channelId"];
+      const installationTeamId = destination["installationTeamId"];
       const threadTs = destination["threadTs"];
       if (typeof channelId !== "string" || typeof threadTs !== "string" || threadTs === "") return;
       const response = await callSlackApi({
         body: { channel_id: channelId, status: "", thread_ts: threadTs },
         botToken,
+        context: {
+          teamId: typeof installationTeamId === "string" ? installationTeamId : undefined,
+        },
         operation: "assistant.threads.setStatus",
       });
       if (response.ok !== true)
@@ -65,6 +69,7 @@ function createSlackStatusRenderer(botToken: SlackBotToken | undefined): Channel
     },
     async render({ destination, snapshot, state }) {
       const channelId = destination["channelId"];
+      const installationTeamId = destination["installationTeamId"];
       const threadTs = destination["threadTs"];
       if (typeof channelId !== "string" || typeof threadTs !== "string" || threadTs === "")
         return state;
@@ -75,6 +80,9 @@ function createSlackStatusRenderer(botToken: SlackBotToken | undefined): Channel
       const response = await callSlackApi({
         body,
         botToken,
+        context: {
+          teamId: typeof installationTeamId === "string" ? installationTeamId : undefined,
+        },
         operation: "assistant.threads.setStatus",
       });
       if (response.ok !== true) {
