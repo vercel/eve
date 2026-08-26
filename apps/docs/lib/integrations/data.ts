@@ -1845,10 +1845,11 @@ const SHOPIFY_EXAMPLE_PROFILE =
   "https://shopify.dev/ucp/agent-profiles/examples/2026-04-08/valid-with-capabilities.json";
 
 // Shopify cannot reach localhost. Use its public profile, or expose this route with a tool like ngrok.
-const agentProfileUrl =
-  process.env.EVE_DEV === "1"
-    ? SHOPIFY_EXAMPLE_PROFILE
-    : \`https://\${process.env.VERCEL_PROJECT_PRODUCTION_URL!}/.well-known/ucp\`;
+function agentProfileUrl(): string {
+  if (process.env.EVE_DEV === "1") return SHOPIFY_EXAMPLE_PROFILE;
+
+  return \`https://\${process.env.VERCEL_PROJECT_PRODUCTION_URL}/.well-known/ucp\`;
+}
 
 export default defineMcpClientConnection({
   url: \`https://\${process.env.SHOPIFY_STORE_DOMAIN!}/api/ucp/mcp\`,
@@ -1857,7 +1858,7 @@ export default defineMcpClientConnection({
     providedArguments: {
       meta: ({ session, toolName }) => ({
         "ucp-agent": {
-          profile: agentProfileUrl,
+          profile: agentProfileUrl(),
         },
 
         // These calls require a unique idempotency key.
