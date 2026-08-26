@@ -31,6 +31,7 @@ export interface ResolvedRuntimeAgentNode {
   readonly sandboxRegistry: RuntimeSandboxRegistry;
   readonly sourceId?: string;
   readonly subagentRegistry: RuntimeSubagentRegistry;
+  readonly tasksEnabled?: boolean;
   readonly toolRegistry: RuntimeToolRegistry;
   readonly turnAgent: RuntimeTurnAgent;
 }

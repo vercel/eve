@@ -103,6 +103,22 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
     expect(turnAgent.instructions).toContainEqual(expect.stringContaining("taskId"));
   });
 
+  it("uses mixed guidance when dynamic subagents can change execution mode", () => {
+    const turnAgent = createResolvedRuntimeTurnAgent({
+      agent: createResolvedAgentForTest(),
+      dynamicSubagentsAvailable: true,
+      nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
+      tools: [createFrameworkAgentTool()],
+    });
+
+    expect(turnAgent.instructions).toContainEqual(
+      expect.stringContaining("Each subagent tool description says whether"),
+    );
+    expect(turnAgent.instructions).not.toContainEqual(
+      expect.stringContaining("Subagent calls start durable background tasks"),
+    );
+  });
+
   it("omits the messaging instruction when an authored tool named agent shadows the framework tool", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest({

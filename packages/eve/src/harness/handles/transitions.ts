@@ -82,8 +82,10 @@ export function prepareAgentContinuation(
   session: HarnessSession,
   input: {
     readonly agentId: string;
+    readonly execution?: "background" | "blocking";
     readonly invokedName: string;
     readonly operation: ContinueOperation;
+    readonly targetKind?: "local" | "remote";
   },
 ): PrepareAgentContinuationResult {
   const handles = getAgentHandleStore(session.state)?.handles ?? [];
@@ -91,7 +93,11 @@ export function prepareAgentContinuation(
   if (existing === undefined) {
     return { kind: "unknown" };
   }
-  if (existing.identity.name !== input.invokedName) {
+  if (
+    existing.identity.name !== input.invokedName ||
+    (input.execution !== undefined && existing.identity.execution !== input.execution) ||
+    (input.targetKind !== undefined && existing.identity.targetKind !== input.targetKind)
+  ) {
     return { kind: "mismatch" };
   }
   if (existing.phase === "running" && existing.operation.id === input.operation.id) {
@@ -218,9 +224,14 @@ export function recordTaskAgentAddress(
   },
 ): HarnessSession {
   const handles = getAgentHandleStore(session.state)?.handles ?? [];
+  const targetKind = input.address.kind === "agent/remote" ? "remote" : "local";
   const record: AgentHandle = {
     address: input.address,
-    identity: input.identity,
+    identity: {
+      ...input.identity,
+      execution: input.identity.execution ?? "background",
+      targetKind: input.identity.targetKind ?? targetKind,
+    },
     phase: "addressed",
   };
   const existing = handles.find((handle) => handle.identity.id === input.identity.id);

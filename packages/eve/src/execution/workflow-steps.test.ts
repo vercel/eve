@@ -1916,12 +1916,7 @@ describe("turnStep", () => {
     );
   });
 
-  it("returns tasksEnabled on park results so the turn workflow selects dispatchTaskStep", async () => {
-    // Regression: a stack rebase once dropped `tasksEnabled` from the park
-    // arms while keeping the computation, so every tasks-mode agent silently
-    // fell back to dispatchRuntimeActionsStep and no background task receipt
-    // was ever minted. The park result is the only wire that carries this
-    // flag to the dispatch selection in turn-workflow.ts.
+  it("uses the unified dispatcher for task-enabled park results", async () => {
     const tasksBundle = {
       adapterRegistry: {
         adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
@@ -1963,7 +1958,8 @@ describe("turnStep", () => {
       serializedContext: createSerializedContext(),
       sessionState: createStubSessionState(),
     });
-    expect(parked).toMatchObject({ action: "park", tasksEnabled: true });
+    expect(parked).toMatchObject({ action: "park" });
+    expect(parked).not.toHaveProperty("tasksEnabled");
 
     installSessionStoreMocks([session]);
     vi.mocked(createExecutionNodeStep).mockImplementation(() => {
@@ -1982,7 +1978,8 @@ describe("turnStep", () => {
       serializedContext: createSerializedContext(),
       sessionState: createStubSessionState(),
     });
-    expect(settled).toMatchObject({ action: "park", tasksEnabled: true });
+    expect(settled).toMatchObject({ action: "park" });
+    expect(settled).not.toHaveProperty("tasksEnabled");
   });
 
   it("passes task-agent availability projection into execution", async () => {

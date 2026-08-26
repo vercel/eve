@@ -3,6 +3,7 @@ import type { HeadersValue } from "#client/types.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import type { JsonObject } from "#shared/json.js";
+import type { ExactDefinition } from "#public/definitions/exact.js";
 
 /**
  * Base URL of a remote eve deployment, either a static string or a function
@@ -61,12 +62,24 @@ export interface RemoteAgentDefinition {
   readonly url: RemoteAgentUrl;
 }
 
+/** Remote subagent definition with parent-owned execution policy. */
+export type RemoteSubagentDefinition = Omit<RemoteAgentDefinition, "kind"> & {
+  /** Runs this subagent as a durable background task. @default false */
+  readonly background?: boolean;
+  readonly kind: "eve:remote-subagent";
+};
+
 /**
  * Authored input that {@link defineRemoteAgent} accepts. eve derives identity
  * from the file path under `agent/subagents/`; authored definitions do not
  * carry a `name` field.
  */
 export type RemoteAgentDefinitionInput = Omit<RemoteAgentDefinition, "kind" | "path"> & {
+  readonly path?: string;
+};
+
+/** Authored input accepted by {@link defineRemoteSubagent}. */
+export type RemoteSubagentDefinitionInput = Omit<RemoteSubagentDefinition, "kind" | "path"> & {
   readonly path?: string;
 };
 
@@ -81,6 +94,23 @@ export function defineRemoteAgent(input: RemoteAgentDefinitionInput): RemoteAgen
   return {
     ...input,
     kind: "remote",
+    path: input.path ?? EVE_SESSION_ROUTE_PATH,
+  };
+}
+
+/**
+ * Defines a remote subagent. Set `background: true` to return a durable task
+ * receipt instead of waiting for the remote child result.
+ */
+export function defineRemoteSubagent<const TAgent extends RemoteSubagentDefinitionInput>(
+  input: ExactDefinition<TAgent, RemoteSubagentDefinitionInput>,
+): TAgent & { readonly kind: "eve:remote-subagent"; readonly path: string };
+export function defineRemoteSubagent(
+  input: RemoteSubagentDefinitionInput,
+): RemoteSubagentDefinition {
+  return {
+    ...input,
+    kind: "eve:remote-subagent",
     path: input.path ?? EVE_SESSION_ROUTE_PATH,
   };
 }

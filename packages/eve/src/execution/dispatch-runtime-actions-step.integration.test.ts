@@ -127,9 +127,11 @@ const LOCAL_PARKED_HANDLE: AgentHandle = {
     sessionId: CHILD_SESSION_ID,
   },
   identity: {
+    execution: "blocking",
     id: deriveAgentId("research", PARKED_START_OPERATION_ID),
     name: "research",
     nodeId: "subagents/research",
+    targetKind: "local",
   },
   lastStatus: "initial result",
   phase: "parked",
@@ -143,9 +145,11 @@ const REMOTE_PARKED_HANDLE: AgentHandle = {
     url: "https://remote.example.com",
   },
   identity: {
+    execution: "blocking",
     id: deriveAgentId("research", PARKED_START_OPERATION_ID),
     name: "research",
     nodeId: "remote/research",
+    targetKind: "remote",
   },
   lastStatus: "initial result",
   phase: "parked",
@@ -289,9 +293,11 @@ describe("dispatchRuntimeActionsStep child starts", () => {
             sessionId: CHILD_SESSION_ID,
           },
           identity: {
+            execution: "blocking",
             id: deriveAgentId("research", startOperationId),
             name: "research",
             nodeId: "subagents/research",
+            targetKind: "local",
           },
           operation: {
             callId: "call-1",
@@ -460,9 +466,11 @@ describe("dispatchRuntimeActionsStep child starts", () => {
             sessionId: CHILD_SESSION_ID,
           },
           identity: {
+            execution: "background",
             id: agentId,
             name: "research",
             nodeId: "subagents/research",
+            targetKind: "local",
           },
           phase: "addressed",
         },
@@ -763,7 +771,7 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
   it("rejects a tasks-mode continuation while the addressed agent has active work", async () => {
     const addressedHandle: AgentHandle = {
       address: LOCAL_PARKED_HANDLE.address,
-      identity: LOCAL_PARKED_HANDLE.identity,
+      identity: { ...LOCAL_PARKED_HANDLE.identity, execution: "background" },
       phase: "addressed",
     };
     let session = createPendingSession({
@@ -810,10 +818,54 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
     expect(mocks.startWorkflowPreferLatest).not.toHaveBeenCalled();
   });
 
+  it("reports execution mismatch before active-task occupancy", async () => {
+    const addressedHandle: AgentHandle = {
+      address: LOCAL_PARKED_HANDLE.address,
+      identity: {
+        ...LOCAL_PARKED_HANDLE.identity,
+        execution: "blocking",
+        targetKind: "local",
+      },
+      phase: "addressed",
+    };
+    let session = createPendingSession({
+      handle: addressedHandle,
+      agentId: addressedHandle.identity.id,
+    });
+    session = recordSessionTask(session, {
+      taskInboxToken: "task-token",
+      createdByTurnId: "turn-previous",
+      metadata: {
+        agentId: addressedHandle.identity.id,
+        kind: "subagent",
+        mode: "local",
+        name: addressedHandle.identity.name,
+      },
+      operationId: "operation-active",
+      taskId: "task_active",
+      taskRunId: "task-run-active",
+    });
+    installContext(session, undefined, true);
+    const view = vi.spyOn(taskRunControl, "readLatestTaskView");
+
+    const result = await dispatchTaskStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(result.results[0]).toMatchObject({
+      isError: true,
+      output: { code: "AGENT_MISMATCH" },
+    });
+    expect(view).not.toHaveBeenCalled();
+  });
+
   it("passes the active turn principal to a tasks-mode continuation", async () => {
     const addressedHandle: AgentHandle = {
       address: LOCAL_PARKED_HANDLE.address,
-      identity: LOCAL_PARKED_HANDLE.identity,
+      identity: { ...LOCAL_PARKED_HANDLE.identity, execution: "background" },
       phase: "addressed",
     };
     const session = createPendingSession({
@@ -1251,17 +1303,31 @@ function createPendingSession(input: {
   readonly handle?: AgentHandle;
   readonly agentId: string | null;
 }): HarnessSession {
+  const remote =
+    input.handle !== undefined &&
+    input.handle.phase !== "starting" &&
+    input.handle.address.kind === "agent/remote";
   return setPendingRuntimeActionBatch({
     actions: [
-      {
-        callId: "call-1",
-        description: "Research",
-        input: { agentId: input.agentId, message: "continue with raw input" },
-        kind: "subagent-call",
-        name: "research",
-        nodeId: "subagents/research",
-        subagentName: "research",
-      },
+      remote
+        ? {
+            callId: "call-1",
+            description: "Research",
+            input: { agentId: input.agentId, message: "continue with raw input" },
+            kind: "remote-agent-call",
+            name: "research",
+            nodeId: input.handle?.identity.nodeId ?? "remote/research",
+            remoteAgentName: "research",
+          }
+        : {
+            callId: "call-1",
+            description: "Research",
+            input: { agentId: input.agentId, message: "continue with raw input" },
+            kind: "subagent-call",
+            name: "research",
+            nodeId: "subagents/research",
+            subagentName: "research",
+          },
     ],
     event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
     responseMessages: [],

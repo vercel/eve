@@ -1,6 +1,5 @@
 import { deserializeContext } from "#context/serialize.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
-import { dispatchTaskStep } from "#execution/tasks/parent/dispatch-task-step.js";
 import {
   createDurableSessionState,
   type DurableSessionState,
@@ -98,11 +97,7 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
 
   // Interrupt-sourced batches obey the same mode split as model-authored
   // ones: task agents wrap every delegation in the task lifecycle.
-  const dispatchStep =
-    bundle.resolvedAgent.config?.experimental?.tasks === true
-      ? dispatchTaskStep
-      : dispatchRuntimeActionsStep;
-  const dispatched = await dispatchStep({
+  const dispatched = await dispatchRuntimeActionsStep({
     callbackBaseUrl: input.callbackBaseUrl,
     parentContinuationToken: input.parentContinuationToken,
     parentWritable: input.parentWritable,

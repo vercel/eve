@@ -117,6 +117,47 @@ describe("task-derived agent availability", () => {
     await expect(appendTaskAgentAnnouncement(next)).resolves.toBe(next);
   });
 
+  it("combines parked blocking and addressed background agents", async () => {
+    vi.mocked(readLatestTaskView).mockResolvedValue(task("task_0", "working"));
+    const session = createSession(["run-0"]);
+    const handles = (session.state![AGENT_HANDLES_STATE_KEY] as { handles: unknown[] }).handles;
+    const withBlocking = {
+      ...session,
+      state: {
+        ...session.state,
+        [AGENT_HANDLES_STATE_KEY]: {
+          handles: [
+            {
+              address: {
+                continuationToken: "blocking-token",
+                kind: "agent/local",
+                sessionId: "blocking-session",
+              },
+              identity: {
+                execution: "blocking",
+                id: "ag_writer:abcdef123456",
+                name: "writer",
+                nodeId: "node-writer",
+                targetKind: "local",
+              },
+              lastStatus: "draft ready",
+              phase: "parked",
+            },
+            ...handles,
+          ],
+        },
+      },
+    };
+
+    const next = await appendTaskAgentAnnouncement(withBlocking);
+    const announcement = String(next.history.at(-1)?.content);
+
+    expect(announcement).toContain('id="ag_writer:abcdef123456"');
+    expect(announcement).toContain("draft ready");
+    expect(announcement).toContain(`id="${metadata.agentId}"`);
+    expect(announcement).toContain('taskId="task_0"');
+  });
+
   it("deduplicates task announcements against the prepared history view", async () => {
     vi.mocked(readLatestTaskView).mockResolvedValue(task("task_0", "working"));
     const session = createSession(["run-0"]);

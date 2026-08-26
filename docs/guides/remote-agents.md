@@ -1,24 +1,25 @@
 ---
 title: "Remote Agents"
-description: "Call another eve deployment as a subagent with defineRemoteAgent: same tool call as a local subagent, outbound auth, durable callback dispatch."
+description: "Call another eve deployment as a subagent with defineRemoteSubagent: same tool call as a local subagent, outbound auth, durable callback dispatch."
 ---
 
-`defineRemoteAgent` calls a separately deployed eve agent as if it were a local subagent. Reach for it when the specialist you delegate to is a separately owned agent behind its own URL rather than a directory in your repo.
+`defineRemoteSubagent` calls a separately deployed eve agent as if it were a local subagent. Reach for it when the specialist you delegate to is a separately owned agent behind its own URL rather than a directory in your repo.
 
 The file lives under `agent/subagents/`, so its tool name is derived from the path. There's no `name` field.
 
 ```ts title="agent/subagents/weather.ts"
-import { defineRemoteAgent } from "eve";
+import { defineRemoteSubagent } from "eve";
 import { vercelOidc } from "eve/agents/auth";
 
-export default defineRemoteAgent({
+export default defineRemoteSubagent({
+  background: false,
   url: "https://weather-agent.example.com",
   description: "Answers weather, temperature, forecast, wind, rain, and snow questions.",
   auth: vercelOidc(),
 });
 ```
 
-`defineRemoteAgent` accepts:
+`defineRemoteSubagent` accepts:
 
 | Parameter          | Type                                          | Required | Default           | Description                                                                                                                                              |
 | ------------------ | --------------------------------------------- | -------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -29,21 +30,25 @@ export default defineRemoteAgent({
 | `headers`          | `HeadersValue`                                | No       | none              | Static or lazily resolved request headers.                                                                                                               |
 | `path`             | `string`                                      | No       | `/eve/v1/session` | Route appended to `url` for the create-session request.                                                                                                  |
 | `outputSchema`     | `StandardSchema \| JSON Schema`               | No       | none              | Structured return type for the first turn of each fresh remote session. A continuation may provide its own per-call schema.                              |
+| `background`       | `boolean`                                     | No       | `false`           | Return a durable task receipt immediately instead of waiting for the remote child result. Requires `experimental.tasks` on the root agent.               |
+
+Existing `defineRemoteAgent` declarations remain supported during migration. They keep the previous root-wide execution behavior; use `defineRemoteSubagent` for new declarations.
 
 ## Dynamic remote agents
 
 Wrap the file in `defineDynamic` when the target or its availability depends on
-the current session. Return `defineRemoteAgent(...)` to expose it and nil to
+the current session. Return `defineRemoteSubagent(...)` to expose it and nil to
 omit it:
 
 ```ts title="agent/subagents/weather.ts"
-import { defineDynamic, defineRemoteAgent } from "eve";
+import { defineDynamic, defineRemoteSubagent } from "eve";
 
 export default defineDynamic({
   events: {
     "session.started": (_event, ctx) =>
       ctx.session.auth.current?.attributes.region === "us"
-        ? defineRemoteAgent({
+        ? defineRemoteSubagent({
+            background: false,
             description: "Answers weather questions for US customers.",
             url: "https://us-weather-agent.example.com",
           })
@@ -58,7 +63,7 @@ resolves function-valued URLs when the event handler runs. Auth and headers
 remain lazy and resolve before each outbound request without entering durable
 workflow state.
 
-Author `auth` and `headers` directly in the `defineRemoteAgent({ ... })` object
+Author `auth` and `headers` directly in the `defineRemoteSubagent({ ... })` object
 and keep their functions self-contained with module imports or environment
 variables. They are rehydrated outside the event handler, so they cannot close
 over `_event`, `ctx`, or handler-local values.
@@ -68,9 +73,9 @@ over `_event`, `ctx`, or handler-local values.
 A string `url` is read at compile time and frozen into the build. When the target comes from a runtime env var — known only once the deployment runs — pass a function instead. eve calls it when it resolves the agent graph at runtime, so it can read `process.env`:
 
 ```ts title="agent/subagents/weather.ts"
-import { defineRemoteAgent } from "eve";
+import { defineRemoteSubagent } from "eve";
 
-export default defineRemoteAgent({
+export default defineRemoteSubagent({
   url: () => process.env.WEATHER_AGENT_URL ?? "https://weather-agent.example.com",
   description: "Answers weather, temperature, forecast, wind, rain, and snow questions.",
 });
@@ -120,10 +125,10 @@ Outbound auth authenticates your _deployment_ to the remote, so by default the r
 Set `forwardPrincipal: true` to forward the dispatching turn's session principal across the hop:
 
 ```ts title="agent/subagents/site-ops.ts"
-import { defineRemoteAgent } from "eve";
+import { defineRemoteSubagent } from "eve";
 import { vercelOidc } from "eve/agents/auth";
 
-export default defineRemoteAgent({
+export default defineRemoteSubagent({
   url: "https://site-ops.example.com",
   description: "Executes site operations as the requesting user.",
   auth: vercelOidc(), // transport trust: authenticates *this* deployment
@@ -145,19 +150,19 @@ A receiver on an eve version that predates all principal forwarding may instead 
 
 ## How remote dispatch and callbacks work
 
-A local subagent runs inline. A remote one runs in its own deployment, so dispatch is asynchronous:
+A local subagent runs in the same deployment. A remote one always dispatches asynchronously to another deployment, but the parent-facing lifecycle depends on `background`:
 
 1. The parent starts a persistent conversation session on the remote's `POST /eve/v1/session`, passing a framework callback URL.
-2. The parent turn parks (suspends durably without holding compute; see [Execution model & durability](../concepts/execution-model-and-durability)) until the remote posts a terminal callback.
-3. When the callback arrives, the parent resumes and surfaces the result.
+2. With `background: false`, the parent turn parks (suspends durably without holding compute; see [Execution model & durability](../concepts/execution-model-and-durability)) until the remote posts a terminal callback. The callback resumes the parent and surfaces the result.
+3. With `background: true`, the call returns a working task receipt immediately. The remote callback settles the task and later notifies the parent through the task delivery path; cancelling the initiating turn does not cancel the admitted task.
 
 The parent stream carries the same `subagent.called`, `action.result`, and `subagent.completed` events as local delegation. For a remote call, `subagent.called.data.remote.url` records the target.
 
-Cancelling the parent while a remote call is active sends an authenticated `POST /eve/v1/session/:childSessionId/cancel` to the remote and waits for that request to be accepted before the parent settles. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.cancelled` → `session.waiting` on its own stream; an older or unreachable remote is logged but cannot turn the parent's cancellation into a failure.
+Cancelling a parent turn while a blocking remote call is active sends an authenticated `POST /eve/v1/session/:childSessionId/cancel` to the remote and waits for that request to be accepted before the parent settles. An admitted background task survives initiating-turn cancellation; use `task_cancel` to stop it. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.cancelled` → `session.waiting` on its own stream; an older or unreachable remote is logged but cannot turn the parent's cancellation into a failure.
 
 When the parent session ends, eve sends an authenticated `POST /eve/v1/session/:childSessionId/reset` for each remote child. Reset retires the parked remote session and recursively cleans up its descendants. The request uses freshly resolved `headers` and `auth`; failures are logged so an unreachable remote cannot block parent finalization.
 
-Both failure paths surface to the parent as a failed tool result, so the caller can explain or recover within the same session. A failed _start_ returns the error inline. A remote that starts and then fails posts a terminal failure callback, which the parent receives as an errored subagent result carrying the remote's error (or `REMOTE_AGENT_FAILED` when none is supplied). Terminal callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than marking the task complete, so the engine retries it.
+For blocking calls, both failure paths surface as a failed tool result, so the caller can explain or recover within the same turn. A failed _start_ returns the error inline. A remote that starts and then fails posts a terminal failure callback, which the parent receives as an errored subagent result carrying the remote's error (or `REMOTE_AGENT_FAILED` when none is supplied). For background calls, start admission returns a receipt and later failures settle and notify through the task path. Terminal callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than marking the task complete, so the engine retries it.
 
 ## What to read next
 

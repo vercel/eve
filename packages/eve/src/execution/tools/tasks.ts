@@ -26,10 +26,10 @@ const TASK_UPDATE_DESCRIPTION =
   "Report activity, not preliminary findings or results.";
 
 /**
- * Builds the harness definitions injected when the root agent enables
- * `experimental.tasks`. Follows the implicit `agent` tool pattern:
- * inline definitions, no registry entry, session-shape hiding in
- * advertised-tools, and re-validation at dispatch.
+ * Builds the harness definitions injected into each runtime node when the root
+ * enables `experimental.tasks`. Definitions are prepared from framework
+ * defaults, lowered here, filtered per session in advertised-tools, and
+ * re-validated at dispatch.
  */
 export function createTaskToolHarnessDefinitions(): readonly HarnessToolDefinition[] {
   return [
@@ -52,10 +52,9 @@ export function createTaskToolHarnessDefinitions(): readonly HarnessToolDefiniti
 /**
  * Whether one node's sessions receive the task tools.
  *
- * Mirrors `isImplicitAgentToolAvailable`: the compile step already
- * rejects `experimental.tasks` on subagents, authored tools with the
- * same name shadow the framework tool, and `disableTool(name)` removes
- * individual tools. Root-node self-delegated children share this node's
- * config, so advertised-tools uses caller/session shape to expose only
- * `task_update` to delegated task children.
+ * The root capability is projected onto every runtime node. Authored tools with
+ * the same name shadow framework defaults, and `disableTool(name)` removes an
+ * individual control. advertised-tools exposes `task_update` only to task-owned
+ * sessions and keeps `task_cancel` available to any task-enabled session so a
+ * declared child can cancel nested tasks it owns.
  */

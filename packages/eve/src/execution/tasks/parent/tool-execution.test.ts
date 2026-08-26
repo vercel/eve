@@ -52,9 +52,11 @@ const usage = {
 };
 
 const childIdentity: AgentIdentity = {
+  execution: "background",
   id: "ag_research:operation1",
   name: "research",
   nodeId: "node_research",
+  targetKind: "local",
 };
 const childAddress: AgentAddress = {
   continuationToken: "continuation_child",
@@ -571,7 +573,14 @@ describe("background tool execution", () => {
     });
     expect(mocks.propagateSubagentExecutorCancel).toHaveBeenCalledWith({
       bundle: undefined,
-      executor: { address: childAddress, identity: childIdentity },
+      executor: {
+        address: childAddress,
+        identity: {
+          id: childIdentity.id,
+          name: childIdentity.name,
+          nodeId: childIdentity.nodeId,
+        },
+      },
       taskId: task.taskId,
     });
     // The task must be terminal before the child learns anything: a late

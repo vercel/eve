@@ -79,13 +79,14 @@ export function buildToolSet(input: {
         ? (definition as BackgroundExecutableTool)
         : undefined,
     );
+    backgroundBatch.setSubagent(definition.name, definition.subagentKind);
     const authorToModelOutput = definition.toModelOutput;
     const approval = buildApprovalFn(definition, input);
     const aiTool = tool({
       description: definition.description,
       execute: wrapToolExecute(definition, backgroundBatch),
       inputSchema: definition.inputSchema,
-      ...(definition.execution === "background"
+      ...(definition.execution === "background" || definition.subagentKind !== undefined
         ? {
             onInputAvailable: ({
               input: toolInput,
@@ -94,8 +95,8 @@ export function buildToolSet(input: {
               readonly input: unknown;
               readonly toolCallId: string;
             }) => {
-              if (definition.execute === undefined) {
-                throw new Error(`Background tool "${definition.name}" has no execute function.`);
+              if (definition.execution === "background" && definition.execute === undefined) {
+                throw new Error(`Subagent tool "${definition.name}" has no execute function.`);
               }
               backgroundBatch.register({
                 callId: toolCallId,

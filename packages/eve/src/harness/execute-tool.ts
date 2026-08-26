@@ -44,6 +44,8 @@ export interface HarnessToolDefinition {
    */
   readonly rootOnly?: boolean;
   readonly runtimeAction?: HarnessRuntimeActionDefinition;
+  /** Internal target kind used to register mixed-mode fanout before dispatch. */
+  readonly subagentKind?: "local" | "remote";
   readonly toModelOutput?: (output: unknown) => unknown;
   readonly workflowCallable?: boolean;
 }

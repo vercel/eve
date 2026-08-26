@@ -40,12 +40,12 @@ Review these default tools before production use. Disable, wrap, restrict, or re
 
 Some framework-provided tools stay out of the default set. Add the corresponding file when your agent needs one:
 
-| Tool       | Definition to export                                | Purpose                                            |
-| ---------- | --------------------------------------------------- | -------------------------------------------------- |
-| `glob`     | `glob` from `eve/tools/glob`                        | Find sandbox files by glob pattern.                |
-| `grep`     | `grep` from `eve/tools/grep`                        | Search sandbox file contents by regex.             |
-| `Workflow` | `experimental_workflow()` from `eve/tools/workflow` | Orchestrate root-agent copies from generated code. |
-| `sleep`    | `sleep()` from `eve/tools/sleep`                    | Pause and durably resume the current turn.         |
+| Tool       | Definition to export                                | Purpose                                                                            |
+| ---------- | --------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `glob`     | `glob` from `eve/tools/glob`                        | Find sandbox files by glob pattern.                                                |
+| `grep`     | `grep` from `eve/tools/grep`                        | Search sandbox file contents by regex.                                             |
+| `Workflow` | `experimental_workflow()` from `eve/tools/workflow` | Orchestrate blocking built-in, declared, and remote subagents from generated code. |
+| `sleep`    | `sleep()` from `eve/tools/sleep`                    | Pause and durably resume the current turn.                                         |
 
 For example, add file discovery and content search with two files:
 
@@ -146,9 +146,10 @@ export default experimental_workflow();
 Without that file, the `Workflow` tool stays off. It earns its keep only when the agent has subagents (or the built-in `agent`) worth coordinating:
 
 ```ts title="agent/subagents/analyst/agent.ts"
-import { defineAgent } from "eve";
+import { defineLocalSubagent } from "eve";
 
-export default defineAgent({
+export default defineLocalSubagent({
+  background: false,
   description: "Analyzes one metric: queries, computes, writes a short finding.",
   model: "anthropic/claude-opus-4.8",
 });
@@ -177,7 +178,7 @@ Each `tools.analyst(...)` call dispatches a child subagent, so the parent stream
 
 ### What a workflow can orchestrate
 
-A workflow reaches only this agent's own agents: the built-in `agent` (a copy of itself), declared [subagents](../subagents), and [remote agents](../guides/remote-agents). That is the whole list. No files, network, shell, skills, or connections. A workflow is a coordination layer over subagents, not a place to do other work. Each call can still request structured output via `outputSchema`, exactly like a direct subagent delegation.
+A workflow reaches only this agent's blocking declared [subagents](../subagents), blocking [remote agents](../guides/remote-agents), and the built-in `agent` when tasks are disabled. Background subagents and the task-enabled built-in `agent` are not currently exposed inside Workflow programs. No files, network, shell, skills, or connections are available. Each blocking call can request structured output via `outputSchema`, exactly like direct delegation.
 
 ### Caps on workflow-spawned subagents
 

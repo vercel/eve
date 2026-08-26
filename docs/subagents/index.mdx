@@ -17,7 +17,7 @@ The root session receives `agent` by default. The model calls it to delegate a t
 }
 ```
 
-The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent` and `Workflow`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. To run independent tasks in parallel, emit multiple `agent` calls in one response; eve runs the batch concurrently and returns every result before the root continues. Give parallel children non-overlapping write scopes.
+The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent` and `Workflow`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. To run independent work in parallel, emit multiple `agent` calls in one response. Without `experimental.tasks`, eve returns every child result before the root continues. With tasks enabled, each call returns a task receipt and the children continue in the background. Give parallel children non-overlapping write scopes.
 
 `agent` is intentionally root-only. Copies created by it cannot call `agent`, and declared subagents never receive the built-in tool. If a stale or forced recursive call reaches execution, eve rejects it instead of starting another child session.
 
@@ -35,35 +35,64 @@ An authored root tool at `agent/tools/agent.ts` takes priority over the built-in
 
 ## Declared subagents
 
-A declared subagent lives under `agent/subagents/<id>/` and uses the same `defineAgent` helper as the root. Its location under `subagents/` is the only thing that marks it as a subagent. Declare one when the child needs a clearly different prompt, role, or tool surface.
+A declared subagent lives under `agent/subagents/<id>/` and uses `defineLocalSubagent`. Declare one when the child needs a clearly different prompt, role, tool surface, or execution policy.
 
 ```ts title="agent/subagents/researcher/agent.ts"
-import { defineAgent } from "eve";
+import { defineLocalSubagent } from "eve";
 
-export default defineAgent({
+export default defineLocalSubagent({
+  background: false,
   description: "Investigate ambiguous questions before the parent agent responds.",
   model: "anthropic/claude-opus-4.8",
 });
 ```
 
-`description` is required. The parent reads it to decide whether to delegate, so the compiler rejects any subagent whose `agent.ts` leaves it out.
+`description` is required. The parent reads it to decide whether to delegate, so the compiler rejects any subagent whose `agent.ts` leaves it out. `background` defaults to `false`: the parent waits for the child and receives its result. Set `background: true` to return a task receipt immediately and let the child continue as a durable background task.
+
+Use `defineRemoteSubagent` for a remote declaration with the same execution switch:
+
+```ts title="agent/subagents/reviewer.ts"
+import { defineRemoteSubagent } from "eve";
+
+export default defineRemoteSubagent({
+  background: true,
+  description: "Review a proposal on the remote deployment.",
+  url: () => process.env.REVIEWER_URL!,
+});
+```
+
+Background subagents require `experimental.tasks: true` on the root agent:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  experimental: { tasks: true },
+  model: "anthropic/claude-sonnet-4.5",
+});
+```
+
+Execution is selected independently for every declared local or remote subagent, so one parent can wait for a focused reviewer while starting a long-running researcher in the background. The built-in root `agent` tool keeps its existing behavior: it runs in the background whenever the root enables tasks.
+
+Existing `defineAgent` and `defineRemoteAgent` declarations under `agent/subagents/` remain supported during migration. They keep the previous root-wide behavior: task-enabled roots run them in the background, and other roots wait for their result. New declarations should use the subagent-specific helpers and choose `background` explicitly.
 
 A mounted extension can also contribute declared subagents from `extension/subagents/`. The mount namespace prefixes the subagent visible to the consuming agent node: mounting an extension as `crm` exposes its `reviewer` subagent as `crm__reviewer`. The contributed subagent keeps its own isolated tools, connections, skills, hooks, instructions, sandbox, and nested subagents, and its modules can read configuration from the extension handle. See [Extensions](./extensions#add-a-subagent) for the authoring and override behavior.
 
 ### Conditional availability
 
 To expose a declared subagent only for certain sessions or turns, export
-`defineDynamic` from that subagent's `agent.ts`. Return a `defineAgent`
+`defineDynamic` from that subagent's `agent.ts`. Return a `defineLocalSubagent`
 configuration to expose the subagent, or nil to omit it from the parent's tools.
 
 ```ts title="agent/subagents/researcher/agent.ts"
-import { defineAgent, defineDynamic } from "eve";
+import { defineDynamic, defineLocalSubagent } from "eve";
 
 export default defineDynamic({
   events: {
     "session.started": (_event, ctx) =>
       ctx.session.auth.current?.attributes.research === true
-        ? defineAgent({
+        ? defineLocalSubagent({
+            background: true,
             description: "Investigate ambiguous questions before the parent responds.",
             model: "anthropic/claude-opus-4.8",
           })
@@ -79,14 +108,15 @@ The subagent's filesystem manifest is always compiled; a non-nil result injects
 the returned agent configuration when the child runs.
 
 Packaging controls must be available before the resolver runs. Put them on
-`defineDynamic`, rather than the `defineAgent` returned by an event handler:
+`defineDynamic`, rather than the `defineLocalSubagent` returned by an event handler:
 
 ```ts
 export default defineDynamic({
   build: { externalDependencies: ["native-package"] },
   events: {
     "session.started": () =>
-      defineAgent({
+      defineLocalSubagent({
+        background: false,
         description: "Use a native package when handling delegated work.",
         model: "anthropic/claude-opus-4.8",
       }),
@@ -153,6 +183,8 @@ Declared subagents can call nested subagents defined under their own directories
 
 `Workflow` is also root-only. Child sessions can still call their own declared or remote subagents, but they receive neither `Workflow` nor the built-in `agent`. The Workflow tool's `maxSubagents` option caps the number of calls made by one program (default 100); see [Workflow tool](./concepts/built-in-tools#workflow-tool).
 
+`Workflow` currently exposes only blocking subagents. Background subagents run through eve's background-tool executor in the model tool loop and are not available inside a Workflow program.
+
 A directly declared subagent's tool name is the bare path-derived name, with no prefix. `agent/subagents/researcher/` registers as the tool `researcher`. A subagent supplied by a mounted extension includes the mount namespace, such as `crm__reviewer`. The model, approvals, logs, and evals reference the resulting name. Its input schema is:
 
 ```ts
@@ -169,7 +201,7 @@ Do not rely on subagent delegation by itself as an approval boundary. Put sensit
 
 Each delegated subagent spins up its own child session and stream. The parent stream carries the control-plane events `subagent.called` and `subagent.completed`, plus interactive `input.requested`, `authorization.required`, and `authorization.completed` events proxied from descendants so the root channel can prompt the user. To follow the child's other progress, read `subagent.called.data.childSessionId` and subscribe at `GET /eve/v1/session/:childSessionId/stream`.
 
-Cancelling a parent turn also requests cancellation of every active child it started, recursively through nested and remote subagents. Each affected session emits its own `turn.cancelled` → `session.waiting` boundary; the cancelled parent does not synthesize tool results or emit `subagent.completed`. A child that already completed or parked has no active turn and is a benign no-op.
+Cancelling a parent turn also requests cancellation of every active blocking child it started, recursively through nested and remote subagents. Each affected session emits its own `turn.cancelled` → `session.waiting` boundary; the cancelled parent does not synthesize tool results or emit `subagent.completed`. A child that already completed or parked has no active turn and is a benign no-op. An admitted background task survives cancellation of the turn that started it; use `task_cancel` to stop that task. Parent-session finalization cancels remaining live tasks.
 
 Subagent model calls automatically retry classified transient provider failures, including overload errors delivered after a stream starts. eve makes at most three fresh model-call attempts, repeating only the current uncommitted call so completed earlier steps, tool results, and sandbox work remain available to the child. Other recoverable task errors fall back to Workflow's durable step retry from the last committed session snapshot. Exhausting the transient model-call attempts or the dedicated empty-response reissue returns one failed task result instead of stacking both retry budgets; terminal errors fail immediately.
 

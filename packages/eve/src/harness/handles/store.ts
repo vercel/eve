@@ -15,12 +15,16 @@ const MAX_STATUS_LENGTH = 120;
  * child does and cannot collide on externally supplied session suffixes.
  */
 export interface AgentIdentity {
+  /** Invocation contract pinned when this child identity is minted or restored. */
+  readonly execution?: "background" | "blocking";
   /** Model-visible identifier: `ag_<name>:<operation-hash>`. */
   readonly id: string;
   /** Subagent tool name. */
   readonly name: string;
   /** Agent-graph node used to re-resolve delivery configuration. */
   readonly nodeId: string;
+  /** Delivery target kind pinned independently from the selected definition. */
+  readonly targetKind?: "local" | "remote";
 }
 
 /**
@@ -145,9 +149,11 @@ export interface AgentHandleStore {
 const nonEmptyString = z.string().min(1);
 
 const identitySchema = z.strictObject({
+  execution: z.enum(["blocking", "background"]).optional(),
   id: nonEmptyString,
   name: nonEmptyString,
   nodeId: nonEmptyString,
+  targetKind: z.enum(["local", "remote"]).optional(),
 });
 
 const startOperationSchema = z.strictObject({
@@ -196,31 +202,45 @@ const addressSchema: z.ZodType<AgentAddress> = z.discriminatedUnion("kind", [
   }),
 ]);
 
-const agentHandleSchema: z.ZodType<AgentHandle> = z.discriminatedUnion("phase", [
-  z.strictObject({
-    identity: identitySchema,
-    operation: startOperationSchema,
-    phase: z.literal("starting"),
-    target: startTargetSchema,
-  }),
-  z.strictObject({
-    address: addressSchema,
-    identity: identitySchema,
-    operation: z.discriminatedUnion("kind", [startOperationSchema, continueOperationSchema]),
-    phase: z.literal("running"),
-  }),
-  z.strictObject({
-    address: addressSchema,
-    identity: identitySchema,
-    lastStatus: z.string().max(MAX_STATUS_LENGTH),
-    phase: z.literal("parked"),
-  }),
-  z.strictObject({
-    address: addressSchema,
-    identity: identitySchema,
-    phase: z.literal("addressed"),
-  }),
-]);
+const agentHandleSchema: z.ZodType<AgentHandle> = z
+  .discriminatedUnion("phase", [
+    z.strictObject({
+      identity: identitySchema,
+      operation: startOperationSchema,
+      phase: z.literal("starting"),
+      target: startTargetSchema,
+    }),
+    z.strictObject({
+      address: addressSchema,
+      identity: identitySchema,
+      operation: z.discriminatedUnion("kind", [startOperationSchema, continueOperationSchema]),
+      phase: z.literal("running"),
+    }),
+    z.strictObject({
+      address: addressSchema,
+      identity: identitySchema,
+      lastStatus: z.string().max(MAX_STATUS_LENGTH),
+      phase: z.literal("parked"),
+    }),
+    z.strictObject({
+      address: addressSchema,
+      identity: identitySchema,
+      phase: z.literal("addressed"),
+    }),
+  ])
+  .transform((handle): AgentHandle => {
+    const target = handle.phase === "starting" ? handle.target : handle.address;
+    return {
+      ...handle,
+      identity: {
+        ...handle.identity,
+        execution:
+          handle.identity.execution ?? (handle.phase === "addressed" ? "background" : "blocking"),
+        targetKind:
+          handle.identity.targetKind ?? (target.kind === "agent/remote" ? "remote" : "local"),
+      },
+    };
+  });
 
 const agentHandleStoreSchema: z.ZodType<AgentHandleStore> = z
   .strictObject({

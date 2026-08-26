@@ -59,6 +59,7 @@ interface PendingRuntimeActionEventMetadata {
 export interface PendingRuntimeActionBatch {
   readonly actions: readonly RuntimeActionRequest[];
   readonly event: PendingRuntimeActionEventMetadata;
+  readonly localFanoutSize?: number;
   readonly responseMessages: readonly ModelMessage[];
 }
 
@@ -117,6 +118,7 @@ export function clearPendingRuntimeActionBatch(session: HarnessSession): Harness
 export function setPendingRuntimeActionBatch(input: {
   readonly actions: readonly RuntimeActionRequest[];
   readonly event: PendingRuntimeActionEventMetadata;
+  readonly localFanoutSize?: number;
   readonly responseMessages: readonly ModelMessage[];
   readonly session: HarnessSession;
 }): HarnessSession {
@@ -125,6 +127,9 @@ export function setPendingRuntimeActionBatch(input: {
   state[PENDING_RUNTIME_ACTION_BATCH_KEY] = {
     actions: [...input.actions],
     event: input.event,
+    ...(input.localFanoutSize === undefined || input.localFanoutSize === 0
+      ? {}
+      : { localFanoutSize: input.localFanoutSize }),
     responseMessages: [...input.responseMessages],
   } satisfies PendingRuntimeActionBatch;
 

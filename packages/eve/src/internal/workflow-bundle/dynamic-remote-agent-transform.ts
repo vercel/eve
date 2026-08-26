@@ -27,14 +27,15 @@ export async function transformDynamicRemoteAgentCredentials(
 ): Promise<{ code: string } | null> {
   if (
     !source.includes("defineDynamic") ||
-    !source.includes("defineRemoteAgent") ||
     (!source.includes("auth") && !source.includes("headers"))
   ) {
     return null;
   }
 
   const ast = (await parseWithNitroRolldownAst(filename, source)) as AstNode;
-  const factories = findCredentialsFactories(filename, source, ast);
+  const helpers = findRemoteHelpers(ast);
+  if (helpers.aliases.size === 0 && helpers.namespaces.size === 0) return null;
+  const factories = findCredentialsFactories(filename, source, ast, helpers);
   return factories.length === 0 ? null : applyTransform(source, factories);
 }
 
@@ -42,6 +43,7 @@ function findCredentialsFactories(
   filename: string,
   source: string,
   ast: AstNode,
+  helpers: RemoteHelperReferences,
 ): CredentialsFactoryInfo[] {
   const factories: CredentialsFactoryInfo[] = [];
   const moduleId = stableModuleId(filename);
@@ -49,8 +51,8 @@ function findCredentialsFactories(
   walkNode(ast, (node) => {
     if (
       node.type !== "CallExpression" ||
-      node.callee?.type !== "Identifier" ||
-      node.callee.name !== "defineRemoteAgent" ||
+      node.callee === undefined ||
+      !isRemoteHelperCall(node.callee, helpers) ||
       node.arguments?.length !== 1 ||
       node.start === undefined ||
       node.end === undefined
@@ -85,6 +87,55 @@ function findCredentialsFactories(
   });
 
   return factories;
+}
+
+interface RemoteHelperReferences {
+  readonly aliases: ReadonlySet<string>;
+  readonly namespaces: ReadonlySet<string>;
+}
+
+function findRemoteHelpers(ast: AstNode): RemoteHelperReferences {
+  const aliases = new Set<string>();
+  const namespaces = new Set<string>();
+  walkNode(ast, (node) => {
+    if (node.type !== "ImportDeclaration") return true;
+    const source = node.source?.value;
+    if (typeof source !== "string" || (source !== "eve" && !source.startsWith("eve/"))) {
+      return false;
+    }
+    for (const specifier of node.specifiers ?? []) {
+      const imported = specifier.imported?.name ?? specifier.imported?.value;
+      if (
+        specifier.type === "ImportSpecifier" &&
+        (imported === "defineRemoteAgent" || imported === "defineRemoteSubagent") &&
+        specifier.local?.name
+      ) {
+        aliases.add(specifier.local.name);
+      }
+      if (specifier.type === "ImportNamespaceSpecifier" && specifier.local?.name) {
+        namespaces.add(specifier.local.name);
+      }
+    }
+    return false;
+  });
+  return { aliases, namespaces };
+}
+
+function isRemoteHelperCall(callee: AstNode, helpers: RemoteHelperReferences): boolean {
+  if (callee.type === "Identifier") {
+    return callee.name !== undefined && helpers.aliases.has(callee.name);
+  }
+  if (
+    callee.type !== "MemberExpression" ||
+    callee.computed === true ||
+    callee.object?.type !== "Identifier" ||
+    callee.object.name === undefined ||
+    !helpers.namespaces.has(callee.object.name)
+  ) {
+    return false;
+  }
+  const property = callee.property?.name;
+  return property === "defineRemoteAgent" || property === "defineRemoteSubagent";
 }
 
 function applyTransform(

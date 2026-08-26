@@ -7,10 +7,12 @@ import { deriveAgentId, type AgentIdentity, type StartOperation } from "#harness
  */
 export function mintStartOperation(input: {
   readonly callId: string;
+  readonly execution?: "background" | "blocking";
   readonly name: string;
   readonly nodeId: string;
   readonly parentSessionId: string;
   readonly parentTurnId: string;
+  readonly targetKind?: "local" | "remote";
 }): { readonly identity: AgentIdentity; readonly operation: StartOperation } {
   const operationId = deriveAgentOperationId({
     callId: input.callId,
@@ -19,9 +21,11 @@ export function mintStartOperation(input: {
   });
   return {
     identity: {
+      execution: input.execution,
       id: deriveAgentId(input.name, operationId),
       name: input.name,
       nodeId: input.nodeId,
+      targetKind: input.targetKind,
     },
     operation: {
       callId: input.callId,

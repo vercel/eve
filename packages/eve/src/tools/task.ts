@@ -103,6 +103,16 @@ export interface TaskExec {
   }): TaskDelegated<TData>;
 }
 
+const taskExecLocalFanout = new WeakMap<TaskExec, number>();
+
+export function recordTaskExecLocalFanout(task: TaskExec, fanout: number): void {
+  taskExecLocalFanout.set(task, fanout);
+}
+
+export function readTaskExecLocalFanout(task: TaskExec): number | undefined {
+  return taskExecLocalFanout.get(task);
+}
+
 export function createTaskDelegated<TData extends JsonObject>(input: {
   readonly binding: TaskBinding;
   readonly executor: TaskExecutorBinding;

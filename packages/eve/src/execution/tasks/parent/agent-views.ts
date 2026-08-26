@@ -60,11 +60,28 @@ export async function appendTaskAgentAnnouncement(
   session: HarnessSession,
   messages: readonly ModelMessage[] = session.history,
 ): Promise<HarnessSession> {
-  const agentViews = await readTaskAgentViews(session);
+  const taskViews = await readTaskAgentViews(session);
+  const taskViewsById = new Map(taskViews.map((view) => [view.id, view]));
+  const store = getAgentHandleStore(session.state);
+  const agentViews = (store?.handles ?? []).flatMap((handle): AgentView[] => {
+    if (handle.phase === "addressed") {
+      const view = taskViewsById.get(handle.identity.id);
+      return view === undefined ? [] : [view];
+    }
+    if (handle.phase !== "parked") return [];
+    return [
+      {
+        availability: "available",
+        id: handle.identity.id,
+        name: handle.identity.name,
+        statusLine: handle.lastStatus,
+      },
+    ];
+  });
   const announcement = resolveAgentsAnnouncement({
     agentViews,
     messages,
-    store: getAgentHandleStore(session.state),
+    store,
   });
   return announcement === undefined
     ? session

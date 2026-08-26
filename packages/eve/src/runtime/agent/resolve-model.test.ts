@@ -7,6 +7,7 @@ import { ContextContainer } from "#context/container.js";
 import { RuntimeModelMetadataCacheKey } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { defineDynamic } from "#dynamic/definition.js";
+import { defineLocalSubagent } from "#public/definitions/agent.js";
 import type { RuntimeModelCatalog } from "#runtime/agent/model-catalog.js";
 import {
   loadDynamicRuntimeModelDefinition,
@@ -45,6 +46,71 @@ describe("dynamic runtime model resolution", () => {
     if (typeof model === "string") throw new Error("expected a mock model instance");
     expect(model.provider).toBe("eve-runtime-mock");
     expect(model.modelId).toBe("eve-mock/dynamic-subagent");
+  });
+
+  it("resolves a static source-backed model from defineLocalSubagent", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_MOCK_AUTHORED_MODELS", "");
+    const model = createLanguageModel("test", "blocking-worker");
+    const moduleMap = createModuleMap({
+      default: defineLocalSubagent({
+        background: false,
+        description: "Blocking worker.",
+        model,
+      }),
+    });
+
+    await expect(
+      resolveRuntimeModelReference(
+        { id: "catalog/canonical-blocking-worker", source: DYNAMIC_MODEL_SOURCE },
+        { moduleMap, nodeId: undefined },
+        "model",
+      ),
+    ).resolves.toBe(model);
+  });
+
+  it("loads a dynamic model from defineLocalSubagent", async () => {
+    const moduleMap = createModuleMap({
+      default: defineLocalSubagent({
+        background: true,
+        description: "Dynamic worker.",
+        model: defineDynamic({
+          events: { "session.started": () => "openai/gpt-5.5" },
+        }),
+      }),
+    });
+
+    const definition = await loadDynamicRuntimeModelDefinition({
+      dynamicModel: DYNAMIC_MODEL_SOURCE,
+      scope: { moduleMap, nodeId: undefined },
+    });
+
+    expect(definition.events["session.started"]).toBeTypeOf("function");
+  });
+
+  it("resolves a source-backed compaction model from defineLocalSubagent", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_MOCK_AUTHORED_MODELS", "");
+    const compactionModel = createLanguageModel("test", "summary-worker");
+    const moduleMap = createModuleMap({
+      default: defineLocalSubagent({
+        background: true,
+        compaction: { model: compactionModel },
+        description: "Background worker.",
+        model: "openai/gpt-5.5",
+      }),
+    });
+
+    await expect(
+      resolveRuntimeModelReference(
+        {
+          id: "catalog/canonical-summary-worker",
+          source: DYNAMIC_MODEL_SOURCE,
+        },
+        { moduleMap, nodeId: undefined },
+        "compaction",
+      ),
+    ).resolves.toBe(compactionModel);
   });
 
   it("loads resolver-only definitions and normalizes explicit metadata", async () => {

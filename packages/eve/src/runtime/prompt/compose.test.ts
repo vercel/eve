@@ -15,7 +15,7 @@ describe("composeRuntimeBasePrompt", () => {
   it("instructs task-mode parents to rely on notifications instead of polling", () => {
     const prompt = composeRuntimeBasePrompt({
       subagentsAvailable: true,
-      tasksEnabled: true,
+      subagentExecution: "background",
     });
 
     expect(prompt).toContainEqual(

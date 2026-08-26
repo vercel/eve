@@ -999,6 +999,68 @@ describe("createToolLoopHarness", () => {
     expect(registeredCallIds).toEqual(["call-a", "call-b"]);
   });
 
+  it("records local blocking and background subagents in one fanout batch", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const tools = new Map([
+      [
+        "blocking_child",
+        {
+          description: "Wait for a child.",
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "blocking_child",
+          runtimeAction: {
+            kind: "subagent-call" as const,
+            nodeId: "blocking-child",
+            subagentName: "blocking_child",
+          },
+          subagentKind: "local" as const,
+        },
+      ],
+      [
+        "background_child",
+        {
+          description: "Start a child task.",
+          execute: vi.fn(),
+          execution: "background" as const,
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "background_child",
+          subagentKind: "local" as const,
+        },
+      ],
+    ]);
+    const runStep = createToolLoopHarness(createTestConfig("conversation", undefined, { tools }));
+    await runStep(createTestSession(), { message: "Hi" });
+    const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+    const blocking = agentCall?.tools?.blocking_child as {
+      onInputAvailable?: (input: { input: unknown; toolCallId: string }) => void;
+    };
+    const background = agentCall?.tools?.background_child as {
+      execute?: (input: unknown, options: { toolCallId: string }) => Promise<unknown>;
+      onInputAvailable?: (input: { input: unknown; toolCallId: string }) => void;
+    };
+    blocking.onInputAvailable?.({ input: {}, toolCallId: "call-blocking" });
+    background.onInputAvailable?.({ input: {}, toolCallId: "call-background" });
+    let localFanout = 0;
+    const ctx = new ContextContainer();
+    ctx.set(BackgroundToolExecutorKey, {
+      async execute({ batch }) {
+        localFanout = batch.subagentCalls.filter((call) => call.kind === "local").length;
+        return { ok: true };
+      },
+    });
+    await contextStorage.run(ctx, () =>
+      background.execute?.({}, { toolCallId: "call-background" }),
+    );
+
+    expect(localFanout).toBe(2);
+  });
+
   it("announces parked agents as user-role content before the user message, outside the system prompt", async () => {
     setupMockAgent({
       finishReason: "stop",

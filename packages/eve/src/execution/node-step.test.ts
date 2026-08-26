@@ -374,6 +374,42 @@ describe("createNodeHarnessTools", () => {
     ).toBe(2);
   });
 
+  it("lowers explicit mixed subagent modes independently", async () => {
+    const tools = createNodeHarnessTools({
+      node: await createNodeWithSourceOwnedTools({
+        names: ["agent"],
+        tasks: true,
+        turnTools: [
+          {
+            description: "Wait for local research.",
+            execution: "blocking",
+            inputSchema: { type: "object" },
+            kind: "subagent",
+            logicalPath: "subagents/research",
+            name: "research",
+            nodeId: "subagents/research",
+            sourceId: "subagents/research",
+          },
+          {
+            description: "Start remote review.",
+            execution: "background",
+            inputSchema: { type: "object" },
+            kind: "remote",
+            logicalPath: "subagents/reviewer",
+            name: "reviewer",
+            nodeId: "subagents/reviewer",
+            sourceId: "subagents/reviewer",
+          },
+        ],
+      }),
+    });
+
+    expect(tools.get("research")?.runtimeAction?.kind).toBe("subagent-call");
+    expect(tools.get("research")?.execute).toBeUndefined();
+    expect(tools.get("reviewer")?.execution).toBe("background");
+    expect(tools.get("reviewer")?.runtimeAction).toBeUndefined();
+  });
+
   it("does not recreate task tools absent from the compiled graph", async () => {
     const tools = createNodeHarnessTools({
       node: await createNodeWithSourceOwnedTools({ names: ["task_update"], tasks: true }),
@@ -517,7 +553,7 @@ describe("createExecutionNodeStep", () => {
       actions: [
         {
           callId: "call-subagent-1",
-          description: "Delegate work to the child agent.",
+          description: expect.stringContaining("waits for the subagent"),
           input: { task: "Delegate this." },
           kind: "subagent-call",
           name: "child-agent",

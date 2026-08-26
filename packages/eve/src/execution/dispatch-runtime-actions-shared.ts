@@ -1,7 +1,6 @@
 /**
- * Machinery shared by the two runtime-action dispatch steps:
- * `dispatchRuntimeActionsStep` (plain mode) and `dispatchTaskStep`
- * (task mode). Both run the same preflight → plan → dispatch → emit
+ * Machinery shared by blocking and task-owned runtime-action dispatch.
+ * Both run the same preflight → plan → dispatch → emit
  * skeleton over one pending batch and differ only in the per-entry
  * delegation lifecycle, so planning, subagent starts, and the
  * replay-safe `subagent.called` emission tail live here.
@@ -93,9 +92,14 @@ export type DispatchPlanEntry =
       readonly action: RuntimeAgentHandleAction;
       readonly agentId: string;
       readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
+      readonly execution: "background" | "blocking";
     }
   | { readonly kind: "reject"; readonly result: RuntimeSubagentDispatchFailure }
-  | { readonly kind: "start"; readonly target: DispatchStartTarget }
+  | {
+      readonly execution: "background" | "blocking";
+      readonly kind: "start";
+      readonly target: DispatchStartTarget;
+    }
   | { readonly kind: "task-control"; readonly action: RuntimeToolCallActionRequest };
 
 export type DispatchStartTarget =
@@ -176,19 +180,23 @@ export async function prepareRuntimeActionDispatch(input: {
    * task-control plan entries. Only task mode plans them; in plain mode
    * those calls fail as unsupported batch actions.
    */
-  readonly taskControls: boolean;
+  readonly taskControls?: boolean;
 }): Promise<PreparedRuntimeActionDispatch | undefined> {
   const durableSession = await readDurableSession(input.sessionState);
   const batch = getPendingRuntimeActionBatch(durableSession.state);
 
   if (batch === undefined || batch.actions.length === 0) return undefined;
   const ctx = await deserializeContext(input.serializedContext);
+  const bundle = ctx.require(BundleKey);
   return await prepareActionDispatch({
     batch,
     ctx,
     durableSession,
     serializedContext: input.serializedContext,
-    taskControls: input.taskControls,
+    taskControls:
+      input.taskControls ??
+      bundle.graph?.root.tasksEnabled ??
+      bundle.resolvedAgent.config?.experimental?.tasks === true,
   });
 }
 
@@ -278,6 +286,7 @@ async function prepareActionDispatch(input: {
     channelMetadata: ctx.get(ChannelInstrumentationKey),
     fanoutSize:
       input.fanoutSize ??
+      batch.localFanoutSize ??
       plan.filter((entry) => entry.kind === "start" && entry.target.kind === "local").length,
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     parentTraceContext: readSessionTraceContext(input.serializedContext, session.sessionId),
@@ -425,6 +434,7 @@ function planDispatch(input: {
             action.kind === "remote-agent-call" && dynamicSubagentSelection?.kind === "remote"
               ? dynamicSubagentSelection.remoteAgent
               : undefined,
+          execution: resolveSubagentExecution(input.bundle, input.ctx, action.nodeId),
           kind: "resume",
         };
       }
@@ -513,6 +523,7 @@ function classifyFreshStart(input: {
             }
           : { outputSchema: input.bundle.turnAgent.outputSchema, type: "runtime" };
       return {
+        execution: resolveSubagentExecution(input.bundle, input.ctx, action.nodeId),
         kind: "start",
         target: {
           action,
@@ -524,6 +535,7 @@ function classifyFreshStart(input: {
     }
     case "remote-agent-call":
       return {
+        execution: resolveSubagentExecution(input.bundle, input.ctx, action.nodeId),
         kind: "start",
         target: {
           action,
@@ -537,6 +549,21 @@ function classifyFreshStart(input: {
     default:
       throw new Error(`Unsupported runtime action kind "${action.kind}" in workflow runtime.`);
   }
+}
+
+function resolveSubagentExecution(
+  bundle: CompiledBundle,
+  ctx: Parameters<typeof getDynamicSubagentSelection>[0],
+  nodeId: string,
+): "background" | "blocking" {
+  const dynamic = getDynamicSubagentSelection(ctx, nodeId);
+  const prepared =
+    dynamic?.prepared ?? bundle.subagentRegistry.subagentsByNodeId.get(nodeId)?.prepared;
+  if (prepared?.execution !== undefined) return prepared.execution;
+  return (bundle.graph?.root.tasksEnabled ??
+    bundle.resolvedAgent.config?.experimental?.tasks === true)
+    ? "background"
+    : "blocking";
 }
 
 /** Starts one planned fresh child against its local or remote target. */

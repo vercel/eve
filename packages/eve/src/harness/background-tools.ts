@@ -2,6 +2,8 @@ import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import type { TaskExec } from "#tools/task.js";
+import { getAgentHandleStore } from "#harness/handles/store.js";
+import type { HarnessSession } from "#harness/types.js";
 
 export interface BackgroundExecutableTool {
   readonly execute: (input: unknown, options: ToolExecuteOptions, task: TaskExec) => unknown;
@@ -16,12 +18,18 @@ export interface BackgroundToolCall {
 
 export interface BackgroundToolCallBatch {
   readonly calls: readonly BackgroundToolCall[];
+  readonly subagentCalls: readonly {
+    readonly callId: string;
+    readonly input: unknown;
+    readonly kind: "local" | "remote";
+  }[];
   register(call: {
     readonly callId: string;
     readonly input: unknown;
     readonly toolName: string;
   }): void;
   setTool(name: string, definition?: BackgroundExecutableTool): void;
+  setSubagent(name: string, kind?: "local" | "remote"): void;
 }
 
 export interface BackgroundToolExecutor {
@@ -51,9 +59,22 @@ export function createBackgroundToolCallBatch(): BackgroundToolCallBatch {
   const calls: BackgroundToolCall[] = [];
   const callsById = new Map<string, BackgroundToolCall>();
   const tools = new Map<string, BackgroundExecutableTool>();
+  const subagentCalls: Array<{
+    readonly callId: string;
+    readonly input: unknown;
+    readonly kind: "local" | "remote";
+  }> = [];
+  const subagentCallsById = new Set<string>();
+  const subagents = new Map<string, "local" | "remote">();
   return {
     calls,
+    subagentCalls,
     register(call) {
+      const subagentKind = subagents.get(call.toolName);
+      if (subagentKind !== undefined && !subagentCallsById.has(call.callId)) {
+        subagentCallsById.add(call.callId);
+        subagentCalls.push({ callId: call.callId, input: call.input, kind: subagentKind });
+      }
       const definition = tools.get(call.toolName);
       if (definition === undefined) return;
 
@@ -74,7 +95,28 @@ export function createBackgroundToolCallBatch(): BackgroundToolCallBatch {
         tools.set(name, definition);
       }
     },
+    setSubagent(name, kind) {
+      if (kind === undefined) subagents.delete(name);
+      else subagents.set(name, kind);
+    },
   };
+}
+
+export function countFreshLocalSubagentCalls(
+  batch: Pick<BackgroundToolCallBatch, "subagentCalls">,
+  session: HarnessSession,
+): number {
+  const knownIds = new Set(
+    (getAgentHandleStore(session.state)?.handles ?? []).map((handle) => handle.identity.id),
+  );
+  return batch.subagentCalls.filter((call) => {
+    if (call.kind !== "local") return false;
+    const agentId =
+      call.input !== null && typeof call.input === "object"
+        ? (call.input as { readonly agentId?: unknown }).agentId
+        : undefined;
+    return typeof agentId !== "string" || agentId.trim() === "" || !knownIds.has(agentId);
+  }).length;
 }
 
 export async function executeBackgroundToolCall(input: {

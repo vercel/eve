@@ -33,6 +33,8 @@ export default defineTool({
 | Helper                                                | Import from                                          | Authored at                                                                | Guide                                                  |
 | ----------------------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------ |
 | `defineAgent`                                         | `eve`                                                | `agent/agent.ts`                                                           | [agent.ts](../agent-config)                            |
+| `defineLocalSubagent`                                 | `eve`                                                | `agent/subagents/<id>/agent.ts`                                            | [Subagents](../subagents)                              |
+| `defineRemoteSubagent`                                | `eve`                                                | `agent/subagents/<id>.ts`                                                  | [Remote agents](../guides/remote-agents)               |
 | `defineTool`                                          | `eve/tools`                                          | `agent/tools/<name>.ts`                                                    | [Tools](../tools)                                      |
 | `defineDynamic`                                       | `eve`, `eve/tools`, `eve/skills`, `eve/instructions` | dynamic model or subagent `agent.ts`; `agent/{tools,skills,instructions}/` | [Dynamic capabilities](../guides/dynamic-capabilities) |
 | `defineMcpClientConnection`                           | `eve/connections`                                    | `agent/connections/<name>.ts`                                              | [MCP connections](../connections/mcp)                  |
@@ -46,7 +48,7 @@ export default defineTool({
 | `defineState`                                         | `eve/context`                                        | tools, hooks, lifecycle                                                    | [Session context](../guides/session-context)           |
 | `defineSandbox`                                       | `eve/sandbox`                                        | `agent/sandbox.ts`                                                         | [Sandbox](../sandbox)                                  |
 | `defineInstrumentation`                               | `eve/instrumentation`                                | `agent/instrumentation.ts`                                                 | [instrumentation.ts](../guides/instrumentation)        |
-| `defineRemoteAgent`                                   | `eve`                                                | `agent/subagents/<id>/agent.ts`                                            | [Remote agents](../guides/remote-agents)               |
+| `defineRemoteAgent`                                   | `eve`                                                | legacy remote subagent declarations                                        | [Remote agents](../guides/remote-agents)               |
 | `defineEval`                                          | `eve/evals`                                          | `evals/*.eval.ts`                                                          | [Evals](../evals/overview)                             |
 | `defineEvalConfig`                                    | `eve/evals`                                          | `evals/evals.config.ts`                                                    | [Evals](../evals/overview)                             |
 | `mockModel`                                           | `eve/evals`                                          | Deterministic fixture agent models                                         | [Evals](../evals/overview)                             |
@@ -54,7 +56,7 @@ export default defineTool({
 
 Tool-wide authoring helpers such as `defineTool`, `defineDynamic`, and `disableTool` come from `eve/tools`. Capability-specific definitions and helpers use their own subpaths (see [Built-in tools](../concepts/built-in-tools)): reusable definitions such as `bash` and `glob` come from `eve/tools/<name>`, `webSearch` comes from `eve/tools/web_search`, `experimental_workflow` comes from `eve/tools/workflow`, `sleep` comes from `eve/tools/sleep`, and approval policies and types come from `eve/tools/approval`. The route verbs `GET`/`HEAD`/`POST`/`PUT`/`PATCH`/`DELETE`/`OPTIONS`/`WS` plus `disableRoute` come from `eve/channels`, and the channel auth helpers `localDev`/`vercelOidc`/`placeholderAuth` come from `eve/channels/auth`.
 
-`AgentReasoningDefinition` is exported from `eve` for the top-level `defineAgent({ reasoning })` setting. `AgentLimitsDefinition` is exported for `defineAgent({ limits })`. `AgentWorkflowDefinition` and `AgentWorkflowWorldDefinition` are exported from `eve` for the `defineAgent({ experimental: { workflow } })` config shape. `ExperimentalWorkflowToolInput` is exported from `eve/tools/workflow`; `WebSearchToolInput` and `WebSearchProvider` are exported from `eve/tools/web_search`.
+`AgentReasoningDefinition` is exported from `eve` for the top-level `defineAgent({ reasoning })` setting. `AgentLimitsDefinition` is exported for `defineAgent({ limits })`. `LocalSubagentDefinition`, `LocalSubagentDefinitionInput`, `RemoteSubagentDefinition`, and `RemoteSubagentDefinitionInput` describe subagent-specific authoring. `AgentWorkflowDefinition` and `AgentWorkflowWorldDefinition` are exported from `eve` for the `defineAgent({ experimental: { workflow } })` config shape. `ExperimentalWorkflowToolInput` is exported from `eve/tools/workflow`; `WebSearchToolInput` and `WebSearchProvider` are exported from `eve/tools/web_search`.
 
 `defineInstructions` accepts `{ content: string, role?: "system" | "user" }`; omitted `role` means `"system"`. Its `eve/instructions` version of `defineDynamic` accepts only `session.started` and `turn.started` handlers returning `defineInstructions(...)` or `null`. The legacy `{ markdown: string }` definition remains available as a deprecated system-role form.
 
@@ -72,35 +74,35 @@ Tool-wide authoring helpers such as `defineTool`, `defineDynamic`, and `disableT
 
 ## Imports at a glance
 
-| Import                                                                      | Holds                                                                     |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `eve`                                                                       | `defineAgent`, `defineRemoteAgent`, `defineDynamic`, agent config types   |
-| `eve/tools`                                                                 | `defineTool`, `defineDynamic`, `disableTool`, generic tool types          |
-| `eve/tools/{bash,read_file,write_file,todo,web_fetch,load_skill,glob,grep}` | Individual reusable tool definitions                                      |
-| `eve/tools/approval`                                                        | Approval types and `always`, `once`, `never`                              |
-| `eve/tools/web_search`                                                      | Provider-managed `webSearch` configuration                                |
-| `eve/tools/workflow`                                                        | Experimental `Workflow` tool definition                                   |
-| `eve/tools/sleep`                                                           | Opt-in durable `sleep` tool                                               |
-| `eve/connections`                                                           | `defineMcpClientConnection`, `defineOpenAPIConnection`                    |
-| `eve/channels`                                                              | `defineChannel`, `disableRoute`, route verbs                              |
-| `eve/channels/eve`                                                          | `eveChannel`                                                              |
-| `eve/channels/auth`                                                         | `localDev`, `vercelOidc`, `placeholderAuth`                               |
-| `eve/channels/{slack,discord,teams,telegram,twilio,github}`                 | platform channel factories                                                |
-| `eve/hooks`                                                                 | `defineHook`                                                              |
-| `eve/schedules`                                                             | `defineSchedule`                                                          |
-| `eve/skills`                                                                | `defineSkill`, `defineDynamic`                                            |
-| `eve/instructions`                                                          | `defineInstructions`, `defineDynamic`                                     |
-| `eve/context`                                                               | `defineState`, session and state types                                    |
-| `eve/sandbox`                                                               | `defineSandbox`, backends                                                 |
-| `eve/instrumentation`                                                       | `defineInstrumentation`, `isChannel`                                      |
-| `eve/models/openai`                                                         | `chatgpt`, deprecated `experimental_chatgpt`                              |
-| `eve/evals`                                                                 | `defineEval`, `defineEvalConfig`, `mockModel`, eval types                 |
-| `eve/evals/expect`                                                          | `includes`, `equals`, `matches`, `similarity`                             |
-| `eve/evals/reporters`                                                       | `Braintrust`, `JUnit`, `EvalReporter`                                     |
-| `eve/evals/loaders`                                                         | `loadJson`, `loadYaml`                                                    |
-| `eve/react`, `eve/vue`, `eve/svelte`                                        | `useEveAgent`                                                             |
-| `eve/next`, `eve/nuxt`, `eve/sveltekit`                                     | framework bundler plugins                                                 |
-| [`eve/client`](../guides/client/overview)                                   | `Client`, `ClientSession`, health and agent-info schemas, response errors |
+| Import                                                                      | Holds                                                                                                          |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `eve`                                                                       | `defineAgent`, `defineLocalSubagent`, `defineRemoteSubagent`, `defineDynamic`, agent and subagent config types |
+| `eve/tools`                                                                 | `defineTool`, `defineDynamic`, `disableTool`, generic tool types                                               |
+| `eve/tools/{bash,read_file,write_file,todo,web_fetch,load_skill,glob,grep}` | Individual reusable tool definitions                                                                           |
+| `eve/tools/approval`                                                        | Approval types and `always`, `once`, `never`                                                                   |
+| `eve/tools/web_search`                                                      | Provider-managed `webSearch` configuration                                                                     |
+| `eve/tools/workflow`                                                        | Experimental `Workflow` tool definition                                                                        |
+| `eve/tools/sleep`                                                           | Opt-in durable `sleep` tool                                                                                    |
+| `eve/connections`                                                           | `defineMcpClientConnection`, `defineOpenAPIConnection`                                                         |
+| `eve/channels`                                                              | `defineChannel`, `disableRoute`, route verbs                                                                   |
+| `eve/channels/eve`                                                          | `eveChannel`                                                                                                   |
+| `eve/channels/auth`                                                         | `localDev`, `vercelOidc`, `placeholderAuth`                                                                    |
+| `eve/channels/{slack,discord,teams,telegram,twilio,github}`                 | platform channel factories                                                                                     |
+| `eve/hooks`                                                                 | `defineHook`                                                                                                   |
+| `eve/schedules`                                                             | `defineSchedule`                                                                                               |
+| `eve/skills`                                                                | `defineSkill`, `defineDynamic`                                                                                 |
+| `eve/instructions`                                                          | `defineInstructions`, `defineDynamic`                                                                          |
+| `eve/context`                                                               | `defineState`, session and state types                                                                         |
+| `eve/sandbox`                                                               | `defineSandbox`, backends                                                                                      |
+| `eve/instrumentation`                                                       | `defineInstrumentation`, `isChannel`                                                                           |
+| `eve/models/openai`                                                         | `chatgpt`, deprecated `experimental_chatgpt`                                                                   |
+| `eve/evals`                                                                 | `defineEval`, `defineEvalConfig`, `mockModel`, eval types                                                      |
+| `eve/evals/expect`                                                          | `includes`, `equals`, `matches`, `similarity`                                                                  |
+| `eve/evals/reporters`                                                       | `Braintrust`, `JUnit`, `EvalReporter`                                                                          |
+| `eve/evals/loaders`                                                         | `loadJson`, `loadYaml`                                                                                         |
+| `eve/react`, `eve/vue`, `eve/svelte`                                        | `useEveAgent`                                                                                                  |
+| `eve/next`, `eve/nuxt`, `eve/sveltekit`                                     | framework bundler plugins                                                                                      |
+| [`eve/client`](../guides/client/overview)                                   | `Client`, `ClientSession`, health and agent-info schemas, response errors                                      |
 
 Exported types ship from the same entrypoint as the helper they describe (for example `ToolDefinition` and `ToolContext` from `eve/tools`). The `exports` field in `packages/eve/package.json` lists every public entrypoint.
 

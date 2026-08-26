@@ -90,6 +90,8 @@ export function createSubagentExecutorBinding(executor: SubagentExecutorData): T
   return {
     data: {
       address: { ...address },
+      // Keep this byte-compatible with already-bound tasks. Handle commit
+      // infers background execution and target kind from the task/address.
       identity: { id: identity.id, name: identity.name, nodeId: identity.nodeId },
     },
     kind: "subagent",
@@ -108,10 +110,20 @@ export function readSubagentExecutor(
 
 function readAgentIdentity(value: JsonValue | undefined): AgentIdentity | undefined {
   if (value === undefined || !isJsonObjectValue(value)) return undefined;
-  const { id, name, nodeId } = value;
-  return typeof id === "string" && typeof name === "string" && typeof nodeId === "string"
-    ? { id, name, nodeId }
-    : undefined;
+  const { execution, id, name, nodeId, targetKind } = value;
+  if (typeof id !== "string" || typeof name !== "string" || typeof nodeId !== "string") {
+    return undefined;
+  }
+  const identity: {
+    execution?: "background" | "blocking";
+    id: string;
+    name: string;
+    nodeId: string;
+    targetKind?: "local" | "remote";
+  } = { id, name, nodeId };
+  if (execution === "background" || execution === "blocking") identity.execution = execution;
+  if (targetKind === "local" || targetKind === "remote") identity.targetKind = targetKind;
+  return identity;
 }
 
 function readAgentAddress(value: JsonValue | undefined): AgentAddress | undefined {

@@ -6,13 +6,10 @@
  * The batch is classified into a dispatch plan first (reject / resume /
  * start), then each entry dispatches and emits one
  * parent `subagent.called` control-plane event through a single tail.
- * Every start commits an agent handle (`starting`) before its side effect
- * and confirms it (`running`) once the child reports coordinates, so the
- * returned snapshot-bearing state owns every child it may have created.
- *
- * Agents running `experimental.tasks` never reach this step: the turn
- * workflow selects `dispatchTaskStep`, the task-mode sibling that wraps
- * each dispatch in the delegated-task lifecycle.
+ * Every start commits an agent handle (`starting`) before its side effect.
+ * Blocking entries confirm it as `running`; task controls and legacy
+ * background entries route through task ownership. New background subagents
+ * execute before the parent reaches this parked runtime-action batch.
  */
 
 import { type DispatchOutcome, dispatchToAgentHandle } from "#execution/agent-handle-dispatch.js";
@@ -25,6 +22,7 @@ import {
   startSubagent,
 } from "#execution/dispatch-runtime-actions-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
+import { dispatchPreparedTaskActions } from "#execution/tasks/parent/dispatch-task-step.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
 export async function dispatchRuntimeActionsStep(
@@ -35,10 +33,20 @@ export async function dispatchRuntimeActionsStep(
   const prepared = await prepareRuntimeActionDispatch({
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,
-    taskControls: false,
   });
   if (prepared === undefined) {
     return { results: [], sessionState: input.sessionState, pendingTasks: [] };
+  }
+
+  // New background subagents execute before this park. Background plan entries
+  // remain possible when resuming a batch persisted by an older deployment.
+  if (
+    prepared.plan.some(
+      (entry) =>
+        entry.kind === "task-control" || ("execution" in entry && entry.execution === "background"),
+    )
+  ) {
+    return dispatchPreparedTaskActions(input, prepared);
   }
 
   const { batch, bundle, session } = prepared;

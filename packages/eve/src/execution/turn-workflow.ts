@@ -11,7 +11,6 @@ import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-st
 import { sendTurnControlStep, type TurnInboxPayload } from "#execution/turn-control-protocol.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
-import { dispatchTaskStep } from "#execution/tasks/parent/dispatch-task-step.js";
 import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
 import {
   migrateTurnWorkflowInput,
@@ -193,12 +192,9 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       // runs `experimental.tasks`.
       if (pendingActionKeys !== undefined) {
         await cursor.adopt(result);
-        const hasPendingTasks = result.action === "park" && result.tasksEnabled;
         let dispatch;
         if (result.action === "dispatch-workflow-runtime-actions") {
           dispatch = dispatchWorkflowRuntimeActionsStep;
-        } else if (hasPendingTasks) {
-          dispatch = dispatchTaskStep;
         } else {
           dispatch = dispatchRuntimeActionsStep;
         }

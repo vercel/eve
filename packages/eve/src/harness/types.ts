@@ -337,7 +337,10 @@ export interface ToolLoopHarnessConfig {
     readonly event: UnstampedMessageStreamEvent;
     readonly messages: readonly ModelMessage[];
   }) => Promise<void>;
-  readonly resolveModel: (reference: RuntimeModelReference) => Promise<LanguageModel>;
+  readonly resolveModel: (
+    reference: RuntimeModelReference,
+    sourceSlot?: "compaction" | "model",
+  ) => Promise<LanguageModel>;
   /**
    * Runtime identity metadata attached to the `session.started` event.
    *

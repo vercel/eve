@@ -10,6 +10,7 @@ import { isTurnCancellation } from "#harness/turn-cancellation.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import {
   BackgroundToolExecutorKey,
+  countFreshLocalSubagentCalls,
   type BackgroundExecutableTool,
   type BackgroundToolCallBatch,
   type BackgroundToolExecutor,
@@ -21,6 +22,7 @@ import type { ToolExecuteOptions } from "#tools/definition.js";
 import {
   createTaskDelegated,
   isTaskDelegated,
+  recordTaskExecLocalFanout,
   type TaskExec,
   type TaskSendCommand,
 } from "#tools/task.js";
@@ -250,6 +252,10 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       session: this.initialSession,
       task,
     };
+    recordTaskExecLocalFanout(
+      taskExec,
+      countFreshLocalSubagentCalls(input.batch, this.initialSession),
+    );
 
     const output = input.definition.execute(input.toolInput, input.options, taskExec);
     if (isAsyncIterable(output)) {

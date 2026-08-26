@@ -55,7 +55,7 @@ describe("createRuntimeSubagentRegistry", () => {
 
     expect(registry.preparedTools).toMatchObject([
       {
-        description: "Investigate one task in depth.",
+        description: expect.stringContaining("Investigate one task in depth."),
         inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
         kind: "subagent",
         logicalPath: "subagents/researcher",
@@ -64,7 +64,7 @@ describe("createRuntimeSubagentRegistry", () => {
         sourceId: "subagents/researcher",
       },
       {
-        description: "Review one draft for clarity.",
+        description: expect.stringContaining("Review one draft for clarity."),
         inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
         kind: "subagent",
         logicalPath: "subagents/reviewer",

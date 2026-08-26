@@ -231,7 +231,10 @@ import {
   getRegisteredTelemetryIntegrations,
 } from "#harness/ai-sdk-telemetry.js";
 import { getAdvertisedTools } from "#harness/advertised-tools.js";
-import { createBackgroundToolCallBatch } from "#harness/background-tools.js";
+import {
+  countFreshLocalSubagentCalls,
+  createBackgroundToolCallBatch,
+} from "#harness/background-tools.js";
 import {
   applyLastToolCacheBreakpoint,
   applySystemCacheBreakpoint,
@@ -437,7 +440,7 @@ async function resolveActiveRuntimeModel(input: {
       throw new Error("Dynamic model selection is unavailable outside an eve runtime context.");
     }
     return {
-      model: await input.config.resolveModel(reference),
+      model: await resolvePrimaryRuntimeModel(input.config, reference),
       session: input.session,
     };
   }
@@ -452,7 +455,7 @@ async function resolveActiveRuntimeModel(input: {
       );
     }
     return {
-      model: await input.config.resolveModel(reference),
+      model: await resolvePrimaryRuntimeModel(input.config, reference),
       session: input.session,
     };
   }
@@ -461,9 +464,18 @@ async function resolveActiveRuntimeModel(input: {
     model:
       selected.model !== undefined
         ? selected.model
-        : await input.config.resolveModel(selected.reference),
+        : await resolvePrimaryRuntimeModel(input.config, selected.reference),
     session: updateSessionModelReference(input.session, selected.reference),
   };
+}
+
+function resolvePrimaryRuntimeModel(
+  config: ToolLoopHarnessConfig,
+  reference: RuntimeModelReference,
+): Promise<LanguageModel> {
+  return reference.source === undefined
+    ? config.resolveModel(reference)
+    : config.resolveModel(reference, "model");
 }
 
 function updateSessionModelReference(
@@ -1455,6 +1467,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       trailingUserNote?: string;
     };
     let modelCallRuntimeActionTools = config.tools;
+    let modelCallBackgroundBatch = createBackgroundToolCallBatch();
 
     const runSingleModelCall = async (
       opts: ModelCallOptions & { readonly attemptIndex: number },
@@ -1475,6 +1488,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         : modelMessages;
       const harnessTools = buildHarnessToolsWithDynamicSubagents(config.tools, ctx);
       const backgroundBatch = createBackgroundToolCallBatch();
+      modelCallBackgroundBatch = backgroundBatch;
       const advertisedHarnessTools = getAdvertisedTools({
         delegatedCaller: taskUpdatesEnabled,
         session,
@@ -2039,6 +2053,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       runStep,
       session,
       runtimeActionTools: modelCallRuntimeActionTools,
+      localFanoutSize: countFreshLocalSubagentCalls(modelCallBackgroundBatch, session),
     });
   }
 
@@ -2578,6 +2593,7 @@ async function handleStepResult(input: {
   readonly result: HarnessStepResult;
   readonly runStep: StepFn;
   readonly runtimeActionTools: HarnessToolMap;
+  readonly localFanoutSize: number;
   readonly session: HarnessSession;
 }): Promise<StepResult> {
   const { config, emit, promptMessages, result, runStep } = input;
@@ -2718,6 +2734,7 @@ async function handleStepResult(input: {
               stepIndex: emissionState.stepIndex,
               turnId: emissionState.turnId,
             },
+            localFanoutSize: input.localFanoutSize,
             responseMessages,
             session: { ...baseSession, history: [...promptMessages] },
           }),
@@ -2733,6 +2750,7 @@ async function handleStepResult(input: {
         stepIndex: emissionState.stepIndex,
         turnId: emissionState.turnId,
       },
+      localFanoutSize: input.localFanoutSize,
       responseMessages,
       session: { ...baseSession, history: parkedInputHistory },
     });

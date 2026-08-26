@@ -2,6 +2,7 @@ import { type AlsContext, loadContext } from "#context/container.js";
 import { HandleEventKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
 import {
+  createTaskAgentContinuationMismatch,
   dispatchToTaskAgentAddress,
   type DispatchOutcome,
   type RuntimeSession,
@@ -22,6 +23,7 @@ import type { BackgroundTask } from "#execution/tasks/parent/delegate.js";
 import { CallbackBaseUrlKey } from "#harness/authorization.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import { defineTool, type TaskExec, type ToolContext } from "#tools/definition.js";
+import { readTaskExecLocalFanout } from "#tools/task.js";
 import type {
   RuntimeRemoteAgentCallActionRequest,
   RuntimeSubagentCallActionRequest,
@@ -89,10 +91,16 @@ export function registerLocalSubagentExecutor(execute: object): void {
   localSubagentExecutors.add(execute);
 }
 
+export function isLocalSubagentCall(call: {
+  readonly definition: { readonly execute: object };
+}): boolean {
+  return localSubagentExecutors.has(call.definition.execute);
+}
+
 export function countLocalSubagentCalls(
   calls: readonly { readonly definition: { readonly execute: object } }[],
 ): number {
-  return calls.filter((call) => localSubagentExecutors.has(call.definition.execute)).length;
+  return calls.filter(isLocalSubagentCall).length;
 }
 
 export async function executeSubagentTool(input: {
@@ -130,7 +138,7 @@ export async function executeSubagentTool(input: {
     callbackBaseUrl: ctx.get(CallbackBaseUrlKey),
     ctx,
     event: { ...emission, turnId: activeTurnId(emission) },
-    localFanoutSize: countLocalSubagentCalls(batch),
+    localFanoutSize: readTaskExecLocalFanout(input.task) ?? countLocalSubagentCalls(batch),
     serializedContext: serializeContext(ctx),
     sessionState: createDurableSessionState({ session }),
     task,
@@ -193,6 +201,13 @@ async function dispatchSubagent(input: SubagentDispatchInput): Promise<SubagentD
   }
 
   if (entry.kind === "resume") {
+    const mismatch = createTaskAgentContinuationMismatch({
+      action: entry.action,
+      agentId: entry.agentId,
+      currentSession: prepared.session,
+    });
+    if (mismatch !== undefined) throw new Error(JSON.stringify(mismatch.output));
+
     const busy = await checkTaskContinuationAvailability({
       action: entry.action,
       agentId: entry.agentId,

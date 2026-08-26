@@ -84,7 +84,9 @@ export async function resolveCompactionModel(input: {
 }> {
   const reference = input.compactionModelReference ?? input.modelReference;
   const model =
-    reference === input.modelReference ? input.model : await input.resolveModel(reference);
+    reference === input.modelReference
+      ? input.model
+      : await input.resolveModel(reference, "compaction");
 
   return {
     model,

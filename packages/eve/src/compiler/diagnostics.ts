@@ -66,6 +66,19 @@ export function createChannelRouteShadowedDiagnostic(input: {
   };
 }
 
+export function createLegacySubagentDefinitionDiagnostic(input: {
+  readonly logicalPath: string;
+  readonly nodeId: string;
+  readonly sourceId: string;
+}): CompilerDiagnostic {
+  return {
+    code: "compile/subagent-legacy-definition",
+    message: `Subagent "${input.logicalPath}" uses a legacy agent helper. Replace it with defineLocalSubagent(...) or defineRemoteSubagent(...) and choose background explicitly.`,
+    severity: "warning",
+    sources: [{ logicalPath: input.logicalPath, nodeId: input.nodeId, sourceId: input.sourceId }],
+  };
+}
+
 export function summarizeCompilerDiagnostics(
   diagnostics: readonly CompilerDiagnostic[],
 ): DiscoverDiagnosticsSummary {

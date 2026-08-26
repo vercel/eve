@@ -19,12 +19,13 @@ import { createLogger } from "#internal/logging.js";
 import type { SessionStartedStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ResolvedDynamicSubagentResolver } from "#runtime/subagents/registry.js";
 import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.js";
-import { normalizeDynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
-import { normalizeDynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
+import { normalizeDynamicLocalSubagentSelection } from "#runtime/subagents/dynamic-agent-config.js";
+import { normalizeDynamicRemoteSubagentSelection } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 const log = createLogger("dynamic-subagents");
 const ALLOWED_DYNAMIC_SUBAGENT_EVENTS = new Set(["session.started", "turn.started"]);
+const warnedLegacySelections = new Set<string>();
 
 type DynamicSubagentSelections = Readonly<Record<string, DurableDynamicSubagentSelection>>;
 
@@ -46,41 +47,54 @@ async function resolveSelections(input: {
         return [resolver.nodeId, null] as const;
       }
       if (isRemoteAgentDefinition(result)) {
-        const remoteAgent = await normalizeDynamicRemoteAgentConfig({
+        const selection = await normalizeDynamicRemoteSubagentSelection({
           name: resolver.name,
           value: result,
         });
-        const prepared = createPreparedRuntimeSubagentTool({
-          description: remoteAgent.description,
-          kind: "remote",
-          logicalPath: resolver.logicalPath,
-          name: resolver.name,
-          nodeId: resolver.nodeId,
-          outputSchema: remoteAgent.outputSchema,
-          path: remoteAgent.path,
-          sourceId: resolver.sourceId,
-          sourceKind: resolver.sourceKind,
-          url: remoteAgent.url,
-        });
+        warnLegacyDynamicSelection(selection.execution, resolver);
+        assertBackgroundSelectionAllowed(selection.execution, input.ctx, resolver.name);
+        const remoteAgent = selection.config;
+        const prepared = createPreparedRuntimeSubagentTool(
+          {
+            description: remoteAgent.description,
+            kind: "remote",
+            logicalPath: resolver.logicalPath,
+            name: resolver.name,
+            nodeId: resolver.nodeId,
+            outputSchema: remoteAgent.outputSchema,
+            path: remoteAgent.path,
+            sourceId: resolver.sourceId,
+            sourceKind: resolver.sourceKind,
+            url: remoteAgent.url,
+          },
+          undefined,
+          selection.execution ?? legacyExecution(input.ctx),
+        );
 
         return [resolver.nodeId, { kind: "remote", prepared, remoteAgent }] as const;
       }
 
-      const agentConfig = normalizeDynamicSubagentAgentConfig({
+      const selection = await normalizeDynamicLocalSubagentSelection({
         name: resolver.name,
         state: input.ctx,
         value: result,
       });
-      const resolvedAgentConfig = await agentConfig;
-      const prepared = createPreparedRuntimeSubagentTool({
-        description: resolvedAgentConfig.description,
-        kind: "subagent",
-        logicalPath: resolver.logicalPath,
-        name: resolver.name,
-        nodeId: resolver.nodeId,
-        sourceId: resolver.sourceId,
-        sourceKind: resolver.sourceKind,
-      });
+      warnLegacyDynamicSelection(selection.execution, resolver);
+      assertBackgroundSelectionAllowed(selection.execution, input.ctx, resolver.name);
+      const resolvedAgentConfig = selection.config;
+      const prepared = createPreparedRuntimeSubagentTool(
+        {
+          description: resolvedAgentConfig.description,
+          kind: "subagent",
+          logicalPath: resolver.logicalPath,
+          name: resolver.name,
+          nodeId: resolver.nodeId,
+          sourceId: resolver.sourceId,
+          sourceKind: resolver.sourceKind,
+        },
+        undefined,
+        selection.execution ?? legacyExecution(input.ctx),
+      );
 
       return [
         resolver.nodeId,
@@ -107,12 +121,41 @@ async function resolveSelections(input: {
   return selections;
 }
 
+function warnLegacyDynamicSelection(
+  execution: "background" | "blocking" | undefined,
+  resolver: ResolvedDynamicSubagentResolver,
+): void {
+  if (execution !== undefined || warnedLegacySelections.has(resolver.sourceId)) return;
+  warnedLegacySelections.add(resolver.sourceId);
+  log.warn(
+    `Dynamic subagent "${resolver.name}" selected a legacy agent definition. Return defineLocalSubagent(...) or defineRemoteSubagent(...) and choose background explicitly.`,
+    { sourceId: resolver.sourceId, subagentName: resolver.name },
+  );
+}
+
 function isRemoteAgentDefinition(value: unknown): boolean {
   return (
     typeof value === "object" &&
     value !== null &&
-    (value as { readonly kind?: unknown }).kind === "remote"
+    ((value as { readonly kind?: unknown }).kind === "remote" ||
+      (value as { readonly kind?: unknown }).kind === "eve:remote-subagent")
   );
+}
+
+function legacyExecution(ctx: ContextReader): "background" | "blocking" {
+  return ctx.get(TasksEnabledKey) === true ? "background" : "blocking";
+}
+
+function assertBackgroundSelectionAllowed(
+  execution: "background" | "blocking" | undefined,
+  ctx: ContextReader,
+  name: string,
+): void {
+  if (execution === "background" && ctx.get(TasksEnabledKey) !== true) {
+    throw new Error(
+      `Dynamic background subagent "${name}" requires experimental.tasks: true in the root agent config.`,
+    );
+  }
 }
 
 export async function dispatchDynamicSubagentEvent(input: {
@@ -173,8 +216,9 @@ export function buildDynamicSubagentTools(input: ContextReader): readonly Harnes
       );
     }
     names.add(selection.prepared.name);
+    const execution = selection.prepared.execution ?? legacyExecution(input);
     tools.push(
-      input.get(TasksEnabledKey) === true
+      execution === "background"
         ? createBackgroundSubagentHarnessDefinition(selection.prepared)
         : createHarnessDelegationToolDefinition(selection.prepared),
     );

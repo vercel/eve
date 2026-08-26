@@ -81,7 +81,7 @@ describe("compileFromMemory", () => {
     expect(manifest.bindings[skill!.sourceId]?.owner).toEqual({ kind: "application" });
   });
 
-  it("preserves roots and passes the serialized v43 schema", async () => {
+  it("preserves roots and passes the serialized v44 schema", async () => {
     const { manifest } = await compileFromMemory({
       agentRoot: "/app/agent",
       appRoot: "/app",

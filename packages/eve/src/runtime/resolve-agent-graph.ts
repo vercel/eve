@@ -92,6 +92,7 @@ export async function resolveRuntimeAgentGraph(
     nodeId: ROOT_COMPILED_AGENT_NODE_ID,
     nodesByNodeId,
     subagentNodesById,
+    tasksEnabled: input.manifest.config.experimental?.tasks === true,
   });
   attachInheritedSandboxWorkspaceResources({
     manifest: input.manifest,
@@ -113,6 +114,7 @@ interface ResolveRuntimeAgentNodeInput {
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
   readonly sourceId?: string;
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
+  readonly tasksEnabled: boolean;
 }
 
 async function resolveRuntimeAgentNode(
@@ -158,7 +160,9 @@ async function resolveRuntimeAgentNode(
       nodesByNodeId: input.nodesByNodeId,
       parentNodeId: input.nodeId,
       subagentNodesById: input.subagentNodesById,
+      tasksEnabled: input.tasksEnabled,
     }),
+    tasksEnabled: input.tasksEnabled,
   });
   const node: ResolvedAgentGraphBundle["root"] = {
     agent,
@@ -168,11 +172,14 @@ async function resolveRuntimeAgentNode(
     sandboxRegistry,
     sourceId: input.sourceId,
     subagentRegistry,
+    tasksEnabled: input.tasksEnabled,
     toolRegistry,
     turnAgent: createResolvedRuntimeTurnAgent({
       agent,
+      dynamicSubagentsAvailable: subagentRegistry.dynamicResolvers.length > 0,
       id: input.agentId,
       nodeId,
+      tasksEnabled: input.tasksEnabled,
       tools: [...toolRegistry.preparedTools, ...subagentRegistry.preparedTools],
     }),
   };
@@ -189,6 +196,7 @@ async function resolveRuntimeSubagents(input: {
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
   readonly parentNodeId: string;
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
+  readonly tasksEnabled: boolean;
 }): Promise<readonly ResolvedRuntimeDelegationNode[]> {
   const resolvedSubagents: ResolvedRuntimeDelegationNode[] = [];
   const childNodeIds = input.childNodeIdsByParentNodeId.get(input.parentNodeId) ?? [];
@@ -213,6 +221,7 @@ async function resolveRuntimeSubagents(input: {
         nodesByNodeId: input.nodesByNodeId,
         sourceRef,
         subagentNodesById: input.subagentNodesById,
+        tasksEnabled: input.tasksEnabled,
       }),
     );
   }
@@ -236,6 +245,7 @@ async function resolveRuntimeSubagent(input: {
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
   readonly sourceRef: CompiledSubagentNode;
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
+  readonly tasksEnabled: boolean;
 }): Promise<ResolvedRuntimeSubagentNode> {
   const variant:
     | { readonly description: string; readonly dynamic?: never }
@@ -251,6 +261,7 @@ async function resolveRuntimeSubagent(input: {
         };
   const resolvedSubagent: ResolvedRuntimeSubagentNode = {
     ...variant,
+    execution: input.sourceRef.execution,
     kind: "subagent",
     logicalPath: input.sourceRef.logicalPath,
     name: input.sourceRef.name,
@@ -267,6 +278,7 @@ async function resolveRuntimeSubagent(input: {
     nodesByNodeId: input.nodesByNodeId,
     sourceId: input.sourceRef.sourceId,
     subagentNodesById: input.subagentNodesById,
+    tasksEnabled: input.tasksEnabled,
   });
 
   return resolvedSubagent;
@@ -291,6 +303,7 @@ async function resolveRuntimeRemoteAgent(input: {
   const resolvedRemoteAgent: {
     auth?: ResolvedRuntimeRemoteAgentNode["auth"];
     description: string;
+    execution?: "background" | "blocking";
     forwardPrincipal?: boolean;
     headers?: HeadersValue;
     kind: "remote";
@@ -304,6 +317,7 @@ async function resolveRuntimeRemoteAgent(input: {
     url: string;
   } = {
     description: input.sourceRef.description,
+    execution: input.sourceRef.execution,
     kind: "remote",
     logicalPath: input.sourceRef.logicalPath,
     name: input.sourceRef.name,

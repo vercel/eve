@@ -4,7 +4,10 @@ import type {
   PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
-import type { RemoteAgentDefinition } from "#public/definitions/remote-agent.js";
+import type {
+  RemoteAgentDefinition,
+  RemoteSubagentDefinition,
+} from "#public/definitions/remote-agent.js";
 import { defineDynamic as defineDynamicBase } from "#dynamic/definition.js";
 import type { DynamicEvents, DynamicSentinel } from "#dynamic/definition.js";
 
@@ -54,8 +57,33 @@ export type DynamicLocalSubagentDefinition = Extract<
   { readonly model: PublicAgentStaticModelDefinition }
 > & { readonly description: string };
 
+/** Local subagent definition with parent-owned execution policy. */
+type WithLocalSubagentPolicy<T> = T extends AgentDefinition
+  ? T & {
+      /** Runs this subagent as a durable background task. @default false */
+      readonly background?: boolean;
+      readonly description: string;
+      readonly kind: "eve:local-subagent";
+    }
+  : never;
+
+type WithoutDefinitionKind<T> = T extends unknown ? Omit<T, "kind"> : never;
+
+export type LocalSubagentDefinition = WithLocalSubagentPolicy<AgentDefinition>;
+
+type DynamicLocalSubagentSelectionDefinition = WithLocalSubagentPolicy<
+  Extract<AgentDefinition, { readonly model: PublicAgentStaticModelDefinition }>
+>;
+
+/** Authored input accepted by {@link defineLocalSubagent}. */
+export type LocalSubagentDefinitionInput = WithoutDefinitionKind<LocalSubagentDefinition>;
+
 /** Definition a dynamic subagent resolver may select at runtime. */
-export type DynamicSubagentDefinition = DynamicLocalSubagentDefinition | RemoteAgentDefinition;
+export type DynamicSubagentDefinition =
+  | DynamicLocalSubagentDefinition
+  | DynamicLocalSubagentSelectionDefinition
+  | RemoteAgentDefinition
+  | RemoteSubagentDefinition;
 
 type DynamicEventHandler<TEvents extends DynamicEvents> = Extract<
   NonNullable<TEvents[keyof TEvents]>,
@@ -69,7 +97,12 @@ type DynamicSubagentDescriptionConstraint<TEvents extends DynamicEvents> =
     Extract<DynamicEventResult<TEvents>, DefinedAgent>,
     DynamicLocalSubagentDefinition
   > extends never
-    ? unknown
+    ? Exclude<
+        Extract<DynamicEventResult<TEvents>, LocalSubagentDefinition>,
+        DynamicLocalSubagentSelectionDefinition
+      > extends never
+      ? unknown
+      : { readonly "Dynamic subagent definitions require a static model": never }
     : { readonly "Dynamic subagent definitions require a description": never };
 
 interface DefineDynamicAgent {
@@ -108,4 +141,17 @@ export function defineAgent<TAgent extends AgentDefinition>(
 ): DefinedAgent<TAgent>;
 export function defineAgent(definition: AgentDefinition): AgentDefinition {
   return definition;
+}
+
+/**
+ * Defines a local subagent. Set `background: true` to return a durable task
+ * receipt instead of waiting for the child result.
+ */
+export function defineLocalSubagent<const TAgent extends LocalSubagentDefinitionInput>(
+  definition: ExactDefinition<TAgent, LocalSubagentDefinitionInput>,
+): TAgent & { readonly kind: "eve:local-subagent" };
+export function defineLocalSubagent(
+  definition: LocalSubagentDefinitionInput,
+): LocalSubagentDefinition {
+  return { ...definition, kind: "eve:local-subagent" } as LocalSubagentDefinition;
 }

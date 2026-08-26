@@ -14,7 +14,6 @@ import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
 import {
   getAgentHandleStore,
   type AgentAddress,
-  type AgentHandle,
   type AgentIdentity,
   type ContinueOperation,
 } from "#harness/handles/store.js";
@@ -112,6 +111,7 @@ export async function dispatchToAgentHandle(input: {
   const { action, agentId, bundle } = input;
   const invokedName =
     action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName;
+  const targetKind = action.kind === "remote-agent-call" ? "remote" : "local";
   const operation: ContinueOperation = {
     callId: action.callId,
     id: deriveAgentOperationId({
@@ -129,8 +129,10 @@ export async function dispatchToAgentHandle(input: {
   // this batch is already gone.
   const prepared = prepareAgentContinuation(input.currentSession, {
     agentId,
+    execution: "blocking",
     invokedName,
     operation,
+    targetKind,
   });
 
   switch (prepared.kind) {
@@ -236,11 +238,8 @@ export async function dispatchToTaskAgentAddress(input: {
   readonly parentToken: string;
 }): Promise<DispatchOutcome> {
   const { action, agentId } = input;
-  const invokedName =
-    action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName;
   const record = (getAgentHandleStore(input.currentSession.state)?.handles ?? []).find(
-    (handle): handle is Extract<AgentHandle, { phase: "addressed" }> =>
-      handle.phase === "addressed" && handle.identity.id === agentId,
+    (handle) => handle.identity.id === agentId,
   );
   if (record === undefined) {
     return {
@@ -253,13 +252,25 @@ export async function dispatchToTaskAgentAddress(input: {
       session: input.currentSession,
     };
   }
-  if (record.identity.name !== invokedName) {
+  const mismatch = createTaskAgentContinuationMismatch({
+    action,
+    agentId,
+    currentSession: input.currentSession,
+  });
+  if (mismatch !== undefined) {
+    return {
+      kind: "error",
+      result: mismatch,
+      session: input.currentSession,
+    };
+  }
+  if (record.phase !== "addressed") {
     return {
       kind: "error",
       result: createAgentErrorResult({
         action,
-        code: AGENT_MISMATCH,
-        message: `Agent "${agentId}" from the <agents> list does not belong to "${invokedName}".`,
+        code: AGENT_BUSY,
+        message: `Agent "${agentId}" is still working on its previous request.`,
       }),
       session: input.currentSession,
     };
@@ -306,6 +317,34 @@ export async function dispatchToTaskAgentAddress(input: {
     session: input.currentSession,
     toolName: record.identity.name,
   };
+}
+
+export function createTaskAgentContinuationMismatch(input: {
+  readonly action: RuntimeAgentHandleAction;
+  readonly agentId: string;
+  readonly currentSession: RuntimeSession;
+}): RuntimeSubagentDispatchFailure | undefined {
+  const record = (getAgentHandleStore(input.currentSession.state)?.handles ?? []).find(
+    (handle) => handle.identity.id === input.agentId,
+  );
+  if (record === undefined) return undefined;
+  const invokedName =
+    input.action.kind === "remote-agent-call"
+      ? input.action.remoteAgentName
+      : input.action.subagentName;
+  const targetKind = input.action.kind === "remote-agent-call" ? "remote" : "local";
+  if (
+    record.identity.name === invokedName &&
+    record.identity.execution === "background" &&
+    record.identity.targetKind === targetKind
+  ) {
+    return undefined;
+  }
+  return createAgentErrorResult({
+    action: input.action,
+    code: AGENT_MISMATCH,
+    message: `Agent "${input.agentId}" no longer matches the selected subagent definition.`,
+  });
 }
 
 /**

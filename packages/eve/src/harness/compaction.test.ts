@@ -248,7 +248,7 @@ describe("resolveCompactionModel", () => {
         },
       },
     });
-    expect(resolveModel).toHaveBeenCalledWith(compactionModelReference);
+    expect(resolveModel).toHaveBeenCalledWith(compactionModelReference, "compaction");
   });
 });
 

@@ -11,7 +11,7 @@ import {
   validateCompiledModuleMap,
 } from "#compiler/validate-artifact.js";
 
-describe("compiled agent manifest v43", () => {
+describe("compiled agent manifest v44", () => {
   it("round-trips a real compiled graph through the serialized schema", async () => {
     const { manifest } = await compileFromMemory({
       model: "openai/gpt-5.4",
@@ -119,6 +119,30 @@ describe("compiled agent manifest v43", () => {
 
     expect(() => validateCompiledAgentManifest(corrupted)).toThrow(
       "subagent graph contains a cycle",
+    );
+  });
+
+  it("rejects a background subagent without the root task capability", async () => {
+    const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+    const agent = createCompiledAgentNodeManifest(manifest);
+    const subagent = {
+      agent,
+      backing: { kind: "resource" as const, sourcePath: "/virtual/subagents/research" },
+      description: "Research agent.",
+      entryPath: "/virtual/subagents/research",
+      execution: "background" as const,
+      logicalPath: "subagents/research",
+      name: "research",
+      nodeId: "research-node",
+      owner: { kind: "application" as const },
+      parentNodeId: "__root__",
+      rootPath: "/virtual/subagents/research",
+      sourceId: "research-source",
+      sourceKind: "module" as const,
+    };
+
+    expect(() => validateCompiledAgentManifest({ ...manifest, subagents: [subagent] })).toThrow(
+      'background subagent "research" requires experimental.tasks',
     );
   });
 

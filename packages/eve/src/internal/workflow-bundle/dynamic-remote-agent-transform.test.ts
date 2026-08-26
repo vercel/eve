@@ -28,12 +28,18 @@ function evaluateSessionHandler(code: string): Function {
     kind: "remote",
     path: "/eve/v1/session",
   });
+  const defineRemoteSubagent = (definition: Record<string, unknown>) => ({
+    ...definition,
+    kind: "eve:remote-subagent",
+    path: "/eve/v1/session",
+  });
   const evaluate = new Function(
     "defineDynamic",
     "defineRemoteAgent",
+    "defineRemoteSubagent",
     `${executable}\nreturn __exported;`,
   );
-  evaluate(defineDynamic, defineRemoteAgent);
+  evaluate(defineDynamic, defineRemoteAgent, defineRemoteSubagent);
   if (handler === undefined) throw new Error("No handler captured");
   return handler;
 }
@@ -100,6 +106,76 @@ export default defineDynamic({
     const remote = handler() as Record<string, unknown>;
 
     expect(remote.__eveResolveRemoteAgentCredentials).toBeTypeOf("function");
+  });
+
+  it("transforms credentials returned by defineRemoteSubagent", async () => {
+    const source = `
+import { defineDynamic, defineRemoteSubagent } from "eve";
+
+export default defineDynamic({
+  events: {
+    "session.started": () =>
+      defineRemoteSubagent({
+        background: true,
+        description: "Remote research.",
+        headers: () => ({ "x-runtime": "fresh" }),
+        url: "https://research.example.com",
+      }),
+  },
+});
+`;
+    const remote = evaluateSessionHandler(await transformSource(source))() as Record<
+      string,
+      unknown
+    >;
+
+    expect(remote.kind).toBe("eve:remote-subagent");
+    expect(remote.background).toBe(true);
+    expect(remote.__eveResolveRemoteAgentCredentials).toBeTypeOf("function");
+  });
+
+  it("transforms an aliased defineRemoteSubagent import", async () => {
+    const source = `
+import { defineDynamic, defineRemoteSubagent as remote } from "eve";
+
+export default defineDynamic({
+  events: {
+    "session.started": () =>
+      remote({
+        background: true,
+        description: "Remote research.",
+        headers: () => ({ "x-runtime": "fresh" }),
+        url: "https://research.example.com",
+      }),
+  },
+});
+`;
+    const code = await transformSource(source);
+
+    expect(code).toContain("__eveResolveRemoteAgentCredentials");
+    expect(code).toContain("remote({");
+  });
+
+  it("transforms a namespace-qualified defineRemoteSubagent call", async () => {
+    const source = `
+import * as eve from "eve";
+
+export default eve.defineDynamic({
+  events: {
+    "session.started": () =>
+      eve.defineRemoteSubagent({
+        background: true,
+        description: "Remote research.",
+        headers: () => ({ "x-runtime": "fresh" }),
+        url: "https://research.example.com",
+      }),
+  },
+});
+`;
+    const code = await transformSource(source);
+
+    expect(code).toContain("__eveResolveRemoteAgentCredentials");
+    expect(code).toContain("eve.defineRemoteSubagent({");
   });
 
   it("preserves quoted credential keys and method shorthand", async () => {

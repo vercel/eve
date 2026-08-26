@@ -110,9 +110,14 @@ describe("getAgentHandleStore", () => {
 });
 
 describe("assertPersistableAgentHandleStore", () => {
-  it("returns a valid store unchanged in shape", () => {
-    expect(assertPersistableAgentHandleStore({ handles: [addressedHandle] })).toEqual({
-      handles: [addressedHandle],
+  it("normalizes legacy identities from their durable handle phase and address", () => {
+    expect(assertPersistableAgentHandleStore({ handles: [addressedHandle] })).toMatchObject({
+      handles: [
+        {
+          identity: { execution: "background", targetKind: "local" },
+          phase: "addressed",
+        },
+      ],
     });
   });
 
@@ -130,8 +135,14 @@ describe("assertPersistableAgentHandleStore", () => {
       phase: "parked",
     };
 
-    expect(assertPersistableAgentHandleStore({ handles: [remoteHandle] })).toEqual({
-      handles: [remoteHandle],
+    expect(assertPersistableAgentHandleStore({ handles: [remoteHandle] })).toMatchObject({
+      handles: [
+        {
+          address: remoteHandle.address,
+          identity: { execution: "blocking", targetKind: "remote" },
+          phase: "parked",
+        },
+      ],
     });
   });
 

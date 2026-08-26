@@ -69,7 +69,11 @@ import {
   collectSelectedSourceIds,
   withExtensionNamespace,
 } from "#compiler/normalize-manifest-helpers.js";
-import { summarizeCompilerDiagnostics, type CompilerDiagnostic } from "#compiler/diagnostics.js";
+import {
+  createLegacySubagentDefinitionDiagnostic,
+  summarizeCompilerDiagnostics,
+  type CompilerDiagnostic,
+} from "#compiler/diagnostics.js";
 import { projectAgentSources, projectSelectedSources } from "#compiler/project-sources.js";
 import {
   composeAgentModuleCandidates,
@@ -140,6 +144,15 @@ export async function compileAgentManifest(
   if (backgroundTool !== undefined && root.manifest.config.experimental?.tasks !== true) {
     throw new Error(
       `Background tool "${backgroundTool.name}" requires experimental.tasks: true in the root agent config.`,
+    );
+  }
+  const backgroundSubagent = [
+    ...root.descendants,
+    ...allNodeManifests.flatMap((node) => node.remoteAgents),
+  ].find((subagent) => subagent.execution === "background");
+  if (backgroundSubagent !== undefined && root.manifest.config.experimental?.tasks !== true) {
+    throw new Error(
+      `Background subagent "${backgroundSubagent.name}" requires experimental.tasks: true in the root agent config.`,
     );
   }
 
@@ -251,7 +264,15 @@ class AgentGraphCompiler {
         phaseOne.selectedConfig.definition,
         `Expected the subagent config export "${phaseOne.selectedConfig.source.exportName ?? "default"}" from "${source.entryPath}" to match the public eve shape.`,
       );
-
+      if (normalized.kind !== "dynamic" && normalized.execution === undefined) {
+        this.diagnostics.push(
+          createLegacySubagentDefinitionDiagnostic({
+            logicalPath: source.logicalPath,
+            nodeId: input.nodeId,
+            sourceId: source.sourceId,
+          }),
+        );
+      }
       if (normalized.kind === "remote") {
         assertRemoteAgentDefinitionHasNoLocalPackageEntries(source);
         remoteAgents.push(
@@ -305,6 +326,9 @@ class AgentGraphCompiler {
         sourceId: source.sourceId,
         sourceKind: "module" as const,
       };
+      if (normalized.kind !== "dynamic" && normalized.execution !== undefined) {
+        Object.assign(base, { execution: normalized.execution });
+      }
       let node: CompiledSubagentNode;
       if (config === undefined) {
         node = {

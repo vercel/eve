@@ -17,7 +17,9 @@
  */
 
 import {
+  createTaskAgentContinuationMismatch,
   type DispatchOutcome,
+  dispatchToAgentHandle,
   dispatchToTaskAgentAddress,
 } from "#execution/agent-handle-dispatch.js";
 import { createAgentContinuationBundle } from "#execution/agent-continuation-bundle.js";
@@ -58,6 +60,13 @@ export async function dispatchTaskStep(
     return { results: [], sessionState: input.sessionState, pendingTasks: [] };
   }
 
+  return dispatchPreparedTaskActions(input, prepared);
+}
+
+export async function dispatchPreparedTaskActions(
+  input: RuntimeActionDispatchInput,
+  prepared: NonNullable<Awaited<ReturnType<typeof prepareRuntimeActionDispatch>>>,
+): Promise<RuntimeActionDispatchResult> {
   const { batch, bundle, session } = prepared;
   // Acquired only once preflight can no longer throw, so a planning failure
   // never leaks the writer lock.
@@ -90,7 +99,67 @@ export async function dispatchTaskStep(
         continue;
       }
 
+      if (entry.execution === "blocking") {
+        const outcome =
+          entry.kind === "resume"
+            ? await dispatchToAgentHandle({
+                action: entry.action,
+                agentId: entry.agentId,
+                auth: prepared.auth,
+                bundle: createAgentContinuationBundle({
+                  action: entry.action,
+                  bundle,
+                  dynamicRemoteAgent: entry.dynamicRemoteAgent,
+                }),
+                currentSession: nextSession,
+                parentToken: input.parentContinuationToken ?? session.continuationToken,
+                parentTurnId: batch.event.turnId,
+              })
+            : await startSubagent({
+                auth: prepared.auth,
+                batchEvent: batch.event,
+                bundle,
+                callbackBaseUrl: input.callbackBaseUrl,
+                capabilities: prepared.capabilities,
+                channelMetadata: prepared.channelMetadata,
+                currentSession: nextSession,
+                fanoutSize: prepared.fanoutSize,
+                initiatorAuth: prepared.initiatorAuth,
+                parentContinuationToken: input.parentContinuationToken,
+                parentTraceContext: prepared.parentTraceContext,
+                sandboxSessionId: prepared.sandboxSessionId,
+                serializedContext: prepared.serializedContext,
+                session,
+                taskOwned: false,
+                target: entry.target,
+              });
+        nextSession = outcome.session;
+        if (outcome.kind === "error") {
+          results.push(outcome.result);
+          continue;
+        }
+        await emitSubagentCalled({
+          adapter: prepared.adapter,
+          adapterCtx: prepared.adapterCtx,
+          batchEvent: batch.event,
+          entry,
+          outcome,
+          sessionId: session.sessionId,
+          writer,
+        });
+        continue;
+      }
+
       if (entry.kind === "resume") {
+        const mismatch = createTaskAgentContinuationMismatch({
+          action: entry.action,
+          agentId: entry.agentId,
+          currentSession: nextSession,
+        });
+        if (mismatch !== undefined) {
+          results.push(mismatch);
+          continue;
+        }
         const busy = await checkTaskContinuationAvailability({
           action: entry.action,
           agentId: entry.agentId,

@@ -161,8 +161,14 @@ export function buildRuntimeIdentity(node: ResolvedRuntimeAgentNode): RuntimeIde
 
 function createRuntimeModelResolver(
   scope: RuntimeModelResolutionScope,
-): (modelReference: Parameters<typeof resolveRuntimeModelReference>[0]) => Promise<LanguageModel> {
-  return (modelReference) => resolveRuntimeModelReference(modelReference, scope);
+): (
+  modelReference: Parameters<typeof resolveRuntimeModelReference>[0],
+  sourceSlot?: "compaction" | "model",
+) => Promise<LanguageModel> {
+  return (modelReference, sourceSlot) =>
+    sourceSlot === undefined
+      ? resolveRuntimeModelReference(modelReference, scope)
+      : resolveRuntimeModelReference(modelReference, scope, sourceSlot);
 }
 
 function createRuntimeDynamicModelEventDispatcher(
@@ -184,14 +190,15 @@ function createRuntimeDynamicModelEventDispatcher(
  *
  * For authored tools: copies all lifecycle fields from the resolved definition.
  * For subagent tools: selects the existing runtime-action definition or the
- * background `defineTool` definition from the node's `experimental.tasks` setting.
+ * background `defineTool` definition from the prepared delegation policy.
  * Tools without `execute` (provider-managed) get entries with schema but no execute.
  */
 export function createNodeHarnessTools(input: {
   readonly node: ResolvedRuntimeAgentNode;
 }): HarnessToolMap {
   const tools = new Map<string, HarnessToolDefinition>();
-  const tasksEnabled = input.node.agent.config?.experimental?.tasks === true;
+  const tasksEnabled =
+    input.node.tasksEnabled ?? input.node.agent.config?.experimental?.tasks === true;
 
   for (const tool of input.node.turnAgent.tools) {
     const definition = resolveHarnessToolDefinition({
@@ -214,7 +221,8 @@ function resolveHarnessToolDefinition(input: {
   readonly tool: PreparedRuntimeTool;
 }): HarnessToolDefinition | null {
   if (input.tool.kind === "subagent" || input.tool.kind === "remote") {
-    return input.tasksEnabled
+    return (input.tool.execution ?? (input.tasksEnabled ? "background" : "blocking")) ===
+      "background"
       ? createBackgroundSubagentHarnessDefinition(input.tool)
       : createHarnessDelegationToolDefinition(input.tool);
   }

@@ -46,7 +46,7 @@ my-agent/
     ├── connections/       # external MCP server connections
     ├── sandbox/           # the agent's single sandbox (optional override)
     ├── workspace/         # files seeded into the sandbox on each session
-    ├── subagents/         # specialist child agents (reuse `defineAgent`)
+    ├── subagents/         # specialist local or remote child agents
     ├── schedules/         # recurring jobs
     └── lib/               # shared authored code imported by other files
 ```
@@ -57,7 +57,8 @@ Every authored directory has a typed helper. Import each from the matching subpa
 
 | Helper                                                          | Subpath                               | Authored Location                                |
 | --------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------ |
-| `defineAgent(...)`                                              | `eve`                                 | `agent.ts`, `subagents/<id>/agent.ts`            |
+| `defineAgent(...)`                                              | `eve`                                 | `agent.ts`                                       |
+| `defineLocalSubagent(...)`, `defineRemoteSubagent(...)`         | `eve`                                 | `subagents/<id>/agent.ts`, `subagents/<id>.ts`   |
 | `defineInstructions(...)`                                       | `eve/instructions`                    | `instructions.ts` (or `instructions.md`)         |
 | `defineTool(...)`, `defineDynamic(...)`, `disableTool(...)`     | `eve/tools`                           | `tools/<name>.ts`                                |
 | `bash`, `readFile`, `writeFile`, and other provided definitions | `eve/tools/<name>`                    | `tools/<name>.ts`                                |

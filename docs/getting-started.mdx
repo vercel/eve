@@ -122,7 +122,7 @@ Files under `agent/` define your agent; only files in `agent/sandbox/workspace/`
 
 ### Local subagents
 
-A local subagent uses the same `agent.ts` shape as the root:
+A local subagent uses `defineLocalSubagent` in its `agent.ts`. It has the root agent's model/config fields plus a required `description` and optional `background` execution policy:
 
 ```text
 agent/subagents/researcher/
@@ -137,7 +137,7 @@ agent/subagents/researcher/
 └── subagents/
 ```
 
-A subagent's `agent.ts` is required and must provide a description, while its instructions are optional. Connections, hooks, skills, shared code, sandboxes, tools, and nested subagents are supported. Channels and schedules remain root-only. See [Subagents](./subagents) for inheritance and isolation behavior.
+A subagent's `agent.ts` is required and must provide a description, while its instructions are optional. Connections, hooks, skills, shared code, sandboxes, tools, and nested subagents are supported. Channels and schedules remain root-only. See [Subagents](./subagents) for execution, inheritance, and isolation behavior.
 
 ### Flat layout
 

@@ -60,9 +60,11 @@ const startOperation: StartOperation = {
 };
 
 const identity: AgentIdentity = {
+  execution: "blocking",
   id: deriveAgentId("research", startOperation.id),
   name: "research",
   nodeId: "node_research",
+  targetKind: "local",
 };
 
 const address: AgentAddress = {
@@ -247,6 +249,27 @@ describe("prepareAgentContinuation", () => {
     ).toEqual({ kind: "busy" });
   });
 
+  it("rejects continuation after execution or target policy changes", () => {
+    const session = parkedSession();
+    const background = prepareAgentContinuation(session, {
+      agentId: identity.id,
+      execution: "background",
+      invokedName: identity.name,
+      operation: continueOperation,
+      targetKind: "local",
+    });
+    const remote = prepareAgentContinuation(session, {
+      agentId: identity.id,
+      execution: "blocking",
+      invokedName: identity.name,
+      operation: continueOperation,
+      targetKind: "remote",
+    });
+
+    expect(background.kind).toBe("mismatch");
+    expect(remote.kind).toBe("mismatch");
+  });
+
   it("treats the operation already recorded on a running handle as a replay", () => {
     const running = runningSession();
     const replay = prepareAgentContinuation(running, {
@@ -342,7 +365,13 @@ describe("rebaseAgentHandles", () => {
       kind: "agent/local",
       sessionId: "session_other",
     },
-    identity: { id: "ag_writer:aaaaaaaaaaaa", name: "writer", nodeId: "node_writer" },
+    identity: {
+      execution: "blocking",
+      id: "ag_writer:aaaaaaaaaaaa",
+      name: "writer",
+      nodeId: "node_writer",
+      targetKind: "local",
+    },
     lastStatus: "",
     phase: "parked",
   };

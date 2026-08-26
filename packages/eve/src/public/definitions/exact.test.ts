@@ -3,8 +3,8 @@ import { z as z3 } from "zod/v3";
 
 import { z } from "#compiled/zod/index.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { defineAgent, defineDynamic } from "#public/definitions/agent.js";
-import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
+import { defineAgent, defineDynamic, defineLocalSubagent } from "#public/definitions/agent.js";
+import { defineRemoteAgent, defineRemoteSubagent } from "#public/definitions/remote-agent.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel, defaultEveAuth } from "#public/channels/eve.js";
 import { defineChannel, POST } from "#public/definitions/channel.js";
@@ -53,6 +53,27 @@ describe("definition helper exact inputs", () => {
     expect(agent.limits.sessionTimeoutMs).toBe(86_400_000);
     expect(experimental_workflow({ maxSubagents: 6 }).maxSubagents).toBe(6);
     expect(schedule.cron).toBe("0 9 * * *");
+  });
+
+  it("stamps per-subagent execution definitions", () => {
+    const local = defineLocalSubagent({
+      background: true,
+      description: "Research deeply.",
+      model: "anthropic/claude-sonnet-5",
+    });
+    const remote = defineRemoteSubagent({
+      description: "Review remotely.",
+      url: "https://review.example.com",
+    });
+
+    expect(local).toMatchObject({ background: true, kind: "eve:local-subagent" });
+    expect(remote).toMatchObject({
+      kind: "eve:remote-subagent",
+      path: "/eve/v1/session",
+    });
+    expectTypeOf(local.background).toEqualTypeOf<true>();
+    expectTypeOf(local.model).toEqualTypeOf<"anthropic/claude-sonnet-5">();
+    expectTypeOf(remote.url).toEqualTypeOf<"https://review.example.com">();
   });
 
   it("accepts async-generator tool executors", () => {
@@ -143,6 +164,37 @@ function typeOnlyFixtures(): void {
     fallback: "anthropic/claude-sonnet-5",
     events: {
       "session.started": () => "anthropic/claude-sonnet-5",
+    },
+  });
+
+  defineLocalSubagent({
+    description: "A statically declared subagent may select its model dynamically.",
+    model: defineDynamic({
+      events: { "session.started": () => "anthropic/claude-sonnet-5" },
+    }),
+  });
+
+  defineDynamic({
+    events: {
+      "session.started": () =>
+        defineLocalSubagent({
+          background: true,
+          description: "Run selected research in the background.",
+          model: "anthropic/claude-sonnet-5",
+        }),
+    },
+  });
+
+  // @ts-expect-error A dynamic local-subagent selection must use a static model.
+  defineDynamic({
+    events: {
+      "session.started": () =>
+        defineLocalSubagent({
+          description: "Invalid dynamic selection.",
+          model: defineDynamic({
+            events: { "session.started": () => "anthropic/claude-sonnet-5" },
+          }),
+        }),
     },
   });
 
@@ -243,6 +295,14 @@ function typeOnlyFixtures(): void {
   };
   // @ts-expect-error Agent identity is path-derived.
   defineAgent(agentWithName);
+
+  const remoteSubagentWithName = {
+    description: "Invalid remote identity.",
+    name: "reviewer",
+    url: "https://review.example.com",
+  };
+  // @ts-expect-error Remote subagent identity is path-derived.
+  defineRemoteSubagent(remoteSubagentWithName);
 
   const hookWithName = {
     events: {},

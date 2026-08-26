@@ -15,6 +15,17 @@ type CompiledNode = CompiledAgentNodeManifest | CompiledAgentResources;
 
 /** Validates invariants that cannot be expressed by the serialized Zod shape. */
 export function validateCompiledAgentManifest(manifest: CompiledAgentManifest): void {
+  if (manifest.config.experimental?.tasks !== true) {
+    const backgroundSubagent = [
+      ...manifest.subagents,
+      ...[manifest, ...manifest.subagents.map((subagent) => subagent.agent)].flatMap(
+        (node) => node.remoteAgents,
+      ),
+    ].find((subagent) => subagent.execution === "background");
+    if (backgroundSubagent !== undefined) {
+      fail(`background subagent "${backgroundSubagent.name}" requires experimental.tasks`);
+    }
+  }
   const nodes = new Map<string, CompiledNode>([[ROOT_COMPILED_AGENT_NODE_ID, manifest]]);
   for (const subagent of manifest.subagents) {
     if (nodes.has(subagent.nodeId)) {

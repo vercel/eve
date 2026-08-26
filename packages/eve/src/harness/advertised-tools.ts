@@ -2,7 +2,11 @@ import type { ToolSet } from "ai";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
-import { TASK_TOOL_NAMES, TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
+import {
+  TASK_CANCEL_TOOL_NAME,
+  TASK_TOOL_NAMES,
+  TASK_UPDATE_TOOL_NAME,
+} from "#tools/framework/task-contract.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import {
   ensureWorkflowContinuationSecurity,
@@ -173,6 +177,7 @@ function shouldHideDelegationTool(
   delegatedCaller: boolean | undefined,
 ): boolean {
   if (definition.name === TASK_UPDATE_TOOL_NAME) return delegatedCaller !== true;
+  if (definition.name === TASK_CANCEL_TOOL_NAME) return false;
   if (isRootOnlyTransitionalTool(definition)) {
     return session.rootSessionId !== undefined || resolveSubagentDepth(session).currentDepth > 0;
   }
@@ -181,10 +186,9 @@ function shouldHideDelegationTool(
 }
 
 /**
- * Tools that only a root session may see. The `agent` self-delegation
- * tool and parent-side `experimental.tasks` controls are injected from the root
- * node's config, which self-delegated children share — session shape is
- * the only signal that separates the root from its children.
+ * Session-shaped framework tool visibility. The `agent` self-delegation tool
+ * is root-only; task update is task-owned-only; task cancellation remains
+ * visible in task-enabled sessions that may own nested work.
  */
 function isRootOnlyTransitionalTool(definition: HarnessToolDefinition): boolean {
   if (definition.rootOnly === true) return true;
@@ -196,7 +200,7 @@ function isRootOnlyTransitionalTool(definition: HarnessToolDefinition): boolean 
     return true;
   }
 
-  return definition.name !== TASK_UPDATE_TOOL_NAME && TASK_TOOL_NAMES.has(definition.name);
+  return !TASK_TOOL_NAMES.has(definition.name) ? false : definition.name !== TASK_CANCEL_TOOL_NAME;
 }
 
 function isToolDefinitionList(

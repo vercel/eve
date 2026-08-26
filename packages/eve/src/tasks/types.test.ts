@@ -34,6 +34,25 @@ describe("subagent executor binding", () => {
     expect(readSubagentExecutor(binding)).toEqual({ address: localAddress, identity });
   });
 
+  it("keeps executor bindings byte-compatible when handles pin execution policy", () => {
+    const pinnedIdentity: AgentIdentity = {
+      ...identity,
+      execution: "background",
+      targetKind: "local",
+    };
+    const binding = createSubagentExecutorBinding({
+      address: localAddress,
+      identity: pinnedIdentity,
+    });
+
+    expect(binding.data.identity).toEqual({
+      id: identity.id,
+      name: identity.name,
+      nodeId: identity.nodeId,
+    });
+    expect(readSubagentExecutor(binding)).toEqual({ address: localAddress, identity });
+  });
+
   it("round-trips a remote child through the durable binding", () => {
     const binding = createSubagentExecutorBinding({ address: remoteAddress, identity });
     expect(readSubagentExecutor(binding)).toEqual({ address: remoteAddress, identity });

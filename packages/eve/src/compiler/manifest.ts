@@ -54,7 +54,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 43;
+export const COMPILED_AGENT_MANIFEST_VERSION = 44;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -315,6 +315,7 @@ export type CompiledSubagentNode = Readonly<
     Node & {
       backing: { readonly kind: "resource"; readonly sourcePath: string };
       entryPath: string;
+      execution?: "background" | "blocking";
       name: string;
       owner: AgentSourceOwner;
       parentNodeId: string;
@@ -923,6 +924,7 @@ const compiledAgentNodeManifestSchema = z
 const compiledSubagentNodeBaseFields = {
   backing: resourceSourceBackingSchema,
   entryPath: z.string(),
+  execution: z.enum(["background", "blocking"]).optional(),
   logicalPath: z.string(),
   name: z.string(),
   nodeId: z.string(),
