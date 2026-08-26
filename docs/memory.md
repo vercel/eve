@@ -260,7 +260,7 @@ A provider can implement three surfaces:
 | `capture` | Observe settled history after a turn or before compaction                |
 | `tools`   | Return model-facing operations bound to the same locked scope            |
 
-The following is a conceptual skeleton, not a working provider. Each helper
+Each helper
 deliberately throws until you connect it to a database or memory-service SDK:
 
 ```ts title="agent/lib/semantic-memory-provider.ts"
