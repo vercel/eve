@@ -86,6 +86,65 @@ describe("activity protocol and reducer", () => {
     expect(next.pendingSettlements).toHaveProperty("blocker:authorization:work:attempt");
   });
 
+  it("recursively cancels active descendant work and its owned entities", () => {
+    const child = {
+      id: "work:child",
+      kind: "subagent" as const,
+      parentId: work.id,
+      rootSessionId: "session",
+      rootTurnId: "turn",
+    };
+    const grandchild = {
+      id: "work:grandchild",
+      kind: "subagent" as const,
+      parentId: child.id,
+      rootSessionId: "session",
+      rootTurnId: "turn",
+    };
+    const snapshot = reduce([
+      { eventId: "root", kind: "work.started", startedAt: "1", work },
+      { eventId: "child", kind: "work.started", startedAt: "2", work: child },
+      { eventId: "grandchild", kind: "work.started", startedAt: "3", work: grandchild },
+      {
+        action: {
+          id: "grandchild-action",
+          kind: "tool",
+          name: "search",
+          parentWorkId: grandchild.id,
+          rootTurnId: "turn",
+          stepIndex: 0,
+        },
+        eventId: "grandchild-action",
+        kind: "action.started",
+        startedAt: "4",
+      },
+      {
+        blocker: {
+          id: "child-input",
+          kind: "input",
+          parentWorkId: child.id,
+          rootTurnId: "turn",
+        },
+        eventId: "child-input",
+        kind: "blocker.started",
+        startedAt: "5",
+      },
+      {
+        eventId: "root-settled",
+        kind: "work.settled",
+        outcome: "failed",
+        settledAt: "6",
+        workId: work.id,
+      },
+    ]);
+
+    expect(snapshot.work[work.id]?.phase).toBe("failed");
+    expect(snapshot.work[child.id]?.phase).toBe("cancelled");
+    expect(snapshot.work[grandchild.id]?.phase).toBe("cancelled");
+    expect(snapshot.actions["grandchild-action"]?.phase).toBe("cancelled");
+    expect(snapshot.blockers["child-input"]?.phase).toBe("cancelled");
+  });
+
   it("cancels running owned actions and blockers when work settles", () => {
     const snapshot = reduce([
       { eventId: "work", kind: "work.started", startedAt: "1", work },

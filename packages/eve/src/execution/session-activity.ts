@@ -2,10 +2,8 @@ import { normalizeActivityText } from "#execution/activity-text.js";
 import {
   type PendingActivitySettlementV1,
   type ActivityActionPhase,
-  type ActivityActionStateV1,
   type ActivityBatchV1,
   type ActivityBlockerPhase,
-  type ActivityBlockerStateV1,
   type ActivityEventV1,
   type ActivitySnapshotV1,
   type ActivityWorkPhase,
@@ -107,16 +105,11 @@ function settleWork(
   const current = snapshot.work[event.workId];
   if (current === undefined) return retainPending(snapshot, "work", event.workId, event);
   if (current.phase !== "running") return snapshot;
-  return {
-    ...snapshot,
-    actions: cancelOwnedActions(snapshot.actions, event.workId, event.settledAt),
-    blockers: cancelOwnedBlockers(snapshot.blockers, event.workId, event.settledAt),
-    work: replaceBounded(snapshot.work, event.workId, {
-      ...current,
-      phase: event.outcome,
-      settledAt: event.settledAt,
-    }),
-  };
+  return settleWorkTree(snapshot, {
+    outcome: event.outcome,
+    settledAt: event.settledAt,
+    workId: event.workId,
+  });
 }
 
 function startAction(
@@ -237,34 +230,55 @@ function pendingKey(kind: PendingActivitySettlementV1["entityKind"], id: string)
   return `${kind}:${id}`;
 }
 
-function cancelOwnedActions(
-  actions: Readonly<Record<string, ActivityActionStateV1>>,
-  parentWorkId: string,
-  settledAt: string,
-): Readonly<Record<string, ActivityActionStateV1>> {
-  return mapOwned(actions, parentWorkId, (action) =>
-    action.phase === "running" ? { ...action, phase: "cancelled", settledAt } : action,
-  );
+function settleWorkTree(
+  snapshot: ActivitySnapshotV1,
+  input: {
+    readonly outcome: Exclude<ActivityWorkPhase, "running">;
+    readonly settledAt: string;
+    readonly workId: string;
+  },
+): ActivitySnapshotV1 {
+  const subtree = new Set([input.workId]);
+  let discovered = true;
+  while (discovered) {
+    discovered = false;
+    for (const work of Object.values(snapshot.work)) {
+      if (work.parentId === undefined || !subtree.has(work.parentId) || subtree.has(work.id))
+        continue;
+      subtree.add(work.id);
+      discovered = true;
+    }
+  }
+
+  return {
+    ...snapshot,
+    actions: mapActivityStates(snapshot.actions, (action) =>
+      subtree.has(action.parentWorkId) && action.phase === "running"
+        ? { ...action, phase: "cancelled", settledAt: input.settledAt }
+        : action,
+    ),
+    blockers: mapActivityStates(snapshot.blockers, (blocker) =>
+      subtree.has(blocker.parentWorkId) && blocker.phase === "blocked"
+        ? { ...blocker, phase: "cancelled", settledAt: input.settledAt }
+        : blocker,
+    ),
+    work: mapActivityStates(snapshot.work, (work) => {
+      if (work.id === input.workId) {
+        return { ...work, phase: input.outcome, settledAt: input.settledAt };
+      }
+      return subtree.has(work.id) && work.phase === "running"
+        ? { ...work, phase: "cancelled", settledAt: input.settledAt }
+        : work;
+    }),
+  };
 }
 
-function cancelOwnedBlockers(
-  blockers: Readonly<Record<string, ActivityBlockerStateV1>>,
-  parentWorkId: string,
-  settledAt: string,
-): Readonly<Record<string, ActivityBlockerStateV1>> {
-  return mapOwned(blockers, parentWorkId, (blocker) =>
-    blocker.phase === "blocked" ? { ...blocker, phase: "cancelled", settledAt } : blocker,
-  );
-}
-
-function mapOwned<T extends { readonly parentWorkId: string }>(
+function mapActivityStates<T>(
   values: Readonly<Record<string, T>>,
-  parentWorkId: string,
   transform: (value: T) => T,
 ): Readonly<Record<string, T>> {
   let next = values;
   for (const [id, value] of Object.entries(values)) {
-    if (value.parentWorkId !== parentWorkId) continue;
     const transformed = transform(value);
     if (transformed === value) continue;
     if (next === values) next = { ...values };
