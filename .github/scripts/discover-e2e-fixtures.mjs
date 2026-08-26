@@ -9,7 +9,8 @@
 //                         the model suite (e2e-local). Fixtures marked
 //                         `"e2e": { "modelMatrix": "full" }` in package.json
 //                         run on every registry model; all other fixtures run
-//                         once on the default (first) model.
+//                         once on the default (first) model. A fixture may add
+//                         narrowly scoped model legs through `additionalModels`.
 //   world_matrix_<world>  `{ name, dir[, world_package] }` entries for that
 //                         world's suite workflow, which runs every fixture
 //                         once with mock models (EVE_E2E_MODEL=mock).
@@ -30,16 +31,23 @@ for (const root of roots) {
     if (!statSync(dir).isDirectory() || !existsSync(join(dir, "evals"))) continue;
 
     let modelMatrix = "default";
+    let additionalModels = [];
     const packageJsonPath = join(dir, "package.json");
     if (existsSync(packageJsonPath)) {
       const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8"));
       modelMatrix = pkg.e2e?.modelMatrix ?? "default";
+      additionalModels = validateNamedEntries(
+        pkg.e2e?.additionalModels ?? [],
+        `${packageJsonPath}: e2e.additionalModels`,
+        ["id"],
+        { allowEmpty: true },
+      );
     }
     if (modelMatrix !== "default" && modelMatrix !== "full") {
       throw new Error(`${packageJsonPath}: e2e.modelMatrix must be "default" or "full".`);
     }
 
-    fixtures.push({ name: entry, dir, modelMatrix });
+    fixtures.push({ name: entry, dir, modelMatrix, additionalModels });
   }
 }
 
@@ -48,8 +56,11 @@ if (fixtures.length === 0) {
   process.exit(1);
 }
 
-const modelMatrix = fixtures.flatMap(({ name, dir, modelMatrix }) =>
-  (modelMatrix === "full" ? models : models.slice(0, 1)).map((model) => ({
+const modelMatrix = fixtures.flatMap(({ name, dir, modelMatrix, additionalModels }) =>
+  uniqueModels([
+    ...(modelMatrix === "full" ? models : models.slice(0, 1)),
+    ...additionalModels,
+  ]).map((model) => ({
     name,
     dir,
     model_name: model.name,
@@ -75,8 +86,8 @@ if (process.env.GITHUB_OUTPUT) {
   process.stdout.write(lines);
 }
 
-function validateNamedEntries(entries, key, requiredFields) {
-  if (!Array.isArray(entries) || entries.length === 0) {
+function validateNamedEntries(entries, key, requiredFields, options = {}) {
+  if (!Array.isArray(entries) || (entries.length === 0 && options.allowEmpty !== true)) {
     throw new Error(`e2e/matrix.json: "${key}" must be a non-empty array.`);
   }
   const names = new Set();
@@ -97,4 +108,15 @@ function validateNamedEntries(entries, key, requiredFields) {
     names.add(entry.name);
   }
   return entries;
+}
+
+function uniqueModels(entries) {
+  const ids = new Set();
+  const names = new Set();
+  return entries.filter((entry) => {
+    if (ids.has(entry.id) || names.has(entry.name)) return false;
+    ids.add(entry.id);
+    names.add(entry.name);
+    return true;
+  });
 }

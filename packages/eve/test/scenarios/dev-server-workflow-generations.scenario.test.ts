@@ -189,7 +189,9 @@ describe("eve dev server workflow generations", () => {
     DEV_SERVER_SCENARIO_TIMEOUT_MS,
   );
 
-  it(
+  // Re-enable after https://github.com/vercel/workflow/pull/3824 ships and eve
+  // vendors the release with abortable local queue deliveries.
+  it.skip(
     "recovers a nonterminal child Workflow on its selected generation after restart",
     async () => {
       const app = await scenarioApp(WORKFLOW_GENERATION_DESCRIPTOR);

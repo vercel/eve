@@ -37,6 +37,10 @@ describe("createWorkflowWorldPluginSource", () => {
 
     expect(source).toContain("/compiled/@workflow/world-local/index.js");
     expect(source).toContain("resolveLocalWorkflowWorldDataDirectory(process.cwd())");
+    expect(source).toContain("applyLocalWorkflowWorldDeliveryTimeoutDefaults");
+    expect(source.indexOf("applyLocalWorkflowWorldDeliveryTimeoutDefaults();")).toBeLessThan(
+      source.indexOf("workflowWorldModule.createWorld"),
+    );
     expect(source).not.toContain("createWorldFromModule(workflowWorldModule)");
   });
 

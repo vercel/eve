@@ -349,12 +349,17 @@ function resolveWorkflowWorldWiring(packageName: string): WorkflowWorldWiring {
     const dataDirectoryImportSpecifier = stringifyEsmImportSpecifier(
       resolvePackageSourceFilePath("src/internal/workflow/local-world-data-directory.ts"),
     );
+    const deliveryTimeoutsImportSpecifier = stringifyEsmImportSpecifier(
+      resolvePackageSourceFilePath("src/internal/workflow/local-world-delivery-timeouts.ts"),
+    );
     const moduleImportSpecifier = resolvePackageCompiledFilePath(
       `src/compiled/${packageName}/index.js`,
     );
     const importLines = `
+import { applyLocalWorkflowWorldDeliveryTimeoutDefaults } from ${deliveryTimeoutsImportSpecifier};
 import { resolveLocalWorkflowWorldDataDirectory } from ${dataDirectoryImportSpecifier};`.trimStart();
     const createWorldSource = `
+applyLocalWorkflowWorldDeliveryTimeoutDefaults();
 const workflowWorld = await workflowWorldModule.createWorld({
   dataDir: resolveLocalWorkflowWorldDataDirectory(process.cwd()),
 });`.trimStart();

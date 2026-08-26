@@ -41,6 +41,7 @@ export default defineTool({
 | `eveChannel`, `slackChannel`, and the other platforms | `eve/channels/<platform>`                            | `agent/channels/<platform>.ts`                                             | [Channels](../channels/overview)                       |
 | `defineSkill`                                         | `eve/skills`                                         | `agent/skills/<name>.ts`                                                   | [Skills](../skills)                                    |
 | `defineInstructions`                                  | `eve/instructions`                                   | `agent/instructions.ts`                                                    | [Instructions](../instructions)                        |
+| `defineMemory`, `defineMemoryProvider`                | `eve/memory`                                         | `agent/memory.ts` or `agent/memory/<slot>.ts`                              | [Memory](../memory)                                    |
 | `defineHook`                                          | `eve/hooks`                                          | `agent/hooks/<slug>.ts`                                                    | [Hooks](../guides/hooks)                               |
 | `defineSchedule`                                      | `eve/schedules`                                      | `agent/schedules/<name>.ts`                                                | [Schedules](../schedules)                              |
 | `defineState`                                         | `eve/context`                                        | tools, hooks, lifecycle                                                    | [Session context](../guides/session-context)           |
@@ -90,6 +91,10 @@ Tool-wide authoring helpers such as `defineTool`, `defineDynamic`, and `disableT
 | `eve/schedules`                                                             | `defineSchedule`                                                          |
 | `eve/skills`                                                                | `defineSkill`, `defineDynamic`                                            |
 | `eve/instructions`                                                          | `defineInstructions`, `defineDynamic`                                     |
+| `eve/memory`                                                                | `defineMemory`, `defineMemoryProvider`, provider and lifecycle types      |
+| `eve/memory/scope`                                                          | `byPrincipal` and memory scope helpers                                    |
+| `eve/memory/file`                                                           | `fileMemory`, `inMemory`, and the conditional document backend contract   |
+| `eve/memory/file/vercel`                                                    | `vercelBlob` and Vercel Blob backend options                              |
 | `eve/context`                                                               | `defineState`, session and state types                                    |
 | `eve/sandbox`                                                               | `defineSandbox`, backends                                                 |
 | `eve/instrumentation`                                                       | `defineInstrumentation`, `isChannel`                                      |
