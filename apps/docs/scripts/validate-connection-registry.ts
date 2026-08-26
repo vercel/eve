@@ -116,24 +116,30 @@ for (const item of items) {
   }
   await access(join(docsRoot, expectedPath));
 
-  if (slug === "browser-use") {
-    if (item.dependencies !== undefined || !("BROWSER_USE_API_KEY" in (item.envVars ?? {}))) {
-      throw new Error(
-        'Registry item "connection/browser-use" must declare its API key without Vercel Connect.',
-      );
+  switch (slug) {
+    case "browser-use": {
+      if (item.dependencies !== undefined || !("BROWSER_USE_API_KEY" in (item.envVars ?? {}))) {
+        throw new Error(
+          'Registry item "connection/browser-use" must declare its API key without Vercel Connect.',
+        );
+      }
+      break;
     }
-  } else if (slug === "shopify") {
-    const envVars = item.envVars ?? {};
-    if (
-      item.dependencies !== undefined ||
-      !("SHOPIFY_STORE_DOMAIN" in envVars) ||
-      !("UCP_AGENT_PROFILE_URL" in envVars)
-    ) {
-      throw new Error(
-        'Registry item "connection/shopify" must declare its storefront and agent profile without Vercel Connect.',
-      );
+    case "shopify": {
+      if (item.dependencies !== undefined) {
+        throw new Error('Registry item "connection/shopify" must not declare dependencies.');
+      }
+      if (item.envVars !== undefined) {
+        throw new Error(
+          'Registry item "connection/shopify" must leave environment configuration to its guided setup.',
+        );
+      }
+      break;
     }
-  } else if (!item.dependencies?.includes("@vercel/connect")) {
-    throw new Error(`Registry item "${item.name}" must depend on @vercel/connect.`);
+    default: {
+      if (!item.dependencies?.includes("@vercel/connect")) {
+        throw new Error(`Registry item "${item.name}" must depend on @vercel/connect.`);
+      }
+    }
   }
 }

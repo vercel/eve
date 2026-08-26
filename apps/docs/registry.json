@@ -1027,10 +1027,6 @@
           "requires": ">=0.45.0"
         }
       },
-      "envVars": {
-        "SHOPIFY_STORE_DOMAIN": "",
-        "UCP_AGENT_PROFILE_URL": ""
-      },
       "files": [
         {
           "path": "registry/connections/shopify.ts",
