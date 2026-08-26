@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createProgressSnapshot, reduceProgressBatch } from "#execution/session-activity.js";
+import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
 import {
   activityMessages,
   buildSlackActivityRenderers,
@@ -32,7 +32,7 @@ const grandchild = {
 };
 
 function snapshot() {
-  return reduceProgressBatch(createProgressSnapshot(), {
+  return reduceActivityBatch(createActivitySnapshot(), {
     events: [
       { eventId: "root", kind: "work.started", startedAt: "2026-01-01T00:00:00Z", work: root },
       { eventId: "child", kind: "work.started", startedAt: "2026-01-01T00:00:01Z", work: child },
@@ -80,7 +80,7 @@ describe("Slack activity activity", () => {
   });
 
   it("keeps temporarily orphaned nested work renderable", () => {
-    const orphan = reduceProgressBatch(createProgressSnapshot(), {
+    const orphan = reduceActivityBatch(createActivitySnapshot(), {
       events: [
         {
           eventId: "grandchild",
@@ -114,7 +114,7 @@ describe("Slack activity activity", () => {
       snapshot: snapshot(),
       state: undefined,
     });
-    const settled = reduceProgressBatch(snapshot(), {
+    const settled = reduceActivityBatch(snapshot(), {
       events: [
         {
           eventId: "settled",
