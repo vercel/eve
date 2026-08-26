@@ -1,55 +1,55 @@
-import type { ChannelProgressRenderer } from "#channel/progress-renderer.js";
+import type { ChannelActivityRenderer } from "#channel/activity-renderer.js";
 import type {
-  ProgressActionV1,
-  ProgressBlockerV1,
-  ProgressSnapshotV1,
-  ProgressWorkV1,
-} from "#protocol/progress.js";
+  ActivityActionStateV1,
+  ActivityBlockerStateV1,
+  ActivitySnapshotV1,
+  ActivityWorkStateV1,
+} from "#protocol/activity.js";
 import { callSlackApi, type SlackBotToken } from "#public/channels/slack/api.js";
 import { truncateTypingStatus } from "#public/channels/slack/limits.js";
 
-const SLACK_STATUS_PROGRESS_RENDERER_ID = "slack.status.v1";
-const SLACK_PROGRESS_RENDERER = Symbol("eve.slack.progress-renderer");
+const SLACK_ACTIVITY_STATUS_RENDERER_ID = "slack.status.v1";
+const SLACK_ACTIVITY_RENDERER = Symbol("eve.slack.activity-renderer");
 
-export interface SlackProgressRenderer {
-  readonly id: typeof SLACK_STATUS_PROGRESS_RENDERER_ID;
-  readonly [SLACK_PROGRESS_RENDERER]: true;
+export interface SlackActivityRenderer {
+  readonly id: typeof SLACK_ACTIVITY_STATUS_RENDERER_ID;
+  readonly [SLACK_ACTIVITY_RENDERER]: true;
 }
 
-interface SlackStatusProgressState {
+interface SlackActivityStatusState {
   readonly status: string;
 }
 
-/** Creates the compact Slack assistant-thread progress renderer. */
-export function slackStatusProgress(): SlackProgressRenderer {
-  return { [SLACK_PROGRESS_RENDERER]: true, id: SLACK_STATUS_PROGRESS_RENDERER_ID };
+/** Creates the compact Slack assistant-thread activity renderer. */
+export function slackActivityStatus(): SlackActivityRenderer {
+  return { [SLACK_ACTIVITY_RENDERER]: true, id: SLACK_ACTIVITY_STATUS_RENDERER_ID };
 }
 
-export function hasSlackStatusProgress(
-  renderers: readonly SlackProgressRenderer[] | undefined,
+export function hasSlackActivityStatus(
+  renderers: readonly SlackActivityRenderer[] | undefined,
 ): boolean {
-  return renderers?.some((renderer) => renderer.id === SLACK_STATUS_PROGRESS_RENDERER_ID) === true;
+  return renderers?.some((renderer) => renderer.id === SLACK_ACTIVITY_STATUS_RENDERER_ID) === true;
 }
 
-export function buildSlackProgressRenderers(input: {
+export function buildSlackActivityRenderers(input: {
   readonly botToken: SlackBotToken | undefined;
-  readonly renderers: readonly SlackProgressRenderer[];
-}): readonly ChannelProgressRenderer[] {
+  readonly renderers: readonly SlackActivityRenderer[];
+}): readonly ChannelActivityRenderer[] {
   const ids = new Set<string>();
   return input.renderers.map((renderer) => {
-    if (renderer[SLACK_PROGRESS_RENDERER] !== true) {
-      throw new TypeError("Slack progress renderers must be created by an eve renderer factory.");
+    if (renderer[SLACK_ACTIVITY_RENDERER] !== true) {
+      throw new TypeError("Slack activity renderers must be created by an eve renderer factory.");
     }
     if (ids.has(renderer.id))
-      throw new TypeError(`Duplicate Slack progress renderer "${renderer.id}".`);
+      throw new TypeError(`Duplicate Slack activity renderer "${renderer.id}".`);
     ids.add(renderer.id);
     return createSlackStatusRenderer(input.botToken);
   });
 }
 
-function createSlackStatusRenderer(botToken: SlackBotToken | undefined): ChannelProgressRenderer {
+function createSlackStatusRenderer(botToken: SlackBotToken | undefined): ChannelActivityRenderer {
   return {
-    id: SLACK_STATUS_PROGRESS_RENDERER_ID,
+    id: SLACK_ACTIVITY_STATUS_RENDERER_ID,
     async dispose({ destination, state }) {
       if (!isSlackStatusState(state) || state.status === "") return;
       const channelId = destination["channelId"];
@@ -68,7 +68,7 @@ function createSlackStatusRenderer(botToken: SlackBotToken | undefined): Channel
       const threadTs = destination["threadTs"];
       if (typeof channelId !== "string" || typeof threadTs !== "string" || threadTs === "")
         return state;
-      const status = selectSlackProgressStatus(snapshot);
+      const status = selectSlackActivityStatus(snapshot);
       if (isSlackStatusState(state) && state.status === status) return state;
       const body: Record<string, unknown> = { channel_id: channelId, status, thread_ts: threadTs };
       if (status !== "") body.loading_messages = [status];
@@ -82,12 +82,12 @@ function createSlackStatusRenderer(botToken: SlackBotToken | undefined): Channel
           `Slack assistant.threads.setStatus failed: ${response.error ?? "unknown_error"}`,
         );
       }
-      return { status } satisfies SlackStatusProgressState;
+      return { status } satisfies SlackActivityStatusState;
     },
   };
 }
 
-export function selectSlackProgressStatus(snapshot: ProgressSnapshotV1): string {
+export function selectSlackActivityStatus(snapshot: ActivitySnapshotV1): string {
   const active = Object.values(snapshot.work).filter((work) => work.phase === "running");
   if (active.length === 0) return "";
   const blocker = newestBlocker(
@@ -103,7 +103,7 @@ export function selectSlackProgressStatus(snapshot: ProgressSnapshotV1): string 
   return "Working…";
 }
 
-function blockerLabel(kind: ProgressBlockerV1["kind"]): string {
+function blockerLabel(kind: ActivityBlockerStateV1["kind"]): string {
   switch (kind) {
     case "approval":
       return "Waiting for approval…";
@@ -114,15 +114,19 @@ function blockerLabel(kind: ProgressBlockerV1["kind"]): string {
   }
 }
 
-function newestBlocker(blockers: readonly ProgressBlockerV1[]): ProgressBlockerV1 | undefined {
+function newestBlocker(
+  blockers: readonly ActivityBlockerStateV1[],
+): ActivityBlockerStateV1 | undefined {
   return newestByStartedAt(blockers);
 }
 
-function newestAction(actions: readonly ProgressActionV1[]): ProgressActionV1 | undefined {
+function newestAction(
+  actions: readonly ActivityActionStateV1[],
+): ActivityActionStateV1 | undefined {
   return newestByStartedAt(actions);
 }
 
-function newestWork(work: readonly ProgressWorkV1[]): ProgressWorkV1 | undefined {
+function newestWork(work: readonly ActivityWorkStateV1[]): ActivityWorkStateV1 | undefined {
   return newestByStartedAt(work);
 }
 
@@ -136,7 +140,7 @@ function newestByStartedAt<T extends { readonly startedAt: string }>(
   );
 }
 
-function isSlackStatusState(value: unknown): value is SlackStatusProgressState {
+function isSlackStatusState(value: unknown): value is SlackActivityStatusState {
   return (
     typeof value === "object" && value !== null && typeof Reflect.get(value, "status") === "string"
   );
