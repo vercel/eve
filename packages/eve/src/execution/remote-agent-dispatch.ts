@@ -8,7 +8,12 @@ import {
   createEveSessionResetRoutePath,
   createEveSessionRoutePath,
 } from "#protocol/routes.js";
-import type { CancelTurnResult, SessionAuthContext, SessionTraceContext } from "#channel/types.js";
+import type {
+  ActivityObserverConfig,
+  CancelTurnResult,
+  SessionAuthContext,
+  SessionTraceContext,
+} from "#channel/types.js";
 import type { ForwardedPrincipal } from "#channel/forwarded-principal.js";
 import type { HeadersValue } from "#client/types.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
@@ -54,7 +59,7 @@ export async function startRemoteAgentSession(input: {
   readonly auth?: SessionAuthContext | null;
   readonly callbackBaseUrl: string | undefined;
   readonly callbackToken?: string;
-  readonly activityObserver?: import("#channel/types.js").ActivityObserverConfig;
+  readonly activityObserver?: ActivityObserverConfig;
   /** The root initiator's principal, forwarded alongside {@link auth}. */
   readonly initiatorAuth?: SessionAuthContext | null;
   /**
@@ -85,7 +90,7 @@ export async function startRemoteAgentSession(input: {
       token: string;
       url: string;
     };
-    activityObserver?: import("#channel/types.js").ActivityObserverConfig;
+    activityObserver?: ActivityObserverConfig;
     forwardedPrincipal?: ForwardedPrincipal;
     message: string;
     mode: "conversation" | "task";
