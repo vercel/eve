@@ -37,6 +37,7 @@ import {
   type RuntimeSession,
 } from "#execution/agent-handle-dispatch.js";
 import { getAgentHandleStore } from "#harness/handles/store.js";
+import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 import { readActionTraceContext } from "#tracing/agent-trace-context-store.js";
 import {
   assertUniqueRuntimeActionCallIds,
@@ -308,7 +309,7 @@ function resolvePreparedActivity(
   return {
     sink: activityObserver.sink,
     workIdentity: activityObserver.workIdentity ?? {
-      id: `root:${session.sessionId}:${turnId}`,
+      id: deriveRootTurnActivityWorkId({ sessionId: session.sessionId, turnId }),
       kind: "root-turn",
       rootSessionId: session.rootSessionId ?? session.sessionId,
       rootTurnId: turnId,

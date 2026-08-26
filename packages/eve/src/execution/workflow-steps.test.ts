@@ -10,6 +10,7 @@ import type {
 import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import {
+  ActivityObserverKey,
   AuthKey,
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
@@ -1720,10 +1721,29 @@ describe("turnStep", () => {
         return { next: null, session: stepSession };
       };
     });
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    const activityRequest = new Promise<Response>(() => {});
+    const fetchMock = vi.fn((url: string) =>
+      url.includes("/activity/")
+        ? activityRequest
+        : Promise.resolve(new Response(null, { status: 202 })),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const ctx = new ContextContainer();
+    ctx.set(ActivityObserverKey, {
+      sink: {
+        url: "https://parent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+        version: 1,
+      },
+      workIdentity: {
+        callId: "parent-call",
+        id: "work:child",
+        kind: "task",
+        name: "remote-worker",
+        rootSessionId: "root",
+        rootTurnId: "turn-root",
+      },
+    });
     ctx.set(AuthKey, null);
     ctx.set(BundleKey, compiledBundle);
     ctx.set(ChannelKey, remoteTaskAdapter);
@@ -1753,6 +1773,10 @@ describe("turnStep", () => {
     );
     expect(inputRequested).not.toHaveBeenCalled();
     expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? []).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://parent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+      expect.objectContaining({ body: expect.stringContaining('"kind":"blocker.started"') }),
+    );
   });
 
   it("keeps a session-scoped dynamic model selection when the first turn is cancelled", async () => {

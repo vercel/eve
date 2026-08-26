@@ -378,7 +378,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
     const stamped = stampMessageStreamEvent(toEmit);
     await writer.write(encodeMessageStreamEvent(stamped));
-    await observeSessionActivity({ ctx, event: stamped, sessionId: initialSession.sessionId });
     return stamped;
   };
 
@@ -400,7 +399,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       messages,
       nodeId: bundle.nodeId ?? "__root__",
     });
-    await progressObserver?.observe(emitted);
+    void observeSessionActivity({ ctx, event: emitted, sessionId: initialSession.sessionId });
     await dispatchStreamEventHooks({ ctx, registry: hookRegistry, event: emitted });
     if (emitted.type !== "step.started") {
       await dispatchDynamicModelEvent({

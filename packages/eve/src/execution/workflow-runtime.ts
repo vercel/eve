@@ -188,12 +188,7 @@ export function createWorkflowRuntime(config: {
       let activityObserver = input.activityObserver;
       if (
         input.parent === undefined &&
-<<<<<<< HEAD
-        eventRelay === undefined &&
-=======
         activityObserver === undefined &&
-        sessionTimeoutMs !== false &&
->>>>>>> 3fc72a1a9 (refactor(eve): observe activity during event emission)
         (getChannelActivityPresentation(input.adapter)?.renderers.length ?? 0) > 0
       ) {
         const collectorContext = serializeContext(ctx);

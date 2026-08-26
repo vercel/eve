@@ -99,7 +99,7 @@ export async function settleCancelledTurnStep(input: {
           // Stamp once: the persisted chunk and the hooks must agree on the id.
           const stamped = stampMessageStreamEvent(transformed);
           await writer.write(encodeMessageStreamEvent(stamped));
-          await observeSessionActivity({ ctx, event: stamped, sessionId: session.sessionId });
+          void observeSessionActivity({ ctx, event: stamped, sessionId: session.sessionId });
           await dispatchStreamEventHooks({
             ctx,
             event: stamped,
