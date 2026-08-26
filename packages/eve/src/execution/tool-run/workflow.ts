@@ -1,10 +1,16 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
-import { attachRunContext, type RunOutcome, type RunRef } from "#execution/tool-run/messages.js";
-import { tell } from "#execution/tool-run/tell.js";
+import {
+  attachRunContext,
+  type RunOutcome,
+  type RunOutcomeMessage,
+  type RunRef,
+  type RunReport,
+} from "#execution/tool-run/messages.js";
 import { openRunControlInbox } from "#execution/tool-run/run-control.js";
-import type { ToolRunReplyTo, ToolRunWorkflowInput } from "#execution/tool-run/types.js";
+import type { ToolRunWorkflowInput } from "#execution/tool-run/types.js";
+import { resumeHook } from "#execution/tool-run/workflow-api.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { JsonValue } from "#shared/json.js";
@@ -19,9 +25,9 @@ type WorkflowToolExecute = (
  *
  * The authored `execute` body was registered by the bundler as a workflow
  * function; this run looks it up, builds the `ctx` it sees, and calls it. The
- * body speaks to its owner — the parked turn or the owning task — over one
- * hook, `ctx.replyTo`: each `yield` is a progress report, `ask` sends a
- * question, and the return value (or a throw) is the single terminal outcome.
+ * body speaks to its owner — the parked turn or the owning task — on the
+ * owner's three hooks, `ctx.owner`: each `yield` resumes `report`, `ask`
+ * resumes `request`, and the return value (or a throw) resumes `outcome` once.
  *
  * The run's own hook is its identity claim and its control inbox: a duplicate
  * start loses the claim and exits, and a `cancel` message aborts
@@ -45,7 +51,6 @@ export async function toolRunWorkflow(input: ToolRunWorkflowInput): Promise<void
     }
 
     const runId = readRunId();
-    const replyTo = ownerToken(input.replyTo);
     const from: RunRef = {
       callId: input.callId,
       input: input.input,
@@ -54,14 +59,14 @@ export async function toolRunWorkflow(input: ToolRunWorkflowInput): Promise<void
       toolName: input.toolName,
       turnId: input.session.turn.id,
     };
-    const ctx = createWorkflowToolContext({ from, input, replyTo, signal: control.signal });
+    const ctx = createWorkflowToolContext({ from, input, signal: control.signal });
     attachRunContext(ctx, { from });
 
     let outcome: RunOutcome;
     try {
       // Race the control read so a cancel trips `ctx.abortSignal` and settles
       // the run as cancelled even when the body is parked on a hook or sleep.
-      const output = await Promise.race([runBody(input, ctx, from, replyTo), control.cancelled]);
+      const output = await Promise.race([runBody(input, ctx, from), control.cancelled]);
       outcome = { output, status: "completed" };
     } catch (error) {
       outcome = control.signal.aborted
@@ -69,7 +74,8 @@ export async function toolRunWorkflow(input: ToolRunWorkflowInput): Promise<void
         : { error: normalizeSerializableError(error), status: "failed" };
     }
 
-    await tell(replyTo, { from, kind: "outcome", result: outcome });
+    const message: RunOutcomeMessage = { from, result: outcome };
+    await resumeHook(input.owner.outcome, message);
   } finally {
     if (ownsInbox) await disposeHook(control.hook);
   }
@@ -80,7 +86,6 @@ async function runBody(
   input: ToolRunWorkflowInput,
   ctx: ToolContext,
   from: RunRef,
-  replyTo: string,
 ): Promise<JsonValue> {
   const execute = resolveWorkflowToolExecute(input);
   const result = execute(input.input, ctx);
@@ -94,7 +99,8 @@ async function runBody(
   let next = await iterator.next();
   while (next.done !== true) {
     last = next.value;
-    await tell(replyTo, { from, kind: "report", update: next.value });
+    const report: RunReport = { from, update: next.value };
+    await resumeHook(input.owner.report, report);
     next = await iterator.next();
   }
   return (next.value as JsonValue | undefined) ?? last ?? null;
@@ -106,11 +112,6 @@ function isAsyncIterable(value: unknown): value is AsyncIterable<JsonValue> {
     value !== null &&
     typeof (value as AsyncIterable<JsonValue>)[Symbol.asyncIterator] === "function"
   );
-}
-
-/** The owner's hook token: the parked turn's inbox, or the owning task's inbox. */
-function ownerToken(replyTo: ToolRunReplyTo): string {
-  return replyTo.kind === "turn" ? replyTo.inboxToken : replyTo.taskInboxToken;
 }
 
 function readRunId(): string {
@@ -143,10 +144,9 @@ function resolveWorkflowToolExecute(input: ToolRunWorkflowInput): WorkflowToolEx
 function createWorkflowToolContext(options: {
   readonly from: RunRef;
   readonly input: ToolRunWorkflowInput;
-  readonly replyTo: string;
   readonly signal: AbortSignal;
 }): ToolContext {
-  const { from, replyTo, signal } = options;
+  const { from, signal } = options;
   const { callId, session, toolName } = options.input;
 
   return {
@@ -156,7 +156,7 @@ function createWorkflowToolContext(options: {
     getSkill: () => unavailable("getSkill()", "skills are read through the session sandbox"),
     getToken: () =>
       unavailable("getToken()", 'read credentials from the environment inside a "use step" helper'),
-    replyTo,
+    owner: options.input.owner,
     requireAuth: () => unavailable("requireAuth()", "a workflow body cannot park on authorization"),
     session: {
       auth: session.auth,

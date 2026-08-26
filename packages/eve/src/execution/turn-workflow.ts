@@ -3,6 +3,7 @@ import { isInboxToolResultFromRecordedRun } from "#harness/tool-runs.js";
 import {
   createHook,
   getWorkflowMetadata,
+  type Hook,
   sleep as workflowSleep,
 } from "#compiled/@workflow/core/index.js";
 
@@ -25,7 +26,20 @@ import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import { emitRunReportStep } from "#execution/tool-run/emit-run-report-step.js";
 import {
-  isRunMessage,
+  deriveRunOwner,
+  outcomeHook,
+  reportHook,
+  requestHook,
+  type RunOutcomeMessage,
+  type RunReport,
+  type RunRequestMessage,
+} from "#execution/tool-run/messages.js";
+import {
+  type ChannelReader,
+  createChannelReader,
+  raceChannelReads,
+} from "#execution/tool-run/owner-channels.js";
+import {
   runOutcomeToToolResult,
   runRequestToInputRequestPayload,
 } from "#execution/tool-run/owner-inbox.js";
@@ -71,7 +85,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   const inbox = createHook<TurnInboxPayload>({ token: `${input.completionToken}:inbox` });
   // Hook promises and iterators share one durable cursor. Create the iterator before
   // claiming so conflict replay is consumed by getConflict(), not a later iterator read.
-  const iterator = inbox[Symbol.asyncIterator]();
+  const inboxReader = createChannelReader("inbox", inbox);
   const cursor = new TurnExecutionCursor({
     controlToken: input.completionToken,
     parentWritable: input.stepInput.parentWritable,
@@ -87,6 +101,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   const bufferedDeliveries: DeliverHookPayload[] = [];
   let nextStepInput = input.stepInput.input;
   let ownsInbox = false;
+  let runHooks: RunHooks | undefined;
   let cancellation: TurnCancellationControl | undefined;
 
   try {
@@ -97,6 +112,22 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       if (isHookConflictError(error)) return;
       throw error;
     }
+
+    // Created after the inbox claim so a losing duplicate never contends for
+    // them. Every run this turn starts addresses them through
+    // `deriveRunOwner(inbox.token)`.
+    const owner = deriveRunOwner(inbox.token);
+    runHooks = {
+      outcome: outcomeHook.create({ token: owner.outcome }),
+      report: reportHook.create({ token: owner.report }),
+      request: requestHook.create({ token: owner.request }),
+    };
+    const readers: TurnReaders = [
+      createChannelReader("report", runHooks.report),
+      createChannelReader("request", runHooks.request),
+      createChannelReader("outcome", runHooks.outcome),
+      inboxReader,
+    ];
 
     // Claimed after the inbox claim so a losing duplicate run never
     // contends for the session cancel token.
@@ -227,8 +258,8 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           inboxToken: inbox.token,
           initialAcceptedAtMs,
           initialResults: dispatchResult.results,
-          iterator,
           nextDeliveryRequestId,
+          readers,
           pendingActionKeys,
         });
         if (results === "cancelled") {
@@ -280,9 +311,28 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
     // terminal result publishes so the next turn's claim never races this
     // run's teardown; this backstop covers the error path.
     if (cancellation !== undefined) await cancellation.dispose();
+    if (runHooks !== undefined) {
+      await disposeHook(runHooks.report);
+      await disposeHook(runHooks.request);
+      await disposeHook(runHooks.outcome);
+    }
     if (ownsInbox) await disposeHook(inbox);
   }
 }
+
+interface RunHooks {
+  readonly outcome: Hook<RunOutcomeMessage>;
+  readonly report: Hook<RunReport>;
+  readonly request: Hook<RunRequestMessage>;
+}
+
+/** The three channels the turn's tool runs report on, in read priority, then its inbox. */
+type TurnReaders = readonly [
+  ChannelReader<"report", RunReport>,
+  ChannelReader<"request", RunRequestMessage>,
+  ChannelReader<"outcome", RunOutcomeMessage>,
+  ChannelReader<"inbox", TurnInboxPayload>,
+];
 
 async function finishCancelledTurn(input: {
   readonly bufferedDeliveries: readonly DeliverHookPayload[];
@@ -325,9 +375,9 @@ async function waitForRuntimeActionResults(input: {
   readonly inboxToken: string;
   readonly initialAcceptedAtMs: number | undefined;
   readonly initialResults: readonly RuntimeActionResult[];
-  readonly iterator: AsyncIterator<TurnInboxPayload>;
   readonly nextDeliveryRequestId: () => string;
   readonly pendingActionKeys: readonly string[];
+  readonly readers: TurnReaders;
 }): Promise<AcceptedRuntimeActionBatch | "cancelled" | "cancel-turn"> {
   let pendingDeliveryRequest: string | undefined;
   const results: RuntimeActionResult[] = [...input.initialResults];
@@ -373,15 +423,10 @@ async function waitForRuntimeActionResults(input: {
       });
     }
 
-    const nextPromise = input.iterator.next();
-    // When a cancel wins the race, the dangling inbox `next()` is dropped
-    // by disposal in teardown; pre-attach a handler so a late rejection
-    // never surfaces as unhandled.
-    nextPromise.catch(() => {});
-    const next = await (input.cancellation === undefined
-      ? nextPromise
-      : Promise.race([nextPromise, input.cancellation.requested]));
-    if (next === "cancel") {
+    // A read that loses to a cancel stays pending and is dropped by disposal
+    // in teardown.
+    const read = await raceChannelReads(input.readers, input.cancellation?.requested);
+    if (read === "cancel") {
       if (pendingDeliveryRequest !== undefined) {
         // Release the raced public input back to the driver so it stays
         // available for the next turn.
@@ -392,37 +437,38 @@ async function waitForRuntimeActionResults(input: {
       }
       return "cancelled";
     }
-    if (next.done) throw new Error("Turn inbox closed before runtime actions completed.");
+    if (read.next.done) throw new Error("Turn inbox closed before runtime actions completed.");
 
-    const value = next.value;
-    if (isRunMessage(value)) {
-      if (value.kind === "outcome") {
-        const result = runOutcomeToToolResult(value);
-        const sessionSnapshotState = input.cursor.sessionState.snapshot?.session.state;
-        if (isInboxToolResultFromRecordedRun(sessionSnapshotState, result)) {
-          const acceptedAtMs = Date.now();
-          results.push(result);
-          acceptedAtMsByKey.set(getRuntimeActionResultKey(result), acceptedAtMs);
-        }
-        continue;
+    if (read.channel === "outcome") {
+      const result = runOutcomeToToolResult(read.next.value);
+      const sessionSnapshotState = input.cursor.sessionState.snapshot?.session.state;
+      if (isInboxToolResultFromRecordedRun(sessionSnapshotState, result)) {
+        const acceptedAtMs = Date.now();
+        results.push(result);
+        acceptedAtMsByKey.set(getRuntimeActionResultKey(result), acceptedAtMs);
       }
-      if (value.kind === "request") {
-        const proxyResult = await runProxySubagentEventStep({
-          hookPayload: runRequestToInputRequestPayload(value),
-          parentWritable: input.cursor.parentWritable,
-          serializedContext: input.cursor.serializedContext,
-          sessionState: input.cursor.sessionState,
-        });
-        await input.cursor.adopt(proxyResult);
-        continue;
-      }
-      await emitRunReportStep({
-        from: value.from,
+      continue;
+    }
+    if (read.channel === "request") {
+      const proxyResult = await runProxySubagentEventStep({
+        hookPayload: runRequestToInputRequestPayload(read.next.value),
         parentWritable: input.cursor.parentWritable,
-        update: value.update,
+        serializedContext: input.cursor.serializedContext,
+        sessionState: input.cursor.sessionState,
+      });
+      await input.cursor.adopt(proxyResult);
+      continue;
+    }
+    if (read.channel === "report") {
+      await emitRunReportStep({
+        from: read.next.value.from,
+        parentWritable: input.cursor.parentWritable,
+        update: read.next.value.update,
       });
       continue;
     }
+
+    const value = read.next.value;
     if (value.kind === "runtime-action-result") {
       // The inbox token is shared by every callee in the batch, so an inbox
       // result must bind to the adopted session snapshot: a subagent result

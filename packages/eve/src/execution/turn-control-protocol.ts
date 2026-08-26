@@ -1,5 +1,4 @@
 import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
-import type { RunMessage } from "#execution/tool-run/messages.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
@@ -7,7 +6,6 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 /** Payloads delivered to the private inbox owned by one active turn. */
 export type TurnInboxPayload =
   | Exclude<HookPayload, DeliverHookPayload>
-  | RunMessage
   | {
       readonly delivery: DeliverHookPayload;
       readonly kind: "driver-delivery";

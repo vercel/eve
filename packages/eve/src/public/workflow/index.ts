@@ -1,10 +1,16 @@
 /**
- * The authoring surface for workflow tool bodies. Everything here is either a
- * thin helper over the Workflow SDK (`ask`, `tell`) or a value the framework
- * must provide because it owns sessions (`agentTurn`). The SDK's own
- * constructs — `createHook`, `createWebhook`, `sleep`, `start`, `resumeHook`,
- * `Run` — are imported from `workflow` and `workflow/api` directly.
+ * The authoring surface for workflow tool bodies. `ask` is a thin helper over
+ * the Workflow SDK; the message types describe what a run resumes on its
+ * owner's three hooks (`ctx.owner`). The SDK's own constructs — `createHook`,
+ * `createWebhook`, `sleep`, `start`, `resumeHook`, `Run` — are imported from
+ * `workflow` and `workflow/api` directly.
  */
 export { ask } from "#execution/tool-run/messages.js";
-export { tell } from "#execution/tool-run/tell.js";
-export type { RunMessage, RunOutcome, RunRef, RunRequest } from "#execution/tool-run/messages.js";
+export type {
+  RunOutcome,
+  RunOutcomeMessage,
+  RunRef,
+  RunReport,
+  RunRequest,
+  RunRequestMessage,
+} from "#execution/tool-run/messages.js";

@@ -21,6 +21,15 @@ import type {
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: vi.fn(),
+  defineHook: () => ({
+    create: (options?: { readonly token?: string }) => ({
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+      dispose: async () => {},
+      getConflict: async () => null,
+      token: options?.token ?? "hook",
+    }),
+    resume: async () => null,
+  }),
 }));
 
 vi.mock("#execution/hook-ownership.js", async (importOriginal) => ({
@@ -174,7 +183,7 @@ describe("taskRunWorkflow", () => {
       "working",
       "completed",
     ]);
-    expect(disposeHook).toHaveBeenCalledTimes(1);
+    expect(disposeHook).toHaveBeenCalledTimes(4);
   });
 
   it("skips views for rejected and noop commands", async () => {
@@ -220,7 +229,7 @@ describe("taskRunWorkflow", () => {
     });
 
     expect(appendedStatuses()).toEqual(["working"]);
-    expect(disposeHook).toHaveBeenCalledTimes(1);
+    expect(disposeHook).toHaveBeenCalledTimes(4);
   });
 
   it("translates a settled child turn from the wire and wakes the parent once ready", async () => {
@@ -289,7 +298,7 @@ describe("taskRunWorkflow", () => {
 
     expect(appendedStatuses()).toEqual(["working", "completed"]);
     expect(wakeTaskParentStep).toHaveBeenCalledTimes(1);
-    expect(disposeHook).toHaveBeenCalledTimes(1);
+    expect(disposeHook).toHaveBeenCalledTimes(4);
   });
 
   it("silently terminates a dispatch rejected before parent indexing", async () => {
@@ -308,7 +317,7 @@ describe("taskRunWorkflow", () => {
 
     expect(appendedStatuses()).toEqual(["working", "failed"]);
     expect(wakeTaskParentStep).not.toHaveBeenCalled();
-    expect(disposeHook).toHaveBeenCalledTimes(1);
+    expect(disposeHook).toHaveBeenCalledTimes(4);
   });
 
   it("releases a fast input request when the readiness barrier arrives", async () => {

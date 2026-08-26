@@ -31,6 +31,15 @@ import { sessionCommandHookToken } from "#execution/session-command-token.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: vi.fn(),
+  defineHook: () => ({
+    create: (options?: { readonly token?: string }) => ({
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+      dispose: async () => {},
+      getConflict: async () => null,
+      token: options?.token ?? "hook",
+    }),
+    resume: async () => null,
+  }),
   getWorkflowMetadata: vi.fn(() => ({
     url: "https://eve.example.com",
     workflowRunId: "wrun_test_123",

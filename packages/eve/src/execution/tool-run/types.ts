@@ -1,20 +1,8 @@
 import type { SessionParent, SessionTurn } from "#channel/types.js";
 import type { SessionAuth } from "#context/keys.js";
 import type { JsonObject } from "#shared/json.js";
+import type { ToolRunOwner } from "#tools/definition.js";
 
-/**
- * Where a tool run reports: the parked turn waiting for the tool's result, or
- * the durable task that owns a background tool call. `RunMessage`s are resumed
- * on the named hook.
- */
-export type ToolRunReplyTo =
-  | { readonly kind: "turn"; readonly inboxToken: string }
-  | {
-      readonly kind: "task";
-      readonly taskId: string;
-      readonly taskInboxToken: string;
-      readonly taskRunId: string;
-    };
 
 /** The session projection an authored workflow body observes as `ctx.session`. */
 export interface ToolRunSessionContext {
@@ -34,7 +22,8 @@ export interface ToolRunWorkflowInput {
    */
   readonly hookToken: string;
   readonly input: JsonObject;
-  readonly replyTo: ToolRunReplyTo;
+  /** Channels of the turn or task that started the run; see {@link ToolRunOwner}. */
+  readonly owner: ToolRunOwner;
   readonly session: ToolRunSessionContext;
   /** Harness step index of the model call that made this tool call. */
   readonly stepIndex: number;
