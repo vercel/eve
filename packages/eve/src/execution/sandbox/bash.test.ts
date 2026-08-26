@@ -102,14 +102,15 @@ describe("executeBashOnSandbox", () => {
 });
 
 describe("background bash processes", () => {
-  it("launches a process group behind the process cap", async () => {
+  it("launches an isolated command behind the process cap", async () => {
     const session = sandbox();
-    const process = await startBackgroundBashProcess(session, "pnpm test");
+    const process = await startBackgroundBashProcess(session, "exit 7");
     const command = vi.mocked(session.run).mock.calls[0]?.[0].command;
 
     expect(process.processId).toMatch(/^[0-9a-f-]{36}$/);
     expect(command).toContain("set -m 2>/dev/null || true");
     expect(command).toContain(`-ge ${MAX_BACKGROUND_BASH_PROCESSES}`);
+    expect(command).toContain("( ( eval 'exit 7' ); code=$?");
   });
 
   it("rejects when the process cap is reached", async () => {
@@ -133,12 +134,14 @@ describe("background bash processes", () => {
     ).resolves.toEqual({ exitCode: 7, stderr: "err", stdout: "out" });
   });
 
-  it("removes process state after killing", async () => {
+  it("removes process state even when the process already exited", async () => {
     const session = sandbox();
 
     await getBackgroundBashProcess(session, "11111111-1111-4111-8111-111111111111").kill();
 
-    expect(vi.mocked(session.run).mock.calls[0]?.[0].command).toContain("&& rm -rf");
+    const command = vi.mocked(session.run).mock.calls[0]?.[0].command;
+    expect(command).toContain('if kill -0 -- -"$pid"');
+    expect(command).toContain("\nrm -rf");
   });
 
   it("rejects missing process state", async () => {

@@ -106,7 +106,7 @@ export async function startBackgroundBashProcess(
     `if [ "$(ls ${quotedRoot} | wc -l)" -ge ${MAX_BACKGROUND_BASH_PROCESSES} ]; then echo ${PROCESS_LIMIT_MARKER} >&2; exit 75; fi`,
     `mkdir -p ${shellQuote(directory)}`,
     `set -m 2>/dev/null || true`,
-    `( eval ${shellQuote(command)}; code=$?; printf '%s' "$code" > ${shellQuote(`${directory}/exit-code.tmp`)} && mv ${shellQuote(`${directory}/exit-code.tmp`)} ${shellQuote(`${directory}/exit-code`)} ) > ${shellQuote(`${directory}/stdout`)} 2> ${shellQuote(`${directory}/stderr`)} &`,
+    `( ( eval ${shellQuote(command)} ); code=$?; printf '%s' "$code" > ${shellQuote(`${directory}/exit-code.tmp`)} && mv ${shellQuote(`${directory}/exit-code.tmp`)} ${shellQuote(`${directory}/exit-code`)} ) > ${shellQuote(`${directory}/stdout`)} 2> ${shellQuote(`${directory}/stderr`)} &`,
     `printf '%s' "$!" > ${shellQuote(`${directory}/pid`)}`,
   ].join("\n");
   const result = await sandbox.run({ command: launch });
@@ -166,7 +166,15 @@ function backgroundBashProcess(sandbox: SandboxSession, processId: string): Back
     async kill() {
       const quotedDirectory = shellQuote(directory);
       const result = await sandbox.run({
-        command: `pid=$(cat ${shellQuote(`${directory}/pid`)}) && [ "$pid" -gt 0 ] && { kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null; } && { sleep 0.1; kill -KILL -- -"$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true; } && rm -rf ${quotedDirectory}`,
+        command: [
+          `pid=$(cat ${shellQuote(`${directory}/pid`)}) && [ "$pid" -gt 0 ] || exit 1`,
+          `if kill -0 -- -"$pid" 2>/dev/null || kill -0 "$pid" 2>/dev/null; then`,
+          `  kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true`,
+          `  sleep 0.1`,
+          `  kill -KILL -- -"$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true`,
+          `fi`,
+          `rm -rf ${quotedDirectory}`,
+        ].join("\n"),
       });
       if (result.exitCode !== 0) {
         throw new Error(`Bash process "${processId}" could not be killed by this sandbox backend.`);
