@@ -7,7 +7,7 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 export interface DiscordGatewayEnvelopeV1 {
   readonly version: 1;
-  readonly connectorId: string;
+  readonly applicationId: string;
   readonly deliveryId: string;
   readonly event: "MESSAGE_CREATE";
   readonly sequence: number | null;
@@ -37,7 +37,6 @@ export interface DiscordMessage {
 }
 
 export interface DiscordGatewayConfig {
-  readonly connectorId: string;
   readonly route?: string;
   readonly secret: string | (() => string | Promise<string>);
   onMessage?(
@@ -53,7 +52,7 @@ export type DiscordGatewayMessageResult = {
 } | null;
 
 interface DiscordGatewayVerificationConfig {
-  readonly connectorId: string;
+  readonly applicationId: string;
   readonly secret: string | (() => string | Promise<string>);
 }
 
@@ -67,9 +66,9 @@ export async function verifyDiscordGatewayRequest(
   }
 
   const timestamp = request.headers.get("x-eve-discord-timestamp") ?? "";
-  const connectorId = request.headers.get("x-eve-discord-connector") ?? "";
+  const applicationId = request.headers.get("x-eve-discord-application") ?? "";
   const signature = request.headers.get("x-eve-discord-signature") ?? "";
-  if (!/^\d+$/.test(timestamp) || !connectorId || !/^v1=[0-9a-f]{64}$/.test(signature)) {
+  if (!/^\d+$/.test(timestamp) || !applicationId || !/^v1=[0-9a-f]{64}$/.test(signature)) {
     throw new DiscordGatewayRequestError(401, "invalid_signature_headers");
   }
   const timestampSeconds = Number(timestamp);
@@ -79,14 +78,14 @@ export async function verifyDiscordGatewayRequest(
   ) {
     throw new DiscordGatewayRequestError(401, "stale_signature");
   }
-  if (connectorId !== config.connectorId) {
-    throw new DiscordGatewayRequestError(401, "connector_mismatch");
+  if (applicationId !== config.applicationId) {
+    throw new DiscordGatewayRequestError(401, "application_mismatch");
   }
 
   const secret = typeof config.secret === "function" ? await config.secret() : config.secret;
   if (!secret) throw new DiscordGatewayRequestError(401, "missing_secret");
   const expected = createHmac("sha256", secret)
-    .update(`v1\n${timestamp}\n${connectorId}\n${body}`, "utf8")
+    .update(`v1\n${timestamp}\n${applicationId}\n${body}`, "utf8")
     .digest();
   const received = Buffer.from(signature.slice(3), "hex");
   if (received.length !== expected.length || !timingSafeEqual(received, expected)) {
@@ -99,8 +98,8 @@ export async function verifyDiscordGatewayRequest(
   } catch {
     throw new DiscordGatewayRequestError(400, "invalid_envelope");
   }
-  if (envelope.connectorId !== config.connectorId) {
-    throw new DiscordGatewayRequestError(401, "connector_mismatch");
+  if (envelope.applicationId !== config.applicationId) {
+    throw new DiscordGatewayRequestError(401, "application_mismatch");
   }
   return { body, envelope };
 }
@@ -170,7 +169,7 @@ function parseEnvelope(value: unknown): DiscordGatewayEnvelopeV1 {
   if (
     !isObject(value) ||
     value.version !== 1 ||
-    !isNonEmptyString(value.connectorId) ||
+    !isNonEmptyString(value.applicationId) ||
     !isNonEmptyString(value.deliveryId) ||
     value.event !== "MESSAGE_CREATE" ||
     (value.sequence !== null && typeof value.sequence !== "number")
@@ -179,7 +178,7 @@ function parseEnvelope(value: unknown): DiscordGatewayEnvelopeV1 {
   }
   return {
     version: 1,
-    connectorId: value.connectorId,
+    applicationId: value.applicationId,
     deliveryId: value.deliveryId,
     event: "MESSAGE_CREATE",
     sequence: value.sequence,

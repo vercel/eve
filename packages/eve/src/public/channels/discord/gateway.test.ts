@@ -7,20 +7,20 @@ import {
   verifyDiscordGatewayRequest,
 } from "#public/channels/discord/gateway.js";
 
-const connectorId = "discord/my-agent";
+const applicationId = "APP1";
 const secret = "test-secret";
 
 function signedRequest(body: string, overrides: Record<string, string> = {}): Request {
   const timestamp = String(Math.floor(Date.now() / 1000));
-  const connector = overrides["x-eve-discord-connector"] ?? connectorId;
+  const application = overrides["x-eve-discord-application"] ?? applicationId;
   const signature = createHmac("sha256", secret)
-    .update(`v1\n${timestamp}\n${connector}\n${body}`, "utf8")
+    .update(`v1\n${timestamp}\n${application}\n${body}`, "utf8")
     .digest("hex");
   return new Request("https://example.com/eve/v1/discord/gateway", {
     body,
     headers: {
       "content-type": "application/json",
-      "x-eve-discord-connector": connector,
+      "x-eve-discord-application": application,
       "x-eve-discord-signature": overrides["x-eve-discord-signature"] ?? `v1=${signature}`,
       "x-eve-discord-timestamp": overrides["x-eve-discord-timestamp"] ?? timestamp,
     },
@@ -30,9 +30,9 @@ function signedRequest(body: string, overrides: Record<string, string> = {}): Re
 
 function envelope(data: unknown = message()): string {
   return JSON.stringify({
-    connectorId,
+    applicationId,
     data,
-    deliveryId: "discord:discord/my-agent:message:M1",
+    deliveryId: "discord:APP1:message:M1",
     event: "MESSAGE_CREATE",
     sequence: 42,
     version: 1,
@@ -55,24 +55,24 @@ describe("Discord Gateway envelope", () => {
   it("verifies the canonical timestamped HMAC before parsing its envelope", async () => {
     const body = envelope();
     await expect(
-      verifyDiscordGatewayRequest(signedRequest(body), { connectorId, secret }),
-    ).resolves.toMatchObject({ envelope: { connectorId, event: "MESSAGE_CREATE", version: 1 } });
+      verifyDiscordGatewayRequest(signedRequest(body), { applicationId, secret }),
+    ).resolves.toMatchObject({ envelope: { applicationId, event: "MESSAGE_CREATE", version: 1 } });
   });
 
-  it("rejects connector mismatches and malformed signatures", async () => {
+  it("rejects application mismatches and malformed signatures", async () => {
     await expect(
       verifyDiscordGatewayRequest(
-        signedRequest(envelope(), { "x-eve-discord-connector": "other" }),
+        signedRequest(envelope(), { "x-eve-discord-application": "other" }),
         {
-          connectorId,
+          applicationId,
           secret,
         },
       ),
-    ).rejects.toMatchObject({ reason: "connector_mismatch", status: 401 });
+    ).rejects.toMatchObject({ reason: "application_mismatch", status: 401 });
     await expect(
       verifyDiscordGatewayRequest(
         signedRequest(envelope(), { "x-eve-discord-signature": "v1=not-a-digest" }),
-        { connectorId, secret },
+        { applicationId, secret },
       ),
     ).rejects.toMatchObject({ reason: "invalid_signature_headers", status: 401 });
   });

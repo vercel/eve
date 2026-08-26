@@ -345,7 +345,13 @@ async function handleGatewayMessage(input: {
   const gateway = input.config.gateway!;
   let envelope;
   try {
-    ({ envelope } = await verifyDiscordGatewayRequest(input.request, gateway));
+    const applicationId = await resolveDiscordApplicationId(
+      input.config.credentials?.applicationId,
+    );
+    ({ envelope } = await verifyDiscordGatewayRequest(input.request, {
+      applicationId,
+      secret: gateway.secret,
+    }));
   } catch (error) {
     if (error instanceof DiscordGatewayRequestError) {
       return Response.json({ accepted: false, reason: error.reason }, { status: error.status });
@@ -355,12 +361,12 @@ async function handleGatewayMessage(input: {
   const message = parseDiscordGatewayMessage(envelope.data);
   if (message === null) return Response.json({ accepted: false, reason: "invalid_message" });
   if (message.guildId && !message.threadId && message.referencedMessage?.id !== undefined) {
-    const anchor = `${gateway.connectorId}:message:${message.referencedMessage.id}`;
+    const anchor = `${envelope.applicationId}:message:${message.referencedMessage.id}`;
     if ((await input.resolveSession(anchor)) === undefined) {
       return Response.json({ accepted: false, reason: "anchor_not_ready" }, { status: 409 });
     }
   }
-  const state = gatewayMessageState(message);
+  const state = gatewayMessageState(envelope.applicationId, message);
   const context: DiscordContext = { discord: buildDiscordHandle({ config: input.config, state }) };
   const result =
     gateway.onMessage === undefined
@@ -373,7 +379,7 @@ async function handleGatewayMessage(input: {
   if (result === null || result === undefined)
     return Response.json({ accepted: false, reason: "ignored" });
   const token = await gatewayContinuationToken({
-    connectorId: gateway.connectorId,
+    applicationId: envelope.applicationId,
     message,
     resolveSession: input.resolveSession,
   });
@@ -402,7 +408,10 @@ async function defaultGatewayMessageResult(input: {
   if (message.author.isBot) return null;
   if (!message.guildId) return { auth: defaultDiscordGatewayAuth(message) };
   if (message.referencedMessage?.id !== undefined) {
-    const token = `${input.config.gateway!.connectorId}:message:${message.referencedMessage.id}`;
+    const applicationId = await resolveDiscordApplicationId(
+      input.config.credentials?.applicationId,
+    );
+    const token = `${applicationId}:message:${message.referencedMessage.id}`;
     return (await input.resolveSession(token)) === undefined
       ? null
       : { auth: defaultDiscordGatewayAuth(message) };
@@ -415,22 +424,22 @@ async function defaultGatewayMessageResult(input: {
 }
 
 async function gatewayContinuationToken(input: {
-  readonly connectorId: string;
+  readonly applicationId: string;
   readonly message: DiscordMessage;
   readonly resolveSession: ChannelResolveSession;
 }): Promise<string | null> {
-  if (!input.message.guildId) return `${input.connectorId}:dm:${input.message.channelId}`;
-  if (input.message.threadId) return `${input.connectorId}:thread:${input.message.threadId}`;
+  if (!input.message.guildId) return `${input.applicationId}:dm:${input.message.channelId}`;
+  if (input.message.threadId) return `${input.applicationId}:thread:${input.message.threadId}`;
   if (input.message.referencedMessage?.id !== undefined) {
-    const anchor = `${input.connectorId}:message:${input.message.referencedMessage.id}`;
+    const anchor = `${input.applicationId}:message:${input.message.referencedMessage.id}`;
     return (await input.resolveSession(anchor)) === undefined ? null : anchor;
   }
-  return `${input.connectorId}:message:${input.message.id}`;
+  return `${input.applicationId}:message:${input.message.id}`;
 }
 
-function gatewayMessageState(message: DiscordMessage): DiscordChannelState {
+function gatewayMessageState(applicationId: string, message: DiscordMessage): DiscordChannelState {
   return {
-    applicationId: null,
+    applicationId,
     channelId: message.channelId,
     conversationId: message.id,
     guildId: message.guildId ?? null,
@@ -503,14 +512,14 @@ function buildDiscordHandle(input: {
   const credentials = mergeCredentials(input.config.credentials, state);
 
   function anchor(posted: DiscordPostedMessage): void {
-    const gatewayMessageChain = input.config.gateway?.connectorId && state.guildId;
+    const gatewayMessageChain = input.config.gateway !== undefined && state.guildId !== null;
     if (!posted.id || (state.hasMessageAnchor && !gatewayMessageChain)) return;
     state.conversationId = posted.id;
     state.hasMessageAnchor = true;
     if (state.channelId) {
-      if (input.config.gateway?.connectorId && !state.guildId) return;
+      if (input.config.gateway !== undefined && state.guildId === null) return;
       const token = gatewayMessageChain
-        ? `${input.config.gateway!.connectorId}:message:${posted.id}`
+        ? `${state.applicationId}:message:${posted.id}`
         : discordContinuationToken(state.channelId, posted.id);
       input.session?.continuation?.rekey(token);
     }
@@ -816,11 +825,11 @@ function commandContinuationToken(
   config: DiscordChannelConfig,
   interaction: DiscordCommandInteraction,
 ): string {
-  if (!config.gateway?.connectorId) {
+  if (config.gateway === undefined) {
     return discordContinuationToken(interaction.channelId, interaction.id);
   }
-  if (!interaction.guildId) return `${config.gateway.connectorId}:dm:${interaction.channelId}`;
-  return `${config.gateway.connectorId}:message:${interaction.id}`;
+  if (!interaction.guildId) return `${interaction.applicationId}:dm:${interaction.channelId}`;
+  return `${interaction.applicationId}:message:${interaction.id}`;
 }
 
 function interactionContinuationToken(
@@ -828,8 +837,8 @@ function interactionContinuationToken(
   interaction: DiscordComponentInteraction | DiscordModalSubmitInteraction,
   messageId: string,
 ): string {
-  return config.gateway?.connectorId && interaction.guildId
-    ? `${config.gateway.connectorId}:message:${messageId}`
+  return config.gateway !== undefined && interaction.guildId
+    ? `${interaction.applicationId}:message:${messageId}`
     : discordContinuationToken(interaction.channelId, messageId);
 }
 

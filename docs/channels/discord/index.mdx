@@ -67,13 +67,12 @@ import { discordChannel } from "eve/channels/discord";
 export default discordChannel({
   credentials: connectDiscordCredentials("discord/my-agent"),
   gateway: {
-    connectorId: "discord/my-agent",
     secret: () => process.env.RELAY_FORWARD_SECRET!,
   },
 });
 ```
 
-This mounts `POST /eve/v1/discord/gateway` in addition to the interaction route. Omitting `gateway` leaves the route unmounted and preserves interaction-only routing.
+This mounts `POST /eve/v1/discord/gateway` in addition to the interaction route. Gateway support does not require Vercel Connect: you can instead pass `{ applicationId, botToken, publicKey }` through `credentials`, or use the matching `DISCORD_*` environment variables. The Discord application ID namespaces conversations and must match the relay's signed application identity. Omitting `gateway` leaves the route unmounted and preserves interaction-only routing.
 
 ### Native bot behavior
 

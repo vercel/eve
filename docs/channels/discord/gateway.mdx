@@ -32,15 +32,31 @@ import { discordChannel } from "eve/channels/discord";
 export default discordChannel({
   credentials: connectDiscordCredentials("discord/my-agent"),
   gateway: {
-    connectorId: "discord/my-agent",
     secret: () => process.env.RELAY_FORWARD_SECRET!,
   },
 });
 ```
 
-This mounts `POST /eve/v1/discord/gateway` in addition to the interaction route. `connectorId` is a stable namespace and must match the relay's connector identity. Guided Connect setups should use the Connect connector UID; with manual credentials, choose an ID and keep it stable. Changing it starts a new conversation namespace.
+This mounts `POST /eve/v1/discord/gateway` in addition to the interaction route. The channel resolves the Discord application ID from `credentials` and uses it to verify the relay and namespace conversations.
 
-`secret` is required and must resolve to the same independent secret used by the relay to sign requests. Do not use the Discord bot token as the relay secret. Omitting `gateway` leaves the route unmounted and preserves the existing interaction-only routing behavior.
+Vercel Connect is optional. You can instead configure the channel directly:
+
+```ts title="agent/channels/discord.ts"
+import { discordChannel } from "eve/channels/discord";
+
+export default discordChannel({
+  credentials: {
+    applicationId: process.env.DISCORD_APPLICATION_ID,
+    botToken: process.env.DISCORD_BOT_TOKEN,
+    publicKey: process.env.DISCORD_PUBLIC_KEY,
+  },
+  gateway: {
+    secret: () => process.env.RELAY_FORWARD_SECRET!,
+  },
+});
+```
+
+You can also omit `credentials`; the channel reads `DISCORD_APPLICATION_ID`, `DISCORD_BOT_TOKEN`, and `DISCORD_PUBLIC_KEY`. `gateway.secret` is required and must resolve to the same independent secret used by the relay to sign requests. Do not use the Discord bot token as the relay secret. Omitting `gateway` leaves the route unmounted and preserves the existing interaction-only routing behavior.
 
 ## Run the relay
 
@@ -66,8 +82,8 @@ Forward the raw `MESSAGE_CREATE` dispatch object from the Gateway payload's `d` 
 ```json
 {
   "version": 1,
-  "connectorId": "discord/my-agent",
-  "deliveryId": "discord:discord/my-agent:message:1234567890",
+  "applicationId": "1234567890",
+  "deliveryId": "discord:1234567890:message:9876543210",
   "event": "MESSAGE_CREATE",
   "sequence": 42,
   "sessionId": "gateway-session-id",
@@ -75,21 +91,21 @@ Forward the raw `MESSAGE_CREATE` dispatch object from the Gateway payload's `d` 
 }
 ```
 
-| Field         | Contract                                                                               |
-| ------------- | -------------------------------------------------------------------------------------- |
-| `version`     | Must be `1`.                                                                           |
-| `connectorId` | Must equal `gateway.connectorId` and the signed connector header.                      |
-| `deliveryId`  | A non-empty relay delivery ID. Use the connector and Discord message ID for stability. |
-| `event`       | Must be `MESSAGE_CREATE`.                                                              |
-| `sequence`    | The Gateway dispatch sequence, or `null`.                                              |
-| `sessionId`   | Optional Discord Gateway session ID for diagnostics.                                   |
-| `data`        | The `d` object from `MESSAGE_CREATE`, enriched with `thread.id` for a thread channel.  |
+| Field           | Contract                                                                                 |
+| --------------- | ---------------------------------------------------------------------------------------- |
+| `version`       | Must be `1`.                                                                             |
+| `applicationId` | Must equal the configured Discord application ID and signed application header.          |
+| `deliveryId`    | A non-empty relay delivery ID. Use the application and Discord message ID for stability. |
+| `event`         | Must be `MESSAGE_CREATE`.                                                                |
+| `sequence`      | The Gateway dispatch sequence, or `null`.                                                |
+| `sessionId`     | Optional Discord Gateway session ID for diagnostics.                                     |
+| `data`          | The `d` object from `MESSAGE_CREATE`, enriched with `thread.id` for a thread channel.    |
 
 Serialize the envelope exactly once. Sign the exact UTF-8 request body with HMAC-SHA256 and send these headers:
 
 ```text
 X-Eve-Discord-Timestamp: <Unix time in decimal seconds>
-X-Eve-Discord-Connector: <gateway.connectorId>
+X-Eve-Discord-Application: <Discord application ID>
 X-Eve-Discord-Signature: v1=<64 lowercase hexadecimal characters>
 Content-Type: application/json
 ```
@@ -97,7 +113,7 @@ Content-Type: application/json
 The signature input has no trailing newline:
 
 ```text
-v1\n<timestamp>\n<connector-id>\n<raw-request-body>
+v1\n<timestamp>\n<application-id>\n<raw-request-body>
 ```
 
 The following helper produces a request accepted by the default Gateway route:
@@ -106,7 +122,7 @@ The following helper produces a request accepted by the default Gateway route:
 import { createHmac } from "node:crypto";
 
 async function forwardMessageCreate(input: {
-  connectorId: string;
+  applicationId: string;
   eveUrl: string;
   gatewaySessionId?: string;
   relaySecret: string;
@@ -116,8 +132,8 @@ async function forwardMessageCreate(input: {
   const timestamp = String(Math.floor(Date.now() / 1000));
   const body = JSON.stringify({
     version: 1,
-    connectorId: input.connectorId,
-    deliveryId: `discord:${input.connectorId}:message:${input.data.id}`,
+    applicationId: input.applicationId,
+    deliveryId: `discord:${input.applicationId}:message:${input.data.id}`,
     event: "MESSAGE_CREATE",
     sequence: input.sequence,
     sessionId: input.gatewaySessionId,
@@ -125,14 +141,14 @@ async function forwardMessageCreate(input: {
     data: input.data,
   });
   const signature = createHmac("sha256", input.relaySecret)
-    .update(`v1\n${timestamp}\n${input.connectorId}\n${body}`, "utf8")
+    .update(`v1\n${timestamp}\n${input.applicationId}\n${body}`, "utf8")
     .digest("hex");
 
   return fetch(new URL("/eve/v1/discord/gateway", input.eveUrl), {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-eve-discord-connector": input.connectorId,
+      "x-eve-discord-application": input.applicationId,
       "x-eve-discord-signature": `v1=${signature}`,
       "x-eve-discord-timestamp": timestamp,
     },
@@ -141,23 +157,23 @@ async function forwardMessageCreate(input: {
 }
 ```
 
-The route rejects bodies over 1 MB. Timestamps are Unix seconds and must be within five minutes of eve's clock. eve verifies the signature before parsing JSON and requires the configured connector ID, signed header, and envelope field to match.
+The route rejects bodies over 1 MB. Timestamps are Unix seconds and must be within five minutes of eve's clock. eve verifies the signature before parsing JSON and requires the configured application ID, signed header, and envelope field to match.
 
 ### Handle relay responses and duplicates
 
 Use the response status to decide whether to retry:
 
-| Status    | Meaning                                                                                   |
-| --------- | ----------------------------------------------------------------------------------------- |
-| `202`     | Accepted. Stop retrying.                                                                  |
-| `200`     | Valid but ignored by policy. Stop retrying.                                               |
-| `400–403` | Invalid envelope, signature, timestamp, connector, or configuration. Fix before retrying. |
-| `409`     | `anchor_not_ready`. Retry briefly with bounded backoff, then treat the reply as stale.    |
-| `413`     | Body exceeds 1 MB. Do not retry unchanged.                                                |
-| `429`     | Rate limited. Retry with backoff.                                                         |
-| `5xx`     | Delivery failed. Retry with bounded backoff.                                              |
+| Status    | Meaning                                                                                     |
+| --------- | ------------------------------------------------------------------------------------------- |
+| `202`     | Accepted. Stop retrying.                                                                    |
+| `200`     | Valid but ignored by policy. Stop retrying.                                                 |
+| `400–403` | Invalid envelope, signature, timestamp, application, or configuration. Fix before retrying. |
+| `409`     | `anchor_not_ready`. Retry briefly with bounded backoff, then treat the reply as stale.      |
+| `413`     | Body exceeds 1 MB. Do not retry unchanged.                                                  |
+| `429`     | Rate limited. Retry with backoff.                                                           |
+| `5xx`     | Delivery failed. Retry with bounded backoff.                                                |
 
-Gateway delivery is at least once. Suppress common replays in the relay with a recent-message set keyed by connector and Discord message ID, and retain that set alongside Gateway checkpoints when possible. The relay should record completion only after eve returns `202` or a terminal `200` response.
+Gateway delivery is at least once. Suppress common replays in the relay with a recent-message set keyed by application and Discord message ID, and retain that set alongside Gateway checkpoints when possible. The relay should record completion only after eve returns `202` or a terminal `200` response.
 
 This is best-effort deduplication: if eve accepts a message but the relay crashes or loses the HTTP response before recording completion, forwarding it again can start another turn. eve does not durably claim `deliveryId` values today.
 
