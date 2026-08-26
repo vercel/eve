@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SandboxTemplateNotProvisionedError } from "#public/definitions/sandbox-backend.js";
 import { vercel } from "#public/sandbox/backends/vercel.js";
 import { createVercelSandbox } from "#execution/sandbox/bindings/vercel.js";
+import { getManagedSandboxCommands } from "#execution/sandbox/managed-command.js";
 
 // The credential fallback consults the developer's Vercel CLI auth and the
 // repo's `.vercel` project link; on a linked, logged-in machine it would
@@ -31,8 +32,10 @@ function createMockCommandResult() {
  */
 function createMockDetachedCommand(
   logs: ReadonlyArray<{ readonly data: string; readonly stream: "stderr" | "stdout" }> = [],
+  cmdId = "cmd-1",
 ) {
   return {
+    cmdId,
     kill: vi.fn().mockResolvedValue(undefined),
     logs() {
       return (async function* () {
@@ -58,6 +61,7 @@ function createMockSandbox(input: {
       rm: vi.fn().mockResolvedValue(undefined),
       unlink: vi.fn().mockResolvedValue(undefined),
     },
+    getCommand: vi.fn(async (cmdId: string) => createMockDetachedCommand([], cmdId)),
     name: input.name,
     readFile: vi.fn(async (file: { path: string }): Promise<object | null> => {
       const content = files.get(file.path);
@@ -1073,6 +1077,27 @@ describe("createVercelSandbox", () => {
 
     const state = await handle.captureState();
     expect(state.metadata).toEqual({ sandboxName: "persisted-sandbox-name" });
+  });
+
+  it("starts and reconnects managed commands through the Vercel command API", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+    vi.mocked(sessionSandbox.runCommand).mockResolvedValue(
+      createMockDetachedCommand([], "cmd-started") as never,
+    );
+
+    const commands = getManagedSandboxCommands(handle.session);
+    const started = await commands.start({ command: "sleep 10", idempotencyKey: "call-1" });
+    const reconnected = await commands.get("cmd-existing");
+
+    expect(started.commandId).toBe("cmd-started");
+    expect(reconnected.commandId).toBe("cmd-existing");
+    expect(sessionSandbox.runCommand).toHaveBeenCalledWith({
+      args: ["-lc", "sleep 10"],
+      cmd: "bash",
+      cwd: "/workspace",
+      detached: true,
+    });
+    expect(sessionSandbox.getCommand).toHaveBeenCalledWith("cmd-existing");
   });
 
   it("stops the session sandbox on shutdown so no VM outlives the server", async () => {
