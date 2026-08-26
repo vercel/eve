@@ -14,17 +14,20 @@ counterpart of `defineRemoteAgent`:
 ```ts
 // foreman/agent/subagents/reviewer.ts
 import { defineLocalAgent } from "eve";
+import reviewer from "#agents/reviewer/agent/agent.ts";
 
-export default defineLocalAgent({
-  agent: "@factory/reviewer",
+export default defineLocalAgent(reviewer, {
   description: "Delegate code reviews here.",
 });
 ```
 
-The mount is an **address, not a config carrier**. It contributes only a
-locator and the parent-facing `description`. The referenced agent's config,
-instructions, tools, hooks, skills, connections, sandbox, and nested subagents
-all come from its own directory, compiled once per deployment. Delegation
+The mount is an **address, not a config carrier**. The import is a
+statically traceable link to the referenced agent's directory plus a
+type-level connection for editors; the value it binds is never read. The
+mount contributes only that link and the parent-facing `description`. The
+referenced agent's config, instructions, tools, hooks, skills, connections,
+sandbox, and nested subagents all come from its own directory, compiled once
+per deployment. Delegation
 dispatches to that agent in-process; the parent session that created the child
 session owns it, exactly as subagent sessions work today.
 
@@ -60,13 +63,15 @@ Foreman as one orchestrator among them:
 
 ```text
 factory/
-  foreman/agent/
-    subagents/classifier.ts    defineLocalAgent → @factory/classifier
-    subagents/reviewer.ts      defineLocalAgent → @factory/reviewer
-    ...
-  classifier/agent/            top-level: own evals, own dev loop
-  reviewer/agent/              top-level: own channel when deployed standalone
-  implementer/agent/
+  package.json                 imports: { "#agents/*": "./agents/*" }
+  agents/
+    foreman/agent/
+      subagents/classifier.ts  defineLocalAgent → #agents/classifier
+      subagents/reviewer.ts    defineLocalAgent → #agents/reviewer
+      ...
+    classifier/agent/          top-level: own evals, own dev loop
+    reviewer/agent/            top-level: own channel when deployed standalone
+    implementer/agent/
 ```
 
 Each task agent is independently developable, evaluable, and optionally
@@ -139,60 +144,69 @@ standalone deployment would have broken every parent's build.
 ### Authoring API
 
 ```ts
-interface LocalAgentDefinitionInput {
-  /**
-   * Locator for a top-level agent in the same workspace: a workspace
-   * package name (preferred) or a path to the agent's app root.
-   */
-  readonly agent: string;
+interface LocalAgentOverrides {
   /** Surfaced to the parent as the delegation tool's description. */
   readonly description: string;
   // Later, mirroring remote agents: outputSchema, etc.
 }
 
-export function defineLocalAgent(input: LocalAgentDefinitionInput): LocalAgentDefinition; // { kind: "local", ... }
+export function defineLocalAgent(
+  agent: AgentDefinition, // link only; the value is never read
+  overrides: LocalAgentOverrides,
+): LocalAgentDefinition; // { kind: "local", ... }
 ```
+
+The first argument exists for the type system and the editor — a compile
+error if the sibling's `agent.ts` moves or stops exporting a config,
+go-to-definition into the sibling, rename-safe refactors. Its runtime value
+is deliberately ignored: config, instructions, tools, and sandbox all come
+from the referenced directory, so there is exactly one source of truth and
+no way for the mount to smuggle in a mutated config.
 
 Symmetry with `defineRemoteAgent` (`packages/eve/src/public/definitions/remote-agent.ts`)
 is deliberate: same mount position (a single file under `subagents/`), same
-"description + locator" shape, one locates by URL, the other by workspace
-identity. Swapping a local reference for a remote one — e.g. when a factory
-splits one agent into its own deployment — is a one-field change in one file.
+"link + description" shape, one locates by URL, the other by import. Swapping
+a local reference for a remote one — e.g. when a factory splits one agent
+into its own deployment — is a one-file change.
 
 The mount filename still provides the parent-visible tool name
 (`reviewer.ts` → `reviewer`), preserving the "name = path under `subagents/`"
 rule; one agent may be mounted under different names by different parents.
 
-An import-based sugar can layer on later purely as a resolution mechanism
-(type-checked link, go-to-definition):
+### Reference resolution
 
-```ts
-import reviewer from "#agents/reviewer/agent.ts";
-export default defineLocalAgent({ agent: reviewer, description: "…" });
+Discovery resolves the reference statically, without importing authored
+modules (the existing discovery invariant), the way extension mounts already
+do (`parseExtensionMountSpecifier`,
+`packages/eve/src/discover/extension-specifier.ts`):
+
+1. Read the mount file text; match
+   `export default defineLocalAgent(<ident>, …)` where `<ident>` is bound by
+   an import.
+2. Extract that import's specifier and resolve it: relative specifiers
+   against the mount file's directory; `#…` specifiers via the nearest
+   `package.json` `imports` map (readable statically); bare specifiers via
+   package resolution.
+3. The resolved module must be the sibling's `agent.ts`; its containing
+   agent directory becomes the referenced agent root.
+
+A single `imports` entry at the workspace root covers every agent with no
+per-agent packaging:
+
+```json
+{ "imports": { "#agents/*": "./agents/*" } }
 ```
 
-Discovery would statically trace the import specifier the way extension
-mounts do (`parseExtensionMountSpecifier`,
-`packages/eve/src/discover/extension-specifier.ts`). The carried value is
-never read — config has exactly one source, the referenced directory. This is
-sugar, not v1.
+Per-agent `package.json` remains optional — only needed when an agent wants
+its own dependencies. Agent identity falls back to the app-root basename as
+it does today.
 
-### Locator resolution
-
-The locator resolves statically at discovery time, without importing authored
-modules (the existing discovery invariant):
-
-1. **Workspace package name** (`@factory/reviewer`): resolved through the
-   workspace's package graph to the package root; the agent root is
-   `<packageRoot>/agent`. Preferred because it survives directory moves —
-   the same reason extension state is keyed by package name rather than
-   mount path (`packageStateNamespace`,
-   `packages/eve/src/discover/extensions.ts`).
-2. **Path** (`../../reviewer`): resolved against the mount file's directory
-   to an app root. Simpler, but couples the mount to disk layout.
-
-Unresolvable locators, or locators resolving to a directory that is not an
-eve app, fail discovery with a named diagnostic.
+The static-shape constraint is inherited from extension mounts:
+`defineLocalAgent(makeReviewer(), …)` or aliasing through intermediate
+variables does not resolve. A `defineLocalAgent` call whose first argument
+cannot be traced to an import fails discovery with a named diagnostic
+("could not statically resolve the referenced agent") — never a silent
+fallback.
 
 Because siblings live in the same workspace, they share one lockfile and one
 eve. Version skew between the referencing and referenced agent is
@@ -210,7 +224,7 @@ New work, and the honest center of the lift:
    pipeline (so root-only config is legal), memoized by canonical agent
    root, plus reference edges `(parentNodeId, mountName) → localAgentId`.
 2. **Reference nodes.** In the parent's tree, a local-agent mount compiles
-   like a remote-agent node — a locator plus description — not like a local
+   like a remote-agent node — a resolved reference plus description — not like a local
    subagent package. Compare `kind: "remote"` handling in
    `packages/eve/src/compiler/normalize-subagent.ts`.
 3. **Delegation lowering.** The runtime subagent registry already lowers
@@ -299,20 +313,27 @@ the factory architecture strains against.
 
 ## Open questions
 
-1. **Locator form at v1:** package name only, path only, or both? Package
-   name is the recommendation; supporting both costs little.
+1. **Specifier forms at v1:** `#…` imports-map aliases and relative paths
+   for certain; are bare package specifiers worth supporting at all, given
+   agents need no per-agent packaging?
 2. **Workspace boundary definition:** what exactly bounds "same workspace" —
-   the pnpm/npm workspace root, or any resolvable path? The deploy-time file
-   availability problem suggests the workspace root.
-3. **Channel/schedule inertness:** is inert-when-referenced the right
+   the directory owning the `imports` map, the pnpm/npm workspace root, or
+   any resolvable path? The deploy-time file availability problem suggests a
+   root that owns all referenced agents.
+3. **A blessed `agents/` convention:** should eve bless
+   `<workspace>/agents/<name>/` as the layout (enabling workspace-aware
+   tooling and short names), or stay layout-agnostic and let the imports map
+   carry the convention? Proposed: layout-agnostic in v1; revisit with
+   workspace-aware `eve dev`.
+4. **Channel/schedule inertness:** is inert-when-referenced the right
    default, or should a deployment be able to opt into activating a
    referenced agent's channels (making one deployment host several
    addressable agents)? The latter is powerful — it is most of the way to
    multi-agent apps — but expands scope considerably.
-4. **`eve dev` at the workspace root:** should the dev server understand a
+5. **`eve dev` at the workspace root:** should the dev server understand a
    workspace of agents (start the parent, resolve references, watch all
    referenced roots), and is that v1 or follow-up?
-5. **Naming:** `defineLocalAgent` (symmetry with `defineRemoteAgent`) vs.
+6. **Naming:** `defineLocalAgent` (symmetry with `defineRemoteAgent`) vs.
    `defineSiblingAgent` / `defineWorkspaceAgent`. This doc uses
    `defineLocalAgent`.
 
