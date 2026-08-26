@@ -13,9 +13,7 @@ const SLACK_ACTIVITY_MESSAGE_RENDERER_ID = "slack.activity.v1";
 const SLACK_ACTIVITY_RENDERER = Symbol("eve.slack.activity-renderer");
 
 export interface SlackActivityRenderer {
-  readonly id:
-    | typeof SLACK_ACTIVITY_STATUS_RENDERER_ID
-    | typeof SLACK_ACTIVITY_MESSAGE_RENDERER_ID;
+  readonly id: typeof SLACK_ACTIVITY_STATUS_RENDERER_ID | typeof SLACK_ACTIVITY_MESSAGE_RENDERER_ID;
   readonly [SLACK_ACTIVITY_RENDERER]: true;
 }
 
@@ -372,7 +370,9 @@ function blockerIcon(phase: ActivityBlockerStateV1["phase"]): string {
   return phase === "blocked" ? "◌" : phase === "completed" ? "✓" : phase === "failed" ? "✗" : "–";
 }
 
-function newestBlocker(blockers: readonly ActivityBlockerStateV1[]): ActivityBlockerStateV1 | undefined {
+function newestBlocker(
+  blockers: readonly ActivityBlockerStateV1[],
+): ActivityBlockerStateV1 | undefined {
   return blockers.reduce<ActivityBlockerStateV1 | undefined>(
     (newest, candidate) =>
       newest === undefined || candidate.startedAt >= newest.startedAt ? candidate : newest,
@@ -380,7 +380,9 @@ function newestBlocker(blockers: readonly ActivityBlockerStateV1[]): ActivityBlo
   );
 }
 
-function newestAction(actions: readonly ActivityActionStateV1[]): ActivityActionStateV1 | undefined {
+function newestAction(
+  actions: readonly ActivityActionStateV1[],
+): ActivityActionStateV1 | undefined {
   return actions.reduce<ActivityActionStateV1 | undefined>(
     (newest, candidate) =>
       newest === undefined || candidate.startedAt >= newest.startedAt ? candidate : newest,
