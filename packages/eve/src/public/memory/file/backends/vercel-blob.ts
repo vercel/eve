@@ -53,7 +53,7 @@ export function vercelBlob(options: VercelBlobBackendOptions = {}): MemoryDocume
           access: "private",
           addRandomSuffix: false,
           allowOverwrite: input.expectedVersion !== null,
-          cacheControlMaxAge: 60,
+          cacheControlMaxAge: 0,
           contentType: "text/markdown; charset=utf-8",
           ifMatch: input.expectedVersion ?? undefined,
         });
