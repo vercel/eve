@@ -34,6 +34,9 @@ describe("bash schemas", () => {
     );
     expect(BASH_INPUT_SCHEMA.safeParse({ action: "poll" }).success).toBe(false);
     expect(BASH_INPUT_SCHEMA.safeParse({ command: "pwd", action: "poll" }).success).toBe(false);
+    expect(
+      BASH_INPUT_SCHEMA.safeParse({ action: "run", command: "pwd", processId: "" }).success,
+    ).toBe(true);
   });
 
   it("distinguishes completed commands from running process receipts", () => {

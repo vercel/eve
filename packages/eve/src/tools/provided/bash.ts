@@ -19,13 +19,15 @@ const YIELD_TIME_SCHEMA = z
   )
   .optional();
 
+type BashProcessToolInput = {
+  readonly action: "poll" | "wait" | "kill";
+  readonly processId: string;
+  readonly yieldTimeMs?: number;
+};
+
 export type BashToolInput =
   | { readonly action?: "run"; readonly command: string; readonly yieldTimeMs?: number }
-  | {
-      readonly action: "poll" | "wait" | "kill";
-      readonly processId: string;
-      readonly yieldTimeMs?: number;
-    };
+  | BashProcessToolInput;
 
 export const BASH_INPUT_SCHEMA = z
   .strictObject({
@@ -44,10 +46,10 @@ export const BASH_INPUT_SCHEMA = z
     yieldTimeMs: YIELD_TIME_SCHEMA,
   })
   .superRefine((input, context) => {
+    const hasCommand = input.command !== undefined && input.command !== "";
+    const hasProcessId = input.processId !== undefined && input.processId !== "";
     const invalid =
-      input.action === "run"
-        ? input.command === undefined || input.processId !== undefined
-        : input.command !== undefined || input.processId === undefined;
+      input.action === "run" ? !hasCommand || hasProcessId : hasCommand || !hasProcessId;
     if (invalid) {
       context.addIssue({
         code: "custom",
@@ -88,15 +90,16 @@ export async function executeBashTool(
   context: Pick<SessionContext, "getSandbox"> & { readonly abortSignal: AbortSignal },
 ): Promise<BashToolOutput> {
   const sandbox = await context.getSandbox();
-  if ("command" in input) {
+  if (input.action === undefined || input.action === "run") {
     return await executeBashOnSandbox(sandbox, input as BashInput, {
       abortSignal: context.abortSignal,
     });
   }
 
+  const processInput = input as BashProcessToolInput;
   const startedAt = Date.now();
-  const process = getBackgroundBashProcess(sandbox, input.processId);
-  if (input.action === "kill") {
+  const process = getBackgroundBashProcess(sandbox, processInput.processId);
+  if (processInput.action === "kill") {
     const before = await process.read();
     if (before.exitCode !== undefined) {
       const output = formatBashOutput(before.stdout, before.stderr, startedAt);
@@ -105,11 +108,11 @@ export async function executeBashTool(
     await process.kill();
     return { ...formatBashOutput(before.stdout, before.stderr, startedAt), status: "killed" };
   }
-  if (input.action === "wait") {
+  if (processInput.action === "wait") {
     await waitForBackgroundBashProcess({
       abortSignal: context.abortSignal,
       process,
-      yieldTimeMs: input.yieldTimeMs ?? DEFAULT_BASH_YIELD_TIME_MS,
+      yieldTimeMs: processInput.yieldTimeMs ?? DEFAULT_BASH_YIELD_TIME_MS,
     });
   }
   const state = await process.read();
