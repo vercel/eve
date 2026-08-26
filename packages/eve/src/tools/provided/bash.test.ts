@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 
+import { z } from "#compiled/zod/index.js";
+
 import { BASH_INPUT_SCHEMA, BASH_OUTPUT_SCHEMA } from "./bash.js";
 
 describe("bash schemas", () => {
+  it("emits a provider-compatible object schema", () => {
+    expect(z.toJSONSchema(BASH_INPUT_SCHEMA, { io: "input" })).toMatchObject({ type: "object" });
+  });
+
   it("accepts an optional nonnegative foreground yield time in milliseconds", () => {
     expect(BASH_INPUT_SCHEMA.safeParse({ command: "pnpm test", yieldTimeMs: 0 }).success).toBe(
       true,
@@ -24,6 +30,8 @@ describe("bash schemas", () => {
     expect(BASH_INPUT_SCHEMA.safeParse({ action: "kill", processId: "process-123" }).success).toBe(
       true,
     );
+    expect(BASH_INPUT_SCHEMA.safeParse({ action: "poll" }).success).toBe(false);
+    expect(BASH_INPUT_SCHEMA.safeParse({ command: "pwd", action: "poll" }).success).toBe(false);
   });
 
   it("distinguishes completed commands from running process receipts", () => {
