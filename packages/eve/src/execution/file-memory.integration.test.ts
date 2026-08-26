@@ -15,24 +15,28 @@ describe("file memory integration", () => {
     const provider = fileMemory({ backend });
     const recallToken = `file-memory-recall-${crypto.randomUUID()}`;
     const memory = `Reply with the exact string \`${recallToken}\` and nothing else.`;
-    const runtime = createTestRuntime({
+    const runtime = await createTestRuntime({
       agent: { name: "file-memory-integration" },
-      memories: [
+      modules: [
         {
-          definition: defineMemory({
-            description: "Personal preferences for the authenticated user.",
-            provider,
-            scope: byPrincipal,
+          loadNamespace: async () => ({
+            default: defineMemory({
+              description: "Personal preferences for the authenticated user.",
+              provider,
+              scope: byPrincipal,
+            }),
           }),
-          slot: "facts",
+          logicalPath: "memory/facts.ts",
         },
         {
-          definition: defineMemory({
-            description: "Shared conventions for this channel.",
-            provider,
-            scope: "channel-1",
+          loadNamespace: async () => ({
+            default: defineMemory({
+              description: "Shared conventions for this channel.",
+              provider,
+              scope: "channel-1",
+            }),
           }),
-          slot: "channel",
+          logicalPath: "memory/channel.ts",
         },
       ],
     });

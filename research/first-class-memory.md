@@ -1194,10 +1194,10 @@ Implementation proceeds in two pull requests:
    lifecycle, compaction, agent-info v4, published documentation, and
    deterministic end-to-end coverage. It does not restack or reuse the custom
    runtime lifecycle from [#2142](https://github.com/vercel/eve/pull/2142).
-2. After #2534 merges, the bounded `fileMemory()` provider in
-   [#2144](https://github.com/vercel/eve/pull/2144) will be rebased onto current
-   `main`. It retains only provider storage, document, backend, and concurrency
-   work, and absorbs final file-provider e2e coverage. The separate e2e tail in
+2. The bounded `fileMemory()` provider in
+   [#2144](https://github.com/vercel/eve/pull/2144) is stacked directly on
+   #2534. It retains only provider storage, document, backend, and concurrency
+   work and includes final file-provider e2e coverage. The separate e2e tail in
    [#2145](https://github.com/vercel/eve/pull/2145) is superseded.
 
 #2534 implements the core boundary through one selected source and binding
