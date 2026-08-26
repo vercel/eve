@@ -28,6 +28,10 @@ function resolveSlackInboundMrkdwnUnsafe(text: string, raw: Record<string, unkno
     return extracted;
   }
 
+  if (hasSlackMessageUnfurl(raw.attachments)) {
+    return `${text}\n${extracted}`;
+  }
+
   if (extracted.length >= trimmedText.length * 2) {
     const hasLegacyAttachments = Array.isArray(raw.attachments) && raw.attachments.length > 0;
     if (hasLegacyAttachments && !normalizedExtracted.includes(normalizedTrimmed)) {
@@ -140,6 +144,7 @@ function extractLegacyAttachmentLines(legacyAttachments: unknown): string[] {
       lines.push(attachment.footer);
     }
     lines.push(...extractBlockKitLines(attachment.blocks));
+    lines.push(...extractSlackMessageUnfurlLines(attachment.message_blocks));
     // Fallback is per-attachment and only when this attachment has no other
     // visible fields; nested blocks count, and earlier attachments must not
     // suppress a later fallback.
@@ -149,6 +154,36 @@ function extractLegacyAttachmentLines(legacyAttachments: unknown): string[] {
       attachment.fallback.length > 0
     ) {
       lines.push(attachment.fallback);
+    }
+  }
+
+  return lines;
+}
+
+function hasSlackMessageUnfurl(legacyAttachments: unknown): boolean {
+  return (
+    Array.isArray(legacyAttachments) &&
+    legacyAttachments.some(
+      (attachment) => isObject(attachment) && Array.isArray(attachment.message_blocks),
+    )
+  );
+}
+
+function extractSlackMessageUnfurlLines(messageBlocks: unknown): string[] {
+  if (!Array.isArray(messageBlocks)) return [];
+
+  const lines: string[] = [];
+  for (const messageBlock of messageBlocks) {
+    if (!isObject(messageBlock) || !isObject(messageBlock.message)) continue;
+
+    const blockLines = extractBlockKitLines(messageBlock.message.blocks);
+    if (blockLines.length > 0) {
+      lines.push(...blockLines);
+    } else if (
+      typeof messageBlock.message.text === "string" &&
+      messageBlock.message.text.length > 0
+    ) {
+      lines.push(messageBlock.message.text);
     }
   }
 
