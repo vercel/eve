@@ -204,12 +204,15 @@ describe("task cancellation identity", () => {
     expect(sendTaskCommand).toHaveBeenCalledWith(
       expect.objectContaining({ command: { kind: "settle-executor" } }),
     );
-    expect(vi.mocked(sendTaskCommand).mock.invocationCallOrder.at(-1)).toBeLessThan(
-      vi.mocked(cancelToolRun).mock.invocationCallOrder[0] ?? 0,
+    expect(vi.mocked(cancelToolRun).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(requestWorkflowTurnCancellation).mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(vi.mocked(requestWorkflowTurnCancellation).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(sendTaskCommand).mock.invocationCallOrder.at(-1) ?? 0,
     );
   });
 
-  it("settles a workflow tool executor before waiting for cancellation", async () => {
+  it("settles a workflow tool executor after cancellation", async () => {
     const session = createSession("local");
     const state = session.state;
     if (state === undefined) throw new Error("Expected task session state.");
@@ -244,8 +247,51 @@ describe("task cancellation identity", () => {
     expect(sendTaskCommand).toHaveBeenCalledWith(
       expect.objectContaining({ command: { kind: "settle-executor" } }),
     );
-    expect(vi.mocked(sendTaskCommand).mock.invocationCallOrder.at(-1)).toBeLessThan(
-      vi.mocked(cancelToolRun).mock.invocationCallOrder[0] ?? 0,
+    expect(vi.mocked(cancelToolRun).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(sendTaskCommand).mock.invocationCallOrder.at(-1) ?? 0,
+    );
+  });
+
+  it("settles a cancelled relay before the child address arrives", async () => {
+    const session = createSession("local");
+    vi.mocked(readLatestTaskView).mockResolvedValue({
+      executor: {
+        binding: {
+          data: {
+            callId: "call-1",
+            hookToken: "run-hook",
+            runId: "relay-run",
+            toolName: "research",
+          },
+          kind: "subagent-relay",
+        },
+      },
+      metadata: {
+        agentId: "missing-agent",
+        kind: "subagent",
+        mode: "local",
+        name: "research",
+      },
+      status: "cancelled",
+      taskId: "task-1",
+    });
+
+    await executeTaskControlAction({
+      action,
+      bundle: {} as CompiledBundle,
+      parentTurnId: "turn-parent",
+      session,
+    });
+
+    expect(cancelToolRun).toHaveBeenCalledWith(
+      expect.objectContaining({ hookToken: "run-hook", runId: "relay-run" }),
+    );
+    expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
+    expect(sendTaskCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ command: { kind: "settle-executor" } }),
+    );
+    expect(vi.mocked(cancelToolRun).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(sendTaskCommand).mock.invocationCallOrder.at(-1) ?? 0,
     );
   });
 
@@ -498,7 +544,7 @@ describe("task cancellation identity", () => {
     expect(cancelRemoteAgentTurn).not.toHaveBeenCalled();
   });
 
-  it("does not propagate a repeated cancel after the task hook is disposed", async () => {
+  it("re-drives propagation after the task hook is disposed", async () => {
     vi.mocked(sendTaskCommand).mockResolvedValue("unreachable");
 
     await executeTaskControlAction({
@@ -508,7 +554,11 @@ describe("task cancellation identity", () => {
       session: createSession("local"),
     });
 
-    expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
+    expect(requestWorkflowTurnCancellation).toHaveBeenCalledWith({
+      sessionId: "child-1",
+      taskId: "task-1",
+      turnId: "turn_child_7",
+    });
     expect(cancelRemoteAgentTurn).not.toHaveBeenCalled();
   });
 

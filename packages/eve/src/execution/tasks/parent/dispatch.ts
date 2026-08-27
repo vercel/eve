@@ -133,7 +133,7 @@ export async function cancelOwnedTask(input: {
   readonly session: RuntimeSession;
 }): Promise<TaskView> {
   const { entry } = input;
-  const delivery = await sendTaskCommand({
+  await sendTaskCommand({
     command: { kind: "cancel" },
     taskInboxToken: entry.taskInboxToken,
   });
@@ -154,7 +154,7 @@ export async function cancelOwnedTask(input: {
   }
   const settledView = view;
 
-  if (settledView.status === "cancelled" && delivery === "delivered") {
+  if (settledView.status === "cancelled") {
     await propagateTaskCancel({
       bundle: input.bundle,
       serializedContext: input.serializedContext,
@@ -185,16 +185,16 @@ async function propagateTaskCancel(input: {
     // The run cannot report its own end once cancelled, so settle the
     // executor here; that is what lets the task run finish and release
     // its hook.
-    await sendTaskCommand({
-      command: { kind: "settle-executor" },
-      taskInboxToken: input.entry.taskInboxToken,
-    });
     await cancelToolRun({
       callId: input.entry.taskId,
       hookToken: toolRun.hookToken,
       reason: `Task ${input.entry.taskId} was cancelled.`,
       runId: toolRun.runId,
       toolName: input.entry.metadata.name,
+    });
+    await sendTaskCommand({
+      command: { kind: "settle-executor" },
+      taskInboxToken: input.entry.taskInboxToken,
     });
     return;
   }
@@ -203,10 +203,6 @@ async function propagateTaskCancel(input: {
   if (metadata === undefined) return;
   const relay = readTaskRelay(input.view.executor);
   if (relay !== undefined) {
-    await sendTaskCommand({
-      command: { kind: "settle-executor" },
-      taskInboxToken: input.entry.taskInboxToken,
-    });
     await cancelToolRun({
       callId: relay.callId,
       hookToken: relay.hookToken,
@@ -218,20 +214,25 @@ async function propagateTaskCancel(input: {
   const executor =
     readSubagentExecutor(input.view.executor) ??
     findTaskAgentAddress(input.session, metadata.agentId);
-  if (executor === undefined) return;
   if (
-    input.view.executor?.childSessionId !== undefined &&
-    input.view.executor.childSessionId !== executor.address.sessionId
+    executor !== undefined &&
+    (input.view.executor?.childSessionId === undefined ||
+      input.view.executor.childSessionId === executor.address.sessionId)
   ) {
-    return;
+    await propagateSubagentExecutorCancel({
+      bundle: input.bundle,
+      childTurnId: input.view.executor?.childTurnId,
+      executor,
+      serializedContext: input.serializedContext,
+      taskId: input.view.taskId,
+    });
   }
-  await propagateSubagentExecutorCancel({
-    bundle: input.bundle,
-    childTurnId: input.view.executor?.childTurnId,
-    executor,
-    serializedContext: input.serializedContext,
-    taskId: input.view.taskId,
-  });
+  if (relay !== undefined) {
+    await sendTaskCommand({
+      command: { kind: "settle-executor" },
+      taskInboxToken: input.entry.taskInboxToken,
+    });
+  }
 }
 
 /**

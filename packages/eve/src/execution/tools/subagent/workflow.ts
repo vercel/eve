@@ -52,7 +52,12 @@ export async function subagentToolExecuteWorkflow(
       throw new SubagentRelayError(error, true);
     }
   } finally {
-    await disposeHook(child);
+    try {
+      await disposeHook(child);
+    } catch {
+      // The child result or failure is authoritative; teardown cannot replace
+      // it with dispatch provenance after this relay adopted the child hook.
+    }
   }
 
   throw new SubagentRelayError(
