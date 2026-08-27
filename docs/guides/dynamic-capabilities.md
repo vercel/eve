@@ -5,6 +5,8 @@ description: "Resolve models, subagents, tools, skills, and instructions at runt
 
 `defineDynamic` resolves the model, subagents, tools, skills, and instructions at runtime from a session event instead of declaring them up front. Reach for it when the right capability isn't known until the session starts, because it hinges on who the caller is, what tenant they belong to, feature flags, or external data. The [subagents](../subagents), [tools](../tools), [skills](../skills), and [instructions](../instructions) guides each point here for their dynamic form.
 
+eve evaluates a dynamic definition module once during compilation to classify and validate it, then retains that module as a runtime entry so its event handlers can run. Its top-level code therefore runs in both phases; keep caller-specific work inside the handlers. See [Authored module lifecycle](../reference/typescript-api#authored-module-lifecycle).
+
 ## Dynamic models
 
 The `model` field in `agent.ts` accepts `defineDynamic({ events })`. Resolvers

@@ -16,6 +16,7 @@ import type {
   Runtime,
   SessionCommand,
   SessionCommandResult,
+  SessionTraceContext,
 } from "#channel/types.js";
 import { serializeContext } from "#context/serialize.js";
 import {
@@ -57,7 +58,11 @@ import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
-import { evaluateTracePolicy } from "#tracing/sampled-trace.js";
+import {
+  isSampledTrace,
+  resolveTracePolicy,
+  resolveTracePolicyDecision,
+} from "#tracing/sampled-trace.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
@@ -458,14 +463,14 @@ function allocateSessionTraceSeed(input: {
   readonly agentName?: string;
   readonly audience: ReturnType<typeof normalizeChannelAudience>;
   readonly channelType?: string;
-  readonly parentTraceContext?: {
-    readonly traceId: string;
-    readonly spanId: string;
-    readonly traceFlags: number;
-  };
+  readonly parentTraceContext?: SessionTraceContext;
 }): SessionTraceSeed | undefined {
   if (input.parentTraceContext !== undefined) {
+    const decision =
+      input.parentTraceContext.decision ??
+      resolveTracePolicyDecision(isSampledTrace(input.parentTraceContext), input.audience);
     return {
+      decision,
       spanId: input.parentTraceContext.spanId,
       traceFlags: input.parentTraceContext.traceFlags,
       traceId: input.parentTraceContext.traceId,
@@ -474,14 +479,15 @@ function allocateSessionTraceSeed(input: {
   const instrumentation = getInstrumentationRuntime();
   if (instrumentation?.prepareSessionTrace === undefined) return undefined;
   if (instrumentation.idGenerator === undefined) return undefined;
-  const sampled = evaluateTracePolicy(instrumentation.otelSettings?.tracePolicy, {
+  const decision = resolveTracePolicy(instrumentation.otelSettings?.tracePolicy, {
     agentName: input.agentName,
     audience: input.audience,
     channelType: input.channelType,
   });
   return {
+    decision,
     spanId: instrumentation.idGenerator.allocateSpanId(),
-    traceFlags: sampled ? 1 : 0,
+    traceFlags: decision.action === "record" ? 1 : 0,
     traceId: instrumentation.idGenerator.generateTraceId(),
   };
 }

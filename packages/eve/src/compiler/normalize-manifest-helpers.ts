@@ -140,6 +140,7 @@ export function createCompiledRemoteAgent(input: {
     backing: input.binding.backing,
     logicalPath,
     owner: input.owner,
+    usage: input.binding.usage,
   };
   const node = {
     backing: { kind: "resource" as const, sourcePath: input.source.entryPath },

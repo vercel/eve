@@ -178,10 +178,20 @@ export interface AgentModuleCandidate {
   readonly sourceId: string;
 }
 
-export interface CompiledModuleBinding {
+export interface AgentModuleBinding {
   readonly backing: AgentModuleBacking;
   readonly logicalPath: string;
   readonly owner: AgentSourceOwner;
+}
+
+export interface CompiledModuleBinding extends AgentModuleBinding {
+  /** Compiler-owned namespace usage for this selected binding. */
+  readonly usage: {
+    /** The compiler evaluated this namespace while normalizing the node. */
+    readonly compile: boolean;
+    /** The namespace is an entry in the runtime module map. */
+    readonly runtimeEntry: boolean;
+  };
 }
 
 export interface AgentSourceDescriptor {
@@ -204,6 +214,12 @@ export interface AgentResourceCandidate {
 }
 
 export type AgentSourceCandidate = AgentModuleCandidate | AgentResourceCandidate;
+
+export function isAgentModuleCandidate(
+  candidate: AgentSourceCandidate,
+): candidate is AgentModuleCandidate {
+  return candidate.backing.kind !== "resource";
+}
 
 export type AgentSourceCompositionEntry =
   | {
@@ -484,9 +500,7 @@ export function disableComposedCandidate(input: {
   };
 }
 
-export function createCompiledModuleBinding(
-  candidate: AgentModuleCandidate,
-): CompiledModuleBinding {
+export function createAgentModuleBinding(candidate: AgentModuleCandidate): AgentModuleBinding {
   return Object.freeze({
     backing: candidate.backing,
     logicalPath: candidate.logicalPath,

@@ -5,7 +5,7 @@ import type { DisabledChannelReasons } from "#setup/cli/index.js";
 
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
 import { createCompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
-import type { CompiledModuleBinding } from "#compiler/source-graph.js";
+import type { AgentModuleBinding } from "#compiler/source-graph.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 
@@ -45,7 +45,7 @@ export async function inspectExistingChannelRegistrations(
   const slackOwners = new Set<string>();
 
   for (const source of manifest.channels) {
-    const binding: CompiledModuleBinding = {
+    const binding: AgentModuleBinding = {
       backing: {
         externalDependencies: [],
         kind: "filesystem",

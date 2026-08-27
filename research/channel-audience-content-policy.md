@@ -38,7 +38,15 @@ interface TraceCaptureContext {
   readonly sessionId: string;
 }
 
-type TraceCapturePolicy = (trace: TraceCaptureContext) => boolean;
+type TracePolicyDecision =
+  | { readonly emit: false }
+  | {
+      readonly emit: true;
+      readonly recordInputs: boolean;
+      readonly recordOutputs: boolean;
+    };
+
+type TraceCapturePolicy = (trace: TraceCaptureContext) => TracePolicyDecision | boolean;
 
 interface OtelOptions {
   // Other process-wide OTel settings are unchanged.
@@ -47,6 +55,11 @@ interface OtelOptions {
 
 declare function otel(options?: OtelOptions): OtelDeclaration;
 ```
+
+The trace decision is a process-wide ceiling. Each delivery is intersected with
+its own audience classification, and destination capture settings may narrow it
+further. A boolean return keeps the existing behavior: `false` drops trace
+production, while `true` records content only where the audience ceiling permits.
 
 Agent Runs and local traces expose the managed export policy:
 
@@ -101,25 +114,25 @@ declare function localTraces(options?: ManagedTraceOptions): OtelIntegration;
 
 `composeSpanExportPolicies()` applies policies in declaration order. A later span or attribute policy sees the facade produced by earlier redactors. A span predicate returning `false` removes that span from one destination without suppressing the rest of its trace. Attribute policies run once for each attribute still visible at their stage.
 
-For example, this admits public and private conversations at the head gate while redacting private content before applying destination-specific filtering:
+For example, this retains every conversation while capturing content only for public audiences:
 
 ```ts
 // agent/instrumentation/otel.ts
 export default otel({
-  tracePolicy: ({ audience }) => audience === "public" || audience === "private",
+  tracePolicy: ({ audience }) => ({
+    emit: true,
+    recordInputs: audience === "public",
+    recordOutputs: audience === "public",
+  }),
 });
 
 // agent/instrumentation/agent-runs.ts
 export default agentRuns({
-  exportPolicy: composeSpanExportPolicies(
-    redactSpanInputs(({ audience }) => audience !== "public"),
-    redactSpanOutputs(({ audience }) => audience !== "public"),
-    {
-      span: ({ name }) => name !== "internal.cache.refresh",
-      attribute: ({ key }) =>
-        key === "user.email" ? { action: "replace", value: "[redacted]" } : { action: "keep" },
-    },
-  ),
+  exportPolicy: composeSpanExportPolicies({
+    span: ({ name }) => name !== "internal.cache.refresh",
+    attribute: ({ key }) =>
+      key === "user.email" ? { action: "replace", value: "[redacted]" } : { action: "keep" },
+  }),
 });
 ```
 
@@ -128,14 +141,18 @@ export default agentRuns({
 The default authored and production head policy is equivalent to:
 
 ```ts
-({ audience }) => audience === "public";
+({ audience }) => ({
+  emit: true,
+  recordInputs: audience === "public",
+  recordOutputs: audience === "public",
+});
 ```
 
 | Audience  | Trace created by default | Content when admitted by a custom trace policy |
 | --------- | ------------------------ | ---------------------------------------------- |
-| `public`  | Yes                      | Unchanged unless an export policy redacts it   |
-| `private` | No                       | Unchanged unless an export policy redacts it   |
-| `unknown` | No                       | Unchanged unless an export policy redacts it   |
+| `public`  | Yes                      | Yes                                            |
+| `private` | Yes                      | No                                             |
+| `unknown` | Yes                      | No                                             |
 
 The default policy for local tracing for `eve dev` is equivalent to:
 

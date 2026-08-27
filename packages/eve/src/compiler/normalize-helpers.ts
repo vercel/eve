@@ -6,8 +6,8 @@ import { toErrorMessage } from "#shared/errors.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { CompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
 import {
+  type AgentModuleBinding,
   type AgentSourceRegistry,
-  type CompiledModuleBinding,
   type AgentSourceOwner,
   type ProgrammaticModuleNamespace,
 } from "#compiler/source-graph.js";
@@ -29,12 +29,12 @@ export interface ManifestCompileContext {
 }
 
 export interface ModuleBackedDefinitionLoadOptions {
-  readonly binding: CompiledModuleBinding;
+  readonly binding: AgentModuleBinding;
   readonly loadNamespace: CompiledBindingNamespaceLoader;
 }
 
 export interface SourceDefinitionCompileOptions {
-  readonly binding?: CompiledModuleBinding;
+  readonly binding?: AgentModuleBinding;
   readonly loadNamespace?: CompiledBindingNamespaceLoader;
   readonly owner: AgentSourceOwner;
 }
@@ -59,7 +59,7 @@ export function requireModuleBackedDefinitionLoadOptions(
  * authored file failed.
  */
 export async function loadModuleBackedDefinition(input: {
-  readonly binding: CompiledModuleBinding;
+  readonly binding: AgentModuleBinding;
   readonly dependencyNamespaces?: Readonly<Record<string, ProgrammaticModuleNamespace>>;
   readonly displayPath?: string;
   readonly kind: string;

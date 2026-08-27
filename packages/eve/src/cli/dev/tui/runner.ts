@@ -226,16 +226,15 @@ export type AgentTUIAgentHeader = {
   name: string;
   serverUrl: string;
   info?: AgentInfoResult;
-  /** Message-of-the-day line shown under the brand line (local sessions only). */
+  /** Message-of-the-day line shown below the startup card (local sessions only). */
   tip?: string;
 };
 
 export type AgentTUIRenderer = {
   /**
-   * Commits a startup header describing the connected agent (brand mark,
-   * model, instructions, tools, skills, subagents) to the transcript before
-   * the first prompt, and refreshes it after local dev artifact changes.
-   * Optional — renderers without a header simply skip it.
+   * Commits the startup card to the transcript before the first prompt and
+   * refreshes it after local dev artifact changes. Optional — renderers
+   * without a header simply skip it.
    */
   renderAgentHeader?(header: AgentTUIAgentHeader): void;
   /**

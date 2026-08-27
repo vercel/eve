@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { compileFromMemory } from "#compiler/compile-from-memory.js";
 import {
-  collectModuleBindingsForManifest,
+  collectRuntimeModuleBindingsForManifest,
   createCompiledModuleMapSource,
   createProgrammaticCompiledModuleMap,
 } from "#compiler/module-map.js";
@@ -25,7 +25,7 @@ vi.mock("#internal/authored-module-loader.js", () => ({
 }));
 
 describe("compiled module maps", () => {
-  it("renders every selected binding and no shadowed source", async () => {
+  it("renders every runtime binding and no compile-only or shadowed source", async () => {
     const { manifest } = await compileFromMemory({
       model: "openai/gpt-5.4",
       tools: [{ name: "weather" }],
@@ -35,8 +35,9 @@ describe("compiled module maps", () => {
       moduleMapPath: "/app/.eve/compile/module-map.mjs",
     });
 
-    for (const sourceId of Object.keys(manifest.bindings)) {
-      expect(source).toContain(JSON.stringify(sourceId));
+    for (const [sourceId, binding] of Object.entries(manifest.bindings)) {
+      if (binding.usage.runtimeEntry) expect(source).toContain(JSON.stringify(sourceId));
+      else expect(source).not.toContain(JSON.stringify(sourceId));
     }
     for (const entry of manifest.sourceComposition.entries) {
       if (entry.kind === "shadowed") {
@@ -47,14 +48,19 @@ describe("compiled module maps", () => {
     expect(source).toContain("memoizeModuleNamespaceFactories");
   });
 
-  it("collects exactly the node binding table plus explicit remote bindings", async () => {
+  it("collects exactly the runtime node bindings plus explicit remote bindings", async () => {
     const { manifest } = await compileFromMemory({
       model: "openai/gpt-5.4",
       tools: [{ name: "weather" }, { name: "echo" }],
     });
 
-    expect(collectModuleBindingsForManifest(manifest).map((entry) => entry.sourceId)).toEqual(
-      Object.keys(manifest.bindings).sort(),
+    expect(
+      collectRuntimeModuleBindingsForManifest(manifest).map((entry) => entry.sourceId),
+    ).toEqual(
+      Object.entries(manifest.bindings)
+        .filter(([, binding]) => binding.usage.runtimeEntry)
+        .map(([sourceId]) => sourceId)
+        .sort(),
     );
   });
 
@@ -86,6 +92,7 @@ describe("compiled module maps", () => {
       },
       logicalPath: "tools/renamed-mount__tool.ts",
       owner: { kind: "extension", namespace: "renamed-mount", packageName: "@acme/crm" },
+      usage: { compile: true, runtimeEntry: true },
     };
     for (const sourceId of applicationSourceIds) {
       manifest.bindings[sourceId] = {
@@ -96,6 +103,7 @@ describe("compiled module maps", () => {
         },
         logicalPath: manifest.bindings[sourceId]!.logicalPath,
         owner: { kind: "application" },
+        usage: manifest.bindings[sourceId]!.usage,
       };
     }
     mocks.loadAuthoredModuleNamespace.mockClear();
@@ -132,8 +140,14 @@ describe("compiled module maps", () => {
         parameters: { role: "derived" },
       },
     };
+    manifest.bindings[configSourceId] = {
+      ...manifest.bindings[configSourceId]!,
+      usage: { ...manifest.bindings[configSourceId]!.usage, runtimeEntry: true },
+    };
 
-    const ordered = collectModuleBindingsForManifest(manifest).map((entry) => entry.sourceId);
+    const ordered = collectRuntimeModuleBindingsForManifest(manifest).map(
+      (entry) => entry.sourceId,
+    );
     const source = createCompiledModuleMapSource({
       manifest,
       moduleMapPath: "/app/.eve/compile/module-map.mjs",

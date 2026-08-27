@@ -27,7 +27,7 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "23";
+export const EVE_MESSAGE_STREAM_VERSION = "24";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -424,6 +424,24 @@ export interface MessageAppendedStreamEvent {
 }
 
 /**
+ * Stream event emitted while the model is generating the input for one tool
+ * call, before the validated call is announced via `actions.requested`.
+ */
+export interface ActionInputAppendedStreamEvent {
+  data: {
+    callId: string;
+    inputTextDelta: string;
+    /** Zero-based UTF-16 code-unit offset where `inputTextDelta` begins. */
+    inputTextOffset: number;
+    sequence: number;
+    stepIndex: number;
+    toolName: string;
+    turnId: string;
+  };
+  type: "action.input.appended";
+}
+
+/**
  * Stream event emitted when one reasoning delta is appended to the current
  * reasoning block for the current step.
  */
@@ -715,6 +733,7 @@ export interface SessionCompletedStreamEvent {
  * consumers receive {@link MessageStreamEvent}.
  */
 export type UnstampedMessageStreamEvent =
+  | ActionInputAppendedStreamEvent
   | ApprovalCandidateStreamEvent
   | ApprovalSettledStreamEvent
   | ContextClearedStreamEvent
@@ -1078,6 +1097,30 @@ export function createActionsRequestedEvent(input: {
       turnId: input.turnId,
     },
     type: "actions.requested",
+  };
+}
+
+/** Creates an `action.input.appended` event for streamed tool input text. */
+export function createActionInputAppendedEvent(input: {
+  readonly callId: string;
+  readonly inputTextDelta: string;
+  readonly inputTextOffset: number;
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly toolName: string;
+  readonly turnId: string;
+}): ActionInputAppendedStreamEvent {
+  return {
+    data: {
+      callId: input.callId,
+      inputTextDelta: input.inputTextDelta,
+      inputTextOffset: input.inputTextOffset,
+      sequence: input.sequence,
+      stepIndex: input.stepIndex,
+      toolName: input.toolName,
+      turnId: input.turnId,
+    },
+    type: "action.input.appended",
   };
 }
 

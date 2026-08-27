@@ -167,9 +167,7 @@ function createCliProgram(
     .exitOverride()
     .hook("preAction", (_program, actionCommand) => {
       const { json } = actionCommand.opts<{ json?: boolean }>();
-      if (["info", "dev", "init"].includes(actionCommand.name()) && !json) {
-        logger.log(eveCliBanner());
-      }
+      if (["info", "init"].includes(actionCommand.name()) && !json) logger.log(eveCliBanner());
     })
     .configureOutput({
       writeErr: (message) => {
@@ -387,6 +385,7 @@ function createCliProgram(
       const remoteServerUrl = remoteTarget?.serverUrl;
       const interactive = hasInteractiveTerminal();
       const mode = resolveDevUiMode({ options, interactive });
+      if (mode === "headless") logger.log(eveCliBanner());
       if (options.input !== undefined && mode === "headless") {
         throw new InvalidArgumentError("--input requires the interactive UI.");
       }
@@ -465,7 +464,6 @@ function createCliProgram(
         logger.log(
           `↗ ${existingLocalDevelopmentServer ? "local" : "remote"} mode targeting ${theme.info(new URL(remoteServerUrl).host)}`,
         );
-
         if (mode === "headless") {
           logger.log(
             renderCliTaggedLine(theme, {
@@ -487,7 +485,6 @@ function createCliProgram(
         return;
       }
 
-      if (mode === "tui") logger.log("");
       const buildProgress = mode === "tui" ? startCliLiveRow(logger) : undefined;
       const onBootProgress = createDevBootProgressReporter(buildProgress);
       buildProgress?.update("Building your agent");

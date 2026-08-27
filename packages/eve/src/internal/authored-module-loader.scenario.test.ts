@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -1220,6 +1220,34 @@ describe("loadAuthoredModuleNamespace", () => {
       logoUrl: "data:application/octet-stream;base64,bG9nby1ieXRlcw==",
       rawText: "asset text",
     });
+  });
+
+  it("rejects asset imports outside the authored package", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/tools/outside_asset.ts": "export default {};\n",
+      },
+      name: "outside-asset-import",
+    });
+    const outsideFileName = `${basename(app.appRoot)}.txt`;
+    const outsidePath = join(app.appRoot, "..", outsideFileName);
+    const modulePath = join(app.appRoot, "agent", "tools", "outside_asset.ts");
+
+    try {
+      await Promise.all([
+        writeFile(outsidePath, "outside\n"),
+        writeFile(
+          modulePath,
+          `import value from "../../../${outsideFileName}?raw";\nexport default value;\n`,
+        ),
+      ]);
+
+      await expect(loadAuthoredModuleNamespace(modulePath)).rejects.toThrow(
+        /resolves outside package root/,
+      );
+    } finally {
+      await rm(outsidePath, { force: true });
+    }
   });
 
   it("recovers in the same process once a missing package is installed", async () => {

@@ -1,5 +1,29 @@
 # eve
 
+## 0.46.0
+
+### Minor Changes
+
+- 1d79217: Emit traces for every audience by default while recording content only for public conversations. `tracePolicy` can explicitly disable emission or select directional content capture, and existing boolean policies retain their current behavior.
+
+### Patch Changes
+
+- 47b3e48: Static authored definitions now remain build-only, while runtime entries and their assets use the same bundling semantics in development and production.
+- 9c0a138: Replace the eve TUI's separate banner and text header with a startup card showing the installed version, active model, and the instructions, tools, skills, subagents, and schedules loaded by the agent.
+- 7acb4ec: Include the original message body when Slack users share a message into an eve conversation. Agents now receive Slack crosspost content alongside distinct top-level comments without repeating content already present in the comment.
+
+## 0.45.2
+
+### Patch Changes
+
+- 295e534: Add a bounded `fileMemory()` provider with scope-partitioned indexed documents, a 4,000-character recalled-context budget by default, and model-facing save and remove tools. `eve dev` uses shared process-local storage, configured Vercel deployments use Blob, and every other environment requires an explicit backend.
+- 5934d69: Prevent long local Workflow deliveries from timing out and replaying an in-flight turn. Explicit local delivery timeout overrides continue to take precedence.
+- 8d2d91e: GitHub, Linear Agent, and Linq registry items now install Vercel CLI 58.5.1 or newer for guided setup. Linq setup no longer tries to infer CLI compatibility from connector creation errors.
+- 295e534: Upgrade the vendored Vercel Blob SDK to 2.8.0 and copy its upstream TypeScript declarations so blob-backed file memory stays aligned with the installed SDK.
+- 79c5514: Cache AI Gateway model metadata for five minutes and refresh immediately on a cache miss, while continuing to fall back to cached metadata when refreshes fail.
+- 17e37f1: Stop producing AI SDK telemetry spans when `tracePolicy` rejects an agent trace.
+- a5917cd: Identify pending tool approvals as trusted runtime state so newer user messages can revise or supersede them without being mistaken for injected approval text.
+
 ## 0.45.1
 
 ### Patch Changes

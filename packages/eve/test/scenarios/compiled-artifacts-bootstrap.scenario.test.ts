@@ -99,7 +99,7 @@ describe("writeCompiledArtifactsFiles", () => {
     const instrumentationPluginSource = await readFile(instrumentationPluginPath, "utf8");
 
     expect(instrumentationPluginSource).toContain(
-      generatedArtifacts.bootstrapPath.replaceAll("\\", "/"),
+      join(outDir, "compiled-artifacts-module-map.mjs").replaceAll("\\", "/"),
     );
     expect(instrumentationPluginSource).toContain(
       `moduleMap.nodes["__root__"].modules["instrumentation.ts"]`,
@@ -172,8 +172,8 @@ describe("writeCompiledArtifactsFiles", () => {
     }
 
     expect(generatedArtifacts.instrumentationSourcePaths).toEqual([
-      join(agentRoot, "instrumentation", "local.ts"),
-      join(agentRoot, "instrumentation", "otel.ts"),
+      join(outDir, "compiled-artifacts-instrumentation-local.mjs"),
+      join(outDir, "compiled-artifacts-instrumentation-otel.mjs"),
     ]);
 
     const instrumentationPluginSource = await readFile(instrumentationPluginPath, "utf8");

@@ -382,7 +382,8 @@ describe("compiler artifacts", () => {
     });
     expect(moduleMapText).toContain('"nodes": Object.freeze({');
     expect(moduleMapText).toContain(`"${ROOT_COMPILED_AGENT_NODE_ID}": Object.freeze({`);
-    expect(moduleMapText).toContain('"agent.mjs": module_0');
+    expect(moduleMapText).toMatch(/"channels\/support\.mjs": module_\d+/);
+    expect(moduleMapText).not.toContain('"agent.mjs":');
     expect(moduleMapText).not.toContain('"subagents": Object.freeze({');
   });
 
@@ -502,13 +503,15 @@ describe("compiler artifacts", () => {
 
     const normalizedModuleMapText = normalizeArtifactValue(moduleMapText.trimEnd(), appRoot);
 
-    // Every selected module-backed source retains a total binding, including
-    // modules whose normalized content is serialized into the manifest.
-    expect(normalizedModuleMapText).toContain('from "../../agent/agent.mjs";');
-    expect(normalizedModuleMapText).toContain('from "../../agent/instructions.mjs";');
+    // The manifest retains the total binding graph, while the runtime map
+    // contains only executable entries.
+    expect(normalizedModuleMapText).not.toContain('from "../../agent/agent.mjs";');
+    expect(normalizedModuleMapText).not.toContain('from "../../agent/instructions.mjs";');
     expect(normalizedModuleMapText).toContain('from "../../agent/tools/get_weather.mjs";');
-    expect(normalizedModuleMapText).toContain('from "../../agent/subagents/reviewer/agent.mjs";');
-    expect(normalizedModuleMapText).toContain(
+    expect(normalizedModuleMapText).not.toContain(
+      'from "../../agent/subagents/reviewer/agent.mjs";',
+    );
+    expect(normalizedModuleMapText).not.toContain(
       'from "../../agent/subagents/reviewer/instructions.mjs";',
     );
     expect(normalizedModuleMapText).toContain(
@@ -516,10 +519,9 @@ describe("compiler artifacts", () => {
     );
     expect(normalizedModuleMapText).toContain('"nodes": Object.freeze({');
     expect(normalizedModuleMapText).toContain(`"${ROOT_COMPILED_AGENT_NODE_ID}": Object.freeze({`);
-    expect(normalizedModuleMapText).toMatch(/"agent\.mjs": module_\d+/);
+    expect(normalizedModuleMapText).not.toContain('"agent.mjs":');
     expect(normalizedModuleMapText).toMatch(/"tools\/get_weather\.mjs": module_\d+/);
     expect(normalizedModuleMapText).toContain('"subagents/reviewer": Object.freeze({');
-    expect(normalizedModuleMapText).toMatch(/"agent\.mjs": module_\d+/);
     expect(normalizedModuleMapText).toMatch(/"tools\/review\.mjs": module_\d+/);
   });
 
@@ -747,7 +749,7 @@ describe("compileAgent", () => {
       sourceId: "sandbox/sandbox.cjs",
       sourceKind: "module",
     });
-    expect(normalizeArtifactValue(moduleMapText, app.appRoot)).toMatch(/"agent\.cjs": module_\d+/);
+    expect(normalizeArtifactValue(moduleMapText, app.appRoot)).not.toContain('"agent.cjs":');
     expect(normalizeArtifactValue(moduleMapText, app.appRoot)).toMatch(
       /"sandbox\/sandbox\.cjs": module_\d+/,
     );
@@ -1410,8 +1412,10 @@ describe("compileAgent", () => {
       nodeId: "subagents/researcher",
       sourceId: "subagents/researcher",
     });
-    expect(normalizedModuleMapText).toContain('from "../../agent/agent.mjs";');
-    expect(normalizedModuleMapText).toContain('from "../../agent/subagents/researcher/agent.mjs";');
+    expect(normalizedModuleMapText).not.toContain('from "../../agent/agent.mjs";');
+    expect(normalizedModuleMapText).not.toContain(
+      'from "../../agent/subagents/researcher/agent.mjs";',
+    );
     expect(normalizedModuleMapText).toContain(
       'from "../../agent/subagents/researcher/sandbox/sandbox.mjs";',
     );

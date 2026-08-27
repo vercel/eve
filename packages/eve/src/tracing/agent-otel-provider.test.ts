@@ -800,7 +800,7 @@ describe("createAgentOtelInstrumentation", () => {
   });
 
   it.each(["private", "unknown"] as const)(
-    "does not record %s conversation traces by default",
+    "records %s conversation traces by default",
     async (audience) => {
       const runtime = createRuntime(new InMemoryAgentTraceStateStore(), null);
 
@@ -810,6 +810,28 @@ describe("createAgentOtelInstrumentation", () => {
         runInContext: runtime.runInContext,
         sessionId: `session-${audience}`,
         turnId: `turn-${audience}`,
+        turnSequence: 0,
+      });
+      await runtime.provider.forceFlush();
+
+      expect(byName(runtime.exporter.getFinishedSpans(), "agent.session")).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    ["legacy false", (): boolean => false],
+    ["explicit emit false", (): { readonly emit: false } => ({ emit: false })],
+  ] as const)(
+    "does not emit a trace when the policy overrides the default with %s",
+    async (_name, tracePolicy) => {
+      const runtime = createRuntime(new InMemoryAgentTraceStateStore(), tracePolicy);
+
+      await emitAttempt({
+        channelAudience: "public",
+        hooks: runtime.hooks,
+        runInContext: runtime.runInContext,
+        sessionId: "session-rejected",
+        turnId: "turn-rejected",
         turnSequence: 0,
       });
       await runtime.provider.forceFlush();

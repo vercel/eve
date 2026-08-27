@@ -17,10 +17,17 @@ import { validateCompiledModuleMap } from "#compiler/validate-artifact.js";
 import { frameworkAgentSourceRegistry } from "#framework/sources/registry.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineChannel, GET, POST } from "#public/definitions/channel.js";
+import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { defineHook } from "#public/definitions/hook.js";
+import { defineInstructions } from "#public/definitions/instructions.js";
+import { defineSchedule } from "#public/definitions/schedule.js";
+import { defineSkill } from "#public/definitions/skill.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
+import { defineDynamic } from "#dynamic/definition.js";
+import { experimental_workflow } from "#tools/workflow.js";
+import { webSearch } from "#tools/provided/web-search.js";
 
 function manifest() {
   return createAgentSourceManifest({
@@ -132,6 +139,123 @@ describe("compileAgentManifest source graph", () => {
     expect(order).toContain("tool");
   });
 
+  it("classifies compile and runtime usage from normalized authored semantics", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({ model: "openai/gpt-5.4" }),
+        }),
+      },
+      {
+        logicalPath: "instructions/static.ts",
+        loadNamespace: async () => ({
+          default: defineInstructions({ content: "Static instructions." }),
+        }),
+      },
+      {
+        logicalPath: "instructions/dynamic.ts",
+        loadNamespace: async () => ({
+          default: defineDynamic({
+            events: { "session.started": () => ({ content: "Dynamic instructions." }) },
+          }),
+        }),
+      },
+      {
+        logicalPath: "skills/static.ts",
+        loadNamespace: async () => ({
+          default: defineSkill({ description: "Static skill.", markdown: "# Static\n" }),
+        }),
+      },
+      {
+        logicalPath: "skills/dynamic.ts",
+        loadNamespace: async () => ({
+          default: defineDynamic({
+            events: {
+              "session.started": () =>
+                defineSkill({ description: "Dynamic skill.", markdown: "# Dynamic\n" }),
+            },
+          }),
+        }),
+      },
+      {
+        logicalPath: "schedules/prompt.ts",
+        loadNamespace: async () => ({
+          default: defineSchedule({ cron: "0 9 * * *", markdown: "Run the prompt." }),
+        }),
+      },
+      {
+        logicalPath: "schedules/handler.ts",
+        loadNamespace: async () => ({
+          default: defineSchedule({ cron: "0 10 * * *", run: async () => {} }),
+        }),
+      },
+      {
+        logicalPath: "tools/executable.ts",
+        loadNamespace: async () => ({
+          default: defineTool({ description: "Execute.", execute: () => null, inputSchema: {} }),
+        }),
+      },
+      {
+        logicalPath: "tools/dynamic.ts",
+        loadNamespace: async () => ({
+          default: defineDynamic({
+            events: {
+              "session.started": () =>
+                defineTool({ description: "Dynamic.", execute: () => null, inputSchema: {} }),
+            },
+          }),
+        }),
+      },
+      {
+        logicalPath: "tools/workflow.ts",
+        loadNamespace: async () => ({ default: experimental_workflow() }),
+      },
+      {
+        logicalPath: "tools/web_search.ts",
+        loadNamespace: async () => ({ default: webSearch({ provider: "parallel" }) }),
+      },
+      {
+        logicalPath: "connections/linear.ts",
+        loadNamespace: async () => ({
+          default: defineMcpClientConnection({
+            description: "Linear.",
+            url: "https://mcp.linear.example",
+          }),
+        }),
+      },
+      {
+        logicalPath: "hooks/audit.ts",
+        loadNamespace: async () => ({
+          default: defineHook({ events: { "session.started": async () => {} } }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+    const usageByLogicalPath = Object.fromEntries(
+      Object.values(compiled.bindings).map((binding) => [binding.logicalPath, binding.usage]),
+    );
+
+    expect(usageByLogicalPath).toMatchObject({
+      "agent.ts": { compile: true, runtimeEntry: false },
+      "connections/linear.ts": { compile: true, runtimeEntry: true },
+      "hooks/audit.ts": { compile: true, runtimeEntry: true },
+      "instructions/dynamic.ts": { compile: true, runtimeEntry: true },
+      "instructions/static.ts": { compile: true, runtimeEntry: false },
+      "schedules/handler.ts": { compile: true, runtimeEntry: true },
+      "schedules/prompt.ts": { compile: true, runtimeEntry: false },
+      "skills/dynamic.ts": { compile: true, runtimeEntry: true },
+      "skills/static.ts": { compile: true, runtimeEntry: false },
+      "tools/dynamic.ts": { compile: true, runtimeEntry: true },
+      "tools/executable.ts": { compile: true, runtimeEntry: true },
+      "tools/web_search.ts": { compile: true, runtimeEntry: false },
+      "tools/workflow.ts": { compile: true, runtimeEntry: false },
+    });
+  });
+
   it("projects the root node once and finalizes its filesystem bindings after config", async () => {
     let toolSourceIterations = 0;
     const discovered = manifest();
@@ -162,6 +286,93 @@ describe("compileAgentManifest source graph", () => {
     expect(compiled.bindings["instrumentation.ts"]?.backing).toMatchObject({
       externalDependencies: ["sharp"],
       kind: "filesystem",
+    });
+    expect(compiled.bindings["instrumentation.ts"]?.usage).toEqual({
+      compile: false,
+      runtimeEntry: true,
+    });
+  });
+
+  it("classifies dynamic and source-backed model configs as runtime entries", async () => {
+    const dynamicRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({
+            model: defineDynamic({
+              events: { "session.started": () => "openai/gpt-5.4" },
+            }),
+          }),
+        }),
+      },
+    ]);
+    const dynamic = await compileAgentManifest(manifest(), {
+      sourceRegistries: [dynamicRegistry],
+    });
+    expect(dynamic.bindings[dynamic.config.source.sourceId]?.usage).toEqual({
+      compile: true,
+      runtimeEntry: true,
+    });
+
+    const directModel = {
+      doGenerate: async () => ({}),
+      doStream: async () => ({}),
+      modelId: "direct-model",
+      provider: "test-provider",
+      specificationVersion: "v3",
+    } as never;
+    const directRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({ model: directModel, modelContextWindowTokens: 8_192 }),
+        }),
+      },
+    ]);
+    const direct = await compileAgentManifest(manifest(), {
+      sourceRegistries: [directRegistry],
+    });
+    expect(direct.config.model?.source?.sourceId).toBe(direct.config.source.sourceId);
+    expect(direct.bindings[direct.config.source.sourceId]?.usage).toEqual({
+      compile: true,
+      runtimeEntry: true,
+    });
+  });
+
+  it("classifies extension mount initialization as runtime-only", async () => {
+    const discovered = manifest();
+    const extensionManifest = createAgentSourceManifest({
+      agentId: "crm-extension",
+      agentRoot: "/virtual/crm-extension/extension",
+      appRoot: "/virtual/crm-extension",
+    });
+    discovered.extensions.push(createModuleSourceRef({ logicalPath: "extensions/crm.ts" }));
+    discovered.resolvedExtensions.push({
+      externalDependencies: [],
+      manifest: extensionManifest,
+      namespace: "crm",
+      packageName: "@acme/crm",
+      packageRoot: "/virtual/crm-extension",
+      sourceRoot: extensionManifest.agentRoot,
+      specifier: "@acme/crm/extension",
+    });
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({ model: "openai/gpt-5.4" }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(discovered, {
+      sourceRegistries: [sourceRegistry],
+    });
+    const mount = compiled.extensionMounts[0]!;
+
+    expect(compiled.bindings[mount.mountSourceId]?.usage).toEqual({
+      compile: false,
+      runtimeEntry: true,
     });
   });
 
@@ -260,6 +471,14 @@ describe("compileAgentManifest source graph", () => {
         owner: { kind: "application" },
       },
       urlPath: "/same/[name]",
+    });
+    expect(compiled.bindings[compiled.channelRoutes.effective[0]!.sourceId]?.usage).toEqual({
+      compile: true,
+      runtimeEntry: true,
+    });
+    expect(compiled.bindings[compiled.channelRoutes.shadowed[0]!.source.sourceId]?.usage).toEqual({
+      compile: true,
+      runtimeEntry: false,
     });
     expect(diagnostics).toContainEqual(
       expect.objectContaining({ code: "compile/channel-route-shadowed", severity: "warning" }),
@@ -429,6 +648,14 @@ describe("compileAgentManifest source graph", () => {
         slot: "profile",
       },
     });
+    expect(compiled.bindings[memory.sourceId]?.usage).toEqual({
+      compile: true,
+      runtimeEntry: true,
+    });
+    expect(compiled.bindings[wrapper.sourceId]?.usage).toEqual({
+      compile: true,
+      runtimeEntry: true,
+    });
 
     const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
       frameworkAgentSourceRegistry,
@@ -518,23 +745,40 @@ describe("compileAgentManifest source graph", () => {
   });
 
   it("rejects stale programmatic revisions before loading a namespace", async () => {
-    const loader = vi.fn(async () => ({ default: defineAgent({ model: "openai/gpt-5.4" }) }));
+    const configLoader = vi.fn(async () => ({
+      default: defineAgent({ model: "openai/gpt-5.4" }),
+    }));
+    const loader = vi.fn(async () => ({
+      default: defineTool({
+        description: "Runtime entry.",
+        execute: () => null,
+        inputSchema: { type: "object" },
+      }),
+    }));
     const source = defineProgrammaticAgentSource({
       id: "revision-test",
-      modules: [{ loadNamespace: loader, logicalPath: "agent.ts" }],
+      modules: [
+        { loadNamespace: configLoader, logicalPath: "agent.ts" },
+        { loadNamespace: loader, logicalPath: "tools/runtime.ts" },
+      ],
       revision: "v1",
     });
     const sourceRegistry = createAgentSourceRegistry([{ applyTo: "root", source }]);
     const compiled = await compileAgentManifest(manifest(), {
       sourceRegistries: [sourceRegistry],
     });
-    const binding = compiled.bindings[compiled.config.source.sourceId]!;
+    const binding = Object.values(compiled.bindings).find(
+      (candidate) => candidate.logicalPath === "tools/runtime.ts",
+    )!;
     const staleRegistry = createAgentSourceRegistry([
       {
         applyTo: "root",
         source: defineProgrammaticAgentSource({
           id: "revision-test",
-          modules: [{ loadNamespace: loader, logicalPath: "agent.ts" }],
+          modules: [
+            { loadNamespace: configLoader, logicalPath: "agent.ts" },
+            { loadNamespace: loader, logicalPath: "tools/runtime.ts" },
+          ],
           revision: "v2",
         }),
       },

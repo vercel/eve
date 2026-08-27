@@ -1,7 +1,9 @@
 import type { SpanContext } from "#compiled/@opentelemetry/api/index.js";
 
+import type { SessionTraceContext } from "#channel/types.js";
 import { contextStorage, loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
+import { SessionTraceSeedKey, type SessionTraceSeed } from "#context/keys.js";
 import type {
   AgentActionTraceState,
   AgentSessionTraceState,
@@ -42,10 +44,11 @@ export function preserveSerializedAgentTraceState(
 export function readSessionTraceContext(
   serializedContext: Readonly<Record<string, unknown>>,
   sessionId: string,
-): SpanContext | undefined {
+): SessionTraceContext | undefined {
   const raw = serializedContext[AgentTraceContextKey.name];
   if (raw === undefined) return undefined;
-  return deserializeState(raw).sessions[sessionId]?.context;
+  const context = deserializeState(raw).sessions[sessionId]?.context;
+  return context === undefined ? undefined : withTraceDecision(serializedContext, context);
 }
 
 /** Reads the durable action span that should parent a dispatched child agent. */
@@ -54,19 +57,27 @@ export function readActionTraceContext(
   sessionId: string,
   turnId: string,
   callId: string,
-): SpanContext | undefined {
+): SessionTraceContext | undefined {
   const raw = serializedContext[AgentTraceContextKey.name];
   if (raw === undefined) return undefined;
   const action = Object.values(deserializeState(raw).actions).find(
     (state) => state.sessionId === sessionId && state.turnId === turnId && state.callId === callId,
   );
   if (action === undefined) return undefined;
-  return {
+  return withTraceDecision(serializedContext, {
     isRemote: false,
     spanId: action.spanId,
     traceFlags: action.parent.traceFlags,
     traceId: action.parent.traceId,
-  };
+  });
+}
+
+function withTraceDecision(
+  serializedContext: Readonly<Record<string, unknown>>,
+  context: SpanContext,
+): SessionTraceContext {
+  const seed = serializedContext[SessionTraceSeedKey.name] as SessionTraceSeed | undefined;
+  return seed?.decision === undefined ? context : { ...context, decision: seed.decision };
 }
 
 /** Durable trace state backed by eve's serialized Workflow context. */
