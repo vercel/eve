@@ -16,8 +16,8 @@ import type { SessionInboxWire } from "#execution/wire/session-inbox-encoder.js"
 import { formatValidationError } from "#runtime/validation.js";
 import { sessionInboxWireV0Migration } from "#execution/wire/session-inbox-wire.v0.js";
 import {
+  parseSessionInboxWireV2,
   sessionInboxWireV1Migration,
-  sessionInboxWireV2Schema,
 } from "#execution/wire/session-inbox-wire.v2.js";
 
 /**
@@ -69,7 +69,7 @@ function decode(value: unknown): DecodedSessionInbox {
     throw new SessionInboxWireError(error instanceof Error ? error.message : String(error));
   }
 
-  const parsed = sessionInboxWireV2Schema.safeParse(migrated);
+  const parsed = parseSessionInboxWireV2(migrated);
   if (!parsed.success) {
     throw new SessionInboxWireError(
       `${WIRE_LABEL} does not match wire version 2: ${formatValidationError(parsed.error)}`,
