@@ -38,7 +38,7 @@ import type {
 import { interpretDelivery } from "./interpret.js";
 import { ledgerFromSessionState } from "./ledger.js";
 import type { LedgerEffect } from "./types.js";
-import { variants, type ApprovalSpec } from "./variants.js";
+import { variants, type ApprovalSpec } from "./variants/index.js";
 
 export async function resolvePendingInputViaInterpreter(input: {
   readonly history?: readonly ModelMessage[];
@@ -109,7 +109,57 @@ declare function translateEffects(input: {
   readonly session: HarnessSession;
 }): ResolvePendingInputResult;
 
-declare function bindApprovalPolicy(spec: ApprovalSpec, tools: HarnessToolMap): ApprovalSpec;
+/**
+ * Late-binds the tool's CURRENT response policy onto an approval row's spec
+ * for this pass only — the policy is never persisted. Same lookup
+ * `authorizeCandidate` performs today
+ * (approval-delivery-coordinator.ts:334); dynamic tools resolve here iff
+ * they are advertised in the live map for this step. A tool absent from the
+ * map leaves `responsePolicy` undefined and the reducer applies the
+ * ephemerality rule recorded at park time: settle directly when
+ * `responseAuthRequired` is false, fail closed (`policy-failed`, row stays
+ * open and answerable after a redeploy) when true.
+ */
+function bindApprovalPolicy(spec: ApprovalSpec, tools: HarnessToolMap): ApprovalSpec {
+  const tool = readTool(tools, spec.request.action.toolName);
+  const response = tool?.approval?.response;
+  if (response === undefined) return { ...spec, responsePolicy: undefined };
+  return {
+    ...spec,
+    responsePolicy: async ({ responder, request }) =>
+      response({
+        // buildApprovalResponseAuth / buildCallbackContext wrapping elided;
+        // the interpreter owns timeout + throw → policy-failed conversion.
+        responder,
+        request: {
+          callId: request.action.callId,
+          requestId: request.requestId,
+          toolInput: request.action.input,
+          toolName: request.action.toolName,
+        },
+      }),
+  };
+}
+
+/**
+ * Narrows `HarnessToolMap.get(name)?.approval` to configuration shape:
+ * a bare ApprovalPolicy function has no response policy
+ * (resolveApprovalPolicy semantics — request policy only).
+ */
+declare function readTool(
+  tools: HarnessToolMap,
+  toolName: string,
+): { readonly approval?: { readonly response?: RawResponsePolicy } } | undefined;
+type RawResponsePolicy = (input: {
+  readonly responder: unknown;
+  readonly request: {
+    readonly callId: string;
+    readonly requestId: string;
+    readonly toolInput: Record<string, unknown>;
+    readonly toolName: string;
+  };
+}) => Promise<import("./variants/index.js").ApprovalPolicyResult>;
+
 declare function actorOf(
   stepInput: StepInput,
   session: HarnessSession,

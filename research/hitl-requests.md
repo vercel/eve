@@ -48,7 +48,7 @@ through the same interpreter that implements eve's internal permissioning.
 Three exported concepts. Everything else is interpreter-internal or an existing
 eve concept reused. A compiling prototype lives beside this doc in
 [`hitl-requests/`](./hitl-requests/): `interpret.ts` (the
-interpreter), `variants.ts` (all four reducers against real harness shapes),
+interpreter), `variants/` (one file per reducer against real harness shapes),
 `ledger.ts` (derivation from the existing batch state), and `seam.ts` (the
 `tool-loop.ts` call site, unchanged).
 
@@ -218,25 +218,50 @@ export const approval = defineVariant<ApprovalSpec, ApprovalOutcome>({
 });
 
 async function adjudicate(row, input): Promise<Verdict<ApprovalOutcome>> {
+  const outcome = input.response.optionId === "allow" ? "allowed" : "denied";
+  if (row.spec.responsePolicy === undefined)
+    // Ephemerality rule (see below): settle when no policy was required;
+    // fail closed when one was required but is unavailable this pass.
+    return row.spec.responseAuthRequired ? { reject: "policy-failed" } : { settle: outcome };
   const decision = await row.spec.responsePolicy({
     responder: input.responder,
     request: row.spec.action,
   });
   if (decision.status === "rejected") return { reject: "unauthorized" };
   if (decision.status === "needs-auth") return { blockOn: decision.challenge };
-  return { settle: input.response.optionId === "allow" ? "allowed" : "denied" };
+  return { settle: outcome };
 }
 ```
 
-Per-tool dynamic approval semantics stay where they live today. The reducer
-owns no policy: `row.spec.responsePolicy` is the tool's resolved authored
-`Approval`, injected per-row at interpretation time from the live
-`HarnessToolMap` — the same late binding `resolveApprovalKeyFromTools` and
-`coordinateApprovalDelivery` perform now, generalized from the approval key
-to the whole policy surface (prototype `seam.ts`, `bindApprovalPolicy`). A
-tool changing its approval semantics between park and response is
-adjudicated by the current policy, exactly as today; the interpreter never
-touches the tool registry.
+Per-tool dynamic approval semantics stay where they live today. Approval
+policies are authored code and dynamic tools (`defineDynamic`) exist only in
+the steps that advertised them, so a policy function cannot be persisted
+with a row. The spec stores only durable facts — the gated `action`, the
+computed `intentKey` string, and `responseAuthRequired` (today's
+`PendingInputBatch.responseAuthRequiredRequestIds`: "this tool had a
+response policy when it asked"). The policy itself is late-bound on every
+interpretation pass: the seam re-resolves `toolName → policy` from the live
+`HarnessToolMap` (prototype `seam.ts`, `bindApprovalPolicy`) — the same
+lookup `authorizeCandidate` performs today
+(`approval-delivery-coordinator.ts:334`), generalized from the approval key
+(`resolveApprovalKeyFromTools`) to the whole policy surface. A tool changing
+its approval semantics between park and response is adjudicated by the
+current policy, exactly as today; the reducer never sees the registry.
+
+When the lookup finds nothing — the dynamic tool vanished, or a redeploy
+removed it — the rule recorded at park time decides, in the reducer:
+
+- `responseAuthRequired: false` — no response policy ever existed; a
+  correlated allow/deny settles directly (today's
+  `settleDirectApprovalResponse`). Consent was fully specified at raise
+  time; whether the underlying call can still execute is the continuation's
+  problem, which rechecks tool existence at dispatch and fails the call,
+  not the consent.
+- `responseAuthRequired: true` — fail closed: reject `policy-failed`, the
+  row stays open (today's `failCandidate`, "authorization temporarily
+  unavailable"). A redeploy restoring the tool makes the same row
+  answerable again — the row outlives the policy's availability, never the
+  reverse.
 
 ```ts
 export const limit = defineVariant<LimitSpec, LimitOutcome>({
