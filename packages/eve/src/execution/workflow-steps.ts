@@ -1,7 +1,7 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { AgentLoopBatch } from "#execution/agent-loop-batch.js";
 import { resumeAgentLoopCheckpoint } from "#execution/agent-loop-checkpoint.js";
-import { AGENT_LOOP_STEPS_PER_WORKFLOW_STEP } from "#execution/agent-loop-config.js";
+import { DEFAULT_AGENT_LOOP_STEPS_PER_WORKFLOW_STEP } from "#execution/agent-loop-config.js";
 import { finalizeTurnStepResult } from "#execution/finalize-turn-step-result.js";
 import { callAdapterEventHandler, defaultDeliverResult } from "#channel/adapter.js";
 import type { DeliverHookPayload } from "#channel/types.js";
@@ -119,14 +119,19 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const deferred = deferMismatchedInlineTurnStep(rawInput);
   if (deferred !== undefined) return deferred;
 
+  const initialCtx = await deserializeContext(rawInput.serializedContext);
+  const agentStepsPerWorkflowStep =
+    initialCtx.require(BundleKey).resolvedAgent.config?.experimental?.workflow
+      ?.agentStepsPerWorkflowStep ?? DEFAULT_AGENT_LOOP_STEPS_PER_WORKFLOW_STEP;
   const resumed = await resumeAgentLoopCheckpoint({
-    enabled: AGENT_LOOP_STEPS_PER_WORKFLOW_STEP > 1,
+    enabled: agentStepsPerWorkflowStep > 1,
     rawInput,
   });
   const { checkpoint } = resumed;
   let input = resumed.stepInput;
   let durableSession = await readDurableSession(input.sessionState);
-  const ctx = await deserializeContext(input.serializedContext);
+  const ctx =
+    checkpoint === undefined ? initialCtx : await deserializeContext(input.serializedContext);
   if (checkpoint === undefined && rawInput.input?.kind === "deliver") {
     ctx.set(TurnTaskDeliveryKey, "none");
     ctx.delete(TurnTaskStateKey);
@@ -559,7 +564,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     });
 
     while (
-      batch.completedSteps < AGENT_LOOP_STEPS_PER_WORKFLOW_STEP &&
+      batch.completedSteps < agentStepsPerWorkflowStep &&
       typeof stepResult.next === "function" &&
       readTurnSleepDurationMs(ctx) === undefined &&
       stepResult.backgroundTasks === undefined

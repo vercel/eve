@@ -247,6 +247,11 @@ export type AgentWorkflowWorldDefinition = string;
  */
 export interface AgentWorkflowDefinition {
   /**
+   * Maximum number of agent-loop steps eve runs inside one durable Workflow
+   * step. Defaults to 1.
+   */
+  readonly agentStepsPerWorkflowStep?: number;
+  /**
    * Workflow world module used for durable workflow storage, queueing, hooks,
    * and streaming.
    */

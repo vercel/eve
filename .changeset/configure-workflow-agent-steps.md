@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Prepare workflow execution to run a configurable number of agent loop steps within each durable Workflow step. Completed logical steps are journaled for cancellation and Workflow retry recovery, while background task launches and requested sleeps remain batching barriers; the limit stays at one.
+Add the experimental `workflow.agentStepsPerWorkflowStep` agent config to batch multiple agent-loop steps within each durable Workflow step. The default remains one; completed logical steps are journaled for retry recovery, while durable waits end a batch early.
