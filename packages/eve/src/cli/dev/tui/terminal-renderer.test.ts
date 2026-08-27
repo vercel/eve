@@ -191,7 +191,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).not.toContain("http://localhost:3000");
   });
 
-  it("refreshes the committed agent header with the latest model", async () => {
+  it("updates the status model without repeating an unchanged agent card", async () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({
       info: agentInfoWithModel("old-model"),
@@ -215,9 +215,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("new-model");
-    // Header refreshes append to scrollback, preserving the prior startup card.
-    expect(snapshot).toContain("old-model");
-    expect(snapshot.lastIndexOf("new-model")).toBeGreaterThan(snapshot.lastIndexOf("old-model"));
+    expect(snapshot).not.toContain("old-model");
+    expect(snapshot.match(/☰eve/gu)).toHaveLength(1);
     expect(snapshot).toContain("hello");
     expect(snapshot).toContain("still here");
     renderer.shutdown();

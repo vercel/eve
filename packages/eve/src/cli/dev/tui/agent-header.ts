@@ -28,8 +28,6 @@ export const AGENT_HEADER_TIPS: readonly string[] = [
   "Use the /help command to see every command.",
 ];
 
-const MAX_TOOL_GROUPS = 4;
-
 const EVE_LOGO = [
   "⣿⣿⣿⣿⣿⣿⣿⣿⣿    ⠏⣿⣿⣿⣿⣿⣿⣿⣿⣿",
   "            ⠇⣿⠏",
@@ -89,38 +87,6 @@ export function buildAgentHeader(input: AgentHeaderInput): string[] {
     );
   }
 
-  const detail = (label: string, value: string): string =>
-    row(`${c.dim(label.padEnd(14))}${value}`);
-  const model = formatHeaderModel(info?.agent.model, theme);
-  if (model !== undefined) lines.push(detail("model", model));
-  if (info !== undefined) {
-    lines.push(detail("instructions", formatInstructions(info, innerWidth - 18)));
-    lines.push(row());
-    const toolGroups = groupTools(info);
-    if (toolGroups.length === 0) {
-      lines.push(detail("tools", "none"));
-    } else {
-      lines.push(detail("tools", ""));
-      for (const group of toolGroups.slice(0, MAX_TOOL_GROUPS)) {
-        lines.push(detail(`  ${group.label}`, fitNames(group.names, innerWidth - 18)));
-      }
-      const omittedGroups = toolGroups.length - MAX_TOOL_GROUPS;
-      if (omittedGroups > 0) {
-        lines.push(detail(`  +${omittedGroups} ${pluralize(omittedGroups, "group")}`, ""));
-      }
-    }
-    lines.push(detail("skills", fitNames(skillNames(info), innerWidth - 18)));
-    lines.push(detail("subagents", fitNames(subagentNames(info), innerWidth - 18)));
-    lines.push(
-      detail(
-        "schedules",
-        fitNames(
-          info.schedules.map((schedule) => schedule.name),
-          innerWidth - 18,
-        ),
-      ),
-    );
-  }
   lines.push(c.dim(`${bottomLeft}${border}${bottomRight}`));
 
   if (info && (info.diagnostics.discoveryErrors > 0 || info.diagnostics.discoveryWarnings > 0)) {
@@ -164,90 +130,6 @@ function spreadRow(left: string, right: string, width: number, ambiguousWidth: n
   return `${clippedLeft}${" ".repeat(gap)}${clippedRight}`;
 }
 
-function groupTools(info: AgentInfoResult): Array<{ label: string; names: string[] }> {
-  const groups = new Map<string, string[]>();
-  for (const tool of info.tools.static) {
-    const label =
-      tool.owner.kind === "application"
-        ? "agent"
-        : tool.owner.kind === "framework"
-          ? "eve"
-          : tool.owner.namespace;
-    const names = groups.get(label) ?? [];
-    names.push(tool.name);
-    groups.set(label, names);
-  }
-  if (info.tools.dynamic.length > 0) {
-    groups.set(
-      "dynamic",
-      info.tools.dynamic.map((resolver) => resolver.slug),
-    );
-  }
-  const priority = (label: string): number => {
-    if (label === "agent") return 0;
-    if (label === "dynamic") return 2;
-    if (label === "eve") return 3;
-    return 1;
-  };
-  return [...groups]
-    .map(([label, names]) => ({ label, names: names.sort() }))
-    .sort((a, b) => priority(a.label) - priority(b.label) || a.label.localeCompare(b.label));
-}
-
-function skillNames(info: AgentInfoResult): string[] {
-  return [
-    ...info.skills.static.map((skill) => skill.name),
-    ...info.skills.dynamic.map((resolver) => `${resolver.slug} (dynamic)`),
-  ].sort();
-}
-
-function subagentNames(info: AgentInfoResult): string[] {
-  return [...info.subagents.local, ...info.remoteAgents.entries]
-    .map((subagent) => subagent.name)
-    .sort();
-}
-
-function formatInstructions(info: AgentInfoResult, width: number): string {
-  const names = [
-    ...info.instructions.static.map(
-      (instructions) => `${instructions.logicalPath} (${instructions.role})`,
-    ),
-    ...info.instructions.dynamic.map((resolver) => `${resolver.slug} (dynamic)`),
-  ];
-  return fitNames(names, width);
-}
-
-function fitNames(names: readonly string[], width: number): string {
-  if (names.length === 0) return "none";
-  for (let count = names.length; count > 0; count -= 1) {
-    const hidden = names.length - count;
-    const value = `${names.slice(0, count).join(", ")}${hidden > 0 ? `, +${hidden} more` : ""}`;
-    if (visibleLength(value) <= width) return value;
-  }
-  return clipVisible(names[0]!, width);
-}
-
-function formatHeaderModel(
-  model: AgentInfoResult["agent"]["model"] | undefined,
-  theme: Theme,
-): string | undefined {
-  if (model?.id === undefined) return undefined;
-  const endpoint = model.endpoint;
-  if (endpoint === undefined) return model.id;
-
-  const via = theme.colors.dim("via ");
-  switch (endpoint.kind) {
-    case "external":
-      return `${model.id} ${via}${endpoint.provider}`;
-    case "chatgpt":
-      return `${model.id} ${via}chatgpt-sub`;
-    case "gateway":
-      return endpoint.connected
-        ? `${model.id} ${via}ai-gateway(${endpoint.credential})`
-        : `${model.id} ${via}ai-gateway(not connected)`;
-  }
-}
-
 function renderTip(tip: string, width: number, theme: Theme): string {
   return clipVisible(
     tip
@@ -262,8 +144,4 @@ function renderTip(tip: string, width: number, theme: Theme): string {
 
 function plural(count: number): string {
   return count === 1 ? "" : "s";
-}
-
-function pluralize(count: number, noun: string): string {
-  return `${noun}${plural(count)}`;
 }
