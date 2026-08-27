@@ -55,6 +55,10 @@ const sessionInboxMigrations: readonly VersionMigration[] = [
  * delivery is the bug this module exists to prevent.
  */
 function decode(value: unknown): DecodedSessionInbox {
+  const declaredVersion =
+    typeof value === "object" && value !== null && "version" in value
+      ? (value as { readonly version?: unknown }).version
+      : undefined;
   let migrated: unknown;
   try {
     migrated = runMigrationChain({
@@ -73,6 +77,9 @@ function decode(value: unknown): DecodedSessionInbox {
     throw new SessionInboxWireError(
       `${WIRE_LABEL} declares version ${JSON.stringify(wire.version)}, expected ${SESSION_INBOX_WIRE_VERSION}.`,
     );
+  }
+  if (declaredVersion === 2 && wire.kind === "deliver" && !("payload" in wire)) {
+    throw new SessionInboxWireError(`${WIRE_LABEL} does not match wire version 2.`);
   }
   return normalizeWire(wire as SessionInboxWire);
 }

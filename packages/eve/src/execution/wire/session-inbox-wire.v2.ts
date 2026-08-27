@@ -39,6 +39,7 @@ const version = z.literal(2);
 export const sessionInboxWireV2Schema = z.discriminatedUnion("kind", [
   v1Deliver.extend({
     caller: v1Caller.extend({ activityObserver: activityObserverSchema.optional() }).optional(),
+    payload: v1Deliver.shape.payload.unwrap(),
     version,
   }),
   v1[1].extend({ version }),

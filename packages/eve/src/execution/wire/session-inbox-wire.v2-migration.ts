@@ -4,8 +4,10 @@ import { isObject } from "#shared/guards.js";
 export const sessionInboxWireV1Migration: VersionMigration = {
   from: 1,
   migrate(prior) {
+    const normalized = normalizeSessionInboxWireV2(prior) as Record<string, unknown>;
     return {
-      ...(normalizeSessionInboxWireV2(prior) as Record<string, unknown>),
+      ...normalized,
+      ...(normalized.kind === "deliver" && !("payload" in normalized) ? { payload: {} } : {}),
       version: 2,
     };
   },

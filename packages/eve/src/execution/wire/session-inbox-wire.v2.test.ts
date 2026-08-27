@@ -30,6 +30,12 @@ const caller = {
 };
 
 describe("session inbox wire v2", () => {
+  it("rejects empty deliveries", () => {
+    expect(() =>
+      sessionInboxWireDecoder.decode({ kind: "deliver", payloads: [], version: 2 }),
+    ).toThrowError();
+  });
+
   it("preserves activity observers for v2 consumers", () => {
     const wire = sessionInboxWireEncoder.encode(
       { caller, kind: "send", payload: { message: "observe" } },
