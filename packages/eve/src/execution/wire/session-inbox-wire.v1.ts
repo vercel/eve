@@ -187,28 +187,8 @@ const authSchema = z
     subject: z.string().optional(),
   })
   .strict();
-const activityWorkIdentitySchema = z
-  .object({
-    callId: z.string().optional(),
-    id: z.string(),
-    kind: z.enum(["root-turn", "subagent", "remote-agent", "task"]),
-    name: z.string().optional(),
-    parentId: z.string().optional(),
-    rootSessionId: z.string(),
-    rootTurnId: z.string(),
-    sessionId: z.string().optional(),
-    turnId: z.string().optional(),
-  })
-  .strict();
 const callerSchema = z
   .object({
-    activityObserver: z
-      .object({
-        sink: z.object({ url: z.string(), version: z.literal(1) }).strict(),
-        workIdentity: activityWorkIdentitySchema.optional(),
-      })
-      .strict()
-      .optional(),
     callId: z.string(),
     replyTo: z.discriminatedUnion("kind", [
       z.object({ kind: z.literal("hook"), token: z.string() }).strict(),

@@ -14,6 +14,10 @@ import {
 } from "#execution/wire/session-inbox-contract.js";
 import type { SessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
 import { sessionInboxWireV0Migration } from "#execution/wire/session-inbox-wire.v0.js";
+import {
+  sessionInboxWireV1Migration,
+  sessionInboxWireV2Schema,
+} from "#execution/wire/session-inbox-wire.v2.js";
 
 /**
  * The session inbox wire family: every payload persisted to a session's
@@ -38,7 +42,10 @@ export { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js
 /** Prefixes chain and schema failures alike, so messages read as one voice. */
 const WIRE_LABEL = "session inbox payload";
 
-const sessionInboxMigrations: readonly VersionMigration[] = [sessionInboxWireV0Migration];
+const sessionInboxMigrations: readonly VersionMigration[] = [
+  sessionInboxWireV0Migration,
+  sessionInboxWireV1Migration,
+];
 
 /**
  * Decodes a persisted inbox payload or throws {@link SessionInboxWireError}.
@@ -61,13 +68,11 @@ function decode(value: unknown): DecodedSessionInbox {
     throw new SessionInboxWireError(error instanceof Error ? error.message : String(error));
   }
 
-  const wire = migrated as Partial<SessionInboxWire>;
-  if (wire.version !== SESSION_INBOX_WIRE_VERSION) {
-    throw new SessionInboxWireError(
-      `${WIRE_LABEL} declares version ${JSON.stringify(wire.version)}, expected ${SESSION_INBOX_WIRE_VERSION}.`,
-    );
+  const parsed = sessionInboxWireV2Schema.safeParse(migrated);
+  if (!parsed.success) {
+    throw new SessionInboxWireError(`${WIRE_LABEL} does not match wire version 2.`);
   }
-  return normalizeWire(wire as SessionInboxWire);
+  return normalizeWire(parsed.data);
 }
 
 /** Workflow-safe consumer facade. */

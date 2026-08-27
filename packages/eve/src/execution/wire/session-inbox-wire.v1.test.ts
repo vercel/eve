@@ -70,17 +70,6 @@ describe("session inbox wire v1", () => {
 
   it("preserves the current delivery, task, caller, and turn-control fields", () => {
     const caller = {
-      activityObserver: {
-        sink: { url: "https://example.com/eve/v1/activity/opaque-token", version: 1 as const },
-        workIdentity: {
-          callId: "call-1",
-          id: "work:call-1",
-          kind: "subagent" as const,
-          name: "researcher",
-          rootSessionId: "root",
-          rootTurnId: "turn",
-        },
-      },
       callId: "call-1",
       replyTo: {
         kind: "callback" as const,
@@ -205,7 +194,7 @@ describe("session inbox wire v1", () => {
   });
 
   it.each([
-    ["a future wire version", { kind: "deliver", payloads: [], version: 2 }],
+    ["a future wire version", { kind: "deliver", payloads: [], version: 3 }],
     ["a non-numeric version", { kind: "deliver", payloads: [], version: "1" }],
     ["an unrecognized kind", { kind: "mystery", version: 1 }],
   ])("rejects %s instead of reinterpreting it", (_name, payload) => {
