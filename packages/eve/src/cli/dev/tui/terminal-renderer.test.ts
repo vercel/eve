@@ -2322,6 +2322,64 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("keeps an editable startup draft inert and hands it to the first prompt", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const requestStop = vi.fn();
+    const startupRenderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      onExitRequest: requestStop,
+    });
+
+    startupRenderer.beginStartupDraft({
+      initialDraft: "weather",
+      tip: "Use the /help command to see every command.",
+      title: "weather-agent",
+    });
+    expect(screen.snapshot()).toContain("weather-agent");
+    expect(screen.snapshot()).toContain("Tip: Use the /help command");
+    expect(screen.snapshot()).not.toContain("model");
+    expect(screen.snapshot()).not.toContain("loading");
+    expect(screen.snapshot()).toContain("Building your agent");
+    expect(screen.snapshot()).toContain("weather");
+
+    input.type(" tomorrow");
+    input.enter();
+    expect(screen.snapshot()).toContain("weather tomorrow");
+
+    const draft = startupRenderer.finishStartupDraft();
+    expect(draft).toBe("weather tomorrow");
+    const prompt = startupRenderer.readPrompt({ initialDraft: draft });
+    input.enter();
+    await expect(prompt).resolves.toBe("weather tomorrow");
+    expect(requestStop).not.toHaveBeenCalled();
+    startupRenderer.shutdown();
+  });
+
+  it("lets Ctrl-C stop an editing-only startup draft", () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const requestStop = vi.fn();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      onExitRequest: requestStop,
+    });
+
+    renderer.beginStartupDraft({
+      tip: "Use the /help command to see every command.",
+      title: "weather-agent",
+    });
+    input.ctrlC();
+
+    expect(requestStop).toHaveBeenCalledOnce();
+    renderer.shutdown();
+  });
+
   it("seeds the editable buffer with an initial draft without auto-submitting", async () => {
     const { screen, input, renderer } = makeRenderer();
 

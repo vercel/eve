@@ -80,7 +80,7 @@ export function buildAgentHeader(input: AgentHeaderInput): string[] {
   const lines = [c.dim(`${topLeft}${border}${topRight}`)];
   // U+2630 is East Asian Ambiguous and renders as two cells in some
   // terminals, so reserve its second cell explicitly inside the card.
-  lines.push(row(title, 1), row());
+  lines.push(row(title, 1));
   const logoWidth = Math.max(...EVE_LOGO.map((line) => visibleLength(line)));
   if (theme.unicode && innerWidth - 2 >= logoWidth) {
     lines.push(

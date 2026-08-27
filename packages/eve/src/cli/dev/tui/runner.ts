@@ -402,6 +402,11 @@ export interface PromptCommandHandler {
   ): Promise<PromptCommandOutcome | undefined>;
 }
 
+type TuiStartup = {
+  readonly headerTip: string;
+  finish(): string;
+};
+
 export type EveTUIRunnerOptions = TuiDisplayOptions & {
   session?: ClientSession;
   /** Production TUI probe injected by the launcher; omitted in hermetic runners. */
@@ -465,6 +470,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   /** Parent-owned diagnostics recorder; omitted for remote and test renderers. */
   diagnostics?: DevDiagnostics;
   lifecycle?: CommandLifecycle;
+  /** Editing-only startup state retained until the final agent header is ready to paint. */
+  startup?: TuiStartup;
 };
 
 /** The attention-line issue for a Vercel auth state, or undefined when nothing's wrong. */
@@ -494,6 +501,7 @@ export class EveTUIRunner {
    * fresh-agent onboarding.
    */
   readonly #initialInput?: string;
+  readonly #startup?: TuiStartup;
   readonly #promptCommandHandler?: PromptCommandHandler;
   readonly #availablePromptCommands: readonly PromptCommandSpec[];
   readonly #withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
@@ -528,7 +536,7 @@ export class EveTUIRunner {
    * refreshes don't re-roll it mid-session. Local sessions only — every
    * tip references local-only slash commands.
    */
-  readonly #headerTip = pickAgentHeaderTip();
+  readonly #headerTip: string;
   #agentInfo?: AgentInfoResult;
   /**
    * approval-id → input-request map populated as `input.requested` events
@@ -585,6 +593,7 @@ export class EveTUIRunner {
     if (this.#renderer.subagents !== undefined) pumpOptions.view = this.#renderer.subagents;
     this.#subagentPump = new SubagentPump(pumpOptions);
     this.#name = options.name ?? "eve";
+    this.#headerTip = options.startup?.headerTip ?? pickAgentHeaderTip();
     this.#withExclusiveTerminal = options.withExclusiveTerminal;
     this.#tools = options.tools ?? "full";
     this.#reasoning = options.reasoning ?? "full";
@@ -594,6 +603,7 @@ export class EveTUIRunner {
     this.#contextSize = options.contextSize;
     this.#formatTransportError = options.formatTransportError ?? toErrorMessage;
     if (options.initialInput !== undefined) this.#initialInput = options.initialInput;
+    if (options.startup !== undefined) this.#startup = options.startup;
     if (options.appRoot !== undefined) {
       this.#appRoot = options.appRoot;
       const trackerOptions: VercelStatusTrackerOptions = {
@@ -645,12 +655,12 @@ export class EveTUIRunner {
    * header. Never throws: a missing or unauthorized `/eve/v1/info` simply
    * yields a header without the agent's configuration detail.
    */
-  async #renderAgentHeader(): Promise<void> {
+  async #renderAgentHeader(): Promise<string | undefined> {
     const serverUrl = this.#serverUrl;
     if (serverUrl === undefined) {
       this.#reportBeforeFirstPaint();
       await this.#renderSetupIssues(undefined);
-      return;
+      return this.#startup?.finish() ?? this.#initialInput;
     }
 
     let info: AgentInfoResult | undefined;
@@ -672,9 +682,11 @@ export class EveTUIRunner {
         }
       }
     }
+    const initialDraft = this.#startup?.finish() ?? this.#initialInput;
     this.#reportBeforeFirstPaint();
     const headerInfo = this.#replaceAgentInfo(info);
     await this.#renderSetupIssues(headerInfo);
+    return initialDraft;
   }
 
   #replaceAgentInfo(info: AgentInfoResult | undefined): AgentInfoResult | undefined {
@@ -730,11 +742,7 @@ export class EveTUIRunner {
     let hasRunTurn = false;
     let followCurrentSession = false;
     let streamWithoutPrompt = false;
-    // `--input` seed: applied to the first prompt's editable buffer, then
-    // cleared so later prompts open empty.
-    let initialDraft = this.#initialInput;
-
-    await this.#renderAgentHeader();
+    let initialDraft = await this.#renderAgentHeader();
     if (this.#remoteConnection?.current().connection.state === "auth-required") {
       await this.#executeExtensionCommand(
         { type: "extension", name: "vc:login", argument: "" },

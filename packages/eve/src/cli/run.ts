@@ -25,7 +25,7 @@ import {
 import { waitForServerOrStop, waitForUiOrServer } from "#cli/dev/wait-for-ui.js";
 import { parseDevelopmentHeaderOption, resolveDevelopmentUrlTarget } from "#cli/dev/url-target.js";
 import type { DevelopmentCliOptions, ProductionCliOptions } from "#cli/dev/command-options.js";
-import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
+import type { DevelopmentTuiStartup, RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { EvalCliOptions } from "#evals/cli/eval.js";
 import {
   registerRuntimeInvokeCommand,
@@ -127,8 +127,8 @@ async function loadPrintApplicationInfo(): Promise<CliRuntimeDependencies["print
   return (await import("#cli/commands/info.js")).printApplicationInfo;
 }
 
-async function loadRunDevelopmentTui(): Promise<CliRuntimeDependencies["runDevelopmentTui"]> {
-  return (await import("#cli/dev/tui/tui.js")).runDevelopmentTui;
+async function loadDevelopmentTuiModule() {
+  return await import("#cli/dev/tui/tui.js");
 }
 
 async function loadRunEvalCommand(): Promise<CliRuntimeDependencies["runEvalCommand"]> {
@@ -405,10 +405,12 @@ function createCliProgram(
         },
         report?: DevBootProgressReporter,
         lifecycle?: CommandLifecycle,
+        startup?: DevelopmentTuiStartup,
       ): Promise<void> => {
         const runDevelopmentTui = await devBootPhase(
           "loading interactive UI",
-          async () => runtime.runDevelopmentTui ?? (await loadRunDevelopmentTui()),
+          async () =>
+            runtime.runDevelopmentTui ?? (await loadDevelopmentTuiModule()).runDevelopmentTui,
           report,
         );
         const display = resolveTuiDisplayOptions(options);
@@ -433,6 +435,7 @@ function createCliProgram(
           lifecycle,
           ...display,
         };
+        if (startup !== undefined) tuiInput.startup = startup;
         if (target.kind === "local") {
           tuiInput.withExclusiveTerminal = async <T>(task: () => Promise<T>): Promise<T> => {
             const run = async (): Promise<T> => {
@@ -504,6 +507,20 @@ function createCliProgram(
         },
       });
 
+      let tuiStartup: DevelopmentTuiStartup | undefined;
+      const tuiStartupPromise =
+        mode === "tui" && runtime.runDevelopmentTui === undefined
+          ? loadDevelopmentTuiModule().then((module) => {
+              onBootProgress({ type: "before-first-paint" });
+              return module.startDevelopmentTuiStartup({
+                appRoot: applicationContext.root,
+                initialInput: options.input,
+                onExitRequest: lifecycle.requestStop,
+                ...resolveTuiDisplayOptions(options),
+              });
+            })
+          : undefined;
+
       try {
         const startHost = runtime.startHost ?? (await loadStartHost());
         server = startHost(applicationContext.root, {
@@ -512,12 +529,20 @@ function createCliProgram(
           onBootProgress,
           port: options.port,
         });
-        const outcome = await Promise.race([
-          server.start().then((handle) => ({ handle })),
-          lifecycle.stopped.then(() => ({ handle: undefined })),
+        const [outcome, startup] = await Promise.all([
+          Promise.race([
+            server.start().then((handle) => ({ handle })),
+            lifecycle.stopped.then(() => ({ handle: undefined })),
+          ]),
+          tuiStartupPromise,
         ]);
         const handle = outcome.handle;
-        if (handle === undefined) return;
+        if (handle === undefined) {
+          tuiStartup = startup;
+          await tuiStartup?.shutdown();
+          return;
+        }
+        tuiStartup = startup;
 
         if (mode !== "tui") {
           logger.log(
@@ -553,10 +578,15 @@ function createCliProgram(
               { appRoot: handle.appRoot, serverUrl: handle.url },
               onBootProgress,
               lifecycle,
+              tuiStartup,
             ),
         });
       } finally {
         buildProgress?.stop();
+        if (tuiStartup === undefined) {
+          tuiStartup = await tuiStartupPromise?.catch(() => undefined);
+          await tuiStartup?.shutdown();
+        }
         await closeServer();
         lifecycle.dispose();
       }

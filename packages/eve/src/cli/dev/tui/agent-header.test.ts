@@ -98,6 +98,34 @@ describe("buildAgentHeader", () => {
     expect(lines[modelIndex]).toContain(colorTheme.colors.dim("via "));
   });
 
+  it("renders only known fields while the agent is loading", () => {
+    const colorTheme = createTheme({ color: true, unicode: true });
+    const card = buildAgentHeader({
+      name: "weather-agent",
+      theme: colorTheme,
+      tip: "Use the /help command to see every command.",
+      width: 120,
+    })
+      .map(stripAnsi)
+      .join("\n");
+
+    expect(card).toContain("weather-agent");
+    expect(card).toContain("Tip: Use the /help command to see every command.");
+    expect(card).not.toContain("loading");
+    for (const label of [
+      "model",
+      "instructions",
+      "tools",
+      "agent",
+      "dynamic",
+      "skills",
+      "subagents",
+      "schedules",
+    ]) {
+      expect(card).not.toMatch(new RegExp(`^│ +${label}`, "mu"));
+    }
+  });
+
   it("bounds every collection for large agents", () => {
     const source = (name: string) => ({
       logicalPath: `${name}.ts`,
