@@ -66,5 +66,6 @@ minimumReleaseAgeExclude:
   - "@linqapp/chat-sdk-adapter"
   - "@vercel/*"
   - "@workflow/*"
+  - eve-channel-blooio
   - nitro
   - workflow
