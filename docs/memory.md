@@ -38,9 +38,9 @@ provider contract described below.
 
 ## Use file memory
 
-`fileMemory()` is ready to use without implementing recall, capture, or memory
-tools. It keeps one indexed document for each resolved scope, recalls that
-document before each turn and after compaction, and gives the model
+`fileMemory()` keeps one indexed document for each resolved scope. The document
+lives in the selected backend, not in the agent's sandbox filesystem. The
+provider recalls it before each turn and after compaction, and gives the model
 `save_memory` and `remove_memory` tools.
 
 ```ts title="agent/memory/profile.ts"
