@@ -42,6 +42,33 @@ describe("session inbox wire v2", () => {
     });
   });
 
+  it("round-trips task deliveries with activity observers", () => {
+    const task = {
+      views: [
+        {
+          metadata: {
+            agentId: "agent-1",
+            kind: "subagent" as const,
+            mode: "local" as const,
+            name: "researcher",
+          },
+          status: "working" as const,
+          taskId: "task-1",
+        },
+      ],
+    };
+    const wire = sessionInboxWireEncoder.encode(
+      { caller, kind: "deliver", payloads: [{ task }] },
+      { version: 2 },
+    );
+
+    expect(sessionInboxWireDecoder.decode(JSON.parse(JSON.stringify(wire)))).toMatchObject({
+      caller,
+      kind: "deliver",
+      payloads: [{ task }],
+    });
+  });
+
   it("omits activity observers for v1 consumers", () => {
     const wire = sessionInboxWireEncoder.encode(
       { caller, kind: "send", payload: { message: "legacy" } },

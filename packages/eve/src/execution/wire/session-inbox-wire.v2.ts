@@ -5,12 +5,10 @@ import type {
   SessionCommand,
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
+import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import type { VersionMigration } from "#execution/durable-session-migrations/chain.js";
 import { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
-import {
-  encodeSessionCommandV1,
-  sessionInboxWireV1Schema,
-} from "#execution/wire/session-inbox-wire.v1.js";
+import { sessionInboxWireV1Schema } from "#execution/wire/session-inbox-wire.v1.js";
 import { formatValidationError } from "#runtime/validation.js";
 
 const activityWorkIdentitySchema = z
@@ -70,17 +68,28 @@ export const sessionInboxWireV1Migration: VersionMigration = {
 export function encodeSessionCommandV2(
   command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
 ): SessionInboxWireV2 {
-  const activityObserver = "caller" in command ? command.caller?.activityObserver : undefined;
-  const v1Command = withoutActivityObserver(command);
-  const v1Wire = encodeSessionCommandV1(v1Command);
   const wire =
-    v1Wire.kind === "deliver" && activityObserver !== undefined && v1Wire.caller !== undefined
+    command.kind === "send"
       ? {
-          ...v1Wire,
-          caller: { ...v1Wire.caller, activityObserver },
+          auth: command.auth,
+          caller: command.caller,
+          deliveryMetadata:
+            command.delivery === undefined ? undefined : [{ ...command.delivery, payloadIndex: 0 }],
+          kind: "deliver" as const,
+          payload: command.payload,
+          payloads: [command.payload],
+          requestId: command.requestId,
+          taskDeliveryId: command.taskDeliveryId,
+          turnPolicy: command.turnPolicy,
           version: 2 as const,
         }
-      : { ...v1Wire, version: 2 as const };
+      : command.kind === "deliver"
+        ? {
+            ...command,
+            payload: coalesceDeliverPayloads(command.payloads),
+            version: 2 as const,
+          }
+        : { ...command, version: 2 as const };
   const parsed = sessionInboxWireV2Schema.safeParse(wire);
   if (!parsed.success) {
     throw new SessionInboxWireError(
@@ -88,12 +97,4 @@ export function encodeSessionCommandV2(
     );
   }
   return parsed.data;
-}
-
-function withoutActivityObserver(
-  command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
-): DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload {
-  if (!("caller" in command) || command.caller?.activityObserver === undefined) return command;
-  const { activityObserver: _activityObserver, ...caller } = command.caller;
-  return { ...command, caller };
 }

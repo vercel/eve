@@ -13,6 +13,7 @@ import {
   SessionInboxWireError,
 } from "#execution/wire/session-inbox-contract.js";
 import type { SessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
+import { formatValidationError } from "#runtime/validation.js";
 import { sessionInboxWireV0Migration } from "#execution/wire/session-inbox-wire.v0.js";
 import {
   sessionInboxWireV1Migration,
@@ -70,7 +71,9 @@ function decode(value: unknown): DecodedSessionInbox {
 
   const parsed = sessionInboxWireV2Schema.safeParse(migrated);
   if (!parsed.success) {
-    throw new SessionInboxWireError(`${WIRE_LABEL} does not match wire version 2.`);
+    throw new SessionInboxWireError(
+      `${WIRE_LABEL} does not match wire version 2: ${formatValidationError(parsed.error)}`,
+    );
   }
   return normalizeWire(parsed.data);
 }
