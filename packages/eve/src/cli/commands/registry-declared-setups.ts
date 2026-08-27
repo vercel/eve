@@ -69,6 +69,7 @@ export async function runDeclaredSetups(input: {
             next: headlessSetupContinuation({
               item: input.item,
               installed: true,
+              answers: input.options.answers,
               question:
                 result.blocker.status === "input_required" ? result.blocker.question : undefined,
             }),
@@ -92,7 +93,11 @@ export async function runDeclaredSetups(input: {
           item: input.item,
           completedItems: [],
           message,
-          next: headlessSetupContinuation({ item: input.item, installed: true }),
+          next: headlessSetupContinuation({
+            item: input.item,
+            installed: true,
+            answers: input.options.answers,
+          }),
         }),
       );
       process.exitCode = 1;

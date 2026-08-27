@@ -60,9 +60,14 @@ export type HeadlessSetupEvent =
 export function headlessSetupContinuation(input: {
   item: string;
   installed: boolean;
+  answers?: Readonly<Record<string, unknown>>;
   question?: Extract<RegistrySetupBlocker, { status: "input_required" }>["question"];
 }): HeadlessSetupCommand {
-  const answer =
+  const answers = Object.entries(input.answers ?? {}).flatMap(([key, value]) => [
+    "--answer",
+    `${key}=${JSON.stringify(value)}`,
+  ]);
+  const nextAnswer =
     input.question?.kind === "environment"
       ? []
       : input.question === undefined
@@ -75,7 +80,8 @@ export function headlessSetupContinuation(input: {
       input.item,
       "--non-interactive",
       ...(input.installed ? ["--skip-install"] : []),
-      ...answer,
+      ...answers,
+      ...nextAnswer,
     ],
   };
 }
