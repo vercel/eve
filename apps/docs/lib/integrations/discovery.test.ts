@@ -86,6 +86,19 @@ describe("integration discovery", () => {
     expect(integrationSearchText(blitzreels!)).toContain("video editing");
   });
 
+  it("renders the Mux Video extension setup", () => {
+    const muxVideo = getIntegration("mux-video");
+    expect(muxVideo).toBeDefined();
+
+    const markdown = integrationMarkdown(muxVideo!);
+    expect(markdown).toContain("github.com/muxinc/mux-video-agent.git");
+    expect(markdown).toContain('import muxVideo from "@mux/eve-video"');
+    expect(markdown).toContain("MUX_TOKEN_ID");
+    expect(markdown).toContain("mux_video__run_workflow");
+    expect(markdown).toContain("require explicit human approval");
+    expect(integrationSearchText(muxVideo!)).toContain("Mux Robots");
+  });
+
   it("renders the Jetty extension and eval reporter setup", () => {
     const jetty = getIntegration("jetty");
     expect(jetty).toBeDefined();

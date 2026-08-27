@@ -1227,6 +1227,55 @@ Source imports, clipping, generation, and exports call the configured BlitzReels
 
 See the [BlitzReels extension package](https://www.npmjs.com/package/@blitzreels/eve) for the complete tool list, configuration, approval defaults, error contract, and OAuth-backed MCP alternative.`,
   },
+  "mux-video": {
+    logo: "mux",
+    docsHref: "https://github.com/muxinc/mux-video-agent/tree/main/packages/eve-video",
+    keywords: [
+      "video",
+      "video assets",
+      "clips",
+      "captions",
+      "subtitles",
+      "Mux Robots",
+      "summarization",
+      "moderation",
+      "translation",
+      "chapters",
+    ],
+    install: `The Mux Video extension currently ships from source with the Mux Video Agent template. Clone the repository and install its workspace dependencies:
+
+\`\`\`bash
+git clone https://github.com/muxinc/mux-video-agent.git
+cd mux-video-agent
+pnpm install
+\`\`\`
+
+The extension requires Node.js 24 or later. The reusable package lives at \`packages/eve-video\` and is mounted by the root agent.`,
+    quickStart: `Add your Mux access token to the template's environment:
+
+\`\`\`bash title=".env.local"
+MUX_TOKEN_ID=mux_token_id_here
+MUX_TOKEN_SECRET=mux_token_secret_here
+\`\`\`
+
+The template mounts the extension under \`agent/extensions/\`:
+
+\`\`\`ts title="agent/extensions/mux_video.ts"
+import muxVideo from "@mux/eve-video";
+
+export default muxVideo({
+  tokenId: process.env.MUX_TOKEN_ID,
+  tokenSecret: process.env.MUX_TOKEN_SECRET,
+});
+\`\`\`
+
+The filename supplies the \`mux_video\` namespace. The extension adds tools such as \`mux_video__get_asset\`, \`mux_video__create_asset\`, \`mux_video__create_clip\`, \`mux_video__run_workflow\`, and \`mux_video__get_workflow_job\`.`,
+    configure: `Use a Mux access token with Video access and access to the Mux Robots workflows you plan to run. Keep the token ID and secret in the environment rather than prompts, tool arguments, or source control.
+
+Asset creation, clip creation, and Mux Robots workflow creation require explicit human approval by default. Robots jobs are asynchronous, so start a workflow with \`mux_video__run_workflow\`, retain the returned job ID, and check it with \`mux_video__get_workflow_job\`.
+
+The extension supports creating and inspecting assets, exact-range clips, subtitles, captions, summaries, questions, chapters, scenes, key moments, thumbnails, moderation, and caption translation or editing. It intentionally excludes multimodal embeddings and semantic video search. See the [Mux Video Agent repository](https://github.com/muxinc/mux-video-agent) for the source, full capability list, deployment steps, and eval suite.`,
+  },
   browserbase: {
     logo: "browserbase",
     docsHref: "https://www.npmjs.com/package/@browserbasehq/eve",
