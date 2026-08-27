@@ -14,6 +14,7 @@ import {
 } from "#execution/eve-workflow-attributes.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
@@ -237,7 +238,7 @@ describe("workflowEntry integration", () => {
         );
         expect(parkBoundary.at(-1)?.type).toBe("session.waiting");
 
-        await resumeHook(`${run.runId}:auth`, {
+        await resumeSessionInbox(`${run.runId}:auth`, {
           kind: "deliver",
           payloads: [
             {
