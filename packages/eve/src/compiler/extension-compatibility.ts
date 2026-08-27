@@ -31,8 +31,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21],
     dropped: {},
   },
-  channel: { current: 11, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], dropped: {} },
-  schedule: { current: 4, supported: [1, 2, 3, 4], dropped: {} },
+  channel: { current: 12, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], dropped: {} },
+  schedule: { current: 5, supported: [1, 2, 3, 4, 5], dropped: {} },
   subagent: {
     current: 5,
     supported: [3, 4, 5],
