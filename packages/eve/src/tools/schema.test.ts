@@ -143,6 +143,33 @@ describe("ToolSchema", () => {
     });
   });
 
+  it("serializes callable Standard Schema implementations", () => {
+    const schema = Object.assign(function schema() {}, {
+      "~standard": {
+        jsonSchema: {
+          input: () => ({ type: "string" }),
+          output: () => ({ type: "number" }),
+        },
+        validate: (value: unknown) => ({ value }),
+        vendor: "example",
+        version: 1 as const,
+      },
+    });
+
+    expect(isToolSchema(schema)).toBe(true);
+    expect(toInputSchema(schema)).toBe(schema);
+    expect(toOutputSchema(schema)).toBe(schema);
+    expect(serializeInputSchema(schema)).toEqual({ type: "string" });
+    expect(serializeOutputSchema(schema)).toEqual({ type: "number" });
+  });
+
+  it("rejects callable values without Standard Schema metadata", () => {
+    // @ts-expect-error Plain functions are not schema sources.
+    expect(() => serializeInputSchema(function schema() {})).toThrow(
+      "Expected a JSON-serializable value.",
+    );
+  });
+
   it("serializes and rehydrates a Zod 3 input schema", async () => {
     const source = z3.object({ city: z3.string() });
 
