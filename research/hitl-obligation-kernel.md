@@ -27,11 +27,14 @@ This proposal factors the machine along two orthogonal axes:
 A **kernel** owns everything variant- and owner-agnostic: rows, candidate
 races, groups, continuations, tombstones, staleness, forced closure,
 projection routes, and park/resume addressing. Variants become small pure
-reducers. Owners become hook consumers. The #1224 transition catalog
-partitions cleanly: `owner.batch.*`, `scheduler.*`, `projector.*`, and all
-cancellation rows land in the kernel and are proven once; `owner.approval.*`,
-`owner.question.*`, `owner.limit.*`, `owner.auth.*` each land in exactly one
-variant file and are proven in isolation. Invariant 10 ("composite states add
+reducers. Owners become hook consumers. The #1224 transition catalog was
+audited row-by-row against this model: `owner.batch.*`, `scheduler.*`,
+`projector.*`, and all cancellation rows land in the kernel and are proven
+once; `owner.approval.*`, `owner.question.*`, `owner.limit.*`, `owner.auth.*`
+each land in exactly one variant file and are proven in isolation. The audit
+surfaced exactly three modulations, absorbed without new exported concepts:
+held-candidate cancellation (`candidate-cancelled`), per-variant stale
+visibility (`staleResponses`), and kernel-scheduled deadlines. Invariant 10 ("composite states add
 no cases") becomes structural: variants cannot reference each other, so
 composite behavior is the row-wise union by construction.
 
@@ -75,7 +78,7 @@ type Input =
 type Verdict<Outcome> =
   | "ignore"
   | { settle: Outcome }
-  | { reject: "unauthorized" | "invalid" | "policy-failed" }
+  | { reject: "unauthorized" | "invalid" | "policy-failed" | "candidate-cancelled" }
   | { dismiss: string; reopen?: unknown; consumeDelivery?: true }
   | { blockOn: ChallengeSpec }; // open a linked row; re-feed me via "linked"
 
@@ -83,15 +86,25 @@ interface Variant<Spec, Outcome> {
   resolve(row: Row<Spec>, input: Input): Verdict<Outcome> | Promise<Verdict<Outcome>>;
   intentKey?(spec: Spec): string | undefined; // kernel dedup (invariant 4)
   present(row: Row<Spec>): Presentation; // InputRequest | AuthorizationChallenge
+  /**
+   * How a stale response against this variant's tombstones surfaces.
+   * Default "context-turn": synthetic context message + context turn so the
+   * agent can answer in-channel. "drop": rejected event only, no model call
+   * — required by Limit (`owner.limit.response.reject-stale`), whose stale
+   * answers must never reach the model.
+   */
+  staleResponses?: "context-turn" | "drop";
 }
 ```
 
 Notes on the boundary:
 
-- **Staleness is kernel-side.** A response naming a terminal row is rejected
-  against the tombstone before any reducer runs; `"stale"` is deliberately
-  absent from the reject vocabulary and no variant implements a second
-  staleness mechanism.
+- **Staleness detection is kernel-side.** A response naming a terminal row
+  is rejected against the tombstone before any reducer runs; `"stale"` is
+  deliberately absent from the reject vocabulary and no variant implements a
+  second staleness mechanism. Stale *visibility* is the one per-variant
+  modulation (`staleResponses`), because Limit requires silent drops where
+  approval and question require a context turn.
 - **Races are kernel-side.** Candidates derive from `{requestId,
 deliveryId}`; single-winner serialization happens before `resolve`.
 - **`present()` selects the event family.** Returning an `InputRequest`
@@ -127,7 +140,17 @@ still emits observable events — Limit is its only user) and `reopen`
 `blockOn`/`linked` is the one cross-variant linkage: a reducer may park a
 candidate on another row reaching terminal state. The blocking variant names
 a row it wants terminal, never the other variant's rules; the blocked-on
-variant never knows it was watched.
+variant never knows it was watched. Held candidates are kernel state with two
+rules: a duplicate delivery of the same candidate returns the existing held
+candidate and never opens a second linked row, and a row settling while a
+candidate is held (for example an authenticated cancel racing a pending
+sign-in, `owner.approval.response.settle-cancel-pending-candidate`) completes
+the linked row as `cancelled` and rejects the held candidate as
+`candidate-cancelled` — the variant is not consulted.
+
+Timers are kernel-scheduled: a spec carrying a deadline gets a `deadline`
+input as a first-class kernel producer (the producer #1224 stage 3 notes is
+missing today), never a variant-owned wait.
 
 ## The four variants
 
@@ -167,6 +190,8 @@ export const approval = defineVariant<ApprovalSpec, ApprovalOutcome>({
         ? adjudicate(row, input.heldResponse)
         : { reject: input.outcome === "declined" ? "unauthorized" : "policy-failed" };
     if (input.kind !== "response") return "ignore"; // text never settles an approval
+    if (!["allow", "deny", "cancel"].includes(input.response.optionId ?? ""))
+      return { reject: "invalid" }; // owner.approval.response.reject-invalid
     if (input.response.optionId === "cancel")
       return input.responder !== null ? { settle: "cancelled" } : { reject: "unauthorized" };
     return adjudicate(row, input);
@@ -187,6 +212,7 @@ async function adjudicate(row, input): Promise<Verdict<ApprovalOutcome>> {
 ```ts
 export const limit = defineVariant<LimitSpec, LimitOutcome>({
   present: (row) => inputRequest("session-limit", promptFor(row.spec)),
+  staleResponses: "drop", // stale limit answers must never reach the model
   resolve(row, input) {
     switch (input.kind) {
       case "response":
