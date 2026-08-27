@@ -235,6 +235,11 @@ export const defaultEvents: SlackChannelInternalEvents = {
     });
     const next = { ...cards };
     delete next[event.requestId];
+    for (const [requestId, pendingCard] of Object.entries(next)) {
+      if (pendingCard.messageTs === card.messageTs) {
+        next[requestId] = { ...pendingCard, messageBlocks: blocks };
+      }
+    }
     channel.state.pendingApprovalCards = next;
   },
 
