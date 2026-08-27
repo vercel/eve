@@ -10,6 +10,7 @@ import type { VersionMigration } from "#execution/durable-session-migrations/cha
 import { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
 import { sessionInboxWireV1Schema } from "#execution/wire/session-inbox-wire.v1.js";
 import { formatValidationError } from "#runtime/validation.js";
+import { isObject } from "#shared/guards.js";
 
 const activityWorkIdentitySchema = z
   .object({
@@ -53,16 +54,14 @@ export type SessionInboxWireV2 = z.infer<typeof sessionInboxWireV2Schema>;
 export const sessionInboxWireV1Migration: VersionMigration = {
   from: 1,
   migrate(prior) {
-    const parsed = sessionInboxWireV1Schema.safeParse(prior);
-    if (!parsed.success) {
-      throw new SessionInboxWireError(
-        `Session inbox payload does not match wire version 1: ${formatValidationError(parsed.error)}`,
-      );
-    }
-    return { ...parsed.data, version: 2 };
+    return { ...(prior as Record<string, unknown>), version: 2 };
   },
   to: 2,
 };
+
+export function parseSessionInboxWireV2(value: unknown) {
+  return sessionInboxWireV2Schema.safeParse(normalizeWireValue(value));
+}
 
 /** Builds and validates one complete version-2 wire value. */
 export function encodeSessionCommandV2(
@@ -90,11 +89,32 @@ export function encodeSessionCommandV2(
             version: 2 as const,
           }
         : { ...command, version: 2 as const };
-  const parsed = sessionInboxWireV2Schema.safeParse(wire);
+  const parsed = parseSessionInboxWireV2(wire);
   if (!parsed.success) {
     throw new SessionInboxWireError(
       `Produced a session inbox payload that does not match wire version 2: ${formatValidationError(parsed.error)}`,
     );
   }
   return parsed.data;
+}
+
+function normalizeWireValue(value: unknown, arrayFallback = false): unknown {
+  if (value === undefined) return arrayFallback ? null : undefined;
+  if (Array.isArray(value)) return value.map((item) => normalizeWireValue(item, true));
+  if (!isPlainRecord(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter((entry) => entry[1] !== undefined)
+      .map(([key, item]) => [key, normalizeWireValue(item)]),
+  );
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!isObject(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return (
+    prototype === null ||
+    prototype === Object.prototype ||
+    Object.getPrototypeOf(prototype) === null
+  );
 }

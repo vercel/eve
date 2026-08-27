@@ -1,3 +1,5 @@
+import { runInNewContext } from "node:vm";
+
 import { describe, expect, it } from "vitest";
 import { z } from "#compiled/zod/index.js";
 
@@ -66,6 +68,113 @@ describe("session inbox wire v2", () => {
       caller,
       kind: "deliver",
       payloads: [{ task }],
+    });
+  });
+
+  it("normalizes omitted task values to their JSON wire representation", () => {
+    const payload = {
+      task: {
+        inputRequests: [
+          {
+            hookPayload: {
+              callId: "call-1",
+              childContinuationToken: "continue-1",
+              childSessionId: "child-1",
+              event: {
+                requests: [
+                  {
+                    action: {
+                      callId: "tool-1",
+                      input: { marker: "FIRST", omitted: undefined },
+                      kind: "tool-call",
+                      toolName: "first_gate",
+                    },
+                    kind: "tool-approval",
+                    prompt: "Approve first_gate?",
+                    requestId: "request-1",
+                  },
+                ],
+                sequence: 1,
+                stepIndex: 0,
+                turnId: "turn-1",
+              },
+              kind: "subagent-input-request",
+              subagentName: "researcher",
+            },
+            taskId: "task-1",
+          },
+        ],
+        views: [
+          {
+            lastOutput: { data: { omitted: undefined, status: "done" }, type: "result" },
+            metadata: { kind: "tool", name: "export" },
+            status: "completed",
+            taskId: "task-2",
+          },
+        ],
+      },
+    };
+    const wire = sessionInboxWireEncoder.encode({ kind: "send", payload } as never, { version: 2 });
+
+    const expected = {
+      payloads: [
+        {
+          task: {
+            inputRequests: [
+              {
+                hookPayload: {
+                  event: { requests: [{ action: { input: { marker: "FIRST" } } }] },
+                },
+              },
+            ],
+            views: [{ lastOutput: { data: { status: "done" } } }],
+          },
+        },
+      ],
+    };
+    expect(wire).toMatchObject(expected);
+    expect(sessionInboxWireDecoder.decode(wire)).toMatchObject(expected);
+  });
+
+  it("normalizes plain records received from another VM realm", () => {
+    const data = runInNewContext(
+      `({ address: { sessionRef: "child" }, identity: { id: "agent" } })`,
+    );
+    const wire = sessionInboxWireEncoder.encode(
+      {
+        kind: "send",
+        payload: {
+          task: {
+            views: [
+              {
+                executor: { binding: { data, kind: "subagent" } },
+                metadata: { kind: "subagent", name: "worker" },
+                status: "working",
+                taskId: "task-1",
+              },
+            ],
+          },
+        },
+      } as never,
+      { version: 2 },
+    );
+
+    expect(sessionInboxWireDecoder.decode(wire)).toMatchObject({
+      payloads: [
+        {
+          task: {
+            views: [
+              {
+                executor: {
+                  binding: {
+                    data: { address: { sessionRef: "child" }, identity: { id: "agent" } },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
     });
   });
 
