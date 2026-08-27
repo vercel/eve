@@ -201,6 +201,7 @@ import {
   normalizeUserContent,
   resolveAssistantStepText,
 } from "#harness/messages.js";
+import { normalizeProviderReasoningHistory } from "#harness/provider-reasoning-history.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import {
   type AuthorizationSignal,
@@ -1405,9 +1406,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       currentMessages.add(emissionState.sequence, pendingApprovals, { cacheFriendly: false });
     }
 
-    // Hydrate `eve-sandbox:` ref FileParts into inline bytes for the model call
-    // only. Session history remains ref-only across future step boundaries.
-    const modelMessages = await hydrateSandboxAttachments(currentMessages.nonSystemMessages);
+    // Hydrate `eve-sandbox:` refs and normalize provider-specific history for
+    // this wire call only. Session history retains refs and provider reasoning
+    // across future step boundaries.
+    const modelMessages = normalizeProviderReasoningHistory({
+      messages: await hydrateSandboxAttachments(currentMessages.nonSystemMessages),
+      model,
+    });
 
     const prepareModelCallInput = (extraSystemNote?: string) => {
       const extraSystemEntry: SystemModelMessage[] = extraSystemNote

@@ -1852,6 +1852,50 @@ describe("createToolLoopHarness", () => {
     expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0]).toMatchObject({ reasoning: "high" });
   });
 
+  it("keeps generic reasoning in history but omits it from an OpenAI Gateway call", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Current answer", role: "assistant" }] },
+      text: "Current answer",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const genericReasoning = {
+      text: "private generic reasoning",
+      type: "reasoning" as const,
+    };
+    const previousResponse: ModelMessage = {
+      content: [genericReasoning, { text: "Previous answer", type: "text" }],
+      role: "assistant",
+    };
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, {
+        resolveModel: vi.fn().mockResolvedValue(
+          new MockLanguageModelV3({
+            modelId: "openai/gpt-5.6-luna",
+            provider: "gateway.language-model",
+          }),
+        ),
+      }),
+    );
+
+    const result = await runStep(createTestSession({ history: [previousResponse] }), {
+      message: "Continue",
+    });
+
+    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
+      generate: ReturnType<typeof vi.fn>;
+    };
+    expect(agent.generate.mock.calls[0]?.[0].messages).toEqual([
+      {
+        content: [{ text: "Previous answer", type: "text" }],
+        role: "assistant",
+      },
+      { content: "Continue", role: "user" },
+    ]);
+    expect(result.session.history[0]?.content).toContain(genericReasoning);
+  });
+
   it("accumulates provider-reported token usage across the session", async () => {
     setupMockAgent({
       finishReason: "stop",
