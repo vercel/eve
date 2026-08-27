@@ -165,6 +165,13 @@ the candidate in the development world, and continue those sessions through
 parked turns, active turns, cancellation, runtime actions, subagents, tasks,
 and timeouts.
 
+The first required local cohort builds the published eve 0.30.8 handler and the
+candidate handler independently against one test-only promotable Workflow
+World. It proves the historical session driver remains deployment-affine while
+its next turn is created and delivered by the promoted candidate. Additional
+cohorts and suspension points are added only when they represent a distinct
+shipped protocol contract; package releases alone do not grow the matrix.
+
 Production routing ultimately targets the latest compatibility-approved
 deployment rather than the most recently created deployment. Promotion is not
 long-lived blue/green routing: after approval, every new turn takes the promoted
