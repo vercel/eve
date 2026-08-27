@@ -13,12 +13,11 @@ import {
   SessionInboxWireError,
 } from "#execution/wire/session-inbox-contract.js";
 import type { SessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
-import { formatValidationError } from "#runtime/validation.js";
 import { sessionInboxWireV0Migration } from "#execution/wire/session-inbox-wire.v0.js";
 import {
-  parseSessionInboxWireV2,
+  normalizeSessionInboxWireV2,
   sessionInboxWireV1Migration,
-} from "#execution/wire/session-inbox-wire.v2.js";
+} from "#execution/wire/session-inbox-wire.v2-migration.js";
 
 /**
  * The session inbox wire family: every payload persisted to a session's
@@ -69,13 +68,13 @@ function decode(value: unknown): DecodedSessionInbox {
     throw new SessionInboxWireError(error instanceof Error ? error.message : String(error));
   }
 
-  const parsed = parseSessionInboxWireV2(migrated);
-  if (!parsed.success) {
+  const wire = normalizeSessionInboxWireV2(migrated) as Partial<SessionInboxWire>;
+  if (wire.version !== SESSION_INBOX_WIRE_VERSION) {
     throw new SessionInboxWireError(
-      `${WIRE_LABEL} does not match wire version 2: ${formatValidationError(parsed.error)}`,
+      `${WIRE_LABEL} declares version ${JSON.stringify(wire.version)}, expected ${SESSION_INBOX_WIRE_VERSION}.`,
     );
   }
-  return normalizeWire(parsed.data);
+  return normalizeWire(wire as SessionInboxWire);
 }
 
 /** Workflow-safe consumer facade. */

@@ -6,11 +6,10 @@ import type {
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
-import type { VersionMigration } from "#execution/durable-session-migrations/chain.js";
 import { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
 import { sessionInboxWireV1Schema } from "#execution/wire/session-inbox-wire.v1.js";
+import { normalizeSessionInboxWireV2 } from "#execution/wire/session-inbox-wire.v2-migration.js";
 import { formatValidationError } from "#runtime/validation.js";
-import { isObject } from "#shared/guards.js";
 
 const activityWorkIdentitySchema = z
   .object({
@@ -51,16 +50,8 @@ export const sessionInboxWireV2Schema = z.discriminatedUnion("kind", [
 
 export type SessionInboxWireV2 = z.infer<typeof sessionInboxWireV2Schema>;
 
-export const sessionInboxWireV1Migration: VersionMigration = {
-  from: 1,
-  migrate(prior) {
-    return { ...(prior as Record<string, unknown>), version: 2 };
-  },
-  to: 2,
-};
-
 export function parseSessionInboxWireV2(value: unknown) {
-  return sessionInboxWireV2Schema.safeParse(normalizeWireValue(value));
+  return sessionInboxWireV2Schema.safeParse(normalizeSessionInboxWireV2(value));
 }
 
 /** Builds and validates one complete version-2 wire value. */
@@ -96,25 +87,4 @@ export function encodeSessionCommandV2(
     );
   }
   return parsed.data;
-}
-
-function normalizeWireValue(value: unknown, arrayFallback = false): unknown {
-  if (value === undefined) return arrayFallback ? null : undefined;
-  if (Array.isArray(value)) return value.map((item) => normalizeWireValue(item, true));
-  if (!isPlainRecord(value)) return value;
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter((entry) => entry[1] !== undefined)
-      .map(([key, item]) => [key, normalizeWireValue(item)]),
-  );
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (!isObject(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return (
-    prototype === null ||
-    prototype === Object.prototype ||
-    Object.getPrototypeOf(prototype) === null
-  );
 }
