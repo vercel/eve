@@ -60,6 +60,8 @@ export default defineChannel({
 
 A route's `path` is its app URL; the channel filename does not prefix it. The route above answers at `POST /threads/:threadId/messages`, not `/support/threads/:threadId/messages`. Use a unique method-and-path pair for each route, and do not use the framework-owned `/eve/v1/*` namespace.
 
+When a Next.js app hosts the agent with `withEve()`, add each channel path outside `/eve/v1/*` to [`publicRoutes`](../guides/frontend/nextjs). Otherwise, Next.js handles the URL instead of the eve service.
+
 Each route receives these operation surfaces:
 
 - `from(address)` binds `send`, `respond`, `cancel`, `compact`, `clear`, and `reset` to a channel-local continuation address.
