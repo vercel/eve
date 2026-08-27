@@ -6,6 +6,7 @@ import { parseJsonValue, type JsonValue } from "#shared/json.js";
 /** Resolves and merges application-provided arguments, with application values winning. */
 export async function resolveProvidedArguments(input: {
   readonly args: unknown;
+  readonly callId: string;
   readonly connection: ResolvedConnectionDefinition;
   readonly toolName: string;
 }): Promise<Record<string, unknown>> {
@@ -21,11 +22,15 @@ export async function resolveProvidedArguments(input: {
   }
 
   let context:
-    | (ReturnType<typeof buildCallbackContext> & { readonly toolName: string })
+    | (ReturnType<typeof buildCallbackContext> & {
+        readonly callId: string;
+        readonly toolName: string;
+      })
     | undefined;
   const getContext = () =>
     (context ??= {
       ...buildCallbackContext(),
+      callId: input.callId,
       toolName: input.toolName,
     });
   const provided: Record<string, JsonValue> = {};

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -10,7 +10,10 @@ import {
 } from "#harness/authorization.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import type { ToolContext } from "#tools/definition.js";
-import type { ConnectionToolMetadata } from "#shared/connection-types.js";
+import type {
+  ConnectionToolExecuteOptions,
+  ConnectionToolMetadata,
+} from "#shared/connection-types.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import connectionSearch from "#tools/framework/connection-search.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
@@ -141,6 +144,59 @@ describe("connection dynamic tools", () => {
 
     expect(Object.keys(tools)).toEqual(["connection_search", "linear__list_issues"]);
     expect(Object.values(tools).every(isBrandedToolEntry)).toBe(true);
+  });
+
+  it("forwards the authored tool call ID to connection execution", async () => {
+    const linear = connection("linear");
+    const executeTool = vi.fn(
+      async (_toolName: string, _args: unknown, _options?: ConnectionToolExecuteOptions) => ({
+        ok: true,
+      }),
+    );
+    const baseRegistry = registry({
+      connections: [linear],
+      loadTools: {
+        linear: async () => [
+          {
+            description: "List issues",
+            inputSchema: { type: "object" },
+            name: "list_issues",
+          },
+        ],
+      },
+    });
+    const connectionRegistry: ConnectionRegistry = {
+      ...baseRegistry,
+      getClient: (name) => ({
+        ...baseRegistry.getClient(name),
+        executeTool,
+      }),
+    };
+    const ctx = new ContextContainer();
+    ctx.set(ConnectionRegistryKey, connectionRegistry);
+    const abortSignal = {} as AbortSignal;
+
+    await contextStorage.run(ctx, async () => {
+      const resolve = getConnectionSearchResolver().events["step.started"]!;
+      const resolveContext = {
+        channel: {},
+        messages: [],
+        session: { auth: { current: null, initiator: null }, id: "test-session" },
+      } satisfies DynamicResolveContext;
+      const initial = (await resolve({}, resolveContext)) as DynamicToolSet;
+      await initial["connection_search"]!.execute({ keywords: "list issues" }, {} as ToolContext);
+      const tools = (await resolve({}, resolveContext)) as DynamicToolSet;
+
+      for (const callId of ["call-1", "call-2", "call-1"]) {
+        await tools["linear__list_issues"]!.execute({}, { abortSignal, callId } as ToolContext);
+      }
+    });
+
+    expect(executeTool.mock.calls.map(([, , options]) => options?.callId)).toEqual([
+      "call-1",
+      "call-2",
+      "call-1",
+    ]);
   });
 });
 

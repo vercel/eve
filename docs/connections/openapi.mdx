@@ -86,7 +86,7 @@ export default defineOpenAPIConnection({
 });
 ```
 
-Values may be JSON values, promises, or callbacks. Callbacks receive the active session context plus the bare operation `toolName`.
+Values may be JSON values, promises, or callbacks. Callbacks receive the active session context, the bare operation `toolName`, and a replay-stable `callId` that is unique to the tool call. Use `callId` when the API needs an idempotency key.
 
 eve removes configured keys from every operation's model-facing input schema and adds their resolved values immediately before constructing the HTTP request. Values apply to every operation on the connection and replace any conflicting model value. The keys correspond to the generated top-level operation inputs: path, query, header, and cookie parameter names, plus `body` for a request body.
 

@@ -111,7 +111,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
   async executeTool(
     toolName: string,
     args: unknown,
-    options?: ConnectionToolExecuteOptions,
+    options: ConnectionToolExecuteOptions,
   ): Promise<OpenApiToolResult> {
     const cache = await this.#ensureTools();
     const operation = cache.operations.get(toolName);
@@ -121,7 +121,8 @@ export class OpenApiConnectionClient implements ConnectionClient {
       );
     }
     return this.#request(operation, cache.baseUrl, isObject(args) ? args : {}, {
-      abortSignal: options?.abortSignal,
+      abortSignal: options.abortSignal,
+      callId: options.callId,
     });
   }
 
@@ -192,6 +193,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
         execute: async (input: unknown, toolOptions) =>
           this.#request(operation, baseUrl, isObject(input) ? input : {}, {
             abortSignal: toolOptions?.abortSignal,
+            callId: toolOptions.toolCallId,
           }),
       });
     }
@@ -425,10 +427,11 @@ export class OpenApiConnectionClient implements ConnectionClient {
     operation: OpenApiOperation,
     baseUrl: string,
     args: Record<string, unknown>,
-    options?: ConnectionToolExecuteOptions,
+    options: ConnectionToolExecuteOptions,
   ): Promise<OpenApiToolResult> {
     const resolvedArgs = await resolveProvidedArguments({
       args,
+      callId: options.callId,
       connection: this.#connection,
       toolName: operation.toolName,
     });

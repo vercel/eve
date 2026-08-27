@@ -124,7 +124,7 @@ export class McpConnectionClient implements ConnectionClient {
   async executeTool(
     toolName: string,
     args: unknown,
-    options?: ConnectionToolExecuteOptions,
+    options: ConnectionToolExecuteOptions,
   ): Promise<unknown> {
     try {
       const { tools } = await this.#ensureTools();
@@ -138,11 +138,12 @@ export class McpConnectionClient implements ConnectionClient {
 
       const resolvedArgs = await resolveProvidedArguments({
         args,
+        callId: options.callId,
         connection: this.#connection,
         toolName,
       });
 
-      return await sdkTool.execute(resolvedArgs, { abortSignal: options?.abortSignal } as never);
+      return await sdkTool.execute(resolvedArgs, { abortSignal: options.abortSignal } as never);
     } catch (error) {
       return await this.#rethrowClassified(error);
     }

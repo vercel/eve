@@ -6,6 +6,8 @@ import type { SessionContext } from "#context/session-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { OpenApiConnectionClient } from "#runtime/connections/openapi-client.js";
 
+const EXECUTE_OPTIONS = { callId: "call-1" } as const;
+
 const SPEC: Record<string, unknown> = {
   openapi: "3.0.3",
   info: { title: "Test API", version: "1.0.0" },
@@ -152,11 +154,19 @@ describe("OpenApiConnectionClient", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
+    const resolver = vi.fn(({ callId }) => callId);
     const client = new OpenApiConnectionClient(
       makeConnection({
-        toolCall: { providedArguments: { teamId: "team_from_app" } },
+        toolCall: { providedArguments: { teamId: resolver } },
       }),
     );
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "session-1",
+      turn: { id: "turn-1", sequence: 0 },
+    });
 
     const metadata = await client.getToolMetadata();
     expect(metadata.find((item) => item.name === "getProject")?.inputSchema).toMatchObject({
@@ -167,15 +177,20 @@ describe("OpenApiConnectionClient", () => {
       metadata.find((item) => item.name === "getProject")?.inputSchema.properties,
     ).not.toHaveProperty("teamId");
 
-    await client.executeTool("getProject", {
-      id: "prj_1",
-      teamId: "team_from_model",
-    });
+    await contextStorage.run(ctx, () =>
+      client.executeTool(
+        "getProject",
+        {
+          id: "prj_1",
+          teamId: "team_from_model",
+        },
+        { callId: "call-1" },
+      ),
+    );
 
     const [calledUrl] = fetchMock.mock.calls[0]!;
-    expect(String(calledUrl)).toBe(
-      "https://api.example.com/v1/projects/prj_1?teamId=team_from_app",
-    );
+    expect(String(calledUrl)).toBe("https://api.example.com/v1/projects/prj_1?teamId=call-1");
+    expect(resolver).toHaveBeenCalledWith(expect.objectContaining({ callId: "call-1" }));
   });
 
   it("builds input schemas from Swagger 2.0 top-level parameters", async () => {
@@ -297,7 +312,11 @@ describe("OpenApiConnectionClient", () => {
       }),
     );
 
-    const result = await client.executeTool("getProject", { id: "prj_1", teamId: "team_9" });
+    const result = await client.executeTool(
+      "getProject",
+      { id: "prj_1", teamId: "team_9" },
+      EXECUTE_OPTIONS,
+    );
 
     expect(result).toEqual({ status: 200, statusText: expect.any(String), body: { id: "prj_1" } });
 
@@ -339,7 +358,9 @@ describe("OpenApiConnectionClient", () => {
       }),
     );
 
-    await contextStorage.run(ctx, () => client.executeTool("getProject", { id: "prj_1" }));
+    await contextStorage.run(ctx, () =>
+      client.executeTool("getProject", { id: "prj_1" }, EXECUTE_OPTIONS),
+    );
 
     const [, init] = fetchMock.mock.calls[0]!;
     expect(init.headers).toMatchObject({
@@ -355,7 +376,11 @@ describe("OpenApiConnectionClient", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new OpenApiConnectionClient(makeConnection());
-    const result = await client.executeTool("createProject", { body: { name: "demo" } });
+    const result = await client.executeTool(
+      "createProject",
+      { body: { name: "demo" } },
+      EXECUTE_OPTIONS,
+    );
 
     expect(result.status).toBe(201);
     const [, init] = fetchMock.mock.calls[0]!;
@@ -374,7 +399,7 @@ describe("OpenApiConnectionClient", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new OpenApiConnectionClient(makeConnection());
-    const result = await client.executeTool("getProject", { id: "missing" });
+    const result = await client.executeTool("getProject", { id: "missing" }, EXECUTE_OPTIONS);
 
     expect(result.status).toBe(404);
     expect(result.body).toEqual({ error: "nope" });
@@ -382,7 +407,9 @@ describe("OpenApiConnectionClient", () => {
 
   it("throws for an unknown tool name", async () => {
     const client = new OpenApiConnectionClient(makeConnection());
-    await expect(client.executeTool("nonexistent", {})).rejects.toThrow(/not found/);
+    await expect(client.executeTool("nonexistent", {}, EXECUTE_OPTIONS)).rejects.toThrow(
+      /not found/,
+    );
   });
 
   it("sanitizes operationIds into provider-legal tool names", async () => {
@@ -492,7 +519,7 @@ describe("OpenApiConnectionClient", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new OpenApiConnectionClient(makeConnection({ url: "" }));
-    await client.executeTool("getProject", { id: "prj_1" });
+    await client.executeTool("getProject", { id: "prj_1" }, EXECUTE_OPTIONS);
 
     const [calledUrl] = fetchMock.mock.calls[0]!;
     expect(String(calledUrl)).toBe("https://api.example.com/v1/projects/prj_1");
@@ -509,11 +536,15 @@ describe("OpenApiConnectionClient", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new OpenApiConnectionClient(makeConnection({ spec: SWAGGER_SPEC, url: "" }));
-    await client.executeTool("getItem", {
-      id: "itm_1",
-      includeDetails: true,
-      tags: ["alpha", "beta"],
-    });
+    await client.executeTool(
+      "getItem",
+      {
+        id: "itm_1",
+        includeDetails: true,
+        tags: ["alpha", "beta"],
+      },
+      EXECUTE_OPTIONS,
+    );
 
     const [calledUrl] = fetchMock.mock.calls[0]!;
     expect(String(calledUrl)).toBe(
@@ -530,7 +561,7 @@ describe("OpenApiConnectionClient", () => {
     const client = new OpenApiConnectionClient(
       makeConnection({ url: "https://override.example.com" }),
     );
-    await client.executeTool("getProject", { id: "prj_1" });
+    await client.executeTool("getProject", { id: "prj_1" }, EXECUTE_OPTIONS);
 
     const [calledUrl] = fetchMock.mock.calls[0]!;
     expect(String(calledUrl)).toBe("https://override.example.com/v1/projects/prj_1");
@@ -552,7 +583,7 @@ describe("OpenApiConnectionClient", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new OpenApiConnectionClient(makeConnection({ spec, url: "" }));
-    await client.executeTool("getProject", { id: "prj_1" });
+    await client.executeTool("getProject", { id: "prj_1" }, EXECUTE_OPTIONS);
 
     const [calledUrl] = fetchMock.mock.calls[0]!;
     expect(String(calledUrl)).toBe("https://api.example.com/v1/projects/prj_1");
@@ -653,7 +684,7 @@ describe("OpenApiConnectionClient", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new OpenApiConnectionClient(makeConnection({ spec: specUrl, url: "" }));
-    await client.executeTool("getPet", { id: "p1" });
+    await client.executeTool("getPet", { id: "p1" }, EXECUTE_OPTIONS);
 
     const requestCall = fetchMock.mock.calls.find((call) => String(call[0]) !== specUrl);
     expect(requestCall).toBeDefined();
@@ -793,7 +824,7 @@ describe("OpenApiConnectionClient", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new OpenApiConnectionClient(makeConnection({ spec }));
-    await client.executeTool("getMe", { session: "abc 123" });
+    await client.executeTool("getMe", { session: "abc 123" }, EXECUTE_OPTIONS);
 
     const [, init] = fetchMock.mock.calls[0]!;
     expect((init.headers as Record<string, string>).cookie).toBe("session=abc%20123");
@@ -812,7 +843,7 @@ describe("OpenApiConnectionClient", () => {
         authorization: { getToken: async () => ({ token: "secret" }), principalType: "app" },
       }),
     );
-    await client.executeTool("op", {});
+    await client.executeTool("op", {}, EXECUTE_OPTIONS);
 
     const [, init] = fetchMock.mock.calls[0]!;
     const headers = init.headers as Record<string, string>;
@@ -833,7 +864,7 @@ describe("OpenApiConnectionClient", () => {
         authorization: { getToken: async () => ({ token: "secret" }), principalType: "app" },
       }),
     );
-    await client.executeTool("op", {});
+    await client.executeTool("op", {}, EXECUTE_OPTIONS);
 
     const [calledUrl, init] = fetchMock.mock.calls[0]!;
     expect(String(calledUrl)).toContain("api_key=secret");
@@ -853,7 +884,7 @@ describe("OpenApiConnectionClient", () => {
         authorization: { getToken: async () => ({ token: "dXNlcjpwYXNz" }), principalType: "app" },
       }),
     );
-    await client.executeTool("op", {});
+    await client.executeTool("op", {}, EXECUTE_OPTIONS);
 
     const [, init] = fetchMock.mock.calls[0]!;
     expect((init.headers as Record<string, string>).Authorization).toBe("Basic dXNlcjpwYXNz");
@@ -877,7 +908,7 @@ describe("OpenApiConnectionClient", () => {
         authorization: { getToken: async () => ({ token: "secret" }), principalType: "app" },
       }),
     );
-    await client.executeTool("getItem", { id: "itm_1" });
+    await client.executeTool("getItem", { id: "itm_1" }, EXECUTE_OPTIONS);
 
     const [calledUrl, init] = fetchMock.mock.calls[0]!;
     expect(String(calledUrl)).toBe("https://api.example.com/v1/items/itm_1?app_key=secret");
@@ -897,7 +928,7 @@ describe("OpenApiConnectionClient", () => {
         authorization: { getToken: async () => ({ token: "secret" }), principalType: "app" },
       }),
     );
-    await client.executeTool("op", {});
+    await client.executeTool("op", {}, EXECUTE_OPTIONS);
 
     const [, init] = fetchMock.mock.calls[0]!;
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer secret");
