@@ -20,7 +20,7 @@ export default defineMcpClientConnection({
           profile: agentProfileUrl(),
         },
 
-        // These calls require a unique idempotency key.
+        // Include callId so sibling calls are unique while durable replays reuse the same key.
         ...(["cancel_cart", "complete_checkout", "cancel_checkout"].includes(toolName)
           ? {
               "idempotency-key": `${session.id}:${session.turn.id}:${toolName}:${callId}`,
