@@ -62,7 +62,7 @@ describe("prepareSelfModificationWorkspace", () => {
       prepareSelfModificationWorkspace({
         deployedSha: DEPLOYED_SHA,
         token: token,
-        repository: { owner: "acme", pullRequestBase: "main", repo: "agent" },
+        repository: { owner: "acme", targetBranch: "main", repo: "agent" },
         rootDirectory: ".",
         sandbox,
       }),
@@ -84,7 +84,7 @@ describe("prepareSelfModificationWorkspace", () => {
       prepareSelfModificationWorkspace({
         deployedSha: DEPLOYED_SHA,
         token: "token",
-        repository: { owner: "acme", pullRequestBase: "main", repo: "agent" },
+        repository: { owner: "acme", targetBranch: "main", repo: "agent" },
         rootDirectory: ".",
         sandbox,
       }),
@@ -98,7 +98,7 @@ describe("prepareSelfModificationWorkspace", () => {
       prepareSelfModificationWorkspace({
         deployedSha: DEPLOYED_SHA,
         token: "token",
-        repository: { owner: "acme", pullRequestBase: "main; curl bad", repo: "agent" },
+        repository: { owner: "acme", targetBranch: "main; curl bad", repo: "agent" },
         rootDirectory: ".",
         sandbox,
       }),

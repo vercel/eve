@@ -13,7 +13,7 @@ const GITHUB_BLOB_SHA = "7".repeat(40);
 const GITHUB_COMMIT_SHA = "9".repeat(40);
 const OPERATION_ID = "session/root-turn/subagent-call";
 const BRANCH = selfModificationBranchName(DEPLOYED_SHA, OPERATION_ID);
-const REPOSITORY = { owner: "acme", pullRequestBase: "main", repo: "agent" };
+const REPOSITORY = { owner: "acme", targetBranch: "main", repo: "agent" };
 const CONTENT = "hello";
 
 interface RecordedRequest {
@@ -212,6 +212,7 @@ describe("publishSelfModificationProposal", () => {
       draft: true,
       pullRequestState: "open",
       pullRequestUrl: "https://github.com/acme/agent/pull/7",
+      targetBranch: "main",
     });
 
     expect(commands.join("\n")).not.toContain("github-token");
@@ -393,7 +394,7 @@ describe("publishSelfModificationProposal", () => {
 
     await expect(
       publishSelfModificationProposal(publicationInput(sandbox, apiFetch)),
-    ).rejects.toThrow(/different pull request base revision/u);
+    ).rejects.toThrow(/different target branch revision/u);
   });
 
   it("treats an ambiguous ref match as an absent branch", async () => {
@@ -414,7 +415,7 @@ describe("publishSelfModificationProposal", () => {
 
     await expect(
       publishSelfModificationProposal(publicationInput(sandbox, apiFetch)),
-    ).rejects.toThrow(/base "main" does not exist in acme\/agent/u);
+    ).rejects.toThrow(/target branch "main" does not exist in acme\/agent/u);
   });
 
   it("fails closed when the configured base moves", async () => {
@@ -426,7 +427,7 @@ describe("publishSelfModificationProposal", () => {
 
     await expect(
       publishSelfModificationProposal(publicationInput(sandbox, apiFetch)),
-    ).rejects.toThrow(/base moved/u);
+    ).rejects.toThrow(/target branch moved/u);
   });
 
   it("surfaces the GitHub failure explanation without the access token", async () => {

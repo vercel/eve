@@ -6,7 +6,6 @@ import {
   type PreparedSelfModificationWorkspace,
   type ProposalChange,
   type SelfModificationCommandSandbox,
-  type SelfModificationPersonalAccessTokenResolver,
   type SelfModificationProposal,
   type SelfModificationRepository,
 } from "./git-workspace.js";
@@ -16,6 +15,11 @@ import {
   assertOperationId,
   assertRepositoryPart,
 } from "./identifiers.js";
+import type {
+  SelfModificationProposalPublisher,
+  SelfModificationPublicationReceipt,
+  SelfModificationPublicationRequest,
+} from "./publisher.js";
 
 const API_BASE_URL = "https://api.github.com";
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -29,7 +33,7 @@ const DELETED_ENTRY_MODE = "100644";
 
 export interface PublishSelfModificationProposalInput {
   readonly body: string;
-  readonly personalAccessToken: SelfModificationPersonalAccessTokenResolver;
+  readonly personalAccessToken: () => Promise<string> | string;
   readonly deployedSha: string;
   readonly fetch?: typeof fetch;
   readonly operationId: string;
@@ -39,7 +43,7 @@ export interface PublishSelfModificationProposalInput {
   readonly title: string;
 }
 
-export interface PublishedSelfModificationProposal {
+export interface PublishedSelfModificationProposal extends SelfModificationPublicationReceipt {
   readonly base: string;
   readonly branch: string;
   readonly changedPaths: readonly string[];
@@ -48,6 +52,32 @@ export interface PublishedSelfModificationProposal {
   readonly draft: boolean;
   readonly pullRequestState: "closed" | "open";
   readonly pullRequestUrl: string;
+}
+
+export interface GitHubDraftPullRequestPublisherOptions {
+  readonly fetch?: typeof fetch;
+  readonly personalAccessToken: () => Promise<string> | string;
+  readonly repository: SelfModificationRepository;
+}
+
+/** Creates the GitHub implementation of the provider-neutral publisher contract. */
+export function createGitHubDraftPullRequestPublisher(
+  options: GitHubDraftPullRequestPublisherOptions,
+): SelfModificationProposalPublisher<PublishedSelfModificationProposal> {
+  return {
+    publish: async (input: SelfModificationPublicationRequest) =>
+      await publishSelfModificationProposal({
+        body: input.description,
+        deployedSha: input.deployedSha,
+        fetch: options.fetch,
+        operationId: input.operationId,
+        personalAccessToken: options.personalAccessToken,
+        repository: options.repository,
+        sandbox: input.sandbox,
+        title: input.title,
+        workspace: input.workspace,
+      }),
+  };
 }
 
 interface GitHubRef {
@@ -107,16 +137,14 @@ export async function publishSelfModificationProposal(
     });
   }
 
-  const baseRef = await github.getRef(input.repository, input.repository.pullRequestBase);
+  const baseRef = await github.getRef(input.repository, input.repository.targetBranch);
   if (baseRef === null) {
     throw new Error(
-      `Self-modification pull request base "${input.repository.pullRequestBase}" does not exist in ${input.repository.owner}/${input.repository.repo}.`,
+      `Self-modification target branch "${input.repository.targetBranch}" does not exist in ${input.repository.owner}/${input.repository.repo}.`,
     );
   }
   if (baseRef.object.sha !== input.workspace.baseSha) {
-    throw new Error(
-      "Self-modification pull request base moved while the proposal was being prepared.",
-    );
+    throw new Error("Self-modification target branch moved while the proposal was being prepared.");
   }
 
   const commitSha = await uploadProposal({ github, input, proposal });
@@ -152,7 +180,7 @@ async function reconcileExistingPublication(context: {
   const existingCommit = await github.getCommit(input.repository, ref.object.sha);
   if (existingCommit.parents.length !== 1 || existingCommit.parents[0]?.sha !== proposal.baseSha) {
     throw new Error(
-      `Self-modification operation conflict: ${branch} targets a different pull request base revision than this proposal.`,
+      `Self-modification operation conflict: ${branch} targets a different target branch revision than this proposal.`,
     );
   }
   if (existingCommit.tree.sha !== proposal.proposedTreeSha) {
@@ -231,7 +259,7 @@ function assertPublicationInput(input: PublishSelfModificationProposalInput): vo
   }
   assertRepositoryPart(input.repository.owner, "repository owner");
   assertRepositoryPart(input.repository.repo, "repository name");
-  assertGitRef(input.repository.pullRequestBase);
+  assertGitRef(input.repository.targetBranch);
   if (
     input.title.trim().length === 0 ||
     input.title.length > MAX_TITLE_LENGTH ||
@@ -255,7 +283,7 @@ function hasControlCharacter(value: string): boolean {
 
 function pullRequestPayload(input: PublishSelfModificationProposalInput, branch: string) {
   return {
-    base: input.repository.pullRequestBase,
+    base: input.repository.targetBranch,
     body: input.body,
     branch,
     title: input.title.trim(),
@@ -270,7 +298,7 @@ function publishedProposal(context: {
   readonly pullRequest: GitHubPullRequest;
 }): PublishedSelfModificationProposal {
   return {
-    base: context.input.repository.pullRequestBase,
+    base: context.input.repository.targetBranch,
     branch: context.branch,
     changedPaths: context.proposal.changes.map((change) => change.path),
     commitSha: context.commitSha,
@@ -278,6 +306,7 @@ function publishedProposal(context: {
     draft: context.pullRequest.draft,
     pullRequestState: context.pullRequest.state,
     pullRequestUrl: context.pullRequest.html_url,
+    targetBranch: context.input.repository.targetBranch,
   };
 }
 
@@ -378,7 +407,7 @@ class GitHubPublisherClient {
     branch: string,
   ): Promise<GitHubPullRequest | null> {
     const query = new URLSearchParams({
-      base: repository.pullRequestBase,
+      base: repository.targetBranch,
       head: `${repository.owner}:${branch}`,
       state: "all",
     });
@@ -467,7 +496,7 @@ function validatePullRequest(
     typeof draft !== "boolean" ||
     (state !== "closed" && state !== "open") ||
     asRecord(record.head, "pull request head").ref !== branch ||
-    asRecord(record.base, "pull request base").ref !== repository.pullRequestBase
+    asRecord(record.base, "pull request base").ref !== repository.targetBranch
   ) {
     throw new Error("GitHub returned an invalid self-modification pull request.");
   }

@@ -24,10 +24,10 @@ const MAX_CHANGED_FILES = 100;
 
 export type SelfModificationCommandSandbox = Pick<SandboxSession, "run">;
 export type SelfModificationCheckoutSandbox = Pick<SandboxSession, "run" | "setNetworkPolicy">;
-export type SelfModificationPersonalAccessTokenResolver = () => Promise<string> | string;
 export interface SelfModificationRepository {
   readonly owner: string;
-  readonly pullRequestBase: string;
+  /** The branch against which the proposal is prepared. */
+  readonly targetBranch: string;
   readonly repo: string;
 }
 export interface PreparedSelfModificationWorkspace {
@@ -63,7 +63,7 @@ export async function prepareSelfModificationWorkspace(input: {
   assertFullSha(input.deployedSha, "deployed revision");
   assertRepositoryPart(input.repository.owner, "repository owner");
   assertRepositoryPart(input.repository.repo, "repository name");
-  assertGitRef(input.repository.pullRequestBase);
+  assertGitRef(input.repository.targetBranch);
   assertRootDirectory(input.rootDirectory);
   if (input.token.length === 0)
     throw new Error("Self-modification checkout requires a GitHub personal access token.");
@@ -91,14 +91,14 @@ export async function prepareSelfModificationWorkspace(input: {
       );
       await run(
         input.sandbox,
-        `GIT_LFS_SKIP_SMUDGE=1 GIT_TERMINAL_PROMPT=0 git -C ${quote(REPOSITORY_PATH)} fetch --no-tags --depth=${INITIAL_FETCH_DEPTH} origin ${quote(`refs/heads/${input.repository.pullRequestBase}`)}`,
+        `GIT_LFS_SKIP_SMUDGE=1 GIT_TERMINAL_PROMPT=0 git -C ${quote(REPOSITORY_PATH)} fetch --no-tags --depth=${INITIAL_FETCH_DEPTH} origin ${quote(`refs/heads/${input.repository.targetBranch}`)}`,
       );
       await run(
         input.sandbox,
         `git -C ${quote(REPOSITORY_PATH)} update-ref ${BASE_REF} FETCH_HEAD`,
       );
       await deepenUntilRelated(input.sandbox, {
-        base: input.repository.pullRequestBase,
+        base: input.repository.targetBranch,
         deployedSha: input.deployedSha,
       });
     },
