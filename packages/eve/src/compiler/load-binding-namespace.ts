@@ -1,6 +1,6 @@
 import {
+  type AgentModuleBinding,
   type AgentSourceRegistry,
-  type CompiledModuleBinding,
   loadProgrammaticModuleNamespace,
   memoizeModuleNamespaceFactories,
   type ProgrammaticModuleNamespace,
@@ -14,9 +14,14 @@ export type CompiledBindingNamespaceLoader = (
 
 /** Loads one node's selected bindings with dependency ordering and per-phase caching. */
 export function createCompiledBindingNamespaceLoader(input: {
-  readonly bindings: Readonly<Record<string, CompiledModuleBinding>>;
+  readonly bindings?: Readonly<Record<string, AgentModuleBinding>>;
+  readonly onLoad?: (sourceId: string) => void;
   readonly registries: readonly AgentSourceRegistry[];
+  readonly resolveBinding?: (sourceId: string) => AgentModuleBinding | undefined;
 }): CompiledBindingNamespaceLoader {
+  if (input.bindings === undefined && input.resolveBinding === undefined) {
+    throw new Error("Compiled binding namespace loader requires a binding source.");
+  }
   const cache = new Map<string, Promise<ProgrammaticModuleNamespace>>();
 
   const load = (
@@ -28,10 +33,11 @@ export function createCompiledBindingNamespaceLoader(input: {
     }
     const cached = cache.get(sourceId);
     if (cached !== undefined) return cached;
-    const binding = input.bindings[sourceId];
+    const binding = input.resolveBinding?.(sourceId) ?? input.bindings?.[sourceId];
     if (binding === undefined) {
       throw new Error(`Compiled binding dependency "${sourceId}" is missing.`);
     }
+    input.onLoad?.(sourceId);
     const nextLineage = new Set(lineage).add(sourceId);
     const loading = loadCompiledBindingNamespace({
       binding,
@@ -46,7 +52,7 @@ export function createCompiledBindingNamespaceLoader(input: {
 }
 
 async function loadCompiledBindingNamespace(input: {
-  readonly binding: CompiledModuleBinding;
+  readonly binding: AgentModuleBinding;
   readonly loadDependency: CompiledBindingNamespaceLoader;
   readonly registries: readonly AgentSourceRegistry[];
 }): Promise<ProgrammaticModuleNamespace> {
@@ -72,7 +78,7 @@ async function loadCompiledBindingNamespace(input: {
 
 /** Derives the stable package-owned scope used while loading an extension module. */
 export function resolveCompiledModuleExtensionScopeNamespace(
-  binding: CompiledModuleBinding,
+  binding: AgentModuleBinding,
 ): string | undefined {
   return binding.owner.kind === "extension"
     ? packageStateNamespace(binding.owner.packageName)

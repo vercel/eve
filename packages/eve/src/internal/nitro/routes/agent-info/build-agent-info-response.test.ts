@@ -109,6 +109,8 @@ describe("buildAgentInfoResponse", () => {
         slug: "profile",
       }),
     );
+    expect(response.agent.config.binding).not.toHaveProperty("usage");
+    expect(response.memories[0]?.binding).not.toHaveProperty("usage");
     expect(() => AgentInfoResultSchema.parse(response)).not.toThrow();
   });
 

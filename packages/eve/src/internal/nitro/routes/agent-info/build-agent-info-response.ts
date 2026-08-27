@@ -273,10 +273,18 @@ function sourceProjection(
     sourceId: source.sourceId,
     sourceKind: toAgentInfoSourceKind(source.sourceKind),
   };
+  const publicBinding =
+    binding === undefined
+      ? undefined
+      : {
+          backing: binding.backing,
+          logicalPath: binding.logicalPath,
+          owner: binding.owner,
+        };
   if (binding !== undefined && source.exportName !== undefined) {
-    return { ...projected, binding, exportName: source.exportName };
+    return { ...projected, binding: publicBinding!, exportName: source.exportName };
   }
-  if (binding !== undefined) return { ...projected, binding };
+  if (binding !== undefined) return { ...projected, binding: publicBinding! };
   if (source.exportName !== undefined) return { ...projected, exportName: source.exportName };
   return projected;
 }

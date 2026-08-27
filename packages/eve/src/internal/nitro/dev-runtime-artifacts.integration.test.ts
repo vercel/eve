@@ -58,6 +58,7 @@ async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoo
   const moduleMapPath = join(compileDirectoryPath, "module-map.mjs");
 
   await mkdir(agentRoot, { recursive: true });
+  await mkdir(join(agentRoot, "tools"), { recursive: true });
   await mkdir(join(appRoot, "node_modules"), { recursive: true });
   await mkdir(join(appRoot, "src", "features", "editor", "eve"), { recursive: true });
   await mkdir(compileDirectoryPath, { recursive: true });
@@ -80,14 +81,7 @@ async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoo
   );
   await writeFile(
     join(agentRoot, "agent.ts"),
-    [
-      'import { createEveModelRouter } from "./model-router";',
-      'import { authSessionAuth } from "@/features/editor/eve/auth-session";',
-      "",
-      'export default { model: "openai/gpt-5.4-mini" };',
-      "export const routed = createEveModelRouter(authSessionAuth);",
-      "",
-    ].join("\n"),
+    ['export default { model: "openai/gpt-5.4-mini" };', ""].join("\n"),
   );
   await writeFile(
     join(agentRoot, "model-router.ts"),
@@ -101,6 +95,23 @@ async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoo
   await writeFile(
     join(appRoot, "src", "features", "editor", "eve", "auth-session.ts"),
     'export const authSessionAuth = "session-auth";\n',
+  );
+  await writeFile(
+    join(agentRoot, "tools", "routed.ts"),
+    [
+      'import { defineTool } from "eve/tools";',
+      'import { createEveModelRouter } from "../model-router";',
+      'import { authSessionAuth } from "@/features/editor/eve/auth-session";',
+      "",
+      "export const routed = createEveModelRouter(authSessionAuth);",
+      "",
+      "export default defineTool({",
+      '  description: "Return the routed session auth value.",',
+      '  inputSchema: { type: "object", properties: {}, additionalProperties: false },',
+      "  async execute() { return routed; },",
+      "});",
+      "",
+    ].join("\n"),
   );
   await writeFile(join(agentRoot, "instructions.md"), "Use the routed model.\n");
 
@@ -744,9 +755,10 @@ describe("development runtime artifact snapshots", () => {
           createDevelopmentNitroArtifactsConfig({ appRoot }),
         ),
       });
-      const agentModule = bundle.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules["agent.ts"];
+      const routedToolModule =
+        bundle.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules["tools/routed.ts"];
 
-      expect(agentModule).toMatchObject({
+      expect(routedToolModule).toMatchObject({
         routed: "router:session-auth",
       });
     });
@@ -764,9 +776,10 @@ describe("development runtime artifact snapshots", () => {
       const bundle = await getCompiledRuntimeAgentBundle({
         compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(runtimeAppRoot!),
       });
-      const agentModule = bundle.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules["agent.ts"];
+      const routedToolModule =
+        bundle.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules["tools/routed.ts"];
 
-      expect(agentModule).toMatchObject({
+      expect(routedToolModule).toMatchObject({
         routed: "router:session-auth",
       });
     });

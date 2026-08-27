@@ -4,7 +4,7 @@ import type {
   CompiledChannelRoutePlan,
   CompiledShadowedChannelRoute,
 } from "#compiler/manifest.js";
-import type { AgentSourceDescriptor, CompiledModuleBinding } from "#compiler/source-graph.js";
+import type { AgentModuleBinding, AgentSourceDescriptor } from "#compiler/source-graph.js";
 import {
   createChannelRouteShadowedDiagnostic,
   type CompilerDiagnostic,
@@ -12,7 +12,7 @@ import {
 import { HOST_HTTP_INVENTORY } from "#framework/host-inventory.js";
 
 export function createCompiledChannelRoutePlan(input: {
-  readonly bindings: Readonly<Record<string, CompiledModuleBinding>>;
+  readonly bindings: Readonly<Record<string, AgentModuleBinding>>;
   readonly channels: readonly CompiledChannelDefinition[];
   readonly diagnostics?: CompilerDiagnostic[];
   readonly nodeId: string;

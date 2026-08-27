@@ -28,7 +28,11 @@ import {
   ROOT_COMPILED_AGENT_NODE_ID,
 } from "#compiler/manifest.js";
 import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
-import { createCompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
+import {
+  markConfigRuntimeEntries,
+  NodeModuleEvaluationContext,
+} from "#compiler/module-lifecycle.js";
+import { assertInstrumentationLayoutConfig } from "#compiler/instrumentation-layout-config.js";
 import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
 import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
@@ -73,11 +77,12 @@ import { summarizeCompilerDiagnostics, type CompilerDiagnostic } from "#compiler
 import { projectAgentSources, projectSelectedSources } from "#compiler/project-sources.js";
 import {
   composeAgentModuleCandidates,
-  createCompiledModuleBinding,
+  createAgentModuleBinding,
   createProgrammaticModuleCandidates,
   describeAgentSourceCandidate,
   disableComposedCandidate,
   instantiateProgrammaticTemplate,
+  isAgentModuleCandidate,
   type AgentModuleCandidate,
   type AgentSourceCandidate,
   type AgentSourceLayer,
@@ -201,6 +206,7 @@ class AgentGraphCompiler {
       };
     }
     const state = finalizeNodeSourceState(phaseOne, externalDependencies);
+    markConfigRuntimeEntries(config, state.evaluation);
     assertInstrumentationLayoutConfig(config, state);
     const resources = await this.compileResources(input, state);
     const children = await this.compileChildren(input, state, externalDependencies);
@@ -254,9 +260,16 @@ class AgentGraphCompiler {
 
       if (normalized.kind === "remote") {
         assertRemoteAgentDefinitionHasNoLocalPackageEntries(source);
+        const sourceId = phaseOne.selectedConfig.source.sourceId;
+        phaseOne.evaluation.setBindings({ [sourceId]: phaseOne.selectedConfig.binding });
+        phaseOne.evaluation.requireRuntimeEntry(sourceId);
+        const binding = phaseOne.evaluation.finalizeBindings()[sourceId];
+        if (binding === undefined) {
+          throw new Error(`Remote subagent "${nodeId}" has no finalized config binding.`);
+        }
         remoteAgents.push(
           createCompiledRemoteAgent({
-            binding: phaseOne.selectedConfig.binding,
+            binding,
             definition: normalized,
             nodeId,
             owner: projected.owner,
@@ -290,6 +303,11 @@ class AgentGraphCompiler {
         config = { ...config, build: { ...config.build, externalDependencies } };
       }
       const finalState = finalizeNodeSourceState(phaseOne, externalDependencies);
+      if (config === undefined) {
+        finalState.evaluation.requireRuntimeEntry(phaseOne.selectedConfig.source.sourceId);
+      } else {
+        markConfigRuntimeEntries(config, finalState.evaluation);
+      }
       if (config !== undefined) assertInstrumentationLayoutConfig(config, finalState);
       const resources = await this.compileResources(childInput, finalState);
       const children = await this.compileChildren(childInput, finalState, externalDependencies);
@@ -422,34 +440,42 @@ class AgentGraphCompiler {
     externalDependencies: readonly string[],
   ): Promise<PhaseOneNodeSourceState> {
     const graph = this.composeNodeSources(input, externalDependencies);
+    const evaluation = new NodeModuleEvaluationContext(this.registries);
+    evaluation.setBindings(
+      Object.fromEntries(
+        [...graph.composed.selected.values()]
+          .filter(isAgentModuleCandidate)
+          .map((candidate) => [candidate.sourceId, createAgentModuleBinding(candidate)]),
+      ),
+    );
     return {
+      evaluation,
       graph,
-      selectedConfig: await this.loadSelectedConfig(graph),
+      selectedConfig: await this.loadSelectedConfig(graph, evaluation),
     };
   }
 
-  private async loadSelectedConfig(state: ComposedNodeSourceGraph): Promise<SelectedNodeConfig> {
+  private async loadSelectedConfig(
+    state: ComposedNodeSourceGraph,
+    evaluation: NodeModuleEvaluationContext,
+  ): Promise<SelectedNodeConfig> {
     const candidate = state.composed.selected.get("agent");
-    if (candidate === undefined || !isModuleCandidate(candidate)) {
+    if (candidate === undefined || !isAgentModuleCandidate(candidate)) {
       throw new Error("Every local agent node requires a selected module-backed agent.ts source.");
     }
-    const binding = createCompiledModuleBinding(candidate);
+    const binding = createAgentModuleBinding(candidate);
     const projected = state.sourcesBySourceId.get(candidate.sourceId);
     if (projected?.source.sourceKind !== "module") {
       throw new Error(`Selected agent config source "${candidate.sourceId}" was not projected.`);
     }
     const source = projected.source;
-    const loadNamespace = createCompiledBindingNamespaceLoader({
-      bindings: { [candidate.sourceId]: binding },
-      registries: this.registries,
-    });
     return {
       binding,
       candidate,
       definition: await loadModuleBackedDefinition({
         binding,
         kind: "agent config",
-        loadNamespace,
+        loadNamespace: evaluation.loadNamespace,
         source,
       }),
       source,
@@ -476,10 +502,7 @@ class AgentGraphCompiler {
     let workflowTool: CompiledWorkflowToolDefinition | undefined;
     let webSearchProvider: WebSearchProvider | undefined;
     const selectedSourceIds = collectSelectedSourceIds(state.composed);
-    const loadNamespace = createCompiledBindingNamespaceLoader({
-      bindings: state.bindings,
-      registries: this.registries,
-    });
+    const loadNamespace = state.evaluation.loadNamespace;
 
     for (const candidate of state.orderedCandidates) {
       if (!selectedSourceIds.has(candidate.sourceId)) continue;
@@ -514,6 +537,7 @@ class AgentGraphCompiler {
               loadNamespace,
             }),
           );
+          state.evaluation.requireRuntimeEntry(candidate.sourceId);
           break;
         case "hook":
           hooks.push(
@@ -522,6 +546,7 @@ class AgentGraphCompiler {
               loadNamespace,
             }),
           );
+          state.evaluation.requireRuntimeEntry(candidate.sourceId);
           break;
         case "instructions": {
           const result = await compileInstructionsEntry(
@@ -530,11 +555,15 @@ class AgentGraphCompiler {
             options,
           );
           if (result.kind === "instructions") instructions.push(result.definition);
-          else dynamicInstructions.push(result.definition);
+          else {
+            dynamicInstructions.push(result.definition);
+            state.evaluation.requireRuntimeEntry(candidate.sourceId);
+          }
           break;
         }
         case "instrumentation":
           instrumentation = entry.source;
+          state.evaluation.requireRuntimeEntry(candidate.sourceId);
           break;
         case "memory":
           memories.push(
@@ -543,22 +572,36 @@ class AgentGraphCompiler {
               loadNamespace,
             }),
           );
+          state.evaluation.requireRuntimeEntry(candidate.sourceId);
           break;
         case "sandbox":
           sandbox = await compileSandboxDefinition(input.manifest.agentRoot, entry.source, {
             binding: binding!,
             loadNamespace,
           });
+          if (!sandbox.inheritsParent) {
+            state.evaluation.requireRuntimeEntry(candidate.sourceId);
+          }
           break;
-        case "schedule":
-          schedules.push(
-            await compileScheduleDefinition(input.manifest.agentRoot, entry.source, options),
+        case "schedule": {
+          const schedule = await compileScheduleDefinition(
+            input.manifest.agentRoot,
+            entry.source,
+            options,
           );
+          schedules.push(schedule);
+          if (schedule.sourceKind === "module" && schedule.hasRun) {
+            state.evaluation.requireRuntimeEntry(candidate.sourceId);
+          }
           break;
+        }
         case "skill": {
           const result = await compileSkillSource(input.manifest.agentRoot, entry.source, options);
           if (result.kind === "skill") skills.push(result.definition);
-          else dynamicSkills.push(withExtensionNamespace(result.definition, candidate.owner));
+          else {
+            dynamicSkills.push(withExtensionNamespace(result.definition, candidate.owner));
+            state.evaluation.requireRuntimeEntry(candidate.sourceId);
+          }
           break;
         }
         case "tool": {
@@ -570,9 +613,12 @@ class AgentGraphCompiler {
             state.composed = disableComposedCandidate({ candidate, composed: state.composed });
             delete state.bindings[candidate.sourceId];
             selectedSourceIds.delete(candidate.sourceId);
-          } else if (result.kind === "tool") tools.push(result.definition);
-          else if (result.kind === "dynamic-tool") {
+          } else if (result.kind === "tool") {
+            tools.push(result.definition);
+            state.evaluation.requireRuntimeEntry(candidate.sourceId);
+          } else if (result.kind === "dynamic-tool") {
             dynamicTools.push(withExtensionNamespace(result.definition, candidate.owner));
+            state.evaluation.requireRuntimeEntry(candidate.sourceId);
           } else if (result.kind === "workflow-tool") {
             assertRootOwnedSpecialTool(candidate as AgentModuleCandidate, "Workflow");
             workflowTool = { ...entry.source, maxSubagents: result.maxSubagents };
@@ -606,17 +652,25 @@ class AgentGraphCompiler {
         ]),
       ),
     });
+    for (const channel of channelRoutes.effective) {
+      state.evaluation.requireRuntimeEntry(channel.sourceId);
+    }
+    const extensionMounts = compileExtensionMounts(input.manifest, state.composed);
+    for (const mount of extensionMounts) {
+      state.evaluation.requireRuntimeEntry(mount.mountSourceId);
+    }
+    const bindings = state.evaluation.finalizeBindings();
     return createCompiledAgentResources({
       agentRoot: input.manifest.agentRoot,
       appRoot: input.manifest.appRoot,
-      bindings: state.bindings,
+      bindings,
       channelRoutes,
       connections,
       diagnosticsSummary: summarizeCompilerDiagnostics(this.diagnostics),
       dynamicInstructions,
       dynamicSkills,
       dynamicTools,
-      extensionMounts: compileExtensionMounts(input.manifest, state.composed),
+      extensionMounts,
       hooks,
       memories,
       instructions,
@@ -635,23 +689,5 @@ class AgentGraphCompiler {
       webSearchProvider,
       workflowTool,
     });
-  }
-}
-
-function isModuleCandidate(candidate: AgentSourceCandidate): candidate is AgentModuleCandidate {
-  return candidate.backing.kind !== "resource";
-}
-
-function assertInstrumentationLayoutConfig(
-  config: CompiledAgentDefinition,
-  state: FinalizedNodeSourceState,
-): void {
-  if (
-    config.experimental?.instrumentationProviders === true &&
-    state.composed.selected.has("instrumentation")
-  ) {
-    throw new Error(
-      "A selected instrumentation.ts source cannot be used with experimental.instrumentationProviders. Move the declaration into the instrumentation/ provider directory.",
-    );
   }
 }

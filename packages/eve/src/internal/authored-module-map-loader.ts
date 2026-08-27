@@ -9,7 +9,7 @@ import type {
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { memoizeModuleNamespaceFactories } from "#compiler/source-graph.js";
 import {
-  collectModuleBindingsForManifest,
+  collectRuntimeModuleBindingsForManifest,
   compiledModuleMapSchema,
   resolveCompiledModuleExtensionScopeNamespace,
   type CompiledModuleMap,
@@ -74,7 +74,7 @@ async function hydrateCompiledNodeScope(
   );
   const container = globalThis as Record<symbol, unknown>;
   const modules: CompiledModuleMap["nodes"][string]["modules"] = {};
-  for (const { binding, sourceId } of collectModuleBindingsForManifest(manifest)) {
+  for (const { binding, sourceId } of collectRuntimeModuleBindingsForManifest(manifest)) {
     const mountConfigScope = mountScopes.get(sourceId);
     if (mountConfigScope !== undefined) container[EXT_CONFIG_SCOPE] = mountConfigScope;
     try {

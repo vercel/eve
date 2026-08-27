@@ -360,6 +360,102 @@ describe("resolveSlackInboundMrkdwn", () => {
     expect(result).toBe("nested body");
   });
 
+  it("extracts shared Slack messages from message unfurl attachments", () => {
+    const result = resolveSlackInboundMrkdwn(":crosspost:", {
+      attachments: [
+        {
+          from_url: "https://example.slack.com/archives/C_SOURCE/p1700000000000100",
+          is_msg_unfurl: true,
+          message_blocks: [
+            {
+              channel: "C_SOURCE",
+              message: {
+                blocks: [
+                  {
+                    type: "rich_text",
+                    elements: [
+                      {
+                        type: "rich_text_section",
+                        elements: [
+                          {
+                            type: "text",
+                            text: "I can't find deployment protection or agent runs in the new sidebar.",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+              team: "T_SOURCE",
+              ts: "1700000000.000100",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toBe(
+      ":crosspost:\nI can't find deployment protection or agent runs in the new sidebar.",
+    );
+  });
+
+  it("falls back to shared Slack message text when its blocks are absent", () => {
+    const result = resolveSlackInboundMrkdwn("", {
+      attachments: [
+        {
+          is_msg_unfurl: true,
+          message_blocks: [{ message: { text: "Forwarded feedback" } }],
+        },
+      ],
+    });
+
+    expect(result).toBe("Forwarded feedback");
+  });
+
+  it("keeps a top-level comment alongside a shorter shared Slack message", () => {
+    const result = resolveSlackInboundMrkdwn(
+      "This seems related to the navigation feedback we discussed yesterday.",
+      {
+        attachments: [
+          {
+            is_msg_unfurl: true,
+            message_blocks: [{ message: { text: "Agent runs are missing." } }],
+          },
+        ],
+      },
+    );
+
+    expect(result).toBe(
+      "This seems related to the navigation feedback we discussed yesterday.\nAgent runs are missing.",
+    );
+  });
+
+  it.each(["is_share", "is_msg_unfurl", "is_reply_unfurl"])(
+    "keeps short shared-message content alongside a longer human comment for %s attachments",
+    (sharedMessageFlag) => {
+      const result = resolveSlackInboundMrkdwn("<@U123> :eyes:", {
+        attachments: [
+          {
+            [sharedMessageFlag]: true,
+            text: "Ship it",
+            from_url: "https://example.slack.com/archives/C123/p1234567890000100",
+          },
+        ],
+      });
+
+      expect(result).toBe("<@U123> :eyes:\nShip it");
+    },
+  );
+
+  it("does not repeat shared-message content already present in the human comment", () => {
+    const result = resolveSlackInboundMrkdwn("Please review: Ship it", {
+      attachments: [{ is_share: true, text: "Ship it" }],
+    });
+
+    expect(result).toBe("Please review: Ship it");
+  });
+
   it("keeps top-level text when rich_text blocks mirror it", () => {
     const result = resolveSlackInboundMrkdwn("Status update", {
       blocks: [

@@ -9,14 +9,15 @@ import type {
   ProjectedSubagentSource,
 } from "#compiler/project-sources.js";
 import {
-  createCompiledModuleBinding,
+  createAgentModuleBinding,
+  type AgentModuleBinding,
   type AgentModuleCandidate,
   type AgentSourceBacking,
   type AgentSourceCandidate,
   type AgentSourceDescriptor,
   type ComposedAgentModuleCandidates,
-  type CompiledModuleBinding,
 } from "#compiler/source-graph.js";
+import type { NodeModuleEvaluationContext } from "#compiler/module-lifecycle.js";
 
 export interface ComposedNodeSourceGraph {
   composed: ComposedAgentModuleCandidates;
@@ -27,19 +28,21 @@ export interface ComposedNodeSourceGraph {
 }
 
 export interface SelectedNodeConfig {
-  readonly binding: CompiledModuleBinding;
+  readonly binding: AgentModuleBinding;
   readonly candidate: AgentModuleCandidate;
   readonly definition: unknown;
   readonly source: ModuleSourceRef;
 }
 
 export interface PhaseOneNodeSourceState {
+  readonly evaluation: NodeModuleEvaluationContext;
   readonly graph: ComposedNodeSourceGraph;
   readonly selectedConfig: SelectedNodeConfig;
 }
 
 export interface FinalizedNodeSourceState extends ComposedNodeSourceGraph {
-  readonly bindings: Record<string, CompiledModuleBinding>;
+  readonly bindings: Record<string, AgentModuleBinding>;
+  readonly evaluation: NodeModuleEvaluationContext;
 }
 
 export function finalizeNodeSourceState(
@@ -89,8 +92,9 @@ export function finalizeNodeSourceState(
         (candidate): candidate is AgentModuleCandidate =>
           selectedSourceIds.has(candidate.sourceId) && candidate.backing.kind !== "resource",
       )
-      .map((candidate) => [candidate.sourceId, createCompiledModuleBinding(candidate)]),
+      .map((candidate) => [candidate.sourceId, createAgentModuleBinding(candidate)]),
   );
+  phaseOne.evaluation.setBindings(bindings);
   return {
     bindings,
     composed,
@@ -105,6 +109,7 @@ export function finalizeNodeSourceState(
     subagentsBySourceId: new Map(
       projected.subagents.map((entry) => [entry.candidate.sourceId, entry]),
     ),
+    evaluation: phaseOne.evaluation,
   };
 }
 
