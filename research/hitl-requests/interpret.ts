@@ -1,10 +1,10 @@
 /**
- * Prototype: HITL obligation kernel.
+ * Prototype: HITL request interpreter.
  *
- * Companion to ../hitl-obligation-kernel.md. Not wired into the build; typed
+ * Companion to ../hitl-requests.md. Not wired into the build; typed
  * against the real harness shapes (`PendingInputBatch`, `InputRequest`,
  * `InputResponse`, `ResolvePendingInputResult`) so every claim in the doc is
- * checkable against the code it must replace. See ledger.ts for how kernel
+ * checkable against the code it must replace. See ledger.ts for how interpreter
  * state derives from the EXISTING batch state without a new store, and
  * seam.ts for where this runs in the step loop (unchanged: between steps).
  */
@@ -21,7 +21,7 @@ import type {
 } from "./types.js";
 
 /**
- * One kernel pass: interpret one delivery against the ledger.
+ * One interpreter pass: interpret one delivery against the ledger.
  *
  * Owns everything variant-agnostic, in order:
  *   1. staleness — responses naming terminal rows reject before any reducer
@@ -31,7 +31,7 @@ import type {
  *   5. group closure — continuation claim exactly once, all members terminal
  *
  * The caller persists `ledger` before performing `effects` (state before
- * effects). Reducers may be async (authored policies); the kernel awaits
+ * effects). Reducers may be async (authored policies); the interpreter awaits
  * them sequentially in row order so replay is journal-deterministic.
  */
 export async function interpretDelivery(input: {
@@ -49,7 +49,7 @@ export async function interpretDelivery(input: {
     const row = ledger.rows.find((candidate) => candidate.id === response.requestId);
 
     if (row === undefined || row.state.phase !== "open") {
-      // Kernel-side staleness: tombstone or unknown id. Visibility is the
+      // Interpreter-side staleness: tombstone or unknown id. Visibility is the
       // variant's one modulation (staleResponses); unknown ids default to
       // context-turn so the agent can react.
       const visibility =
@@ -152,7 +152,7 @@ function applyVerdict(input: {
   }
 
   // blockOn: open the linked challenge row, hold the candidate. When the
-  // linked row reaches terminal, the kernel re-feeds the blocking row with
+  // linked row reaches terminal, the interpreter re-feeds the blocking row with
   // a "linked" input carrying the outcome (driven by the next pass).
   const linked: Row = {
     id: `${row.id}:challenge`,

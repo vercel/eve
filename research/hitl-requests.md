@@ -4,7 +4,7 @@ status: draft
 last_updated: "2026-08-27"
 ---
 
-# HITL obligation kernel: one parking mechanism, independent variants
+# HITL requests: one parking mechanism, independent variants
 
 ## Summary
 
@@ -24,36 +24,36 @@ This proposal factors the machine along two orthogonal axes:
 - **Owner** — _who waits_: the parked session turn, a framework gate, or a
   durable tool-body run. An owner is a hook token — nothing more.
 
-A **kernel** owns everything variant- and owner-agnostic: rows, candidate
+A shared **interpreter** owns everything variant- and owner-agnostic: rows, candidate
 races, groups, continuations, tombstones, staleness, forced closure,
 projection routes, and park/resume addressing. Variants become small pure
 reducers. Owners become hook consumers. The #1224 transition catalog was
 audited row-by-row against this model: `owner.batch.*`, `scheduler.*`,
-`projector.*`, and all cancellation rows land in the kernel and are proven
+`projector.*`, and all cancellation rows land in the interpreter and are proven
 once; `owner.approval.*`, `owner.question.*`, `owner.limit.*`, `owner.auth.*`
 each land in exactly one variant file and are proven in isolation. The audit
 surfaced exactly three modulations, absorbed without new exported concepts:
 held-candidate cancellation (`candidate-cancelled`), per-variant stale
-visibility (`staleResponses`), and kernel-scheduled deadlines. Invariant 10 ("composite states add
+visibility (`staleResponses`), and interpreter-scheduled deadlines. Invariant 10 ("composite states add
 no cases") becomes structural: variants cannot reference each other, so
 composite behavior is the row-wise union by construction.
 
 The first new owner class is the **tool-body run**: background tools whose
-`execute` is a workflow function may open obligations mid-body and `await`
+`execute` is a workflow function may open requests mid-body and `await`
 them, giving framework users mid-task HITL (`ctx.request`, `ctx.auth`)
-through the same kernel that implements eve's internal permissioning.
+through the same interpreter that implements eve's internal permissioning.
 
 ## Model
 
-Three exported concepts. Everything else is kernel-internal or an existing
+Three exported concepts. Everything else is interpreter-internal or an existing
 eve concept reused. A compiling prototype lives beside this doc in
-[`hitl-obligation-kernel/`](./hitl-obligation-kernel/): `kernel.ts` (the
+[`hitl-requests/`](./hitl-requests/): `interpret.ts` (the
 interpreter), `variants.ts` (all four reducers against real harness shapes),
 `ledger.ts` (derivation from the existing batch state), and `seam.ts` (the
 `tool-loop.ts` call site, unchanged).
 
 **A row is one element of today's `PendingInputBatch.requests`** — one open
-obligation, flattened out of the batch it arrived in. A batch is not a state
+request, flattened out of the batch it arrived in. A batch is not a state
 shape of its own: it is the set of rows sharing a `groupId`, and the batch's
 withheld `responseMessages` become that group's continuation payload. The
 existing batch semantics are preserved by construction, not reimplemented:
@@ -64,22 +64,22 @@ shrinkage (`removePendingInputBatches`) is rows transitioning open → terminal
 with nothing overwriting rows it never resolved; withheld output appearing
 zero times until closure is the continuation payload spliced exactly at
 claim. During migration the batch collection remains the persisted
-representation — the kernel derives its ledger from it
+representation — the interpreter derives its ledger from it
 (`ledgerFromSessionState`); only interpretation moves.
 
 ```ts
-/** One open item, durably stored. Kernel-owned shape. */
+/** One open item, durably stored. Interpreter-owned shape. */
 interface Row<Spec> {
   id: RequestId;
   kind: VariantKind;
-  spec: Spec; // variant-owned data, opaque to the kernel
+  spec: Spec; // variant-owned data, opaque to the interpreter
   owner: string; // hook token — where closure payloads deliver
   groupId: GroupId;
 }
 
 /**
- * What the kernel feeds a variant. `message` carries no text:
- * text-matching against obligations is unrepresentable by construction.
+ * What the interpreter feeds a variant. `message` carries no text:
+ * text-matching against open requests is unrepresentable by construction.
  */
 type Input =
   | {
@@ -103,7 +103,7 @@ type Verdict<Outcome> =
 
 interface Variant<Spec, Outcome> {
   resolve(row: Row<Spec>, input: Input): Verdict<Outcome> | Promise<Verdict<Outcome>>;
-  intentKey?(spec: Spec): string | undefined; // kernel dedup (invariant 4)
+  intentKey?(spec: Spec): string | undefined; // interpreter dedup (invariant 4)
   present(row: Row<Spec>): Presentation; // InputRequest | AuthorizationChallenge
   /**
    * How a stale response against this variant's tombstones surfaces.
@@ -118,25 +118,25 @@ interface Variant<Spec, Outcome> {
 
 Notes on the boundary:
 
-- **Staleness detection is kernel-side.** A response naming a terminal row
+- **Staleness detection is interpreter-side.** A response naming a terminal row
   is rejected against the tombstone before any reducer runs; `"stale"` is
   deliberately absent from the reject vocabulary and no variant implements a
   second staleness mechanism. Stale *visibility* is the one per-variant
   modulation (`staleResponses`), because Limit requires silent drops where
   approval and question require a context turn.
-- **Races are kernel-side.** Candidates derive from `{requestId,
+- **Races are interpreter-side.** Candidates derive from `{requestId,
 deliveryId}`; single-winner serialization happens before `resolve`.
 - **`present()` selects the event family.** Returning an `InputRequest`
   implies `input.*` lifecycle events; returning a challenge implies
   `authorization.*`. The two wire vocabularies are preserved — challenges
-  remain non-input-request obligations, per #1224.
+  remain outside the input-request wire vocabulary, per #1224.
 - **`resolve` may be async** (authored approval policies run inside it,
   step-wrapped). This deviates from #1224's strictly pure `interpretHitl`;
   policy evaluation is deterministic-by-journaling rather than pure. A
   policy throw or timeout becomes `{ reject: "policy-failed" }` and the row
-  stays open (kernel rule).
+  stays open (interpreter rule).
 
-## Kernel contract
+## Interpreter contract
 
 Owned unconditionally, with no per-kind branches:
 
@@ -151,15 +151,15 @@ Owned unconditionally, with no per-kind branches:
 | Park/resume addressing | durable hook + capability-alias demux; registration committed before any resume URL is advertised; disposed owners reject resumes (route-lost, never a parent failure) |
 | Events                 | state persisted before effects; every admitted input yields an observable event                                                                                        |
 
-Two verdict fields are the licensed irregularities, both kernel-enforced:
+Two verdict fields are the licensed irregularities, both interpreter-enforced:
 `consumeDelivery` (at most one consumer per delivery; the consumed message
 still emits observable events — Limit is its only user) and `reopen`
-(dismiss-and-replace with kernel-owned monotonic identity).
+(dismiss-and-replace with interpreter-owned monotonic identity).
 
 `blockOn`/`linked` is the one cross-variant linkage: a reducer may park a
 candidate on another row reaching terminal state. The blocking variant names
 a row it wants terminal, never the other variant's rules; the blocked-on
-variant never knows it was watched. Held candidates are kernel state with two
+variant never knows it was watched. Held candidates are interpreter state with two
 rules: a duplicate delivery of the same candidate returns the existing held
 candidate and never opens a second linked row, and a row settling while a
 candidate is held (for example an authenticated cancel racing a pending
@@ -167,8 +167,8 @@ sign-in, `owner.approval.response.settle-cancel-pending-candidate`) completes
 the linked row as `cancelled` and rejects the held candidate as
 `candidate-cancelled` — the variant is not consulted.
 
-Timers are kernel-scheduled: a spec carrying a deadline gets a `deadline`
-input as a first-class kernel producer (the producer #1224 stage 3 notes is
+Timers are interpreter-scheduled: a spec carrying a deadline gets a `deadline`
+input as a first-class interpreter producer (the producer #1224 stage 3 notes is
 missing today), never a variant-owned wait.
 
 ## The four variants
@@ -235,7 +235,7 @@ owns no policy: `row.spec.responsePolicy` is the tool's resolved authored
 `coordinateApprovalDelivery` perform now, generalized from the approval key
 to the whole policy surface (prototype `seam.ts`, `bindApprovalPolicy`). A
 tool changing its approval semantics between park and response is
-adjudicated by the current policy, exactly as today; the kernel never
+adjudicated by the current policy, exactly as today; the interpreter never
 touches the tool registry.
 
 ```ts
@@ -277,15 +277,15 @@ export const challenge = defineVariant<ChallengeSpec, ChallengeOutcome>({
 
 Stale generations never reach the Limit reducer: the generation is part of
 the request id, so a `gen-1` response hits a tombstone. Forced closure of a
-Challenge maps to `completed(cancelled)` in the kernel's dismissal-to-
-vocabulary translation — the one place kind leaks into kernel output.
+Challenge maps to `completed(cancelled)` in the interpreter's dismissal-to-
+vocabulary translation — the one place kind leaks into interpreter output.
 
-## Where the kernel runs: the existing seam
+## Where the interpreter runs: the existing seam
 
 HITL interpretation runs today between harness steps — the model step ends,
 the harness parks (`appendPendingInputBatch`, `tool-loop.ts:2806`), and the
 next step begins by resolving pending input (`resolvePendingInput`,
-`tool-loop.ts:1050`, preceded by `coordinateApprovalDelivery`). The kernel
+`tool-loop.ts:1050`, preceded by `coordinateApprovalDelivery`). The interpreter
 does not move that seam; it replaces what runs inside it:
 
 ```text
@@ -304,20 +304,20 @@ parts; the park side (`appendPendingInputBatch`) is consumed by `raiseRows`
 at the next pass. The body-run owner introduces no second seam either: it is
 reachable only in background tasks where the step already ended with a
 receipt, and its deliveries arrive through its own inbox, interpreted by the
-same kernel pass. The prototype's `seam.ts` states the exact call-site
+same interpreter pass. The prototype's `seam.ts` states the exact call-site
 contract, including how each `LedgerEffect` translates into today's
 `ResolvePendingInputResult` fields (`rejectedActions`, `resolvedInputs`,
 `deferredMessage`, `limitContinuation`).
 
 ## Owners
 
-An owner is a hook token. The kernel delivers settlement and dismissal
+An owner is a hook token. The interpreter delivers settlement and dismissal
 payloads to `row.owner` over the existing durable session-inbox envelope
 (`resumeSessionInbox`); what the consumer does with them is its own business.
 
 - **Session turn** — today's behavior, unchanged: resume restores withheld
   output, appends member outcomes, runs allowed tools once, resumes the
-  model. The ApprovalBatch continuation is a kernel group whose owner is the
+  model. The ApprovalBatch continuation is a interpreter group whose owner is the
   session inbox.
 - **Framework gate** — the step-end approval park; same rows, no bespoke
   AI SDK approval-part state.
@@ -325,7 +325,7 @@ payloads to `row.owner` over the existing durable session-inbox envelope
   background tool's `"use workflow"` `execute`. Its inbox is a new executor
   kind on the existing task child wire; the task run workflow stays the
   single lifecycle writer, unchanged. The parent session projects body-owned
-  rows through the kernel's Route machine, exactly as for child sessions.
+  rows through the interpreter's Route machine, exactly as for child sessions.
 
 The #1224 rule "no blocked continuation anywhere" (invariant 1) becomes an
 owner-contract clause: every owner's waiting frame must be force-resumable
@@ -363,7 +363,7 @@ export default defineTool({
     ]);
     if (decision.optionId === "abort") return { status: "aborted" };
 
-    const token = await ctx.auth("acme"); // opens a Challenge row, same kernel
+    const token = await ctx.auth("acme"); // opens a Challenge row, same interpreter
     return await applyPlan(plan, token);
   },
 });
@@ -372,7 +372,7 @@ export default defineTool({
 Semantics:
 
 - `ctx.request` opens a Question or Approval row and returns a promise
-  resolved by the kernel's demux over the body run's single inbox. No new
+  resolved by the interpreter's demux over the body run's single inbox. No new
   variants, no new verdicts: the parking mechanism is `row.owner`.
 - Every result carries a status (`answered | ignored | allowed | denied |
 cancelled`); dismissal and cancellation resolve or reject the promise so
@@ -396,16 +396,16 @@ cancelled`); dismissal and cancellation resolve or reject the promise so
 
 ## Migration
 
-Each legacy obligation store has exactly one destination:
+Each legacy HITL store has exactly one destination:
 
 | Legacy                                            | Destination                                                                                                                                    |
 | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eve.runtime.pendingInputBatches`                 | One kernel group per batch; each request becomes an Approval/Question row; withheld `responseMessages` become the group's continuation payload |
+| `eve.runtime.pendingInputBatches`                 | One interpreter group per batch; each request becomes an Approval/Question row; withheld `responseMessages` become the group's continuation payload |
 | `eve.runtime.deferredStepInput`                   | Deleted as a mechanism (per #1224); wedged messages release as ordinary message turns on the first delivery after upgrade                      |
 | `eve.runtime.pendingAuthorization`                | Challenge rows in one group; the journaled `resume` payload becomes continuation payload                                                       |
-| `eve.runtime.hitl.approvalState`                  | Kernel candidate records and tombstones                                                                                                        |
-| `eve.runtime.hitl.approvedTools`                  | Unchanged — policy input (`ApprovalContext.approvedTools`), not obligation state                                                               |
-| Task synthetic `task:authorization:*` blocker ids | Deleted; a child's challenge is a real Challenge row owned by the child, projected to the parent as a kernel route                             |
+| `eve.runtime.hitl.approvalState`                  | Interpreter candidate records and tombstones                                                                                                        |
+| `eve.runtime.hitl.approvedTools`                  | Unchanged — policy input (`ApprovalContext.approvedTools`), not request state                                                               |
+| Task synthetic `task:authorization:*` blocker ids | Deleted; a child's challenge is a real Challenge row owned by the child, projected to the parent as an interpreter route                             |
 
 Mechanics:
 
@@ -425,22 +425,22 @@ Mechanics:
 ## Relationship to #1224 and sequencing
 
 This is a refinement of the #1224 target architecture, not a competitor:
-stages 1–2 (store foundation, interpreter extraction) build the kernel;
-this doc adds the internal seam `kernel.ts` + `variants/*.ts` and the owner
+stages 1–2 (store foundation, interpreter extraction) build the interpreter;
+this doc adds the internal seam `interpret.ts` + `variants/*.ts` and the owner
 axis. Stage 3 (auth through the machine) becomes the Challenge variant.
 The transition catalog and its eval anchors remain the conformance suite,
-re-anchored by axis: kernel rows proven once, variant rows proven per
+re-anchored by axis: interpreter rows proven once, variant rows proven per
 variant, composite coverage generated as unions.
 
 Order of work:
 
-1. **Kernel + variants** — #1224 stages 1–3 with the variant seam.
+1. **Interpreter + variants** — #1224 stages 1–3 with the variant seam.
 2. **Body-run owner** — new executor kind on the task child wire; demux;
    `ctx.request` / `ctx.auth`; responder forwarding added to the task
    input wire (additive). Depends on workflow functions as
    `defineTool.execute` (the subagents-as-workflow-tools research, §6.1).
 3. **Gate unification** — the framework approval gate re-expressed as
-   kernel rows (representation change; step-end park mechanics retained).
+   interpreter rows (representation change; step-end park mechanics retained).
 
 ## Open questions
 

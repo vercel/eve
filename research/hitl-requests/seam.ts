@@ -1,5 +1,5 @@
 /**
- * Where the kernel runs: the SAME seam as today. This file is the answer to
+ * Where the interpreter runs: the SAME seam as today. This file is the answer to
  * "HITL logic runs after the current step loop ends and before the next one
  * — we'd need to converge": we do not move the seam, we replace what runs
  * inside it.
@@ -16,7 +16,7 @@
  *
  * Target (same call site, same contract):
  *
- *   resolvePendingInputViaKernel({ session, stepInput, tools })
+ *   resolvePendingInputViaInterpreter({ session, stepInput, tools })
  *   → ResolvePendingInputResult
  *
  * The park side is likewise unmoved: the model step still ends, the harness
@@ -35,12 +35,12 @@ import type {
   ResolvePendingInputResult,
   StepInput,
 } from "./harness-types.js";
-import { interpretDelivery } from "./kernel.js";
+import { interpretDelivery } from "./interpret.js";
 import { ledgerFromSessionState } from "./ledger.js";
 import type { LedgerEffect } from "./types.js";
 import { variants, type ApprovalSpec } from "./variants.js";
 
-export async function resolvePendingInputViaKernel(input: {
+export async function resolvePendingInputViaInterpreter(input: {
   readonly history?: readonly ModelMessage[];
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;

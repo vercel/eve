@@ -3,7 +3,7 @@
  * store. This file is the answer to "this doesn't touch the existing batch
  * semantics": every field of `PendingInputBatch` maps onto ledger shapes,
  * and the batch collection remains the persisted representation during
- * migration (the kernel reads it; only the interpretation moves).
+ * migration (the interpreter reads it; only the interpretation moves).
  *
  *   PendingInputBatch                     Ledger
  *   ─────────────────                     ──────

@@ -31,7 +31,7 @@ export interface InputRequest {
 
 /**
  * Deviation: today's wire InputResponse is {requestId, optionId?, text?}.
- * The kernel needs the verified responder and actor relation as DATA (they
+ * The interpreter needs the verified responder and actor relation as DATA (they
  * are guard axes). Today they ride beside the response
  * (attributedInputResponses on StepInput); the prototype folds them in.
  */

@@ -1,6 +1,6 @@
 /**
  * Prototype types. `Row` answers "why 'row' and what does it mean": one row
- * is one open obligation — the unit that today is one element of
+ * is one open request — the unit that today is one element of
  * `PendingInputBatch.requests` (plus, separately, one pending authorization
  * challenge, one limit prompt, one approval candidate's target). "Row"
  * because the durable ledger is a flat table of them; a batch is not a state
@@ -21,7 +21,7 @@ export interface Row<Spec = unknown> {
   readonly baseId: string;
   readonly generation: number;
   readonly kind: VariantKind;
-  /** Variant-owned data, opaque to the kernel. */
+  /** Variant-owned data, opaque to the interpreter. */
   readonly spec: Spec;
   /** Hook token — where settlement/dismissal payloads deliver. */
   readonly owner: string;
@@ -38,7 +38,7 @@ export interface RowRef {
   readonly id: string;
 }
 
-/** What the kernel feeds a reducer. `message` carries no text. */
+/** What the interpreter feeds a reducer. `message` carries no text. */
 export type RowInput =
   | {
       readonly kind: "response";

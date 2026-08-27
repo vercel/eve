@@ -31,7 +31,7 @@ export interface ApprovalSpec {
    * The tool's resolved response policy. Injected per-row by the seam from
    * the live HarnessToolMap — the reducer never touches the tool registry,
    * which is what keeps per-tool dynamic approval semantics out of the
-   * kernel. Absent policy = accept any responder (today's default).
+   * interpreter. Absent policy = accept any responder (today's default).
    */
   readonly responsePolicy?: (input: {
     readonly responder: SessionAuthContext | null;
@@ -74,7 +74,7 @@ async function adjudicate(
   const outcome: ApprovalOutcome = option === "allow" ? "allowed" : "denied";
   if (row.spec.responsePolicy === undefined) return { settle: outcome };
 
-  // Policy throw/timeout → policy-failed, row stays open: the kernel wraps
+  // Policy throw/timeout → policy-failed, row stays open: the interpreter wraps
   // this call (handleApprovalResponsePolicyError semantics move there).
   const decision = await row.spec.responsePolicy({ responder, request: row.spec.request });
   if (decision.status === "rejected") return { reject: "unauthorized" };
@@ -161,7 +161,7 @@ export const limit: Variant<LimitSpec, LimitOutcome> = {
 export interface ChallengeSpec {
   readonly name: string; // connection name
   readonly attemptId: string;
-  readonly deadlineAt?: number; // kernel schedules the deadline input
+  readonly deadlineAt?: number; // interpreter schedules the deadline input
 }
 
 export type ChallengeOutcome = "authorized" | "declined" | "failed" | "timed-out";
