@@ -29,9 +29,9 @@ function createMockCommandResult() {
  * drains `logs()` alongside `wait()`. By default this mock yields no log
  * lines and exits 0 so `spawn` and `run` resolve without real I/O.
  */
-function createMockDetachedCommand(
-  logs: ReadonlyArray<{ readonly data: string; readonly stream: "stderr" | "stdout" }> = [],
-) {
+type MockVercelLog = { readonly data: string; readonly stream: "stderr" | "stdout" };
+
+function createMockDetachedCommand(logs: ReadonlyArray<MockVercelLog> = []) {
   return {
     kill: vi.fn().mockResolvedValue(undefined),
     logs() {
@@ -39,6 +39,16 @@ function createMockDetachedCommand(
         yield* logs;
       })();
     },
+    wait: vi.fn().mockResolvedValue({ exitCode: 0 }),
+  };
+}
+
+function createFailingMockDetachedCommand(error: unknown) {
+  return {
+    kill: vi.fn().mockResolvedValue(undefined),
+    logs: () => ({
+      [Symbol.asyncIterator]: () => ({ next: async () => await Promise.reject(error) }),
+    }),
     wait: vi.fn().mockResolvedValue({ exitCode: 0 }),
   };
 }
@@ -117,7 +127,7 @@ async function createTestVercelSession() {
     templateKey: "template-key",
   });
 
-  return { handle, sessionSandbox };
+  return { handle, sandboxModule, sessionSandbox };
 }
 
 async function consumeWebStream(stream: ReadableStream<Uint8Array>): Promise<string> {
@@ -1625,6 +1635,50 @@ describe("createVercelSandbox", () => {
     await expect(handle.session.readFile({ path: "/workspace/message.txt" })).rejects.toThrow(
       "Vercel Sandbox returned an unsupported file stream.",
     );
+  });
+
+  it("reattaches after a submitted command loses its output stream without replaying it", async () => {
+    const { handle, sandboxModule, sessionSandbox } = await createTestVercelSession();
+    const streamError = Object.assign(new Error("Sandbox stream was closed."), {
+      code: "sandbox_stream_closed",
+    });
+    const replacementSandbox = createMockSandbox({ name: "session" });
+    replacementSandbox.runCommand.mockResolvedValue(createMockDetachedCommand());
+    const command = createFailingMockDetachedCommand(streamError);
+    sessionSandbox.runCommand.mockResolvedValueOnce(command);
+    sessionSandbox.runCommand.mockClear();
+    sandboxModule.Sandbox.get.mockResolvedValueOnce(replacementSandbox);
+
+    await expect(handle.session.run({ command: "deploy" })).rejects.toThrow(
+      "The command’s output stream was interrupted after submission. Its completion state is unknown; the sandbox was reattached. Inspect state before retrying.",
+    );
+
+    expect(sandboxModule.Sandbox.get).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "session", resume: true }),
+    );
+    expect(sessionSandbox.runCommand).toHaveBeenCalledOnce();
+
+    await expect(handle.session.run({ command: "inspect state" })).resolves.toEqual({
+      exitCode: 0,
+      stderr: "",
+      stdout: "",
+    });
+    expect(replacementSandbox.runCommand).toHaveBeenCalledOnce();
+  });
+
+  it("reports when recovery after an interrupted command stream also fails", async () => {
+    const { handle, sandboxModule, sessionSandbox } = await createTestVercelSession();
+    const streamError = Object.assign(new Error("Stream ended before command finished."), {
+      code: "stream_ended_early",
+    });
+    sessionSandbox.runCommand.mockResolvedValueOnce(createFailingMockDetachedCommand(streamError));
+    sandboxModule.Sandbox.get.mockRejectedValueOnce(new Error("snapshot unavailable"));
+
+    await expect(handle.session.run({ command: "deploy" })).rejects.toThrow(
+      'The command’s output stream was interrupted after submission, so its completion state is unknown. The sandbox could not be reattached: Failed to look up Vercel sandbox "session": snapshot unavailable',
+    );
+
+    expect(sessionSandbox.runCommand).toHaveBeenCalledOnce();
   });
 
   it("forwards env to runCommand when spawning a process", async () => {

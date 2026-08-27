@@ -11,6 +11,7 @@ import type {
 
 export async function getNamedVercelSandbox(input: {
   readonly createOptions: VercelCreateOptions;
+  readonly resume?: boolean;
   readonly sandboxModule: VercelModule;
   readonly sandboxName: string;
 }): Promise<VercelSandbox | null> {
@@ -32,12 +33,13 @@ export async function getNamedVercelSandbox(input: {
 
 async function getVercelSandboxGetOptions(input: {
   readonly createOptions: VercelCreateOptions;
+  readonly resume?: boolean;
   readonly sandboxName: string;
 }): Promise<VercelGetOptions> {
   const baseOptions = {
     fetch: getVercelSandboxFetch(input.createOptions),
     name: input.sandboxName,
-    resume: false,
+    resume: input.resume ?? false,
   };
 
   try {

@@ -26,6 +26,14 @@ function logs(...values: ReadonlyArray<TestLog>): () => AsyncIterable<TestLog> {
   };
 }
 
+function failingLogs(error: unknown): AsyncIterable<TestLog> {
+  return {
+    [Symbol.asyncIterator]() {
+      return { next: async () => await Promise.reject(error) };
+    },
+  };
+}
+
 describe("adaptMultiplexedCommandToSandboxProcess", () => {
   it("splits logs and waits for both command and log completion", async () => {
     const releaseLogs = Promise.withResolvers<void>();
@@ -85,6 +93,28 @@ describe("adaptMultiplexedCommandToSandboxProcess", () => {
     await expect(readText(process.stdout)).rejects.toBe(failure);
     await expect(readText(process.stderr)).rejects.toBe(failure);
     await expect(process.wait()).rejects.toBe(failure);
+  });
+
+  it("maps a log failure once across both streams and wait", async () => {
+    const failure = new Error("log transport failed");
+    const mapped = new Error("completion unknown");
+    const mapError = vi.fn(async () => mapped);
+    const command = {
+      kill: vi.fn(async () => undefined),
+      logs: () => failingLogs(failure),
+      wait: vi.fn(async () => ({ exitCode: 0 })),
+    };
+    const process = adaptMultiplexedCommandToSandboxProcess({
+      command,
+      getOutput: (log) => log.output,
+      mapError,
+    });
+
+    await expect(readText(process.stdout)).rejects.toBe(mapped);
+    await expect(readText(process.stderr)).rejects.toBe(mapped);
+    await expect(process.wait()).rejects.toBe(mapped);
+    expect(mapError).toHaveBeenCalledOnce();
+    expect(mapError).toHaveBeenCalledWith(failure);
   });
 
   it("continues routing logs after one output is canceled", async () => {
