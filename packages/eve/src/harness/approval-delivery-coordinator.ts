@@ -240,17 +240,29 @@ export async function coordinateApprovalDelivery(input: {
   }
 
   const remainingStepInput = removeConsumedResponses(stepInput, consumed);
-  if (consumed.size > 0) {
+  if (consumed.size > 0 || didCommit) {
+    // Reattach settlements for still-pending requests so downstream input
+    // resolution sees the whole batch: a batch answered one response per
+    // delivery otherwise carries only its newest response and the parked
+    // turn never resumes (#2182).
+    const respondedRequestIds = new Set([
+      ...(remainingStepInput?.inputResponses ?? []).map((response) => response.requestId),
+      ...(remainingStepInput?.attributedInputResponses ?? []).map(
+        ({ response }) => response.requestId,
+      ),
+    ]);
+    const settledPending = getApprovalAuditState(session.state).settlements.filter(
+      (settlement) =>
+        pendingRequestIds.has(settlement.requestId) &&
+        !respondedRequestIds.has(settlement.requestId),
+    );
     return deliveryResult(
       session,
-      remainingStepInput,
-      didCommit ? "continue-coordination" : "continue",
+      appendSettledResponses(remainingStepInput, settledPending),
+      consumed.size > 0 && didCommit ? "continue-coordination" : "continue",
       [],
       feedback,
     );
-  }
-  if (didCommit) {
-    return deliveryResult(session, remainingStepInput, "continue", [], feedback);
   }
 
   // Candidates are persisted in an earlier pass. Run pending candidates and
