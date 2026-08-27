@@ -15,8 +15,8 @@
     "@vercel/blob": "^2.8.0",
     "@vercel/connect": "0.8.0",
     "ai": "^7.0.70",
-    "eve": "^0.39.3",
-    "zod": "4.4.3"
+    "eve": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "~24.13.3",

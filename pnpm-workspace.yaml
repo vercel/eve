@@ -2,6 +2,8 @@ packages:
   - apps/*
   - apps/*/*
   - e2e/fixtures/*
+  - examples/factory
+  - examples/factory/packages/*
   - packages/*
 
 allowBuilds:
