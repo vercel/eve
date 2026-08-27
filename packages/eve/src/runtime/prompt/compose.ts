@@ -17,6 +17,9 @@ const AGENT_MESSAGING_INSTRUCTION =
 const TASK_AGENT_MESSAGING_INSTRUCTION =
   "Agent messaging\nSubagent calls start durable background tasks and return immediately with a task receipt. After delegating, continue helping the user or end your turn. The task will notify you when it completes, fails, needs input, or sends an update; completion and failure notifications include the task's result. Agents you have already delegated to remain visible in the framework-authored `<agents>` conversation note. `availability=busy` means the listed task still owns that agent session: wait for its notification or use task_cancel with its taskId instead of starting a continuation. `availability=available` means no nonterminal task owns the session, so you may pass agentId to the original subagent tool to continue it. Calling a subagent without agentId always starts a new agent session.";
 
+const MIXED_AGENT_MESSAGING_INSTRUCTION =
+  "Agent messaging\nEach subagent tool description says whether the call waits for a child result or starts a durable background task and returns a receipt. Background tasks notify you when they complete, fail, need input, or send an update. Agents you have already delegated to remain visible in the framework-authored `<agents>` conversation note. `availability=busy` means the listed child is still working; wait for its result or notification before continuing it. `availability=available` means you may pass agentId to the original subagent tool to continue it. Calling a subagent without agentId always starts a new agent session.";
+
 /**
  * Input for composing the base authored instructions prompt for one
  * resolved agent.
@@ -24,7 +27,7 @@ const TASK_AGENT_MESSAGING_INSTRUCTION =
 interface ComposeRuntimeBasePromptInput {
   connections?: readonly ResolvedConnectionDefinition[];
   instructions?: readonly ResolvedInstructionsDefinition[];
-  tasksEnabled?: boolean;
+  subagentExecution?: "background" | "blocking" | "mixed";
   skills?: readonly ResolvedSkillDefinition[];
   subagentsAvailable?: boolean;
   toolsAvailable?: boolean;
@@ -41,7 +44,13 @@ export function composeRuntimeBasePrompt(input: ComposeRuntimeBasePromptInput): 
     ...createWorkspacePromptBlocks(input.workspaceSpec),
     ...(input.toolsAvailable ? [PARALLEL_ACTION_INSTRUCTION] : []),
     ...(input.subagentsAvailable
-      ? [input.tasksEnabled ? TASK_AGENT_MESSAGING_INSTRUCTION : AGENT_MESSAGING_INSTRUCTION]
+      ? [
+          input.subagentExecution === "background"
+            ? TASK_AGENT_MESSAGING_INSTRUCTION
+            : input.subagentExecution === "mixed"
+              ? MIXED_AGENT_MESSAGING_INSTRUCTION
+              : AGENT_MESSAGING_INSTRUCTION,
+        ]
       : []),
     ...createConnectionsPromptBlocks(input.connections),
     ...createSkillsPromptBlocks(input.skills),

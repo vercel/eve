@@ -192,18 +192,6 @@ export async function acknowledgeDelegatedTasksStep(input: {
   }
 }
 
-/** Fails an indexed task whose child dispatch was definitively rejected. */
-export async function failDelegatedDispatch(input: {
-  readonly error: JsonValue;
-  readonly task: DelegatedTask;
-}): Promise<void> {
-  await sendTaskCommand({
-    command: { data: input.error, kind: "fail" },
-    taskInboxToken: input.task.taskInboxToken,
-    retryUnreachable: { attempts: 20, delayMs: 250 },
-  });
-}
-
 /** Silently terminates a task whose child dispatch failed before parent indexing. */
 export async function rejectDelegatedDispatch(input: {
   readonly error: JsonValue;

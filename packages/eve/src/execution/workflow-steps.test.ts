@@ -61,6 +61,8 @@ import { turnStep } from "#execution/workflow-steps.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import {
   LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
+  subagentToolExecuteWorkflowReference,
+  toolRunWorkflowReference,
   turnWorkflowReference,
   workflowEntryReference,
 } from "#execution/workflow-runtime.js";
@@ -798,7 +800,9 @@ describe("dispatchRuntimeActionsStep", () => {
     } as never;
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
     startMock
+      .mockResolvedValueOnce({ runId: "relay-run-1" })
       .mockResolvedValueOnce({ runId: "child-run" })
+      .mockResolvedValueOnce({ runId: "relay-run-2" })
       .mockRejectedValueOnce(new Error("child start failed"));
     getRunMock.mockReturnValue({
       getReadable: () =>
@@ -854,19 +858,7 @@ describe("dispatchRuntimeActionsStep", () => {
     });
 
     expect(result).toEqual({
-      results: [
-        {
-          callId: "call-2",
-          isError: true,
-          kind: "subagent-result",
-          origin: "dispatch",
-          output: {
-            code: "SUBAGENT_START_FAILED",
-            message: "child start failed",
-          },
-          subagentName: "agent",
-        },
-      ],
+      results: [],
       sessionState: expect.any(Object),
       pendingTasks: [],
     });
@@ -886,6 +878,30 @@ describe("dispatchRuntimeActionsStep", () => {
       ],
     });
     expect(startMock).toHaveBeenCalledWith(
+      toolRunWorkflowReference,
+      [
+        expect.objectContaining({
+          subagent: expect.objectContaining({
+            replyToken: expect.stringMatching(/^turn-inbox:subagent:/u),
+            subagentName: "agent",
+          }),
+          workflowId: subagentToolExecuteWorkflowReference.workflowId,
+        }),
+      ],
+      { deploymentId: "latest" },
+    );
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      expect.stringContaining(":subagent:"),
+      expect.objectContaining({
+        results: [
+          expect.objectContaining({
+            callId: "call-2",
+            output: expect.objectContaining({ code: "SUBAGENT_START_FAILED" }),
+          }),
+        ],
+      }),
+    );
+    expect(startMock).toHaveBeenCalledWith(
       workflowEntryReference,
       [
         expect.objectContaining({
@@ -901,7 +917,9 @@ describe("dispatchRuntimeActionsStep", () => {
           serializedContext: expect.objectContaining({
             "eve.channel": expect.objectContaining({
               kind: "subagent",
-              state: expect.objectContaining({ parentContinuationToken: "turn-inbox" }),
+              state: expect.objectContaining({
+                parentContinuationToken: expect.stringMatching(/^turn-inbox:subagent:/u),
+              }),
             }),
           }),
         }),
@@ -971,6 +989,7 @@ describe("dispatchRuntimeActionsStep", () => {
       turnAgent: TestTurnAgent,
     } as never;
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    startMock.mockResolvedValueOnce({ runId: "relay-run" });
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1008,26 +1027,24 @@ describe("dispatchRuntimeActionsStep", () => {
       sessionState,
     });
 
-    expect(result.results).toEqual([
-      {
-        callId: "call-1",
-        isError: true,
-        kind: "subagent-result",
-        origin: "dispatch",
-        output: {
-          code: "REMOTE_AGENT_START_FAILED",
-          message: 'Remote agent "research" create-session request failed with HTTP 503.',
-        },
-        subagentName: "research",
-      },
-    ]);
+    expect(result.results).toEqual([]);
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      expect.stringContaining(":subagent:"),
+      expect.objectContaining({
+        results: [
+          expect.objectContaining({
+            output: expect.objectContaining({ code: "REMOTE_AGENT_START_FAILED" }),
+          }),
+        ],
+      }),
+    );
     // The prepared handle was committed before the effect and rejected as
     // dead when the start failed, so no handle survives.
     expect(getAgentHandleStore(result.sessionState.snapshot?.session.state)).toEqual({
       handles: [],
     });
-    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).callback.token).toBe(
-      "turn-inbox",
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).callback.token).toMatch(
+      /^turn-inbox:subagent:/u,
     );
     expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE)).toBeUndefined();
   });
@@ -1910,75 +1927,6 @@ describe("turnStep", () => {
     expect(createExecutionNodeStep).toHaveBeenCalledWith(
       expect.objectContaining({ node: effectiveNode }),
     );
-  });
-
-  it("returns tasksEnabled on park results so the turn workflow selects dispatchTaskStep", async () => {
-    // Regression: a stack rebase once dropped `tasksEnabled` from the park
-    // arms while keeping the computation, so every tasks-mode agent silently
-    // fell back to dispatchRuntimeActionsStep and no background task receipt
-    // was ever minted. The park result is the only wire that carries this
-    // flag to the dispatch selection in turn-workflow.ts.
-    const tasksBundle = {
-      adapterRegistry: {
-        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
-      },
-      compiledArtifactsSource: {} as never,
-      graph: {
-        nodesByNodeId: new Map(),
-        root: {
-          sandboxRegistry: { sandbox: null },
-          turnAgent: TestTurnAgent,
-        },
-      },
-      moduleMap: { nodes: {} },
-      hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: {
-        config: { experimental: { tasks: true } },
-      },
-      subagentRegistry: {},
-      toolRegistry: {},
-      turnAgent: TestTurnAgent,
-    } as never;
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(tasksBundle);
-
-    const session = createStubSession();
-    installSessionStoreMocks([session]);
-    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (stepSession): Promise<StepResult> => ({
-        next: null,
-        session: stepSession,
-      });
-    });
-
-    const parked = await turnStep({
-      input: {
-        kind: "deliver",
-        payloads: [{ message: "start a background task" }],
-      },
-      parentWritable: createTestWritable(),
-      serializedContext: createSerializedContext(),
-      sessionState: createStubSessionState(),
-    });
-    expect(parked).toMatchObject({ action: "park", tasksEnabled: true });
-
-    installSessionStoreMocks([session]);
-    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (stepSession): Promise<StepResult> => ({
-        next: null,
-        session: stepSession,
-        settledTurn: { output: "settled" },
-      });
-    });
-    const settled = await turnStep({
-      input: {
-        kind: "deliver",
-        payloads: [{ message: "settle" }],
-      },
-      parentWritable: createTestWritable(),
-      serializedContext: createSerializedContext(),
-      sessionState: createStubSessionState(),
-    });
-    expect(settled).toMatchObject({ action: "park", tasksEnabled: true });
   });
 
   it("passes task-agent availability projection into execution", async () => {

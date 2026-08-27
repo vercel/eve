@@ -12,7 +12,7 @@ import {
 
 type HarnessDelegationTool = Pick<
   PreparedRuntimeDelegationTool,
-  "description" | "kind" | "name" | "nodeId"
+  "description" | "execution" | "kind" | "name" | "nodeId"
 > & {
   readonly inputSchema?: ToolSchemaSource | null;
   readonly outputSchema?: ToolSchemaSource | null;
@@ -37,13 +37,14 @@ export function createHarnessDelegationToolDefinition(
         };
 
   return {
-    description: tool.description ?? "",
+    description: describeSubagentExecution(tool.description, "blocking"),
     inputSchema: toInputSchema(tool.inputSchema) ?? UNSPECIFIED_INPUT_SCHEMA,
     name: tool.name,
     outputSchema: toOutputSchema(tool.outputSchema) ?? undefined,
     rootOnly: tool.rootOnly,
     runtimeAction,
-    workflowCallable: true,
+    subagentKind: tool.kind === "remote" ? "remote" : "local",
+    workflowCallable: tool.execution !== "background",
   };
 }
 
@@ -69,13 +70,25 @@ export function createBackgroundSubagentHarnessDefinition(
   });
   if (tool.kind !== "remote") registerLocalSubagentExecutor(execute);
   return {
-    description: definition.description,
+    description: describeSubagentExecution(definition.description, "background"),
     execute,
     execution: definition.execution,
     inputSchema: toInputSchema(definition.inputSchema) ?? UNSPECIFIED_INPUT_SCHEMA,
     name: tool.name,
     outputSchema: toOutputSchema(definition.outputSchema) ?? undefined,
     rootOnly: tool.rootOnly,
-    workflowCallable: true,
+    subagentKind: tool.kind === "remote" ? "remote" : "local",
+    workflowCallable: false,
   };
+}
+
+function describeSubagentExecution(
+  description: string | undefined,
+  execution: "background" | "blocking",
+): string {
+  const behavior =
+    execution === "background"
+      ? "This call starts a background task and returns a task receipt immediately."
+      : "This call waits for the subagent and returns its result.";
+  return `${description ?? ""}\n\n${behavior}`;
 }

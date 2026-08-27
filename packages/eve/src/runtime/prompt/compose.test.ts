@@ -15,7 +15,7 @@ describe("composeRuntimeBasePrompt", () => {
   it("instructs task-mode parents to rely on notifications instead of polling", () => {
     const prompt = composeRuntimeBasePrompt({
       subagentsAvailable: true,
-      tasksEnabled: true,
+      subagentExecution: "background",
     });
 
     expect(prompt).toContainEqual(
@@ -27,6 +27,17 @@ describe("composeRuntimeBasePrompt", () => {
     expect(prompt).not.toContainEqual(expect.stringContaining("task_peek"));
     expect(prompt).not.toContainEqual(expect.stringContaining("task_sleep"));
     expect(prompt).toContainEqual(expect.stringContaining("notify you"));
+  });
+
+  it("explains mixed blocking and background subagent behavior", () => {
+    const prompt = composeRuntimeBasePrompt({
+      subagentsAvailable: true,
+      subagentExecution: "mixed",
+    });
+
+    expect(prompt).toContainEqual(expect.stringContaining("tool description"));
+    expect(prompt).toContainEqual(expect.stringContaining("waits for a child result"));
+    expect(prompt).toContainEqual(expect.stringContaining("background task"));
   });
 
   it("omits agent messaging instructions when subagents are unavailable", () => {

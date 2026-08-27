@@ -25,6 +25,7 @@ export type CompiledRemoteAgentNode = Readonly<
       backing: { readonly kind: "resource"; readonly sourcePath: string };
       binding: CompiledModuleBinding;
       entryPath: string;
+      execution?: "background" | "blocking";
       name: string;
       owner: AgentSourceOwner;
       parentNodeId: string;
@@ -82,6 +83,7 @@ export const compiledRemoteAgentNodeSchema: z.ZodType<CompiledRemoteAgentNode> =
       .strict(),
     description: z.string(),
     entryPath: z.string(),
+    execution: z.enum(["background", "blocking"]).optional(),
     exportName: z.string().optional(),
     logicalPath: z.string(),
     name: z.string(),

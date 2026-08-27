@@ -63,8 +63,9 @@ value completes the durable task with that value. Returning `task.delegated({ ex
 returns a `working` receipt immediately while an external executor continues the task.
 The root agent must enable `experimental.tasks`; eve rejects background tools at build time otherwise.
 
-This contract currently supports framework-owned task executors, including local and remote
-subagents when `experimental.tasks` is enabled. After delegating, an in-process executor reports
+This contract currently supports framework-owned task executors. A task-enabled root runs the
+built-in `agent` in the background; declared local and remote subagents opt in with their own
+`background` field. After delegating, an in-process executor reports
 progress with `task.send({ kind: "update", message })` and the terminal result with
 `task.send({ kind: "complete", data })` (or `fail` / `cancel`). `send` is not restart-safe — an
 in-memory callback dies with the process — so the cross-process executor wire remains

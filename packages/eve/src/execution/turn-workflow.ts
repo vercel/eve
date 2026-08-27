@@ -1,5 +1,9 @@
 import { isInboxSubagentResultFromRunningHandle } from "#harness/handles/query.js";
-import { isInboxToolResultFromRecordedRun } from "#harness/tool-runs.js";
+import {
+  findToolRun,
+  isInboxSubagentResultFromRecordedRun,
+  isInboxToolResultFromRecordedRun,
+} from "#harness/tool-runs.js";
 import {
   createHook,
   getWorkflowMetadata,
@@ -13,7 +17,6 @@ import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-st
 import { sendTurnControlStep, type TurnInboxPayload } from "#execution/turn-control-protocol.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
-import { dispatchTaskStep } from "#execution/tasks/parent/dispatch-task-step.js";
 import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
 import {
   migrateTurnWorkflowInput,
@@ -34,13 +37,19 @@ import {
   type RunReport,
   type RunRequestMessage,
 } from "#execution/tool-run/messages.js";
+import { releaseToolRunStep } from "#execution/tool-run/start.js";
+import {
+  bindLegacyTurnSubagentEvent,
+  bindTurnSubagentEvent,
+  isTurnSubagentOutcomeBound,
+} from "#execution/tools/subagent/owner-wire.js";
 import {
   type ChannelReader,
   createChannelReader,
   raceChannelReads,
 } from "#execution/tool-run/owner-channels.js";
 import {
-  runOutcomeToToolResult,
+  runOutcomeToActionResult,
   runRequestToInputRequestPayload,
 } from "#execution/tool-run/owner-inbox.js";
 import {
@@ -227,19 +236,14 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       // A pending runtime-action batch (model-driven `park` or dynamic-workflow
       // interrupt) is resolved in-line so the turn stays alive across the wait;
       // the arms differ only in their dispatch path: the workflow adapter for
-      // interrupt-sourced batches, and the task-mode sibling when the agent
-      // runs `experimental.tasks`.
+      // interrupt-sourced batches, and the normal owner-side dispatcher for
+      // model-authored blocking actions and task controls.
       if (pendingActionKeys !== undefined) {
         await cursor.adopt(result);
-        const hasPendingTasks = result.action === "park" && result.tasksEnabled;
-        let dispatch;
-        if (result.action === "dispatch-workflow-runtime-actions") {
-          dispatch = dispatchWorkflowRuntimeActionsStep;
-        } else if (hasPendingTasks) {
-          dispatch = dispatchTaskStep;
-        } else {
-          dispatch = dispatchRuntimeActionsStep;
-        }
+        const dispatch =
+          result.action === "dispatch-workflow-runtime-actions"
+            ? dispatchWorkflowRuntimeActionsStep
+            : dispatchRuntimeActionsStep;
         const dispatchResult = await dispatch({
           callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
           parentContinuationToken: inbox.token,
@@ -326,7 +330,7 @@ interface RunHooks {
   readonly request: Hook<RunRequestMessage>;
 }
 
-/** The three channels the turn's tool runs report on, in read priority, then its inbox. */
+/** Run channels in read priority, then the turn inbox. */
 type TurnReaders = readonly [
   ChannelReader<"report", RunReport>,
   ChannelReader<"request", RunRequestMessage>,
@@ -394,6 +398,11 @@ async function waitForRuntimeActionResults(input: {
       results,
     });
     if (ready !== undefined) {
+      const state = input.cursor.sessionState.snapshot?.session.state;
+      for (const result of ready) {
+        const run = findToolRun(state, result.callId);
+        if (run?.resultKind === "subagent") await releaseToolRunStep(run.hookToken);
+      }
       if (pendingDeliveryRequest !== undefined) {
         // The entry may already be racing public input against this wait.
         // Cancellation keeps that input available for the next parent turn.
@@ -440,9 +449,18 @@ async function waitForRuntimeActionResults(input: {
     if (read.next.done) throw new Error("Turn inbox closed before runtime actions completed.");
 
     if (read.channel === "outcome") {
-      const result = runOutcomeToToolResult(read.next.value);
+      const result = runOutcomeToActionResult(read.next.value);
       const sessionSnapshotState = input.cursor.sessionState.snapshot?.session.state;
-      if (isInboxToolResultFromRecordedRun(sessionSnapshotState, result)) {
+      const accepted =
+        result.kind === "tool-result"
+          ? isInboxToolResultFromRecordedRun(sessionSnapshotState, result)
+          : result.kind === "subagent-result" && result.origin === "child"
+            ? isInboxSubagentResultFromRunningHandle(sessionSnapshotState, result) ||
+              isInboxSubagentResultFromRecordedRun(sessionSnapshotState, result)
+            : result.kind === "subagent-result" &&
+              result.origin === "dispatch" &&
+              isInboxSubagentResultFromRecordedRun(sessionSnapshotState, result);
+      if (accepted) {
         const acceptedAtMs = Date.now();
         results.push(result);
         acceptedAtMsByKey.set(getRuntimeActionResultKey(result), acceptedAtMs);
@@ -460,10 +478,35 @@ async function waitForRuntimeActionResults(input: {
       continue;
     }
     if (read.channel === "report") {
+      const report = read.next.value;
+      if (report.kind === "subagent-outcome") {
+        if (isTurnSubagentOutcomeBound(input.cursor.sessionState.snapshot?.session.state, report)) {
+          const acceptedAtMs = Date.now();
+          results.push(report.result);
+          acceptedAtMsByKey.set(getRuntimeActionResultKey(report.result), acceptedAtMs);
+        }
+        continue;
+      }
+      if (report.kind === "subagent-event") {
+        const event = bindTurnSubagentEvent(
+          input.cursor.sessionState.snapshot?.session.state,
+          report,
+        );
+        if (event !== undefined) {
+          const proxyResult = await runProxySubagentEventStep({
+            hookPayload: event,
+            parentWritable: input.cursor.parentWritable,
+            serializedContext: input.cursor.serializedContext,
+            sessionState: input.cursor.sessionState,
+          });
+          await input.cursor.adopt(proxyResult);
+        }
+        continue;
+      }
       await emitRunReportStep({
-        from: read.next.value.from,
+        from: report.from,
         parentWritable: input.cursor.parentWritable,
-        update: read.next.value.update,
+        update: report.update,
       });
       continue;
     }
@@ -481,7 +524,8 @@ async function waitForRuntimeActionResults(input: {
       const accepted = value.results.filter((result) =>
         result.kind === "tool-result"
           ? isInboxToolResultFromRecordedRun(sessionSnapshotState, result)
-          : isInboxSubagentResultFromRunningHandle(sessionSnapshotState, result),
+          : isInboxSubagentResultFromRunningHandle(sessionSnapshotState, result) ||
+            isInboxSubagentResultFromRecordedRun(sessionSnapshotState, result),
       );
       if (accepted.length > 0) {
         const acceptedAtMs = Date.now();
@@ -494,8 +538,13 @@ async function waitForRuntimeActionResults(input: {
     }
 
     if (value.kind === "subagent-input-request" || value.kind === "subagent-authorization-event") {
+      const event = bindLegacyTurnSubagentEvent(
+        input.cursor.sessionState.snapshot?.session.state,
+        value,
+      );
+      if (event === undefined) continue;
       const proxyResult = await runProxySubagentEventStep({
-        hookPayload: value,
+        hookPayload: event,
         parentWritable: input.cursor.parentWritable,
         serializedContext: input.cursor.serializedContext,
         sessionState: input.cursor.sessionState,

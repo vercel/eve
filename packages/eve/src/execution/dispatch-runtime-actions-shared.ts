@@ -1,10 +1,7 @@
 /**
- * Machinery shared by the two runtime-action dispatch steps:
- * `dispatchRuntimeActionsStep` (plain mode) and `dispatchTaskStep`
- * (task mode). Both run the same preflight → plan → dispatch → emit
- * skeleton over one pending batch and differ only in the per-entry
- * delegation lifecycle, so planning, subagent starts, and the
- * replay-safe `subagent.called` emission tail live here.
+ * Shared runtime-action planning, child startup, and replay-safe
+ * `subagent.called` emission used by the turn owner, Workflow interrupts,
+ * and the task-backed subagent executor.
  */
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -121,7 +118,7 @@ export type DispatchStartTarget =
       readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
     };
 
-/** Input contract shared by both dispatch steps so the turn workflow can select either. */
+/** Input shared by direct and Workflow-originated owner-side dispatch. */
 export interface RuntimeActionDispatchInput {
   readonly callbackBaseUrl?: string;
   /** Internal hook that receives child completion and HITL payloads. */
@@ -131,11 +128,7 @@ export interface RuntimeActionDispatchInput {
   readonly sessionState: DurableSessionState;
 }
 
-/**
- * Result contract shared by both dispatch steps. `pendingTasks` is
- * always empty in plain mode; keeping it on both keeps the turn
- * workflow's acknowledgement call site uniform.
- */
+/** Owner-side results plus any task-control work that still needs acknowledgement. */
 export interface RuntimeActionDispatchResult {
   readonly results: readonly RuntimeActionResult[];
   readonly sessionState: DurableSessionState;
@@ -185,8 +178,8 @@ export async function prepareRuntimeActionDispatch(input: {
   readonly sessionState: DurableSessionState;
   /**
    * Classify task-control calls as
-   * task-control plan entries. Only task mode plans them; in plain mode
-   * those calls fail as unsupported batch actions.
+   * task-control plan entries. Callers without the task capability leave
+   * them unsupported.
    */
   readonly taskControls: boolean;
 }): Promise<PreparedRuntimeActionDispatch | undefined> {
@@ -290,6 +283,7 @@ async function prepareActionDispatch(input: {
     channelMetadata: ctx.get(ChannelInstrumentationKey),
     fanoutSize:
       input.fanoutSize ??
+      batch.localFanoutSize ??
       plan.filter((entry) => entry.kind === "start" && entry.target.kind === "local").length,
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     parentSession: ctx.get(ParentSessionKey),

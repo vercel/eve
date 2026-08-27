@@ -10,23 +10,38 @@
  * and confirms it (`running`) once the child reports coordinates, so the
  * returned snapshot-bearing state owns every child it may have created.
  *
- * Agents running `experimental.tasks` never reach this step: the turn
- * workflow selects `dispatchTaskStep`, the task-mode sibling that wraps
- * each dispatch in the delegated-task lifecycle.
+ * Background definitions execute during the model step through the task
+ * runtime. This step owns the remaining blocking actions and task controls.
  */
 
-import { type DispatchOutcome, dispatchToAgentHandle } from "#execution/agent-handle-dispatch.js";
+import {
+  createAgentContinuationMismatch,
+  type DispatchOutcome,
+  dispatchToAgentHandle,
+} from "#execution/agent-handle-dispatch.js";
 import { createAgentContinuationBundle } from "#execution/agent-continuation-bundle.js";
 import {
   emitSubagentCalled,
   prepareRuntimeActionDispatch,
   type RuntimeActionDispatchInput,
   type RuntimeActionDispatchResult,
-  startSubagent,
   startWorkflowTool,
 } from "#execution/dispatch-runtime-actions-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
+import type {
+  RuntimeRemoteAgentCallActionRequest,
+  RuntimeSubagentCallActionRequest,
+} from "#shared/action-types.js";
+import { recordToolRun } from "#harness/tool-runs.js";
+import {
+  createSubagentToolRunSession,
+  settleSubagentToolRunDispatchFailure,
+  startSubagentToolRun,
+} from "#execution/tools/subagent/run.js";
+import { startBlockingSubagent } from "#execution/tools/subagent/blocking.js";
+import { executeTaskControlAction } from "#execution/tasks/parent/dispatch.js";
+import type { DelegatedTask } from "#execution/tasks/parent/delegate.js";
 
 export async function dispatchRuntimeActionsStep(
   input: RuntimeActionDispatchInput,
@@ -36,7 +51,7 @@ export async function dispatchRuntimeActionsStep(
   const prepared = await prepareRuntimeActionDispatch({
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,
-    taskControls: false,
+    taskControls: true,
   });
   if (prepared === undefined) {
     return { results: [], sessionState: input.sessionState, pendingTasks: [] };
@@ -49,6 +64,7 @@ export async function dispatchRuntimeActionsStep(
 
   let nextSession = session;
   const results: RuntimeActionResult[] = [];
+  const pendingTasks: DelegatedTask[] = [];
 
   try {
     for (const entry of prepared.plan) {
@@ -69,13 +85,67 @@ export async function dispatchRuntimeActionsStep(
         continue;
       }
       if (entry.kind === "task-control") {
-        // Unreachable: the plan was built with `taskControls: false`.
-        throw new Error("Task-control actions require the task dispatch step.");
+        const control = await executeTaskControlAction({
+          action: entry.action,
+          adapter: prepared.adapter,
+          bundle,
+          parentStepIndex: batch.event.stepIndex,
+          parentTurnId: batch.event.turnId,
+          serializedContext: prepared.serializedContext,
+          session: nextSession,
+        });
+        nextSession = control.session;
+        if (control.pendingTask !== undefined) pendingTasks.push(control.pendingTask);
+        results.push(control.result);
+        continue;
       }
 
       let outcome: DispatchOutcome;
       switch (entry.kind) {
         case "resume":
+          const mismatch = createAgentContinuationMismatch({
+            action: entry.action,
+            agentId: entry.agentId,
+            currentSession: nextSession,
+            execution: "blocking",
+          });
+          if (mismatch !== undefined) {
+            const run = await startSubagentToolRun({
+              action: entry.action,
+              ownerToken: input.parentContinuationToken ?? session.continuationToken,
+              session: createSubagentToolRunSession({
+                auth: { current: prepared.auth, initiator: prepared.initiatorAuth },
+                id: session.sessionId,
+                parent: prepared.parentSession,
+                sequence: batch.event.sequence,
+                turnId: batch.event.turnId,
+              }),
+              stepIndex: batch.event.stepIndex,
+            });
+            nextSession = recordSubagentToolRun(nextSession, entry.action, run);
+            if (!run.replyReady) continue;
+            await settleSubagentToolRunDispatchFailure({
+              replyToken: run.replyToken,
+              result: mismatch,
+            });
+            continue;
+          }
+          const run = await startSubagentToolRun({
+            action: entry.action,
+            ownerToken: input.parentContinuationToken ?? session.continuationToken,
+            session: createSubagentToolRunSession({
+              auth: { current: prepared.auth, initiator: prepared.initiatorAuth },
+              id: session.sessionId,
+              parent: prepared.parentSession,
+              sequence: batch.event.sequence,
+              turnId: batch.event.turnId,
+            }),
+            stepIndex: batch.event.stepIndex,
+          });
+          if (!run.replyReady) {
+            nextSession = recordSubagentToolRun(nextSession, entry.action, run);
+            continue;
+          }
           outcome = await dispatchToAgentHandle({
             action: entry.action,
             agentId: entry.agentId,
@@ -86,12 +156,21 @@ export async function dispatchRuntimeActionsStep(
               dynamicRemoteAgent: entry.dynamicRemoteAgent,
             }),
             currentSession: nextSession,
-            parentToken: input.parentContinuationToken ?? session.continuationToken,
+            parentToken: run.replyToken,
             parentTurnId: batch.event.turnId,
           });
+          nextSession = recordSubagentToolRun(outcome.session, entry.action, run);
+          if (outcome.kind === "error") {
+            await settleSubagentToolRunDispatchFailure({
+              replyToken: run.replyToken,
+              result: outcome.result,
+            });
+            continue;
+          }
           break;
         case "start":
-          outcome = await startSubagent({
+          const started = await startBlockingSubagent({
+            action: entry.target.action,
             auth: prepared.auth,
             batchEvent: batch.event,
             bundle,
@@ -101,21 +180,29 @@ export async function dispatchRuntimeActionsStep(
             currentSession: nextSession,
             fanoutSize: prepared.fanoutSize,
             initiatorAuth: prepared.initiatorAuth,
-            parentContinuationToken: input.parentContinuationToken,
+            ownerToken: input.parentContinuationToken ?? session.continuationToken,
+            parentSession: prepared.parentSession,
             parentTraceContext: prepared.parentTraceContext,
             sandboxSessionId: prepared.sandboxSessionId,
             serializedContext: prepared.serializedContext,
             session,
-            taskOwned: false,
+            stepIndex: batch.event.stepIndex,
             target: entry.target,
           });
+          if (started.outcome === undefined) {
+            nextSession = recordSubagentToolRun(nextSession, entry.target.action, started.run);
+            continue;
+          }
+          outcome = started.outcome;
+          nextSession = recordSubagentToolRun(outcome.session, entry.target.action, started.run);
+          if (outcome.kind === "error") {
+            await settleSubagentToolRunDispatchFailure({
+              replyToken: started.run.replyToken,
+              result: outcome.result,
+            });
+            continue;
+          }
           break;
-      }
-
-      nextSession = outcome.session;
-      if (outcome.kind === "error") {
-        results.push(outcome.result);
-        continue;
       }
 
       await emitSubagentCalled({
@@ -138,6 +225,20 @@ export async function dispatchRuntimeActionsStep(
       nextSession === session
         ? input.sessionState
         : createDurableSessionState({ session: nextSession }),
-    pendingTasks: [],
+    pendingTasks,
   };
+}
+
+function recordSubagentToolRun(
+  session: Parameters<typeof createDurableSessionState>[0]["session"],
+  action: RuntimeRemoteAgentCallActionRequest | RuntimeSubagentCallActionRequest,
+  run: Awaited<ReturnType<typeof startSubagentToolRun>>,
+) {
+  return recordToolRun(session, {
+    callId: action.callId,
+    hookToken: run.hookToken,
+    runId: run.runId,
+    resultKind: "subagent",
+    toolName: action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName,
+  });
 }

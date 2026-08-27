@@ -67,13 +67,14 @@ Return the child definition to configure and expose it. Return `null` to omit
 it from the parent's model-visible tools.
 
 ```ts title="agent/subagents/finance/agent.ts"
-import { defineAgent, defineDynamic } from "eve";
+import { defineDynamic, defineLocalSubagent } from "eve";
 
 export default defineDynamic({
   events: {
     "session.started": (_event, ctx) =>
       ctx.session.auth.current?.attributes.plan === "enterprise"
-        ? defineAgent({
+        ? defineLocalSubagent({
+            background: false,
             description: "Analyze financial and accounting data.",
             model: "openai/gpt-5.5",
           })
@@ -94,16 +95,17 @@ the outer `defineDynamic` definition; build and Workflow-world configuration
 cannot be selected in a handler result.
 
 A single-file remote subagent uses the same lifecycle. Return
-`defineRemoteAgent(...)` to expose the selected deployment, or `null` to omit it:
+`defineRemoteSubagent(...)` to expose the selected deployment, or `null` to omit it:
 
 ```ts title="agent/subagents/finance.ts"
-import { defineDynamic, defineRemoteAgent } from "eve";
+import { defineDynamic, defineRemoteSubagent } from "eve";
 
 export default defineDynamic({
   events: {
     "session.started": (_event, ctx) =>
       ctx.session.auth.current?.attributes.plan === "enterprise"
-        ? defineRemoteAgent({
+        ? defineRemoteSubagent({
+            background: false,
             description: "Analyze financial and accounting data.",
             url: "https://finance-agent.example.com",
           })
@@ -112,7 +114,7 @@ export default defineDynamic({
 });
 ```
 
-The returned remote definition can change its URL, path, headers, auth,
+The returned local or remote definition can also choose `background`. A background selection requires `experimental.tasks: true` on the root agent. The returned remote definition can change its URL, path, headers, auth,
 principal forwarding, and output schema. Function-valued URLs resolve when the
 dynamic event runs. Auth and headers remain lazy and resolve before each
 outbound request without entering durable workflow state.
@@ -122,8 +124,8 @@ shadows the session selection for that turn, including when the turn handler
 returns `null`. If a resolver throws or returns an invalid definition, eve logs the
 failure and omits the subagent.
 
-The resolved set applies to local and remote direct delegation and the
-`Workflow` tool. eve
+The resolved set applies to local and remote direct delegation. Active blocking selections also
+apply to the `Workflow` tool; background selections do not. eve
 also checks availability again before starting the child, so a stale or
 manually constructed call fails with `SUBAGENT_UNAVAILABLE`. Treat conditional
 availability as capability composition, not as the only authorization

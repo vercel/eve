@@ -87,11 +87,12 @@ export interface SubagentExecutorData {
 
 export function createSubagentExecutorBinding(executor: SubagentExecutorData): TaskExecutorBinding {
   const { address, identity } = executor;
+  const data: Record<string, JsonValue> = {
+    address: { ...address },
+    identity: { id: identity.id, name: identity.name, nodeId: identity.nodeId },
+  };
   return {
-    data: {
-      address: { ...address },
-      identity: { id: identity.id, name: identity.name, nodeId: identity.nodeId },
-    },
+    data,
     kind: "subagent",
   };
 }
@@ -104,6 +105,81 @@ export function readSubagentExecutor(
   const identity = readAgentIdentity(binding.data.identity);
   const address = readAgentAddress(binding.data.address);
   return identity === undefined || address === undefined ? undefined : { address, identity };
+}
+
+interface TaskRelayData {
+  readonly callId: string;
+  readonly hookToken: string;
+  readonly released?: true;
+  readonly runId: string;
+  readonly toolName: string;
+}
+
+const TASK_RELAY_EXECUTOR_KIND = "subagent-relay";
+const TASK_RELAY_DATA_KEY = "$eveRelay";
+
+export function readTaskRelay(
+  executor: TaskExecutorBinding | TaskExecutorState | undefined,
+): TaskRelayData | undefined {
+  const binding = executor !== undefined && "kind" in executor ? executor : executor?.binding;
+  if (binding === undefined) return undefined;
+  const relay =
+    binding.kind === TASK_RELAY_EXECUTOR_KIND
+      ? binding.data
+      : binding.kind === "subagent"
+        ? binding.data[TASK_RELAY_DATA_KEY]
+        : undefined;
+  if (!isJsonObjectValue(relay)) return undefined;
+  const { callId, hookToken, released, runId, toolName } = relay;
+  if (
+    typeof callId !== "string" ||
+    typeof hookToken !== "string" ||
+    typeof runId !== "string" ||
+    typeof toolName !== "string" ||
+    (released !== undefined && released !== true)
+  ) {
+    return undefined;
+  }
+  return released === true
+    ? { callId, hookToken, released, runId, toolName }
+    : { callId, hookToken, runId, toolName };
+}
+
+export function createTaskRelayBinding(
+  relay: Omit<TaskRelayData, "released">,
+): TaskExecutorBinding {
+  return { data: { ...relay }, kind: TASK_RELAY_EXECUTOR_KIND };
+}
+
+export function bindTaskRelayToExecutor(
+  executor: TaskExecutorBinding,
+  relay: TaskRelayData,
+): TaskExecutorBinding {
+  return {
+    ...executor,
+    data: { ...executor.data, [TASK_RELAY_DATA_KEY]: { ...relay } },
+  };
+}
+
+export function executorBindingWithoutTaskRelay(
+  executor: TaskExecutorBinding,
+): TaskExecutorBinding {
+  const data = { ...executor.data };
+  delete data[TASK_RELAY_DATA_KEY];
+  return { ...executor, data };
+}
+
+export function releaseTaskRelay(executor: TaskExecutorState | undefined): TaskExecutorState {
+  const binding = executor?.binding;
+  const relay = readTaskRelay(executor);
+  if (binding === undefined || relay === undefined) return { ...executor };
+  return {
+    ...executor,
+    binding:
+      binding.kind === TASK_RELAY_EXECUTOR_KIND
+        ? { ...binding, data: { ...relay, released: true } }
+        : bindTaskRelayToExecutor(binding, { ...relay, released: true }),
+  };
 }
 
 function readAgentIdentity(value: JsonValue | undefined): AgentIdentity | undefined {
@@ -324,6 +400,13 @@ export type TaskCommand =
   | {
       readonly executor: TaskExecutorBinding;
       readonly kind: "bind";
+    }
+  | {
+      readonly callId: string;
+      readonly hookToken: string;
+      readonly kind: "bind-relay";
+      readonly runId: string;
+      readonly toolName: string;
     }
   | {
       readonly kind: "complete";

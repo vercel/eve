@@ -1,4 +1,4 @@
-import { defineAgent } from "eve";
+import { defineLocalSubagent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
 const FAN_IN_MARKER_PATTERN = /TASK-FAN-IN-[12]/u;
@@ -13,7 +13,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   return `FANOUT-COMPLETE:${request.lastUserMessage ?? ""}`;
 }
 
-export default defineAgent({
+export default defineLocalSubagent({
+  background: true,
   description: "Complete one fanout task with its deterministic marker.",
   model: mockModel(respond),
   modelContextWindowTokens: 1_000_000,

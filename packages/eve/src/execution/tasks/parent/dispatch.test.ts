@@ -11,6 +11,7 @@ import {
 import { executeTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import { readLatestTaskView, sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
+import { cancelToolRun } from "#execution/tool-run/cancel.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 import type { RuntimeToolCallActionRequest } from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
@@ -34,6 +35,7 @@ vi.mock("#execution/remote-agent-dispatch.js", async (importOriginal) => ({
   resolveRemoteAgentForAction: vi.fn(),
   resolveRemoteAgentStreamHeaders: vi.fn(),
 }));
+vi.mock("#execution/tool-run/cancel.js", () => ({ cancelToolRun: vi.fn() }));
 
 const action: RuntimeToolCallActionRequest = {
   callId: "call-cancel",
@@ -151,6 +153,101 @@ describe("task cancellation identity", () => {
       });
     },
   );
+
+  it("cancels the relay and child for a workflow-backed subagent task", async () => {
+    const session = createSession("local");
+    vi.mocked(readLatestTaskView).mockResolvedValue({
+      metadata: {
+        agentId: "agent-1",
+        kind: "subagent",
+        mode: "local",
+        name: "research",
+      },
+      executor: {
+        childSessionId: "child-1",
+        childTurnId: "turn_child_7",
+        binding: {
+          data: {
+            address: {
+              continuationToken: "child-token",
+              kind: "agent/local",
+              sessionId: "child-1",
+            },
+            identity: { id: "agent-1", name: "research", nodeId: "node-1" },
+            $eveRelay: {
+              callId: "call-1",
+              hookToken: "run-hook",
+              runId: "relay-run",
+              toolName: "research",
+            },
+          },
+          kind: "subagent",
+        },
+      },
+      status: "cancelled",
+      taskId: "task-1",
+    });
+
+    await executeTaskControlAction({
+      action,
+      bundle: {} as CompiledBundle,
+      parentTurnId: "turn-parent",
+      session,
+    });
+
+    expect(cancelToolRun).toHaveBeenCalledWith(
+      expect.objectContaining({ hookToken: "run-hook", runId: "relay-run" }),
+    );
+    expect(requestWorkflowTurnCancellation).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "child-1" }),
+    );
+    expect(sendTaskCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ command: { kind: "settle-executor" } }),
+    );
+    expect(vi.mocked(sendTaskCommand).mock.invocationCallOrder.at(-1)).toBeLessThan(
+      vi.mocked(cancelToolRun).mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it("settles a workflow tool executor before waiting for cancellation", async () => {
+    const session = createSession("local");
+    const state = session.state;
+    if (state === undefined) throw new Error("Expected task session state.");
+    const entry = (
+      state[SESSION_TASKS_STATE_KEY] as {
+        tasks: Array<{ executor?: { data: Record<string, unknown>; kind: string } }>;
+      }
+    ).tasks[0]!;
+    entry.executor = {
+      data: { hookToken: "tool-hook", runId: "tool-run" },
+      kind: "workflow-tool",
+    };
+    vi.mocked(readLatestTaskView).mockResolvedValue({
+      executor: {
+        binding: {
+          data: { hookToken: "tool-hook", runId: "tool-run" },
+          kind: "workflow-tool",
+        },
+      },
+      metadata: { kind: "tool", name: "export" },
+      status: "cancelled",
+      taskId: "task-1",
+    });
+
+    await executeTaskControlAction({
+      action,
+      bundle: {} as CompiledBundle,
+      parentTurnId: "turn-parent",
+      session,
+    });
+
+    expect(sendTaskCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ command: { kind: "settle-executor" } }),
+    );
+    expect(vi.mocked(sendTaskCommand).mock.invocationCallOrder.at(-1)).toBeLessThan(
+      vi.mocked(cancelToolRun).mock.invocationCallOrder[0] ?? 0,
+    );
+  });
 
   it("cancels a dynamic remote task with its creation-time credential resolver", async () => {
     const session = createSession("remote");

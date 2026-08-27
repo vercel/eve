@@ -127,7 +127,8 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   }
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
-  const tasksEnabled = bundle.resolvedAgent.config?.experimental?.tasks === true;
+  const tasksEnabled =
+    bundle.tasksEnabled ?? bundle.resolvedAgent.config?.experimental?.tasks === true;
   ctx.set(TasksEnabledKey, tasksEnabled);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
   const taskUpdatesEnabled =
@@ -312,7 +313,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       ...derivePendingState(rekeyed),
       serializedContext: nextSerializedContext,
       sessionState: nextState,
-      tasksEnabled,
     };
   }
 
@@ -639,7 +639,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           isError: stepResult.settledTurn.isError,
           usage: delta,
         },
-        tasksEnabled,
       };
     }
 
@@ -650,7 +649,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       ...sleepTransition,
       serializedContext: nextSerializedContext,
       sessionState: nextState,
-      tasksEnabled,
     };
   }
 

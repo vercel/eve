@@ -28,6 +28,13 @@ const ALL_COMMANDS: readonly TaskCommand[] = [
   { data: { answer: 42 }, kind: "complete" },
   { data: { message: "boom" }, kind: "fail" },
   { data: { message: "unindexed" }, kind: "reject-dispatch" },
+  {
+    callId: "call-1",
+    hookToken: "run-hook",
+    kind: "bind-relay",
+    runId: "relay-run",
+    toolName: "research",
+  },
   { kind: "cancel" },
   { kind: "require-authorization", requestId: "auth-1" },
   { inputRequests: [{ question: "which?" }], kind: "require-input" },
@@ -36,6 +43,37 @@ const ALL_COMMANDS: readonly TaskCommand[] = [
 ];
 
 describe("applyTaskTransition", () => {
+  it("binds one replay-stable workflow relay", () => {
+    const working = createView("working");
+    const command = {
+      callId: "call-1",
+      hookToken: "run-hook",
+      kind: "bind-relay" as const,
+      runId: "relay-run",
+      toolName: "research",
+    };
+
+    const bound = applyTaskTransition(working, command);
+
+    expect(bound).toMatchObject({
+      action: "accepted",
+      view: {
+        executor: {
+          binding: {
+            kind: "subagent-relay",
+            data: {
+              callId: command.callId,
+              hookToken: command.hookToken,
+              runId: command.runId,
+              toolName: command.toolName,
+            },
+          },
+        },
+      },
+    });
+    expect(applyTaskTransition(bound.view, command).action).toBe("noop");
+  });
+
   it("binds an opaque executor binding idempotently", () => {
     const command = {
       executor: { data: { operationId: "operation-1" }, kind: "export" },
@@ -300,7 +338,7 @@ describe("applyTaskTransition", () => {
   it.each(TERMINAL_STATUSES)("keeps %s final against every lifecycle command", (status) => {
     const view = createView(status);
     for (const command of ALL_COMMANDS) {
-      if (command.kind === "bind") continue;
+      if (command.kind === "bind" || command.kind === "bind-relay") continue;
       if (command.kind === "cancel" && status === "cancelled") continue;
       const result = applyTaskTransition(view, command);
       expect(result.action).toBe("rejected");
@@ -358,6 +396,36 @@ describe("applyTaskTransition", () => {
     expect(result).toEqual({
       action: "accepted",
       view: { ...cancelled.view, executor: { lifecycle: "terminal" }, usage },
+    });
+  });
+
+  it("settles the relay release barrier on forced cancellation", () => {
+    const working = createView("working", {
+      executor: {
+        binding: {
+          data: {
+            callId: "call-1",
+            hookToken: "relay-hook",
+            runId: "relay-run",
+            toolName: "research",
+          },
+          kind: "subagent-relay",
+        },
+      },
+    });
+    const cancelled = applyTaskTransition(working, { kind: "cancel" });
+    if (cancelled.action !== "accepted") throw new Error("Expected cancellation to commit.");
+
+    const settled = applyTaskTransition(cancelled.view, { kind: "settle-executor" });
+
+    expect(settled).toMatchObject({
+      action: "accepted",
+      view: {
+        executor: {
+          binding: { data: { released: true }, kind: "subagent-relay" },
+          lifecycle: "terminal",
+        },
+      },
     });
   });
 });

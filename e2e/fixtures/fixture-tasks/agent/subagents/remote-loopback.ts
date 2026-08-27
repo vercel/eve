@@ -1,9 +1,10 @@
-import { defineDynamic, defineRemoteAgent } from "eve";
+import { defineDynamic, defineRemoteSubagent } from "eve";
 
 export default defineDynamic({
   events: {
     "session.started": () =>
-      defineRemoteAgent({
+      defineRemoteSubagent({
+        background: true,
         description: "Loopback remote child for deterministic task HITL coverage.",
         url: () =>
           process.env.VERCEL_URL !== undefined && process.env.VERCEL_URL !== ""

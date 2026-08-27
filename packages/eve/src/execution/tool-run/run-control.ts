@@ -4,8 +4,9 @@ import { isRunControlMessage, type RunControlMessage } from "#execution/tool-run
 
 /**
  * A run's control surface: the hook that is both its identity claim and the
- * inbox its owner cancels it on, a durable `AbortController` a `cancel` message
- * trips, and a `cancelled` promise the body's waits race so the durable read is
+ * inbox its owner controls, a durable `AbortController` a `cancel` message
+ * trips, a release barrier for subagent relay adoption, and a `cancelled`
+ * promise the body's waits race so the durable read is
  * actually driven. Racing is what makes cancellation observable — an unawaited
  * hook read is not scheduled under replay — so every eve-provided wait races
  * `cancelled`, and the signal is there for steps and manual races.
@@ -15,6 +16,8 @@ export interface RunControlInbox {
   readonly signal: AbortSignal;
   /** Rejects with {@link RunCancelledError} when a cancel message arrives; never resolves. */
   readonly cancelled: Promise<never>;
+  /** Resolves once the owner durably adopts this run's coordinates. */
+  readonly released: Promise<void>;
   /** The cancel reason once aborted, for the run's `cancelled` outcome. */
   reason(): string | undefined;
 }
@@ -31,11 +34,19 @@ export function openRunControlInbox(hookToken: string): RunControlInbox {
   const iterator = hook[Symbol.asyncIterator]();
   const controller = new AbortController();
   let cancelReason: string | undefined;
-
-  const cancelled = consumeCancel(iterator, (reason) => {
-    cancelReason = reason;
-    controller.abort(new RunCancelledError(reason));
+  let release: (() => void) | undefined;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
   });
+
+  const cancelled = consumeControl(
+    iterator,
+    (reason) => {
+      cancelReason = reason;
+      controller.abort(new RunCancelledError(reason));
+    },
+    () => release?.(),
+  );
   // Racing drives the read; a lone reference must not surface as unhandled.
   cancelled.catch(() => {});
 
@@ -43,19 +54,20 @@ export function openRunControlInbox(hookToken: string): RunControlInbox {
     cancelled,
     hook,
     reason: () => cancelReason,
+    released,
     signal: controller.signal,
   };
 }
 
 /**
- * Reads the control inbox until a cancel message, aborting in the read
- * continuation and then rejecting so a racing wait throws. A non-cancel or
- * malformed message is skipped; end-of-stream parks forever so the race is
- * simply never won.
+ * Reads the control inbox, resolving owner release without stopping the read,
+ * or aborting and rejecting when cancellation arrives. Malformed messages are
+ * skipped; end-of-stream parks forever so the cancellation race is never won.
  */
-async function consumeCancel(
+async function consumeControl(
   iterator: AsyncIterator<RunControlMessage>,
   onCancel: (reason: string) => void,
+  onRelease: () => void,
 ): Promise<never> {
   while (true) {
     let next: IteratorResult<RunControlMessage>;
@@ -66,6 +78,10 @@ async function consumeCancel(
     }
     if (next.done === true) return await new Promise<never>(() => {});
     if (!isRunControlMessage(next.value)) continue;
+    if (next.value.kind === "release") {
+      onRelease();
+      continue;
+    }
     onCancel(next.value.reason);
     throw new RunCancelledError(next.value.reason);
   }

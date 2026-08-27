@@ -17,6 +17,7 @@ export interface ToolRunRecord {
   readonly hookToken: string;
   readonly runId: string;
   readonly toolName: string;
+  readonly resultKind?: "subagent" | "tool";
 }
 
 /**
@@ -69,6 +70,15 @@ export function isInboxToolResultFromRecordedRun(
 ): boolean {
   const record = findToolRun(state, result.callId);
   return record !== undefined && record.toolName === result.toolName;
+}
+
+/** A child result reported through a shared subagent execute run. */
+export function isInboxSubagentResultFromRecordedRun(
+  state: SessionStateMap | undefined,
+  result: { readonly callId: string; readonly subagentName: string },
+): boolean {
+  const record = findToolRun(state, result.callId);
+  return record?.resultKind === "subagent" && record.toolName === result.subagentName;
 }
 
 function writeToolRuns<T extends { readonly state?: SessionStateMap }>(

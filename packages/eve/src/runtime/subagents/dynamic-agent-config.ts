@@ -25,13 +25,39 @@ export interface DynamicSubagentAgentConfig {
 
 export type DynamicSubagentModelReference = RuntimeModelReference;
 
+export interface DynamicLocalSubagentSelection {
+  readonly config: DynamicSubagentAgentConfig;
+  readonly execution?: "background" | "blocking";
+}
+
+export async function normalizeDynamicLocalSubagentSelection(
+  input: Parameters<typeof normalizeDynamicSubagentAgentConfig>[0],
+): Promise<DynamicLocalSubagentSelection> {
+  const value = input.value;
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    (value as { readonly kind?: unknown }).kind !== "eve:local-subagent"
+  ) {
+    return { config: await normalizeDynamicSubagentAgentConfig(input) };
+  }
+  const { background, kind: _kind, ...definition } = value as Record<string, unknown>;
+  if (background !== undefined && typeof background !== "boolean") {
+    throw new Error(`Dynamic subagent "${input.name}" must provide a boolean "background" field.`);
+  }
+  return {
+    config: await normalizeDynamicSubagentAgentConfig({ ...input, value: definition }),
+    execution: background === true ? "background" : "blocking",
+  };
+}
+
 export async function normalizeDynamicSubagentAgentConfig(input: {
   readonly catalog?: RuntimeModelCatalog;
   readonly name: string;
   readonly state: ContextAccessor;
   readonly value: unknown;
 }): Promise<DynamicSubagentAgentConfig> {
-  const message = `Dynamic subagent "${input.name}" must return defineAgent(...), defineRemoteAgent(...), or null.`;
+  const message = `Dynamic subagent "${input.name}" must return defineAgent(...), defineLocalSubagent(...), defineRemoteAgent(...), defineRemoteSubagent(...), or null.`;
   const definition = normalizeAgentDefinition(input.value, message);
 
   if (!definition.description) {

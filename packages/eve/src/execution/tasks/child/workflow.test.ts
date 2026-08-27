@@ -12,6 +12,7 @@ import {
   wakeTaskUpdateParentStep,
 } from "#execution/tasks/child/steps.js";
 import { taskRunWorkflow } from "#execution/tasks/child/workflow.js";
+import { releaseToolRunStep } from "#execution/tool-run/start.js";
 import type {
   TaskCommandHookPayload,
   TaskInboundAnswerInput,
@@ -19,11 +20,18 @@ import type {
   TaskView,
 } from "#tasks/types.js";
 
+const runReports = vi.hoisted(() => [] as unknown[]);
+
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: vi.fn(),
   defineHook: () => ({
     create: (options?: { readonly token?: string }) => ({
-      [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+      [Symbol.asyncIterator]: () => ({
+        next: () =>
+          options?.token?.endsWith(":report") === true && runReports.length > 0
+            ? Promise.resolve({ done: false, value: runReports.shift() })
+            : new Promise(() => {}),
+      }),
       dispose: async () => {},
       getConflict: async () => null,
       token: options?.token ?? "hook",
@@ -47,7 +55,10 @@ vi.mock("#execution/tasks/child/steps.js", () => ({
   wakeTaskUpdateParentStep: vi.fn(),
 }));
 
+vi.mock("#execution/tool-run/start.js", () => ({ releaseToolRunStep: vi.fn() }));
+
 afterEach(() => {
+  runReports.length = 0;
   vi.resetAllMocks();
 });
 
@@ -299,6 +310,90 @@ describe("taskRunWorkflow", () => {
     expect(appendedStatuses()).toEqual(["working", "completed"]);
     expect(wakeTaskParentStep).toHaveBeenCalledTimes(1);
     expect(disposeHook).toHaveBeenCalledTimes(4);
+  });
+
+  it("drains ordered relay events before releasing its terminal outcome", async () => {
+    const ZERO = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 };
+    const from = {
+      callId: "call-1",
+      input: {},
+      runId: "relay-run",
+      stepIndex: 0,
+      toolName: "research",
+      turnId: "turn-parent",
+    };
+    const address = {
+      continuationToken: "child-token",
+      kind: "agent/local" as const,
+      sessionId: "child-session",
+    };
+    const identity = {
+      id: "ag_research:abcdef123456",
+      name: "research",
+      nodeId: "subagents/research",
+    };
+    const update = {
+      callId: "call-1",
+      kind: "task-update" as const,
+      message: "Final progress update.",
+      updateEpoch: "child-turn",
+      updateIndex: 0,
+    };
+    mockCommandHook([
+      {
+        command: {
+          callId: "call-1",
+          hookToken: "relay-hook",
+          kind: "bind-relay",
+          runId: "relay-run",
+          toolName: "research",
+        },
+        kind: "task-command",
+      },
+      {
+        command: {
+          executor: {
+            data: { address, identity },
+            kind: "subagent",
+          },
+          kind: "bind",
+        },
+        kind: "task-command",
+      },
+      { command: { kind: "ready" }, kind: "task-command" },
+    ]);
+    runReports.push(
+      { from, kind: "subagent-event", event: update },
+      {
+        from,
+        kind: "subagent-outcome",
+        result: {
+          callId: "call-1",
+          kind: "subagent-result",
+          origin: "child",
+          outcome: {
+            kind: "parked",
+            result: { kind: "succeeded", output: "done" },
+            usageDelta: ZERO,
+          },
+          output: "done",
+          subagentName: "research",
+        },
+      },
+    );
+
+    await taskRunWorkflow({
+      taskInboxToken: "task-token",
+      initialView: createWorkingView(),
+      parentContinuationToken: "parent-session-token",
+    });
+
+    expect(wakeTaskUpdateParentStep).toHaveBeenCalledWith(expect.objectContaining({ update }));
+    expect(releaseToolRunStep).toHaveBeenCalledWith("relay-hook");
+    expect(appendedStatuses()).toEqual(["working", "working", "working", "completed", "completed"]);
+    expect(vi.mocked(wakeTaskUpdateParentStep).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(releaseToolRunStep).mock.invocationCallOrder[0] ?? 0,
+    );
   });
 
   it("silently terminates a dispatch rejected before parent indexing", async () => {

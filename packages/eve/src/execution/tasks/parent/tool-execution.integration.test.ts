@@ -144,12 +144,14 @@ describe("background subagent tool execution", () => {
       );
       const localTool = createBackgroundSubagentHarnessDefinition({
         description: "General-purpose agent",
+        execution: "background",
         kind: "subagent",
         name: "agent",
         nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
       });
       const remoteTool = createBackgroundSubagentHarnessDefinition({
         description: remoteNode.description,
+        execution: "background",
         kind: "remote",
         name: remoteNode.name,
         nodeId: remoteNode.nodeId,
@@ -303,7 +305,7 @@ describe("background subagent tool execution", () => {
           remoteView === undefined ? undefined : readSubagentTaskMetadata(remoteView),
         ).toMatchObject({ mode: "remote", name: "reviewer" });
         expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
-          callback: { token: remoteTask?.taskInboxToken },
+          callback: { token: expect.stringMatching(/^task:.*:subagent:/u) },
         });
       } finally {
         await Promise.all(

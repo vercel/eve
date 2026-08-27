@@ -14,6 +14,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { buildToolSet } from "#harness/tools.js";
 import type { HarnessSession } from "#harness/types.js";
 import {
+  AGENT_HANDLES_STATE_KEY,
   getAgentHandleStore,
   type AgentAddress,
   type AgentIdentity,
@@ -22,9 +23,11 @@ import { defineTool, type TaskExec, type ToolContext } from "#tools/definition.j
 import { toInputSchema } from "#tools/schema.js";
 import { getSessionTaskIndex } from "#tasks/session-index.js";
 import { createSubagentExecutorBinding } from "#tasks/types.js";
+import { bindTaskExecToolRun, recordTaskExecAgentRemoval } from "#tools/task.js";
 
 const mocks = vi.hoisted(() => ({
   beginBackgroundTask: vi.fn(),
+  cancelToolRun: vi.fn(),
   propagateSubagentExecutorCancel: vi.fn(),
   rejectDelegatedDispatch: vi.fn(),
   sendTaskCommand: vi.fn(),
@@ -45,6 +48,7 @@ vi.mock("#execution/tasks/parent/run-parent.js", async (importOriginal) => ({
   sendTaskCommand: mocks.sendTaskCommand,
   sendTaskInboundPayload: mocks.sendTaskInboundPayload,
 }));
+vi.mock("#execution/tool-run/cancel.js", () => ({ cancelToolRun: mocks.cancelToolRun }));
 
 const usage = {
   inputTokens: { cacheRead: undefined, cacheWrite: undefined, noCache: 1, total: 1 },
@@ -80,7 +84,13 @@ function createSubagentTool(): HarnessToolDefinition {
     description: "Spawn a research subagent.",
     execution: "background",
     inputSchema: z.strictObject({}),
-    execute(_input: Record<string, never>, _ctx: ToolContext, background: TaskExec) {
+    async execute(_input: Record<string, never>, ctx: ToolContext, background: TaskExec) {
+      await bindTaskExecToolRun(background, {
+        callId: ctx.callId,
+        hookToken: "relay-hook",
+        runId: "relay-run",
+        toolName: "research",
+      });
       return background.delegated({
         executor: createSubagentExecutorBinding({
           address: childAddress,
@@ -126,6 +136,7 @@ describe("background tool execution", () => {
     mocks.propagateSubagentExecutorCancel.mockReset();
     mocks.rejectDelegatedDispatch.mockReset();
     mocks.sendTaskCommand.mockReset();
+    mocks.cancelToolRun.mockReset();
     mocks.sendTaskInboundPayload.mockReset();
   });
 
@@ -526,6 +537,197 @@ describe("background tool execution", () => {
     expect(mocks.propagateSubagentExecutorCancel).not.toHaveBeenCalled();
   });
 
+  it("binds the relay before committing a delegated subagent executor", async () => {
+    const task = {
+      createdByStepIndex: 0,
+      createdByTurnId: "turn-1",
+      metadata: { kind: "tool", name: "research" },
+      taskId: "task-research",
+      taskInboxToken: "inbox-research",
+      taskRunId: "run-research",
+    } as const;
+    mocks.beginBackgroundTask.mockResolvedValue(task);
+    mocks.sendTaskCommand.mockResolvedValue("delivered");
+    const definition = defineTool({
+      description: "Bind and delegate a researcher.",
+      execution: "background",
+      inputSchema: z.strictObject({}),
+      async execute(_input, _ctx, taskExec) {
+        await bindTaskExecToolRun(taskExec, {
+          callId: "call-research",
+          hookToken: "relay-hook",
+          runId: "relay-run",
+          toolName: "research",
+        });
+        return taskExec.delegated({
+          executor: createSubagentExecutorBinding({
+            address: childAddress,
+            identity: childIdentity,
+          }),
+          receipt: { agentId: childIdentity.id },
+        });
+      },
+    });
+    const tool = {
+      description: definition.description,
+      execute: createToolExecuteWithAuth({
+        execute: definition.execute,
+        execution: definition.execution,
+        scope: "research",
+      }),
+      execution: definition.execution,
+      inputSchema: toInputSchema(definition.inputSchema),
+      name: "research",
+    } satisfies HarnessToolDefinition;
+    const session = createParentSession();
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(SessionIdKey, session.sessionId);
+
+    await runStep(
+      ctx,
+      session,
+      async (current) => {
+        await generateText({
+          model: subagentToolCallModel(),
+          prompt: "Spawn the researcher.",
+          tools: buildToolSet({ tools: new Map([[tool.name, tool]]) }),
+        });
+        return { next: null, session: current };
+      },
+      [backgroundToolExecutionProvider],
+    );
+
+    const commands = mocks.sendTaskCommand.mock.calls.map((call) => call[0].command.kind);
+    expect(commands).toEqual(expect.arrayContaining(["bind-relay", "bind"]));
+    expect(commands.indexOf("bind-relay")).toBeLessThan(commands.indexOf("bind"));
+  });
+
+  it("composes executor-owned address cleanup with the step session", async () => {
+    const task = {
+      createdByStepIndex: 0,
+      createdByTurnId: "turn-1",
+      metadata: { kind: "tool", name: "research" },
+      taskId: "task-research",
+      taskInboxToken: "inbox-research",
+      taskRunId: "run-research",
+    } as const;
+    mocks.beginBackgroundTask.mockResolvedValue(task);
+    mocks.sendTaskCommand.mockResolvedValue("delivered");
+    const session = createParentSession();
+    const addressed = {
+      ...session,
+      state: {
+        ...session.state,
+        [AGENT_HANDLES_STATE_KEY]: {
+          handles: [{ address: childAddress, identity: childIdentity, phase: "addressed" }],
+        },
+      },
+    } as HarnessSession;
+    const definition = defineTool({
+      description: "Fail after cleaning a stale address.",
+      execution: "background",
+      inputSchema: z.strictObject({}),
+      async execute(_input, _ctx, taskExec) {
+        recordTaskExecAgentRemoval(taskExec, childIdentity.id);
+        throw new Error("admission failed");
+      },
+    });
+    const tool = {
+      description: definition.description,
+      execute: createToolExecuteWithAuth({
+        execute: definition.execute,
+        execution: definition.execution,
+        scope: "research",
+      }),
+      execution: definition.execution,
+      inputSchema: toInputSchema(definition.inputSchema),
+      name: "research",
+    } satisfies HarnessToolDefinition;
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(SessionIdKey, session.sessionId);
+
+    const result = await runStep(
+      ctx,
+      addressed,
+      async (current) => {
+        await generateText({
+          model: subagentToolCallModel(),
+          prompt: "Spawn the researcher.",
+          tools: buildToolSet({ tools: new Map([[tool.name, tool]]) }),
+        });
+        return { next: null, session: current };
+      },
+      [backgroundToolExecutionProvider],
+    );
+
+    expect(getAgentHandleStore(result.session.state)?.handles).toEqual([]);
+  });
+
+  it("does not remove an address when the executor records no cleanup", async () => {
+    const task = {
+      createdByStepIndex: 0,
+      createdByTurnId: "turn-1",
+      metadata: { kind: "tool", name: "research" },
+      taskId: "task-research",
+      taskInboxToken: "inbox-research",
+      taskRunId: "run-research",
+    } as const;
+    mocks.beginBackgroundTask.mockResolvedValue(task);
+    mocks.sendTaskCommand.mockResolvedValue("delivered");
+    const session = createParentSession();
+    const addressed = {
+      ...session,
+      state: {
+        ...session.state,
+        [AGENT_HANDLES_STATE_KEY]: {
+          handles: [{ address: childAddress, identity: childIdentity, phase: "addressed" }],
+        },
+      },
+    } as HarnessSession;
+    const definition = defineTool({
+      description: "Fail without removing a retryable address.",
+      execution: "background",
+      inputSchema: z.strictObject({}),
+      async execute() {
+        throw new Error("retryable admission failure");
+      },
+    });
+    const tool = {
+      description: definition.description,
+      execute: createToolExecuteWithAuth({
+        execute: definition.execute,
+        execution: definition.execution,
+        scope: "research",
+      }),
+      execution: definition.execution,
+      inputSchema: toInputSchema(definition.inputSchema),
+      name: "research",
+    } satisfies HarnessToolDefinition;
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(SessionIdKey, session.sessionId);
+
+    const result = await runStep(
+      ctx,
+      addressed,
+      async (current) => {
+        await generateText({
+          model: subagentToolCallModel(),
+          prompt: "Spawn the researcher.",
+          tools: buildToolSet({ tools: new Map([[tool.name, tool]]) }),
+        });
+        return { next: null, session: current };
+      },
+      [backgroundToolExecutionProvider],
+    );
+
+    expect(getAgentHandleStore(result.session.state)?.handles).toEqual([
+      { address: childAddress, identity: childIdentity, phase: "addressed" },
+    ]);
+  });
+
   it("rejects the task first and then cancels the dispatched subagent child when the parent step fails", async () => {
     const task = {
       createdByStepIndex: 0,
@@ -578,6 +780,14 @@ describe("background tool execution", () => {
     // child result then bounces instead of reviving the rejected task.
     expect(mocks.rejectDelegatedDispatch.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.propagateSubagentExecutorCancel.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(mocks.cancelToolRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        callId: "call-research",
+        hookToken: "relay-hook",
+        runId: "relay-run",
+        toolName: "research",
+      }),
     );
     expect(getSessionTaskIndex(session.state)).toEqual([]);
   });

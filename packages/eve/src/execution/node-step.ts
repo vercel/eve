@@ -193,7 +193,8 @@ export function createNodeHarnessTools(input: {
   readonly node: ResolvedRuntimeAgentNode;
 }): HarnessToolMap {
   const tools = new Map<string, HarnessToolDefinition>();
-  const tasksEnabled = input.node.agent.config?.experimental?.tasks === true;
+  const tasksEnabled =
+    input.node.tasksEnabled ?? input.node.agent.config?.experimental?.tasks === true;
 
   for (const tool of input.node.turnAgent.tools) {
     const definition = resolveHarnessToolDefinition({
@@ -216,7 +217,8 @@ function resolveHarnessToolDefinition(input: {
   readonly tool: PreparedRuntimeTool;
 }): HarnessToolDefinition | null {
   if (input.tool.kind === "subagent" || input.tool.kind === "remote") {
-    return input.tasksEnabled
+    return (input.tool.execution ?? (input.tasksEnabled ? "background" : "blocking")) ===
+      "background"
       ? createBackgroundSubagentHarnessDefinition(input.tool)
       : createHarnessDelegationToolDefinition(input.tool);
   }

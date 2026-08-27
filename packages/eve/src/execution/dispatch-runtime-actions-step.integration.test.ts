@@ -8,7 +8,6 @@ import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { prepareAgentActionDispatch } from "#execution/dispatch-runtime-actions-shared.js";
-import { dispatchTaskStep } from "#execution/tasks/parent/dispatch-task-step.js";
 import {
   resolvePendingRuntimeActions,
   setPendingRuntimeActionBatch,
@@ -21,9 +20,7 @@ import {
   type AgentHandle,
 } from "#harness/handles/store.js";
 import type { HarnessSession } from "#harness/types.js";
-import { getSessionTaskIndex } from "#tasks/session-index.js";
-import { recordSessionTask } from "#tasks/session-index.js";
-import * as taskRunControl from "#execution/tasks/parent/run-parent.js";
+import { getToolRuns } from "#harness/tool-runs.js";
 import {
   AuthKey,
   CapabilitiesKey,
@@ -53,6 +50,7 @@ const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
   startRemoteAgentSession: vi.fn(),
   startWorkflowPreferLatest: vi.fn(),
+  waitForCommandHookOwner: vi.fn(),
 }));
 
 vi.mock("#context/serialize.js", () => ({
@@ -81,8 +79,12 @@ vi.mock("#execution/workflow-runtime.js", () => ({
   }),
   workflowEntryReference: { workflowId: "workflow//eve//workflowEntry" },
   startWorkflowPreferLatest: mocks.startWorkflowPreferLatest,
+  subagentToolExecuteWorkflowReference: {
+    workflowId: "workflow//eve//subagentToolExecuteWorkflow",
+  },
   taskRunWorkflowReference: { workflowId: "workflow//eve//taskRun" },
-  waitForCommandHookOwner: vi.fn().mockResolvedValue({ runId: "task-run-1" }),
+  toolRunWorkflowReference: { workflowId: "workflow//eve//toolRun" },
+  waitForCommandHookOwner: mocks.waitForCommandHookOwner,
 }));
 
 // Only the network calls are mocked; error classification and registry
@@ -170,6 +172,7 @@ beforeEach(() => {
   });
   mocks.startWorkflowPreferLatest.mockResolvedValue({ runId: "task-run-1" });
   mocks.resumeHook.mockResolvedValue({ runId: "task-run-1" });
+  mocks.waitForCommandHookOwner.mockResolvedValue({ runId: "task-run-1" });
   mocks.hydrateDurableSession.mockImplementation(({ durable }) => durable);
   mocks.createDurableSessionState.mockImplementation(({ session }) => ({
     ...BASE_STATE,
@@ -303,6 +306,9 @@ describe("dispatchRuntimeActionsStep child starts", () => {
         },
       ],
     });
+    expect(getToolRuns(readResultSessionState(result, session))).toMatchObject([
+      { callId: "call-1", resultKind: "subagent", toolName: "research" },
+    ]);
     expect(writes).toHaveLength(1);
   });
 
@@ -344,34 +350,6 @@ describe("dispatchRuntimeActionsStep child starts", () => {
             sandboxSessionId: "parent-session",
           }),
         }),
-      }),
-    );
-  });
-
-  it("opens a shared parent sandbox for a background-task child", async () => {
-    const session = createStartSession({ kind: "local" });
-    const { backend, create } = createSandboxBackend();
-    installSandboxContext({
-      child: { inheritsParent: true, name: "research", nodeId: "subagents/research" },
-      registry: createSandboxRegistry(backend),
-      session,
-    });
-    vi.spyOn(taskRunControl, "sendTaskCommandToOwner").mockResolvedValue({ runId: "task-run-1" });
-
-    await dispatchTaskStep({
-      parentContinuationToken: "turn-inbox",
-      parentWritable: createWritable(),
-      serializedContext: {},
-      sessionState: BASE_STATE,
-    });
-
-    expect(create).toHaveBeenCalledTimes(1);
-    expect(mocks.createSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        adapter: expect.objectContaining({
-          state: expect.objectContaining({ sandboxSessionId: "parent-session" }),
-        }),
-        mode: "conversation",
       }),
     );
   });
@@ -425,87 +403,6 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     expect(mocks.createSession).not.toHaveBeenCalled();
   });
 
-  it("records a tasks-mode child as an address and derives task identity separately", async () => {
-    const session = createStartSession({ kind: "local" });
-    installContext(
-      session,
-      { definition: { description: "Research", kind: "subagent" }, nodeId: "subagents/research" },
-      true,
-    );
-    vi.spyOn(taskRunControl, "sendTaskCommandToOwner").mockResolvedValue({
-      runId: "task-run-1",
-    });
-
-    // Tasks-mode dispatch routes through dispatchTaskStep; the turn workflow
-    // never sends `experimental.tasks` agents to dispatchRuntimeActionsStep.
-    const result = await dispatchTaskStep({
-      parentContinuationToken: "turn-inbox",
-      parentWritable: createWritable(),
-      serializedContext: {},
-      sessionState: BASE_STATE,
-    });
-    const state = readResultSessionState(result, session);
-    const agentId = deriveAgentId("research", startOperationId);
-
-    expect(result.results[0]).toMatchObject({
-      origin: "child",
-      output: { agentId, status: "working" },
-    });
-    expect(getAgentHandleStore(state)).toEqual({
-      handles: [
-        {
-          address: {
-            continuationToken: "subagent:parent-session:call-1",
-            kind: "agent/local",
-            sessionId: CHILD_SESSION_ID,
-          },
-          identity: {
-            id: agentId,
-            name: "research",
-            nodeId: "subagents/research",
-          },
-          phase: "addressed",
-        },
-      ],
-    });
-    expect(getSessionTaskIndex(state)).toEqual([
-      expect.objectContaining({
-        metadata: expect.objectContaining({ agentId }),
-        taskRunId: "task-run-1",
-      }),
-    ]);
-  });
-
-  it("silently rejects a tasks-mode start that failed before index admission", async () => {
-    const session = createStartSession({ kind: "local" });
-    installContext(
-      session,
-      { definition: { description: "Research", kind: "subagent" }, nodeId: "subagents/research" },
-      true,
-    );
-    mocks.createSession.mockRejectedValue(new Error("child start failed"));
-    vi.spyOn(taskRunControl, "sendTaskCommandToOwner").mockResolvedValue({ runId: "task-run-1" });
-
-    const result = await dispatchTaskStep({
-      parentContinuationToken: "turn-inbox",
-      parentWritable: createWritable(),
-      serializedContext: {},
-      sessionState: BASE_STATE,
-    });
-    const state = readResultSessionState(result, session);
-
-    expect(result.pendingTasks).toEqual([]);
-    expect(getSessionTaskIndex(state)).toEqual([]);
-    expect(result.results[0]).toMatchObject({
-      isError: true,
-      output: { code: "SUBAGENT_START_FAILED" },
-    });
-    expect(mocks.resumeHook).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ command: expect.objectContaining({ kind: "reject-dispatch" }) }),
-    );
-  });
-
   it("adopts the child a replayed start already created instead of failing it", async () => {
     const session = createStartSession({ kind: "local" });
     installContext(session, {
@@ -550,10 +447,17 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       sessionState: BASE_STATE,
     });
 
-    expect(result.results[0]).toMatchObject({
-      isError: true,
-      output: { code: "SUBAGENT_START_FAILED" },
-    });
+    expect(result.results).toEqual([]);
+    expect(mocks.resumeHook).toHaveBeenCalledWith(
+      expect.stringContaining(":subagent:"),
+      expect.objectContaining({
+        results: [
+          expect.objectContaining({
+            output: expect.objectContaining({ code: "SUBAGENT_START_FAILED" }),
+          }),
+        ],
+      }),
+    );
     // The store was written (prepare committed ownership before the effect)
     // and the dead start was rejected, so no handle survives.
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
@@ -674,10 +578,17 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       sessionState: BASE_STATE,
     });
 
-    expect(result.results[0]).toMatchObject({
-      isError: true,
-      output: { code: "REMOTE_AGENT_START_FAILED" },
-    });
+    expect(result.results).toEqual([]);
+    expect(mocks.resumeHook).toHaveBeenCalledWith(
+      expect.stringContaining(":subagent:"),
+      expect.objectContaining({
+        results: [
+          expect.objectContaining({
+            output: expect.objectContaining({ code: "REMOTE_AGENT_START_FAILED" }),
+          }),
+        ],
+      }),
+    );
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
       handles: [],
     });
@@ -760,88 +671,6 @@ describe("dispatchRuntimeActionsStep child starts", () => {
 });
 
 describe("dispatchRuntimeActionsStep agent delivery", () => {
-  it("rejects a tasks-mode continuation while the addressed agent has active work", async () => {
-    const addressedHandle: AgentHandle = {
-      address: LOCAL_PARKED_HANDLE.address,
-      identity: LOCAL_PARKED_HANDLE.identity,
-      phase: "addressed",
-    };
-    let session = createPendingSession({
-      handle: addressedHandle,
-      agentId: addressedHandle.identity.id,
-    });
-    session = recordSessionTask(session, {
-      taskInboxToken: "task-token",
-      createdByTurnId: "turn-previous",
-      metadata: {
-        agentId: addressedHandle.identity.id,
-        kind: "subagent",
-        mode: "local",
-        name: addressedHandle.identity.name,
-      },
-      operationId: "operation-active",
-      taskId: "task_active",
-      taskRunId: "task-run-active",
-    });
-    installContext(session, undefined, true);
-    vi.spyOn(taskRunControl, "readLatestTaskView").mockResolvedValue({
-      metadata: {
-        agentId: addressedHandle.identity.id,
-        kind: "subagent",
-        mode: "local",
-        name: addressedHandle.identity.name,
-      },
-      status: "working",
-      taskId: "task_active",
-    });
-
-    const result = await dispatchTaskStep({
-      parentContinuationToken: "turn-inbox",
-      parentWritable: createWritable(),
-      serializedContext: {},
-      sessionState: BASE_STATE,
-    });
-
-    expect(result.results[0]).toMatchObject({
-      isError: true,
-      output: { code: "AGENT_BUSY", message: expect.stringContaining("task_active") },
-    });
-    expect(mocks.dispatchSession).not.toHaveBeenCalled();
-    expect(mocks.startWorkflowPreferLatest).not.toHaveBeenCalled();
-  });
-
-  it("passes the active turn principal to a tasks-mode continuation", async () => {
-    const addressedHandle: AgentHandle = {
-      address: LOCAL_PARKED_HANDLE.address,
-      identity: LOCAL_PARKED_HANDLE.identity,
-      phase: "addressed",
-    };
-    const session = createPendingSession({
-      handle: addressedHandle,
-      agentId: addressedHandle.identity.id,
-    });
-    installContext(session, undefined, true, TURN_AUTH);
-
-    const result = await dispatchTaskStep({
-      parentContinuationToken: "turn-inbox",
-      parentWritable: createWritable(),
-      serializedContext: {},
-      sessionState: BASE_STATE,
-    });
-
-    expect(mocks.dispatchSession).toHaveBeenCalledWith({
-      command: expect.objectContaining({
-        auth: TURN_AUTH,
-        kind: "send",
-      }),
-      sessionId: CHILD_SESSION_ID,
-    });
-    expect(result.results[0]).toMatchObject({
-      origin: "child",
-      output: { agentId: addressedHandle.identity.id, status: "working" },
-    });
-  });
-
   const continueOperationId = deriveAgentOperationId({
     callId: "call-1",
     parentSessionId: "parent-session",
@@ -868,8 +697,9 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
       command: {
         caller: {
           callId: "call-1",
-          replyTo: { kind: "hook", token: "turn-inbox" },
+          replyTo: { kind: "hook", token: expect.stringMatching(/^turn-inbox:subagent:/u) },
           subagentName: "research",
+          taskId: undefined,
         },
         kind: "send",
         auth: null,
@@ -966,12 +796,13 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
       sessionState: BASE_STATE,
     });
 
-    expect(result.results).toEqual([
+    expect(result.results).toEqual([]);
+    expect(mocks.resumeHook).toHaveBeenCalledWith(
+      expect.stringContaining(":subagent:"),
       expect.objectContaining({
-        isError: true,
-        output: expect.objectContaining({ code }),
+        results: [expect.objectContaining({ output: expect.objectContaining({ code }) })],
       }),
-    ]);
+    );
     expect(mocks.dispatchSession).not.toHaveBeenCalled();
     expect(mocks.continueRemoteAgentSession).not.toHaveBeenCalled();
     // Addressing mistakes and busy conflicts never touch the store.
@@ -995,10 +826,17 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
       sessionState: BASE_STATE,
     });
 
-    expect(result.results[0]).toMatchObject({
-      isError: true,
-      output: { code: "AGENT_UNREACHABLE" },
-    });
+    expect(result.results).toEqual([]);
+    expect(mocks.resumeHook).toHaveBeenCalledWith(
+      expect.stringContaining(":subagent:"),
+      expect.objectContaining({
+        results: [
+          expect.objectContaining({
+            output: expect.objectContaining({ code: "AGENT_UNREACHABLE" }),
+          }),
+        ],
+      }),
+    );
     expect(getAgentHandleStore(result.sessionState.snapshot?.session.state)).toEqual({
       handles: [],
     });
@@ -1035,16 +873,8 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
 
     expect(mocks.dispatchSession).toHaveBeenCalledTimes(1);
     expect(mocks.createSession).not.toHaveBeenCalled();
-    expect(result.results).toEqual([
-      expect.objectContaining({
-        isError: true,
-        output: expect.objectContaining({ code: "AGENT_UNREACHABLE" }),
-      }),
-      expect.objectContaining({
-        isError: true,
-        output: expect.objectContaining({ code: "AGENT_UNREACHABLE" }),
-      }),
-    ]);
+    expect(result.results).toEqual([]);
+    expect(mocks.resumeHook).toHaveBeenCalledTimes(2);
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
       handles: [],
     });
@@ -1089,10 +919,17 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
         sessionId: "remote-session-123456789012",
       }),
     );
-    expect(result.results[0]).toMatchObject({
-      isError: true,
-      output: { code: "AGENT_UNREACHABLE" },
-    });
+    expect(result.results).toEqual([]);
+    expect(mocks.resumeHook).toHaveBeenCalledWith(
+      expect.stringContaining(":subagent:"),
+      expect.objectContaining({
+        results: [
+          expect.objectContaining({
+            output: expect.objectContaining({ code: "AGENT_UNREACHABLE" }),
+          }),
+        ],
+      }),
+    );
     expect(getAgentHandleStore(result.sessionState.snapshot?.session.state)).toEqual({
       handles: [],
     });
@@ -1120,13 +957,20 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
     });
 
     expect(mocks.continueRemoteAgentSession).toHaveBeenCalledTimes(1);
-    expect(result.results[0]).toMatchObject({
-      isError: true,
-      output: {
-        code: "AGENT_UNREACHABLE",
-        message: expect.stringContaining("temporarily unreachable"),
-      },
-    });
+    expect(result.results).toEqual([]);
+    expect(mocks.resumeHook).toHaveBeenCalledWith(
+      expect.stringContaining(":subagent:"),
+      expect.objectContaining({
+        results: [
+          expect.objectContaining({
+            output: {
+              code: "AGENT_UNREACHABLE",
+              message: expect.stringContaining("temporarily unreachable"),
+            },
+          }),
+        ],
+      }),
+    );
     // The child may still be alive: the handle is restored to parked with
     // its pre-delivery status so the model can retry the same agentId.
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
@@ -1150,13 +994,20 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
     });
 
     expect(mocks.continueRemoteAgentSession).not.toHaveBeenCalled();
-    expect(result.results[0]).toMatchObject({
-      isError: true,
-      output: {
-        code: "AGENT_UNREACHABLE",
-        message: expect.stringContaining("no longer reachable"),
-      },
-    });
+    expect(result.results).toEqual([]);
+    expect(mocks.resumeHook).toHaveBeenCalledWith(
+      expect.stringContaining(":subagent:"),
+      expect.objectContaining({
+        results: [
+          expect.objectContaining({
+            output: {
+              code: "AGENT_UNREACHABLE",
+              message: expect.stringContaining("no longer reachable"),
+            },
+          }),
+        ],
+      }),
+    );
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
       handles: [],
     });
@@ -1251,17 +1102,20 @@ function createPendingSession(input: {
   readonly handle?: AgentHandle;
   readonly agentId: string | null;
 }): HarnessSession {
+  const remote =
+    input.handle?.phase !== "starting" && input.handle?.address.kind === "agent/remote";
+  const common = {
+    callId: "call-1",
+    description: "Research",
+    input: { agentId: input.agentId, message: "continue with raw input" },
+    name: "research",
+    nodeId: remote ? "remote/research" : "subagents/research",
+  };
   return setPendingRuntimeActionBatch({
     actions: [
-      {
-        callId: "call-1",
-        description: "Research",
-        input: { agentId: input.agentId, message: "continue with raw input" },
-        kind: "subagent-call",
-        name: "research",
-        nodeId: "subagents/research",
-        subagentName: "research",
-      },
+      remote
+        ? { ...common, kind: "remote-agent-call", remoteAgentName: "research" }
+        : { ...common, kind: "subagent-call", subagentName: "research" },
     ],
     event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
     responseMessages: [],

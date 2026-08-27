@@ -1,5 +1,5 @@
 import { e2eSubagentConfig } from "@eve-e2e/config";
-import { defineAgent } from "eve";
+import { defineLocalSubagent } from "eve";
 
 /**
  * Smoke-test fixture: a leaf subagent whose only purpose is to emit a
@@ -10,7 +10,8 @@ import { defineAgent } from "eve";
  * to call this subagent. The instructions (alongside this file) fix
  * the subagent's reply so the smoke test has a stable string to grep.
  */
-export default defineAgent({
+export default defineLocalSubagent({
+  background: false,
   description:
     "Smoke-test echo subagent. Call this whenever the user mentions the phrase 'echo marker subagent'. Pass any short text as the input; the subagent replies with a fixed marker token.",
   ...e2eSubagentConfig(),

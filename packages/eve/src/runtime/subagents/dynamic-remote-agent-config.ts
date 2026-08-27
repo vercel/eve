@@ -20,20 +20,54 @@ export interface DynamicRemoteAgentConfig {
   readonly url: string;
 }
 
+export interface DynamicRemoteSubagentSelection {
+  readonly config: DynamicRemoteAgentConfig;
+  readonly execution?: "background" | "blocking";
+}
+
+export async function normalizeDynamicRemoteSubagentSelection(
+  input: Parameters<typeof normalizeDynamicRemoteAgentConfig>[0],
+): Promise<DynamicRemoteSubagentSelection> {
+  const record = expectObjectRecord(input.value, `Invalid dynamic subagent "${input.name}".`);
+  if (record.kind !== "eve:remote-subagent") {
+    return { config: await normalizeDynamicRemoteAgentConfig(input) };
+  }
+  if (record.background !== undefined && typeof record.background !== "boolean") {
+    throw new Error(`Dynamic subagent "${input.name}" must provide a boolean "background" field.`);
+  }
+  return {
+    config: await normalizeDynamicRemoteAgentConfig(input),
+    execution: record.background === true ? "background" : "blocking",
+  };
+}
+
 export async function normalizeDynamicRemoteAgentConfig(input: {
   readonly name: string;
   readonly value: unknown;
 }): Promise<DynamicRemoteAgentConfig> {
-  const message = `Dynamic subagent "${input.name}" must return defineAgent(...), defineRemoteAgent(...), or null.`;
+  const message = `Dynamic subagent "${input.name}" must return defineAgent(...), defineLocalSubagent(...), defineRemoteAgent(...), defineRemoteSubagent(...), or null.`;
   const record = expectObjectRecord(input.value, message);
   expectOnlyKnownKeys(
     record,
-    ["auth", "description", "forwardPrincipal", "headers", "kind", "outputSchema", "path", "url"],
+    [
+      "auth",
+      "background",
+      "description",
+      "forwardPrincipal",
+      "headers",
+      "kind",
+      "outputSchema",
+      "path",
+      "url",
+    ],
     message,
   );
 
-  if (record.kind !== "remote") {
+  if (record.kind !== "remote" && record.kind !== "eve:remote-subagent") {
     throw new Error(message);
+  }
+  if (record.kind === "remote" && record.background !== undefined) {
+    throw new Error(`${message} The "background" field requires defineRemoteSubagent(...).`);
   }
 
   const url = await resolveUrl(record.url, message);

@@ -146,6 +146,7 @@ export function createCompiledRemoteAgent(input: {
     binding,
     description: input.definition.description,
     entryPath: input.source.entryPath,
+    execution: input.definition.execution,
     logicalPath,
     name: input.source.subagentId,
     nodeId: input.nodeId,

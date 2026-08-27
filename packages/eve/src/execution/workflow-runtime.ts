@@ -60,6 +60,7 @@ import { evaluateTracePolicy } from "#tracing/sampled-trace.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import {
   SESSION_TIMEOUT_WORKFLOW_NAME,
+  SUBAGENT_TOOL_EXECUTE_WORKFLOW_NAME,
   TASK_RUN_WORKFLOW_NAME,
   TOOL_RUN_WORKFLOW_NAME,
   TURN_WORKFLOW_NAME,
@@ -114,6 +115,11 @@ export const taskRunWorkflowReference = {
 /** Stable workflow reference for authored workflow tool runs. */
 export const toolRunWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${TOOL_RUN_WORKFLOW_NAME}`,
+};
+
+/** Shared framework-owned execute body for local and remote subagent tools. */
+export const subagentToolExecuteWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${SUBAGENT_TOOL_EXECUTE_WORKFLOW_NAME}`,
 };
 
 /**

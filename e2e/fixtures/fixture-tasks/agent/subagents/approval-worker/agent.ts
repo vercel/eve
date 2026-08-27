@@ -1,4 +1,4 @@
-import { defineAgent } from "eve";
+import { defineLocalSubagent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
@@ -57,7 +57,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   return "CHILD-GATES-COMPLETE";
 }
 
-export default defineAgent({
+export default defineLocalSubagent({
+  background: true,
   description: "Run deterministic approval gates in order.",
   model: mockModel(respond),
   modelContextWindowTokens: 1_000_000,

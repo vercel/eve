@@ -276,6 +276,7 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
 export type ResolvedRuntimeSubagentNode = Readonly<
   ModuleSourceRef &
     Node & {
+      execution?: "background" | "blocking";
       kind: "subagent";
       name: string;
     } & (
@@ -299,6 +300,7 @@ export type ResolvedRuntimeRemoteAgentNode = Readonly<
     Node & {
       auth?: OutboundAuthFn;
       description: string;
+      execution?: "background" | "blocking";
       forwardPrincipal?: boolean;
       headers?: HeadersValue;
       kind: "remote";

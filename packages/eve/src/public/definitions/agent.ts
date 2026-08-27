@@ -4,7 +4,10 @@ import type {
   PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
-import type { RemoteAgentDefinition } from "#public/definitions/remote-agent.js";
+import type {
+  RemoteAgentDefinition,
+  RemoteSubagentDefinition,
+} from "#public/definitions/remote-agent.js";
 import { defineDynamic as defineDynamicBase } from "#dynamic/definition.js";
 import type { DynamicEvents, DynamicSentinel } from "#dynamic/definition.js";
 
@@ -54,8 +57,32 @@ export type DynamicLocalSubagentDefinition = Extract<
   { readonly model: PublicAgentStaticModelDefinition }
 > & { readonly description: string };
 
+type WithLocalSubagentPolicy<T> = T extends AgentDefinition
+  ? T & {
+      /** Runs this subagent as a durable background task. @default false */
+      readonly background?: boolean;
+      readonly description: string;
+      readonly kind: "eve:local-subagent";
+    }
+  : never;
+
+type WithoutDefinitionKind<T> = T extends unknown ? Omit<T, "kind"> : never;
+
+export type LocalSubagentDefinition = WithLocalSubagentPolicy<AgentDefinition>;
+
+type DynamicLocalSubagentSelectionDefinition = WithLocalSubagentPolicy<
+  Extract<AgentDefinition, { readonly model: PublicAgentStaticModelDefinition }>
+>;
+
+/** Authored input accepted by {@link defineLocalSubagent}. */
+export type LocalSubagentDefinitionInput = WithoutDefinitionKind<LocalSubagentDefinition>;
+
 /** Definition a dynamic subagent resolver may select at runtime. */
-export type DynamicSubagentDefinition = DynamicLocalSubagentDefinition | RemoteAgentDefinition;
+export type DynamicSubagentDefinition =
+  | DynamicLocalSubagentDefinition
+  | DynamicLocalSubagentSelectionDefinition
+  | RemoteAgentDefinition
+  | RemoteSubagentDefinition;
 
 type DynamicEventHandler<TEvents extends DynamicEvents> = Extract<
   NonNullable<TEvents[keyof TEvents]>,
@@ -108,4 +135,14 @@ export function defineAgent<TAgent extends AgentDefinition>(
 ): DefinedAgent<TAgent>;
 export function defineAgent(definition: AgentDefinition): AgentDefinition {
   return definition;
+}
+
+/** Defines a local subagent and its parent-owned execution policy. */
+export function defineLocalSubagent<const TAgent extends LocalSubagentDefinitionInput>(
+  definition: ExactDefinition<TAgent, LocalSubagentDefinitionInput>,
+): TAgent & { readonly kind: "eve:local-subagent" };
+export function defineLocalSubagent(
+  definition: LocalSubagentDefinitionInput,
+): LocalSubagentDefinition {
+  return { ...definition, kind: "eve:local-subagent" } as LocalSubagentDefinition;
 }

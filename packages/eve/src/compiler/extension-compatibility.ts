@@ -34,8 +34,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   channel: { current: 10, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dropped: {} },
   schedule: { current: 4, supported: [1, 2, 3, 4], dropped: {} },
   subagent: {
-    current: 4,
-    supported: [3, 4],
+    current: 5,
+    supported: [3, 4, 5],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       2: "Persistent subagent sessions are now the default and the experimental opt-in was removed",

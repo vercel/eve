@@ -3,6 +3,13 @@ import type { SessionAuth } from "#context/keys.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ToolRunOwner } from "#tools/definition.js";
 
+/** Private descriptor consumed only by eve's shared subagent execute body. */
+export interface SubagentToolRunDescriptor {
+  /** Hook the child reports results and blocking events to. */
+  readonly replyToken: string;
+  /** Authored subagent name used to bind relay failures and events. */
+  readonly subagentName: string;
+}
 
 /** The session projection an authored workflow body observes as `ctx.session`. */
 export interface ToolRunSessionContext {
@@ -28,6 +35,8 @@ export interface ToolRunWorkflowInput {
   /** Harness step index of the model call that made this tool call. */
   readonly stepIndex: number;
   readonly toolName: string;
+  /** Present only for eve's framework-owned subagent execute workflow. */
+  readonly subagent?: SubagentToolRunDescriptor;
   /** Id of the authored `"use workflow"` function the driver registered for `execute`. */
   readonly workflowId: string;
 }

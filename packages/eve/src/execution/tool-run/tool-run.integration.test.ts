@@ -12,6 +12,7 @@ import {
   stepThenRaceWorkflow,
   failingDeployWorkflow,
   reportingDeployWorkflow,
+  subagentShapedDeployWorkflow,
 } from "#internal/testing/workflow-tool-fixtures.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getWorld, start } from "#internal/workflow/runtime.js";
@@ -165,6 +166,31 @@ describe("workflow tools", () => {
     });
 
     expect(output).toContain("deploy of api exploded");
+  });
+
+  it("returns subagent-shaped authored JSON as an ordinary tool result", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-subagent-shaped-json",
+      execute: subagentShapedDeployWorkflow,
+      toolName: "deploy_service",
+    });
+
+    const output = await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: 'Run deploy_service with service "api"' },
+          serializedContext: buildSerializedContext({
+            continuationToken: "schedule:workflow-tool-subagent-shaped-json",
+            mode: "task",
+          }),
+        },
+      ]);
+      const result = await run.returnValue;
+      return String(result.output);
+    });
+
+    expect(output).toContain('"kind":"subagent-result"');
+    expect(output).toContain('"output":"authored payload"');
   });
 
   it("routes a human answer to the waiting workflow body", async () => {

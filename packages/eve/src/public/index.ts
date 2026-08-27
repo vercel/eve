@@ -16,13 +16,19 @@ export {
   type DefinedAgent,
   type DynamicSubagentDefinition,
   type DynamicLocalSubagentDefinition,
+  type LocalSubagentDefinition,
+  type LocalSubagentDefinitionInput,
   defineAgent,
   defineDynamic,
+  defineLocalSubagent,
 } from "#public/definitions/agent.js";
 export type { DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";
 export {
   type RemoteAgentDefinition,
   type RemoteAgentDefinitionInput,
   type RemoteAgentUrl,
+  type RemoteSubagentDefinition,
+  type RemoteSubagentDefinitionInput,
   defineRemoteAgent,
+  defineRemoteSubagent,
 } from "#public/definitions/remote-agent.js";

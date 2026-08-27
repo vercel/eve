@@ -2,6 +2,7 @@ import { type AlsContext, loadContext } from "#context/container.js";
 import { HandleEventKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
 import {
+  createAgentContinuationMismatch,
   dispatchToTaskAgentAddress,
   type DispatchOutcome,
   type RuntimeSession,
@@ -22,6 +23,11 @@ import type { BackgroundTask } from "#execution/tasks/parent/delegate.js";
 import { CallbackBaseUrlKey } from "#harness/authorization.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import { defineTool, type TaskExec, type ToolContext } from "#tools/definition.js";
+import {
+  bindTaskExecToolRun,
+  readTaskExecLocalFanout,
+  recordTaskExecAgentRemoval,
+} from "#tools/task.js";
 import type {
   RuntimeRemoteAgentCallActionRequest,
   RuntimeSubagentCallActionRequest,
@@ -34,6 +40,13 @@ import { activeTurnId } from "#harness/active-turn-id.js";
 import { createSubagentCalledEvent } from "#protocol/message.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
+import {
+  createSubagentToolRunSession,
+  startSubagentToolRun,
+} from "#execution/tools/subagent/run.js";
+import { cancelToolRun } from "#execution/tool-run/cancel.js";
+import { propagateSubagentExecutorCancel } from "#execution/tasks/parent/dispatch.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
 type SubagentCallAction = RuntimeRemoteAgentCallActionRequest | RuntimeSubagentCallActionRequest;
 
@@ -42,6 +55,8 @@ interface SubagentDefinitionInput {
   readonly name: string;
   readonly nodeId: string;
 }
+
+type SubagentToolContext = Pick<ToolContext, "callId" | "session" | "toolName">;
 
 interface SubagentDispatchInput {
   readonly action: SubagentCallAction;
@@ -57,6 +72,7 @@ interface SubagentDispatchInput {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: ReturnType<typeof createDurableSessionState>;
   readonly task: BackgroundTask;
+  readonly toolRun: Awaited<ReturnType<typeof startSubagentToolRun>>;
 }
 
 interface SubagentDispatchResult {
@@ -68,7 +84,18 @@ interface SubagentDispatchResult {
   readonly session: RuntimeSession;
 }
 
-/** Transitional PR 1 classifier, replaced by declared dispatch effects in PR 2. */
+class SubagentDispatchError extends Error {
+  readonly agentId?: string;
+  readonly outcome: Extract<DispatchOutcome, { readonly kind: "error" }>;
+
+  constructor(outcome: Extract<DispatchOutcome, { readonly kind: "error" }>, agentId?: string) {
+    super(JSON.stringify(outcome.result.output));
+    this.agentId = agentId;
+    this.outcome = outcome;
+  }
+}
+
+/** Identifies local subagent calls when computing a background batch's fanout. */
 const localSubagentExecutors = new WeakSet<object>();
 const batchAgentClaims = new WeakMap<TaskExec["batch"], Map<string, string>>();
 const log = createLogger("runtime.framework-tools.subagent");
@@ -99,7 +126,7 @@ export async function executeSubagentTool(input: {
   readonly definition: SubagentDefinitionInput;
   readonly kind: "local" | "remote";
   readonly task: TaskExec;
-  readonly toolContext: ToolContext;
+  readonly toolContext: SubagentToolContext;
   readonly toolInput: unknown;
 }) {
   const ctx = loadContext();
@@ -124,55 +151,110 @@ export async function executeSubagentTool(input: {
           kind: "subagent-call",
           subagentName: input.definition.name,
         };
-  const dispatched = await dispatchSubagent({
+  const toolRun = await startSubagentToolRun({
     action,
-    batch,
-    callbackBaseUrl: ctx.get(CallbackBaseUrlKey),
-    ctx,
-    event: { ...emission, turnId: activeTurnId(emission) },
-    localFanoutSize: countLocalSubagentCalls(batch),
-    serializedContext: serializeContext(ctx),
-    sessionState: createDurableSessionState({ session }),
-    task,
+    ownerToken: task.taskInboxToken,
+    session: createSubagentToolRunSession({
+      auth: input.toolContext.session.auth,
+      id: session.sessionId,
+      parent: input.toolContext.session.parent,
+      sequence: input.toolContext.session.turn.sequence,
+      turnId: input.toolContext.session.turn.id,
+    }),
+    stepIndex: emission.stepIndex,
   });
-  // The executor binding is the durable copy of the child's addressed
-  // handle, read back from the post-dispatch session so it is exactly what
-  // the handle store recorded (fresh start) or already held (resume). It is
-  // deep-equal on replay — identity and address derive from the originating
-  // call — and it is the only channel the task layer needs: commit writes
-  // the address into the parent handle store, and compensation or a later
-  // turn cancels the child through it.
-  const record = findTaskAgentAddress(dispatched.session, dispatched.agentId);
-  if (record === undefined) {
-    throw new Error(
-      `Subagent dispatch for "${dispatched.agentId}" recorded no task agent address.`,
-    );
+  let dispatched: SubagentDispatchResult;
+  try {
+    await bindTaskExecToolRun(input.task, {
+      callId: action.callId,
+      hookToken: toolRun.hookToken,
+      runId: toolRun.runId,
+      toolName: input.definition.name,
+    });
+    if (!toolRun.replyReady) {
+      throw new Error(
+        `Subagent relay for "${input.definition.name}" could not open its child hook.`,
+      );
+    }
+    dispatched = await dispatchSubagent({
+      action,
+      batch,
+      callbackBaseUrl: ctx.get(CallbackBaseUrlKey),
+      ctx,
+      event: { ...emission, turnId: activeTurnId(emission) },
+      localFanoutSize: readTaskExecLocalFanout(input.task) ?? countLocalSubagentCalls(batch),
+      serializedContext: serializeContext(ctx),
+      sessionState: createDurableSessionState({ session }),
+      task,
+      toolRun,
+    });
+  } catch (error) {
+    await cancelToolRun({
+      callId: action.callId,
+      hookToken: toolRun.hookToken,
+      reason: "Subagent admission failed.",
+      runId: toolRun.runId,
+      toolName: input.definition.name,
+    });
+    if (error instanceof SubagentDispatchError) {
+      if (error.agentId !== undefined) recordTaskExecAgentRemoval(input.task, error.agentId);
+    }
+    throw error;
   }
-  const executor = createSubagentExecutorBinding({
-    address: record.address,
-    identity: record.identity,
-  });
-  await emitSubagentCalled({
-    callId: input.toolContext.callId,
-    childSessionId: dispatched.address.sessionId,
-    event: { ...emission, turnId: activeTurnId(emission) },
-    name: dispatched.name,
-    remote: dispatched.remote,
-    sessionId: session.sessionId,
-    toolName: input.definition.name,
-  });
+  try {
+    // The executor binding is the durable copy of the child's addressed
+    // handle, read back from the post-dispatch session so it is exactly what
+    // the handle store recorded (fresh start) or already held (resume).
+    const record = findTaskAgentAddress(dispatched.session, dispatched.agentId);
+    if (record === undefined) {
+      throw new Error(
+        `Subagent dispatch for "${dispatched.agentId}" recorded no task agent address.`,
+      );
+    }
+    const executor = createSubagentExecutorBinding({
+      address: record.address,
+      identity: record.identity,
+    });
+    await emitSubagentCalled({
+      callId: input.toolContext.callId,
+      childSessionId: dispatched.address.sessionId,
+      event: { ...emission, turnId: activeTurnId(emission) },
+      name: dispatched.name,
+      remote: dispatched.remote,
+      sessionId: session.sessionId,
+      toolName: input.definition.name,
+    });
 
-  const delegated = input.task.delegated({
-    executor,
-    receipt: { agentId: dispatched.agentId },
-  });
-  await emitSubagentCompleted({
-    callId: input.toolContext.callId,
-    output: JSON.stringify(delegated.receipt),
-    subagentName: dispatched.name,
-    taskId: delegated.receipt.taskId,
-  });
-  return delegated;
+    const delegated = input.task.delegated({
+      executor,
+      receipt: { agentId: dispatched.agentId },
+    });
+    await emitSubagentCompleted({
+      callId: input.toolContext.callId,
+      output: JSON.stringify(delegated.receipt),
+      subagentName: dispatched.name,
+      taskId: delegated.receipt.taskId,
+    });
+    return delegated;
+  } catch (error) {
+    const record = findTaskAgentAddress(dispatched.session, dispatched.agentId);
+    if (record !== undefined) {
+      await propagateSubagentExecutorCancel({
+        bundle: ctx.get(BundleKey),
+        executor: { address: record.address, identity: record.identity },
+        serializedContext: serializeContext(ctx),
+        taskId: task.taskId,
+      });
+    }
+    await cancelToolRun({
+      callId: action.callId,
+      hookToken: toolRun.hookToken,
+      reason: "Subagent admission failed.",
+      runId: toolRun.runId,
+      toolName: input.definition.name,
+    });
+    throw error;
+  }
 }
 
 async function dispatchSubagent(input: SubagentDispatchInput): Promise<SubagentDispatchResult> {
@@ -193,6 +275,14 @@ async function dispatchSubagent(input: SubagentDispatchInput): Promise<SubagentD
   }
 
   if (entry.kind === "resume") {
+    const mismatch = createAgentContinuationMismatch({
+      action: entry.action,
+      agentId: entry.agentId,
+      currentSession: prepared.session,
+      execution: "background",
+    });
+    if (mismatch !== undefined) throw new Error(JSON.stringify(mismatch.output));
+
     const busy = await checkTaskContinuationAvailability({
       action: entry.action,
       agentId: entry.agentId,
@@ -226,7 +316,7 @@ async function dispatchSubagent(input: SubagentDispatchInput): Promise<SubagentD
             dynamicRemoteAgent: entry.dynamicRemoteAgent,
           }),
           currentSession: prepared.session,
-          parentToken: input.task.taskInboxToken,
+          parentToken: input.toolRun.replyToken,
         })
       : await startSubagent({
           auth: prepared.auth,
@@ -238,7 +328,7 @@ async function dispatchSubagent(input: SubagentDispatchInput): Promise<SubagentD
           currentSession: prepared.session,
           fanoutSize: prepared.fanoutSize,
           initiatorAuth: prepared.initiatorAuth,
-          parentContinuationToken: input.task.taskInboxToken,
+          parentContinuationToken: input.toolRun.replyToken,
           parentTraceContext: prepared.parentTraceContext,
           sandboxSessionId: prepared.sandboxSessionId,
           serializedContext: prepared.serializedContext,
@@ -246,7 +336,33 @@ async function dispatchSubagent(input: SubagentDispatchInput): Promise<SubagentD
           taskOwned: true,
           target: entry.target,
         });
-  if (outcome.kind === "error") throw new Error(JSON.stringify(outcome.result.output));
+  if (outcome.kind === "error") {
+    if (entry.kind !== "resume" || outcome.deliveryAmbiguous !== true) {
+      const removedAgentId =
+        entry.kind === "resume" &&
+        findTaskAgentAddress(outcome.session, entry.agentId) === undefined
+          ? entry.agentId
+          : undefined;
+      throw new SubagentDispatchError(outcome, removedAgentId);
+    }
+    const record = findTaskAgentAddress(outcome.session, entry.agentId);
+    if (record === undefined) throw new SubagentDispatchError(outcome, entry.agentId);
+    return {
+      address: record.address,
+      agentId: entry.agentId,
+      mode: record.address.kind === "agent/remote" ? "remote" : "local",
+      name: record.identity.name,
+      ...(record.address.kind === "agent/remote"
+        ? {
+            remote: {
+              resolverId: entry.dynamicRemoteAgent?.credentialsStepId ?? input.action.nodeId,
+              url: record.address.url,
+            },
+          }
+        : {}),
+      session: outcome.session,
+    };
+  }
 
   const described = describeTaskDispatch({
     action: input.action,

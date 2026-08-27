@@ -7,6 +7,7 @@ import {
   createWorkflowRuntime,
   LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
   sessionTimeoutWorkflowReference,
+  subagentToolExecuteWorkflowReference,
   turnWorkflowReference,
   workflowEntryReference,
 } from "#execution/workflow-runtime.js";
@@ -70,6 +71,10 @@ describe("workflowEntryReference", () => {
     );
     expect(sessionTimeoutWorkflowReference.workflowId).not.toContain("/src/execution/");
     expect(sessionTimeoutWorkflowReference.workflowId).not.toContain("@");
+    expect(subagentToolExecuteWorkflowReference.workflowId).toBe(
+      `workflow//${packageInfo.name}//subagentToolExecuteWorkflow`,
+    );
+    expect(subagentToolExecuteWorkflowReference.workflowId).not.toContain("@");
   });
 });
 

@@ -17,7 +17,11 @@ const ALLOWED_DYNAMIC_SUBAGENT_EVENTS = new Set<DynamicToolEventName>([
 ]);
 
 export type NormalizedSubagentConfig =
-  | { readonly kind: "local"; readonly definition: unknown }
+  | {
+      readonly kind: "local";
+      readonly definition: unknown;
+      readonly execution?: "background" | "blocking";
+    }
   | {
       readonly build?: { readonly externalDependencies?: readonly string[] };
       readonly eventNames: readonly DynamicToolEventName[];
@@ -25,6 +29,7 @@ export type NormalizedSubagentConfig =
     }
   | {
       readonly description: string;
+      readonly execution?: "background" | "blocking";
       readonly kind: "remote";
       readonly outputSchema?: JsonObject;
       readonly path: string;
@@ -56,12 +61,23 @@ export function normalizeSubagentConfig(value: unknown, message: string): Normal
   if (
     value !== null &&
     typeof value === "object" &&
-    (value as { readonly kind?: unknown }).kind === "remote"
+    ((value as { readonly kind?: unknown }).kind === "remote" ||
+      (value as { readonly kind?: unknown }).kind === "eve:remote-subagent")
   ) {
     const record = expectObjectRecord(value, message);
     expectOnlyKnownKeys(
       record,
-      ["auth", "description", "forwardPrincipal", "headers", "kind", "outputSchema", "path", "url"],
+      [
+        "auth",
+        "background",
+        "description",
+        "forwardPrincipal",
+        "headers",
+        "kind",
+        "outputSchema",
+        "path",
+        "url",
+      ],
       message,
     );
     if (record.forwardPrincipal !== undefined) {
@@ -71,16 +87,47 @@ export function normalizeSubagentConfig(value: unknown, message: string): Normal
       );
     }
     const outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined);
-    return {
+    const explicit = record.kind === "eve:remote-subagent";
+    const background = normalizeBackground(record.background, explicit, message);
+    const normalized: Extract<NormalizedSubagentConfig, { readonly kind: "remote" }> = {
       description: expectString(record.description, message),
       kind: "remote",
       outputSchema,
       path: record.path === undefined ? EVE_SESSION_ROUTE_PATH : expectString(record.path, message),
       url: typeof record.url === "function" ? undefined : expectString(record.url, message),
     };
+    return explicit
+      ? { ...normalized, execution: background ? "background" : "blocking" }
+      : normalized;
+  }
+
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    (value as { readonly kind?: unknown }).kind === "eve:local-subagent"
+  ) {
+    const record = expectObjectRecord(value, message);
+    const background = normalizeBackground(record.background, true, message);
+    const { background: _background, kind: _kind, ...definition } = record;
+    return {
+      definition,
+      execution: background ? "background" : "blocking",
+      kind: "local",
+    };
   }
 
   return { definition: value, kind: "local" };
+}
+
+function normalizeBackground(value: unknown, allowed: boolean, message: string): boolean {
+  if (value === undefined) return false;
+  if (!allowed) {
+    throw new Error(`${message} The "background" field requires defineRemoteSubagent(...).`);
+  }
+  if (typeof value !== "boolean") {
+    throw new Error(`${message} Expected "background" to be a boolean.`);
+  }
+  return value;
 }
 
 export function assertRemoteAgentDefinitionHasNoLocalPackageEntries(

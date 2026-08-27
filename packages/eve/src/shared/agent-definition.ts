@@ -201,9 +201,9 @@ export interface AgentExperimentalDefinition {
    */
   readonly instrumentationProviders?: boolean;
   /**
-   * Runs this agent's delegated subagent calls as durable background tasks.
-   * The originating tool call returns a task receipt immediately and the
-   * model manages the work through the `task_*` framework tools. Root agents
+   * Enables durable background tasks and their `task_*` framework tools.
+   * The built-in `agent` runs in the background while this is enabled;
+   * declared subagents choose with their own `background` field. Root agents
    * only.
    */
   readonly tasks?: boolean;

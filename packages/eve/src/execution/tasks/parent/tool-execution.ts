@@ -7,9 +7,11 @@ import { isAuthorizationSignal } from "#harness/authorization.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import { isTurnCancellation } from "#harness/turn-cancellation.js";
+import { removeTaskAgentAddress } from "#harness/handles/transitions.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import {
   BackgroundToolExecutorKey,
+  countFreshLocalSubagentCalls,
   type BackgroundExecutableTool,
   type BackgroundToolCallBatch,
   type BackgroundToolExecutor,
@@ -21,6 +23,8 @@ import type { ToolExecuteOptions } from "#tools/definition.js";
 import {
   createTaskDelegated,
   isTaskDelegated,
+  recordTaskExecLocalFanout,
+  recordTaskExecRuntime,
   type TaskExec,
   type TaskSendCommand,
 } from "#tools/task.js";
@@ -41,7 +45,14 @@ import { sendTaskCommand, sendTaskInboundPayload } from "#execution/tasks/parent
 
 interface BackgroundToolExecutionRecord {
   settled: boolean;
+  removedAgentIds?: string[];
   task?: BackgroundTask;
+  toolRun?: {
+    readonly callId: string;
+    readonly hookToken: string;
+    readonly runId: string;
+    readonly toolName: string;
+  };
 }
 
 interface BackgroundToolStepResult {
@@ -185,6 +196,9 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
   private apply(session: HarnessSession): HarnessSession {
     let next = session;
     for (const record of this.records) {
+      for (const agentId of record.removedAgentIds ?? []) {
+        next = removeTaskAgentAddress(next, agentId);
+      }
       if (!record.settled || record.task === undefined) continue;
       // Framework-owned executor commits, matched by executor kind. The
       // subagent binding is the durable copy of the child's addressed
@@ -252,6 +266,19 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       session: this.initialSession,
       task,
     };
+    recordTaskExecRuntime(taskExec, {
+      bindToolRun: async (run) => {
+        await deliverTaskCommand(task, { ...run, kind: "bind-relay" });
+        record.toolRun = run;
+      },
+      removeAgent: (agentId) => {
+        record.removedAgentIds = [...(record.removedAgentIds ?? []), agentId];
+      },
+    });
+    recordTaskExecLocalFanout(
+      taskExec,
+      countFreshLocalSubagentCalls(input.batch, this.initialSession),
+    );
 
     const output = input.definition.execute(input.toolInput, input.options, taskExec);
     if (isAsyncIterable(output)) {
@@ -348,6 +375,15 @@ async function compensateBackgroundToolExecution(
         bundle,
         executor: subagent,
         taskId: record.task.taskId,
+      });
+    }
+    if (record.toolRun !== undefined) {
+      await cancelToolRun({
+        callId: record.toolRun.callId,
+        hookToken: record.toolRun.hookToken,
+        reason: "The step that started the subagent failed.",
+        runId: record.toolRun.runId,
+        toolName: record.toolRun.toolName,
       });
     }
     const toolRun = readWorkflowToolExecutor(record.task.executor);

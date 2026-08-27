@@ -2,9 +2,24 @@ import { createHook, defineHook, type Hook } from "#compiled/@workflow/core/inde
 
 import { resumeHook } from "#execution/tool-run/workflow-api.js";
 
-import type { ToolContext, ToolInputRequest, ToolInputResponse, ToolRunOwner } from "#tools/definition.js";
+import type {
+  ToolContext,
+  ToolInputRequest,
+  ToolInputResponse,
+  ToolRunOwner,
+} from "#tools/definition.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { RuntimeSubagentResult } from "#shared/action-types.js";
+import type {
+  SubagentAuthorizationEventHookPayload,
+  SubagentInputRequestHookPayload,
+} from "#channel/types.js";
+import type {
+  TaskInboundAuthorizationEvent,
+  TaskInboundTurnStarted,
+  TaskInboundUpdate,
+} from "#tasks/types.js";
 
 /**
  * A request a run asks its owner to put to a human. Either the author's
@@ -31,18 +46,23 @@ export interface RunRef {
 /** Terminal result of one run, reported once to its owner. */
 export type RunOutcome =
   | { readonly status: "completed"; readonly output: JsonValue }
+  | { readonly status: "subagent"; readonly result: RuntimeSubagentResult }
   | { readonly status: "failed"; readonly error: unknown }
   | { readonly status: "cancelled"; readonly reason?: string };
 
 /**
- * The three things a run says to its owner, each on its own hook of the
- * owner's {@link ToolRunOwner}: progress on `report`, a question on `request`
- * with the token of the hook its answer resumes, and the end on `outcome`.
+ * The public things a run says to its owner. Framework subagent events and
+ * outcomes share `report` so their order is durable; authored tools use
+ * progress, request, and outcome as before.
  */
-export interface RunReport {
-  readonly from: RunRef;
-  readonly update: JsonValue;
-}
+export type RunReport =
+  | { readonly from: RunRef; readonly kind: "progress"; readonly update: JsonValue }
+  | { readonly event: RunEvent; readonly from: RunRef; readonly kind: "subagent-event" }
+  | {
+      readonly from: RunRef;
+      readonly kind: "subagent-outcome";
+      readonly result: RuntimeSubagentResult;
+    };
 
 export interface RunRequestMessage {
   readonly from: RunRef;
@@ -55,12 +75,32 @@ export interface RunOutcomeMessage {
   readonly result: RunOutcome;
 }
 
+/** Child payloads a subagent execute run forwards unchanged to its owner. */
+export type RunEvent =
+  | SubagentAuthorizationEventHookPayload
+  | SubagentInputRequestHookPayload
+  | TaskInboundAuthorizationEvent
+  | TaskInboundTurnStarted
+  | TaskInboundUpdate;
+
+export function isRunEvent(value: unknown): value is RunEvent {
+  if (typeof value !== "object" || value === null) return false;
+  const kind = Reflect.get(value, "kind");
+  return (
+    kind === "subagent-authorization-event" ||
+    kind === "subagent-input-request" ||
+    kind === "authorization-event" ||
+    kind === "turn-started" ||
+    kind === "task-update"
+  );
+}
+
 export const reportHook = defineHook<RunReport>();
 export const requestHook = defineHook<RunRequestMessage>();
 export const outcomeHook = defineHook<RunOutcomeMessage>();
 
 /**
- * An owner's three channels derive from its inbox token, so the owner creates
+ * An owner's public channels derive from its inbox token, so the owner creates
  * them and a run it starts addresses them from the same string.
  */
 export function deriveRunOwner(inboxToken: string): ToolRunOwner {
@@ -72,7 +112,9 @@ export function deriveRunOwner(inboxToken: string): ToolRunOwner {
 }
 
 /** What an owner says to a run, on the run's own hook. */
-export type RunControlMessage = { readonly kind: "cancel"; readonly reason: string };
+export type RunControlMessage =
+  | { readonly kind: "cancel"; readonly reason: string }
+  | { readonly kind: "release" };
 
 /**
  * Narrows a control-inbox payload. Hand-written rather than a zod schema: this
@@ -82,7 +124,13 @@ export type RunControlMessage = { readonly kind: "cancel"; readonly reason: stri
 export function isRunControlMessage(value: unknown): value is RunControlMessage {
   if (typeof value !== "object" || value === null) return false;
   const { kind, reason } = value as { kind?: unknown; reason?: unknown };
-  return kind === "cancel" && typeof reason === "string";
+  return kind === "release" || (kind === "cancel" && typeof reason === "string");
+}
+
+export function isRunReleaseMessage(
+  value: unknown,
+): value is Extract<RunControlMessage, { kind: "release" }> {
+  return isRunControlMessage(value) && value.kind === "release";
 }
 
 /**
@@ -121,6 +169,11 @@ function readRunContext(ctx: ToolContext): RunContext {
     );
   }
   return context;
+}
+
+/** Reads the framework-owned run identity attached to a workflow tool context. */
+export function readRunRef(ctx: ToolContext): RunRef {
+  return readRunContext(ctx).from;
 }
 
 /**

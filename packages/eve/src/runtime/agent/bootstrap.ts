@@ -81,8 +81,10 @@ export const BOOTSTRAP_RUNTIME_SYSTEM_PROMPT =
  */
 export function createResolvedRuntimeTurnAgent(input: {
   readonly agent: ResolvedAgent;
+  readonly dynamicSubagentsAvailable?: boolean;
   readonly id?: string;
   readonly nodeId?: string;
+  readonly tasksEnabled?: boolean;
   readonly tools: readonly PreparedRuntimeTool[];
 }): RuntimeTurnAgent {
   const agent = input.agent;
@@ -100,6 +102,23 @@ export function createResolvedRuntimeTurnAgent(input: {
       tool.owner.kind === "framework" &&
       tool.name === AGENT_TOOL_NAME,
   );
+  const tasksEnabled = input.tasksEnabled ?? config?.experimental?.tasks === true;
+  const subagentExecutions = new Set(
+    input.tools.flatMap((tool): Array<"background" | "blocking"> => {
+      if (tool.kind === "subagent" || tool.kind === "remote") {
+        return [tool.execution ?? (tasksEnabled ? "background" : "blocking")];
+      }
+      return tool.owner.kind === "framework" && tool.name === AGENT_TOOL_NAME
+        ? [tasksEnabled ? "background" : "blocking"]
+        : [];
+    }),
+  );
+  const subagentExecution =
+    input.dynamicSubagentsAvailable === true || subagentExecutions.size > 1
+      ? "mixed"
+      : subagentExecutions.has("background")
+        ? "background"
+        : "blocking";
   const base: RuntimeTurnAgentBase = {
     availableSkills: agent.skills.map((skill) => ({
       description: skill.description,
@@ -112,8 +131,11 @@ export function createResolvedRuntimeTurnAgent(input: {
     instructions: composeRuntimeBasePrompt({
       connections: agent.connections,
       instructions: agent.instructions,
-      subagentsAvailable: subagentDeclaredTool || subagentFrameworkRootTool,
-      tasksEnabled: config?.experimental?.tasks === true,
+      subagentExecution,
+      subagentsAvailable:
+        input.dynamicSubagentsAvailable === true ||
+        subagentDeclaredTool ||
+        subagentFrameworkRootTool,
       toolsAvailable: input.tools.length > 0,
       workspaceSpec: agent.workspaceSpec,
     }),

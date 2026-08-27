@@ -63,6 +63,31 @@ export function isAgentHandleAction(
 /** Hydrated parent session snapshot threaded through dispatch. */
 export type RuntimeSession = ReturnType<typeof hydrateDurableSession>;
 
+/** Rejects a continuation whose current definition changed target or execution mode. */
+export function createAgentContinuationMismatch(input: {
+  readonly action: RuntimeAgentHandleAction;
+  readonly agentId: string;
+  readonly currentSession: RuntimeSession;
+  readonly execution: "background" | "blocking";
+}): RuntimeSubagentDispatchFailure | undefined {
+  const handle = (getAgentHandleStore(input.currentSession.state)?.handles ?? []).find(
+    (candidate) => candidate.identity.id === input.agentId,
+  );
+  if (handle === undefined) return undefined;
+  const expectedRemote = input.action.kind === "remote-agent-call";
+  const actualRemote =
+    handle.phase === "starting"
+      ? handle.target.kind === "agent/remote"
+      : handle.address.kind === "agent/remote";
+  const actualExecution = handle.phase === "addressed" ? "background" : "blocking";
+  if (actualRemote === expectedRemote && actualExecution === input.execution) return undefined;
+  return createAgentErrorResult({
+    action: input.action,
+    code: AGENT_MISMATCH,
+    message: `Agent "${input.agentId}" no longer matches this subagent definition. Start a new agent instead.`,
+  });
+}
+
 /**
  * Outcome of dispatching one planned runtime action: an adopted child ready
  * for the `subagent.called` emission tail, or a per-action error result.

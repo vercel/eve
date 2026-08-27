@@ -38,6 +38,7 @@ import {
   isTerminalTaskStatus,
   readSubagentExecutor,
   readSubagentTaskMetadata,
+  readTaskRelay,
   type SubagentExecutorData,
   type TaskView,
 } from "#tasks/types.js";
@@ -184,6 +185,10 @@ async function propagateTaskCancel(input: {
     // The run cannot report its own end once cancelled, so settle the
     // executor here; that is what lets the task run finish and release
     // its hook.
+    await sendTaskCommand({
+      command: { kind: "settle-executor" },
+      taskInboxToken: input.entry.taskInboxToken,
+    });
     await cancelToolRun({
       callId: input.entry.taskId,
       hookToken: toolRun.hookToken,
@@ -191,15 +196,25 @@ async function propagateTaskCancel(input: {
       runId: toolRun.runId,
       toolName: input.entry.metadata.name,
     });
-    await sendTaskCommand({
-      command: { kind: "settle-executor" },
-      taskInboxToken: input.entry.taskInboxToken,
-    });
     return;
   }
 
   const metadata = readSubagentTaskMetadata(input.view);
   if (metadata === undefined) return;
+  const relay = readTaskRelay(input.view.executor);
+  if (relay !== undefined) {
+    await sendTaskCommand({
+      command: { kind: "settle-executor" },
+      taskInboxToken: input.entry.taskInboxToken,
+    });
+    await cancelToolRun({
+      callId: relay.callId,
+      hookToken: relay.hookToken,
+      reason: `Task ${input.entry.taskId} was cancelled.`,
+      runId: relay.runId,
+      toolName: relay.toolName,
+    });
+  }
   const executor =
     readSubagentExecutor(input.view.executor) ??
     findTaskAgentAddress(input.session, metadata.agentId);

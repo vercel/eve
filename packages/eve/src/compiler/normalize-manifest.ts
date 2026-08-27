@@ -135,6 +135,15 @@ export async function compileAgentManifest(
       `Background tool "${backgroundTool.name}" requires experimental.tasks: true in the root agent config.`,
     );
   }
+  const backgroundSubagent = [
+    ...root.descendants,
+    ...allNodeManifests.flatMap((node) => node.remoteAgents),
+  ].find((subagent) => subagent.execution === "background");
+  if (backgroundSubagent !== undefined && root.manifest.config.experimental?.tasks !== true) {
+    throw new Error(
+      `Background subagent "${backgroundSubagent.name}" requires experimental.tasks: true in the root agent config.`,
+    );
+  }
 
   const diagnosticsSummary = summarizeCompilerDiagnostics(diagnostics);
   const subagents: CompiledSubagentNode[] = root.descendants.map((subagent) =>
@@ -289,6 +298,7 @@ class AgentGraphCompiler {
       const base = {
         backing: projected.candidate.backing,
         entryPath: source.entryPath,
+        execution: normalized.kind === "local" ? normalized.execution : undefined,
         logicalPath: source.logicalPath,
         name: source.subagentId,
         nodeId,

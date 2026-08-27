@@ -610,7 +610,7 @@ describe("turnWorkflow", () => {
     expect(inbox.createIterator).toHaveBeenCalledOnce();
   });
 
-  it("keeps a local subagent result inside one turn workflow", async () => {
+  it("keeps an explicit blocking subagent inside a tasks-enabled turn", async () => {
     const now = vi.spyOn(Date, "now").mockReturnValue(1_234);
     const initialState = createSessionState({ continuationToken: "slack:C1:" });
     const pendingState = createSessionState({ continuationToken: "slack:C1:T1" });
@@ -918,8 +918,67 @@ describe("turnWorkflow", () => {
     expect(vi.mocked(turnStep).mock.calls[1]?.[0].sessionState).toBe(retiredProxyState);
   });
 
-  it("lets the parent cancel after a descendant consumes a session-limit Stop response", async () => {
+  it("drops an unbound legacy child event before proxying it", async () => {
     const pendingState = createSessionState();
+    installInbox([
+      {
+        callId: "call-1",
+        childContinuationToken: "child-token",
+        childSessionId: "wrong-child",
+        event: { requests: [], sequence: 0, stepIndex: 0, turnId: "turn_0" },
+        kind: "subagent-input-request",
+        subagentName: "delegate",
+      },
+      {
+        kind: "runtime-action-result",
+        results: [
+          {
+            callId: "call-1",
+            kind: "subagent-result",
+            origin: "child",
+            output: "child output",
+            subagentName: "delegate",
+          },
+        ],
+      },
+    ]);
+    vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
+      results: [],
+      sessionState: withRunningChildren(pendingState, [
+        { callId: "call-1", sessionId: "child-session" },
+      ]),
+      pendingTasks: [],
+    });
+    vi.mocked(turnStep)
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
+        serializedContext: {},
+        sessionState: pendingState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "done",
+        serializedContext: {},
+        sessionState: createSessionState(),
+      });
+
+    const { input } = createInput({
+      driverCapabilities: { turnInbox: true },
+      mode: "task",
+      sessionState: pendingState,
+    });
+    await turnWorkflow(input);
+
+    expect(runProxySubagentEventStep).not.toHaveBeenCalled();
+  });
+
+  it("lets the parent cancel after a descendant consumes a session-limit Stop response", async () => {
+    const pendingState = withRunningChildren(createSessionState(), [
+      { callId: "call-1", sessionId: "child-session" },
+    ]);
     const proxyState = createSessionState({ hasProxyInputRequests: true });
     const retiredProxyState = createSessionState();
     const requestId = "child-limit-request";

@@ -3,6 +3,7 @@ import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { ContextAccessor } from "#context/key.js";
 import { RuntimeModelMetadataCacheKey, type CachedModelMetadata } from "#context/keys.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
+import { normalizeSubagentConfig } from "#compiler/normalize-subagent.js";
 import { normalizeCatalogModelId } from "#internal/model-catalog.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import type {
@@ -88,10 +89,8 @@ async function loadSourceBackedRuntimeModelReference(
     moduleMap: scope.moduleMap,
     nodeId: scope.nodeId,
   });
-  const normalizedDefinition = normalizeAgentDefinition(
-    definition,
-    `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to match the public eve shape.`,
-  );
+  const message = `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to match the public eve shape.`;
+  const normalizedDefinition = normalizeLoadedAgentDefinition(definition, message);
   const model = normalizedDefinition.model;
 
   if (model === undefined) {
@@ -127,10 +126,8 @@ export async function loadDynamicRuntimeModelDefinition(input: {
     moduleMap: input.scope.moduleMap,
     nodeId: input.scope.nodeId,
   });
-  const normalizedDefinition = normalizeAgentDefinition(
-    definition,
-    `Expected the authored agent config export "${input.dynamicModel.exportName ?? "default"}" from "${input.dynamicModel.logicalPath}" to match the public eve shape.`,
-  );
+  const message = `Expected the authored agent config export "${input.dynamicModel.exportName ?? "default"}" from "${input.dynamicModel.logicalPath}" to match the public eve shape.`;
+  const normalizedDefinition = normalizeLoadedAgentDefinition(definition, message);
   const authoredModel = normalizedDefinition.model;
 
   if (!isDynamicModelDefinition(authoredModel)) {
@@ -140,6 +137,12 @@ export async function loadDynamicRuntimeModelDefinition(input: {
   }
 
   return authoredModel;
+}
+
+function normalizeLoadedAgentDefinition(value: unknown, message: string) {
+  const subagent = normalizeSubagentConfig(value, message);
+  if (subagent.kind !== "local") throw new Error(message);
+  return normalizeAgentDefinition(subagent.definition, message);
 }
 
 export async function resolveRuntimeModelSelection(input: {

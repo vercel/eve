@@ -319,6 +319,20 @@ describe("createNodeHarnessTools", () => {
     expect(tools.has("task_sleep")).toBe(false);
   });
 
+  it("lowers inherited task controls on a task-enabled named node", async () => {
+    const node = await createNodeWithSourceOwnedTools({
+      names: ["task_cancel", "task_update"],
+      tasks: false,
+    });
+    const tools = createNodeHarnessTools({
+      node: { ...node, nodeId: "subagents/worker", tasksEnabled: true },
+    });
+
+    for (const name of ["task_cancel", "task_update"]) {
+      expect(tools.get(name)?.runtimeAction).toEqual({ kind: "task-control" });
+    }
+  });
+
   it("executes compiled local and remote delegation tools in the selected task mode", async () => {
     const delegationTools: StaticRuntimeTurnAgent["tools"] = [
       {
@@ -350,6 +364,34 @@ describe("createNodeHarnessTools", () => {
     expect(legacy.get("reviewer")?.runtimeAction?.kind).toBe("remote-agent-call");
     expect(legacy.get("research")?.execution).toBeUndefined();
     expect(legacy.get("reviewer")?.execution).toBeUndefined();
+
+    const explicitBlocking = createNodeHarnessTools({
+      node: await createNodeWithSourceOwnedTools({
+        names: ["agent"],
+        tasks: true,
+        turnTools: delegationTools.map((tool) =>
+          tool.kind === "subagent" || tool.kind === "remote"
+            ? { ...tool, execution: "blocking" as const }
+            : tool,
+        ),
+      }),
+    });
+    expect(explicitBlocking.get("research")?.runtimeAction?.kind).toBe("subagent-call");
+    expect(explicitBlocking.get("reviewer")?.runtimeAction?.kind).toBe("remote-agent-call");
+    expect(explicitBlocking.get("research")?.workflowCallable).toBe(true);
+
+    const mixed = createNodeHarnessTools({
+      node: await createNodeWithSourceOwnedTools({
+        names: ["agent"],
+        tasks: true,
+        turnTools: delegationTools.map((tool) =>
+          tool.kind === "subagent" ? { ...tool, execution: "blocking" as const } : tool,
+        ),
+      }),
+    });
+    expect(mixed.get("agent")?.execution).toBe("background");
+    expect(mixed.get("research")?.runtimeAction?.kind).toBe("subagent-call");
+    expect(mixed.get("reviewer")?.execution).toBe("background");
 
     const background = createNodeHarnessTools({
       node: await createNodeWithSourceOwnedTools({
@@ -517,7 +559,7 @@ describe("createExecutionNodeStep", () => {
       actions: [
         {
           callId: "call-subagent-1",
-          description: "Delegate work to the child agent.",
+          description: expect.stringContaining("Delegate work to the child agent."),
           input: { task: "Delegate this." },
           kind: "subagent-call",
           name: "child-agent",
@@ -530,6 +572,7 @@ describe("createExecutionNodeStep", () => {
         stepIndex: 0,
         turnId: "",
       },
+      localFanoutSize: 0,
       responseMessages: [
         {
           content: [

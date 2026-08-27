@@ -147,7 +147,7 @@ describe("getAdvertisedTools for definition arrays", () => {
     expect([...advertisedTools.keys()]).toEqual(["add", "task_cancel"]);
   });
 
-  it("keeps only task_update in delegated sessions", () => {
+  it("keeps task controls in task-enabled delegated sessions", () => {
     const tools = new Map([
       ["add", createTool("add")],
       ["task_cancel", createTaskControlTool("task_cancel")],
@@ -160,7 +160,7 @@ describe("getAdvertisedTools for definition arrays", () => {
       tools,
     });
 
-    expect([...advertisedTools.keys()]).toEqual(["add", "task_update"]);
+    expect([...advertisedTools.keys()]).toEqual(["add", "task_cancel", "task_update"]);
   });
 
   it("removes task_update from sessions without a delegated caller", () => {

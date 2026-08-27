@@ -11,12 +11,15 @@ import {
   wakeTaskUpdateParentStep,
 } from "#execution/tasks/child/steps.js";
 import { applyTaskTransition } from "#tasks/transitions.js";
+import { releaseToolRunStep } from "#execution/tool-run/start.js";
 import { translateTaskInboundPayload } from "#tasks/wire.js";
 import {
   deriveRunOwner,
+  isRunEvent,
   outcomeHook,
   reportHook,
   requestHook,
+  type RunReport,
 } from "#execution/tool-run/messages.js";
 import { createChannelReader, raceChannelReads } from "#execution/tool-run/owner-channels.js";
 import {
@@ -27,6 +30,10 @@ import {
 import {
   isReadyTaskStatus,
   isTerminalTaskStatus,
+  readSubagentTaskMetadata,
+  readTaskRelay,
+  releaseTaskRelay,
+  readSubagentExecutor,
   readTaskInputRequestId,
   readTaskUsage,
   type TaskCommand,
@@ -55,7 +62,10 @@ function isTaskRunFinished(view: TaskView, dispatchAcknowledged: boolean): boole
 
   // Cancellation makes the task terminal before the child executor has
   // necessarily unwound. Keep its hook open until the final result settles it.
-  return view.status !== "cancelled" || view.executor?.lifecycle === "terminal";
+  return (
+    (view.status !== "cancelled" || view.executor?.lifecycle === "terminal") &&
+    (readTaskRelay(view.executor) === undefined || readTaskRelay(view.executor)?.released === true)
+  );
 }
 
 /**
@@ -118,22 +128,40 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     let view = input.initialView;
     let pendingInputRequest: TaskInboundInputRequest | undefined;
     let pendingAuthorizationEvents: TaskInboundAuthorizationEvent[] = [];
+    const pendingRelayReports: RunReport[] = [];
     let pendingUpdates: TaskInboundUpdate[] = [];
     let dispatchAcknowledged = false;
     let runUpdateIndex = 0;
     await appendTaskViewStep({ view });
 
     while (!isTaskRunFinished(view, dispatchAcknowledged)) {
-      const read = await raceChannelReads(readers);
-      if (read.next.done === true) return;
-      const raw: TaskRunHookPayload =
-        read.channel === "report"
-          ? runReportToTaskUpdate(read.next.value, view.taskId, runUpdateIndex++)
-          : read.channel === "request"
-            ? runRequestToInputRequestPayload(read.next.value)
-            : read.channel === "outcome"
-              ? { command: runOutcomeToTaskCommand(read.next.value), kind: "task-command" }
-              : read.next.value;
+      const deferred =
+        readTaskRelay(view.executor) !== undefined &&
+        readSubagentExecutor(view.executor) !== undefined
+          ? pendingRelayReports.shift()
+          : undefined;
+      const read = deferred === undefined ? await raceChannelReads(readers) : undefined;
+      if (read?.next.done === true) return;
+      if (
+        read?.channel === "report" &&
+        read.next.value.kind !== "progress" &&
+        (readTaskRelay(view.executor) === undefined ||
+          readSubagentExecutor(view.executor) === undefined)
+      ) {
+        pendingRelayReports.push(read.next.value);
+        continue;
+      }
+      const raw: TaskRunHookPayload | undefined =
+        deferred !== undefined
+          ? bindTaskRunReport(deferred, view, runUpdateIndex++)
+          : read!.channel === "report"
+            ? bindTaskRunReport(read!.next.value, view, runUpdateIndex++)
+            : read!.channel === "request"
+              ? runRequestToInputRequestPayload(read!.next.value)
+              : read!.channel === "outcome"
+                ? { command: runOutcomeToTaskCommand(read!.next.value), kind: "task-command" }
+                : read!.next.value;
+      if (raw === undefined) continue;
       const payload: TaskRunInboundPayload =
         raw.kind === "subagent-authorization-event" ? { ...raw, kind: "authorization-event" } : raw;
       // Approval lifecycle events (`approval.candidate`/`approval.settled`)
@@ -196,6 +224,12 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
           });
         }
         pendingUpdates = [];
+        const relay = readTaskRelay(view.executor);
+        if (relay !== undefined && relay.released !== true) {
+          await releaseToolRunStep(relay.hookToken);
+          view = markRelayReleased(view);
+          await appendTaskViewStep({ view });
+        }
         await wakeTaskParentStep({ token: input.parentContinuationToken, view });
         continue;
       }
@@ -226,6 +260,17 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
         pendingUpdates = [];
       }
       if (becameTerminal || routableAuthorizationEvents.length > 0) pendingAuthorizationEvents = [];
+      const relay = readTaskRelay(view.executor);
+      if (
+        becameTerminal &&
+        dispatchAcknowledged &&
+        relay !== undefined &&
+        relay.released !== true
+      ) {
+        await releaseToolRunStep(relay.hookToken);
+        view = markRelayReleased(view);
+        await appendTaskViewStep({ view });
+      }
       const routableInputRequest =
         pendingInputRequest !== undefined &&
         dispatchAcknowledged &&
@@ -260,6 +305,53 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     }
     if (ownsHook) await disposeHook(commands);
   }
+}
+
+function markRelayReleased(view: TaskView): TaskView {
+  const relay = readTaskRelay(view.executor);
+  return relay === undefined ? view : { ...view, executor: releaseTaskRelay(view.executor) };
+}
+
+function bindTaskRunReport(
+  report: RunReport,
+  view: TaskView,
+  updateIndex: number,
+): TaskRunHookPayload | undefined {
+  if (report.kind === "progress") return runReportToTaskUpdate(report, view.taskId, updateIndex);
+  const metadata = readSubagentTaskMetadata(view);
+  const relay = readTaskRelay(view.executor);
+  const executor = readSubagentExecutor(view.executor);
+  if (
+    metadata === undefined ||
+    executor === undefined ||
+    relay?.runId !== report.from.runId ||
+    relay.callId !== report.from.callId ||
+    relay.toolName !== report.from.toolName ||
+    report.from.toolName !== metadata.name
+  ) {
+    return undefined;
+  }
+  if (report.kind === "subagent-outcome") {
+    return report.result.callId === report.from.callId &&
+      report.result.subagentName === metadata.name
+      ? { kind: "runtime-action-result", results: [report.result] }
+      : undefined;
+  }
+  const event = report.event;
+  if (!isRunEvent(event)) return undefined;
+  if (event.kind === "turn-started") {
+    return event.taskId === view.taskId && event.childSessionId === executor.address.sessionId
+      ? event
+      : undefined;
+  }
+  if (event.kind === "task-update") {
+    return event;
+  }
+  return event.callId === report.from.callId &&
+    event.subagentName === metadata.name &&
+    event.childSessionId === executor.address.sessionId
+    ? event
+    : undefined;
 }
 
 /**

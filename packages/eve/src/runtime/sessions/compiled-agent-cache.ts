@@ -35,6 +35,7 @@ export interface CompiledRuntimeAgentBundle {
   readonly nodeId?: string;
   readonly resolvedAgent: ResolvedAgent;
   readonly subagentRegistry: RuntimeSubagentRegistry;
+  readonly tasksEnabled?: boolean;
   readonly toolRegistry: RuntimeToolRegistry;
   readonly turnAgent: RuntimeTurnAgent;
 }
@@ -84,6 +85,7 @@ async function loadFullBundle(
     moduleMap,
     resolvedAgent: rootNode.agent,
     subagentRegistry: rootNode.subagentRegistry,
+    tasksEnabled: rootNode.tasksEnabled,
     toolRegistry: rootNode.toolRegistry,
     turnAgent: rootNode.turnAgent,
   };
@@ -194,6 +196,7 @@ export async function getCompiledRuntimeAgentBundle(input: {
     nodeId: input.nodeId,
     resolvedAgent: node.agent,
     subagentRegistry: node.subagentRegistry,
+    tasksEnabled: node.tasksEnabled,
     toolRegistry: node.toolRegistry,
     turnAgent: node.turnAgent,
   };

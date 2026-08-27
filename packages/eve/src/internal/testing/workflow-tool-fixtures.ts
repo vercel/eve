@@ -50,6 +50,26 @@ export async function failingDeployWorkflow(input: DeployInput): Promise<never> 
   throw new Error(`deploy of ${input.service} exploded`);
 }
 
+export async function subagentShapedDeployWorkflow(): Promise<{
+  readonly callId: string;
+  readonly isError: true;
+  readonly kind: "subagent-result";
+  readonly origin: "dispatch";
+  readonly output: string;
+  readonly subagentName: string;
+}> {
+  "use workflow";
+
+  return {
+    callId: "authored-call",
+    isError: true,
+    kind: "subagent-result",
+    origin: "dispatch",
+    output: "authored payload",
+    subagentName: "authored-name",
+  };
+}
+
 export async function* reportingDeployWorkflow(
   input: DeployInput,
 ): AsyncGenerator<string, { readonly plan: string }> {

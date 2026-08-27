@@ -5,7 +5,15 @@ import type {
   TaskUsage,
   TaskView,
 } from "#tasks/types.js";
-import { isTerminalTaskStatus, readTaskInputRequestId } from "#tasks/types.js";
+import {
+  bindTaskRelayToExecutor,
+  createTaskRelayBinding,
+  executorBindingWithoutTaskRelay,
+  isTerminalTaskStatus,
+  readTaskInputRequestId,
+  readTaskRelay,
+  releaseTaskRelay,
+} from "#tasks/types.js";
 import { jsonValuesEqual } from "#shared/json.js";
 
 /**
@@ -79,13 +87,15 @@ function terminalView(
  * executor fields, never the status above:
  *
  * ```text
- * binding:  unset --bind-------> bound            (replay noop, conflict rejected)
+ * binding:  unset --bind-relay-> relay --bind-> executor (replay noop, conflict rejected)
  * address:  unset --start-turn-> session pinned   (turn id updated per delivery)
  * verdict:  unset --complete/fail/cancel/settle-executor-> parked | terminal
  * ```
  *
- * - `bind` writes the executor binding exactly once: replaying the
- *   same binding is a noop, a different one is rejected.
+ * - `bind` writes the executor binding exactly once, replacing only the
+ *   framework's relay placeholder. Replaying the same binding is a noop.
+ * - `bind-relay` records the workflow relay before child dispatch, retaining
+ *   its identity claim until the task owner has adopted the terminal result.
  * - `start-turn` records the child session/turn ids used to address
  *   the executor, rejecting a child-session mismatch.
  * - Terminal commands and a late `settle-executor` record the child's
@@ -93,12 +103,65 @@ function terminalView(
  *   can take another delivery, `terminal` means it ended with the turn.
  */
 export function applyTaskTransition(view: TaskView, command: TaskCommand): TaskTransitionResult {
+  if (command.kind === "bind-relay") {
+    const relay = readTaskRelay(view.executor);
+    if (
+      relay?.callId === command.callId &&
+      relay.hookToken === command.hookToken &&
+      relay.runId === command.runId &&
+      relay.toolName === command.toolName
+    ) {
+      return { action: "noop", view };
+    }
+    if (relay !== undefined) {
+      return {
+        action: "rejected",
+        reason: `Task "${view.taskId}" already has a workflow relay.`,
+        view,
+      };
+    }
+    if (view.executor?.binding !== undefined) {
+      return {
+        action: "rejected",
+        reason: `Task "${view.taskId}" already has an executor binding.`,
+        view,
+      };
+    }
+    return {
+      action: "accepted",
+      view: {
+        ...view,
+        executor: {
+          ...view.executor,
+          binding: createTaskRelayBinding({
+            callId: command.callId,
+            hookToken: command.hookToken,
+            runId: command.runId,
+            toolName: command.toolName,
+          }),
+        },
+      },
+    };
+  }
   if (command.kind === "bind") {
     const binding = view.executor?.binding;
+    const relay = readTaskRelay(view.executor);
+    if (binding?.kind === "subagent-relay" && command.executor.kind === "subagent") {
+      return {
+        action: "accepted",
+        view: {
+          ...view,
+          executor: {
+            ...view.executor,
+            binding: bindTaskRelayToExecutor(command.executor, relay!),
+          },
+        },
+      };
+    }
     if (
       binding !== undefined &&
       binding.kind === command.executor.kind &&
-      jsonValuesEqual(binding.data, command.executor.data)
+      jsonValuesEqual(executorBindingWithoutTaskRelay(binding).data, command.executor.data)
     ) {
       return { action: "noop", view };
     }
@@ -117,8 +180,16 @@ export function applyTaskTransition(view: TaskView, command: TaskCommand): TaskT
 
   if (isTerminalTaskStatus(view.status)) {
     if (command.kind === "settle-executor") {
-      const executor = { ...view.executor, lifecycle: "terminal" as const };
-      if (sameUsage(view.usage, command.usage) && view.executor?.lifecycle === "terminal") {
+      const executor = {
+        ...releaseTaskRelay(view.executor),
+        lifecycle: "terminal" as const,
+      };
+      if (
+        sameUsage(view.usage, command.usage) &&
+        view.executor?.lifecycle === "terminal" &&
+        (readTaskRelay(view.executor) === undefined ||
+          readTaskRelay(view.executor)?.released === true)
+      ) {
         return { action: "noop", view };
       }
       const next = { ...view, executor };

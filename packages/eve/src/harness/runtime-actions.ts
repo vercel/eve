@@ -62,6 +62,7 @@ interface PendingRuntimeActionEventMetadata {
 export interface PendingRuntimeActionBatch {
   readonly actions: readonly RuntimeActionRequest[];
   readonly event: PendingRuntimeActionEventMetadata;
+  readonly localFanoutSize?: number;
   readonly responseMessages: readonly ModelMessage[];
 }
 
@@ -120,6 +121,7 @@ export function clearPendingRuntimeActionBatch(session: HarnessSession): Harness
 export function setPendingRuntimeActionBatch(input: {
   readonly actions: readonly RuntimeActionRequest[];
   readonly event: PendingRuntimeActionEventMetadata;
+  readonly localFanoutSize?: number;
   readonly responseMessages: readonly ModelMessage[];
   readonly session: HarnessSession;
 }): HarnessSession {
@@ -128,6 +130,7 @@ export function setPendingRuntimeActionBatch(input: {
   state[PENDING_RUNTIME_ACTION_BATCH_KEY] = {
     actions: [...input.actions],
     event: input.event,
+    localFanoutSize: input.localFanoutSize,
     responseMessages: [...input.responseMessages],
   } satisfies PendingRuntimeActionBatch;
 
@@ -287,6 +290,15 @@ export async function resolvePendingRuntimeActions(input: {
     if (result.kind !== "tool-result") continue;
     const record = findToolRun(nextSession.state, result.callId);
     if (record === undefined) continue;
+    nextSession = removeToolRun(
+      clearProxyInputRequestsForChild(nextSession, record.hookToken),
+      record.callId,
+    );
+  }
+  for (const result of readyResults) {
+    if (result.kind !== "subagent-result") continue;
+    const record = findToolRun(nextSession.state, result.callId);
+    if (record?.resultKind !== "subagent") continue;
     nextSession = removeToolRun(
       clearProxyInputRequestsForChild(nextSession, record.hookToken),
       record.callId,

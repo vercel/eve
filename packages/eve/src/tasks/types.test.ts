@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { AgentAddress, AgentIdentity } from "#harness/handles/store.js";
 import {
+  createTaskRelayBinding,
   createSubagentExecutorBinding,
   readSubagentExecutor,
   readSubagentTaskMetadata,
+  readTaskRelay,
 } from "#tasks/types.js";
 
 const identity: AgentIdentity = {
@@ -32,6 +34,38 @@ describe("subagent executor binding", () => {
     const binding = createSubagentExecutorBinding({ address: localAddress, identity });
     expect(binding.kind).toBe("subagent");
     expect(readSubagentExecutor(binding)).toEqual({ address: localAddress, identity });
+  });
+
+  it("reads a structurally valid workflow relay", () => {
+    expect(
+      readTaskRelay({
+        binding: createTaskRelayBinding({
+          callId: "call-1",
+          hookToken: "relay-hook",
+          runId: "relay-run",
+          toolName: "research",
+        }),
+      }),
+    ).toEqual({
+      callId: "call-1",
+      hookToken: "relay-hook",
+      runId: "relay-run",
+      toolName: "research",
+    });
+    expect(readTaskRelay({ kind: "subagent-relay", data: { callId: 1 } } as never)).toBeUndefined();
+    expect(
+      readTaskRelay({
+        data: {
+          $eveRelay: {
+            callId: "call-1",
+            hookToken: "relay-hook",
+            runId: "relay-run",
+            toolName: "research",
+          },
+        },
+        kind: "authored-executor",
+      }),
+    ).toBeUndefined();
   });
 
   it("round-trips a remote child through the durable binding", () => {

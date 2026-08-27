@@ -103,6 +103,63 @@ export interface TaskExec {
   }): TaskDelegated<TData>;
 }
 
+const taskExecLocalFanout = new WeakMap<TaskExec, number>();
+const taskExecRuntime = new WeakMap<
+  TaskExec,
+  {
+    readonly bindToolRun: (run: {
+      readonly callId: string;
+      readonly hookToken: string;
+      readonly runId: string;
+      readonly toolName: string;
+    }) => Promise<void>;
+    readonly removeAgent: (agentId: string) => void;
+  }
+>();
+
+export function recordTaskExecLocalFanout(task: TaskExec, fanout: number): void {
+  taskExecLocalFanout.set(task, fanout);
+}
+
+export function readTaskExecLocalFanout(task: TaskExec): number | undefined {
+  return taskExecLocalFanout.get(task);
+}
+
+export function recordTaskExecRuntime(
+  task: TaskExec,
+  runtime: {
+    readonly bindToolRun: (run: {
+      readonly callId: string;
+      readonly hookToken: string;
+      readonly runId: string;
+      readonly toolName: string;
+    }) => Promise<void>;
+    readonly removeAgent: (agentId: string) => void;
+  },
+): void {
+  taskExecRuntime.set(task, runtime);
+}
+
+export async function bindTaskExecToolRun(
+  task: TaskExec,
+  run: {
+    readonly callId: string;
+    readonly hookToken: string;
+    readonly runId: string;
+    readonly toolName: string;
+  },
+): Promise<void> {
+  const runtime = taskExecRuntime.get(task);
+  if (runtime === undefined) throw new Error("The subagent task has no runtime binding.");
+  await runtime.bindToolRun(run);
+}
+
+export function recordTaskExecAgentRemoval(task: TaskExec, agentId: string): void {
+  const runtime = taskExecRuntime.get(task);
+  if (runtime === undefined) throw new Error("The subagent task has no runtime binding.");
+  runtime.removeAgent(agentId);
+}
+
 export function createTaskDelegated<TData extends JsonObject>(input: {
   readonly binding: TaskBinding;
   readonly executor: TaskExecutorBinding;

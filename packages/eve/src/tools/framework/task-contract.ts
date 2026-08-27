@@ -4,7 +4,7 @@ import { jsonValueSchema } from "#shared/json-schemas.js";
 export const TASK_CANCEL_TOOL_NAME = "task_cancel";
 export const TASK_UPDATE_TOOL_NAME = "task_update";
 
-/** Transitional PR 1 task-tool names used by the existing dispatch mechanics. */
+/** Framework task-control tool names lowered by the runtime. */
 export const TASK_TOOL_NAMES: ReadonlySet<string> = new Set([
   TASK_CANCEL_TOOL_NAME,
   TASK_UPDATE_TOOL_NAME,

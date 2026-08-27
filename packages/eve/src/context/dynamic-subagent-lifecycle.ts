@@ -19,8 +19,8 @@ import { createLogger } from "#internal/logging.js";
 import type { SessionStartedStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ResolvedDynamicSubagentResolver } from "#runtime/subagents/registry.js";
 import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.js";
-import { normalizeDynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
-import { normalizeDynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
+import { normalizeDynamicLocalSubagentSelection } from "#runtime/subagents/dynamic-agent-config.js";
+import { normalizeDynamicRemoteSubagentSelection } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 const log = createLogger("dynamic-subagents");
@@ -46,12 +46,15 @@ async function resolveSelections(input: {
         return [resolver.nodeId, null] as const;
       }
       if (isRemoteAgentDefinition(result)) {
-        const remoteAgent = await normalizeDynamicRemoteAgentConfig({
+        const selection = await normalizeDynamicRemoteSubagentSelection({
           name: resolver.name,
           value: result,
         });
+        assertBackgroundSelectionAllowed(selection.execution, input.ctx, resolver.name);
+        const remoteAgent = selection.config;
         const prepared = createPreparedRuntimeSubagentTool({
           description: remoteAgent.description,
+          execution: selection.execution,
           kind: "remote",
           logicalPath: resolver.logicalPath,
           name: resolver.name,
@@ -66,14 +69,17 @@ async function resolveSelections(input: {
         return [resolver.nodeId, { kind: "remote", prepared, remoteAgent }] as const;
       }
 
-      const agentConfig = normalizeDynamicSubagentAgentConfig({
+      const selection = normalizeDynamicLocalSubagentSelection({
         name: resolver.name,
         state: input.ctx,
         value: result,
       });
-      const resolvedAgentConfig = await agentConfig;
+      const resolvedSelection = await selection;
+      assertBackgroundSelectionAllowed(resolvedSelection.execution, input.ctx, resolver.name);
+      const resolvedAgentConfig = resolvedSelection.config;
       const prepared = createPreparedRuntimeSubagentTool({
         description: resolvedAgentConfig.description,
+        execution: resolvedSelection.execution,
         kind: "subagent",
         logicalPath: resolver.logicalPath,
         name: resolver.name,
@@ -111,8 +117,21 @@ function isRemoteAgentDefinition(value: unknown): boolean {
   return (
     typeof value === "object" &&
     value !== null &&
-    (value as { readonly kind?: unknown }).kind === "remote"
+    ((value as { readonly kind?: unknown }).kind === "remote" ||
+      (value as { readonly kind?: unknown }).kind === "eve:remote-subagent")
   );
+}
+
+function assertBackgroundSelectionAllowed(
+  execution: "background" | "blocking" | undefined,
+  ctx: ContextReader,
+  name: string,
+): void {
+  if (execution === "background" && ctx.get(TasksEnabledKey) !== true) {
+    throw new Error(
+      `Dynamic background subagent "${name}" requires experimental.tasks: true in the root agent config.`,
+    );
+  }
 }
 
 export async function dispatchDynamicSubagentEvent(input: {
@@ -174,7 +193,8 @@ export function buildDynamicSubagentTools(input: ContextReader): readonly Harnes
     }
     names.add(selection.prepared.name);
     tools.push(
-      input.get(TasksEnabledKey) === true
+      (selection.prepared.execution ??
+        (input.get(TasksEnabledKey) === true ? "background" : "blocking")) === "background"
         ? createBackgroundSubagentHarnessDefinition(selection.prepared)
         : createHarnessDelegationToolDefinition(selection.prepared),
     );

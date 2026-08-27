@@ -1,10 +1,13 @@
 import type { ToolRunWorkflowInput } from "#execution/tool-run/types.js";
+import type { RunControlMessage } from "#execution/tool-run/messages.js";
 import {
   startWorkflowPreferLatest,
   toolRunWorkflowReference,
   waitForCommandHookOwner,
 } from "#execution/workflow-runtime.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
+import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 
 /**
  * The run's hook token derives from the originating call alone, so a replayed
@@ -25,14 +28,31 @@ export function deriveToolRunHookToken(input: {
  */
 export async function startToolRun(
   input: Omit<ToolRunWorkflowInput, "hookToken">,
-): Promise<{ readonly hookToken: string; readonly runId: string }> {
+): Promise<{ readonly hookToken: string; readonly ownsRun: boolean; readonly runId: string }> {
   const hookToken = deriveToolRunHookToken({
     callId: input.callId,
     parentSessionId: input.session.id,
     parentTurnId: input.session.turn.id,
   });
   const workflowInput: ToolRunWorkflowInput = { ...input, hookToken };
-  await startWorkflowPreferLatest(toolRunWorkflowReference, [workflowInput]);
+  const started = await startWorkflowPreferLatest(toolRunWorkflowReference, [workflowInput]);
   const owner = await waitForCommandHookOwner(hookToken);
-  return { hookToken, runId: owner.runId };
+  return {
+    hookToken,
+    ownsRun: started?.runId === undefined || owner.runId === started.runId,
+    runId: owner.runId,
+  };
+}
+
+/** Releases a settled subagent relay after its owner durably adopted the run. */
+export async function releaseToolRunStep(hookToken: string): Promise<void> {
+  "use step";
+
+  const release: RunControlMessage = { kind: "release" };
+  try {
+    await resumeHook(hookToken, release);
+  } catch (error) {
+    // A forced cancellation may have disposed the relay before adoption.
+    if (!isTaskWorkflowTargetGone(error)) throw error;
+  }
 }

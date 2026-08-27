@@ -3,8 +3,8 @@ import { z as z3 } from "zod/v3";
 
 import { z } from "#compiled/zod/index.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { defineAgent, defineDynamic } from "#public/definitions/agent.js";
-import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
+import { defineAgent, defineDynamic, defineLocalSubagent } from "#public/definitions/agent.js";
+import { defineRemoteAgent, defineRemoteSubagent } from "#public/definitions/remote-agent.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel, defaultEveAuth } from "#public/channels/eve.js";
 import { defineChannel, POST } from "#public/definitions/channel.js";
@@ -71,6 +71,23 @@ describe("definition helper exact inputs", () => {
     expectTypeOf<ReturnType<typeof streamedTool.execute>>().toEqualTypeOf<
       AsyncGenerator<{ phase: string }, void, unknown>
     >();
+  });
+
+  it("stamps per-subagent execution definitions", () => {
+    const local = defineLocalSubagent({
+      background: true,
+      description: "Research deeply.",
+      model: "anthropic/claude-sonnet-5",
+    });
+    const remote = defineRemoteSubagent({
+      description: "Review remotely.",
+      url: "https://review.example.com",
+    });
+
+    expect(local).toMatchObject({ background: true, kind: "eve:local-subagent" });
+    expect(remote).toMatchObject({ kind: "eve:remote-subagent", path: "/eve/v1/session" });
+    expectTypeOf(local.background).toEqualTypeOf<true>();
+    expectTypeOf(remote.url).toEqualTypeOf<"https://review.example.com">();
   });
 
   it("preserves ordinary async tool executor return types", () => {
