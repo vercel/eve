@@ -15,6 +15,7 @@ import {
   createTurnCancelledEvent,
   createTurnFailedEvent,
   createTurnStartedEvent,
+  createToolOutputSpilledEvent,
 } from "#protocol/message.js";
 import {
   createInstrumentationHandleEvent,
@@ -29,6 +30,7 @@ import {
   inputIdempotencyKey,
   sessionIdempotencyKey,
   turnIdempotencyKey,
+  toolOutputSpillIdempotencyKey,
 } from "#harness/instrumentation/lifecycle.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 
@@ -170,6 +172,51 @@ describe("createInstrumentationHandleEvent", () => {
         sessionId: "session-1",
         turnId: "turn-1",
         type: "session.waiting",
+      },
+    ]);
+  });
+
+  it("publishes tool-output spills as metadata-only lifecycle events", async () => {
+    const events: InstrumentationEvent[] = [];
+    const handleEvent = createInstrumentationHandleEvent({
+      handleEvent: async () => {},
+      hooks: {
+        capturesContent: false,
+        publish: async (event) => {
+          events.push(event);
+        },
+      },
+      sessionId: "session-1",
+    })!;
+
+    await handleEvent(
+      createToolOutputSpilledEvent({
+        bytes: 128,
+        callId: "call-1",
+        maxInlineBytes: 32,
+        path: "/workspace/.eve/tool-results/abc.json",
+        sequence: 0,
+        spillId: "abc",
+        stepIndex: 1,
+        toolName: "search",
+        turnId: "turn-1",
+      }),
+    );
+
+    expect(events).toEqual([
+      {
+        bytes: 128,
+        callId: "call-1",
+        idempotencyKey: toolOutputSpillIdempotencyKey("session-1", "abc"),
+        maxInlineBytes: 32,
+        path: "/workspace/.eve/tool-results/abc.json",
+        sequence: 0,
+        sessionId: "session-1",
+        spillId: "abc",
+        stepIndex: 1,
+        toolName: "search",
+        turnId: "turn-1",
+        type: "tool.output.spilled",
       },
     ]);
   });

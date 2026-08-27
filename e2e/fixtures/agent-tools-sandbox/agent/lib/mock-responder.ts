@@ -1,9 +1,12 @@
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
+import { OVERFLOW_PROBE_TOKEN } from "./overflow-probe.js";
 
 const SUBAGENT_DIRECTIVE = /ask the `([^`]+)` subagent with message:\s*([\s\S]+)/iu;
 const BASH_DIRECTIVE = /run the bash command `([^`]+)`/iu;
 const SKILL_DIRECTIVE = /load the `([^`]+)` skill/iu;
 
+const OVERFLOW_DIRECTIVE = /run the `overflow_probe` tool/iu;
+const OVERFLOW_FILE_PATH = /^\/workspace\/\.eve\/tool-results\/[a-f0-9]{64}\.json$/u;
 /**
  * Scripted mock for the world suites: sandbox evals phrase every prompt as an
  * explicit directive, so the responder executes exactly the requested tool
@@ -22,6 +25,9 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
     }
   }
   const turnHasToolResult = lastToolResultIndex > lastAuthoredUserIndex;
+  if (OVERFLOW_DIRECTIVE.test(message)) {
+    return overflowProbeResponse(request);
+  }
 
   const subagent = SUBAGENT_DIRECTIVE.exec(message);
   if (subagent?.[1] !== undefined && subagent[2] !== undefined) {
@@ -53,6 +59,54 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
   }
 
   return `Mock reply: ${message}`;
+}
+
+function overflowProbeResponse(request: MockModelRequest): MockModelResponse | string {
+  const probe = request.toolResults.find((result) => result.id === "overflow-probe-source");
+  if (probe === undefined) {
+    return {
+      toolCalls: [{ id: "overflow-probe-source", input: {}, name: "overflow_probe" }],
+    };
+  }
+
+  if (request.toolResults.some((result) => result.id === "overflow-probe-read")) {
+    return bashStdout(request);
+  }
+
+  const path = overflowFilePath(probe.output);
+  if (path === undefined) {
+    return "overflow_probe did not produce an eve tool-output file reference";
+  }
+
+  return {
+    toolCalls: [
+      {
+        id: "overflow-probe-read",
+        input: { command: `grep -m 1 -o '${OVERFLOW_PROBE_TOKEN}' ${path}` },
+        name: "bash",
+      },
+    ],
+  };
+}
+
+function overflowFilePath(output: unknown): string | undefined {
+  if (
+    typeof output !== "object" ||
+    output === null ||
+    !("kind" in output) ||
+    output.kind !== "eve-tool-output-file" ||
+    !("bytes" in output) ||
+    typeof output.bytes !== "number" ||
+    output.bytes <= 64 * 1024 ||
+    !("toolName" in output) ||
+    output.toolName !== "overflow_probe" ||
+    !("path" in output) ||
+    typeof output.path !== "string" ||
+    !OVERFLOW_FILE_PATH.test(output.path)
+  ) {
+    return undefined;
+  }
+  return output.path;
 }
 
 function bashStdout(request: MockModelRequest): string {

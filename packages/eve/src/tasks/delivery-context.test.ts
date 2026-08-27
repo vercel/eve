@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionStateMap } from "#harness/types.js";
+import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 import {
   resolveInitiatingTaskContext,
@@ -68,9 +69,9 @@ describe("task delivery instructions", () => {
 });
 
 describe("resolveInitiatingTaskContext", () => {
-  it("projects the active turn's accepted background tasks as initiating", () => {
+  it("projects the active turn's accepted background tasks as initiating", async () => {
     expect(
-      resolveInitiatingTaskContext({
+      await resolveInitiatingTaskContext({
         state: taskState([
           taskEntry("task_1", "turn_1", undefined, { data: {}, kind: "subagent" }),
           taskEntry("task_2", "turn_2", undefined, { data: {}, kind: "subagent" }),
@@ -81,12 +82,13 @@ describe("resolveInitiatingTaskContext", () => {
       context:
         '[Task state]\n{"tasks":[{"name":"report_probe","status":"pending","taskId":"task_1"}]}',
       phase: "initiating",
+      spills: [],
     });
   });
 
-  it("ignores task records that were not accepted by an executor", () => {
+  it("ignores task records that were not accepted by an executor", async () => {
     expect(
-      resolveInitiatingTaskContext({
+      await resolveInitiatingTaskContext({
         state: taskState([taskEntry("task_1", "turn_1")]),
         turnId: "turn_1",
       }),
@@ -95,7 +97,7 @@ describe("resolveInitiatingTaskContext", () => {
 });
 
 describe("resolveTaskDeliveryContext", () => {
-  it("projects terminal and pending siblings from the delivered task's parent turn", () => {
+  it("projects terminal and pending siblings from the delivered task's parent turn", async () => {
     const completed = {
       lastOutput: { data: { result: "first" }, type: "result" },
       metadata,
@@ -108,16 +110,17 @@ describe("resolveTaskDeliveryContext", () => {
       taskEntry("task_3", "turn_2"),
     ]);
 
-    expect(resolveTaskDeliveryContext({ state, taskDeliveryId: "task_1:ready:completed" })).toEqual(
-      {
-        context:
-          '[Task state]\n{"tasks":[{"name":"report_probe","status":"completed","taskId":"task_1"},{"name":"report_probe","status":"pending","taskId":"task_2"}]}',
-        phase: "pending",
-      },
-    );
+    expect(
+      await resolveTaskDeliveryContext({ state, taskDeliveryId: "task_1:ready:completed" }),
+    ).toEqual({
+      context:
+        '[Task state]\n{"tasks":[{"name":"report_probe","status":"completed","taskId":"task_1"},{"name":"report_probe","status":"pending","taskId":"task_2"}]}',
+      phase: "pending",
+      spills: [],
+    });
   });
 
-  it("includes every output once the parent has received the whole terminal cohort", () => {
+  it("includes every output once the parent has received the whole terminal cohort", async () => {
     const first = {
       lastOutput: { data: { result: "first" }, type: "result" },
       metadata,
@@ -132,7 +135,7 @@ describe("resolveTaskDeliveryContext", () => {
     } satisfies TaskView;
 
     expect(
-      resolveTaskDeliveryContext({
+      await resolveTaskDeliveryContext({
         state: taskState([
           taskEntry("task_1", "turn_1", first),
           taskEntry("task_2", "turn_1", second),
@@ -143,12 +146,42 @@ describe("resolveTaskDeliveryContext", () => {
       context:
         '[Task state]\n{"tasks":[{"name":"report_probe","output":{"data":{"result":"first"},"type":"result"},"status":"completed","taskId":"task_1"},{"name":"report_probe","output":{"data":{"result":"second"},"type":"result"},"status":"completed","taskId":"task_2"}]}',
       phase: "settled",
+      spills: [],
     });
   });
 
-  it("returns no context when the delivery is not owned by the session task index", () => {
+  it("projects terminal output through the configured overflow policy", async () => {
+    const sandbox = mockSandbox();
+    const completed = {
+      lastOutput: { data: { result: "x".repeat(100) }, type: "result" },
+      metadata,
+      status: "completed",
+      taskId: "task_1",
+    } satisfies TaskView;
+
+    const result = await resolveTaskDeliveryContext({
+      policy: { maxInlineBytes: 32, overflow: "sandbox" },
+      sandboxAccess: sandbox.access,
+      state: taskState([taskEntry("task_1", "turn_1", completed)]),
+      taskDeliveryId: "task_1:ready:completed",
+    });
+
+    expect(sandbox.writes).toHaveLength(1);
+    expect(result?.context).toContain('"kind":"eve-tool-output-file"');
+    expect(result?.context).not.toContain("x".repeat(100));
+    expect(result?.spills).toEqual([
+      expect.objectContaining({
+        callId: "task:task_1",
+        maxInlineBytes: 32,
+        path: sandbox.writes[0]?.path,
+        toolName: "task",
+      }),
+    ]);
+  });
+
+  it("returns no context when the delivery is not owned by the session task index", async () => {
     expect(
-      resolveTaskDeliveryContext({
+      await resolveTaskDeliveryContext({
         state: taskState([taskEntry("task_1", "turn_1")]),
         taskDeliveryId: "task_unknown:ready:completed",
       }),

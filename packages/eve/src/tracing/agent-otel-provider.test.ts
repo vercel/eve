@@ -44,6 +44,7 @@ import {
   modelCallIdempotencyKey,
   sessionIdempotencyKey,
   turnIdempotencyKey,
+  toolOutputSpillIdempotencyKey,
 } from "#harness/instrumentation/lifecycle.js";
 
 interface TestRuntime {
@@ -519,6 +520,49 @@ describe("createAgentOtelInstrumentation", () => {
 
     const spans = runtime.exporter.getFinishedSpans();
     expect(byName(spans, "agent.session")).toHaveLength(0);
+  });
+
+  it("records bounded metadata for model-facing tool-output spills", async () => {
+    const runtime = createRuntime();
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await runtime.hooks.publish({
+      bytes: 131_072,
+      callId: "call-1",
+      idempotencyKey: toolOutputSpillIdempotencyKey("session-1", "abc"),
+      maxInlineBytes: 65_536,
+      path: "/workspace/.eve/tool-results/abc.json",
+      sequence: 0,
+      sessionId: "session-1",
+      spillId: "abc",
+      stepIndex: 1,
+      toolName: "search",
+      turnId: "turn-1",
+      type: "tool.output.spilled",
+    });
+    await completeTurn(runtime.hooks, "session-1", "turn-1");
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    const spill = byName(spans, "agent.tool.output")[0]!;
+    const turn = byName(spans, "agent.turn")[0]!;
+    expect(spill.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
+    expect(spill.events.map((event) => event.name)).toEqual(["tool.output.spilled"]);
+    expect(spill.attributes).toMatchObject({
+      "agent.session.id": "session-1",
+      "agent.step.index": 1,
+      "agent.tool.output.bytes": 131_072,
+      "agent.tool.output.call_id": "call-1",
+      "agent.tool.output.max_inline_bytes": 65_536,
+      "agent.tool.output.path": "/workspace/.eve/tool-results/abc.json",
+      "agent.tool.output.spill_id": "abc",
+      "agent.tool.output.tool_name": "search",
+      "agent.turn.id": "turn-1",
+    });
   });
 
   it.each([

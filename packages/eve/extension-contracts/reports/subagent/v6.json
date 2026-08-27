@@ -1,14 +1,14 @@
 {
   "kind": "eve-extension-capability-contract",
   "capability": "subagent",
-  "epoch": 4,
-  "sha256": "539a5ddb907e4324356534f7a2479887b6a00dfc702e5e6f9bdaf4313266628d",
+  "epoch": 6,
+  "sha256": "3169d50307ea907ece054e5c2279ddd1d1ef9a0b69d2a0be37912e659ffed79f",
   "exports": [
     "AgentCompactionDefinition",
     "AgentDefinition",
     "AgentModelDefinition",
     "AgentStaticModelDefinition",
-
+    "AgentToolOutputDefinition",
     "DefinedAgent",
     "DynamicLocalSubagentDefinition",
     "DynamicSubagentDefinition",

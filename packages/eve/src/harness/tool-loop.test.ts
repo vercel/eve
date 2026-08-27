@@ -20,6 +20,7 @@ import {
   InitiatorAuthKey,
   LiveStepDynamicModelSelectionKey,
   ParentSessionKey,
+  PendingToolOutputSpillsKey,
   SandboxKey,
   ScheduleIdKey,
   SessionTraceSeedKey,
@@ -65,6 +66,7 @@ import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { appendMissingToolResultMessages, createToolLoopHarness } from "#harness/tool-loop.js";
+import { TOOL_OUTPUT_FILE_REFERENCE_KIND } from "#harness/tool-output-overflow.js";
 import { isSessionLimitDecline, TurnCancelledError } from "#harness/turn-cancellation.js";
 import {
   getSessionTokenLimitViolation,
@@ -3286,6 +3288,184 @@ describe("createToolLoopHarness", () => {
       status: "completed",
       turnId: "turn_0",
     });
+  });
+
+  it("spills model history before persisting the continuation and emits the full action.result", async () => {
+    const fullOutput = "contract metadata ".repeat(16);
+    setupMockAgent({
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [
+              {
+                input: { address: "0x1" },
+                toolCallId: "call-overflow",
+                toolName: "add",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+          {
+            content: [
+              {
+                output: fullOutput,
+                toolCallId: "call-overflow",
+                toolName: "add",
+                type: "tool-result",
+              },
+            ],
+            role: "tool",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [
+        {
+          input: { address: "0x1" },
+          toolCallId: "call-overflow",
+          toolName: "add",
+          type: "tool-call",
+        },
+      ],
+      toolResults: [
+        {
+          input: { address: "0x1" },
+          output: fullOutput,
+          toolCallId: "call-overflow",
+          toolName: "add",
+          type: "tool-result",
+        },
+      ],
+    });
+
+    const sandbox = mockSandbox();
+    const ctx = new ContextContainer();
+    ctx.set(SandboxKey, sandbox.access);
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        toolOutput: { maxInlineBytes: 32, overflow: "sandbox" },
+      }),
+    );
+    const first = await contextStorage.run(ctx, () =>
+      runStep(createTestSession(), { message: "Load the metadata." }),
+    );
+
+    expect(events.find((event) => event.type === "action.result")?.data).toMatchObject({
+      result: { callId: "call-overflow", output: fullOutput, toolName: "add" },
+    });
+    expect(events.find((event) => event.type === "tool.output.spilled")?.data).toMatchObject({
+      bytes: Buffer.byteLength(fullOutput, "utf8"),
+      callId: "call-overflow",
+      maxInlineBytes: 32,
+      path: sandbox.writes[0]?.path,
+      sequence: 0,
+      spillId: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      stepIndex: 0,
+      toolName: "add",
+      turnId: "turn_0",
+    });
+    const checkpointToolMessage = first.session.history.find((message) => message.role === "tool");
+    if (checkpointToolMessage?.role !== "tool") {
+      throw new Error("Expected the continuation session to retain projected tool history.");
+    }
+    const checkpointOverflowPart = checkpointToolMessage.content.find(
+      (part) => part.type === "tool-result",
+    );
+
+    expect(sandbox.writes).toHaveLength(1);
+    expect(sandbox.writes[0]?.content).toBe(fullOutput);
+    expect(checkpointOverflowPart).toMatchObject({
+      output: {
+        type: "json",
+        value: {
+          bytes: Buffer.byteLength(fullOutput, "utf8"),
+          kind: TOOL_OUTPUT_FILE_REFERENCE_KIND,
+          path: sandbox.writes[0]?.path,
+          toolName: "add",
+        },
+      },
+      toolCallId: "call-overflow",
+      toolName: "add",
+    });
+    const next = first.next;
+    expect(typeof next).toBe("function");
+    if (typeof next !== "function") {
+      throw new Error("Expected the oversized tool result to continue the model loop.");
+    }
+
+    setupMockAgentError(new Error("Model blew up"));
+    const failed = await contextStorage.run(ctx, () => next(first.session));
+
+    const agent = vi.mocked(ToolLoopAgent).mock.results.at(-1)?.value;
+    if (agent === undefined) {
+      throw new Error("Expected a second ToolLoopAgent instance.");
+    }
+    const modelMessages = vi.mocked(agent.stream).mock.calls[0]?.[0].messages as
+      | ModelMessage[]
+      | undefined;
+    if (modelMessages === undefined) {
+      throw new Error("Expected the second ToolLoopAgent instance to stream.");
+    }
+    const toolMessage = modelMessages.find((message) => message.role === "tool");
+    if (toolMessage?.role !== "tool") {
+      throw new Error("Expected the second model call to receive tool history.");
+    }
+    const overflowPart = toolMessage.content.find((part) => part.type === "tool-result");
+    const persistedToolMessage = failed.session.history.find((message) => message.role === "tool");
+    if (persistedToolMessage?.role !== "tool") {
+      throw new Error("Expected failed model call history to retain the tool result reference.");
+    }
+    const persistedOverflowPart = persistedToolMessage.content.find(
+      (part) => part.type === "tool-result",
+    );
+
+    expect(sandbox.writes).toHaveLength(1);
+    expect(overflowPart).toEqual(checkpointOverflowPart);
+    expect(persistedOverflowPart).toEqual(checkpointOverflowPart);
+    expect(events.filter((event) => event.type === "tool.output.spilled")).toHaveLength(1);
+  });
+
+  it("emits task output spills staged before the model step", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "done", role: "assistant" }] },
+      text: "done",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const ctx = new ContextContainer();
+    ctx.set(PendingToolOutputSpillsKey, [
+      {
+        bytes: 128,
+        callId: "task:task_1",
+        maxInlineBytes: 32,
+        path: "/workspace/.eve/tool-results/abc.json",
+        spillId: "abc",
+        toolName: "task",
+      },
+    ]);
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+
+    await contextStorage.run(ctx, () =>
+      runStep(createTestSession(), { message: "Report the task result." }),
+    );
+
+    expect(events.find((event) => event.type === "tool.output.spilled")?.data).toEqual({
+      bytes: 128,
+      callId: "task:task_1",
+      maxInlineBytes: 32,
+      path: "/workspace/.eve/tool-results/abc.json",
+      sequence: 0,
+      spillId: "abc",
+      stepIndex: 0,
+      toolName: "task",
+      turnId: "turn_0",
+    });
+    expect(ctx.get(PendingToolOutputSpillsKey)).toEqual([]);
   });
 
   it("skips AI-SDK-marked invalid tool calls so a malformed JSON payload does not crash the harness", async () => {

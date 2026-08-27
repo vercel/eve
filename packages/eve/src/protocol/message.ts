@@ -27,7 +27,7 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "24";
+export const EVE_MESSAGE_STREAM_VERSION = "25";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -314,6 +314,22 @@ export interface ActionResultStreamEvent {
     turnId: string;
   };
   type: "action.result";
+}
+
+/** Stream event emitted after eve durably spills model-facing tool output. */
+export interface ToolOutputSpilledStreamEvent {
+  data: {
+    bytes: number;
+    callId: string;
+    maxInlineBytes: number;
+    path: string;
+    sequence: number;
+    spillId: string;
+    stepIndex: number;
+    toolName: string;
+    turnId: string;
+  };
+  type: "tool.output.spilled";
 }
 
 /**
@@ -759,6 +775,7 @@ export type UnstampedMessageStreamEvent =
   | InputResolvedStreamEvent
   | ActionPartialStreamEvent
   | ActionResultStreamEvent
+  | ToolOutputSpilledStreamEvent
   | ReasoningCompletedStreamEvent
   | StepCompletedStreamEvent
   | StepFailedStreamEvent
@@ -1290,6 +1307,24 @@ export function createActionResultEvent(input: {
       turnId: input.turnId,
     },
     type: "action.result",
+  };
+}
+
+/** Creates a durable notification for one model-facing tool-output spill. */
+export function createToolOutputSpilledEvent(input: {
+  readonly bytes: number;
+  readonly callId: string;
+  readonly maxInlineBytes: number;
+  readonly path: string;
+  readonly sequence: number;
+  readonly spillId: string;
+  readonly stepIndex: number;
+  readonly toolName: string;
+  readonly turnId: string;
+}): ToolOutputSpilledStreamEvent {
+  return {
+    data: { ...input },
+    type: "tool.output.spilled",
   };
 }
 

@@ -16,6 +16,7 @@ describe("resolveEffectiveAgentRuntime", () => {
       limits: { sessionTimeoutMs: 120_000 },
       model: { id: "anthropic/claude-opus-4.6" },
       reasoning: "high",
+      toolOutput: { maxInlineBytes: 65_536, overflow: "sandbox" },
     });
     const tools = [{ name: "search" }];
 
@@ -25,6 +26,7 @@ describe("resolveEffectiveAgentRuntime", () => {
           config: {
             compaction: { thresholdPercent: 0.9 },
             limits: { sessionTimeoutMs: 60_000 },
+            toolOutput: { maxInlineBytes: 131_072, overflow: "sandbox" },
           },
         },
         turnAgent: {
@@ -41,6 +43,7 @@ describe("resolveEffectiveAgentRuntime", () => {
     expect(effective).toMatchObject({
       limits: { sessionTimeoutMs: 120_000 },
       thresholdPercent: 0.75,
+      toolOutput: { maxInlineBytes: 65_536, overflow: "sandbox" },
       turnAgent: {
         compactionModel: { id: "anthropic/claude-sonnet-4.5" },
         model: { id: "anthropic/claude-opus-4.6" },

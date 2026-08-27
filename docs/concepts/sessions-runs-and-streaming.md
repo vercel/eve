@@ -53,6 +53,7 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `actions.requested`       | The model requested one or more actions, including tool calls; calls stream before execution.                    |
 | `action.partial`          | A locally executed tool generator yielded a preliminary output snapshot.                                         |
 | `action.result`           | A tool call returned.                                                                                            |
+| `tool.output.spilled`     | An oversized model-facing tool result moved to the sandbox; carries bounded reference metadata.                  |
 | `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or `ask_question`); carries `requests`. |
 | `input.resolved`          | The server accepted terminal human-input outcomes; carries `resolutions` with responses when provided.           |
 | `subagent.called`         | A subagent was delegated; carries `childSessionId` to attach to.                                                 |
@@ -82,6 +83,11 @@ The optional `data.trace` on session and turn starts contains eve-owned W3C trac
 When a streamed tool input becomes a validated call, its `action.input.appended` events precede the matching `actions.requested` event. Each append carries `callId`, `toolName`, `inputTextDelta`, and `inputTextOffset`; the offset is the zero-based UTF-16 code-unit position where the delta begins. Storing only the delta and offset avoids repeating the cumulative input in every durable event. The default client reducer starts or restarts accumulation at offset `0`, ignores a nonzero offset that is not contiguous, and projects the potentially incomplete JSON as a `dynamic-tool` part with `state: "input-streaming"` and cumulative text in `inputText`. `actions.requested` replaces that part with `state: "input-available"` and the validated `input`. Excluded internal actions never publish their input stream.
 
 `action.partial` carries one complete preliminary output snapshot from an authored async-generator tool. A later partial for the same `callId` replaces it, and `action.result` is the final snapshot. When the durable writer is busy, eve may keep only the newest adjacent partial for a call. Treat partials as last-write-wins: a durable step can retry and replay overlapping event runs. Provider-executed tool progress and MCP progress notifications are not projected as `action.partial` events.
+
+`tool.output.spilled` leaves the complete `action.result` unchanged. Its data
+contains `callId`, `toolName`, `bytes`, `maxInlineBytes`, `path`, and a
+deterministic `spillId`. Durable step retries can repeat the notification with
+a different `meta.id`; deduplicate spill handling by `spillId`.
 
 Note: consider the privacy, confidentiality, and user-experience implications for displaying, storing, or transmitting reasoning events in your application.
 

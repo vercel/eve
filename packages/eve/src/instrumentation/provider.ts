@@ -59,6 +59,7 @@ export type {
   InstrumentationToolCallFailedEvent,
   InstrumentationToolCallStartedEvent,
   InstrumentationToolOutput,
+  InstrumentationToolOutputSpilledEvent,
   InstrumentationTraceContext,
   InstrumentationTurnFailedEvent,
   InstrumentationTurnSettledEvent,

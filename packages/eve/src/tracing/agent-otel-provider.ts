@@ -42,6 +42,7 @@ import type {
   InstrumentationProviderDefinition,
   InstrumentationSessionStartedEvent,
   InstrumentationTraceContext,
+  InstrumentationToolOutputSpilledEvent,
   InstrumentationSessionTransitionEvent,
   InstrumentationTurnStartedEvent,
   InstrumentationTurnTerminalEvent,
@@ -428,6 +429,40 @@ export function createAgentOtelInstrumentation(
     }
   };
 
+  const onToolOutputSpilled = async (
+    event: InstrumentationToolOutputSpilledEvent,
+  ): Promise<void> => {
+    const turn = await input.stateStore.getTurn(event.sessionId, event.turnId);
+    const parent = turn?.context ?? (await input.stateStore.getSession(event.sessionId))?.context;
+    if (parent === undefined || !isSampledTrace(parent)) return;
+
+    const span = input.idGenerator.withSpanId(
+      input.idGenerator.deriveSpanId(event.idempotencyKey),
+      () =>
+        input.tracer.startSpan(
+          "agent.tool.output",
+          {
+            attributes: {
+              "agent.framework.name": "eve",
+              "agent.framework.version": input.frameworkVersion,
+              "agent.session.id": event.sessionId,
+              "agent.step.index": event.stepIndex,
+              "agent.tool.output.bytes": event.bytes,
+              "agent.tool.output.call_id": event.callId,
+              "agent.tool.output.max_inline_bytes": event.maxInlineBytes,
+              "agent.tool.output.path": event.path,
+              "agent.tool.output.spill_id": event.spillId,
+              "agent.tool.output.tool_name": event.toolName,
+              "agent.turn.id": event.turnId,
+            },
+          },
+          contextFromSpanContext(parent),
+        ),
+    );
+    span.addEvent("tool.output.spilled");
+    span.end();
+  };
+
   return {
     hook: {
       // The destinations behind this pipeline filter content per exporter, but
@@ -455,6 +490,7 @@ export function createAgentOtelInstrumentation(
         "session.started": onSessionStarted,
         "session.waiting": onSessionTransition,
         ...tools.events,
+        "tool.output.spilled": onToolOutputSpilled,
         "turn.cancelled": onTurnTerminal,
         "turn.completed": onTurnTerminal,
         "turn.failed": onTurnTerminal,

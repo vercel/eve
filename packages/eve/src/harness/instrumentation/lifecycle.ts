@@ -163,6 +163,10 @@ export function channelDeliveryIdempotencyKey(sessionId: string, deliveryId: str
   return `channel-delivery:${sessionId}:${deliveryId}`;
 }
 
+export function toolOutputSpillIdempotencyKey(sessionId: string, spillId: string): string {
+  return `tool-output-spill:${sessionId}:${spillId}`;
+}
+
 export interface InstrumentationChannelDeliveryRef {
   readonly channelAudience?: ChannelAudience;
   readonly channelKind: string;
@@ -404,6 +408,21 @@ export interface InstrumentationStepAttemptMetadataEvent {
   readonly providerMetadata: Readonly<Record<string, unknown>>;
 }
 
+export interface InstrumentationToolOutputSpilledEvent {
+  readonly type: "tool.output.spilled";
+  readonly bytes: number;
+  readonly callId: string;
+  readonly idempotencyKey: string;
+  readonly maxInlineBytes: number;
+  readonly path: string;
+  readonly sequence: number;
+  readonly sessionId: string;
+  readonly spillId: string;
+  readonly stepIndex: number;
+  readonly toolName: string;
+  readonly turnId: string;
+}
+
 export interface InstrumentationModelCallStartedEvent {
   readonly type: "model.call.started";
   readonly idempotencyKey: string;
@@ -562,6 +581,7 @@ export interface InstrumentationProviderDefinition {
     readonly "tool.call.started"?: InstrumentationEventHandler<InstrumentationToolCallStartedEvent>;
     readonly "tool.call.completed"?: InstrumentationEventHandler<InstrumentationToolCallCompletedEvent>;
     readonly "tool.call.failed"?: InstrumentationEventHandler<InstrumentationToolCallFailedEvent>;
+    readonly "tool.output.spilled"?: InstrumentationEventHandler<InstrumentationToolOutputSpilledEvent>;
     readonly "turn.cancelled"?: InstrumentationEventHandler<InstrumentationTurnSettledEvent>;
     readonly "turn.completed"?: InstrumentationEventHandler<InstrumentationTurnSettledEvent>;
     readonly "turn.failed"?: InstrumentationEventHandler<InstrumentationTurnFailedEvent>;
@@ -607,6 +627,7 @@ export type InstrumentationPointEvent =
   | InstrumentationSessionStartedEvent
   | InstrumentationSessionTransitionEvent
   | InstrumentationTurnStartedEvent
+  | InstrumentationToolOutputSpilledEvent
   | InstrumentationTurnTerminalEvent;
 
 export type InstrumentationEvent = InstrumentationCorrelatedEvent | InstrumentationPointEvent;

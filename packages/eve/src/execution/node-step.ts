@@ -77,6 +77,8 @@ export interface CreateExecutionNodeStepInput {
   readonly mode: RunMode;
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
+  /** Effective model-facing tool output policy for this agent selection. */
+  readonly toolOutput?: NonNullable<ResolvedRuntimeAgentNode["agent"]["config"]>["toolOutput"];
   /**
    * Effective `maxSubagents` cap configured by the experimental Workflow tool
    * definition and materialized on the session at creation.
@@ -117,6 +119,9 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),
     tools,
+    toolOutput: Object.hasOwn(input, "toolOutput")
+      ? input.toolOutput
+      : input.node.agent.config?.toolOutput,
   });
   if (instrumentation === undefined) return step;
   return async (session, stepInput) => {

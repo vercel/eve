@@ -1,6 +1,6 @@
 ---
 title: "Agents"
-description: "Configure an eve agent's model, reasoning effort, compaction, limits, and runtime behavior in agent.ts."
+description: "Configure an eve agent's model, reasoning effort, compaction, tool output, limits, and runtime behavior in agent.ts."
 ---
 
 An eve app has one root agent assembled from the files under `agent/`. Its optional `agent.ts` calls `defineAgent` (from `eve`) when you need to configure the model or other runtime behavior. Declared [subagents](./subagents) have their own `agent.ts` and capabilities; this page covers the configuration shared by root agents and subagents.
@@ -147,6 +147,53 @@ export default defineAgent({
 
 See [Default harness](./concepts/default-harness#compaction) for how the loop applies it.
 
+## Spill oversized tool results
+
+Set `toolOutput` to keep one tool result from filling model history. The policy
+applies across authored tools, framework tools, generated connection tools,
+client-supplied tools, and subagent results that eve sends to the model:
+
+```ts title="agent/agent.ts"
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  toolOutput: {
+    maxInlineBytes: 64 * 1024,
+    overflow: "sandbox",
+  },
+});
+```
+
+Both fields are required. `maxInlineBytes` must be a positive integer. The
+policy is disabled when `toolOutput` is omitted. eve measures text as UTF-8
+bytes and JSON by its compact serialized value. A result at or below
+`maxInlineBytes` stays unchanged. A larger result is written under
+`/workspace/.eve/tool-results` in the session sandbox: text as `.txt`, JSON as
+readable `.json`. Model history receives a small object with the file path,
+original byte count, and tool name. Replaying the same call with the same
+result overwrites the same path; a changed result receives a different path.
+
+The policy runs after a tool's `toModelOutput`, so use that callback when you
+can give the model a smaller semantic summary. The full execution result still
+appears in `action.result` for hooks, channels, clients, and observability;
+only model history receives the file reference. Framework control results that
+eve must reread to reconstruct capabilities, such as `connection_search`, and
+approval denials remain inline.
+
+After the sandbox write succeeds, eve emits a durable `tool.output.spilled`
+stream event with the call id, tool name, original byte count, configured
+limit, file path, and deterministic `spillId`. Hooks, channels, and raw stream
+clients can observe the spill without inspecting or changing `action.result`.
+OpenTelemetry instrumentation records the same bounded metadata on an
+`agent.tool.output` span. Durable retries may physically deliver the event
+more than once; deduplicate notifications by `spillId`, not the stream event
+id.
+
+Provider-executed server tools are outside this boundary: the provider consumes
+their output before eve receives it, so `toolOutput` cannot limit that first
+provider call. Sandbox references follow the [sandbox lifecycle](./sandbox#lifecycle);
+persist important artifacts outside the sandbox when they must survive
+provider-side sandbox replacement.
+
 ## Runtime limits
 
 Use `limits` for framework-owned runtime caps. Session token limits stop the
@@ -255,6 +302,7 @@ installed package must stay external in hosted output, list it in
 | `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; token-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                   |
 | `experimental` | `{ workflow?: { world?: string } }`     | unset            | Opt-in settings that can change or disappear in any release. Treat them as unstable. `workflow.world` selects the Workflow world package backing session state, queues, hooks, and streams on the root agent. |
 | `outputSchema` | Standard Schema or a JSON Schema object | none             | Structured return type for function-like invocations such as a subagent turn, schedule, or remote job. Ordinary interactive turns ignore it unless the client supplies a per-message schema.                  |
+| `toolOutput`   | `AgentToolOutputDefinition`             | none             | Optional agent-wide overflow policy for model-facing tool results. Oversized text and JSON are written to the session sandbox while `action.result` keeps the full output.                                    |
 | `build`        | `{ externalDependencies?: string[] }`   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.      |
 
 `externalDependencies` is a packaging control only. It keeps selected packages as runtime dependencies in the hosted output; it does not authorize, configure, or review any third-party service those packages may call.

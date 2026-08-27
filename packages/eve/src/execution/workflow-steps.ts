@@ -86,10 +86,7 @@ import { createDurableSessionState, readDurableSession } from "#execution/durabl
 import type { TurnStepInput } from "#execution/durable-session-migrations/turn-workflow.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { appendTaskAgentAnnouncement } from "#execution/tasks/parent/agent-views.js";
-import {
-  resolveInitiatingTaskContext,
-  resolveTaskDeliveryContext,
-} from "#tasks/delivery-context.js";
+import { prepareTaskDeliveryModelContext } from "#tasks/delivery-context.js";
 import {
   readRetainedBackgroundToolResult,
   runBackgroundStep,
@@ -252,35 +249,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       ctx.set(RuntimeActionSettlementTimesKey, input.input.acceptedAtMsByCallId);
     }
     resolved = { runtimeActionResults: input.input.results };
-  }
-
-  if (
-    resolved !== undefined &&
-    rawInput.input?.kind === "deliver" &&
-    rawInput.input.taskDeliveryId !== undefined
-  ) {
-    const taskContext = resolveTaskDeliveryContext({
-      state: durableSession.state,
-      taskDeliveryId: rawInput.input.taskDeliveryId,
-    });
-    if (taskContext !== undefined) {
-      ctx.set(TurnTaskDeliveryKey, taskContext.phase);
-      resolved = {
-        ...resolved,
-        context: [...(resolved.context ?? []), taskContext.context],
-      };
-    }
-  }
-
-  if (tasksEnabled && ctx.get(TurnTaskDeliveryKey) === "none") {
-    const taskContext = resolveInitiatingTaskContext({
-      state: durableSession.state,
-      turnId: activeTurnId(initialEmissionState),
-    });
-    if (taskContext !== undefined) {
-      ctx.set(TurnTaskDeliveryKey, taskContext.phase);
-      ctx.set(TurnTaskStateKey, taskContext.context);
-    }
   }
 
   // Persist adapter-state mutations across the step boundary.
@@ -446,6 +414,17 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     // or the pending batch would re-park and later re-dispatch.
     throwIfTurnAborted(input.abortSignal);
     stepResult = await runBackgroundStep(ctx, initialSession, async (enrichedSession) => {
+      resolved = await prepareTaskDeliveryModelContext({
+        ctx,
+        policy: effectiveAgent.toolOutput,
+        resolved,
+        state: durableSession.state,
+        taskDeliveryId:
+          rawInput.input?.kind === "deliver" ? rawInput.input.taskDeliveryId : undefined,
+        tasksEnabled,
+        turnId: activeTurnId(initialEmissionState),
+      });
+
       ctx.setVirtualContext(HandleEventKey, handleEvent);
       let schemaSession = resolveEffectiveOutputSchema({
         agentOutputSchema: effectiveAgent.turnAgent.outputSchema,
@@ -533,6 +512,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
             nodeId: bundle.nodeId,
           },
           node: effectiveNode,
+          toolOutput: effectiveAgent.toolOutput,
           workflowMaxSubagents: refreshedSession.workflowMaxSubagents,
         });
         return step(modelSession, stepInput);

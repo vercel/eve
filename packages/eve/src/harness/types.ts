@@ -12,7 +12,10 @@ import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
-import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
+import type {
+  AgentReasoningDefinition,
+  AgentToolOutputDefinition,
+} from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessInstrumentation } from "#harness/instrumentation/runtime.js";
 import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
@@ -346,6 +349,8 @@ export interface ToolLoopHarnessConfig {
    * authoritative server-side metadata.
    */
   readonly runtimeIdentity?: RuntimeIdentity;
+  /** Optional agent-wide policy for spilling oversized model-facing tool results. */
+  readonly toolOutput?: AgentToolOutputDefinition;
   /**
    * Unified tool definitions for this harness step.
    *

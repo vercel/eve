@@ -26,6 +26,7 @@ export type {
   PublicAgentModelDefinition as AgentModelDefinition,
   PublicAgentStaticModelDefinition as AgentStaticModelDefinition,
   PublicAgentCompactionDefinition as AgentCompactionDefinition,
+  AgentToolOutputDefinition,
 } from "#shared/agent-definition.js";
 
 /**
